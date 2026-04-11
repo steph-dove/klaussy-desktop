@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Klaussy</title>
+  <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+  <link rel="stylesheet" href="../node_modules/highlight.js/styles/vs2015.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Repo selection overlay -->
+  <div id="repo-overlay" class="overlay" style="display: none;">
+    <div class="overlay-content">
+      <h2>Select Repository</h2>
+      <p>Choose the git repository you want to create worktrees for.</p>
+      <button id="btn-select-repo">Select Repository</button>
+    </div>
+  </div>
+
+  <!-- Main app -->
+  <div id="app" style="display: none;">
+    <div id="sidebar">
+      <div id="sidebar-header">
+        <h1>Klaussy</h1>
+        <div class="header-buttons">
+          <button id="btn-diff" title="Toggle diff panel">&#916;</button>
+          <button id="btn-layout" title="Cycle layout: single / columns / grid">&#9638;</button>
+          <button id="btn-new-task" title="New Task">+</button>
+        </div>
+      </div>
+
+      <!-- Project switcher (Phase 3) -->
+      <div id="project-switcher">
+        <select id="project-select" title="Switch project"></select>
+        <button id="btn-add-project" title="Add project">+</button>
+      </div>
+
+      <div id="task-list"></div>
+
+      <div id="sidebar-footer">
+        <button id="btn-new-window" title="New Window">&#8862;</button>
+        <button id="btn-theme" title="Change theme">&#9681;</button>
+        <button id="btn-sidebar-toggle" title="Resize sidebar">
+          <span id="sidebar-toggle-icon">&#9654;</span>
+          <span id="sidebar-toggle-label">Expand</span>
+        </button>
+      </div>
+    </div>
+
+    <div id="main-panel">
+      <div id="terminal-area">
+        <div id="empty-state">
+          <p>Click <strong>+</strong> to create a new task</p>
+          <p class="sub">Each task creates a git worktree and spawns Claude Code in it.</p>
+        </div>
+        <div id="terminals"></div>
+      </div>
+
+      <!-- Diff panel (Phase 1, 2, 6) -->
+      <div id="diff-panel">
+        <div id="diff-resize-handle"></div>
+        <div id="diff-header">
+          <div class="diff-header-actions">
+            <button id="btn-refresh-diff" title="Refresh">&#8635;</button>
+            <button id="btn-close-diff" title="Close">&times;</button>
+          </div>
+        </div>
+        <div id="diff-tabs">
+          <button class="diff-tab active" data-tab="changes">Changes</button>
+          <button class="diff-tab" data-tab="pr">PR</button>
+        </div>
+
+        <!-- Changes tab content -->
+        <div id="changes-tab-content">
+          <div id="diff-file-list"></div>
+          <div id="diff-content">
+            <pre id="diff-view"></pre>
+          </div>
+          <div id="commit-area" style="display: none;">
+            <input type="text" id="commit-message" placeholder="Commit message..." autocomplete="off" spellcheck="false" />
+            <button id="btn-do-commit">Commit</button>
+          </div>
+          <div id="diff-footer">
+            <button id="btn-commit" title="Commit staged changes">Commit</button>
+            <button id="btn-push" title="Push to remote">Push</button>
+            <button id="btn-create-pr" title="Create pull request">PR</button>
+          </div>
+        </div>
+
+        <!-- PR tab content -->
+        <div id="pr-tab-content" style="display: none;">
+          <div id="pr-panel">
+            <div id="pr-info"></div>
+            <div id="pr-comments-list"></div>
+            <div id="pr-comment-form">
+              <textarea id="pr-comment-input" placeholder="Leave a comment..." rows="3"></textarea>
+              <div id="pr-comment-actions">
+                <button id="btn-pr-comment" title="Post a general comment">Comment</button>
+                <button id="btn-pr-approve" title="Approve this PR">Approve</button>
+                <button id="btn-pr-request-changes" title="Request changes">Request Changes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Task Modal -->
+  <div id="modal-overlay" style="display: none;">
+    <div id="modal">
+      <div id="modal-tabs">
+        <button class="modal-tab active" data-tab="new">New Worktree</button>
+        <button class="modal-tab" data-tab="existing">Existing Worktree</button>
+      </div>
+
+      <!-- New worktree tab -->
+      <div id="tab-new" class="tab-content active">
+        <p>Enter a name. A git worktree and Claude Code instance will be created.</p>
+        <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
+        <div id="basepath-picker">
+          <label>Location:</label>
+          <div id="basepath-row">
+            <span id="basepath-display">Default</span>
+            <button id="btn-basepath">Change</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Existing worktree tab -->
+      <div id="tab-existing" class="tab-content">
+        <p>Select an existing worktree directory to attach Claude Code to.</p>
+        <div id="path-picker">
+          <span id="path-display">No directory selected</span>
+          <button id="btn-browse">Browse</button>
+        </div>
+      </div>
+
+      <!-- Shell selector (shared across tabs) -->
+      <div id="shell-selector">
+        <label>Run:</label>
+        <div class="shell-options">
+          <button class="shell-option active" data-shell="claude">Claude Code</button>
+          <button class="shell-option" data-shell="shell">Shell</button>
+        </div>
+      </div>
+
+      <div id="modal-error"></div>
+      <div id="modal-actions">
+        <button id="modal-cancel">Cancel</button>
+        <button id="modal-create">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Theme Picker Modal (Phase 5) -->
+  <div id="theme-overlay" style="display: none;">
+    <div id="theme-modal">
+      <h3>Theme</h3>
+      <div id="theme-list"></div>
+      <button id="theme-close">Close</button>
+    </div>
+  </div>
+
+  <!-- File Viewer Modal (Phase 7) -->
+  <div id="file-viewer-overlay" style="display: none;">
+    <div id="file-viewer">
+      <div id="file-viewer-header">
+        <span id="file-viewer-name"></span>
+        <button id="file-viewer-close">&times;</button>
+      </div>
+      <pre id="file-viewer-content"></pre>
+    </div>
+  </div>
+
+  <!-- Search bar (Cmd+F) -->
+  <div id="search-bar" style="display: none;">
+    <input type="text" id="search-input" placeholder="Search..." autocomplete="off" spellcheck="false" />
+    <span id="search-count"></span>
+    <button id="search-prev" title="Previous (Shift+Enter)">&#9650;</button>
+    <button id="search-next" title="Next (Enter)">&#9660;</button>
+    <button id="search-close" title="Close (Esc)">&times;</button>
+  </div>
+
+  <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+  <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="hljs-bundle.js"></script>
+  <script src="theme.js"></script>
+  <script src="diff-panel.js"></script>
+  <script src="pr-panel.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
