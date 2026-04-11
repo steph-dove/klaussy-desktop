@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" rx="200" fill="#151528"/>
+  <g transform="translate(512, 512)">
+    <!-- { on the left -->
+    <text x="-280" y="0" text-anchor="middle" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="300" fill="#e05a33">{</text>
+    <!-- K in the center -->
+    <text x="0" y="0" text-anchor="middle" dominant-baseline="central" font-family="Georgia, 'Times New Roman', serif" font-weight="bold" font-size="300" fill="#ffffff">K</text>
+    <!-- } on the right -->
+    <text x="280" y="0" text-anchor="middle" dominant-baseline="central" font-family="Arial, Helvetica, sans-serif" font-weight="bold" font-size="300" fill="#e05a33">}</text>
+  </g>
+</svg>
