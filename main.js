@@ -167,6 +167,9 @@ app.whenReady().then(() => {
       try { saveSessions(); } catch {}
     }
   }, 10000);
+
+  // Start auto-fetch background interval
+  startAutoFetch();
 });
 
 function shutdownAndSave() {
@@ -510,7 +513,11 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
-  const instance = { id, name, worktreePath, branch, mode, originalMode: mode, pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {} };
+  const instance = {
+    id, name, worktreePath, branch, mode, originalMode: mode,
+    pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {},
+    subTerminals: [], nextSubId: 1,
+  };
   initIdleDetectionFields(instance);
   instances.set(id, instance);
 
@@ -539,6 +546,9 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
       if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${id}`, exitCode);
     }
   });
+
+  // Start CI polling for this task
+  startCIPolling(id, worktreePath, branch);
 
   return { id, name, worktreePath, branch, mode };
 }
@@ -590,18 +600,72 @@ ipcMain.handle('list-tasks', () => {
   }));
 });
 
-ipcMain.on('write-terminal', (_event, { id, data }) => {
+ipcMain.on('write-terminal', (_event, { id, data, subId }) => {
   const inst = instances.get(id);
-  if (inst && inst.alive) {
+  if (!inst) return;
+  if (subId !== undefined && subId > 0) {
+    const sub = inst.subTerminals.find(s => s.subId === subId);
+    if (sub && sub.alive) sub.pty.write(data);
+  } else if (inst.alive) {
     inst.pty.write(data);
   }
 });
 
-ipcMain.on('resize-terminal', (_event, { id, cols, rows }) => {
+ipcMain.on('resize-terminal', (_event, { id, cols, rows, subId }) => {
   const inst = instances.get(id);
-  if (inst && inst.alive) {
+  if (!inst) return;
+  if (subId !== undefined && subId > 0) {
+    const sub = inst.subTerminals.find(s => s.subId === subId);
+    if (sub && sub.alive) { try { sub.pty.resize(cols, rows); } catch {} }
+  } else if (inst.alive) {
     try { inst.pty.resize(cols, rows); } catch {}
   }
+});
+
+// ---- Sub-terminal Multiplexing (Feature 5) ----
+
+ipcMain.handle('add-sub-terminal', (_event, { taskId, label }) => {
+  const inst = instances.get(taskId);
+  if (!inst) return { error: 'Instance not found' };
+
+  const subId = inst.nextSubId++;
+  const userShell = process.env.SHELL || '/bin/zsh';
+  const ptyProc = pty.spawn(userShell, ['-l'], {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd: inst.worktreePath,
+    env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
+  });
+
+  const sub = { subId, label: label || 'Shell', pty: ptyProc, alive: true };
+  inst.subTerminals.push(sub);
+
+  ptyProc.onData((data) => {
+    for (const win of allWindows) {
+      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${taskId}-${subId}`, data);
+    }
+  });
+
+  ptyProc.onExit(() => {
+    sub.alive = false;
+    for (const win of allWindows) {
+      if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${taskId}-${subId}`);
+    }
+  });
+
+  return { subId, label: sub.label };
+});
+
+ipcMain.handle('kill-sub-terminal', (_event, { taskId, subId }) => {
+  const inst = instances.get(taskId);
+  if (!inst) return { error: 'Instance not found' };
+  const idx = inst.subTerminals.findIndex(s => s.subId === subId);
+  if (idx === -1) return { error: 'Sub-terminal not found' };
+  const sub = inst.subTerminals[idx];
+  try { sub.pty.kill(); } catch {}
+  inst.subTerminals.splice(idx, 1);
+  return { ok: true };
 });
 
 ipcMain.handle('kill-task', (_event, { id }) => {
@@ -609,7 +673,12 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   if (!inst) return { error: 'Instance not found' };
 
   clearIdleTimer(inst);
+  stopCIPolling(id);
   try { inst.pty.kill(); } catch {}
+  // Kill all sub-terminals
+  for (const sub of (inst.subTerminals || [])) {
+    try { sub.pty.kill(); } catch {}
+  }
   inst.alive = false;
 
   // Never delete worktrees or branches — only kill the process
@@ -1310,6 +1379,7 @@ ipcMain.handle('get-preferences', () => {
     defaultMode: config.defaultMode || 'claude',
     theme: config.theme || { preset: 'dark' },
     keybindings: config.keybindings || {},
+    autoFetchInterval: config.autoFetchInterval || 60000,
   };
 });
 
@@ -1323,6 +1393,10 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.defaultMode !== undefined) config.defaultMode = prefs.defaultMode;
   if (prefs.theme !== undefined) config.theme = prefs.theme;
   if (prefs.keybindings !== undefined) config.keybindings = prefs.keybindings;
+  if (prefs.autoFetchInterval !== undefined) {
+    config.autoFetchInterval = prefs.autoFetchInterval;
+    startAutoFetch(); // Reset the auto-fetch timer
+  }
   saveConfig(config);
 
   // Broadcast to all windows so they can apply changes live
@@ -1451,6 +1525,224 @@ ipcMain.handle('pr-review', async (_event, { worktreePath, prNumber, event, body
     return { error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
+
+// ---- Merge Conflict Resolution (Feature 1) ----
+
+ipcMain.handle('read-conflict-file', async (_event, { worktreePath, file }) => {
+  try {
+    const content = fs.readFileSync(path.join(worktreePath, file), 'utf-8');
+    return { content };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('write-resolved-file', async (_event, { worktreePath, file, content }) => {
+  try {
+    fs.writeFileSync(path.join(worktreePath, file), content, 'utf-8');
+    execFileSync('git', ['add', file], { cwd: worktreePath, stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+// ---- .env File Viewer/Editor (Feature 12) ----
+
+ipcMain.handle('list-env-files', async (_event, { worktreePath }) => {
+  try {
+    const entries = fs.readdirSync(worktreePath);
+    const envFiles = entries.filter(f => /^\.env/.test(f) && fs.statSync(path.join(worktreePath, f)).isFile());
+    return { files: envFiles };
+  } catch (err) {
+    return { files: [], error: err.message };
+  }
+});
+
+ipcMain.handle('read-env-file', async (_event, { worktreePath, filename }) => {
+  // Security: prevent path traversal
+  if (filename.includes('/') || filename.includes('\\') || !filename.startsWith('.env')) {
+    return { error: 'Invalid filename' };
+  }
+  try {
+    const content = fs.readFileSync(path.join(worktreePath, filename), 'utf-8');
+    return { content };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('write-env-file', async (_event, { worktreePath, filename, content }) => {
+  // Security: prevent path traversal
+  if (filename.includes('/') || filename.includes('\\') || !filename.startsWith('.env')) {
+    return { error: 'Invalid filename' };
+  }
+  try {
+    fs.writeFileSync(path.join(worktreePath, filename), content, 'utf-8');
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// ---- CI/CD Status (Feature 3) ----
+
+const ciPollingIntervals = new Map(); // taskId -> intervalId
+
+function startCIPolling(id, worktreePath, branch) {
+  stopCIPolling(id);
+  const poll = () => {
+    try {
+      const output = execFileSync('gh', [
+        'run', 'list', '--branch', branch, '--limit', '5',
+        '--json', 'status,conclusion,name,url,createdAt'
+      ], { cwd: worktreePath, stdio: 'pipe', timeout: 10000 }).toString();
+      const runs = JSON.parse(output);
+      for (const win of allWindows) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('ci-status-update', { id, runs });
+        }
+      }
+    } catch {}
+  };
+  // Initial poll after short delay
+  setTimeout(poll, 3000);
+  ciPollingIntervals.set(id, setInterval(poll, 30000));
+}
+
+function stopCIPolling(id) {
+  const intervalId = ciPollingIntervals.get(id);
+  if (intervalId) {
+    clearInterval(intervalId);
+    ciPollingIntervals.delete(id);
+  }
+}
+
+ipcMain.handle('ci-status', async (_event, { worktreePath, branch }) => {
+  try {
+    const output = execFileSync('gh', [
+      'run', 'list', '--branch', branch, '--limit', '5',
+      '--json', 'status,conclusion,name,url,createdAt'
+    ], { cwd: worktreePath, stdio: 'pipe', timeout: 10000 }).toString();
+    return { runs: JSON.parse(output) };
+  } catch (err) {
+    return { runs: [], error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('ci-run-logs', async (_event, { worktreePath, runId }) => {
+  try {
+    const output = execFileSync('gh', ['run', 'view', String(runId), '--log-failed'], {
+      cwd: worktreePath, stdio: 'pipe', timeout: 15000, maxBuffer: 5 * 1024 * 1024
+    }).toString();
+    return { logs: output };
+  } catch (err) {
+    return { logs: '', error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+// ---- Git Tags (Feature 11) ----
+
+ipcMain.handle('git-tags', async (_event, { worktreePath }) => {
+  try {
+    const output = execFileSync('git', ['tag', '-l', '--sort=-creatordate',
+      '--format=%(refname:short)\t%(objectname:short)\t%(subject)\t%(creatordate:short)'],
+      { cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 }).toString();
+    const tags = output.split('\n').filter(Boolean).map(line => {
+      const [name, commit, message, date] = line.split('\t');
+      return { name, commit, message: message || '', date: date || '' };
+    });
+    return { tags };
+  } catch (err) {
+    return { tags: [], error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-tag-create', async (_event, { worktreePath, name, message, commit }) => {
+  try {
+    const args = ['tag'];
+    if (message) {
+      args.push('-a', name, '-m', message);
+    } else {
+      args.push(name);
+    }
+    if (commit) args.push(commit);
+    execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-tag-delete', async (_event, { worktreePath, name }) => {
+  try {
+    execFileSync('git', ['tag', '-d', name], { cwd: worktreePath, stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-tag-push', async (_event, { worktreePath, name }) => {
+  try {
+    execFileSync('git', ['push', 'origin', name], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+// ---- Task Notes (Feature 14) ----
+
+ipcMain.handle('get-task-note', async (_event, { taskName }) => {
+  const config = loadConfig();
+  return { note: (config.taskNotes && config.taskNotes[taskName]) || '' };
+});
+
+ipcMain.handle('set-task-note', async (_event, { taskName, note }) => {
+  const config = loadConfig();
+  if (!config.taskNotes) config.taskNotes = {};
+  config.taskNotes[taskName] = note;
+  saveConfig(config);
+  return { ok: true };
+});
+
+// ---- Auto-fetch (Feature 15) ----
+
+let autoFetchIntervalId = null;
+
+function startAutoFetch() {
+  if (autoFetchIntervalId) {
+    clearInterval(autoFetchIntervalId);
+    autoFetchIntervalId = null;
+  }
+  const config = loadConfig();
+  const interval = config.autoFetchInterval || 60000; // default 60s
+  if (interval <= 0) return;
+
+  autoFetchIntervalId = setInterval(() => {
+    for (const [id, inst] of instances) {
+      if (!inst.alive || !inst.worktreePath) continue;
+      try {
+        execFileSync('git', ['fetch', '--prune'], { cwd: inst.worktreePath, stdio: 'pipe', timeout: 10000 });
+        // Compute ahead/behind
+        try {
+          const ab = execFileSync('git', ['rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], {
+            cwd: inst.worktreePath, stdio: 'pipe', timeout: 5000,
+          }).toString().trim();
+          const parts = ab.split(/\s+/);
+          const ahead = parseInt(parts[0], 10) || 0;
+          const behind = parseInt(parts[1], 10) || 0;
+          for (const win of allWindows) {
+            if (!win.isDestroyed()) {
+              win.webContents.send('auto-fetch-update', { id, ahead, behind });
+            }
+          }
+        } catch {}
+      } catch {}
+    }
+  }, interval);
+}
 
 // ---- Phase 7: File Viewer ----
 
