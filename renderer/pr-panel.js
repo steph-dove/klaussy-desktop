@@ -104,7 +104,7 @@ window.PRPanel = (function () {
       html += '<div class="pr-url"><a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on GitHub</a></div>';
     }
     if (pr.body) {
-      html += '<div class="pr-body">' + escHtml(pr.body) + '</div>';
+      html += '<div class="pr-body">' + renderMarkdown(pr.body) + '</div>';
     }
     html += '</div>';
 
@@ -181,9 +181,12 @@ window.PRPanel = (function () {
       }
       html += '</div>';
       if (c.diff_hunk) {
-        html += '<pre class="pr-comment-hunk">' + escHtml(c.diff_hunk.split('\n').slice(-3).join('\n')) + '</pre>';
+        var hunkLines = c.diff_hunk.split('\n').slice(-3).filter(function (l) { return l.trim() !== ''; }).join('\n');
+        if (hunkLines) {
+          html += '<pre class="pr-comment-hunk">' + renderDiffHunk(hunkLines) + '</pre>';
+        }
       }
-      html += '<div class="pr-comment-body">' + escHtml(c.body) + '</div>';
+      html += '<div class="pr-comment-body">' + renderMarkdown(c.body) + '</div>';
       html += '</div>';
     });
 
@@ -205,7 +208,7 @@ window.PRPanel = (function () {
     html += ' <span class="pr-comment-time">' + escHtml(time) + '</span>';
     html += '</div>';
     if (item.body) {
-      html += '<div class="pr-comment-body">' + escHtml(item.body) + '</div>';
+      html += '<div class="pr-comment-body">' + renderMarkdown(item.body) + '</div>';
     }
     html += '</div>';
     return html;
@@ -275,6 +278,41 @@ window.PRPanel = (function () {
     } catch (e) {
       return isoString;
     }
+  }
+
+  function renderMarkdown(text) {
+    var escaped = escHtml(text);
+
+    // Fenced code blocks: ```lang\n...\n```
+    escaped = escaped.replace(/```(\w*)\n([\s\S]*?)```/g, function (_match, _lang, code) {
+      return '<pre class="pr-code-block">' + code.replace(/\n$/, '') + '</pre>';
+    });
+
+    // Inline code: `code`
+    escaped = escaped.replace(/`([^`]+)`/g, '<code class="pr-inline-code">$1</code>');
+
+    // Bold: **text**
+    escaped = escaped.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+    // Italic: *text* (but not inside **)
+    escaped = escaped.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+    // Line breaks
+    escaped = escaped.replace(/\n/g, '<br>');
+
+    return escaped;
+  }
+
+  function renderDiffHunk(hunkText) {
+    var lines = escHtml(hunkText).split('\n');
+    return lines.map(function (line) {
+      if (line.startsWith('+')) {
+        return '<span class="pr-hunk-add">' + line + '</span>';
+      } else if (line.startsWith('-')) {
+        return '<span class="pr-hunk-del">' + line + '</span>';
+      }
+      return '<span>' + line + '</span>';
+    }).join('\n');
   }
 
   function escHtml(s) {
