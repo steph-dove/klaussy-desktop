@@ -14,7 +14,7 @@ window.PRPanel = (function () {
     document.getElementById('btn-pr-request-changes').addEventListener('click', function () { submitReview('request-changes'); });
 
     // Tab switching
-    var allTabContents = ['changes-tab-content', 'pr-tab-content', 'files-tab-content', 'search-tab-content'];
+    var allTabContents = ['changes-tab-content', 'pr-tab-content', 'files-tab-content', 'search-tab-content', 'history-tab-content', 'stash-tab-content'];
     document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
@@ -29,6 +29,12 @@ window.PRPanel = (function () {
         }
         if (target === 'files') {
           window.dispatchEvent(new CustomEvent('load-file-tree'));
+        }
+        if (target === 'history') {
+          window.dispatchEvent(new CustomEvent('load-history'));
+        }
+        if (target === 'stash') {
+          window.dispatchEvent(new CustomEvent('load-stash'));
         }
       });
     });

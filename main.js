@@ -10,6 +10,34 @@ const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
 let isQuitting = false;
 
+// E1: Log ring buffer
+const LOG_MAX = 500;
+const logBuffer = [];
+const origConsoleLog = console.log;
+const origConsoleError = console.error;
+const origConsoleWarn = console.warn;
+
+function captureLog(level, args) {
+  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  logBuffer.push({ time: new Date().toISOString(), level, msg });
+  if (logBuffer.length > LOG_MAX) logBuffer.shift();
+}
+
+console.log = function (...args) { captureLog('log', args); origConsoleLog.apply(console, args); };
+console.error = function (...args) { captureLog('error', args); origConsoleError.apply(console, args); };
+console.warn = function (...args) { captureLog('warn', args); origConsoleWarn.apply(console, args); };
+
+// Also capture uncaught errors
+process.on('uncaughtException', (err) => {
+  captureLog('error', ['Uncaught:', err.stack || err.message]);
+  origConsoleError.call(console, 'Uncaught:', err);
+});
+
+process.on('unhandledRejection', (reason) => {
+  captureLog('error', ['Unhandled rejection:', String(reason)]);
+  origConsoleError.call(console, 'Unhandled rejection:', reason);
+});
+
 // Persist repo path in a simple JSON file in userData
 function getConfigPath() {
   return path.join(app.getPath('userData'), 'config.json');
@@ -392,7 +420,7 @@ ipcMain.handle('get-repo', () => {
   return null;
 });
 
-ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath }) => {
+ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars }) => {
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
   const branch = `task/${sanitized}`;
   const worktreeDir = basePath || getWorktreeDir(repoPath);
@@ -422,7 +450,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath })
     return { error: `Failed to create worktree: ${err.message}` };
   }
 
-  return spawnInWorktree(name, worktreePath, branch, mode || 'claude');
+  return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
 });
 
 // Attach to an existing worktree directory
@@ -457,7 +485,7 @@ ipcMain.handle('browse-directory', async () => {
   return result.filePaths[0];
 });
 
-function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId) {
+function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv) {
   const id = nextId++;
   const userShell = process.env.SHELL || '/bin/zsh';
 
@@ -479,10 +507,10 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId) {
     cols: 120,
     rows: 30,
     cwd: worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color' },
+    env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
-  const instance = { id, name, worktreePath, branch, mode, originalMode: mode, pty: ptyProc, alive: true, popoutWindows: new Set() };
+  const instance = { id, name, worktreePath, branch, mode, originalMode: mode, pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {} };
   initIdleDetectionFields(instance);
   instances.set(id, instance);
 
@@ -877,6 +905,206 @@ ipcMain.handle('create-pr', async (_event, { worktreePath, title, body }) => {
     return { error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
+
+// ---- Phase D: Git Gaps ----
+
+// D1: Fetch & Pull
+ipcMain.handle('git-fetch', async (_event, { worktreePath }) => {
+  try {
+    execFileSync('git', ['fetch', '--prune'], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-pull', async (_event, { worktreePath }) => {
+  try {
+    const output = execFileSync('git', ['pull'], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 }).toString().trim();
+    return { ok: true, output };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-ahead-behind', async (_event, { worktreePath }) => {
+  try {
+    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
+    const upstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
+    const counts = execFileSync('git', ['rev-list', '--left-right', '--count', upstream + '...HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
+    const parts = counts.split(/\s+/);
+    return { behind: parseInt(parts[0], 10) || 0, ahead: parseInt(parts[1], 10) || 0 };
+  } catch {
+    return { behind: 0, ahead: 0 };
+  }
+});
+
+// D2: Branch checkout
+ipcMain.handle('git-checkout', async (_event, { worktreePath, branch }) => {
+  try {
+    execFileSync('git', ['checkout', branch], { cwd: worktreePath, stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+// D3: Stash
+ipcMain.handle('git-stash-push', async (_event, { worktreePath, message }) => {
+  try {
+    const args = ['stash', 'push'];
+    if (message) args.push('-m', message);
+    execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-stash-pop', async (_event, { worktreePath, index }) => {
+  try {
+    const args = ['stash', 'pop'];
+    if (index !== undefined) args.push('stash@{' + index + '}');
+    execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+ipcMain.handle('git-stash-list', async (_event, { worktreePath }) => {
+  try {
+    const output = execFileSync('git', ['stash', 'list', '--format=%gd\t%s'], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    const stashes = output.split('\n').filter(Boolean).map(function (line) {
+      const parts = line.split('\t');
+      return { ref: parts[0], message: parts.slice(1).join('\t') };
+    });
+    return { stashes };
+  } catch (err) {
+    return { stashes: [], error: err.message };
+  }
+});
+
+// D4: Commit history
+ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
+  try {
+    const output = execFileSync('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '-' + (count || 50)], {
+      cwd: worktreePath, stdio: 'pipe',
+    }).toString();
+    const commits = output.split('\n').filter(Boolean).map(function (line) {
+      const p = line.split('\t');
+      return { hash: p[0], short: p[1], author: p[2], date: p[3], subject: p[4] };
+    });
+    return { commits };
+  } catch (err) {
+    return { commits: [], error: err.message };
+  }
+});
+
+ipcMain.handle('git-show', async (_event, { worktreePath, hash }) => {
+  try {
+    const diff = execFileSync('git', ['show', '--format=', hash], {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024,
+    }).toString();
+    return { diff };
+  } catch (err) {
+    return { diff: '', error: err.message };
+  }
+});
+
+// D5: Blame
+ipcMain.handle('git-blame', async (_event, { worktreePath, file }) => {
+  try {
+    const output = execFileSync('git', ['blame', '--porcelain', file], {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024,
+    }).toString();
+    // Parse porcelain blame into per-line annotations
+    const lines = [];
+    let current = {};
+    const commits = {};
+    output.split('\n').forEach(function (line) {
+      const headerMatch = line.match(/^([0-9a-f]{40}) (\d+) (\d+)/);
+      if (headerMatch) {
+        current = { hash: headerMatch[1], origLine: parseInt(headerMatch[2]), finalLine: parseInt(headerMatch[3]) };
+        return;
+      }
+      if (line.startsWith('author ')) {
+        if (!commits[current.hash]) commits[current.hash] = {};
+        commits[current.hash].author = line.substring(7);
+      }
+      if (line.startsWith('author-time ')) {
+        if (!commits[current.hash]) commits[current.hash] = {};
+        commits[current.hash].time = parseInt(line.substring(12));
+      }
+      if (line.startsWith('summary ')) {
+        if (!commits[current.hash]) commits[current.hash] = {};
+        commits[current.hash].summary = line.substring(8);
+      }
+      if (line.startsWith('\t')) {
+        lines.push({
+          line: current.finalLine,
+          hash: current.hash.substring(0, 8),
+          author: commits[current.hash]?.author || '',
+          summary: commits[current.hash]?.summary || '',
+          time: commits[current.hash]?.time || 0,
+        });
+      }
+    });
+    return { lines };
+  } catch (err) {
+    return { lines: [], error: err.message };
+  }
+});
+
+// D7: Conflict detection
+ipcMain.handle('git-conflicts', async (_event, { worktreePath }) => {
+  try {
+    const output = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
+      cwd: worktreePath, stdio: 'pipe',
+    }).toString();
+    const files = output.split('\n').filter(Boolean);
+    return { files };
+  } catch {
+    return { files: [] };
+  }
+});
+
+// ---- Phase E: Reliability / Diagnostics ----
+
+// E1: Log viewer
+ipcMain.handle('get-logs', () => {
+  return logBuffer.slice();
+});
+
+// E2: Export session transcript
+ipcMain.handle('export-transcript', async (_event, { id }) => {
+  const inst = instances.get(id);
+  if (!inst) return { error: 'Instance not found' };
+
+  const result = await dialog.showSaveDialog(mainWindow, {
+    title: 'Export Session Transcript',
+    defaultPath: path.join(app.getPath('documents'), inst.name + '-transcript.txt'),
+    filters: [{ name: 'Text', extensions: ['txt'] }, { name: 'Markdown', extensions: ['md'] }],
+  });
+
+  if (result.canceled || !result.filePath) return { canceled: true };
+
+  // The transcript will be sent from the renderer (xterm buffer)
+  return { filePath: result.filePath };
+});
+
+ipcMain.handle('write-transcript', (_event, { filePath, content }) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// E3: Per-task env vars — stored in create-task and passed to pty spawn
+// The create-task handler already exists; we extend the modal to pass env/cwd
+// and store them on the instance. The spawn functions already use worktreePath as cwd.
 
 // ---- Phase 3: Multi-Project ----
 

@@ -62,6 +62,9 @@
         <div id="diff-resize-handle"></div>
         <div id="diff-header">
           <div class="diff-header-actions">
+            <button id="btn-fetch" title="Fetch">Fetch</button>
+            <button id="btn-pull" title="Pull">Pull</button>
+            <span id="ahead-behind"></span>
             <button id="btn-refresh-diff" title="Refresh">&#8635;</button>
             <button id="btn-close-diff" title="Close">&times;</button>
           </div>
@@ -71,6 +74,8 @@
           <button class="diff-tab" data-tab="pr">PR</button>
           <button class="diff-tab" data-tab="files">Files</button>
           <button class="diff-tab" data-tab="search">Search</button>
+          <button class="diff-tab" data-tab="history">History</button>
+          <button class="diff-tab" data-tab="stash">Stash</button>
         </div>
 
         <!-- Changes tab content -->
@@ -115,6 +120,23 @@
           <div id="file-viewer-content">
             <div id="file-viewer-view"></div>
           </div>
+        </div>
+
+        <!-- History tab content (D4) -->
+        <div id="history-tab-content" style="display: none;">
+          <div id="history-list"></div>
+          <div id="history-diff-content">
+            <pre id="history-diff-view"></pre>
+          </div>
+        </div>
+
+        <!-- Stash tab content (D3) -->
+        <div id="stash-tab-content" style="display: none;">
+          <div id="stash-actions">
+            <input type="text" id="stash-message" placeholder="Stash message (optional)..." autocomplete="off" spellcheck="false" />
+            <button id="btn-stash-push">Stash</button>
+          </div>
+          <div id="stash-list"></div>
         </div>
 
         <!-- Search tab content (C3) -->
@@ -165,6 +187,12 @@
           <button class="shell-option active" data-shell="claude">Claude Code</button>
           <button class="shell-option" data-shell="shell">Shell</button>
         </div>
+      </div>
+
+      <!-- Env vars (E3) -->
+      <div id="env-vars-section">
+        <label>Environment Variables <span class="env-hint">(KEY=VALUE, one per line)</span></label>
+        <textarea id="modal-env-vars" rows="2" placeholder="e.g. DEBUG=true" spellcheck="false"></textarea>
       </div>
 
       <div id="modal-error"></div>

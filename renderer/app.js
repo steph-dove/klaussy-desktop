@@ -304,7 +304,11 @@
 
     // Show the viewer area
     fileViewerContent.style.display = 'block';
-    fileViewerView.innerHTML = '<div class="file-viewer-header-inline"><span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span></div><div class="file-viewer-body">Loading...</div>';
+    fileViewerView.innerHTML = '<div class="file-viewer-header-inline"><span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span><button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button></div><div class="file-viewer-body">Loading...</div>';
+
+    fileViewerView.querySelector('.file-viewer-blame-btn').addEventListener('click', function () {
+      window.toggleBlame();
+    });
 
     var result = await window.klaus.readFile(filePath);
     var body = fileViewerView.querySelector('.file-viewer-body');
@@ -575,6 +579,146 @@
       });
     });
   }
+
+  // ---- Commit History (D4) ----
+
+  var historyList = document.getElementById('history-list');
+  var historyDiffView = document.getElementById('history-diff-view');
+
+  window.addEventListener('load-history', loadHistory);
+
+  async function loadHistory() {
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    var wt = task ? task.worktreePath : null;
+    if (!wt) {
+      historyList.innerHTML = '<div class="file-tree-empty">No active task</div>';
+      return;
+    }
+
+    historyList.innerHTML = '<div class="file-tree-empty">Loading...</div>';
+    historyDiffView.innerHTML = '';
+
+    var result = await window.klaus.gitLog(wt, 50);
+    if (result.error) {
+      historyList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
+      return;
+    }
+
+    historyList.innerHTML = '';
+    result.commits.forEach(function (c) {
+      var item = document.createElement('div');
+      item.className = 'history-item';
+      item.innerHTML =
+        '<span class="history-hash">' + escHtml(c.short) + '</span>' +
+        '<span class="history-subject">' + escHtml(c.subject) + '</span>' +
+        '<span class="history-meta">' + escHtml(c.author) + ' \u00b7 ' + escHtml(c.date) + '</span>';
+      item.addEventListener('click', async function () {
+        historyList.querySelectorAll('.history-item').forEach(function (el) { el.classList.remove('selected'); });
+        item.classList.add('selected');
+        historyDiffView.innerHTML = 'Loading...';
+        var diff = await window.klaus.gitShow(wt, c.hash);
+        historyDiffView.textContent = diff.diff || diff.error || 'No diff';
+      });
+      historyList.appendChild(item);
+    });
+  }
+
+  // ---- Stash (D3) ----
+
+  var stashList = document.getElementById('stash-list');
+  var stashMessage = document.getElementById('stash-message');
+  var btnStashPush = document.getElementById('btn-stash-push');
+
+  window.addEventListener('load-stash', loadStash);
+
+  btnStashPush.addEventListener('click', async function () {
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    var wt = task ? task.worktreePath : null;
+    if (!wt) return;
+
+    btnStashPush.disabled = true;
+    var result = await window.klaus.gitStashPush(wt, stashMessage.value.trim() || undefined);
+    btnStashPush.disabled = false;
+    stashMessage.value = '';
+    if (result.error) {
+      alert('Stash failed: ' + result.error);
+    }
+    loadStash();
+    DiffPanel.refresh();
+  });
+
+  async function loadStash() {
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    var wt = task ? task.worktreePath : null;
+    if (!wt) {
+      stashList.innerHTML = '<div class="file-tree-empty">No active task</div>';
+      return;
+    }
+
+    var result = await window.klaus.gitStashList(wt);
+    if (result.stashes.length === 0) {
+      stashList.innerHTML = '<div class="file-tree-empty">No stashes</div>';
+      return;
+    }
+
+    stashList.innerHTML = '';
+    result.stashes.forEach(function (s, idx) {
+      var item = document.createElement('div');
+      item.className = 'stash-item';
+      item.innerHTML =
+        '<div class="stash-info"><span class="stash-ref">' + escHtml(s.ref) + '</span>' +
+        '<span class="stash-msg">' + escHtml(s.message) + '</span></div>' +
+        '<button class="stash-pop-btn" title="Pop this stash">Pop</button>';
+
+      item.querySelector('.stash-pop-btn').addEventListener('click', async function (e) {
+        e.stopPropagation();
+        var res = await window.klaus.gitStashPop(wt, idx);
+        if (res.error) {
+          alert('Stash pop failed: ' + res.error);
+        }
+        loadStash();
+        DiffPanel.refresh();
+      });
+
+      stashList.appendChild(item);
+    });
+  }
+
+  // ---- Blame toggle in file viewer (D5) ----
+
+  window.toggleBlame = async function () {
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    if (!task) return;
+
+    var header = fileViewerView.querySelector('.file-viewer-header-inline');
+    if (!header) return;
+
+    var path = header.querySelector('.file-viewer-path');
+    if (!path) return;
+
+    var fileName = path.textContent;
+    var wt = task.worktreePath;
+
+    // Toggle: if blame annotations exist, remove them
+    var existing = fileViewerView.querySelectorAll('.blame-annotation');
+    if (existing.length > 0) {
+      existing.forEach(function (el) { el.remove(); });
+      return;
+    }
+
+    var result = await window.klaus.gitBlame(wt, fileName);
+    if (result.error || result.lines.length === 0) return;
+
+    var lineEls = fileViewerView.querySelectorAll('.file-view-line');
+    result.lines.forEach(function (blame, i) {
+      if (i >= lineEls.length) return;
+      var anno = document.createElement('span');
+      anno.className = 'blame-annotation';
+      anno.textContent = blame.hash + ' ' + blame.author.substring(0, 12);
+      anno.title = blame.summary;
+      lineEls[i].insertBefore(anno, lineEls[i].firstChild);
+    });
+  };
 
   function escHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -913,6 +1057,8 @@
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
+    var envField = document.getElementById('modal-env-vars');
+    if (envField) envField.value = '';
     setTimeout(function () { modalInput.focus(); }, 50);
   }
 
@@ -920,44 +1066,6 @@
     modalOverlay.style.display = 'none';
     modalInput.value = '';
     modalError.textContent = '';
-  }
-
-  async function submitModal() {
-    modalCreate.disabled = true;
-    modalCreate.textContent = 'Creating...';
-    modalError.textContent = '';
-
-    var result;
-
-    if (activeTab === 'new') {
-      var name = modalInput.value.trim();
-      if (!name) {
-        modalCreate.disabled = false;
-        modalCreate.textContent = 'Create';
-        return;
-      }
-      result = await window.klaus.createTask(name, repoPath, selectedMode, selectedBasePath);
-    } else {
-      if (!selectedWorktreePath) {
-        modalError.textContent = 'Please select a directory first.';
-        modalCreate.disabled = false;
-        modalCreate.textContent = 'Create';
-        return;
-      }
-      result = await window.klaus.attachWorktree(selectedWorktreePath, selectedMode);
-    }
-
-    modalCreate.disabled = false;
-    modalCreate.textContent = 'Create';
-
-    if (result.error) {
-      modalError.textContent = result.error;
-      return;
-    }
-
-    hideModal();
-    addTaskToUI(result);
-    switchToTask(result.id);
   }
 
   btnNewTask.addEventListener('click', showModal);
@@ -1206,11 +1314,12 @@
       window.klaus.writeTerminal(id, data);
     });
 
-    // Right-click context menu
+    // Right-click context menu (capture phase to intercept before xterm)
     container.addEventListener('contextmenu', function (e) {
       e.preventDefault();
+      e.stopPropagation();
       showContextMenu(e.clientX, e.clientY, id);
-    });
+    }, true);
 
     var taskEntry = {
       id: id, name: name, worktreePath: worktreePath, branch: branch,
@@ -1604,6 +1713,19 @@
         task.notifyEnabled = newVal;
         await window.klaus.setNotifyEnabled(id, newVal);
       }},
+      // E2: Export transcript
+      { label: 'Export Transcript', shortcut: '', action: async function () {
+        var result = await window.klaus.exportTranscript(id);
+        if (result.canceled || result.error) return;
+        // Get terminal buffer content
+        var buf = task.terminal.buffer.active;
+        var lines = [];
+        for (var i = 0; i < buf.length; i++) {
+          var line = buf.getLine(i);
+          if (line) lines.push(line.translateToString(true));
+        }
+        await window.klaus.writeTranscript(result.filePath, lines.join('\n'));
+      }},
     ];
 
     // Restart if exited
@@ -1714,6 +1836,7 @@
       }
     });
 
+    commands.push({ label: 'View Logs', action: showLogViewer });
     commands.push({ label: 'About Klaussy', action: showAboutDialog });
 
     paletteOverlay = document.createElement('div');
@@ -1925,5 +2048,92 @@
         '<button class="about-close">Close</button>';
       dialog.querySelector('.about-close').addEventListener('click', function () { overlay.remove(); });
     });
+  }
+
+  // ---- E1: Log Viewer ----
+
+  function showLogViewer() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+
+    var viewer = document.createElement('div');
+    viewer.className = 'log-viewer';
+    viewer.innerHTML = '<div class="log-viewer-header"><h3>Main Process Logs</h3><button class="log-viewer-close">&times;</button></div><div class="log-viewer-content">Loading...</div>';
+
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    overlay.appendChild(viewer);
+    document.body.appendChild(overlay);
+
+    viewer.querySelector('.log-viewer-close').addEventListener('click', function () { overlay.remove(); });
+
+    window.klaus.getLogs().then(function (logs) {
+      var content = viewer.querySelector('.log-viewer-content');
+      if (!logs || logs.length === 0) {
+        content.textContent = 'No logs yet.';
+        return;
+      }
+      content.innerHTML = logs.map(function (entry) {
+        var cls = entry.level === 'error' ? 'log-error' : entry.level === 'warn' ? 'log-warn' : 'log-info';
+        return '<div class="log-entry ' + cls + '"><span class="log-time">' + escHtml(entry.time.substring(11, 19)) + '</span><span class="log-level">' + escHtml(entry.level) + '</span><span class="log-msg">' + escHtml(entry.msg) + '</span></div>';
+      }).join('');
+      content.scrollTop = content.scrollHeight;
+    });
+  }
+
+  // ---- E3: Parse env vars from modal ----
+
+  var modalEnvVars = document.getElementById('modal-env-vars');
+
+  async function submitModal() {
+    modalCreate.disabled = true;
+    modalCreate.textContent = 'Creating...';
+    modalError.textContent = '';
+
+    // Parse env vars
+    var envVars = {};
+    var envText = modalEnvVars.value.trim();
+    if (envText) {
+      envText.split('\n').forEach(function (line) {
+        var eq = line.indexOf('=');
+        if (eq > 0) {
+          envVars[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
+        }
+      });
+    }
+
+    var result;
+
+    if (activeTab === 'new') {
+      var name = modalInput.value.trim();
+      if (!name) {
+        modalCreate.disabled = false;
+        modalCreate.textContent = 'Create';
+        return;
+      }
+      result = await window.klaus.createTask(name, repoPath, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
+    } else {
+      if (!selectedWorktreePath) {
+        modalCreate.disabled = false;
+        modalCreate.textContent = 'Create';
+        modalError.textContent = 'Select a directory first.';
+        return;
+      }
+      result = await window.klaus.attachWorktree(selectedWorktreePath, selectedMode);
+    }
+
+    modalCreate.disabled = false;
+    modalCreate.textContent = 'Create';
+
+    if (result.error) {
+      modalError.textContent = result.error;
+      return;
+    }
+
+    hideModal();
+    addTaskToUI(result);
+    switchToTask(result.id);
   }
 })();
