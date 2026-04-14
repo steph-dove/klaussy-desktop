@@ -24,6 +24,26 @@ window.DiffPanel = (function () {
 
     document.getElementById('btn-refresh-diff').addEventListener('click', refresh);
     document.getElementById('btn-close-diff').addEventListener('click', hide);
+
+    // D1: Fetch & Pull
+    document.getElementById('btn-fetch').addEventListener('click', async function () {
+      this.disabled = true;
+      this.textContent = '...';
+      var result = await window.klaus.gitFetch(currentWorktreePath);
+      this.disabled = false;
+      this.textContent = 'Fetch';
+      updateAheadBehind();
+      refresh();
+    });
+    document.getElementById('btn-pull').addEventListener('click', async function () {
+      this.disabled = true;
+      this.textContent = '...';
+      var result = await window.klaus.gitPull(currentWorktreePath);
+      this.disabled = false;
+      this.textContent = 'Pull';
+      updateAheadBehind();
+      refresh();
+    });
     document.getElementById('btn-commit').addEventListener('click', toggleCommitArea);
     document.getElementById('btn-push').addEventListener('click', pushChanges);
     document.getElementById('btn-create-pr').addEventListener('click', createPR);
@@ -183,6 +203,7 @@ window.DiffPanel = (function () {
     remoteList = [];
     diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
     await refresh();
+    updateAheadBehind();
     if (refreshInterval) clearInterval(refreshInterval);
     refreshInterval = setInterval(refresh, 5000);
     // Trigger refit after panel appears
@@ -424,6 +445,8 @@ window.DiffPanel = (function () {
 
     fileListEl.innerHTML = html;
     bindModeToggle();
+    addCheckoutToBranchSelect();
+    checkConflicts();
 
     // Bind section buttons
     var stageAllBtn = fileListEl.querySelector('.js-stage-all');
@@ -961,5 +984,61 @@ window.DiffPanel = (function () {
     return selectedFile;
   }
 
-  return { init: init, show: show, hide: hide, isVisible: isVisible, refresh: refresh, updateWorktree: updateWorktree, setCommentCallback: setCommentCallback, showFile: showFile, getSelectedFile: getSelectedFile };
+  // D1: Ahead/behind counts
+  async function updateAheadBehind() {
+    if (!currentWorktreePath) return;
+    var el = document.getElementById('ahead-behind');
+    var result = await window.klaus.gitAheadBehind(currentWorktreePath);
+    var parts = [];
+    if (result.ahead > 0) parts.push('\u2191' + result.ahead);
+    if (result.behind > 0) parts.push('\u2193' + result.behind);
+    el.textContent = parts.join(' ');
+    el.title = (result.ahead || 0) + ' ahead, ' + (result.behind || 0) + ' behind';
+  }
+
+  // D2: Branch checkout (integrated into mode toggle)
+  function addCheckoutToBranchSelect() {
+    var branchLabel = fileListEl.querySelector('.diff-branch-label');
+    if (!branchLabel || diffMode !== 'working') return;
+
+    branchLabel.style.cursor = 'pointer';
+    branchLabel.title = 'Click to switch branch';
+    branchLabel.addEventListener('click', async function () {
+      if (branchList.length === 0) {
+        var result = await window.klaus.gitBranches(currentWorktreePath);
+        branchList = result.branches || [];
+        remoteList = result.remotes || [];
+      }
+
+      var allBranches = branchList.concat(remoteList);
+      var choice = prompt('Switch to branch:\n\n' + allBranches.join('\n'));
+      if (!choice || !choice.trim()) return;
+
+      var res = await window.klaus.gitCheckout(currentWorktreePath, choice.trim());
+      if (res.error) {
+        alert('Checkout failed: ' + res.error);
+      } else {
+        refresh();
+        updateAheadBehind();
+      }
+    });
+  }
+
+  // D7: Conflict detection
+  async function checkConflicts() {
+    if (!currentWorktreePath) return;
+    var result = await window.klaus.gitConflicts(currentWorktreePath);
+    if (result.files && result.files.length > 0) {
+      var conflictBanner = fileListEl.querySelector('.conflict-banner');
+      if (!conflictBanner) {
+        conflictBanner = document.createElement('div');
+        conflictBanner.className = 'conflict-banner';
+        fileListEl.insertBefore(conflictBanner, fileListEl.firstChild);
+      }
+      conflictBanner.innerHTML = '\u26A0 ' + result.files.length + ' conflicted file' + (result.files.length > 1 ? 's' : '') +
+        ' \u2014 <span class="conflict-files">' + result.files.map(escHtml).join(', ') + '</span>';
+    }
+  }
+
+  return { init: init, show: show, hide: hide, isVisible: isVisible, refresh: refresh, updateWorktree: updateWorktree, setCommentCallback: setCommentCallback, showFile: showFile, getSelectedFile: getSelectedFile, updateAheadBehind: updateAheadBehind };
 })();

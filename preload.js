@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('klaus', {
   listWorktrees: () => ipcRenderer.invoke('list-worktrees'),
 
   // Task management
-  createTask: (name, repoPath, mode, basePath) => ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath }),
+  createTask: (name, repoPath, mode, basePath, envVars) => ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars }),
   attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),
   browseDirectory: () => ipcRenderer.invoke('browse-directory'),
   listTasks: () => ipcRenderer.invoke('list-tasks'),
@@ -44,6 +44,11 @@ contextBridge.exposeInMainWorld('klaus', {
   getAboutInfo: () => ipcRenderer.invoke('get-about-info'),
   renameTask: (id, newName) => ipcRenderer.invoke('rename-task', { id, newName }),
   duplicateTask: (id) => ipcRenderer.invoke('duplicate-task', { id }),
+
+  // Phase E: Reliability
+  getLogs: () => ipcRenderer.invoke('get-logs'),
+  exportTranscript: (id) => ipcRenderer.invoke('export-transcript', { id }),
+  writeTranscript: (filePath, content) => ipcRenderer.invoke('write-transcript', { filePath, content }),
 
   // Preferences (B1-B4)
   openPreferences: () => ipcRenderer.invoke('open-preferences'),
@@ -96,6 +101,19 @@ contextBridge.exposeInMainWorld('klaus', {
   gitCommit: (worktreePath, message) => ipcRenderer.invoke('git-commit', { worktreePath, message }),
   gitPush: (worktreePath) => ipcRenderer.invoke('git-push', { worktreePath }),
   createPR: (worktreePath, title, body) => ipcRenderer.invoke('create-pr', { worktreePath, title, body }),
+
+  // Git gaps (Phase D)
+  gitFetch: (worktreePath) => ipcRenderer.invoke('git-fetch', { worktreePath }),
+  gitPull: (worktreePath) => ipcRenderer.invoke('git-pull', { worktreePath }),
+  gitAheadBehind: (worktreePath) => ipcRenderer.invoke('git-ahead-behind', { worktreePath }),
+  gitCheckout: (worktreePath, branch) => ipcRenderer.invoke('git-checkout', { worktreePath, branch }),
+  gitStashPush: (worktreePath, message) => ipcRenderer.invoke('git-stash-push', { worktreePath, message }),
+  gitStashPop: (worktreePath, index) => ipcRenderer.invoke('git-stash-pop', { worktreePath, index }),
+  gitStashList: (worktreePath) => ipcRenderer.invoke('git-stash-list', { worktreePath }),
+  gitLog: (worktreePath, count) => ipcRenderer.invoke('git-log', { worktreePath, count }),
+  gitShow: (worktreePath, hash) => ipcRenderer.invoke('git-show', { worktreePath, hash }),
+  gitBlame: (worktreePath, file) => ipcRenderer.invoke('git-blame', { worktreePath, file }),
+  gitConflicts: (worktreePath) => ipcRenderer.invoke('git-conflicts', { worktreePath }),
 
   // Multi-project (Phase 3)
   listProjects: () => ipcRenderer.invoke('list-projects'),
