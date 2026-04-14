@@ -76,6 +76,7 @@
           <button class="diff-tab" data-tab="search">Search</button>
           <button class="diff-tab" data-tab="history">History</button>
           <button class="diff-tab" data-tab="stash">Stash</button>
+          <button class="diff-tab" data-tab="env">Env</button>
         </div>
 
         <!-- Changes tab content -->
@@ -124,9 +125,31 @@
 
         <!-- History tab content (D4) -->
         <div id="history-tab-content" style="display: none;">
-          <div id="history-list"></div>
-          <div id="history-diff-content">
-            <pre id="history-diff-view"></pre>
+          <div id="history-sub-tabs">
+            <button class="history-sub-tab active" data-sub="commits">Commits</button>
+            <button class="history-sub-tab" data-sub="tags">Tags</button>
+          </div>
+          <div id="history-commits-content">
+            <div id="history-list"></div>
+            <div id="history-diff-content">
+              <pre id="history-diff-view"></pre>
+            </div>
+          </div>
+          <div id="history-tags-content" style="display: none;">
+            <div id="tags-actions">
+              <button id="btn-create-tag" class="tags-action-btn">+ Tag</button>
+            </div>
+            <div id="tags-create-form" style="display: none;">
+              <input type="text" id="tag-name-input" placeholder="Tag name (e.g. v1.0.0)" spellcheck="false" />
+              <input type="text" id="tag-message-input" placeholder="Message (optional)" spellcheck="false" />
+              <input type="text" id="tag-commit-input" placeholder="Commit (optional, defaults to HEAD)" spellcheck="false" />
+              <div id="tags-form-buttons">
+                <button id="btn-tag-cancel" class="tags-btn-secondary">Cancel</button>
+                <button id="btn-tag-submit" class="tags-btn-primary">Create</button>
+              </div>
+              <div id="tag-error" class="tags-error"></div>
+            </div>
+            <div id="tags-list"></div>
           </div>
         </div>
 
@@ -137,6 +160,16 @@
             <button id="btn-stash-push">Stash</button>
           </div>
           <div id="stash-list"></div>
+        </div>
+
+        <!-- Env tab content (Feature 12) -->
+        <div id="env-tab-content" style="display: none;">
+          <div id="env-file-selector"></div>
+          <div id="env-editor"></div>
+          <div id="env-footer">
+            <button id="btn-env-save" class="env-save-btn">Save</button>
+            <span id="env-status"></span>
+          </div>
         </div>
 
         <!-- Search tab content (C3) -->
@@ -212,6 +245,33 @@
     </div>
   </div>
 
+  <!-- Merge Conflict Resolution (Feature 1) -->
+  <div id="conflict-overlay" style="display: none;">
+    <div id="conflict-modal">
+      <div id="conflict-header">
+        <select id="conflict-file-select"></select>
+        <div id="conflict-header-actions">
+          <button id="btn-conflict-resolve" class="conflict-btn-primary">Mark Resolved</button>
+          <button id="btn-conflict-close" class="conflict-btn-secondary">&times;</button>
+        </div>
+      </div>
+      <div id="conflict-panes">
+        <div class="conflict-pane" id="conflict-ours">
+          <div class="conflict-pane-header">Ours (Current)</div>
+          <div class="conflict-pane-body" id="conflict-ours-body"></div>
+        </div>
+        <div class="conflict-pane" id="conflict-result">
+          <div class="conflict-pane-header">Result</div>
+          <div class="conflict-pane-body" id="conflict-result-body"></div>
+        </div>
+        <div class="conflict-pane" id="conflict-theirs">
+          <div class="conflict-pane-header">Theirs (Incoming)</div>
+          <div class="conflict-pane-body" id="conflict-theirs-body"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Search bar (Cmd+F) -->
   <div id="search-bar" style="display: none;">
     <input type="text" id="search-input" placeholder="Search..." autocomplete="off" spellcheck="false" />
@@ -229,6 +289,8 @@
   <script src="theme.js"></script>
   <script src="diff-panel.js"></script>
   <script src="pr-panel.js"></script>
+  <script src="env-panel.js"></script>
+  <script src="conflict-panel.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

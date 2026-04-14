@@ -832,6 +832,28 @@ window.DiffPanel = (function () {
     commentCallback = fn;
   }
 
+  // Feature 13: Keyboard shortcut to send selected diff/hunk to Claude
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'E') {
+      e.preventDefault();
+      if (!commentCallback) return;
+
+      // Try selected text first
+      var sel = window.getSelection();
+      var selectedText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
+
+      if (!selectedText && currentParsedHunks.length > 0) {
+        // Fall back to all hunks of the selected file
+        selectedText = currentParsedHunks.map(function (h) { return h.lines.join('\n'); }).join('\n');
+      }
+
+      if (!selectedText || !selectedFile) return;
+
+      var prompt = 'Regarding ' + selectedFile + ':\n```\n' + selectedText + '\n```\nPlease review this code change.';
+      commentCallback(prompt);
+    }
+  });
+
   function getStatusClass(status) {
     var s = status.trim();
     if (s.startsWith('M')) return 'modified';
@@ -1036,7 +1058,13 @@ window.DiffPanel = (function () {
         fileListEl.insertBefore(conflictBanner, fileListEl.firstChild);
       }
       conflictBanner.innerHTML = '\u26A0 ' + result.files.length + ' conflicted file' + (result.files.length > 1 ? 's' : '') +
-        ' \u2014 <span class="conflict-files">' + result.files.map(escHtml).join(', ') + '</span>';
+        ' \u2014 <span class="conflict-files">' + result.files.map(escHtml).join(', ') + '</span>' +
+        ' <button class="conflict-resolve-btn">Resolve</button>';
+      conflictBanner.querySelector('.conflict-resolve-btn').addEventListener('click', function () {
+        if (window.ConflictPanel && currentWorktreePath) {
+          window.ConflictPanel.show(currentWorktreePath);
+        }
+      });
     }
   }
 

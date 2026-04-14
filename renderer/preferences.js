@@ -34,6 +34,7 @@
   var claudePath = document.getElementById('pref-claude-path');
   var defaultMode = document.getElementById('pref-default-mode');
   var claudeInfo = document.getElementById('claude-info');
+  var autoFetch = document.getElementById('pref-auto-fetch');
   var statusMsg = document.getElementById('status-msg');
 
   fontFamily.value = prefs.fontFamily;
@@ -42,6 +43,7 @@
   cursorStyle.value = prefs.cursorStyle;
   claudePath.value = prefs.claudePath || '';
   defaultMode.value = prefs.defaultMode;
+  autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
 
   // Theme dropdown
   themes.forEach(function (t) {
@@ -170,6 +172,9 @@
       bindings[input.dataset.action] = input.dataset.binding;
     });
 
+    var fetchSeconds = parseInt(autoFetch.value, 10);
+    if (isNaN(fetchSeconds) || fetchSeconds < 0) fetchSeconds = 60;
+
     var updated = {
       fontFamily: fontFamily.value,
       fontSize: parseInt(fontSize.value, 10) || 13,
@@ -179,6 +184,7 @@
       defaultMode: defaultMode.value,
       theme: { preset: themeSelect.value },
       keybindings: bindings,
+      autoFetchInterval: fetchSeconds * 1000,
     };
 
     await window.klaus.setPreferences(updated);
@@ -192,7 +198,7 @@
   }
 
   // Attach change listeners
-  [fontFamily, fontSize, lineHeight, cursorStyle, themeSelect, defaultMode].forEach(function (el) {
+  [fontFamily, fontSize, lineHeight, cursorStyle, themeSelect, defaultMode, autoFetch].forEach(function (el) {
     el.addEventListener('change', saveAll);
     el.addEventListener('input', saveAll);
   });

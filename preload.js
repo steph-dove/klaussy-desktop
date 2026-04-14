@@ -60,8 +60,8 @@ contextBridge.exposeInMainWorld('klaus', {
   },
 
   // Terminal I/O
-  writeTerminal: (id, data) => ipcRenderer.send('write-terminal', { id, data }),
-  resizeTerminal: (id, cols, rows) => ipcRenderer.send('resize-terminal', { id, cols, rows }),
+  writeTerminal: (id, data, subId) => ipcRenderer.send('write-terminal', { id, data, subId }),
+  resizeTerminal: (id, cols, rows, subId) => ipcRenderer.send('resize-terminal', { id, cols, rows, subId }),
   onTerminalData: (id, callback) => {
     const channel = `terminal-data-${id}`;
     const listener = (_event, data) => callback(data);
@@ -148,4 +148,51 @@ contextBridge.exposeInMainWorld('klaus', {
   readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
   listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
   searchFiles: (worktreePath, query) => ipcRenderer.invoke('search-files', { worktreePath, query }),
+
+  // Sub-terminal multiplexing (Feature 5)
+  addSubTerminal: (taskId, label) => ipcRenderer.invoke('add-sub-terminal', { taskId, label }),
+  killSubTerminal: (taskId, subId) => ipcRenderer.invoke('kill-sub-terminal', { taskId, subId }),
+  onSubTerminalData: (taskId, subId, callback) => {
+    const channel = `terminal-data-${taskId}-${subId}`;
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  onSubTerminalExit: (taskId, subId, callback) => {
+    const channel = `terminal-exit-${taskId}-${subId}`;
+    const listener = () => callback();
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+
+  // Merge conflict resolution (Feature 1)
+  readConflictFile: (worktreePath, file) => ipcRenderer.invoke('read-conflict-file', { worktreePath, file }),
+  writeResolvedFile: (worktreePath, file, content) => ipcRenderer.invoke('write-resolved-file', { worktreePath, file, content }),
+
+  // .env file editor (Feature 12)
+  listEnvFiles: (worktreePath) => ipcRenderer.invoke('list-env-files', { worktreePath }),
+  readEnvFile: (worktreePath, filename) => ipcRenderer.invoke('read-env-file', { worktreePath, filename }),
+  writeEnvFile: (worktreePath, filename, content) => ipcRenderer.invoke('write-env-file', { worktreePath, filename, content }),
+
+  // CI/CD status (Feature 3)
+  ciStatus: (worktreePath, branch) => ipcRenderer.invoke('ci-status', { worktreePath, branch }),
+  ciRunLogs: (worktreePath, runId) => ipcRenderer.invoke('ci-run-logs', { worktreePath, runId }),
+  onCIStatusUpdate: (callback) => {
+    ipcRenderer.on('ci-status-update', (_event, data) => callback(data));
+  },
+
+  // Git tags (Feature 11)
+  gitTags: (worktreePath) => ipcRenderer.invoke('git-tags', { worktreePath }),
+  gitTagCreate: (worktreePath, name, message, commit) => ipcRenderer.invoke('git-tag-create', { worktreePath, name, message, commit }),
+  gitTagDelete: (worktreePath, name) => ipcRenderer.invoke('git-tag-delete', { worktreePath, name }),
+  gitTagPush: (worktreePath, name) => ipcRenderer.invoke('git-tag-push', { worktreePath, name }),
+
+  // Task notes (Feature 14)
+  getTaskNote: (taskName) => ipcRenderer.invoke('get-task-note', { taskName }),
+  setTaskNote: (taskName, note) => ipcRenderer.invoke('set-task-note', { taskName, note }),
+
+  // Auto-fetch updates (Feature 15)
+  onAutoFetchUpdate: (callback) => {
+    ipcRenderer.on('auto-fetch-update', (_event, data) => callback(data));
+  },
 });
