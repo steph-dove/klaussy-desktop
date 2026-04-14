@@ -14,15 +14,21 @@ window.PRPanel = (function () {
     document.getElementById('btn-pr-request-changes').addEventListener('click', function () { submitReview('request-changes'); });
 
     // Tab switching
+    var allTabContents = ['changes-tab-content', 'pr-tab-content', 'files-tab-content', 'search-tab-content'];
     document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
         tab.classList.add('active');
         var target = tab.dataset.tab;
-        document.getElementById('changes-tab-content').style.display = target === 'changes' ? '' : 'none';
-        document.getElementById('pr-tab-content').style.display = target === 'pr' ? '' : 'none';
+        allTabContents.forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.style.display = id === target + '-tab-content' ? '' : 'none';
+        });
         if (target === 'pr') {
           loadPR();
+        }
+        if (target === 'files') {
+          window.dispatchEvent(new CustomEvent('load-file-tree'));
         }
       });
     });

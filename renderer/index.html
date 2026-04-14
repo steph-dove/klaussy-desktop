@@ -40,6 +40,7 @@
       <div id="sidebar-footer">
         <button id="btn-new-window" title="New Window">&#8862;</button>
         <button id="btn-theme" title="Change theme">&#9681;</button>
+        <button id="btn-prefs" title="Preferences"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.902 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291a1.873 1.873 0 0 0-1.116-2.693l-.318-.094c-.835-.246-.835-1.428 0-1.674l.319-.094a1.873 1.873 0 0 0 1.115-2.692l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318z"/></svg></button>
         <button id="btn-sidebar-toggle" title="Resize sidebar">
           <span id="sidebar-toggle-icon">&#9654;</span>
           <span id="sidebar-toggle-label">Expand</span>
@@ -68,6 +69,8 @@
         <div id="diff-tabs">
           <button class="diff-tab active" data-tab="changes">Changes</button>
           <button class="diff-tab" data-tab="pr">PR</button>
+          <button class="diff-tab" data-tab="files">Files</button>
+          <button class="diff-tab" data-tab="search">Search</button>
         </div>
 
         <!-- Changes tab content -->
@@ -101,6 +104,25 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- Files tab content (C2) -->
+        <div id="files-tab-content" style="display: none;">
+          <div id="file-tree-filter-bar">
+            <input type="text" id="file-tree-filter" placeholder="Filter files..." autocomplete="off" spellcheck="false" />
+          </div>
+          <div id="file-tree"></div>
+          <div id="file-viewer-content">
+            <div id="file-viewer-view"></div>
+          </div>
+        </div>
+
+        <!-- Search tab content (C3) -->
+        <div id="search-tab-content" style="display: none;">
+          <div id="project-search-bar">
+            <input type="text" id="project-search-input" placeholder="Search in project..." autocomplete="off" spellcheck="false" />
+          </div>
+          <div id="project-search-results"></div>
         </div>
       </div>
     </div>
@@ -159,17 +181,6 @@
       <h3>Theme</h3>
       <div id="theme-list"></div>
       <button id="theme-close">Close</button>
-    </div>
-  </div>
-
-  <!-- File Viewer Modal (Phase 7) -->
-  <div id="file-viewer-overlay" style="display: none;">
-    <div id="file-viewer">
-      <div id="file-viewer-header">
-        <span id="file-viewer-name"></span>
-        <button id="file-viewer-close">&times;</button>
-      </div>
-      <pre id="file-viewer-content"></pre>
     </div>
   </div>
 
