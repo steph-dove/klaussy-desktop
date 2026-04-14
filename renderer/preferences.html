@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Preferences</title>
+  <style>
+    :root {
+      --bg: #0f0f1a;
+      --surface: #1e1e36;
+      --surface-hover: #2a2a4a;
+      --border: #2a2a4a;
+      --accent: #6c5ce7;
+      --accent-hover: #7d6ef0;
+      --text: #e0e0e0;
+      --text-muted: #888;
+      --text-dim: #666;
+      --input-bg: #0f0f1a;
+      --error: #ff5252;
+      --success: #00e676;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding: 0;
+      overflow-y: auto;
+      -webkit-app-region: drag;
+    }
+
+    .prefs-container {
+      -webkit-app-region: no-drag;
+      padding: 24px;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    h2 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: var(--text);
+    }
+
+    .section {
+      margin-bottom: 24px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .field {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .field label {
+      font-size: 13px;
+      color: var(--text);
+      flex-shrink: 0;
+    }
+
+    .field input[type="text"],
+    .field input[type="number"],
+    .field select {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      color: var(--text);
+      font-size: 13px;
+      width: 200px;
+      outline: none;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      border-color: var(--accent);
+    }
+
+    .field select {
+      -webkit-appearance: none;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+
+    .field input[type="number"] {
+      width: 80px;
+    }
+
+    .field-full {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 6px;
+    }
+
+    .field-full input[type="text"] {
+      width: 100%;
+    }
+
+    .field-hint {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: -6px;
+      margin-bottom: 12px;
+    }
+
+    .claude-info {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: -6px;
+      margin-bottom: 12px;
+    }
+
+    .claude-info .version {
+      color: var(--success);
+    }
+
+    .claude-info .not-found {
+      color: var(--error);
+    }
+
+    /* Keybindings table */
+    .keybindings-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .keybindings-table th {
+      text-align: left;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      padding: 4px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .keybindings-table td {
+      padding: 6px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .keybindings-table td:first-child {
+      color: var(--text);
+    }
+
+    .key-input {
+      background: var(--input-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 3px 8px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+      width: 140px;
+      outline: none;
+      cursor: pointer;
+      text-align: center;
+    }
+
+    .key-input:focus {
+      border-color: var(--accent);
+      color: var(--text);
+    }
+
+    .key-input.recording {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .status-msg {
+      font-size: 12px;
+      color: var(--success);
+      text-align: center;
+      margin-top: 8px;
+      min-height: 18px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .status-msg.visible {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="prefs-container">
+    <h2>Preferences</h2>
+
+    <!-- Terminal Section -->
+    <div class="section">
+      <div class="section-title">Terminal</div>
+
+      <div class="field field-full">
+        <label>Font Family</label>
+        <input type="text" id="pref-font-family" spellcheck="false" />
+      </div>
+
+      <div class="field">
+        <label>Font Size</label>
+        <input type="number" id="pref-font-size" min="8" max="28" step="1" />
+      </div>
+
+      <div class="field">
+        <label>Line Height</label>
+        <input type="number" id="pref-line-height" min="1" max="2" step="0.1" />
+      </div>
+
+      <div class="field">
+        <label>Cursor Style</label>
+        <select id="pref-cursor-style">
+          <option value="block">Block</option>
+          <option value="underline">Underline</option>
+          <option value="bar">Bar</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Appearance Section -->
+    <div class="section">
+      <div class="section-title">Appearance</div>
+
+      <div class="field">
+        <label>Theme</label>
+        <select id="pref-theme"></select>
+      </div>
+    </div>
+
+    <!-- Claude CLI Section -->
+    <div class="section">
+      <div class="section-title">Claude CLI</div>
+
+      <div class="field field-full">
+        <label>Claude Path</label>
+        <input type="text" id="pref-claude-path" placeholder="claude (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="field-hint">Leave empty to use the default <code>claude</code> from PATH.</div>
+      <div class="claude-info" id="claude-info"></div>
+
+      <div class="field">
+        <label>Default Mode</label>
+        <select id="pref-default-mode">
+          <option value="claude">Claude Code</option>
+          <option value="shell">Shell</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Keybindings Section -->
+    <div class="section">
+      <div class="section-title">Shortcuts</div>
+
+      <table class="keybindings-table">
+        <thead>
+          <tr><th>Action</th><th>Shortcut</th></tr>
+        </thead>
+        <tbody id="keybindings-body"></tbody>
+      </table>
+      <div class="field-hint" style="margin-top: 8px;">Click a shortcut to record a new binding. Press Esc to cancel.</div>
+    </div>
+
+    <div class="status-msg" id="status-msg">Saved</div>
+  </div>
+
+  <script src="preferences.js"></script>
+</body>
+</html>

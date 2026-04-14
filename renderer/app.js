@@ -47,8 +47,14 @@
     // Refit terminal and sync size to new shell pty
     setTimeout(function () {
       t.fitAddon.fit();
+      t.terminal.scrollToBottom();
       window.klaus.resizeTerminal(data.id, t.terminal.cols, t.terminal.rows);
     }, 100);
+  });
+
+  // ---- Handle notification click → focus task ----
+  window.klaus.onNotificationClicked(function (data) {
+    switchToTask(data.id);
   });
 
   // ---- Save UI state before quit ----
@@ -186,6 +192,47 @@
     window.klaus.newWindow();
   });
 
+  // ---- Preferences (B1-B4) ----
+  const btnPrefs = document.getElementById('btn-prefs');
+  btnPrefs.addEventListener('click', function () {
+    window.klaus.openPreferences();
+  });
+
+  // Apply preference changes broadcast from main process
+  window.klaus.onPreferencesChanged(function (prefs) {
+    if (prefs.fontSize !== undefined || prefs.fontFamily !== undefined ||
+        prefs.lineHeight !== undefined || prefs.cursorStyle !== undefined) {
+      tasks.forEach(function (task, id) {
+        if (prefs.fontSize !== undefined) {
+          currentFontSize = prefs.fontSize;
+          task.terminal.options.fontSize = prefs.fontSize;
+        }
+        if (prefs.fontFamily !== undefined) {
+          task.terminal.options.fontFamily = prefs.fontFamily;
+        }
+        if (prefs.lineHeight !== undefined) {
+          task.terminal.options.lineHeight = prefs.lineHeight;
+        }
+        if (prefs.cursorStyle !== undefined) {
+          task.terminal.options.cursorStyle = prefs.cursorStyle;
+        }
+        task.fitAddon.fit();
+        task.terminal.scrollToBottom();
+        window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+      });
+    }
+    if (prefs.theme !== undefined) {
+      ThemeManager.apply(prefs.theme.preset);
+    }
+  });
+
+  // Load saved terminal preferences on startup
+  var savedPrefs = {};
+  window.klaus.getPreferences().then(function (prefs) {
+    savedPrefs = prefs;
+    if (prefs.fontSize && prefs.fontSize !== 13) currentFontSize = prefs.fontSize;
+  });
+
   // ---- Theme Picker (Phase 5) ----
   const btnTheme = document.getElementById('btn-theme');
   const themeOverlay = document.getElementById('theme-overlay');
@@ -227,34 +274,307 @@
     });
   });
 
-  // ---- File Viewer (Phase 7) ----
-  const fileViewerOverlay = document.getElementById('file-viewer-overlay');
-  const fileViewerName = document.getElementById('file-viewer-name');
-  const fileViewerContent = document.getElementById('file-viewer-content');
-  const fileViewerClose = document.getElementById('file-viewer-close');
+  // ---- File Viewer (C1) — renders inline in the diff panel ----
 
-  fileViewerClose.addEventListener('click', function () { fileViewerOverlay.style.display = 'none'; });
-  fileViewerOverlay.addEventListener('click', function (e) {
-    if (e.target === fileViewerOverlay) fileViewerOverlay.style.display = 'none';
-  });
+  // File viewer renders in the Files tab content area below the file tree
+  var fileViewerContent = document.getElementById('file-viewer-content');
+  var fileViewerView = document.getElementById('file-viewer-view');
 
-  window.openFileViewer = async function (filePath, fileName) {
-    fileViewerName.textContent = fileName || filePath;
-    fileViewerContent.innerHTML = 'Loading...';
-    fileViewerOverlay.style.display = 'flex';
+  window.openFileViewer = async function (filePath, fileName, lineNumber) {
+    // Make sure the diff panel is open
+    var diffPanel = document.getElementById('diff-panel');
+    if (!diffPanel.classList.contains('visible')) {
+      btnDiff.click();
+    }
+
+    // Switch to the Files tab
+    document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
+    document.querySelector('#diff-tabs .diff-tab[data-tab="files"]').classList.add('active');
+    ['changes-tab-content', 'pr-tab-content', 'search-tab-content'].forEach(function (id) {
+      document.getElementById(id).style.display = 'none';
+    });
+    document.getElementById('files-tab-content').style.display = '';
+
+    // Load file tree if not already loaded
+    if (!fileTreeData.length) loadFileTree();
+
+    // Track worktree for click-to-search
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    fileViewerWorktree = task ? task.worktreePath : null;
+
+    // Show the viewer area
+    fileViewerContent.style.display = 'block';
+    fileViewerView.innerHTML = '<div class="file-viewer-header-inline"><span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span></div><div class="file-viewer-body">Loading...</div>';
 
     var result = await window.klaus.readFile(filePath);
+    var body = fileViewerView.querySelector('.file-viewer-body');
     if (result.error) {
-      fileViewerContent.innerHTML = '<span style="color: var(--error)">Error: ' + result.error + '</span>';
+      body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
       return;
     }
 
+    // Syntax highlight with hljs
+    var ext = result.ext || '';
+    var langMap = { js: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java', md: 'markdown', json: 'json', html: 'xml', htm: 'xml', xml: 'xml', css: 'css', sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml', toml: 'ini', sql: 'sql', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp' };
+    var lang = langMap[ext];
+    var highlighted;
+    if (lang && window.hljs && window.hljs.getLanguage(lang)) {
+      highlighted = window.hljs.highlight(result.content, { language: lang }).value;
+    } else if (window.hljs) {
+      highlighted = window.hljs.highlightAuto(result.content).value;
+    } else {
+      highlighted = escHtml(result.content);
+    }
+
     // Render with line numbers
-    var lines = result.content.split('\n');
-    fileViewerContent.innerHTML = lines.map(function (line) {
-      return '<span class="file-line">' + escHtml(line) + '</span>';
-    }).join('\n');
+    var lines = highlighted.split('\n');
+    body.innerHTML = lines.map(function (line, i) {
+      var num = i + 1;
+      var cls = (lineNumber && num === lineNumber) ? ' file-line-highlight' : '';
+      return '<div class="file-view-line' + cls + '" data-line="' + num + '"><span class="file-line-num">' + num + '</span><span class="file-line">' + (line || ' ') + '</span></div>';
+    }).join('');
+
+    // Scroll to line if specified
+    if (lineNumber) {
+      var target = body.querySelector('[data-line="' + lineNumber + '"]');
+      if (target) target.scrollIntoView({ block: 'center' });
+    }
+
+    // Click-to-search: click a word to find all occurrences
+    body.addEventListener('click', function (e) {
+      // Don't trigger on text selection
+      var sel = window.getSelection();
+      if (sel && sel.toString().length > 0) return;
+
+      var word = getWordAtPoint(e.target, e.clientX, e.clientY);
+      if (word && word.length >= 2) {
+        searchSymbol(word, fileViewerWorktree);
+      }
+    });
   };
+
+  var fileViewerWorktree = null;
+
+  function getWordAtPoint(element, x, y) {
+    // Get the text node and offset under the click
+    if (!element || !element.textContent) return null;
+    var range = document.caretRangeFromPoint(x, y);
+    if (!range) return null;
+
+    var node = range.startNode || range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return null;
+
+    var text = node.textContent;
+    var offset = range.startOffset;
+
+    // Expand to word boundaries
+    var start = offset;
+    var end = offset;
+    var wordChars = /[a-zA-Z0-9_$]/;
+    while (start > 0 && wordChars.test(text[start - 1])) start--;
+    while (end < text.length && wordChars.test(text[end])) end++;
+
+    return text.substring(start, end);
+  }
+
+  function searchSymbol(word, worktreePath) {
+    // Switch to Search tab and run the search
+    document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
+    document.querySelector('#diff-tabs .diff-tab[data-tab="search"]').classList.add('active');
+    ['changes-tab-content', 'pr-tab-content', 'files-tab-content'].forEach(function (id) {
+      document.getElementById(id).style.display = 'none';
+    });
+    document.getElementById('search-tab-content').style.display = '';
+
+    projectSearchInput.value = word;
+    doProjectSearch();
+  }
+
+  // ---- File Tree (C2) ----
+
+  var fileTree = document.getElementById('file-tree');
+  var fileTreeFilter = document.getElementById('file-tree-filter');
+  var fileTreeData = [];
+  var fileTreeWorktree = null;
+
+  window.addEventListener('load-file-tree', loadFileTree);
+
+  async function loadFileTree() {
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    var wt = task ? task.worktreePath : null;
+    if (!wt) {
+      fileTree.innerHTML = '<div class="file-tree-empty">No active task</div>';
+      return;
+    }
+
+    if (wt === fileTreeWorktree && fileTreeData.length > 0) {
+      renderFileTree(fileTreeFilter.value);
+      return;
+    }
+
+    fileTreeWorktree = wt;
+    fileTree.innerHTML = '<div class="file-tree-empty">Loading...</div>';
+
+    var result = await window.klaus.listFiles(wt);
+    if (result.error) {
+      fileTree.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
+      return;
+    }
+
+    fileTreeData = result.files;
+    renderFileTree('');
+  }
+
+  function renderFileTree(filter) {
+    var filtered = fileTreeData;
+    if (filter) {
+      var q = filter.toLowerCase();
+      filtered = fileTreeData.filter(function (f) { return f.toLowerCase().includes(q); });
+    }
+
+    // Build directory tree
+    var tree = {};
+    filtered.forEach(function (filepath) {
+      var parts = filepath.split('/');
+      var node = tree;
+      parts.forEach(function (part, i) {
+        if (i === parts.length - 1) {
+          if (!node._files) node._files = [];
+          node._files.push({ name: part, path: filepath });
+        } else {
+          if (!node[part]) node[part] = {};
+          node = node[part];
+        }
+      });
+    });
+
+    fileTree.innerHTML = '';
+    renderTreeNode(tree, fileTree, 0);
+  }
+
+  function renderTreeNode(node, container, depth) {
+    // Directories first
+    var dirs = Object.keys(node).filter(function (k) { return k !== '_files'; }).sort();
+    dirs.forEach(function (dir) {
+      var dirEl = document.createElement('div');
+      dirEl.className = 'file-tree-dir';
+
+      var label = document.createElement('div');
+      label.className = 'file-tree-label';
+      label.style.paddingLeft = (depth * 16 + 8) + 'px';
+      label.innerHTML = '<span class="file-tree-arrow">&#9654;</span> ' + escHtml(dir);
+
+      var children = document.createElement('div');
+      children.className = 'file-tree-children';
+      children.style.display = 'none';
+
+      label.addEventListener('click', function () {
+        var open = children.style.display !== 'none';
+        children.style.display = open ? 'none' : '';
+        label.querySelector('.file-tree-arrow').innerHTML = open ? '&#9654;' : '&#9660;';
+      });
+
+      dirEl.appendChild(label);
+      dirEl.appendChild(children);
+      container.appendChild(dirEl);
+      renderTreeNode(node[dir], children, depth + 1);
+    });
+
+    // Files
+    if (node._files) {
+      node._files.sort(function (a, b) { return a.name.localeCompare(b.name); });
+      node._files.forEach(function (file) {
+        var fileEl = document.createElement('div');
+        fileEl.className = 'file-tree-file';
+        fileEl.style.paddingLeft = (depth * 16 + 8) + 'px';
+        fileEl.textContent = file.name;
+        fileEl.title = file.path;
+        fileEl.addEventListener('click', function () {
+          window.openFileViewer(fileTreeWorktree + '/' + file.path, file.path);
+        });
+        container.appendChild(fileEl);
+      });
+    }
+  }
+
+  fileTreeFilter.addEventListener('input', function () {
+    renderFileTree(fileTreeFilter.value);
+  });
+
+  // ---- Project Search (C3) ----
+
+  var projectSearchInput = document.getElementById('project-search-input');
+  var projectSearchResults = document.getElementById('project-search-results');
+  var searchTimer = null;
+
+  projectSearchInput.addEventListener('input', function () {
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(doProjectSearch, 400);
+  });
+
+  projectSearchInput.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (searchTimer) clearTimeout(searchTimer);
+      doProjectSearch();
+    }
+  });
+
+  async function doProjectSearch() {
+    var query = projectSearchInput.value.trim();
+    if (!query) {
+      projectSearchResults.innerHTML = '';
+      return;
+    }
+
+    var task = activeTaskId ? tasks.get(activeTaskId) : null;
+    var wt = task ? task.worktreePath : null;
+    if (!wt) {
+      projectSearchResults.innerHTML = '<div class="file-tree-empty">No active task</div>';
+      return;
+    }
+
+    projectSearchResults.innerHTML = '<div class="file-tree-empty">Searching...</div>';
+
+    var result = await window.klaus.searchFiles(wt, query);
+    if (result.error) {
+      projectSearchResults.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
+      return;
+    }
+
+    if (result.results.length === 0) {
+      projectSearchResults.innerHTML = '<div class="file-tree-empty">No matches found</div>';
+      return;
+    }
+
+    // Group by file
+    var grouped = {};
+    result.results.forEach(function (r) {
+      if (!grouped[r.file]) grouped[r.file] = [];
+      grouped[r.file].push(r);
+    });
+
+    projectSearchResults.innerHTML = '';
+    Object.keys(grouped).forEach(function (file) {
+      var fileHeader = document.createElement('div');
+      fileHeader.className = 'search-result-file';
+      fileHeader.textContent = file;
+      fileHeader.addEventListener('click', function () {
+        window.openFileViewer(wt + '/' + file, file);
+      });
+      projectSearchResults.appendChild(fileHeader);
+
+      grouped[file].forEach(function (match) {
+        var line = document.createElement('div');
+        line.className = 'search-result-line';
+        line.innerHTML = '<span class="search-line-num">' + match.line + '</span>' + escHtml(match.text.substring(0, 200));
+        line.addEventListener('click', function () {
+          window.openFileViewer(wt + '/' + file, file, match.line);
+        });
+        projectSearchResults.appendChild(line);
+      });
+    });
+  }
 
   function escHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -589,10 +909,10 @@
     basepathDisplay.textContent = 'Default';
     basepathDisplay.classList.remove('has-path');
     activeTab = 'new';
-    selectedMode = 'claude';
+    selectedMode = savedPrefs.defaultMode || 'claude';
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
-    shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === 'claude'); });
+    shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
     setTimeout(function () { modalInput.focus(); }, 50);
   }
 
@@ -665,7 +985,9 @@
     var terminal = new Terminal({
       cursorBlink: true,
       fontSize: currentFontSize,
-      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      lineHeight: savedPrefs.lineHeight || 1.2,
+      cursorStyle: savedPrefs.cursorStyle || 'block',
       scrollback: 10000,
       theme: termTheme,
       allowProposedApi: true,
@@ -896,8 +1218,14 @@
       terminal: terminal, fitAddon: fitAddon, searchAddon: searchAddon,
       container: container, cleanup: cleanup,
       alive: task.alive !== false,
+      notifyEnabled: true,
     };
     tasks.set(id, taskEntry);
+
+    // Fetch persisted notification preference
+    window.klaus.getNotifyEnabled(id).then(function (val) {
+      taskEntry.notifyEnabled = val;
+    });
 
     renderSidebarItem(taskEntry);
     emptyState.style.display = 'none';
@@ -1064,6 +1392,7 @@
     if (task) {
       setTimeout(function () {
         task.fitAddon.fit();
+        task.terminal.scrollToBottom();
         window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
         task.terminal.focus();
       }, 50);
@@ -1110,6 +1439,7 @@
     setTimeout(function () {
       tasks.forEach(function (task, id) {
         task.fitAddon.fit();
+        task.terminal.scrollToBottom();
         window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
       });
     }, 50);
@@ -1126,6 +1456,7 @@
     tasks.forEach(function (task, id) {
       task.terminal.options.fontSize = currentFontSize;
       task.fitAddon.fit();
+      task.terminal.scrollToBottom();
       window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
     });
   }
@@ -1251,6 +1582,14 @@
       { label: 'Pop Out', shortcut: '', action: async function () {
         await window.klaus.popOutTask(id);
       }},
+      // A6: Duplicate task
+      { label: 'Duplicate', shortcut: '', action: async function () {
+        var result = await window.klaus.duplicateTask(id);
+        if (result && !result.error) {
+          addTaskToUI(result);
+          switchToTask(result.id);
+        }
+      }},
       // Phase 7: View files in worktree
       { label: 'View File...', shortcut: '', action: function () {
         var filePath = prompt('File path (relative to worktree):');
@@ -1258,6 +1597,12 @@
           var full = task.worktreePath + '/' + filePath;
           window.openFileViewer(full, filePath);
         }
+      }},
+      { sep: true },
+      { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', shortcut: '', action: async function () {
+        var newVal = task.notifyEnabled === false;
+        task.notifyEnabled = newVal;
+        await window.klaus.setNotifyEnabled(id, newVal);
       }},
     ];
 
@@ -1321,4 +1666,264 @@
       btnDiff.click();
     }
   });
+
+  // ---- Command Palette (A3) ----
+
+  var paletteOverlay = null;
+
+  function showCommandPalette() {
+    if (paletteOverlay) { hideCommandPalette(); return; }
+
+    var commands = [
+      { label: 'New Task', action: function () { showModal(); } },
+      { label: 'Toggle Diff Panel', action: function () { btnDiff.click(); } },
+      { label: 'Change Theme', action: function () { showThemePicker(); } },
+      { label: 'Preferences', action: function () { window.klaus.openPreferences(); } },
+      { label: 'New Window', action: function () { window.klaus.newWindow(); } },
+      { label: 'Zoom In', action: zoomIn },
+      { label: 'Zoom Out', action: zoomOut },
+      { label: 'Reset Zoom', action: zoomReset },
+    ];
+
+    // Add task-specific commands
+    if (activeTaskId) {
+      var task = tasks.get(activeTaskId);
+      if (task) {
+        commands.push({ label: 'Search in Terminal', action: function () { openSearch(activeTaskId); } });
+        commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
+        commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); btnDiff.classList.add('active'); } });
+        commands.push({ label: 'Pop Out', action: function () { window.klaus.popOutTask(activeTaskId); } });
+        commands.push({ label: 'Kill Task', action: function () { window.klaus.killTask(activeTaskId).then(function () { removeTaskFromUI(activeTaskId); }); } });
+        if (!task.alive) {
+          commands.push({ label: 'Restart Claude', action: function () {
+            window.klaus.getLatestSession(task.worktreePath).then(function (sessionId) {
+              var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
+              window.klaus.writeTerminal(activeTaskId, cmd + '\n');
+              task.mode = 'claude';
+              updateSidebarMode(activeTaskId, 'claude');
+            });
+          }});
+        }
+      }
+    }
+
+    // Add switch-to-task commands
+    tasks.forEach(function (t, id) {
+      if (id !== activeTaskId) {
+        commands.push({ label: 'Switch to: ' + t.name, action: function () { switchToTask(id); } });
+      }
+    });
+
+    commands.push({ label: 'About Klaussy', action: showAboutDialog });
+
+    paletteOverlay = document.createElement('div');
+    paletteOverlay.className = 'palette-overlay';
+
+    var palette = document.createElement('div');
+    palette.className = 'palette';
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'palette-input';
+    input.placeholder = 'Type a command...';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+
+    var list = document.createElement('div');
+    list.className = 'palette-list';
+
+    var filtered = commands;
+    var selectedIndex = 0;
+
+    function render() {
+      list.innerHTML = '';
+      filtered.forEach(function (cmd, i) {
+        var item = document.createElement('div');
+        item.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');
+        item.textContent = cmd.label;
+        item.addEventListener('click', function () {
+          hideCommandPalette();
+          cmd.action();
+        });
+        item.addEventListener('mouseenter', function () {
+          selectedIndex = i;
+          render();
+        });
+        list.appendChild(item);
+      });
+    }
+
+    input.addEventListener('input', function () {
+      var q = input.value.toLowerCase();
+      filtered = commands.filter(function (c) { return c.label.toLowerCase().includes(q); });
+      selectedIndex = 0;
+      render();
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1);
+        render();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        selectedIndex = Math.max(selectedIndex - 1, 0);
+        render();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filtered[selectedIndex]) {
+          hideCommandPalette();
+          filtered[selectedIndex].action();
+        }
+      } else if (e.key === 'Escape') {
+        hideCommandPalette();
+      }
+    });
+
+    paletteOverlay.addEventListener('click', function (e) {
+      if (e.target === paletteOverlay) hideCommandPalette();
+    });
+
+    palette.appendChild(input);
+    palette.appendChild(list);
+    paletteOverlay.appendChild(palette);
+    document.body.appendChild(paletteOverlay);
+    render();
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
+  function hideCommandPalette() {
+    if (paletteOverlay) {
+      paletteOverlay.remove();
+      paletteOverlay = null;
+    }
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey && e.key === 'k') {
+      e.preventDefault();
+      showCommandPalette();
+    }
+  });
+
+  // ---- Task Rename (A4) ----
+
+  taskList.addEventListener('dblclick', function (e) {
+    var item = e.target.closest('.task-item[data-id]');
+    if (!item) return;
+    var nameEl = item.querySelector('.task-name');
+    if (!nameEl) return;
+
+    var id = parseInt(item.dataset.id, 10);
+    var task = tasks.get(id);
+    if (!task) return;
+
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'inline-rename';
+    input.value = task.name;
+    input.style.cssText = 'font-size:13px;background:var(--input-bg);border:1px solid var(--accent);border-radius:4px;color:var(--text);padding:1px 4px;width:100%;outline:none;';
+
+    var original = nameEl.textContent;
+    nameEl.textContent = '';
+    nameEl.appendChild(input);
+    input.focus();
+    input.select();
+
+    function commit() {
+      var newName = input.value.trim() || original;
+      nameEl.textContent = newName;
+      task.name = newName;
+      window.klaus.renameTask(id, newName);
+      // Update grid label too
+      var gridLabel = task.container.querySelector('.grid-label');
+      if (gridLabel) {
+        var dot = gridLabel.querySelector('.grid-dot');
+        gridLabel.textContent = '';
+        if (dot) gridLabel.appendChild(dot);
+        gridLabel.appendChild(document.createTextNode(newName));
+      }
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = original; input.blur(); }
+    });
+  });
+
+  // ---- Task Reorder (A5) ----
+
+  var dragItem = null;
+
+  taskList.addEventListener('dragstart', function (e) {
+    var item = e.target.closest('.task-item[data-id]');
+    if (!item) return;
+    dragItem = item;
+    item.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  taskList.addEventListener('dragover', function (e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    var target = e.target.closest('.task-item');
+    if (!target || target === dragItem) return;
+    var rect = target.getBoundingClientRect();
+    var mid = rect.top + rect.height / 2;
+    if (e.clientY < mid) {
+      taskList.insertBefore(dragItem, target);
+    } else {
+      taskList.insertBefore(dragItem, target.nextSibling);
+    }
+  });
+
+  taskList.addEventListener('dragend', function () {
+    if (dragItem) {
+      dragItem.classList.remove('dragging');
+      dragItem = null;
+    }
+  });
+
+  // Make task items draggable
+  var observer = new MutationObserver(function () {
+    taskList.querySelectorAll('.task-item[data-id]').forEach(function (item) {
+      if (!item.getAttribute('draggable')) {
+        item.setAttribute('draggable', 'true');
+      }
+    });
+  });
+  observer.observe(taskList, { childList: true });
+
+  // ---- About Dialog (A7) ----
+
+  function showAboutDialog() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+
+    var dialog = document.createElement('div');
+    dialog.className = 'about-dialog';
+    dialog.innerHTML = '<h2>Klaussy</h2><div class="about-loading">Loading...</div>';
+
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    window.klaus.getAboutInfo().then(function (info) {
+      dialog.innerHTML =
+        '<h2>Klaussy</h2>' +
+        '<div class="about-rows">' +
+          '<div class="about-row"><span>Version</span><span>' + escHtml(info.appVersion) + '</span></div>' +
+          '<div class="about-row"><span>Electron</span><span>' + escHtml(info.electronVersion) + '</span></div>' +
+          '<div class="about-row"><span>Node</span><span>' + escHtml(info.nodeVersion) + '</span></div>' +
+          '<div class="about-row"><span>Claude CLI</span><span>' + escHtml(info.claudeVersion) + '</span></div>' +
+          '<div class="about-row"><span>Claude Path</span><span>' + escHtml(info.claudePath) + '</span></div>' +
+        '</div>' +
+        '<button class="about-close">Close</button>';
+      dialog.querySelector('.about-close').addEventListener('click', function () { overlay.remove(); });
+    });
+  }
 })();

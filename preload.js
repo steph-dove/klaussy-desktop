@@ -33,6 +33,27 @@ contextBridge.exposeInMainWorld('klaus', {
   convertToShell: (id) => ipcRenderer.invoke('convert-to-shell', { id }),
   openExternal: (url) => ipcRenderer.invoke('open-external', { url }),
 
+  // Idle notification (A1)
+  setNotifyEnabled: (id, enabled) => ipcRenderer.invoke('set-notify-enabled', { id, enabled }),
+  getNotifyEnabled: (id) => ipcRenderer.invoke('get-notify-enabled', { id }),
+  onNotificationClicked: (callback) => {
+    ipcRenderer.on('notification-clicked', (_event, data) => callback(data));
+  },
+
+  // About, rename, duplicate (A4, A6, A7)
+  getAboutInfo: () => ipcRenderer.invoke('get-about-info'),
+  renameTask: (id, newName) => ipcRenderer.invoke('rename-task', { id, newName }),
+  duplicateTask: (id) => ipcRenderer.invoke('duplicate-task', { id }),
+
+  // Preferences (B1-B4)
+  openPreferences: () => ipcRenderer.invoke('open-preferences'),
+  getPreferences: () => ipcRenderer.invoke('get-preferences'),
+  setPreferences: (prefs) => ipcRenderer.invoke('set-preferences', prefs),
+  getClaudeInfo: () => ipcRenderer.invoke('get-claude-info'),
+  onPreferencesChanged: (callback) => {
+    ipcRenderer.on('preferences-changed', (_event, prefs) => callback(prefs));
+  },
+
   // Terminal I/O
   writeTerminal: (id, data) => ipcRenderer.send('write-terminal', { id, data }),
   resizeTerminal: (id, cols, rows) => ipcRenderer.send('resize-terminal', { id, cols, rows }),
@@ -105,6 +126,8 @@ contextBridge.exposeInMainWorld('klaus', {
   // Explain diff
   explainDiff: (worktreePath, file, hunk) => ipcRenderer.invoke('explain-diff', { worktreePath, file, hunk }),
 
-  // File viewer (Phase 7)
+  // File viewer (Phase 7) + File tree & search (C1-C3)
   readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
+  listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
+  searchFiles: (worktreePath, query) => ipcRenderer.invoke('search-files', { worktreePath, query }),
 });

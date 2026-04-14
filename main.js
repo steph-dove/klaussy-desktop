@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execSync, execFileSync, execFile } = require('child_process');
@@ -100,7 +100,6 @@ app.whenReady().then(() => {
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
-        { role: 'paste' },
         { role: 'selectAll' },
       ],
     },
@@ -214,6 +213,107 @@ function findLatestSessionId(worktreePath) {
     return files.length > 0 ? files[0].sessionId : null;
   } catch {
     return null;
+  }
+}
+
+// ---- Idle / Prompt Detection (A1) ----
+
+const IDLE_TIMEOUT_MS = 15000;
+const NOTIFY_COOLDOWN_MS = 30000;
+const ROLLING_BUFFER_SIZE = 500;
+
+const PROMPT_PATTERNS = [
+  /\(y\/n\)\s*$/i,
+  /\(Y\/n\)\s*$/,
+  /\(yes\/no\)\s*$/i,
+  /Do you want to proceed/i,
+  /Press Enter to continue/i,
+  /Allow\s.*\?/i,
+  /❯\s*$/,
+];
+
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
+}
+
+function isAnyWindowFocused() {
+  for (const win of allWindows) {
+    if (!win.isDestroyed() && win.isFocused()) return true;
+  }
+  for (const [, inst] of instances) {
+    for (const win of inst.popoutWindows) {
+      if (!win.isDestroyed() && win.isFocused()) return true;
+    }
+  }
+  return false;
+}
+
+function sendIdleNotification(inst, reason) {
+  if (!inst.notifyEnabled) return;
+  if (Date.now() - inst.lastNotifyTime < NOTIFY_COOLDOWN_MS) return;
+  if (isAnyWindowFocused()) return;
+
+  const notification = new Notification({
+    title: `Klaussy — ${inst.name}`,
+    body: reason,
+    silent: false,
+  });
+
+  notification.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('notification-clicked', { id: inst.id });
+    }
+  });
+
+  notification.show();
+  inst.lastNotifyTime = Date.now();
+}
+
+function processIdleDetection(inst, data) {
+  if (inst.mode !== 'claude') return;
+
+  inst.lastDataTime = Date.now();
+  inst.notifiedIdle = false;
+
+  // Update rolling buffer
+  const stripped = stripAnsi(data);
+  inst.recentOutput = (inst.recentOutput + stripped).slice(-ROLLING_BUFFER_SIZE);
+
+  // Reset quiet timer
+  if (inst.quietTimer) clearTimeout(inst.quietTimer);
+  inst.quietTimer = setTimeout(() => {
+    if (inst.alive && inst.mode === 'claude' && !inst.notifiedIdle) {
+      inst.notifiedIdle = true;
+      sendIdleNotification(inst, 'Claude has been idle for 15s');
+    }
+  }, IDLE_TIMEOUT_MS);
+
+  // Check prompt patterns against recent output tail
+  const tail = inst.recentOutput.slice(-200);
+  for (const pattern of PROMPT_PATTERNS) {
+    if (pattern.test(tail)) {
+      sendIdleNotification(inst, 'Claude is waiting for input');
+      break;
+    }
+  }
+}
+
+function initIdleDetectionFields(inst) {
+  const config = loadConfig();
+  inst.notifyEnabled = config.notifyPrefs?.[inst.name] !== false;
+  inst.lastDataTime = 0;
+  inst.quietTimer = null;
+  inst.notifiedIdle = false;
+  inst.lastNotifyTime = 0;
+  inst.recentOutput = '';
+}
+
+function clearIdleTimer(inst) {
+  if (inst.quietTimer) {
+    clearTimeout(inst.quietTimer);
+    inst.quietTimer = null;
   }
 }
 
@@ -362,13 +462,15 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId) {
   const userShell = process.env.SHELL || '/bin/zsh';
 
   // 'claude' mode launches claude code, 'shell' mode launches a login shell
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
   let claudeCmd;
   if (mode === 'shell') {
     claudeCmd = null;
   } else if (resumeSessionId) {
-    claudeCmd = `claude --resume ${resumeSessionId}`;
+    claudeCmd = `${claudeBin} --resume ${resumeSessionId}`;
   } else {
-    claudeCmd = 'claude';
+    claudeCmd = claudeBin;
   }
 
   const args = claudeCmd ? ['-l', '-c', claudeCmd] : ['-l'];
@@ -381,9 +483,11 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId) {
   });
 
   const instance = { id, name, worktreePath, branch, mode, originalMode: mode, pty: ptyProc, alive: true, popoutWindows: new Set() };
+  initIdleDetectionFields(instance);
   instances.set(id, instance);
 
   ptyProc.onData((data) => {
+    processIdleDetection(instance, data);
     for (const win of allWindows) {
       if (!win.isDestroyed()) win.webContents.send(`terminal-data-${id}`, data);
     }
@@ -393,6 +497,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId) {
   });
 
   ptyProc.onExit(({ exitCode }) => {
+    clearIdleTimer(instance);
     // If this was a Claude session, auto-convert to shell in-place (but not during quit)
     if (instance.mode === 'claude' && !isQuitting) {
       convertInstanceToShell(instance);
@@ -411,6 +516,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId) {
 }
 
 function convertInstanceToShell(inst) {
+  sendIdleNotification(inst, 'Claude has exited');
   const id = inst.id;
   const userShell = process.env.SHELL || '/bin/zsh';
   const ptyProc = pty.spawn(userShell, ['-l'], {
@@ -474,6 +580,7 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
+  clearIdleTimer(inst);
   try { inst.pty.kill(); } catch {}
   inst.alive = false;
 
@@ -493,8 +600,10 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   // Resume as Claude
   const userShell = process.env.SHELL || '/bin/zsh';
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
   const latestSession = findLatestSessionId(inst.worktreePath);
-  const claudeCmd = latestSession ? `claude --resume ${latestSession}` : 'claude';
+  const claudeCmd = latestSession ? `${claudeBin} --resume ${latestSession}` : claudeBin;
   inst.mode = 'claude';
 
   const args = ['-l', '-c', claudeCmd];
@@ -508,8 +617,11 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   inst.pty = ptyProc;
   inst.alive = true;
+  inst.recentOutput = '';
+  inst.notifiedIdle = false;
 
   ptyProc.onData((data) => {
+    processIdleDetection(inst, data);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send(`terminal-data-${id}`, data);
     }
@@ -520,6 +632,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   // When this Claude exits, auto-convert to shell again
   ptyProc.onExit(() => {
+    clearIdleTimer(inst);
     if (inst.mode === 'claude') {
       convertInstanceToShell(inst);
     } else {
@@ -536,6 +649,86 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 // Open URL in default browser
 ipcMain.handle('open-external', (_event, { url }) => {
   shell.openExternal(url);
+});
+
+// ---- Idle Notification Toggle ----
+
+ipcMain.handle('set-notify-enabled', (_event, { id, enabled }) => {
+  const inst = instances.get(id);
+  if (!inst) return { error: 'Instance not found' };
+  inst.notifyEnabled = enabled;
+  const config = loadConfig();
+  if (!config.notifyPrefs) config.notifyPrefs = {};
+  config.notifyPrefs[inst.name] = enabled;
+  saveConfig(config);
+  return { ok: true };
+});
+
+ipcMain.handle('get-notify-enabled', (_event, { id }) => {
+  const inst = instances.get(id);
+  if (!inst) return true;
+  return inst.notifyEnabled !== false;
+});
+
+// ---- About Info (A7) ----
+
+ipcMain.handle('get-about-info', async () => {
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  let claudeVersion = 'not found';
+  try {
+    claudeVersion = execFileSync(claudeBin, ['--version'], { stdio: 'pipe', timeout: 5000 }).toString().trim();
+  } catch {}
+  return {
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron,
+    nodeVersion: process.versions.node,
+    claudePath: claudeBin,
+    claudeVersion,
+  };
+});
+
+// ---- Rename Task (A4) ----
+
+ipcMain.handle('rename-task', (_event, { id, newName }) => {
+  const inst = instances.get(id);
+  if (!inst) return { error: 'Instance not found' };
+  inst.name = newName;
+  return { ok: true };
+});
+
+// ---- Duplicate Task (A6) ----
+
+ipcMain.handle('duplicate-task', async (_event, { id }) => {
+  const inst = instances.get(id);
+  if (!inst) return { error: 'Instance not found' };
+
+  const config = loadConfig();
+  const repoPath = config.repoPath;
+  if (!repoPath) return { error: 'No repo configured' };
+
+  const baseName = inst.name + '-copy';
+  const sanitized = baseName.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  const branch = `task/${sanitized}`;
+  const worktreeDir = getWorktreeDir(repoPath);
+  const worktreePath = path.join(worktreeDir, sanitized);
+
+  fs.mkdirSync(worktreeDir, { recursive: true });
+
+  // Branch from the same branch as the source
+  const sourceBranch = inst.branch || 'main';
+
+  try {
+    execSync(`git worktree add -b "${branch}" "${worktreePath}" "${sourceBranch}"`, {
+      cwd: repoPath,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    return { error: `Failed to create worktree: ${err.message}` };
+  }
+
+  const mode = config.defaultMode || 'claude';
+  return spawnInWorktree(baseName, worktreePath, branch, mode);
 });
 
 // ---- Phase 1: Git Status & Diff ----
@@ -844,6 +1037,117 @@ ipcMain.handle('get-system-theme', () => {
 nativeTheme.on('updated', () => {
   for (const win of allWindows) {
     if (!win.isDestroyed()) win.webContents.send('system-theme-changed', nativeTheme.shouldUseDarkColors);
+  }
+});
+
+// ---- Preferences Window (B1-B4) ----
+
+let prefsWindow = null;
+
+ipcMain.handle('open-preferences', () => {
+  if (prefsWindow && !prefsWindow.isDestroyed()) {
+    prefsWindow.focus();
+    return { ok: true };
+  }
+
+  prefsWindow = new BrowserWindow({
+    width: 520,
+    height: 560,
+    title: 'Preferences',
+    icon: path.join(__dirname, 'icon.icns'),
+    backgroundColor: '#1a1a2e',
+    resizable: true,
+    minimizable: false,
+    maximizable: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  prefsWindow.loadFile(path.join(__dirname, 'renderer', 'preferences.html'));
+  prefsWindow.on('closed', () => { prefsWindow = null; });
+  return { ok: true };
+});
+
+ipcMain.handle('get-preferences', () => {
+  const config = loadConfig();
+  return {
+    fontFamily: config.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+    fontSize: config.fontSize || 13,
+    lineHeight: config.lineHeight || 1.2,
+    cursorStyle: config.cursorStyle || 'block',
+    claudePath: config.claudePath || '',
+    defaultMode: config.defaultMode || 'claude',
+    theme: config.theme || { preset: 'dark' },
+    keybindings: config.keybindings || {},
+  };
+});
+
+ipcMain.handle('set-preferences', (_event, prefs) => {
+  const config = loadConfig();
+  if (prefs.fontFamily !== undefined) config.fontFamily = prefs.fontFamily;
+  if (prefs.fontSize !== undefined) config.fontSize = prefs.fontSize;
+  if (prefs.lineHeight !== undefined) config.lineHeight = prefs.lineHeight;
+  if (prefs.cursorStyle !== undefined) config.cursorStyle = prefs.cursorStyle;
+  if (prefs.claudePath !== undefined) config.claudePath = prefs.claudePath;
+  if (prefs.defaultMode !== undefined) config.defaultMode = prefs.defaultMode;
+  if (prefs.theme !== undefined) config.theme = prefs.theme;
+  if (prefs.keybindings !== undefined) config.keybindings = prefs.keybindings;
+  saveConfig(config);
+
+  // Broadcast to all windows so they can apply changes live
+  for (const win of allWindows) {
+    if (!win.isDestroyed()) win.webContents.send('preferences-changed', prefs);
+  }
+  return { ok: true };
+});
+
+ipcMain.handle('get-claude-info', async () => {
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  try {
+    const version = execFileSync(claudeBin, ['--version'], { stdio: 'pipe', timeout: 5000 }).toString().trim();
+    return { path: claudeBin, version };
+  } catch {
+    return { path: claudeBin, version: 'not found' };
+  }
+});
+
+// ---- File Tree & Search (C1-C3) ----
+
+ipcMain.handle('list-files', async (_event, { worktreePath }) => {
+  try {
+    const output = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024,
+    }).toString();
+    const files = output.split('\n').filter(Boolean);
+    return { files };
+  } catch (err) {
+    return { files: [], error: err.message };
+  }
+});
+
+ipcMain.handle('search-files', async (_event, { worktreePath, query }) => {
+  try {
+    const args = ['grep', '-n', '--no-color', '-I', '-r', '--max-count=5', query];
+    const output = execFileSync('git', args, {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
+    }).toString();
+    const results = [];
+    output.split('\n').filter(Boolean).forEach(function (line) {
+      var match = line.match(/^([^:]+):(\d+):(.*)$/);
+      if (match) {
+        results.push({ file: match[1], line: parseInt(match[2], 10), text: match[3] });
+      }
+    });
+    // Cap at 100 results
+    return { results: results.slice(0, 100) };
+  } catch (err) {
+    // git grep returns exit code 1 when no matches found
+    if (err.status === 1) return { results: [] };
+    return { results: [], error: err.message };
   }
 });
 
