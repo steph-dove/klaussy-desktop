@@ -224,11 +224,22 @@ window.DiffPanel = (function () {
   }
 
   function updateWorktree(worktreePath) {
-    if (currentWorktreePath !== worktreePath) {
-      currentWorktreePath = worktreePath;
+    var changed = currentWorktreePath !== worktreePath;
+    currentWorktreePath = worktreePath;
+    if (changed) {
       selectedFile = null;
       diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
-      refresh();
+    }
+    // Force refresh even if paused (this is an explicit task switch, not auto-refresh)
+    refreshPaused = false;
+    refresh();
+    updateAheadBehind();
+    // Reload the currently active non-Changes tab
+    if (window._reloadDiffTab) {
+      var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
+      if (activeTab && activeTab.dataset.tab !== 'changes') {
+        window._reloadDiffTab(activeTab.dataset.tab, worktreePath);
+      }
     }
   }
 

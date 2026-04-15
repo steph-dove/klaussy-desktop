@@ -457,11 +457,12 @@
   var fileTreeData = [];
   var fileTreeWorktree = null;
 
-  window.addEventListener('load-file-tree', loadFileTree);
+  window.addEventListener('load-file-tree', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
+  window.addEventListener('reload-tab-files', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
 
-  async function loadFileTree() {
+  async function loadFileTree(overrideWt) {
     var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
+    var wt = overrideWt || (task ? task.worktreePath : null);
     if (!wt) {
       fileTree.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
@@ -567,6 +568,13 @@
   var projectSearchResults = document.getElementById('project-search-results');
   var searchTimer = null;
 
+  window.addEventListener('load-search', function (e) {
+    if (projectSearchInput.value.trim()) doProjectSearch(e.detail && e.detail.worktreePath);
+  });
+  window.addEventListener('reload-tab-search', function (e) {
+    if (projectSearchInput.value.trim()) doProjectSearch(e.detail && e.detail.worktreePath);
+  });
+
   projectSearchInput.addEventListener('input', function () {
     if (searchTimer) clearTimeout(searchTimer);
     searchTimer = setTimeout(doProjectSearch, 400);
@@ -580,7 +588,7 @@
     }
   });
 
-  async function doProjectSearch() {
+  async function doProjectSearch(overrideWt) {
     var query = projectSearchInput.value.trim();
     if (!query) {
       projectSearchResults.innerHTML = '';
@@ -588,7 +596,7 @@
     }
 
     var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
+    var wt = overrideWt || (task ? task.worktreePath : null);
     if (!wt) {
       projectSearchResults.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
@@ -641,11 +649,12 @@
   var historyList = document.getElementById('history-list');
   var historyDiffView = document.getElementById('history-diff-view');
 
-  window.addEventListener('load-history', loadHistory);
+  window.addEventListener('load-history', function (e) { loadHistory(e.detail && e.detail.worktreePath); });
+  window.addEventListener('reload-tab-history', function (e) { loadHistory(e.detail && e.detail.worktreePath); });
 
-  async function loadHistory() {
+  async function loadHistory(overrideWt) {
     var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
+    var wt = overrideWt || (task ? task.worktreePath : null);
     if (!wt) {
       historyList.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
@@ -801,7 +810,8 @@
   var stashMessage = document.getElementById('stash-message');
   var btnStashPush = document.getElementById('btn-stash-push');
 
-  window.addEventListener('load-stash', loadStash);
+  window.addEventListener('load-stash', function (e) { loadStash(e.detail && e.detail.worktreePath); });
+  window.addEventListener('reload-tab-stash', function (e) { loadStash(e.detail && e.detail.worktreePath); });
 
   btnStashPush.addEventListener('click', async function () {
     var task = activeTaskId ? tasks.get(activeTaskId) : null;
@@ -819,22 +829,34 @@
     DiffPanel.refresh();
   });
 
-  async function loadStash() {
+  async function loadStash(overrideWt) {
     var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
+    var wt = overrideWt || (task ? task.worktreePath : null);
     if (!wt) {
       stashList.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
     }
 
+    // Get current branch to filter stashes
+    var statusResult = await window.klaus.gitStatus(wt);
+    var currentBranch = statusResult.branch || '';
+
     var result = await window.klaus.gitStashList(wt);
-    if (result.stashes.length === 0) {
-      stashList.innerHTML = '<div class="file-tree-empty">No stashes</div>';
+    // Filter to only stashes from the current branch
+    var filtered = result.stashes.filter(function (s) {
+      // Stash messages are typically "WIP on <branch>: ..." or "On <branch>: ..."
+      var match = s.message.match(/^(?:WIP )?[Oo]n ([^:]+):/);
+      if (!match) return true; // show if we can't parse
+      return match[1] === currentBranch;
+    });
+
+    if (filtered.length === 0) {
+      stashList.innerHTML = '<div class="file-tree-empty">No stashes on ' + escHtml(currentBranch) + '</div>';
       return;
     }
 
     stashList.innerHTML = '';
-    result.stashes.forEach(function (s, idx) {
+    filtered.forEach(function (s, idx) {
       var item = document.createElement('div');
       item.className = 'stash-item';
       item.innerHTML =
@@ -844,7 +866,10 @@
 
       item.querySelector('.stash-pop-btn').addEventListener('click', async function (e) {
         e.stopPropagation();
-        var res = await window.klaus.gitStashPop(wt, idx);
+        // Extract original index from ref like "stash@{2}"
+        var refMatch = s.ref.match(/\{(\d+)\}/);
+        var originalIdx = refMatch ? parseInt(refMatch[1], 10) : idx;
+        var res = await window.klaus.gitStashPop(wt, originalIdx);
         if (res.error) {
           alert('Stash pop failed: ' + res.error);
         }
@@ -855,6 +880,15 @@
       stashList.appendChild(item);
     });
   }
+
+  // ---- Global tab reload (called by PRPanel.reloadActiveTab) ----
+  window._reloadDiffTab = function (tab, wt) {
+    if (tab === 'files') loadFileTree(wt);
+    else if (tab === 'history') loadHistory(wt);
+    else if (tab === 'stash') loadStash(wt);
+    else if (tab === 'search' && projectSearchInput.value.trim()) doProjectSearch(wt);
+    else if (tab === 'env') EnvPanel.setWorktree(wt);
+  };
 
   // ---- Blame toggle in file viewer (D5) ----
 
@@ -1301,8 +1335,9 @@
       if (currentLayout() === 'single') {
         switchToTask(id);
       } else {
-        // Just focus this terminal (update diff panel etc)
+        // Focus this terminal and update all panels
         focusedTaskId = id;
+        activeTaskId = id;
         var t = tasks.get(id);
         if (t && DiffPanel.isVisible()) {
           DiffPanel.updateWorktree(t.worktreePath);
@@ -1388,6 +1423,7 @@
     terminal.textarea.addEventListener('focus', function () {
       if (focusedTaskId !== id) {
         focusedTaskId = id;
+        activeTaskId = id;
         var t = tasks.get(id);
         if (t && DiffPanel.isVisible()) {
           DiffPanel.updateWorktree(t.worktreePath);
@@ -1514,6 +1550,26 @@
       '<button class="sub-tab active" data-sub-id="0">Primary</button>' +
       '<button class="sub-tab-add" title="Add shell tab">+</button>';
     container.insertBefore(subTabBar, label.nextSibling);
+
+    // Sub-tab clicks: don't let them bubble to the container (which would call switchToTask
+    // in single mode), but do update focus and the diff panel for this task.
+    subTabBar.addEventListener('click', function (e) {
+      e.stopPropagation();
+      focusedTaskId = id;
+      activeTaskId = id;
+      var t = tasks.get(id);
+      if (t && DiffPanel.isVisible()) {
+        DiffPanel.updateWorktree(t.worktreePath);
+        DiffPanel.refresh();
+        PRPanel.setWorktree(t.worktreePath);
+        EnvPanel.setWorktree(t.worktreePath);
+      }
+    });
+
+    // Primary tab click to switch back
+    subTabBar.querySelector('.sub-tab[data-sub-id="0"]').addEventListener('click', function () {
+      switchSubTerminal(taskEntry, null);
+    });
 
     subTabBar.querySelector('.sub-tab-add').addEventListener('click', async function () {
       var result = await window.klaus.addSubTerminal(id, 'Shell');
@@ -1922,10 +1978,20 @@
     var task = tasks.get(id);
     if (task) {
       setTimeout(function () {
-        task.fitAddon.fit();
-        task.terminal.scrollToBottom();
-        window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
-        task.terminal.focus();
+        // Fit and focus the active sub-terminal if one is selected, otherwise primary
+        if (task.activeSubId !== null && task.activeSubId !== undefined) {
+          var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
+          if (sub) {
+            sub.fitAddon.fit();
+            sub.terminal.focus();
+            window.klaus.resizeTerminal(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
+          }
+        } else {
+          task.fitAddon.fit();
+          task.terminal.scrollToBottom();
+          window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+          task.terminal.focus();
+        }
       }, 50);
 
       // Update diff panel if visible
@@ -1970,9 +2036,18 @@
   function fitAllTerminals() {
     setTimeout(function () {
       tasks.forEach(function (task, id) {
-        task.fitAddon.fit();
-        task.terminal.scrollToBottom();
-        window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+        // Fit active sub-terminal if one is selected
+        if (task.activeSubId !== null && task.activeSubId !== undefined) {
+          var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
+          if (sub) {
+            sub.fitAddon.fit();
+            window.klaus.resizeTerminal(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
+          }
+        } else {
+          task.fitAddon.fit();
+          task.terminal.scrollToBottom();
+          window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+        }
       });
     }, 50);
   }

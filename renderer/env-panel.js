@@ -13,6 +13,7 @@ window.EnvPanel = (function () {
 
     saveBtn.addEventListener('click', save);
     window.addEventListener('load-env', load);
+    window.addEventListener('reload-tab-env', load);
   }
 
   function setWorktree(wt) {
