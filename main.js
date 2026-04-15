@@ -424,13 +424,26 @@ ipcMain.handle('get-repo', () => {
 });
 
 ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars }) => {
-  const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-  const branch = `task/${sanitized}`;
-  const worktreeDir = basePath || getWorktreeDir(repoPath);
-  const worktreePath = path.join(worktreeDir, sanitized);
+  // Validate repoPath is a git repo
+  try {
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
+  } catch {
+    return { error: 'Active project is not a git repository: ' + repoPath };
+  }
 
-  // Ensure worktree directory exists
-  fs.mkdirSync(worktreeDir, { recursive: true });
+  const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  const branch = `${sanitized}`;
+
+  // Match klausify CLI convention: worktree as sibling of repo
+  // e.g. /projects/myrepo -> /projects/myrepo-fix-login
+  const repoBasename = path.basename(repoPath);
+  const worktreeDir = basePath || path.dirname(repoPath);
+  const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitized);
+
+  // Check worktree doesn't already exist
+  if (fs.existsSync(worktreePath)) {
+    return { error: 'Worktree directory already exists: ' + worktreePath };
+  }
 
   // Get the default branch to branch from
   let baseBranch;
@@ -440,18 +453,34 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
       stdio: 'pipe',
     }).toString().trim().replace('origin/', '');
   } catch {
-    baseBranch = 'main';
+    // Try common branch names
+    for (const candidate of ['main', 'master', 'develop']) {
+      try {
+        execFileSync('git', ['rev-parse', '--verify', candidate], { cwd: repoPath, stdio: 'pipe' });
+        baseBranch = candidate;
+        break;
+      } catch {}
+    }
+    if (!baseBranch) baseBranch = 'main';
   }
 
-  // Create the worktree
+  // Create the worktree (matching klausify CLI: git worktree add ../<repo>-<branch> -b <branch>)
   try {
     execSync(`git worktree add -b "${branch}" "${worktreePath}" "${baseBranch}"`, {
       cwd: repoPath,
       stdio: 'pipe',
     });
   } catch (err) {
-    return { error: `Failed to create worktree: ${err.message}` };
+    return { error: `Failed to create worktree: ${err.stderr ? err.stderr.toString() : err.message}` };
   }
+
+  // Verify the worktree was created in the correct repo
+  try {
+    const wtTopLevel = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: worktreePath, stdio: 'pipe'
+    }).toString().trim();
+    console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
+  } catch {}
 
   return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
 });

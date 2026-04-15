@@ -552,20 +552,38 @@ window.DiffPanel = (function () {
             try { hLines = hLines.map(enhanceLine); } catch (e) {}
           }
           var contentLines = fileResult.content.split('\n');
-          diffViewEl.innerHTML = '<div class="diff-line diff-header">New file: ' + escHtml(file) + '</div>' +
+          diffViewEl.innerHTML = renderViewFullFileLink(file) + '<div class="diff-line diff-header">New file: ' + escHtml(file) + '</div>' +
             contentLines.map(function (line, idx) {
               return '<div class="diff-line diff-add"><span class="diff-prefix">+</span><span class="diff-code">' +
                 (hLines ? hLines[idx] : escHtml(line)) + '</span></div>';
             }).join('');
+          bindViewFullFileLink(file);
           return;
         }
       }
       diffViewEl.innerHTML = '<div class="diff-empty">No diff available</div>';
       return;
     }
-    diffViewEl.innerHTML = renderDiff(result.diff);
+    diffViewEl.innerHTML = renderViewFullFileLink(file) + renderDiff(result.diff);
+    bindViewFullFileLink(file);
     bindInlineComments(file);
     bindExplainButtons(file);
+  }
+
+  function renderViewFullFileLink(file) {
+    return '<div class="diff-view-full-file"><a href="#" class="js-view-full-file">View full file</a> <span class="diff-view-full-path">' + escHtml(file) + '</span></div>';
+  }
+
+  function bindViewFullFileLink(file) {
+    var link = diffViewEl.querySelector('.js-view-full-file');
+    if (!link) return;
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      var fullPath = currentWorktreePath + '/' + file;
+      if (typeof window.openFileViewer === 'function') {
+        window.openFileViewer(fullPath, file);
+      }
+    });
   }
 
   function bindInlineComments(file) {
