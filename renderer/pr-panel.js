@@ -48,6 +48,24 @@ window.PRPanel = (function () {
     currentPR = null;
     prInfoEl.innerHTML = '';
     commentsListEl.innerHTML = '';
+    // Reload whichever tab is currently active
+    reloadActiveTab();
+  }
+
+  function reloadActiveTab() {
+    var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
+    if (!activeTab) return;
+    var target = activeTab.dataset.tab;
+    var wt = currentWorktreePath;
+    if (target === 'pr') {
+      loadPR();
+    } else if (target !== 'changes') {
+      // Call the global reload function directly
+      if (window._reloadDiffTab) {
+        window._reloadDiffTab(target, wt);
+      }
+    }
+    // 'changes' is handled by DiffPanel.refresh() already
   }
 
   async function loadPR() {
