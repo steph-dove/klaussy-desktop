@@ -108,16 +108,37 @@ body {
   flex-direction: column;
   overflow: hidden;
   transition: width 0.2s ease, min-width 0.2s ease;
-}
-
-#sidebar.expanded {
-  width: 320px;
-  min-width: 320px;
+  position: relative;
 }
 
 #sidebar.collapsed {
   width: 48px;
   min-width: 48px;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 10;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle.active {
+  background: var(--accent);
+}
+
+#sidebar.collapsed .sidebar-resize-handle {
+  display: none;
+}
+
+#sidebar.resizing {
+  transition: none;
 }
 
 #sidebar-header {
@@ -1390,6 +1411,28 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.diff-view-full-file {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-view-full-file a {
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.diff-view-full-file a:hover {
+  text-decoration: underline;
+}
+
+.diff-view-full-path {
+  margin-left: 6px;
+  opacity: 0.6;
 }
 
 .diff-line.diff-header {
@@ -3041,6 +3084,41 @@ body {
   border-color: var(--accent);
 }
 
+.modal-repo-indicator {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  font-family: 'SF Mono', Menlo, monospace;
+  word-break: break-all;
+}
+
+.modal-repo-path {
+  font-size: 11px;
+  color: var(--text);
+  word-break: break-all;
+  display: inline;
+}
+
+.modal-repo-browse {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
+  margin-left: 6px;
+}
+
+.modal-repo-browse:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 /* ---- Task Notes (Feature 14) ---- */
 
 .task-note-btn {
@@ -3559,8 +3637,9 @@ body {
   color: var(--text-dim);
   cursor: pointer;
   font-size: 14px;
-  padding: 2px 8px;
+  padding: 4px 8px;
   line-height: 1;
+  text-align: left;
   transition: color 0.15s;
 }
 

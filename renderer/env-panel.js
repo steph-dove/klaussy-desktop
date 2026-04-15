@@ -22,14 +22,23 @@ window.EnvPanel = (function () {
     currentRows = [];
   }
 
+  var loadGeneration = 0;
+
   async function load() {
     if (!currentWorktreePath) {
       editorEl.innerHTML = '<div class="env-empty">No active task</div>';
       return;
     }
 
+    var wt = currentWorktreePath;
+    var gen = ++loadGeneration;
+
     fileSelectorEl.innerHTML = '';
-    var result = await window.klaus.listEnvFiles(currentWorktreePath);
+    var result = await window.klaus.listEnvFiles(wt);
+
+    // Abort if a newer load was triggered while we were awaiting
+    if (gen !== loadGeneration) return;
+
     if (result.error || result.files.length === 0) {
       fileSelectorEl.innerHTML = '';
       editorEl.innerHTML = '<div class="env-empty">No .env files found</div>';
@@ -43,21 +52,22 @@ window.EnvPanel = (function () {
       btn.addEventListener('click', function () {
         fileSelectorEl.querySelectorAll('.env-file-btn').forEach(function (b) { b.classList.remove('active'); });
         btn.classList.add('active');
-        loadFile(filename);
+        loadFile(filename, wt);
       });
       fileSelectorEl.appendChild(btn);
     });
 
     // Auto-select first file if none selected
     if (!currentFilename || result.files.indexOf(currentFilename) === -1) {
-      loadFile(result.files[0]);
+      loadFile(result.files[0], wt);
       fileSelectorEl.querySelector('.env-file-btn').classList.add('active');
     }
   }
 
-  async function loadFile(filename) {
+  async function loadFile(filename, wt) {
     currentFilename = filename;
-    var result = await window.klaus.readEnvFile(currentWorktreePath, filename);
+    wt = wt || currentWorktreePath;
+    var result = await window.klaus.readEnvFile(wt, filename);
     if (result.error) {
       editorEl.innerHTML = '<div class="env-empty">Error: ' + escHtml(result.error) + '</div>';
       return;

@@ -23,6 +23,14 @@
   const sidebarToggleIcon = document.getElementById('sidebar-toggle-icon');
   const sidebarToggleLabel = document.getElementById('sidebar-toggle-label');
 
+  // ---- Prevent Electron default file drag-and-drop navigation ----
+  document.addEventListener('dragover', function (e) {
+    e.preventDefault();
+  });
+  document.addEventListener('drop', function (e) {
+    e.preventDefault();
+  });
+
   // ---- Init Theme (Phase 5) ----
   ThemeManager.init();
 
@@ -140,7 +148,7 @@
       if (task) {
         DiffPanel.show(task.worktreePath);
         PRPanel.setWorktree(task.worktreePath);
-        EnvPanel.setWorktree(task.worktreePath);
+
         btnDiff.classList.add('active');
       }
     }
@@ -199,6 +207,8 @@
   const projectSelect = document.getElementById('project-select');
   const btnAddProject = document.getElementById('btn-add-project');
 
+  var selectedProjectFilter = null; // null = show all
+
   async function loadProjects() {
     var projects = await window.klaus.listProjects();
     var current = await window.klaus.getRepo();
@@ -210,29 +220,52 @@
       projects = [{ name: current.split('/').pop(), path: current }];
     }
 
+    // "All" option to show all tasks
+    var allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = 'All Projects';
+    if (!selectedProjectFilter) allOpt.selected = true;
+    projectSelect.appendChild(allOpt);
+
     projects.forEach(function (p) {
       var opt = document.createElement('option');
       opt.value = p.path;
       opt.textContent = p.name;
-      if (p.path === current) opt.selected = true;
+      if (p.path === selectedProjectFilter) opt.selected = true;
       projectSelect.appendChild(opt);
     });
 
-    if (projects.length === 0) {
-      var opt = document.createElement('option');
-      opt.textContent = 'No projects';
-      opt.disabled = true;
-      projectSelect.appendChild(opt);
+    // Set repoPath to first project if not set
+    if (!repoPath && projects.length > 0) {
+      repoPath = projects[0].path;
     }
   }
 
-  projectSelect.addEventListener('change', async function () {
+  projectSelect.addEventListener('change', function () {
     var newPath = projectSelect.value;
-    if (newPath) {
-      await window.klaus.switchProject(newPath);
-      repoPath = newPath;
-    }
+    selectedProjectFilter = newPath || null;
+    filterTaskList();
   });
+
+  function filterTaskList() {
+    taskList.querySelectorAll('.task-item').forEach(function (item) {
+      var id = Number(item.dataset.id);
+      var task = tasks.get(id);
+      if (!task || !selectedProjectFilter) {
+        item.style.display = '';
+        return;
+      }
+      // Show task if its worktreePath starts with the selected project path
+      var matches = task.worktreePath && task.worktreePath.startsWith(selectedProjectFilter);
+      // Also match sibling worktrees (e.g. /projects/repo-branchname for /projects/repo)
+      if (!matches && task.worktreePath) {
+        var parentDir = task.worktreePath.substring(0, task.worktreePath.lastIndexOf('/'));
+        var projectParent = selectedProjectFilter.substring(0, selectedProjectFilter.lastIndexOf('/'));
+        matches = parentDir === projectParent;
+      }
+      item.style.display = matches ? '' : 'none';
+    });
+  }
 
   btnAddProject.addEventListener('click', async function () {
     var result = await window.klaus.addProject();
@@ -887,7 +920,7 @@
     else if (tab === 'history') loadHistory(wt);
     else if (tab === 'stash') loadStash(wt);
     else if (tab === 'search' && projectSearchInput.value.trim()) doProjectSearch(wt);
-    else if (tab === 'env') EnvPanel.setWorktree(wt);
+    else if (tab === 'env') { EnvPanel.setWorktree(wt); EnvPanel.load(); }
   };
 
   // ---- Blame toggle in file viewer (D5) ----
@@ -930,20 +963,13 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  // ---- Sidebar resize: default -> expanded -> collapsed -> default ----
-  const sidebarStates = ['default', 'expanded', 'collapsed'];
-  const sidebarLabels = { default: 'Expand', expanded: 'Collapse', collapsed: 'Show' };
-  const sidebarIcons = { default: '\u25B6', expanded: '\u25C0', collapsed: '\u25B6' };
-  let sidebarIndex = 0;
+  // ---- Sidebar toggle & manual resize ----
+  var sidebarCollapsed = false;
+  var DEFAULT_SIDEBAR_WIDTH = 240;
+  var MIN_SIDEBAR_WIDTH = 140;
+  var MAX_SIDEBAR_RATIO = 0.4;
 
-  function cycleSidebar() {
-    sidebarIndex = (sidebarIndex + 1) % sidebarStates.length;
-    var state = sidebarStates[sidebarIndex];
-    sidebar.classList.remove('expanded', 'collapsed');
-    if (state !== 'default') sidebar.classList.add(state);
-    sidebarToggleLabel.textContent = sidebarLabels[state];
-    sidebarToggleIcon.textContent = sidebarIcons[state];
-
+  function refitTerminals() {
     setTimeout(function () {
       if (currentLayout() !== 'single') {
         fitAllTerminals();
@@ -957,7 +983,63 @@
     }, 250);
   }
 
-  btnSidebarToggle.addEventListener('click', cycleSidebar);
+  function toggleSidebar() {
+    sidebarCollapsed = !sidebarCollapsed;
+    sidebar.style.width = '';
+    sidebar.style.minWidth = '';
+    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    sidebar.classList.remove('expanded');
+    sidebarToggleIcon.textContent = sidebarCollapsed ? '\u25B6' : '\u25C0';
+    sidebarToggleLabel.textContent = sidebarCollapsed ? 'Show' : 'Hide';
+    refitTerminals();
+  }
+
+  btnSidebarToggle.addEventListener('click', toggleSidebar);
+
+  // Drag handle on right edge of sidebar for manual resize
+  var sidebarResizeHandle = document.createElement('div');
+  sidebarResizeHandle.className = 'sidebar-resize-handle';
+  sidebar.appendChild(sidebarResizeHandle);
+
+  (function () {
+    var dragging = false;
+    var startX = 0;
+    var startWidth = 0;
+
+    sidebarResizeHandle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      dragging = true;
+      startX = e.clientX;
+      startWidth = sidebar.getBoundingClientRect().width;
+      sidebarResizeHandle.classList.add('active');
+      sidebar.classList.add('resizing');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      var newWidth = startWidth + (e.clientX - startX);
+      var maxWidth = window.innerWidth * MAX_SIDEBAR_RATIO;
+      newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, maxWidth));
+      sidebar.classList.remove('collapsed', 'expanded');
+      sidebarCollapsed = false;
+      sidebar.style.width = newWidth + 'px';
+      sidebar.style.minWidth = newWidth + 'px';
+      sidebarToggleIcon.textContent = '\u25C0';
+      sidebarToggleLabel.textContent = 'Hide';
+    });
+
+    document.addEventListener('mouseup', function () {
+      if (!dragging) return;
+      dragging = false;
+      sidebarResizeHandle.classList.remove('active');
+      sidebar.classList.remove('resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      refitTerminals();
+    });
+  })();
 
   // ---- Init ----
   repoPath = await window.klaus.getRepo();
@@ -1162,7 +1244,7 @@
     if (uiState.diffPanelOpen && task.worktreePath) {
       DiffPanel.show(task.worktreePath);
       PRPanel.setWorktree(task.worktreePath);
-        EnvPanel.setWorktree(task.worktreePath);
+
       btnDiff.classList.add('active');
 
       // Restore selected file after the file list loads
@@ -1266,6 +1348,22 @@
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
     var envField = document.getElementById('modal-env-vars');
     if (envField) envField.value = '';
+    // Show repo picker so user explicitly selects which repo to create worktree from
+    var repoIndicator = document.getElementById('modal-repo-indicator');
+    if (repoIndicator) {
+      repoIndicator.innerHTML =
+        '<strong>Repo:</strong> ' +
+        '<span id="modal-repo-path" class="modal-repo-path">' + escHtml(repoPath || 'No repo selected') + '</span>' +
+        ' <button id="btn-modal-repo-browse" class="modal-repo-browse">Browse</button>';
+      repoIndicator.style.display = '';
+      document.getElementById('btn-modal-repo-browse').addEventListener('click', async function () {
+        var dir = await window.klaus.browseDirectory();
+        if (dir) {
+          repoPath = dir;
+          document.getElementById('modal-repo-path').textContent = dir;
+        }
+      });
+    }
     setTimeout(function () { modalInput.focus(); }, 50);
   }
 
@@ -1342,7 +1440,7 @@
         if (t && DiffPanel.isVisible()) {
           DiffPanel.updateWorktree(t.worktreePath);
           PRPanel.setWorktree(t.worktreePath);
-          EnvPanel.setWorktree(t.worktreePath);
+
         }
       }
     });
@@ -1428,7 +1526,7 @@
         if (t && DiffPanel.isVisible()) {
           DiffPanel.updateWorktree(t.worktreePath);
           PRPanel.setWorktree(t.worktreePath);
-          EnvPanel.setWorktree(t.worktreePath);
+
         }
       }
     });
@@ -1439,7 +1537,7 @@
       var meta = e.metaKey;
 
       if (e.key === 'Enter' && e.shiftKey) {
-        window.klaus.writeTerminal(id, '\n');
+        window.klaus.writeTerminal(id, '\x1b[13;2u');
         return false;
       }
       if (meta && e.key === 'c') {
@@ -1562,7 +1660,6 @@
         DiffPanel.updateWorktree(t.worktreePath);
         DiffPanel.refresh();
         PRPanel.setWorktree(t.worktreePath);
-        EnvPanel.setWorktree(t.worktreePath);
       }
     });
 
@@ -1650,6 +1747,10 @@
     subTerminal.attachCustomKeyEventHandler(function (e) {
       if (e.type !== 'keydown') return true;
       var meta = e.metaKey;
+      if (e.key === 'Enter' && e.shiftKey) {
+        window.klaus.writeTerminal(id, '\x1b[13;2u', subId);
+        return false;
+      }
       if (meta && e.key === 'c') {
         var sel = subTerminal.getSelection();
         if (sel) { navigator.clipboard.writeText(sel); return false; }
@@ -1998,7 +2099,7 @@
       if (DiffPanel.isVisible()) {
         DiffPanel.updateWorktree(task.worktreePath);
         PRPanel.setWorktree(task.worktreePath);
-        EnvPanel.setWorktree(task.worktreePath);
+
       }
     }
   }
@@ -2183,7 +2284,7 @@
       { label: 'Show Changes', shortcut: '', action: function () {
         DiffPanel.show(task.worktreePath);
         PRPanel.setWorktree(task.worktreePath);
-        EnvPanel.setWorktree(task.worktreePath);
+
         btnDiff.classList.add('active');
       }},
       // Phase 4: Pop out to separate window
