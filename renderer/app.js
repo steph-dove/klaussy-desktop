@@ -1,13 +1,9 @@
 (async function () {
-  const tasks = new Map(); // id -> { name, terminal, fitAddon, container, cleanup[], alive }
-  let activeTaskId = null;
-  let focusedTaskId = null;
-  let repoPath = null;
+  var tasks = AppState.tasks;
+  var ciStatusMap = AppState.ciStatusMap;
   const isSecondaryWindow = new URLSearchParams(window.location.search).has('secondary');
   const layouts = ['single', 'columns', 'grid'];
   const layoutIcons = { single: '\u25A8', columns: '\u2759\u2759', grid: '\u2637' };
-  let layoutIndex = 0;
-  let currentFontSize = 13;
 
   const repoOverlay = document.getElementById('repo-overlay');
   const appEl = document.getElementById('app');
@@ -40,8 +36,8 @@
   EnvPanel.init();
   ConflictPanel.init();
   DiffPanel.setCommentCallback(function (text) {
-    if (activeTaskId) {
-      window.klaus.writeTerminal(activeTaskId, text + '\n');
+    if (AppState.activeTaskId) {
+      window.klaus.writeTerminal(AppState.activeTaskId, text + '\n');
     }
   });
 
@@ -68,8 +64,6 @@
   });
 
   // ---- CI/CD Status (Feature 3) ----
-  var ciStatusMap = new Map(); // taskId -> runs[]
-
   window.klaus.onCIStatusUpdate(function (data) {
     ciStatusMap.set(data.id, data.runs);
     updateCIStatusIcon(data.id, data.runs);
@@ -115,7 +109,7 @@
   // ---- Auto-fetch updates (Feature 15) ----
   window.klaus.onAutoFetchUpdate(function (data) {
     // If the updated task is active and diff panel is open, refresh ahead/behind
-    if (data.id === activeTaskId && DiffPanel.isVisible()) {
+    if (data.id === AppState.activeTaskId && DiffPanel.isVisible()) {
       DiffPanel.updateAheadBehind();
     }
   });
@@ -144,7 +138,7 @@
       DiffPanel.hide();
       btnDiff.classList.remove('active');
     } else {
-      var task = tasks.get(activeTaskId);
+      var task = tasks.get(AppState.activeTaskId);
       if (task) {
         DiffPanel.show(task.worktreePath);
         PRPanel.setWorktree(task.worktreePath);
@@ -203,77 +197,9 @@
     });
   })();
 
-  // ---- Project Switcher (Phase 3) ----
-  const projectSelect = document.getElementById('project-select');
-  const btnAddProject = document.getElementById('btn-add-project');
-
-  var selectedProjectFilter = null; // null = show all
-
-  async function loadProjects() {
-    var projects = await window.klaus.listProjects();
-    var current = await window.klaus.getRepo();
-    projectSelect.innerHTML = '';
-
-    if (projects.length === 0 && current) {
-      // Migrate: single repo into projects list
-      await window.klaus.switchProject(current);
-      projects = [{ name: current.split('/').pop(), path: current }];
-    }
-
-    // "All" option to show all tasks
-    var allOpt = document.createElement('option');
-    allOpt.value = '';
-    allOpt.textContent = 'All Projects';
-    if (!selectedProjectFilter) allOpt.selected = true;
-    projectSelect.appendChild(allOpt);
-
-    projects.forEach(function (p) {
-      var opt = document.createElement('option');
-      opt.value = p.path;
-      opt.textContent = p.name;
-      if (p.path === selectedProjectFilter) opt.selected = true;
-      projectSelect.appendChild(opt);
-    });
-
-    // Set repoPath to first project if not set
-    if (!repoPath && projects.length > 0) {
-      repoPath = projects[0].path;
-    }
-  }
-
-  projectSelect.addEventListener('change', function () {
-    var newPath = projectSelect.value;
-    selectedProjectFilter = newPath || null;
-    filterTaskList();
-  });
-
-  function filterTaskList() {
-    taskList.querySelectorAll('.task-item').forEach(function (item) {
-      var id = Number(item.dataset.id);
-      var task = tasks.get(id);
-      if (!task || !selectedProjectFilter) {
-        item.style.display = '';
-        return;
-      }
-      // Show task if its worktreePath starts with the selected project path
-      var matches = task.worktreePath && task.worktreePath.startsWith(selectedProjectFilter);
-      // Also match sibling worktrees (e.g. /projects/repo-branchname for /projects/repo)
-      if (!matches && task.worktreePath) {
-        var parentDir = task.worktreePath.substring(0, task.worktreePath.lastIndexOf('/'));
-        var projectParent = selectedProjectFilter.substring(0, selectedProjectFilter.lastIndexOf('/'));
-        matches = parentDir === projectParent;
-      }
-      item.style.display = matches ? '' : 'none';
-    });
-  }
-
-  btnAddProject.addEventListener('click', async function () {
-    var result = await window.klaus.addProject();
-    if (result) {
-      repoPath = result.path;
-      await loadProjects();
-    }
-  });
+  // ---- Project Switcher (extracted to project-switcher.js) ----
+  var loadProjects = ProjectSwitcher.loadProjects;
+  var filterTaskList = ProjectSwitcher.filterTaskList;
 
   // ---- New Window ----
   const btnNewWindow = document.getElementById('btn-new-window');
@@ -293,7 +219,7 @@
         prefs.lineHeight !== undefined || prefs.cursorStyle !== undefined) {
       tasks.forEach(function (task, id) {
         if (prefs.fontSize !== undefined) {
-          currentFontSize = prefs.fontSize;
+          AppState.currentFontSize = prefs.fontSize;
           task.terminal.options.fontSize = prefs.fontSize;
         }
         if (prefs.fontFamily !== undefined) {
@@ -316,10 +242,9 @@
   });
 
   // Load saved terminal preferences on startup
-  var savedPrefs = {};
   window.klaus.getPreferences().then(function (prefs) {
-    savedPrefs = prefs;
-    if (prefs.fontSize && prefs.fontSize !== 13) currentFontSize = prefs.fontSize;
+    AppState.savedPrefs = prefs;
+    if (prefs.fontSize && prefs.fontSize !== 13) AppState.currentFontSize = prefs.fontSize;
   });
 
   // ---- Theme Picker (Phase 5) ----
@@ -365,606 +290,26 @@
 
   // ---- File Viewer (C1) — renders inline in the diff panel ----
 
-  // File viewer renders in the Files tab content area below the file tree
-  var fileViewerContent = document.getElementById('file-viewer-content');
-  var fileViewerView = document.getElementById('file-viewer-view');
-
-  window.openFileViewer = async function (filePath, fileName, lineNumber) {
-    // Make sure the diff panel is open
-    var diffPanel = document.getElementById('diff-panel');
-    if (!diffPanel.classList.contains('visible')) {
-      btnDiff.click();
-    }
-
-    // Switch to the Files tab
-    document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
-    document.querySelector('#diff-tabs .diff-tab[data-tab="files"]').classList.add('active');
-    ['changes-tab-content', 'pr-tab-content', 'search-tab-content'].forEach(function (id) {
-      document.getElementById(id).style.display = 'none';
-    });
-    document.getElementById('files-tab-content').style.display = '';
-
-    // Load file tree if not already loaded
-    if (!fileTreeData.length) loadFileTree();
-
-    // Track worktree for click-to-search
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    fileViewerWorktree = task ? task.worktreePath : null;
-
-    // Show the viewer area
-    fileViewerContent.style.display = 'block';
-    fileViewerView.innerHTML = '<div class="file-viewer-header-inline"><span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span><button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button></div><div class="file-viewer-body">Loading...</div>';
-
-    fileViewerView.querySelector('.file-viewer-blame-btn').addEventListener('click', function () {
-      window.toggleBlame();
-    });
-
-    var result = await window.klaus.readFile(filePath);
-    var body = fileViewerView.querySelector('.file-viewer-body');
-    if (result.error) {
-      body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
-      return;
-    }
-
-    // Syntax highlight with hljs
-    var ext = result.ext || '';
-    var langMap = { js: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java', md: 'markdown', json: 'json', html: 'xml', htm: 'xml', xml: 'xml', css: 'css', sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml', toml: 'ini', sql: 'sql', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp' };
-    var lang = langMap[ext];
-    var highlighted;
-    if (lang && window.hljs && window.hljs.getLanguage(lang)) {
-      highlighted = window.hljs.highlight(result.content, { language: lang }).value;
-    } else if (window.hljs) {
-      highlighted = window.hljs.highlightAuto(result.content).value;
-    } else {
-      highlighted = escHtml(result.content);
-    }
-
-    // Render with line numbers
-    var lines = highlighted.split('\n');
-    body.innerHTML = lines.map(function (line, i) {
-      var num = i + 1;
-      var cls = (lineNumber && num === lineNumber) ? ' file-line-highlight' : '';
-      return '<div class="file-view-line' + cls + '" data-line="' + num + '"><span class="file-line-num">' + num + '</span><span class="file-line">' + (line || ' ') + '</span></div>';
-    }).join('');
-
-    // Scroll to line if specified
-    if (lineNumber) {
-      var target = body.querySelector('[data-line="' + lineNumber + '"]');
-      if (target) target.scrollIntoView({ block: 'center' });
-    }
-
-    // Click-to-search: click a word to find all occurrences
-    body.addEventListener('click', function (e) {
-      // Don't trigger on text selection
-      var sel = window.getSelection();
-      if (sel && sel.toString().length > 0) return;
-
-      var word = getWordAtPoint(e.target, e.clientX, e.clientY);
-      if (word && word.length >= 2) {
-        searchSymbol(word, fileViewerWorktree);
-      }
-    });
-  };
-
-  var fileViewerWorktree = null;
-
-  function getWordAtPoint(element, x, y) {
-    // Get the text node and offset under the click
-    if (!element || !element.textContent) return null;
-    var range = document.caretRangeFromPoint(x, y);
-    if (!range) return null;
-
-    var node = range.startNode || range.startContainer;
-    if (node.nodeType !== Node.TEXT_NODE) return null;
-
-    var text = node.textContent;
-    var offset = range.startOffset;
-
-    // Expand to word boundaries
-    var start = offset;
-    var end = offset;
-    var wordChars = /[a-zA-Z0-9_$]/;
-    while (start > 0 && wordChars.test(text[start - 1])) start--;
-    while (end < text.length && wordChars.test(text[end])) end++;
-
-    return text.substring(start, end);
-  }
-
-  function searchSymbol(word, worktreePath) {
-    // Switch to Search tab and run the search
-    document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
-    document.querySelector('#diff-tabs .diff-tab[data-tab="search"]').classList.add('active');
-    ['changes-tab-content', 'pr-tab-content', 'files-tab-content'].forEach(function (id) {
-      document.getElementById(id).style.display = 'none';
-    });
-    document.getElementById('search-tab-content').style.display = '';
-
-    projectSearchInput.value = word;
-    doProjectSearch();
-  }
-
-  // ---- File Tree (C2) ----
-
-  var fileTree = document.getElementById('file-tree');
-  var fileTreeFilter = document.getElementById('file-tree-filter');
-  var fileTreeData = [];
-  var fileTreeWorktree = null;
-
-  window.addEventListener('load-file-tree', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
-  window.addEventListener('reload-tab-files', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
-
-  async function loadFileTree(overrideWt) {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = overrideWt || (task ? task.worktreePath : null);
-    if (!wt) {
-      fileTree.innerHTML = '<div class="file-tree-empty">No active task</div>';
-      return;
-    }
-
-    if (wt === fileTreeWorktree && fileTreeData.length > 0) {
-      renderFileTree(fileTreeFilter.value);
-      return;
-    }
-
-    fileTreeWorktree = wt;
-    fileTree.innerHTML = '<div class="file-tree-empty">Loading...</div>';
-
-    var result = await window.klaus.listFiles(wt);
-    if (result.error) {
-      fileTree.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
-      return;
-    }
-
-    fileTreeData = result.files;
-    renderFileTree('');
-  }
-
-  function renderFileTree(filter) {
-    var filtered = fileTreeData;
-    if (filter) {
-      var q = filter.toLowerCase();
-      filtered = fileTreeData.filter(function (f) { return f.toLowerCase().includes(q); });
-    }
-
-    // Build directory tree
-    var tree = {};
-    filtered.forEach(function (filepath) {
-      var parts = filepath.split('/');
-      var node = tree;
-      parts.forEach(function (part, i) {
-        if (i === parts.length - 1) {
-          if (!node._files) node._files = [];
-          node._files.push({ name: part, path: filepath });
-        } else {
-          if (!node[part]) node[part] = {};
-          node = node[part];
-        }
-      });
-    });
-
-    fileTree.innerHTML = '';
-    renderTreeNode(tree, fileTree, 0);
-  }
-
-  function renderTreeNode(node, container, depth) {
-    // Directories first
-    var dirs = Object.keys(node).filter(function (k) { return k !== '_files'; }).sort();
-    dirs.forEach(function (dir) {
-      var dirEl = document.createElement('div');
-      dirEl.className = 'file-tree-dir';
-
-      var label = document.createElement('div');
-      label.className = 'file-tree-label';
-      label.style.paddingLeft = (depth * 16 + 8) + 'px';
-      label.innerHTML = '<span class="file-tree-arrow">&#9654;</span> ' + escHtml(dir);
-
-      var children = document.createElement('div');
-      children.className = 'file-tree-children';
-      children.style.display = 'none';
-
-      label.addEventListener('click', function () {
-        var open = children.style.display !== 'none';
-        children.style.display = open ? 'none' : '';
-        label.querySelector('.file-tree-arrow').innerHTML = open ? '&#9654;' : '&#9660;';
-      });
-
-      dirEl.appendChild(label);
-      dirEl.appendChild(children);
-      container.appendChild(dirEl);
-      renderTreeNode(node[dir], children, depth + 1);
-    });
-
-    // Files
-    if (node._files) {
-      node._files.sort(function (a, b) { return a.name.localeCompare(b.name); });
-      node._files.forEach(function (file) {
-        var fileEl = document.createElement('div');
-        fileEl.className = 'file-tree-file';
-        fileEl.style.paddingLeft = (depth * 16 + 8) + 'px';
-        fileEl.textContent = file.name;
-        fileEl.title = file.path;
-        fileEl.addEventListener('click', function () {
-          window.openFileViewer(fileTreeWorktree + '/' + file.path, file.path);
-        });
-        container.appendChild(fileEl);
-      });
-    }
-  }
-
-  fileTreeFilter.addEventListener('input', function () {
-    renderFileTree(fileTreeFilter.value);
-  });
-
-  // ---- Project Search (C3) ----
-
-  var projectSearchInput = document.getElementById('project-search-input');
-  var projectSearchResults = document.getElementById('project-search-results');
-  var searchTimer = null;
-
-  window.addEventListener('load-search', function (e) {
-    if (projectSearchInput.value.trim()) doProjectSearch(e.detail && e.detail.worktreePath);
-  });
-  window.addEventListener('reload-tab-search', function (e) {
-    if (projectSearchInput.value.trim()) doProjectSearch(e.detail && e.detail.worktreePath);
-  });
-
-  projectSearchInput.addEventListener('input', function () {
-    if (searchTimer) clearTimeout(searchTimer);
-    searchTimer = setTimeout(doProjectSearch, 400);
-  });
-
-  projectSearchInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (searchTimer) clearTimeout(searchTimer);
-      doProjectSearch();
-    }
-  });
-
-  async function doProjectSearch(overrideWt) {
-    var query = projectSearchInput.value.trim();
-    if (!query) {
-      projectSearchResults.innerHTML = '';
-      return;
-    }
-
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = overrideWt || (task ? task.worktreePath : null);
-    if (!wt) {
-      projectSearchResults.innerHTML = '<div class="file-tree-empty">No active task</div>';
-      return;
-    }
-
-    projectSearchResults.innerHTML = '<div class="file-tree-empty">Searching...</div>';
-
-    var result = await window.klaus.searchFiles(wt, query);
-    if (result.error) {
-      projectSearchResults.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
-      return;
-    }
-
-    if (result.results.length === 0) {
-      projectSearchResults.innerHTML = '<div class="file-tree-empty">No matches found</div>';
-      return;
-    }
-
-    // Group by file
-    var grouped = {};
-    result.results.forEach(function (r) {
-      if (!grouped[r.file]) grouped[r.file] = [];
-      grouped[r.file].push(r);
-    });
-
-    projectSearchResults.innerHTML = '';
-    Object.keys(grouped).forEach(function (file) {
-      var fileHeader = document.createElement('div');
-      fileHeader.className = 'search-result-file';
-      fileHeader.textContent = file;
-      fileHeader.addEventListener('click', function () {
-        window.openFileViewer(wt + '/' + file, file);
-      });
-      projectSearchResults.appendChild(fileHeader);
-
-      grouped[file].forEach(function (match) {
-        var line = document.createElement('div');
-        line.className = 'search-result-line';
-        line.innerHTML = '<span class="search-line-num">' + match.line + '</span>' + escHtml(match.text.substring(0, 200));
-        line.addEventListener('click', function () {
-          window.openFileViewer(wt + '/' + file, file, match.line);
-        });
-        projectSearchResults.appendChild(line);
-      });
-    });
-  }
-
-  // ---- Commit History (D4) ----
-
-  var historyList = document.getElementById('history-list');
-  var historyDiffView = document.getElementById('history-diff-view');
-
-  window.addEventListener('load-history', function (e) { loadHistory(e.detail && e.detail.worktreePath); });
-  window.addEventListener('reload-tab-history', function (e) { loadHistory(e.detail && e.detail.worktreePath); });
-
-  async function loadHistory(overrideWt) {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = overrideWt || (task ? task.worktreePath : null);
-    if (!wt) {
-      historyList.innerHTML = '<div class="file-tree-empty">No active task</div>';
-      return;
-    }
-
-    historyList.innerHTML = '<div class="file-tree-empty">Loading...</div>';
-    historyDiffView.innerHTML = '';
-
-    var result = await window.klaus.gitLog(wt, 50);
-    if (result.error) {
-      historyList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
-      return;
-    }
-
-    historyList.innerHTML = '';
-    result.commits.forEach(function (c) {
-      var item = document.createElement('div');
-      item.className = 'history-item';
-      item.innerHTML =
-        '<span class="history-hash">' + escHtml(c.short) + '</span>' +
-        '<span class="history-subject">' + escHtml(c.subject) + '</span>' +
-        '<span class="history-meta">' + escHtml(c.author) + ' \u00b7 ' + escHtml(c.date) + '</span>';
-      item.addEventListener('click', async function () {
-        historyList.querySelectorAll('.history-item').forEach(function (el) { el.classList.remove('selected'); });
-        item.classList.add('selected');
-        historyDiffView.innerHTML = 'Loading...';
-        var diff = await window.klaus.gitShow(wt, c.hash);
-        historyDiffView.textContent = diff.diff || diff.error || 'No diff';
-      });
-      historyList.appendChild(item);
-    });
-  }
-
-  // ---- History Sub-tabs & Tags (Feature 11) ----
-
-  var historySubTabs = document.querySelectorAll('.history-sub-tab');
-  var historyCommitsContent = document.getElementById('history-commits-content');
-  var historyTagsContent = document.getElementById('history-tags-content');
-  var tagsList = document.getElementById('tags-list');
-  var tagsCreateForm = document.getElementById('tags-create-form');
-  var tagNameInput = document.getElementById('tag-name-input');
-  var tagMessageInput = document.getElementById('tag-message-input');
-  var tagCommitInput = document.getElementById('tag-commit-input');
-  var tagError = document.getElementById('tag-error');
-
-  historySubTabs.forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      historySubTabs.forEach(function (t) { t.classList.remove('active'); });
-      tab.classList.add('active');
-      var sub = tab.dataset.sub;
-      historyCommitsContent.style.display = sub === 'commits' ? '' : 'none';
-      historyTagsContent.style.display = sub === 'tags' ? '' : 'none';
-      if (sub === 'tags') loadTags();
-    });
-  });
-
-  document.getElementById('btn-create-tag').addEventListener('click', function () {
-    tagsCreateForm.style.display = '';
-    tagNameInput.value = '';
-    tagMessageInput.value = '';
-    tagCommitInput.value = '';
-    tagError.textContent = '';
-    tagNameInput.focus();
-  });
-
-  document.getElementById('btn-tag-cancel').addEventListener('click', function () {
-    tagsCreateForm.style.display = 'none';
-  });
-
-  document.getElementById('btn-tag-submit').addEventListener('click', async function () {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
-    if (!wt) return;
-
-    var name = tagNameInput.value.trim();
-    if (!name) { tagError.textContent = 'Tag name is required'; return; }
-
-    var message = tagMessageInput.value.trim() || undefined;
-    var commit = tagCommitInput.value.trim() || undefined;
-
-    this.disabled = true;
-    var result = await window.klaus.gitTagCreate(wt, name, message, commit);
-    this.disabled = false;
-
-    if (result.error) {
-      tagError.textContent = result.error;
-    } else {
-      tagsCreateForm.style.display = 'none';
-      loadTags();
-    }
-  });
-
-  async function loadTags() {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
-    if (!wt) {
-      tagsList.innerHTML = '<div class="file-tree-empty">No active task</div>';
-      return;
-    }
-
-    tagsList.innerHTML = '<div class="file-tree-empty">Loading...</div>';
-    var result = await window.klaus.gitTags(wt);
-    if (result.error) {
-      tagsList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
-      return;
-    }
-
-    if (result.tags.length === 0) {
-      tagsList.innerHTML = '<div class="file-tree-empty">No tags</div>';
-      return;
-    }
-
-    tagsList.innerHTML = '';
-    result.tags.forEach(function (tag) {
-      var item = document.createElement('div');
-      item.className = 'tag-item';
-      item.innerHTML =
-        '<div class="tag-info">' +
-          '<span class="tag-name">' + escHtml(tag.name) + '</span>' +
-          '<span class="tag-meta">' + escHtml(tag.commit) + (tag.date ? ' \u00b7 ' + escHtml(tag.date) : '') + '</span>' +
-          (tag.message ? '<span class="tag-message">' + escHtml(tag.message) + '</span>' : '') +
-        '</div>' +
-        '<div class="tag-actions">' +
-          '<button class="tag-push-btn" title="Push to remote">\u2191</button>' +
-          '<button class="tag-delete-btn" title="Delete">&times;</button>' +
-        '</div>';
-
-      item.querySelector('.tag-push-btn').addEventListener('click', async function (e) {
-        e.stopPropagation();
-        this.disabled = true;
-        this.textContent = '...';
-        var res = await window.klaus.gitTagPush(wt, tag.name);
-        this.disabled = false;
-        this.textContent = '\u2191';
-        if (res.error) alert('Push failed: ' + res.error);
-      });
-
-      item.querySelector('.tag-delete-btn').addEventListener('click', async function (e) {
-        e.stopPropagation();
-        if (!confirm('Delete tag "' + tag.name + '"?')) return;
-        var res = await window.klaus.gitTagDelete(wt, tag.name);
-        if (res.error) alert('Delete failed: ' + res.error);
-        else loadTags();
-      });
-
-      tagsList.appendChild(item);
-    });
-  }
-
-  // ---- Stash (D3) ----
-
-  var stashList = document.getElementById('stash-list');
-  var stashMessage = document.getElementById('stash-message');
-  var btnStashPush = document.getElementById('btn-stash-push');
-
-  window.addEventListener('load-stash', function (e) { loadStash(e.detail && e.detail.worktreePath); });
-  window.addEventListener('reload-tab-stash', function (e) { loadStash(e.detail && e.detail.worktreePath); });
-
-  btnStashPush.addEventListener('click', async function () {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = task ? task.worktreePath : null;
-    if (!wt) return;
-
-    btnStashPush.disabled = true;
-    var result = await window.klaus.gitStashPush(wt, stashMessage.value.trim() || undefined);
-    btnStashPush.disabled = false;
-    stashMessage.value = '';
-    if (result.error) {
-      alert('Stash failed: ' + result.error);
-    }
-    loadStash();
-    DiffPanel.refresh();
-  });
-
-  async function loadStash(overrideWt) {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    var wt = overrideWt || (task ? task.worktreePath : null);
-    if (!wt) {
-      stashList.innerHTML = '<div class="file-tree-empty">No active task</div>';
-      return;
-    }
-
-    // Get current branch to filter stashes
-    var statusResult = await window.klaus.gitStatus(wt);
-    var currentBranch = statusResult.branch || '';
-
-    var result = await window.klaus.gitStashList(wt);
-    // Filter to only stashes from the current branch
-    var filtered = result.stashes.filter(function (s) {
-      // Stash messages are typically "WIP on <branch>: ..." or "On <branch>: ..."
-      var match = s.message.match(/^(?:WIP )?[Oo]n ([^:]+):/);
-      if (!match) return true; // show if we can't parse
-      return match[1] === currentBranch;
-    });
-
-    if (filtered.length === 0) {
-      stashList.innerHTML = '<div class="file-tree-empty">No stashes on ' + escHtml(currentBranch) + '</div>';
-      return;
-    }
-
-    stashList.innerHTML = '';
-    filtered.forEach(function (s, idx) {
-      var item = document.createElement('div');
-      item.className = 'stash-item';
-      item.innerHTML =
-        '<div class="stash-info"><span class="stash-ref">' + escHtml(s.ref) + '</span>' +
-        '<span class="stash-msg">' + escHtml(s.message) + '</span></div>' +
-        '<button class="stash-pop-btn" title="Pop this stash">Pop</button>';
-
-      item.querySelector('.stash-pop-btn').addEventListener('click', async function (e) {
-        e.stopPropagation();
-        // Extract original index from ref like "stash@{2}"
-        var refMatch = s.ref.match(/\{(\d+)\}/);
-        var originalIdx = refMatch ? parseInt(refMatch[1], 10) : idx;
-        var res = await window.klaus.gitStashPop(wt, originalIdx);
-        if (res.error) {
-          alert('Stash pop failed: ' + res.error);
-        }
-        loadStash();
-        DiffPanel.refresh();
-      });
-
-      stashList.appendChild(item);
-    });
-  }
+  // ---- File Browser (extracted to file-browser.js) ----
+  var loadFileTree = FileBrowser.loadFileTree;
+  var doProjectSearch = FileBrowser.doProjectSearch;
+
+  // ---- Feature panels (extracted to history-panel.js, stash-panel.js) ----
+  var loadHistory = HistoryPanel.loadHistory;
+  var loadStash = StashPanel.loadStash;
 
   // ---- Global tab reload (called by PRPanel.reloadActiveTab) ----
   window._reloadDiffTab = function (tab, wt) {
     if (tab === 'files') loadFileTree(wt);
     else if (tab === 'history') loadHistory(wt);
     else if (tab === 'stash') loadStash(wt);
-    else if (tab === 'search' && projectSearchInput.value.trim()) doProjectSearch(wt);
+    else if (tab === 'search') doProjectSearch(wt);
     else if (tab === 'env') { EnvPanel.setWorktree(wt); EnvPanel.load(); }
   };
 
-  // ---- Blame toggle in file viewer (D5) ----
-
-  window.toggleBlame = async function () {
-    var task = activeTaskId ? tasks.get(activeTaskId) : null;
-    if (!task) return;
-
-    var header = fileViewerView.querySelector('.file-viewer-header-inline');
-    if (!header) return;
-
-    var path = header.querySelector('.file-viewer-path');
-    if (!path) return;
-
-    var fileName = path.textContent;
-    var wt = task.worktreePath;
-
-    // Toggle: if blame annotations exist, remove them
-    var existing = fileViewerView.querySelectorAll('.blame-annotation');
-    if (existing.length > 0) {
-      existing.forEach(function (el) { el.remove(); });
-      return;
-    }
-
-    var result = await window.klaus.gitBlame(wt, fileName);
-    if (result.error || result.lines.length === 0) return;
-
-    var lineEls = fileViewerView.querySelectorAll('.file-view-line');
-    result.lines.forEach(function (blame, i) {
-      if (i >= lineEls.length) return;
-      var anno = document.createElement('span');
-      anno.className = 'blame-annotation';
-      anno.textContent = blame.hash + ' ' + blame.author.substring(0, 12);
-      anno.title = blame.summary;
-      lineEls[i].insertBefore(anno, lineEls[i].firstChild);
-    });
-  };
-
-  function escHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  var escHtml = AppUtils.escHtml;
 
   // ---- Sidebar toggle & manual resize ----
-  var sidebarCollapsed = false;
   var DEFAULT_SIDEBAR_WIDTH = 240;
   var MIN_SIDEBAR_WIDTH = 140;
   var MAX_SIDEBAR_RATIO = 0.4;
@@ -973,24 +318,24 @@
     setTimeout(function () {
       if (currentLayout() !== 'single') {
         fitAllTerminals();
-      } else if (activeTaskId != null) {
-        var task = tasks.get(activeTaskId);
+      } else if (AppState.activeTaskId != null) {
+        var task = tasks.get(AppState.activeTaskId);
         if (task) {
           task.fitAddon.fit();
-          window.klaus.resizeTerminal(activeTaskId, task.terminal.cols, task.terminal.rows);
+          window.klaus.resizeTerminal(AppState.activeTaskId, task.terminal.cols, task.terminal.rows);
         }
       }
     }, 250);
   }
 
   function toggleSidebar() {
-    sidebarCollapsed = !sidebarCollapsed;
+    AppState.sidebarCollapsed = !AppState.sidebarCollapsed;
     sidebar.style.width = '';
     sidebar.style.minWidth = '';
-    sidebar.classList.toggle('collapsed', sidebarCollapsed);
+    sidebar.classList.toggle('collapsed', AppState.sidebarCollapsed);
     sidebar.classList.remove('expanded');
-    sidebarToggleIcon.textContent = sidebarCollapsed ? '\u25B6' : '\u25C0';
-    sidebarToggleLabel.textContent = sidebarCollapsed ? 'Show' : 'Hide';
+    sidebarToggleIcon.textContent = AppState.sidebarCollapsed ? '\u25B6' : '\u25C0';
+    sidebarToggleLabel.textContent = AppState.sidebarCollapsed ? 'Show' : 'Hide';
     refitTerminals();
   }
 
@@ -1023,7 +368,7 @@
       var maxWidth = window.innerWidth * MAX_SIDEBAR_RATIO;
       newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(newWidth, maxWidth));
       sidebar.classList.remove('collapsed', 'expanded');
-      sidebarCollapsed = false;
+      AppState.sidebarCollapsed = false;
       sidebar.style.width = newWidth + 'px';
       sidebar.style.minWidth = newWidth + 'px';
       sidebarToggleIcon.textContent = '\u25C0';
@@ -1042,8 +387,8 @@
   })();
 
   // ---- Init ----
-  repoPath = await window.klaus.getRepo();
-  if (repoPath) {
+  AppState.repoPath = await window.klaus.getRepo();
+  if (AppState.repoPath) {
     showApp();
   } else {
     repoOverlay.style.display = 'flex';
@@ -1052,7 +397,7 @@
   btnSelectRepo.addEventListener('click', async function () {
     var selected = await window.klaus.selectRepo();
     if (selected) {
-      repoPath = selected;
+      AppState.repoPath = selected;
       // Also add to projects list
       await window.klaus.addProject();
       showApp();
@@ -1096,6 +441,7 @@
     });
   }
 
+  window._addWorktreeToSidebar = addWorktreeToSidebar;
   function addWorktreeToSidebar(wt) {
     // Don't add if already in sidebar (as a worktree item or active task)
     var existing = taskList.querySelector('.worktree-item[data-path="' + CSS.escape(wt.path) + '"]');
@@ -1256,21 +602,7 @@
     }
   }
 
-  function formatAge(isoString) {
-    if (!isoString) return '';
-    var ms = Date.now() - new Date(isoString).getTime();
-    var mins = Math.floor(ms / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return mins + 'm ago';
-    var hrs = Math.floor(mins / 60);
-    if (hrs < 24) return hrs + 'h ago';
-    var days = Math.floor(hrs / 24);
-    return days + 'd ago';
-  }
-
-  function escHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  var formatAge = AppUtils.formatAge;
 
   // ---- New Task (modal) ----
   const modalOverlay = document.getElementById('modal-overlay');
@@ -1342,7 +674,7 @@
     basepathDisplay.textContent = 'Default';
     basepathDisplay.classList.remove('has-path');
     activeTab = 'new';
-    selectedMode = savedPrefs.defaultMode || 'claude';
+    selectedMode = AppState.savedPrefs.defaultMode || 'claude';
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
@@ -1353,13 +685,13 @@
     if (repoIndicator) {
       repoIndicator.innerHTML =
         '<strong>Repo:</strong> ' +
-        '<span id="modal-repo-path" class="modal-repo-path">' + escHtml(repoPath || 'No repo selected') + '</span>' +
+        '<span id="modal-repo-path" class="modal-repo-path">' + escHtml(AppState.repoPath || 'No repo selected') + '</span>' +
         ' <button id="btn-modal-repo-browse" class="modal-repo-browse">Browse</button>';
       repoIndicator.style.display = '';
       document.getElementById('btn-modal-repo-browse').addEventListener('click', async function () {
         var dir = await window.klaus.browseDirectory();
         if (dir) {
-          repoPath = dir;
+          AppState.repoPath = dir;
           document.getElementById('modal-repo-path').textContent = dir;
         }
       });
@@ -1384,883 +716,31 @@
     if (e.key === 'Escape') hideModal();
   });
 
-  function addTaskToUI(task) {
-    var id = task.id;
-    var name = task.name;
-    var worktreePath = task.worktreePath;
-    var branch = task.branch;
+  // ---- Terminal, Sidebar, Layout (extracted to terminal-manager.js, sidebar-manager.js) ----
+  var addTaskToUI = TerminalManager.addTaskToUI;
+  var removeTaskFromUI = TerminalManager.removeTaskFromUI;
+  var switchToTask = TerminalManager.switchToTask;
+  var rewireTerminal = TerminalManager.rewireTerminal;
+  var currentLayout = TerminalManager.currentLayout;
+  var fitAllTerminals = TerminalManager.fitAllTerminals;
+  var zoomIn = TerminalManager.zoomIn;
+  var zoomOut = TerminalManager.zoomOut;
+  var zoomReset = TerminalManager.zoomReset;
+  var updateSidebarItem = Sidebar.updateItem;
+  var updateSidebarMode = Sidebar.updateMode;
+  var showResumeButton = Sidebar.showResumeButton;
+  var showUnreadBadge = Sidebar.showUnreadBadge;
+  var hideUnreadBadge = Sidebar.hideUnreadBadge;
+
+  // Expose context menu builder for terminal-manager
+  window._showContextMenu = showContextMenu;
 
-    // Create terminal
-    var Terminal = window.Terminal;
-    var FitAddon = window.FitAddon;
-
-    var termTheme = ThemeManager.getTerminalTheme();
-    var terminal = new Terminal({
-      cursorBlink: true,
-      fontSize: currentFontSize,
-      fontFamily: savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      lineHeight: savedPrefs.lineHeight || 1.2,
-      cursorStyle: savedPrefs.cursorStyle || 'block',
-      scrollback: 10000,
-      theme: termTheme,
-      allowProposedApi: true,
-    });
-
-    var fitAddon = new FitAddon.FitAddon();
-    terminal.loadAddon(fitAddon);
-
-    var SearchAddon = window.SearchAddon;
-    var searchAddon = new SearchAddon.SearchAddon();
-    terminal.loadAddon(searchAddon);
-
-    var WebLinksAddon = window.WebLinksAddon;
-    var webLinksAddon = new WebLinksAddon.WebLinksAddon(function (_event, uri) {
-      window.klaus.openExternal(uri);
-    });
-    terminal.loadAddon(webLinksAddon);
-
-    // Create container with grid label
-    var container = document.createElement('div');
-    container.className = 'terminal-container';
-    container.dataset.id = id;
-
-    var label = document.createElement('div');
-    label.className = 'grid-label';
-    label.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>' + escHtml(name);
-
-    // In single mode: click to switch. In multi mode: click to focus, drag to reorder.
-    label.addEventListener('click', function () {
-      if (currentLayout() === 'single') {
-        switchToTask(id);
-      } else {
-        // Focus this terminal and update all panels
-        focusedTaskId = id;
-        activeTaskId = id;
-        var t = tasks.get(id);
-        if (t && DiffPanel.isVisible()) {
-          DiffPanel.updateWorktree(t.worktreePath);
-          PRPanel.setWorktree(t.worktreePath);
-
-        }
-      }
-    });
-
-    // Drag-and-drop reordering
-    label.draggable = true;
-    label.addEventListener('dragstart', function (e) {
-      if (currentLayout() === 'single') { e.preventDefault(); return; }
-      container.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id.toString());
-    });
-    label.addEventListener('dragend', function () {
-      container.classList.remove('dragging');
-      terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {
-        el.classList.remove('drag-over');
-      });
-    });
-    container.addEventListener('dragover', function (e) {
-      if (currentLayout() === 'single') return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      var dragging = terminalsEl.querySelector('.dragging');
-      if (dragging && dragging !== container) {
-        container.classList.add('drag-over');
-      }
-    });
-    container.addEventListener('dragleave', function () {
-      container.classList.remove('drag-over');
-    });
-    container.addEventListener('drop', function (e) {
-      e.preventDefault();
-      container.classList.remove('drag-over');
-      var dragging = terminalsEl.querySelector('.dragging');
-      if (!dragging || dragging === container) return;
-
-      // Determine position: insert before or after based on drop position
-      var rect = container.getBoundingClientRect();
-      var isVertical = currentLayout() === 'grid';
-      var mid = isVertical ? rect.top + rect.height / 2 : rect.left + rect.width / 2;
-      var pos = isVertical ? e.clientY : e.clientX;
-
-      if (pos < mid) {
-        terminalsEl.insertBefore(dragging, container);
-      } else {
-        terminalsEl.insertBefore(dragging, container.nextSibling);
-      }
-
-      fitAllTerminals();
-    });
-
-    container.appendChild(label);
-
-    terminalsEl.appendChild(container);
-    terminal.open(container);
-
-    // Scroll-to-bottom button
-    var scrollBtn = document.createElement('button');
-    scrollBtn.className = 'terminal-scroll-bottom';
-    scrollBtn.innerHTML = '&#8595;';
-    scrollBtn.title = 'Scroll to bottom';
-    scrollBtn.style.display = 'none';
-    container.appendChild(scrollBtn);
-
-    scrollBtn.addEventListener('click', function () {
-      terminal.scrollToBottom();
-      scrollBtn.style.display = 'none';
-    });
-
-    // Show/hide based on scroll position
-    terminal.onScroll(function () {
-      var buf = terminal.buffer.active;
-      var atBottom = buf.viewportY >= buf.baseY;
-      scrollBtn.style.display = atBottom ? 'none' : 'block';
-    });
-
-    // Track focus — update diff panel when terminal receives focus
-    terminal.textarea.addEventListener('focus', function () {
-      if (focusedTaskId !== id) {
-        focusedTaskId = id;
-        activeTaskId = id;
-        var t = tasks.get(id);
-        if (t && DiffPanel.isVisible()) {
-          DiffPanel.updateWorktree(t.worktreePath);
-          PRPanel.setWorktree(t.worktreePath);
-
-        }
-      }
-    });
-
-    // Custom key handling
-    terminal.attachCustomKeyEventHandler(function (e) {
-      if (e.type !== 'keydown') return true;
-      var meta = e.metaKey;
-
-      if (e.key === 'Enter' && e.shiftKey) {
-        window.klaus.writeTerminal(id, '\x1b[13;2u');
-        return false;
-      }
-      if (meta && e.key === 'c') {
-        var sel = terminal.getSelection();
-        if (sel) { navigator.clipboard.writeText(sel); return false; }
-        return true;
-      }
-      if (meta && e.key === 'v') {
-        navigator.clipboard.readText().then(function (text) {
-          if (text) window.klaus.writeTerminal(id, text);
-        });
-        return false;
-      }
-      if (meta && e.key === 'f') {
-        openSearch(id);
-        return false;
-      }
-      if (meta && e.key === 'k') {
-        terminal.clear();
-        return false;
-      }
-      if (meta && (e.key === '=' || e.key === '+')) {
-        zoomIn();
-        return false;
-      }
-      if (meta && e.key === '-') {
-        zoomOut();
-        return false;
-      }
-      if (meta && e.key === '0') {
-        zoomReset();
-        return false;
-      }
-      return true;
-    });
-
-    // File drag-and-drop
-    container.addEventListener('dragover', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      container.classList.add('drag-over');
-    });
-
-    container.addEventListener('dragleave', function (e) {
-      e.preventDefault();
-      container.classList.remove('drag-over');
-    });
-
-    container.addEventListener('drop', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      container.classList.remove('drag-over');
-      var files = Array.from(e.dataTransfer.files);
-      if (files.length > 0) {
-        var paths = files.map(function (f) {
-          var p = f.path;
-          return p.includes(' ') ? '"' + p + '"' : p;
-        }).join(' ');
-        window.klaus.writeTerminal(id, paths);
-      }
-    });
-
-    // Wire up I/O
-    var cleanup = [];
-
-    var removeDataListener = window.klaus.onTerminalData(id, function (data) {
-      terminal.write(data);
-      if (activeTaskId !== id) {
-        showUnreadBadge(id);
-      }
-    });
-    cleanup.push(removeDataListener);
-
-    var removeExitListener = window.klaus.onTerminalExit(id, function () {
-      var t = tasks.get(id);
-      if (!t) return;
-      t.alive = false;
-      updateSidebarItem(id);
-    });
-    cleanup.push(removeExitListener);
-
-    terminal.onData(function (data) {
-      window.klaus.writeTerminal(id, data);
-    });
-
-    // Right-click context menu (capture phase to intercept before xterm)
-    container.addEventListener('contextmenu', function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      showContextMenu(e.clientX, e.clientY, id);
-    }, true);
-
-    var taskEntry = {
-      id: id, name: name, worktreePath: worktreePath, branch: branch,
-      mode: task.mode || 'claude',
-      terminal: terminal, fitAddon: fitAddon, searchAddon: searchAddon,
-      container: container, cleanup: cleanup,
-      alive: task.alive !== false,
-      notifyEnabled: true,
-      subTerminals: [], activeSubId: null,
-    };
-    tasks.set(id, taskEntry);
-
-    // Sub-terminal tab bar (Feature 5)
-    var subTabBar = document.createElement('div');
-    subTabBar.className = 'sub-terminal-tabs';
-    subTabBar.innerHTML =
-      '<button class="sub-tab active" data-sub-id="0">Primary</button>' +
-      '<button class="sub-tab-add" title="Add shell tab">+</button>';
-    container.insertBefore(subTabBar, label.nextSibling);
-
-    // Sub-tab clicks: don't let them bubble to the container (which would call switchToTask
-    // in single mode), but do update focus and the diff panel for this task.
-    subTabBar.addEventListener('click', function (e) {
-      e.stopPropagation();
-      focusedTaskId = id;
-      activeTaskId = id;
-      var t = tasks.get(id);
-      if (t && DiffPanel.isVisible()) {
-        DiffPanel.updateWorktree(t.worktreePath);
-        DiffPanel.refresh();
-        PRPanel.setWorktree(t.worktreePath);
-      }
-    });
-
-    // Primary tab click to switch back
-    subTabBar.querySelector('.sub-tab[data-sub-id="0"]').addEventListener('click', function () {
-      switchSubTerminal(taskEntry, null);
-    });
-
-    subTabBar.querySelector('.sub-tab-add').addEventListener('click', async function () {
-      var result = await window.klaus.addSubTerminal(id, 'Shell');
-      if (result.error) return;
-      addSubTerminalTab(taskEntry, result.subId, result.label);
-    });
-
-    // Fetch persisted notification preference
-    window.klaus.getNotifyEnabled(id).then(function (val) {
-      taskEntry.notifyEnabled = val;
-    });
-
-    renderSidebarItem(taskEntry);
-    emptyState.style.display = 'none';
-    switchToTask(id);
-  }
-
-  // ---- Sub-terminal Management (Feature 5) ----
-
-  function addSubTerminalTab(taskEntry, subId, label) {
-    var id = taskEntry.id;
-    var container = taskEntry.container;
-    var subTabBar = container.querySelector('.sub-terminal-tabs');
-    var addBtn = subTabBar.querySelector('.sub-tab-add');
-
-    // Create tab button
-    var tab = document.createElement('button');
-    tab.className = 'sub-tab';
-    tab.dataset.subId = subId;
-    tab.innerHTML = escHtml(label) + ' <span class="sub-tab-close">&times;</span>';
-    subTabBar.insertBefore(tab, addBtn);
-
-    // Create terminal for this sub-terminal
-    var Terminal = window.Terminal;
-    var FitAddon = window.FitAddon;
-    var termTheme = ThemeManager.getTerminalTheme();
-
-    var subTerminal = new Terminal({
-      cursorBlink: true,
-      fontSize: currentFontSize,
-      fontFamily: savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
-      lineHeight: savedPrefs.lineHeight || 1.2,
-      cursorStyle: savedPrefs.cursorStyle || 'block',
-      scrollback: 10000,
-      theme: termTheme,
-      allowProposedApi: true,
-    });
-
-    var subFitAddon = new FitAddon.FitAddon();
-    subTerminal.loadAddon(subFitAddon);
-
-    // Create wrapper div for this sub-terminal
-    var subWrapper = document.createElement('div');
-    subWrapper.className = 'sub-terminal-wrapper';
-    subWrapper.dataset.subId = subId;
-    subWrapper.style.display = 'none';
-    container.appendChild(subWrapper);
-    subTerminal.open(subWrapper);
-
-    // Wire up I/O
-    var subCleanup = [];
-    var removeData = window.klaus.onSubTerminalData(id, subId, function (data) {
-      subTerminal.write(data);
-    });
-    subCleanup.push(removeData);
-
-    var removeExit = window.klaus.onSubTerminalExit(id, subId, function () {
-      var sub = taskEntry.subTerminals.find(function (s) { return s.subId === subId; });
-      if (sub) sub.alive = false;
-    });
-    subCleanup.push(removeExit);
-
-    subTerminal.onData(function (data) {
-      window.klaus.writeTerminal(id, data, subId);
-    });
-
-    // Custom key handler for sub-terminal
-    subTerminal.attachCustomKeyEventHandler(function (e) {
-      if (e.type !== 'keydown') return true;
-      var meta = e.metaKey;
-      if (e.key === 'Enter' && e.shiftKey) {
-        window.klaus.writeTerminal(id, '\x1b[13;2u', subId);
-        return false;
-      }
-      if (meta && e.key === 'c') {
-        var sel = subTerminal.getSelection();
-        if (sel) { navigator.clipboard.writeText(sel); return false; }
-        return true;
-      }
-      if (meta && e.key === 'v') {
-        navigator.clipboard.readText().then(function (text) {
-          if (text) window.klaus.writeTerminal(id, text, subId);
-        });
-        return false;
-      }
-      if (meta && e.key === 'k') { subTerminal.clear(); return false; }
-      return true;
-    });
-
-    var subEntry = {
-      subId: subId, label: label, terminal: subTerminal, fitAddon: subFitAddon,
-      wrapper: subWrapper, tab: tab, cleanup: subCleanup, alive: true,
-    };
-    taskEntry.subTerminals.push(subEntry);
-
-    // Switch to this sub-terminal
-    tab.addEventListener('click', function (e) {
-      if (e.target.classList.contains('sub-tab-close')) return;
-      switchSubTerminal(taskEntry, subId);
-    });
-
-    // Close sub-terminal
-    tab.querySelector('.sub-tab-close').addEventListener('click', async function (e) {
-      e.stopPropagation();
-      await window.klaus.killSubTerminal(id, subId);
-      subCleanup.forEach(function (fn) { fn(); });
-      subTerminal.dispose();
-      subWrapper.remove();
-      tab.remove();
-      var idx = taskEntry.subTerminals.indexOf(subEntry);
-      if (idx !== -1) taskEntry.subTerminals.splice(idx, 1);
-      // Switch back to primary
-      if (taskEntry.activeSubId === subId) {
-        switchSubTerminal(taskEntry, null);
-      }
-    });
-
-    // Auto-switch to new sub-terminal
-    switchSubTerminal(taskEntry, subId);
-  }
-
-  function switchSubTerminal(taskEntry, subId) {
-    var container = taskEntry.container;
-    taskEntry.activeSubId = subId;
-
-    // Toggle primary terminal visibility
-    var xtermEls = container.querySelectorAll(':scope > .xterm');
-    xtermEls.forEach(function (el) {
-      el.style.display = subId === null || subId === undefined ? '' : 'none';
-    });
-
-    // Toggle sub-terminal wrappers
-    container.querySelectorAll('.sub-terminal-wrapper').forEach(function (w) {
-      w.style.display = parseInt(w.dataset.subId, 10) === subId ? '' : 'none';
-    });
-
-    // Update tab active state
-    container.querySelectorAll('.sub-tab').forEach(function (t) {
-      var tabSubId = t.dataset.subId === '0' ? null : parseInt(t.dataset.subId, 10);
-      var isActive = (subId === null || subId === undefined) ? t.dataset.subId === '0' : tabSubId === subId;
-      t.classList.toggle('active', isActive);
-    });
-
-    // Fit the active terminal
-    setTimeout(function () {
-      if (subId === null || subId === undefined) {
-        taskEntry.fitAddon.fit();
-        taskEntry.terminal.focus();
-        window.klaus.resizeTerminal(taskEntry.id, taskEntry.terminal.cols, taskEntry.terminal.rows);
-      } else {
-        var sub = taskEntry.subTerminals.find(function (s) { return s.subId === subId; });
-        if (sub) {
-          sub.fitAddon.fit();
-          sub.terminal.focus();
-          window.klaus.resizeTerminal(taskEntry.id, sub.terminal.cols, sub.terminal.rows, subId);
-        }
-      }
-    }, 50);
-  }
-
-  function renderSidebarItem(task) {
-    var item = document.createElement('div');
-    item.className = 'task-item';
-    item.dataset.id = task.id;
-
-    var modeLabel = task.mode === 'shell' ? 'sh' : 'cc';
-    item.innerHTML =
-      '<span class="status-dot ' + (task.alive ? 'alive' : 'exited') + '"></span>' +
-      '<span class="task-mode" title="' + (task.mode === 'shell' ? 'Shell' : 'Claude Code') + '">' + modeLabel + '</span>' +
-      '<span class="task-name" title="' + escHtml(task.worktreePath) + '">' + escHtml(task.name) + '</span>' +
-      '<span class="ci-status-icon" title="CI status"></span>' +
-      '<span class="unread-badge"></span>' +
-      '<button class="task-note-btn" title="Notes">&#9998;</button>' +
-      '<button class="task-close" title="Remove">&times;</button>';
-
-    item.addEventListener('click', function (e) {
-      if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')) return;
-      if (e.target.classList.contains('ci-status-icon')) {
-        var url = e.target.dataset.url;
-        if (url) window.klaus.openExternal(url);
-        return;
-      }
-      switchToTask(task.id);
-    });
-
-    item.querySelector('.task-close').addEventListener('click', async function (e) {
-      e.stopPropagation();
-      // Save worktree info before removing
-      var wt = {
-        path: task.worktreePath,
-        name: task.name,
-        branch: task.branch || '',
-      };
-      await window.klaus.killTask(task.id);
-      removeTaskFromUI(task.id);
-      // Add back as an available worktree item
-      addWorktreeToSidebar(wt);
-    });
-
-    // Task notes (Feature 14)
-    var noteBtn = item.querySelector('.task-note-btn');
-    window.klaus.getTaskNote(task.name).then(function (result) {
-      if (result.note) noteBtn.classList.add('has-note');
-    });
-    noteBtn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      showNotePopover(noteBtn, task.name);
-    });
-
-    taskList.appendChild(item);
-  }
-
-  // ---- Task Notes Popover (Feature 14) ----
-  var activeNotePopover = null;
-
-  function showNotePopover(anchorEl, taskName) {
-    // Close existing popover
-    if (activeNotePopover) {
-      activeNotePopover.remove();
-      activeNotePopover = null;
-    }
-
-    var popover = document.createElement('div');
-    popover.className = 'note-popover';
-    popover.innerHTML = '<textarea class="note-textarea" placeholder="Add a note for this task..." rows="4"></textarea>';
-    var textarea = popover.querySelector('textarea');
-
-    // Position next to anchor
-    var rect = anchorEl.getBoundingClientRect();
-    popover.style.position = 'fixed';
-    popover.style.top = rect.bottom + 4 + 'px';
-    popover.style.left = rect.left + 'px';
-    popover.style.zIndex = '9999';
-
-    document.body.appendChild(popover);
-    activeNotePopover = popover;
-
-    // Load existing note
-    window.klaus.getTaskNote(taskName).then(function (result) {
-      textarea.value = result.note || '';
-      textarea.focus();
-    });
-
-    // Save on blur
-    textarea.addEventListener('blur', function () {
-      var note = textarea.value.trim();
-      window.klaus.setTaskNote(taskName, note);
-      anchorEl.classList.toggle('has-note', note.length > 0);
-      setTimeout(function () {
-        if (activeNotePopover === popover) {
-          popover.remove();
-          activeNotePopover = null;
-        }
-      }, 100);
-    });
-
-    // Save on Cmd+Enter
-    textarea.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-        textarea.blur();
-      }
-      if (e.key === 'Escape') {
-        textarea.blur();
-      }
-    });
-
-    // Close on outside click
-    function onOutsideClick(e) {
-      if (!popover.contains(e.target) && e.target !== anchorEl) {
-        textarea.blur();
-        document.removeEventListener('mousedown', onOutsideClick);
-      }
-    }
-    setTimeout(function () {
-      document.addEventListener('mousedown', onOutsideClick);
-    }, 0);
-  }
-
-  function updateSidebarItem(id) {
-    var task = tasks.get(id);
-    if (!task) return;
-    var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
-    if (item) {
-      var dot = item.querySelector('.status-dot');
-      dot.className = 'status-dot ' + (task.alive ? 'alive' : 'exited');
-    }
-    var gridDot = task.container.querySelector('.grid-dot');
-    if (gridDot) {
-      gridDot.className = 'grid-dot ' + (task.alive ? 'alive' : 'exited');
-    }
-  }
-
-  function rewireTerminal(id) {
-    var task = tasks.get(id);
-    if (!task) return;
-
-    // Remove ALL old IPC listeners to prevent duplicates
-    if (task.cleanup) {
-      task.cleanup.forEach(function (fn) { fn(); });
-    }
-    task.cleanup = [];
-
-    var removeDataListener = window.klaus.onTerminalData(id, function (data) {
-      task.terminal.write(data);
-      if (activeTaskId !== id) {
-        showUnreadBadge(id);
-      }
-    });
-    task.cleanup.push(removeDataListener);
-
-    var removeExitListener = window.klaus.onTerminalExit(id, function () {
-      var t = tasks.get(id);
-      if (!t) return;
-      t.alive = false;
-      updateSidebarItem(id);
-    });
-    task.cleanup.push(removeExitListener);
-  }
-
-  function updateSidebarMode(id, mode) {
-    var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
-    if (!item) return;
-    var modeEl = item.querySelector('.task-mode');
-    if (modeEl) {
-      modeEl.textContent = mode === 'shell' ? 'sh' : 'cc';
-      modeEl.title = mode === 'shell' ? 'Shell' : 'Claude Code';
-    }
-  }
-
-  function showResumeButton(id, task) {
-    var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
-    if (!item) return;
-    // Remove existing resume button if any
-    var existing = item.querySelector('.sidebar-resume-btn');
-    if (existing) existing.remove();
-
-    var btn = document.createElement('button');
-    btn.className = 'sidebar-resume-btn';
-    btn.textContent = 'Resume';
-    btn.title = 'Resume Claude session';
-
-    // Insert before the close button
-    var closeBtn = item.querySelector('.task-close');
-    if (closeBtn) {
-      item.insertBefore(btn, closeBtn);
-    } else {
-      item.appendChild(btn);
-    }
-
-    btn.addEventListener('click', async function (e) {
-      e.stopPropagation();
-      // Type the resume command into the existing shell
-      var sessionId = await window.klaus.getLatestSession(task.worktreePath);
-      var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-      window.klaus.writeTerminal(id, cmd + '\n');
-      task.mode = 'claude';
-      updateSidebarMode(id, 'claude');
-      btn.remove();
-    });
-  }
-
-  function removeTaskFromUI(id) {
-    var task = tasks.get(id);
-    if (!task) return;
-
-    task.cleanup.forEach(function (fn) { fn(); });
-    task.terminal.dispose();
-    task.container.remove();
-
-    var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
-    if (item) item.remove();
-
-    tasks.delete(id);
-
-    if (activeTaskId === id) {
-      activeTaskId = null;
-      var remaining = Array.from(tasks.keys());
-      if (remaining.length > 0) {
-        switchToTask(remaining[0]);
-      } else {
-        emptyState.style.display = 'flex';
-      }
-    }
-  }
-
-  function switchToTask(id) {
-    activeTaskId = id;
-    focusedTaskId = id;
-
-    hideUnreadBadge(id);
-
-    taskList.querySelectorAll('.task-item').forEach(function (el) {
-      el.classList.toggle('active', Number(el.dataset.id) === id);
-    });
-
-    terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {
-      el.classList.toggle('active', Number(el.dataset.id) === id);
-    });
-
-    var task = tasks.get(id);
-    if (task) {
-      setTimeout(function () {
-        // Fit and focus the active sub-terminal if one is selected, otherwise primary
-        if (task.activeSubId !== null && task.activeSubId !== undefined) {
-          var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
-          if (sub) {
-            sub.fitAddon.fit();
-            sub.terminal.focus();
-            window.klaus.resizeTerminal(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
-          }
-        } else {
-          task.fitAddon.fit();
-          task.terminal.scrollToBottom();
-          window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
-          task.terminal.focus();
-        }
-      }, 50);
-
-      // Update diff panel if visible
-      if (DiffPanel.isVisible()) {
-        DiffPanel.updateWorktree(task.worktreePath);
-        PRPanel.setWorktree(task.worktreePath);
-
-      }
-    }
-  }
-
-  // ---- Layout cycling ----
-  function currentLayout() {
-    return layouts[layoutIndex];
-  }
-
-  function applyLayout() {
-    var layout = currentLayout();
-    terminalsEl.classList.remove('columns-view', 'grid-view');
-    btnLayout.classList.toggle('active', layout !== 'single');
-    btnLayout.textContent = layoutIcons[layout];
-    btnLayout.title = 'Layout: ' + layout + ' (click to cycle)';
-
-    if (layout === 'single') {
-      if (activeTaskId != null) {
-        switchToTask(activeTaskId);
-      }
-    } else {
-      terminalsEl.classList.add(layout === 'columns' ? 'columns-view' : 'grid-view');
-      terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {
-        el.classList.remove('active');
-      });
-      fitAllTerminals();
-    }
-  }
-
-  function cycleLayout() {
-    layoutIndex = (layoutIndex + 1) % layouts.length;
-    applyLayout();
-  }
-
-  function fitAllTerminals() {
-    setTimeout(function () {
-      tasks.forEach(function (task, id) {
-        // Fit active sub-terminal if one is selected
-        if (task.activeSubId !== null && task.activeSubId !== undefined) {
-          var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
-          if (sub) {
-            sub.fitAddon.fit();
-            window.klaus.resizeTerminal(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
-          }
-        } else {
-          task.fitAddon.fit();
-          task.terminal.scrollToBottom();
-          window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
-        }
-      });
-    }, 50);
-  }
-
-  btnLayout.addEventListener('click', cycleLayout);
-
-  // ---- Font zoom ----
-  var MIN_FONT = 8;
-  var MAX_FONT = 28;
-
-  function setFontSize(size) {
-    currentFontSize = Math.max(MIN_FONT, Math.min(MAX_FONT, size));
-    tasks.forEach(function (task, id) {
-      task.terminal.options.fontSize = currentFontSize;
-      task.fitAddon.fit();
-      task.terminal.scrollToBottom();
-      window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
-    });
-  }
-
-  function zoomIn() { setFontSize(currentFontSize + 1); }
-  function zoomOut() { setFontSize(currentFontSize - 1); }
-  function zoomReset() { setFontSize(13); }
-
-  // ---- Search (Cmd+F) ----
-  var searchBar = document.getElementById('search-bar');
-  var searchInput = document.getElementById('search-input');
-  var searchCount = document.getElementById('search-count');
-  var searchPrev = document.getElementById('search-prev');
-  var searchNext = document.getElementById('search-next');
-  var searchCloseBtn = document.getElementById('search-close');
-  var searchTaskId = null;
-
-  function openSearch(id) {
-    searchTaskId = id;
-    searchBar.style.display = 'flex';
-    searchInput.value = '';
-    searchCount.textContent = '';
-    setTimeout(function () { searchInput.focus(); }, 50);
-  }
-
-  function closeSearch() {
-    searchBar.style.display = 'none';
-    searchInput.value = '';
-    searchCount.textContent = '';
-    if (searchTaskId != null) {
-      var task = tasks.get(searchTaskId);
-      if (task) task.terminal.focus();
-    }
-    searchTaskId = null;
-  }
-
-  function doSearch(direction) {
-    if (searchTaskId == null) return;
-    var task = tasks.get(searchTaskId);
-    if (!task) return;
-    var term = searchInput.value;
-    if (!term) return;
-    if (direction === 'prev') {
-      task.searchAddon.findPrevious(term);
-    } else {
-      task.searchAddon.findNext(term);
-    }
-  }
-
-  searchInput.addEventListener('input', function () { doSearch('next'); });
-  searchNext.addEventListener('click', function () { doSearch('next'); });
-  searchPrev.addEventListener('click', function () { doSearch('prev'); });
-  searchCloseBtn.addEventListener('click', closeSearch);
-  searchInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') closeSearch();
-    if (e.key === 'Enter' && e.shiftKey) { doSearch('prev'); e.preventDefault(); }
-    else if (e.key === 'Enter') { doSearch('next'); e.preventDefault(); }
-  });
-
-  // ---- Unread badge ----
-  function showUnreadBadge(id) {
-    var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
-    if (!item) return;
-    var badge = item.querySelector('.unread-badge');
-    if (badge) badge.classList.add('visible');
-  }
-
-  function hideUnreadBadge(id) {
-    var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
-    if (!item) return;
-    var badge = item.querySelector('.unread-badge');
-    if (badge) badge.classList.remove('visible');
-  }
 
   // ---- Right-click context menu ----
-  var contextMenu = null;
-
-  function removeContextMenu() {
-    if (contextMenu) {
-      contextMenu.remove();
-      contextMenu = null;
-    }
-  }
-
-  document.addEventListener('click', removeContextMenu);
-  document.addEventListener('contextmenu', removeContextMenu);
 
   function showContextMenu(x, y, id) {
-    removeContextMenu();
     var task = tasks.get(id);
     if (!task) return;
-
-    var menu = document.createElement('div');
-    menu.className = 'context-menu';
-    menu.style.left = x + 'px';
-    menu.style.top = y + 'px';
 
     var items = [
       { label: 'Copy', shortcut: '\u2318C', action: function () {
@@ -2280,27 +760,22 @@
       { label: 'Zoom Out', shortcut: '\u2318\u2212', action: zoomOut },
       { label: 'Reset Zoom', shortcut: '\u23180', action: zoomReset },
       { sep: true },
-      // Phase 1: Open diff panel for this task
-      { label: 'Show Changes', shortcut: '', action: function () {
+      { label: 'Show Changes', action: function () {
         DiffPanel.show(task.worktreePath);
         PRPanel.setWorktree(task.worktreePath);
-
         btnDiff.classList.add('active');
       }},
-      // Phase 4: Pop out to separate window
-      { label: 'Pop Out', shortcut: '', action: async function () {
+      { label: 'Pop Out', action: async function () {
         await window.klaus.popOutTask(id);
       }},
-      // A6: Duplicate task
-      { label: 'Duplicate', shortcut: '', action: async function () {
+      { label: 'Duplicate', action: async function () {
         var result = await window.klaus.duplicateTask(id);
         if (result && !result.error) {
           addTaskToUI(result);
           switchToTask(result.id);
         }
       }},
-      // Phase 7: View files in worktree
-      { label: 'View File...', shortcut: '', action: function () {
+      { label: 'View File...', action: function () {
         var filePath = prompt('File path (relative to worktree):');
         if (filePath) {
           var full = task.worktreePath + '/' + filePath;
@@ -2308,16 +783,14 @@
         }
       }},
       { sep: true },
-      { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', shortcut: '', action: async function () {
+      { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', action: async function () {
         var newVal = task.notifyEnabled === false;
         task.notifyEnabled = newVal;
         await window.klaus.setNotifyEnabled(id, newVal);
       }},
-      // E2: Export transcript
-      { label: 'Export Transcript', shortcut: '', action: async function () {
+      { label: 'Export Transcript', action: async function () {
         var result = await window.klaus.exportTranscript(id);
         if (result.canceled || result.error) return;
-        // Get terminal buffer content
         var buf = task.terminal.buffer.active;
         var lines = [];
         for (var i = 0; i < buf.length; i++) {
@@ -2328,10 +801,9 @@
       }},
     ];
 
-    // Restart if exited
     if (!task.alive) {
       items.push({ sep: true });
-      items.push({ label: 'Restart Claude', shortcut: '', action: async function () {
+      items.push({ label: 'Restart Claude', action: async function () {
         var sessionId = await window.klaus.getLatestSession(task.worktreePath);
         var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
         window.klaus.writeTerminal(id, cmd + '\n');
@@ -2342,44 +814,8 @@
       }});
     }
 
-    items.forEach(function (entry) {
-      if (entry.sep) {
-        var sep = document.createElement('div');
-        sep.className = 'context-menu-sep';
-        menu.appendChild(sep);
-        return;
-      }
-      var item = document.createElement('div');
-      item.className = 'context-menu-item';
-      item.innerHTML = entry.label + '<span class="shortcut">' + entry.shortcut + '</span>';
-      item.addEventListener('click', function (e) {
-        e.stopPropagation();
-        removeContextMenu();
-        entry.action();
-      });
-      menu.appendChild(item);
-    });
-
-    document.body.appendChild(menu);
-    contextMenu = menu;
-
-    var rect = menu.getBoundingClientRect();
-    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
-    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
+    ContextMenu.show(x, y, items);
   }
-
-  // Handle window resize
-  window.addEventListener('resize', function () {
-    if (currentLayout() !== 'single') {
-      fitAllTerminals();
-    } else if (activeTaskId != null) {
-      var task = tasks.get(activeTaskId);
-      if (task) {
-        task.fitAddon.fit();
-        window.klaus.resizeTerminal(activeTaskId, task.terminal.cols, task.terminal.rows);
-      }
-    }
-  });
 
   // Keyboard shortcut: Cmd+G to toggle diff panel
   document.addEventListener('keydown', function (e) {
@@ -2391,11 +827,7 @@
 
   // ---- Command Palette (A3) ----
 
-  var paletteOverlay = null;
-
-  function showCommandPalette() {
-    if (paletteOverlay) { hideCommandPalette(); return; }
-
+  function buildPaletteCommands() {
     var commands = [
       { label: 'New Task', action: function () { showModal(); } },
       { label: 'Toggle Diff Panel', action: function () { btnDiff.click(); } },
@@ -2407,31 +839,29 @@
       { label: 'Reset Zoom', action: zoomReset },
     ];
 
-    // Add task-specific commands
-    if (activeTaskId) {
-      var task = tasks.get(activeTaskId);
+    if (AppState.activeTaskId) {
+      var task = tasks.get(AppState.activeTaskId);
       if (task) {
-        commands.push({ label: 'Search in Terminal', action: function () { openSearch(activeTaskId); } });
+        commands.push({ label: 'Search in Terminal', action: function () { openSearch(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); btnDiff.classList.add('active'); } });
-        commands.push({ label: 'Pop Out', action: function () { window.klaus.popOutTask(activeTaskId); } });
-        commands.push({ label: 'Kill Task', action: function () { window.klaus.killTask(activeTaskId).then(function () { removeTaskFromUI(activeTaskId); }); } });
+        commands.push({ label: 'Pop Out', action: function () { window.klaus.popOutTask(AppState.activeTaskId); } });
+        commands.push({ label: 'Kill Task', action: function () { window.klaus.killTask(AppState.activeTaskId).then(function () { removeTaskFromUI(AppState.activeTaskId); }); } });
         if (!task.alive) {
           commands.push({ label: 'Restart Claude', action: function () {
             window.klaus.getLatestSession(task.worktreePath).then(function (sessionId) {
               var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-              window.klaus.writeTerminal(activeTaskId, cmd + '\n');
+              window.klaus.writeTerminal(AppState.activeTaskId, cmd + '\n');
               task.mode = 'claude';
-              updateSidebarMode(activeTaskId, 'claude');
+              updateSidebarMode(AppState.activeTaskId, 'claude');
             });
           }});
         }
       }
     }
 
-    // Add switch-to-task commands
     tasks.forEach(function (t, id) {
-      if (id !== activeTaskId) {
+      if (id !== AppState.activeTaskId) {
         commands.push({ label: 'Switch to: ' + t.name, action: function () { switchToTask(id); } });
       }
     });
@@ -2439,87 +869,11 @@
     commands.push({ label: 'View Logs', action: showLogViewer });
     commands.push({ label: 'About Klaussy', action: showAboutDialog });
 
-    paletteOverlay = document.createElement('div');
-    paletteOverlay.className = 'palette-overlay';
-
-    var palette = document.createElement('div');
-    palette.className = 'palette';
-
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'palette-input';
-    input.placeholder = 'Type a command...';
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-
-    var list = document.createElement('div');
-    list.className = 'palette-list';
-
-    var filtered = commands;
-    var selectedIndex = 0;
-
-    function render() {
-      list.innerHTML = '';
-      filtered.forEach(function (cmd, i) {
-        var item = document.createElement('div');
-        item.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');
-        item.textContent = cmd.label;
-        item.addEventListener('click', function () {
-          hideCommandPalette();
-          cmd.action();
-        });
-        item.addEventListener('mouseenter', function () {
-          selectedIndex = i;
-          render();
-        });
-        list.appendChild(item);
-      });
-    }
-
-    input.addEventListener('input', function () {
-      var q = input.value.toLowerCase();
-      filtered = commands.filter(function (c) { return c.label.toLowerCase().includes(q); });
-      selectedIndex = 0;
-      render();
-    });
-
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1);
-        render();
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        selectedIndex = Math.max(selectedIndex - 1, 0);
-        render();
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        if (filtered[selectedIndex]) {
-          hideCommandPalette();
-          filtered[selectedIndex].action();
-        }
-      } else if (e.key === 'Escape') {
-        hideCommandPalette();
-      }
-    });
-
-    paletteOverlay.addEventListener('click', function (e) {
-      if (e.target === paletteOverlay) hideCommandPalette();
-    });
-
-    palette.appendChild(input);
-    palette.appendChild(list);
-    paletteOverlay.appendChild(palette);
-    document.body.appendChild(paletteOverlay);
-    render();
-    setTimeout(function () { input.focus(); }, 50);
+    return commands;
   }
 
-  function hideCommandPalette() {
-    if (paletteOverlay) {
-      paletteOverlay.remove();
-      paletteOverlay = null;
-    }
+  function showCommandPalette() {
+    CommandPalette.show(buildPaletteCommands());
   }
 
   document.addEventListener('keydown', function (e) {
@@ -2529,159 +883,12 @@
     }
   });
 
-  // ---- Task Rename (A4) ----
-
-  taskList.addEventListener('dblclick', function (e) {
-    var item = e.target.closest('.task-item[data-id]');
-    if (!item) return;
-    var nameEl = item.querySelector('.task-name');
-    if (!nameEl) return;
-
-    var id = parseInt(item.dataset.id, 10);
-    var task = tasks.get(id);
-    if (!task) return;
-
-    var input = document.createElement('input');
-    input.type = 'text';
-    input.className = 'inline-rename';
-    input.value = task.name;
-    input.style.cssText = 'font-size:13px;background:var(--input-bg);border:1px solid var(--accent);border-radius:4px;color:var(--text);padding:1px 4px;width:100%;outline:none;';
-
-    var original = nameEl.textContent;
-    nameEl.textContent = '';
-    nameEl.appendChild(input);
-    input.focus();
-    input.select();
-
-    function commit() {
-      var newName = input.value.trim() || original;
-      nameEl.textContent = newName;
-      task.name = newName;
-      window.klaus.renameTask(id, newName);
-      // Update grid label too
-      var gridLabel = task.container.querySelector('.grid-label');
-      if (gridLabel) {
-        var dot = gridLabel.querySelector('.grid-dot');
-        gridLabel.textContent = '';
-        if (dot) gridLabel.appendChild(dot);
-        gridLabel.appendChild(document.createTextNode(newName));
-      }
-    }
-
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { input.value = original; input.blur(); }
-    });
-  });
-
-  // ---- Task Reorder (A5) ----
-
-  var dragItem = null;
-
-  taskList.addEventListener('dragstart', function (e) {
-    var item = e.target.closest('.task-item[data-id]');
-    if (!item) return;
-    dragItem = item;
-    item.classList.add('dragging');
-    e.dataTransfer.effectAllowed = 'move';
-  });
-
-  taskList.addEventListener('dragover', function (e) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    var target = e.target.closest('.task-item');
-    if (!target || target === dragItem) return;
-    var rect = target.getBoundingClientRect();
-    var mid = rect.top + rect.height / 2;
-    if (e.clientY < mid) {
-      taskList.insertBefore(dragItem, target);
-    } else {
-      taskList.insertBefore(dragItem, target.nextSibling);
-    }
-  });
-
-  taskList.addEventListener('dragend', function () {
-    if (dragItem) {
-      dragItem.classList.remove('dragging');
-      dragItem = null;
-    }
-  });
-
-  // Make task items draggable
-  var observer = new MutationObserver(function () {
-    taskList.querySelectorAll('.task-item[data-id]').forEach(function (item) {
-      if (!item.getAttribute('draggable')) {
-        item.setAttribute('draggable', 'true');
-      }
-    });
-  });
-  observer.observe(taskList, { childList: true });
+  // Task rename and reorder extracted to sidebar-manager.js
 
   // ---- About Dialog (A7) ----
 
-  function showAboutDialog() {
-    var overlay = document.createElement('div');
-    overlay.className = 'palette-overlay';
-
-    var dialog = document.createElement('div');
-    dialog.className = 'about-dialog';
-    dialog.innerHTML = '<h2>Klaussy</h2><div class="about-loading">Loading...</div>';
-
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) overlay.remove();
-    });
-
-    overlay.appendChild(dialog);
-    document.body.appendChild(overlay);
-
-    window.klaus.getAboutInfo().then(function (info) {
-      dialog.innerHTML =
-        '<h2>Klaussy</h2>' +
-        '<div class="about-rows">' +
-          '<div class="about-row"><span>Version</span><span>' + escHtml(info.appVersion) + '</span></div>' +
-          '<div class="about-row"><span>Electron</span><span>' + escHtml(info.electronVersion) + '</span></div>' +
-          '<div class="about-row"><span>Node</span><span>' + escHtml(info.nodeVersion) + '</span></div>' +
-          '<div class="about-row"><span>Claude CLI</span><span>' + escHtml(info.claudeVersion) + '</span></div>' +
-          '<div class="about-row"><span>Claude Path</span><span>' + escHtml(info.claudePath) + '</span></div>' +
-        '</div>' +
-        '<button class="about-close">Close</button>';
-      dialog.querySelector('.about-close').addEventListener('click', function () { overlay.remove(); });
-    });
-  }
-
-  // ---- E1: Log Viewer ----
-
-  function showLogViewer() {
-    var overlay = document.createElement('div');
-    overlay.className = 'palette-overlay';
-
-    var viewer = document.createElement('div');
-    viewer.className = 'log-viewer';
-    viewer.innerHTML = '<div class="log-viewer-header"><h3>Main Process Logs</h3><button class="log-viewer-close">&times;</button></div><div class="log-viewer-content">Loading...</div>';
-
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) overlay.remove();
-    });
-
-    overlay.appendChild(viewer);
-    document.body.appendChild(overlay);
-
-    viewer.querySelector('.log-viewer-close').addEventListener('click', function () { overlay.remove(); });
-
-    window.klaus.getLogs().then(function (logs) {
-      var content = viewer.querySelector('.log-viewer-content');
-      if (!logs || logs.length === 0) {
-        content.textContent = 'No logs yet.';
-        return;
-      }
-      content.innerHTML = logs.map(function (entry) {
-        var cls = entry.level === 'error' ? 'log-error' : entry.level === 'warn' ? 'log-warn' : 'log-info';
-        return '<div class="log-entry ' + cls + '"><span class="log-time">' + escHtml(entry.time.substring(11, 19)) + '</span><span class="log-level">' + escHtml(entry.level) + '</span><span class="log-msg">' + escHtml(entry.msg) + '</span></div>';
-      }).join('');
-      content.scrollTop = content.scrollHeight;
-    });
-  }
+  var showAboutDialog = Dialogs.showAbout;
+  var showLogViewer = Dialogs.showLog;
 
   // ---- E3: Parse env vars from modal ----
 
@@ -2713,7 +920,7 @@
         modalCreate.textContent = 'Create';
         return;
       }
-      result = await window.klaus.createTask(name, repoPath, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
+      result = await window.klaus.createTask(name, AppState.repoPath, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
     } else {
       if (!selectedWorktreePath) {
         modalCreate.disabled = false;
