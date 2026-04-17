@@ -274,15 +274,17 @@ window.PRPanel = (function () {
         ? (c.path + (targetLine != null ? ':' + targetLine : ''))
         : '';
 
-      html += '<div class="pr-comment-item pr-inline-comment">';
+      var isReply = !!c.in_reply_to_id;
+      var itemCls = 'pr-comment-item pr-inline-comment' + (isReply ? ' pr-inline-reply' : '');
+      html += '<div class="' + itemCls + '">';
       html += '<div class="pr-comment-meta">';
       html += '<strong>' + escHtml(author) + '</strong>';
       html += ' <span class="pr-comment-time">' + escHtml(time) + '</span>';
-      if (pathLabel) {
+      if (!isReply && pathLabel) {
         html += ' on <span class="pr-comment-file">' + escHtml(pathLabel) + '</span>';
       }
       html += '</div>';
-      html += renderReviewHunk(c);
+      if (!isReply) html += renderReviewHunk(c);
       html += '<div class="pr-comment-body">' + renderMarkdown(c.body) + '</div>';
       // Reply area — inline review comments support threading
       html += buildReplyArea({
