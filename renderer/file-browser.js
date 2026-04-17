@@ -33,8 +33,14 @@ window.FileBrowser = (function () {
     var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
     fileViewerWorktree = task ? task.worktreePath : null;
 
-    fileViewerContent.style.display = 'block';
-    fileViewerView.innerHTML = '<div class="file-viewer-header-inline"><span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span><button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button></div><div class="file-viewer-body">Loading...</div>';
+    fileViewerContent.style.display = 'flex';
+    fileViewerView.innerHTML =
+      '<div class="file-viewer-header-inline">' +
+        '<span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span>' +
+        '<span class="file-editor-status"></span>' +
+        '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
+      '</div>' +
+      '<div class="file-viewer-body">Loading...</div>';
 
     fileViewerView.querySelector('.file-viewer-blame-btn').addEventListener('click', function () {
       window.toggleBlame();
@@ -42,43 +48,107 @@ window.FileBrowser = (function () {
 
     var result = await window.klaus.readFile(filePath);
     var body = fileViewerView.querySelector('.file-viewer-body');
+    var statusEl = fileViewerView.querySelector('.file-editor-status');
     if (result.error) {
       body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
       return;
     }
 
-    var ext = result.ext || '';
-    var langMap = { js: 'javascript', ts: 'typescript', py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java', md: 'markdown', json: 'json', html: 'xml', htm: 'xml', xml: 'xml', css: 'css', sh: 'bash', bash: 'bash', zsh: 'bash', yml: 'yaml', yaml: 'yaml', toml: 'ini', sql: 'sql', c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp' };
-    var lang = langMap[ext];
-    var highlighted;
-    if (lang && window.hljs && window.hljs.getLanguage(lang)) {
-      highlighted = window.hljs.highlight(result.content, { language: lang }).value;
-    } else if (window.hljs) {
-      highlighted = window.hljs.highlightAuto(result.content).value;
-    } else {
-      highlighted = escHtml(result.content);
+    var savedContent = result.content;
+    var currentFilePath = filePath;
+
+    // Build textarea editor with line numbers gutter
+    body.innerHTML =
+      '<div class="file-editor-wrap">' +
+        '<div class="file-line-gutter" aria-hidden="true"></div>' +
+        '<textarea class="file-editor-textarea" spellcheck="false"></textarea>' +
+      '</div>';
+
+    var textarea = body.querySelector('.file-editor-textarea');
+    var gutter = body.querySelector('.file-line-gutter');
+    textarea.value = result.content;
+
+    function updateGutter() {
+      var count = textarea.value.split('\n').length;
+      var nums = [];
+      for (var i = 1; i <= count; i++) nums.push(i);
+      gutter.textContent = nums.join('\n');
     }
+    updateGutter();
 
-    var lines = highlighted.split('\n');
-    body.innerHTML = lines.map(function (line, i) {
-      var num = i + 1;
-      var cls = (lineNumber && num === lineNumber) ? ' file-line-highlight' : '';
-      return '<div class="file-view-line' + cls + '" data-line="' + num + '"><span class="file-line-num">' + num + '</span><span class="file-line">' + (line || ' ') + '</span></div>';
-    }).join('');
+    // Sync gutter scroll with textarea
+    textarea.addEventListener('scroll', function () {
+      gutter.scrollTop = textarea.scrollTop;
+    });
 
+    // Jump to line
     if (lineNumber) {
-      var target = body.querySelector('[data-line="' + lineNumber + '"]');
-      if (target) target.scrollIntoView({ block: 'center' });
+      var lines = textarea.value.split('\n');
+      var pos = 0;
+      for (var i = 0; i < Math.min(lineNumber - 1, lines.length); i++) {
+        pos += lines[i].length + 1;
+      }
+      textarea.setSelectionRange(pos, pos);
+      // Scroll line into view — approximate line height
+      requestAnimationFrame(function () {
+        textarea.focus();
+        var approxLineH = parseFloat(getComputedStyle(textarea).lineHeight) || 18;
+        textarea.scrollTop = Math.max(0, (lineNumber - 5) * approxLineH);
+        gutter.scrollTop = textarea.scrollTop;
+      });
     }
 
-    body.addEventListener('click', function (e) {
-      var sel = window.getSelection();
-      if (sel && sel.toString().length > 0) return;
-      var word = getWordAtPoint(e.target, e.clientX, e.clientY);
-      if (word && word.length >= 2) {
-        searchSymbol(word, fileViewerWorktree);
+    // Track modifications
+    textarea.addEventListener('input', function () {
+      updateGutter();
+      if (textarea.value !== savedContent) {
+        statusEl.textContent = 'Modified';
+        statusEl.className = 'file-editor-status modified';
+      } else {
+        statusEl.textContent = '';
+        statusEl.className = 'file-editor-status';
       }
     });
+
+    // Tab inserts spaces, Cmd/Ctrl+S saves
+    textarea.addEventListener('keydown', function (e) {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        var start = textarea.selectionStart;
+        var end = textarea.selectionEnd;
+        textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
+        textarea.selectionStart = textarea.selectionEnd = start + 2;
+        textarea.dispatchEvent(new Event('input'));
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        saveFile();
+      }
+    });
+
+    async function saveFile() {
+      statusEl.textContent = 'Saving...';
+      statusEl.className = 'file-editor-status saving';
+      var content = textarea.value;
+      var writeResult = await window.klaus.writeFile(currentFilePath, content);
+      if (writeResult.error) {
+        statusEl.textContent = 'Save failed';
+        statusEl.className = 'file-editor-status error';
+        return;
+      }
+      savedContent = content;
+      statusEl.textContent = 'Saved';
+      statusEl.className = 'file-editor-status saved';
+      setTimeout(function () {
+        if (statusEl.textContent === 'Saved') {
+          statusEl.textContent = '';
+          statusEl.className = 'file-editor-status';
+        }
+      }, 2000);
+      if (window.DiffPanel && window.DiffPanel.isVisible()) {
+        window.DiffPanel.refresh();
+      }
+    }
   };
 
   function getWordAtPoint(element, x, y) {
@@ -277,26 +347,34 @@ window.FileBrowser = (function () {
     if (!task) return;
     var header = fileViewerView.querySelector('.file-viewer-header-inline');
     if (!header) return;
-    var path = header.querySelector('.file-viewer-path');
-    if (!path) return;
-    var fileName = path.textContent;
+    var pathEl = header.querySelector('.file-viewer-path');
+    if (!pathEl) return;
+    var fileName = pathEl.textContent;
     var wt = task.worktreePath;
-    var existing = fileViewerView.querySelectorAll('.blame-annotation');
-    if (existing.length > 0) {
-      existing.forEach(function (el) { el.remove(); });
+    var gutter = fileViewerView.querySelector('.file-line-gutter');
+    if (!gutter) return;
+
+    // Toggle off if blame is showing
+    if (gutter.dataset.blame === '1') {
+      gutter.dataset.blame = '';
+      gutter.classList.remove('blame-active');
+      var textarea = fileViewerView.querySelector('.file-editor-textarea');
+      if (textarea) {
+        var count = textarea.value.split('\n').length;
+        var nums = [];
+        for (var i = 1; i <= count; i++) nums.push(i);
+        gutter.textContent = nums.join('\n');
+      }
       return;
     }
+
     var result = await window.klaus.gitBlame(wt, fileName);
     if (result.error || result.lines.length === 0) return;
-    var lineEls = fileViewerView.querySelectorAll('.file-view-line');
-    result.lines.forEach(function (blame, i) {
-      if (i >= lineEls.length) return;
-      var anno = document.createElement('span');
-      anno.className = 'blame-annotation';
-      anno.textContent = blame.hash + ' ' + blame.author.substring(0, 12);
-      anno.title = blame.summary;
-      lineEls[i].insertBefore(anno, lineEls[i].firstChild);
-    });
+    gutter.dataset.blame = '1';
+    gutter.classList.add('blame-active');
+    gutter.textContent = result.lines.map(function (blame, i) {
+      return blame.hash.substring(0, 7) + ' ' + blame.author.substring(0, 10);
+    }).join('\n');
   };
 
   return {

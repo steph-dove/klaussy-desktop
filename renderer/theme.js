@@ -63,6 +63,12 @@ window.ThemeManager = (function () {
       surface: '#f2f2f7', surfaceHover: '#e5e5ea',
       inputBg: '#ffffff', success: '#34c759', error: '#ff3b30',
       termBg: '#ffffff', termFg: '#1c1c1e', termCursor: '#5856d6', termSelection: '#5856d633',
+      termAnsi: {
+        black: '#1c1c1e', red: '#c41a16', green: '#007400', yellow: '#b5890a',
+        blue: '#0451a5', magenta: '#a626a4', cyan: '#0b7261', white: '#8e8e93',
+        brightBlack: '#6e6e73', brightRed: '#cf222e', brightGreen: '#1a7f37', brightYellow: '#a67c00',
+        brightBlue: '#0969da', brightMagenta: '#8b57ce', brightCyan: '#0e8585', brightWhite: '#f5f5f7',
+      },
       diffText: '#24292f',
       diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#1a7f37',
       diffDelBg: 'rgba(218, 54, 51, 0.1)', diffDelFg: '#cf222e',
@@ -72,6 +78,7 @@ window.ThemeManager = (function () {
   };
 
   var currentPreset = 'dark';
+  var resolvedSystemPreset = 'dark';
   var isSystemMode = false;
 
   function init() {
@@ -89,7 +96,8 @@ window.ThemeManager = (function () {
     if (window.klaus.onSystemThemeChanged) {
       window.klaus.onSystemThemeChanged(function (isDark) {
         if (isSystemMode) {
-          applyPresetColors(isDark ? 'dark' : 'light');
+          resolvedSystemPreset = isDark ? 'dark' : 'light';
+          applyPresetColors(resolvedSystemPreset);
         }
       });
     }
@@ -102,7 +110,8 @@ window.ThemeManager = (function () {
     // Ask main process for current system theme
     if (window.klaus.getSystemTheme) {
       window.klaus.getSystemTheme().then(function (isDark) {
-        applyPresetColors(isDark ? 'dark' : 'light');
+        resolvedSystemPreset = isDark ? 'dark' : 'light';
+        applyPresetColors(resolvedSystemPreset);
       });
     }
   }
@@ -159,22 +168,49 @@ window.ThemeManager = (function () {
   function getTerminalTheme() {
     var resolvedPreset = currentPreset;
     if (currentPreset === 'system') {
-      // Use CSS variable values directly since they're already set
       var style = getComputedStyle(document.documentElement);
-      return {
+      var sysResult = {
         background: style.getPropertyValue('--term-bg').trim(),
         foreground: style.getPropertyValue('--term-fg').trim(),
         cursor: style.getPropertyValue('--term-cursor').trim(),
         selectionBackground: style.getPropertyValue('--term-selection').trim(),
       };
+      var sysTheme = presets[resolvedSystemPreset];
+      if (sysTheme && sysTheme.termAnsi) {
+        var a = sysTheme.termAnsi;
+        sysResult.black = a.black; sysResult.red = a.red; sysResult.green = a.green; sysResult.yellow = a.yellow;
+        sysResult.blue = a.blue; sysResult.magenta = a.magenta; sysResult.cyan = a.cyan; sysResult.white = a.white;
+        sysResult.brightBlack = a.brightBlack; sysResult.brightRed = a.brightRed; sysResult.brightGreen = a.brightGreen; sysResult.brightYellow = a.brightYellow;
+        sysResult.brightBlue = a.brightBlue; sysResult.brightMagenta = a.brightMagenta; sysResult.brightCyan = a.brightCyan; sysResult.brightWhite = a.brightWhite;
+      }
+      return sysResult;
     }
     var theme = presets[resolvedPreset];
-    return {
+    var result = {
       background: theme.termBg,
       foreground: theme.termFg,
       cursor: theme.termCursor,
       selectionBackground: theme.termSelection,
     };
+    if (theme.termAnsi) {
+      result.black = theme.termAnsi.black;
+      result.red = theme.termAnsi.red;
+      result.green = theme.termAnsi.green;
+      result.yellow = theme.termAnsi.yellow;
+      result.blue = theme.termAnsi.blue;
+      result.magenta = theme.termAnsi.magenta;
+      result.cyan = theme.termAnsi.cyan;
+      result.white = theme.termAnsi.white;
+      result.brightBlack = theme.termAnsi.brightBlack;
+      result.brightRed = theme.termAnsi.brightRed;
+      result.brightGreen = theme.termAnsi.brightGreen;
+      result.brightYellow = theme.termAnsi.brightYellow;
+      result.brightBlue = theme.termAnsi.brightBlue;
+      result.brightMagenta = theme.termAnsi.brightMagenta;
+      result.brightCyan = theme.termAnsi.brightCyan;
+      result.brightWhite = theme.termAnsi.brightWhite;
+    }
+    return result;
   }
 
   function getPresetList() {

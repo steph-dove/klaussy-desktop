@@ -64,6 +64,56 @@ function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
 }
 
+// Resolve the correct gh auth token for a given repo directory.
+// Matches the remote owner (e.g. "steph-dove") to a logged-in gh account.
+const ghTokenCache = new Map(); // remote owner -> token
+
+function ghEnvForRepo(repoDir) {
+  try {
+    // Get the remote URL
+    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd: repoDir, stdio: 'pipe',
+    }).toString().trim();
+
+    // Extract owner from SSH or HTTPS remote
+    // ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
+    let owner;
+    const sshMatch = remoteUrl.match(/github\.com[:/]([^/]+)\//);
+    if (sshMatch) owner = sshMatch[1];
+    if (!owner) return {};
+
+    if (ghTokenCache.has(owner)) {
+      const cached = ghTokenCache.get(owner);
+      if (cached) return { GH_TOKEN: cached };
+      return {};
+    }
+
+    // Try to get a token for this owner from gh auth
+    try {
+      const token = execFileSync('gh', ['auth', 'token', '--user', owner], {
+        stdio: 'pipe', timeout: 5000,
+      }).toString().trim();
+      if (token) {
+        ghTokenCache.set(owner, token);
+        return { GH_TOKEN: token };
+      }
+    } catch {}
+
+    ghTokenCache.set(owner, null);
+    return {};
+  } catch {
+    return {};
+  }
+}
+
+function ghExec(args, opts) {
+  const env = ghEnvForRepo(opts.cwd);
+  return execFileSync('gh', args, {
+    ...opts,
+    env: { ...process.env, ...env },
+  });
+}
+
 function createWindow(opts) {
   opts = opts || {};
   const win = new BrowserWindow({
@@ -428,7 +478,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
   } catch {
-    return { error: 'Active project is not a git repository: ' + repoPath };
+    return { error: 'Active project is not a git repository. Remove and re-add the project to initialize git.' };
   }
 
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
@@ -482,6 +532,97 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
   } catch {}
 
+  await runKlausifyInit(worktreePath, baseBranch);
+  return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
+});
+
+// List branches for a repo (local + remote, excluding those already checked out in worktrees)
+ipcMain.handle('list-branches', async (_event, { repoPath }) => {
+  try {
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
+  } catch {
+    return { error: 'Not a git repository: ' + repoPath };
+  }
+
+  // Get branches already checked out in worktrees
+  let worktreeBranches = new Set();
+  try {
+    const wtList = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath, stdio: 'pipe' }).toString();
+    for (const line of wtList.split('\n')) {
+      if (line.startsWith('branch ')) {
+        worktreeBranches.add(line.replace('branch refs/heads/', ''));
+      }
+    }
+  } catch {}
+
+  let branches = [];
+  try {
+    const raw = execFileSync('git', ['branch', '-a', '--format', '%(refname:short)\t%(objectname:short)\t%(committerdate:relative)'], {
+      cwd: repoPath, stdio: 'pipe'
+    }).toString().trim();
+    for (const line of raw.split('\n')) {
+      if (!line) continue;
+      const [ref, hash, date] = line.split('\t');
+      // Skip HEAD pointers and branches already in worktrees
+      if (ref.includes('/HEAD')) continue;
+      // For remote branches, strip origin/ prefix for the local name
+      let localName = ref;
+      let isRemote = false;
+      if (ref.startsWith('origin/')) {
+        localName = ref.replace('origin/', '');
+        isRemote = true;
+      }
+      if (worktreeBranches.has(localName)) continue;
+      branches.push({ ref, localName, hash, date, isRemote });
+    }
+  } catch (err) {
+    return { error: 'Failed to list branches: ' + (err.stderr ? err.stderr.toString() : err.message) };
+  }
+
+  // Deduplicate: prefer local over remote
+  const seen = new Map();
+  for (const b of branches) {
+    if (!seen.has(b.localName) || !b.isRemote) {
+      seen.set(b.localName, b);
+    }
+  }
+  return { branches: Array.from(seen.values()) };
+});
+
+// Create worktree from an existing branch
+ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, basePath, envVars }) => {
+  try {
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
+  } catch {
+    return { error: 'Not a git repository: ' + repoPath };
+  }
+
+  const sanitized = branch.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  const repoBasename = path.basename(repoPath);
+  const worktreeDir = basePath || path.dirname(repoPath);
+  const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitized);
+
+  if (fs.existsSync(worktreePath)) {
+    return { error: 'Worktree directory already exists: ' + worktreePath };
+  }
+
+  try {
+    // Check if it's a local branch already
+    try {
+      execFileSync('git', ['rev-parse', '--verify', branch], { cwd: repoPath, stdio: 'pipe' });
+    } catch {
+      // If not local, create tracking branch from origin
+      execFileSync('git', ['branch', branch, 'origin/' + branch], { cwd: repoPath, stdio: 'pipe' });
+    }
+    execFileSync('git', ['worktree', 'add', worktreePath, branch], {
+      cwd: repoPath, stdio: 'pipe',
+    });
+  } catch (err) {
+    return { error: 'Failed to create worktree: ' + (err.stderr ? err.stderr.toString() : err.message) };
+  }
+
+  await runKlausifyInit(worktreePath);
+  const name = sanitized;
   return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
 });
 
@@ -516,6 +657,56 @@ ipcMain.handle('browse-directory', async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
 });
+
+let klausifyAvailable = null; // null = unchecked, true/false after first check
+
+function checkKlausifyInstalled() {
+  if (klausifyAvailable !== null) return klausifyAvailable;
+  try {
+    execFileSync('klausify', ['--version'], { stdio: 'pipe', timeout: 5000 });
+    klausifyAvailable = true;
+  } catch {
+    klausifyAvailable = false;
+  }
+  return klausifyAvailable;
+}
+
+async function promptKlausifyInstall() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  const { response } = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['Install with pipx', 'Skip'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'klausify not found',
+    message: 'klausify CLI is not installed.',
+    detail: 'klausify sets up Claude Code boilerplate (CLAUDE.md, etc.) for each new worktree.\n\nInstall it now with pipx?',
+  });
+  if (response !== 0) return false;
+  try {
+    execSync('pipx install klausify', { stdio: 'pipe', timeout: 60000 });
+    klausifyAvailable = true;
+    return true;
+  } catch (err) {
+    dialog.showErrorBox('Installation failed', 'Could not install klausify:\n' + (err.stderr ? err.stderr.toString() : err.message) + '\n\nTry manually: pipx install klausify');
+    return false;
+  }
+}
+
+async function runKlausifyInit(worktreePath, baseBranch) {
+  if (!checkKlausifyInstalled()) {
+    const installed = await promptKlausifyInstall();
+    if (!installed) return;
+  }
+  try {
+    const args = ['init', '--repo', worktreePath, '--skip-enrich'];
+    if (baseBranch) args.push('--base-branch', baseBranch);
+    execFileSync('klausify', args, { stdio: 'pipe', timeout: 30000 });
+    console.log('klausify init completed for', worktreePath);
+  } catch (err) {
+    console.warn('klausify init failed (non-fatal):', err.message);
+  }
+}
 
 function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv) {
   const id = nextId++;
@@ -853,6 +1044,7 @@ ipcMain.handle('duplicate-task', async (_event, { id }) => {
     return { error: `Failed to create worktree: ${err.message}` };
   }
 
+  await runKlausifyInit(worktreePath, sourceBranch);
   const mode = config.defaultMode || 'claude';
   return spawnInWorktree(baseName, worktreePath, branch, mode);
 });
@@ -997,7 +1189,7 @@ ipcMain.handle('git-push', async (_event, { worktreePath }) => {
 
 ipcMain.handle('create-pr', async (_event, { worktreePath, title, body }) => {
   try {
-    const result = execFileSync('gh', ['pr', 'create', '--title', title, '--body', body || ''], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 }).toString().trim();
+    const result = ghExec(['pr', 'create', '--title', title, '--body', body || ''], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 }).toString().trim();
     return { url: result };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -1219,11 +1411,29 @@ ipcMain.handle('add-project', async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   const projectPath = result.filePaths[0];
 
+  let isGitRepo = false;
   try {
     execSync('git rev-parse --git-dir', { cwd: projectPath, stdio: 'pipe' });
-  } catch {
-    dialog.showErrorBox('Not a git repository', `${projectPath} is not a git repository.`);
-    return null;
+    isGitRepo = true;
+  } catch {}
+
+  if (!isGitRepo) {
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      buttons: ['Initialize Git', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Not a git repository',
+      message: `"${path.basename(projectPath)}" is not a git repository.`,
+      detail: 'Would you like to initialize it with git? This will run "git init" in the selected directory.',
+    });
+    if (response !== 0) return null;
+    try {
+      execSync('git init', { cwd: projectPath, stdio: 'pipe' });
+    } catch (err) {
+      dialog.showErrorBox('Git init failed', err.message);
+      return null;
+    }
   }
 
   const config = loadConfig();
@@ -1266,6 +1476,13 @@ ipcMain.handle('list-worktrees', () => {
   const repoPath = config.repoPath;
   if (!repoPath) return [];
 
+  // Verify it's a git repo before listing worktrees
+  try {
+    execSync('git rev-parse --git-dir', { cwd: repoPath, stdio: 'pipe' });
+  } catch {
+    return [];
+  }
+
   try {
     const output = execSync('git worktree list --porcelain', {
       cwd: repoPath,
@@ -1289,10 +1506,11 @@ ipcMain.handle('list-worktrees', () => {
     });
     if (current.path) worktrees.push(current);
 
-    // Filter out bare worktrees and add active status
+    // Filter out bare and hidden worktrees, add active status
     const activePaths = new Set(Array.from(instances.values()).map(i => i.worktreePath));
+    const hidden = new Set(config.hiddenWorktrees || []);
     return worktrees
-      .filter(w => !w.bare)
+      .filter(w => !w.bare && !hidden.has(w.path))
       .map(w => ({
         path: w.path,
         name: path.basename(w.path),
@@ -1302,6 +1520,16 @@ ipcMain.handle('list-worktrees', () => {
   } catch {
     return [];
   }
+});
+
+ipcMain.handle('hide-worktree', (_event, { worktreePath }) => {
+  const config = loadConfig();
+  if (!config.hiddenWorktrees) config.hiddenWorktrees = [];
+  if (!config.hiddenWorktrees.includes(worktreePath)) {
+    config.hiddenWorktrees.push(worktreePath);
+  }
+  saveConfig(config);
+  return { ok: true };
 });
 
 // ---- Phase 4: Pop-Out Windows ----
@@ -1501,19 +1729,75 @@ ipcMain.handle('explain-diff', async (_event, { worktreePath, file, hunk }) => {
   });
 });
 
+// ---- PR Comment AI Review ----
+
+ipcMain.handle('pr-ai-review-comment', async (_event, { worktreePath, prTitle, prBody, commentAuthor, commentBody, filePath, diffHunk }) => {
+  let context = `PR Title: ${prTitle}\n`;
+  if (prBody) context += `PR Description: ${prBody}\n`;
+  if (filePath) context += `File: ${filePath}\n`;
+  if (diffHunk) context += `Code context:\n\`\`\`\n${diffHunk}\n\`\`\`\n`;
+
+  const prompt = `You are reviewing a PR comment. Analyze whether the comment raises a valid concern, and draft a concise reply.
+
+${context}
+Comment by ${commentAuthor}:
+"${commentBody}"
+
+Respond in this exact format:
+VALIDITY: [Valid / Partially Valid / Not Valid] — one sentence explaining why.
+SUGGESTED REPLY:
+[Your drafted reply to post on the PR. Be professional, concise, and constructive. If the concern is valid, acknowledge it and describe how you'll address it. If not, explain why politely.]`;
+
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  return new Promise((resolve) => {
+    execFile(claudeBin, ['-p', prompt], {
+      cwd: worktreePath,
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ error: stderr || err.message });
+      } else {
+        resolve({ review: stdout.trim() });
+      }
+    });
+  });
+});
+
+// ---- PR Threaded Reply ----
+
+ipcMain.handle('pr-reply-to-comment', async (_event, { worktreePath, prNumber, commentId, body }) => {
+  try {
+    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    const repo = JSON.parse(repoResult).nameWithOwner;
+    ghExec(['api', '-X', 'POST',
+      'repos/' + repo + '/pulls/' + prNumber + '/comments',
+      '-F', 'in_reply_to=' + commentId,
+      '-f', 'body=' + body,
+    ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
 // ---- PR Interaction ----
 
 ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
   try {
-    const result = execFileSync('gh', [
+    const result = ghExec([
       'pr', 'view', '--json',
       'number,title,state,body,url,headRefName,baseRefName,additions,deletions,reviewDecision,comments,reviews'
     ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
     return { pr: JSON.parse(result) };
   } catch (err) {
     const msg = (err.stderr ? err.stderr.toString() : err.message) || '';
-    if (msg.includes('no pull requests found') || msg.includes('Could not resolve')) {
+    if (msg.includes('no pull requests found')) {
       return { pr: null };
+    }
+    if (msg.includes('Could not resolve')) {
+      return { pr: null, error: 'Cannot access this repository. Check that `gh` is authenticated with the correct GitHub account.' };
     }
     return { pr: null, error: msg };
   }
@@ -1522,9 +1806,9 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
 ipcMain.handle('pr-review-comments', async (_event, { worktreePath, prNumber }) => {
   try {
     // Get inline review comments via gh api
-    const repoResult = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
     const repo = JSON.parse(repoResult).nameWithOwner;
-    const comments = execFileSync('gh', ['api', 'repos/' + repo + '/pulls/' + prNumber + '/comments'], {
+    const comments = ghExec(['api', 'repos/' + repo + '/pulls/' + prNumber + '/comments'], {
       cwd: worktreePath, stdio: 'pipe', timeout: 15000
     }).toString();
     return { comments: JSON.parse(comments) };
@@ -1535,7 +1819,7 @@ ipcMain.handle('pr-review-comments', async (_event, { worktreePath, prNumber }) 
 
 ipcMain.handle('pr-add-comment', async (_event, { worktreePath, prNumber, body }) => {
   try {
-    execFileSync('gh', ['pr', 'comment', String(prNumber), '--body', body], {
+    ghExec(['pr', 'comment', String(prNumber), '--body', body], {
       cwd: worktreePath, stdio: 'pipe', timeout: 15000
     });
     return { ok: true };
@@ -1548,7 +1832,7 @@ ipcMain.handle('pr-review', async (_event, { worktreePath, prNumber, event, body
   try {
     const args = ['pr', 'review', String(prNumber), '--' + event];
     if (body) args.push('--body', body);
-    execFileSync('gh', args, { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
+    ghExec(args, { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -1622,7 +1906,7 @@ function startCIPolling(id, worktreePath, branch) {
   stopCIPolling(id);
   const poll = () => {
     try {
-      const output = execFileSync('gh', [
+      const output = ghExec([
         'run', 'list', '--branch', branch, '--limit', '5',
         '--json', 'status,conclusion,name,url,createdAt'
       ], { cwd: worktreePath, stdio: 'pipe', timeout: 10000 }).toString();
@@ -1649,7 +1933,7 @@ function stopCIPolling(id) {
 
 ipcMain.handle('ci-status', async (_event, { worktreePath, branch }) => {
   try {
-    const output = execFileSync('gh', [
+    const output = ghExec([
       'run', 'list', '--branch', branch, '--limit', '5',
       '--json', 'status,conclusion,name,url,createdAt'
     ], { cwd: worktreePath, stdio: 'pipe', timeout: 10000 }).toString();
@@ -1661,7 +1945,7 @@ ipcMain.handle('ci-status', async (_event, { worktreePath, branch }) => {
 
 ipcMain.handle('ci-run-logs', async (_event, { worktreePath, runId }) => {
   try {
-    const output = execFileSync('gh', ['run', 'view', String(runId), '--log-failed'], {
+    const output = ghExec(['run', 'view', String(runId), '--log-failed'], {
       cwd: worktreePath, stdio: 'pipe', timeout: 15000, maxBuffer: 5 * 1024 * 1024
     }).toString();
     return { logs: output };
@@ -1779,6 +2063,15 @@ ipcMain.handle('read-file', async (_event, { filePath }) => {
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
     return { content, ext: path.extname(filePath).slice(1) };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('write-file', async (_event, { filePath, content }) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8');
+    return { ok: true };
   } catch (err) {
     return { error: err.message };
   }
