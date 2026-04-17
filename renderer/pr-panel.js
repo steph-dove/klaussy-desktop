@@ -26,6 +26,13 @@ window.PRPanel = (function () {
         handleSendReply(sendBtn);
         return;
       }
+      var expandBtn = e.target.closest('.pr-hunk-expand-btn');
+      if (expandBtn) {
+        var wrap = expandBtn.closest('.pr-comment-hunk-wrap');
+        if (wrap) wrap.classList.remove('collapsed');
+        expandBtn.remove();
+        return;
+      }
     });
 
     // Tab switching
@@ -213,10 +220,12 @@ window.PRPanel = (function () {
       return;
     }
 
-    var html = '<div class="pr-comments-header">Comments (' + items.length + ')</div>';
+    var html = '<div class="pr-comments-section">';
+    html += '<div class="pr-comments-header">Comments (' + items.length + ')</div>';
     items.forEach(function (item) {
       html += renderCommentItem(item);
     });
+    html += '</div>';
     commentsListEl.innerHTML = html;
   }
 
@@ -253,26 +262,27 @@ window.PRPanel = (function () {
   function renderReviewComments(comments) {
     if (comments.length === 0) return;
 
-    var html = '<div class="pr-comments-header">Inline Review Comments (' + comments.length + ')</div>';
+    var html = '<div class="pr-comments-section">';
+    html += '<div class="pr-comments-header">Inline Review Comments (' + comments.length + ')</div>';
     comments.forEach(function (c) {
       var time = formatTime(c.created_at);
       var author = c.user ? c.user.login : 'unknown';
       var commentId = c.id || '';
+      var side = c.side || 'RIGHT';
+      var targetLine = side === 'LEFT' ? (c.original_line || c.original_position) : (c.line || c.position);
+      var pathLabel = c.path
+        ? (c.path + (targetLine != null ? ':' + targetLine : ''))
+        : '';
 
       html += '<div class="pr-comment-item pr-inline-comment">';
       html += '<div class="pr-comment-meta">';
       html += '<strong>' + escHtml(author) + '</strong>';
       html += ' <span class="pr-comment-time">' + escHtml(time) + '</span>';
-      if (c.path) {
-        html += ' on <span class="pr-comment-file">' + escHtml(c.path) + '</span>';
+      if (pathLabel) {
+        html += ' on <span class="pr-comment-file">' + escHtml(pathLabel) + '</span>';
       }
       html += '</div>';
-      if (c.diff_hunk) {
-        var hunkLines = c.diff_hunk.split('\n').slice(-3).filter(function (l) { return l.trim() !== ''; }).join('\n');
-        if (hunkLines) {
-          html += '<pre class="pr-comment-hunk">' + renderDiffHunk(hunkLines) + '</pre>';
-        }
-      }
+      html += renderReviewHunk(c);
       html += '<div class="pr-comment-body">' + renderMarkdown(c.body) + '</div>';
       // Reply area — inline review comments support threading
       html += buildReplyArea({
@@ -285,6 +295,7 @@ window.PRPanel = (function () {
       });
       html += '</div>';
     });
+    html += '</div>';
 
     commentsListEl.innerHTML += html;
   }
@@ -496,6 +507,72 @@ window.PRPanel = (function () {
       }
       return '<span>' + line + '</span>';
     }).join('\n');
+  }
+
+  // Full inline-comment hunk with line numbers + target line highlight.
+  function renderReviewHunk(c) {
+    if (!c.diff_hunk) return '';
+    var raw = c.diff_hunk.replace(/\n+$/, '');
+    if (!raw) return '';
+    var lines = raw.split('\n');
+
+    // Locate the (last) @@ header and seed starting line numbers.
+    var headerIdx = -1;
+    for (var i = 0; i < lines.length; i++) {
+      if (/^@@.*@@/.test(lines[i])) headerIdx = i;
+    }
+    var oldLn = 0, newLn = 0;
+    if (headerIdx >= 0) {
+      var m = lines[headerIdx].match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (m) { oldLn = parseInt(m[1], 10) - 1; newLn = parseInt(m[2], 10) - 1; }
+    }
+
+    var side = c.side || 'RIGHT';
+    var targetLine = side === 'LEFT' ? (c.original_line || c.original_position) : (c.line || c.position);
+
+    var rows = lines.map(function (line, idx) {
+      var cls = 'pr-hunk-line';
+      var oldN = '', newN = '', isTarget = false;
+      if (idx === headerIdx) {
+        cls += ' pr-hunk-header-line';
+      } else {
+        var first = line.charAt(0);
+        if (first === '+') {
+          newLn++; newN = newLn; cls += ' pr-hunk-add';
+          if (side === 'RIGHT' && newLn === targetLine) isTarget = true;
+        } else if (first === '-') {
+          oldLn++; oldN = oldLn; cls += ' pr-hunk-del';
+          if (side === 'LEFT' && oldLn === targetLine) isTarget = true;
+        } else {
+          oldLn++; newLn++; oldN = oldLn; newN = newLn; cls += ' pr-hunk-ctx';
+          if ((side === 'RIGHT' && newLn === targetLine) ||
+              (side === 'LEFT' && oldLn === targetLine)) isTarget = true;
+        }
+      }
+      if (isTarget) cls += ' pr-hunk-target';
+      return { cls: cls, text: line, oldN: oldN, newN: newN };
+    });
+
+    var COLLAPSE_AT = 15;
+    var tooLong = rows.length > COLLAPSE_AT;
+    var wrapCls = 'pr-comment-hunk-wrap' + (tooLong ? ' collapsed' : '');
+
+    var html = '<div class="' + wrapCls + '">';
+    if (tooLong) {
+      html += '<button type="button" class="pr-hunk-expand-btn">'
+           +  'Show full hunk (' + rows.length + ' lines)</button>';
+    }
+    html += '<pre class="pr-comment-hunk">';
+    rows.forEach(function (r) {
+      html += '<div class="' + r.cls + '">'
+           +  '<span class="pr-hunk-ln pr-hunk-ln-old">' + r.oldN + '</span>'
+           +  '<span class="pr-hunk-ln pr-hunk-ln-new">' + r.newN + '</span>'
+           +  '<span class="pr-hunk-text">' + escHtml(r.text) + '</span>'
+           +  '</div>';
+    });
+    html += '</pre>';
+    html += '</div>';
+    return html;
   }
 
   function escHtml(s) {
