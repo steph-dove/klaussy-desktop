@@ -2248,6 +2248,12 @@ body {
   background: rgba(139, 92, 246, 0.03);
 }
 
+.pr-inline-comment.pr-inline-reply {
+  margin-left: 18px;
+  border-left-width: 2px;
+  opacity: 0.95;
+}
+
 .pr-loading, .pr-empty, .pr-error {
   padding: 24px 14px;
   font-size: 12px;
