@@ -144,6 +144,7 @@ contextBridge.exposeInMainWorld('klaus', {
   // PR interaction
   prForBranch: (worktreePath) => ipcRenderer.invoke('pr-for-branch', { worktreePath }),
   prReviewComments: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-comments', { worktreePath, prNumber }),
+  prChecks: (worktreePath, prNumber) => ipcRenderer.invoke('pr-checks', { worktreePath, prNumber }),
   prAddComment: (worktreePath, prNumber, body) => ipcRenderer.invoke('pr-add-comment', { worktreePath, prNumber, body }),
   prReview: (worktreePath, prNumber, event, body) => ipcRenderer.invoke('pr-review', { worktreePath, prNumber, event, body }),
   prAiReviewComment: (opts) => ipcRenderer.invoke('pr-ai-review-comment', opts),

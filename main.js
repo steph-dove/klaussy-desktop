@@ -1857,6 +1857,28 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
   }
 });
 
+ipcMain.handle('pr-checks', async (_event, { worktreePath, prNumber }) => {
+  try {
+    const out = ghExec(
+      ['pr', 'checks', String(prNumber), '--json', 'name,state,bucket,link,workflow,description'],
+      { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }
+    ).toString();
+    return { checks: JSON.parse(out) };
+  } catch (err) {
+    const msg = err.stderr ? err.stderr.toString() : err.message;
+    // `gh pr checks` exits non-zero when checks are failing — the JSON still
+    // prints to stdout. Try to recover from err.stdout before giving up.
+    if (err.stdout) {
+      try { return { checks: JSON.parse(err.stdout.toString()) }; } catch {}
+    }
+    // "no checks reported" is not an error
+    if (msg && /no checks reported/i.test(msg)) {
+      return { checks: [] };
+    }
+    return { checks: [], error: msg };
+  }
+});
+
 ipcMain.handle('pr-review-comments', async (_event, { worktreePath, prNumber }) => {
   try {
     // Get inline review comments via gh api

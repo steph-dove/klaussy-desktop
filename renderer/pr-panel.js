@@ -70,6 +70,8 @@ window.PRPanel = (function () {
     currentPR = null;
     prInfoEl.innerHTML = '';
     commentsListEl.innerHTML = '';
+    var checksEl = document.getElementById('pr-checks');
+    if (checksEl) checksEl.innerHTML = '';
     reloadActiveTab();
   }
 
@@ -90,6 +92,8 @@ window.PRPanel = (function () {
     if (!currentWorktreePath) return;
     prInfoEl.innerHTML = '<div class="pr-loading">Loading PR...</div>';
     commentsListEl.innerHTML = '';
+    var checksEl = document.getElementById('pr-checks');
+    if (checksEl) checksEl.innerHTML = '';
 
     var result = await window.klaus.prForBranch(currentWorktreePath);
 
@@ -107,10 +111,112 @@ window.PRPanel = (function () {
     renderPRInfo(result.pr);
     renderComments(result.pr);
 
-    // Also fetch inline review comments
-    var reviewComments = await window.klaus.prReviewComments(currentWorktreePath, result.pr.number);
+    // Fetch CI checks and inline review comments in parallel.
+    var prNumber = result.pr.number;
+    var worktreeAtRequest = currentWorktreePath;
+    var [checksResult, reviewComments] = await Promise.all([
+      window.klaus.prChecks(worktreeAtRequest, prNumber),
+      window.klaus.prReviewComments(worktreeAtRequest, prNumber),
+    ]);
+
+    // Drop stale responses if the user switched worktrees/PRs mid-flight.
+    if (worktreeAtRequest !== currentWorktreePath || !currentPR || currentPR.number !== prNumber) return;
+
+    renderPRChecks(checksResult);
+
     if (reviewComments.comments && reviewComments.comments.length > 0) {
       renderReviewComments(reviewComments.comments);
+    }
+  }
+
+  function renderPRChecks(result) {
+    var host = document.getElementById('pr-checks');
+    if (!host) return;
+    host.innerHTML = '';
+
+    if (result.error) {
+      host.innerHTML = '<div class="pr-checks-empty">Checks unavailable: ' + escHtml(result.error) + '</div>';
+      return;
+    }
+    var checks = result.checks || [];
+    if (checks.length === 0) {
+      host.innerHTML = '<div class="pr-checks-empty">No checks reported.</div>';
+      return;
+    }
+
+    // gh emits normalized buckets: pass, fail, pending, skipping, cancel.
+    // Fall back to `state` when a check row has no bucket.
+    function bucketOf(c) {
+      if (c.bucket) return c.bucket;
+      var s = (c.state || '').toLowerCase();
+      if (s === 'success' || s === 'neutral') return 'pass';
+      if (s === 'failure' || s === 'timed_out' || s === 'action_required' || s === 'error') return 'fail';
+      if (s === 'cancelled') return 'cancel';
+      if (s === 'skipped') return 'skipping';
+      return 'pending';
+    }
+
+    var counts = { pass: 0, fail: 0, pending: 0, cancel: 0, skipping: 0 };
+    checks.forEach(function (c) {
+      var b = bucketOf(c);
+      counts[b] = (counts[b] || 0) + 1;
+    });
+
+    var summaryBits = [];
+    if (counts.pass) summaryBits.push('<span class="pr-check-pill pass">&#10003; ' + counts.pass + ' passing</span>');
+    if (counts.fail) summaryBits.push('<span class="pr-check-pill fail">&#10007; ' + counts.fail + ' failing</span>');
+    if (counts.pending) summaryBits.push('<span class="pr-check-pill pending">&#9711; ' + counts.pending + ' pending</span>');
+    if (counts.cancel) summaryBits.push('<span class="pr-check-pill cancel">&#8854; ' + counts.cancel + ' cancelled</span>');
+    if (counts.skipping) summaryBits.push('<span class="pr-check-pill skipping">&#8211; ' + counts.skipping + ' skipped</span>');
+
+    var hasFail = counts.fail > 0;
+    var expanded = hasFail; // auto-expand when anything is failing
+
+    var html = '<div class="pr-checks-section' + (expanded ? ' expanded' : '') + '">';
+    html += '<button type="button" class="pr-checks-toggle">';
+    html += '<span class="pr-checks-summary">' + summaryBits.join(' <span class="pr-check-dot">&middot;</span> ') + '</span>';
+    html += '<span class="pr-checks-caret">&#9662;</span>';
+    html += '</button>';
+    html += '<div class="pr-checks-list">';
+    checks.forEach(function (c) {
+      var b = bucketOf(c);
+      var label = c.workflow ? (c.workflow + ' / ' + (c.name || '')) : (c.name || '(unnamed)');
+      html += '<div class="pr-check-row">';
+      html += '<span class="pr-check-bucket pr-check-bucket-' + b + '">' + bucketGlyph(b) + '</span>';
+      html += '<span class="pr-check-name">' + escHtml(label) + '</span>';
+      html += '<span class="pr-check-conclusion">' + escHtml(c.state || '') + '</span>';
+      if (c.link) {
+        html += '<a href="#" class="pr-check-link" data-url="' + escAttr(c.link) + '" title="Open in browser">&#8599;</a>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '</div>';
+
+    host.innerHTML = html;
+
+    var section = host.querySelector('.pr-checks-section');
+    var toggle = host.querySelector('.pr-checks-toggle');
+    if (toggle && section) {
+      toggle.addEventListener('click', function () { section.classList.toggle('expanded'); });
+    }
+    host.querySelectorAll('.pr-check-link').forEach(function (a) {
+      a.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.klaus.openExternal(a.dataset.url);
+      });
+    });
+  }
+
+  function bucketGlyph(b) {
+    switch (b) {
+      case 'pass': return '&#10003;';
+      case 'fail': return '&#10007;';
+      case 'pending': return '&#9711;';
+      case 'cancel': return '&#8854;';
+      case 'skipping': return '&#8211;';
+      default: return '&bull;';
     }
   }
 
