@@ -256,11 +256,38 @@ function saveSessions() {
   // otherwise keep whatever was previously saved
   if (instances.size === 0) return;
 
+  // Group claude instances by worktree so we can disambiguate when multiple
+  // terminals share a worktree. Each instance owns its own session .jsonl.
+  const claudeByWorktree = new Map();
+  for (const [, inst] of instances) {
+    const saveMode = inst.originalMode || inst.mode;
+    if (saveMode !== 'claude') continue;
+    if (!claudeByWorktree.has(inst.worktreePath)) claudeByWorktree.set(inst.worktreePath, []);
+    claudeByWorktree.get(inst.worktreePath).push(inst);
+  }
+
+  // For each worktree, resolve instance session IDs by picking .jsonl files
+  // that (a) weren't present at that instance's spawn and (b) haven't already
+  // been claimed by another instance on the same worktree. This covers fresh
+  // spawns (detect picks up the new file) and resumes where Claude forks the
+  // session into a new .jsonl (detect supersedes the initial resume id).
+  for (const [, insts] of claudeByWorktree) {
+    insts.sort((a, b) => (a.spawnTime || 0) - (b.spawnTime || 0));
+    const claimed = new Set();
+    for (const inst of insts) {
+      const detected = detectClaudeSessionId(inst, claimed);
+      if (detected) inst.claudeSessionId = detected;
+      if (inst.claudeSessionId) claimed.add(inst.claudeSessionId);
+    }
+  }
+
   const config = loadConfig();
   const sessions = [];
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
-    const sessionId = saveMode === 'claude' ? findLatestSessionId(inst.worktreePath) : null;
+    const sessionId = saveMode === 'claude'
+      ? (inst.claudeSessionId || findLatestSessionId(inst.worktreePath))
+      : null;
     sessions.push({
       sessionId: sessionId,
       name: inst.name,
@@ -274,27 +301,47 @@ function saveSessions() {
   saveConfig(config);
 }
 
-function findLatestSessionId(worktreePath) {
-  // Claude stores sessions in ~/.claude/projects/<encoded-path>/*.jsonl
+function listSessionFiles(worktreePath) {
   const claudeDir = path.join(process.env.HOME, '.claude', 'projects');
   const encodedPath = worktreePath.replace(/\//g, '-');
   const projectDir = path.join(claudeDir, encodedPath);
-
   try {
-    if (!fs.existsSync(projectDir)) return null;
-    const files = fs.readdirSync(projectDir)
+    if (!fs.existsSync(projectDir)) return [];
+    return fs.readdirSync(projectDir)
       .filter(f => f.endsWith('.jsonl'))
-      .map(f => ({
-        name: f,
-        sessionId: f.replace('.jsonl', ''),
-        mtime: fs.statSync(path.join(projectDir, f)).mtimeMs,
-      }))
-      .sort((a, b) => b.mtime - a.mtime);
-
-    return files.length > 0 ? files[0].sessionId : null;
+      .map(f => {
+        const st = fs.statSync(path.join(projectDir, f));
+        return {
+          name: f,
+          sessionId: f.replace('.jsonl', ''),
+          mtime: st.mtimeMs,
+          ctime: st.ctimeMs,
+        };
+      });
   } catch {
-    return null;
+    return [];
   }
+}
+
+function snapshotSessionIds(worktreePath) {
+  return new Set(listSessionFiles(worktreePath).map(f => f.sessionId));
+}
+
+// Find the session id for a freshly-spawned claude instance: pick the .jsonl
+// that didn't exist at spawn and isn't claimed by another instance. Prefer the
+// oldest-created "new" file so concurrent spawns pair up in spawn order.
+function detectClaudeSessionId(inst, claimed) {
+  const preSpawn = inst.preSpawnSessionIds || new Set();
+  const files = listSessionFiles(inst.worktreePath)
+    .filter(f => !preSpawn.has(f.sessionId))
+    .filter(f => !claimed || !claimed.has(f.sessionId))
+    .sort((a, b) => a.ctime - b.ctime);
+  return files.length > 0 ? files[0].sessionId : null;
+}
+
+function findLatestSessionId(worktreePath) {
+  const files = listSessionFiles(worktreePath).sort((a, b) => b.mtime - a.mtime);
+  return files.length > 0 ? files[0].sessionId : null;
 }
 
 // ---- Idle / Prompt Detection (A1) ----
@@ -737,6 +784,9 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     id, name, worktreePath, branch, mode, originalMode: mode,
     pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {},
     subTerminals: [], nextSubId: 1,
+    spawnTime: Date.now(),
+    preSpawnSessionIds: mode === 'claude' ? snapshotSessionIds(worktreePath) : new Set(),
+    claudeSessionId: mode === 'claude' ? (resumeSessionId || null) : null,
   };
   initIdleDetectionFields(instance);
   instances.set(id, instance);
@@ -915,13 +965,17 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   // because mode will be 'shell' at this point
   try { inst.pty.kill(); } catch {}
 
-  // Resume as Claude
+  // Resume as Claude — prefer this instance's tracked session so multiple
+  // terminals on the same worktree don't collide on the "latest" .jsonl.
   const userShell = process.env.SHELL || '/bin/zsh';
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const latestSession = findLatestSessionId(inst.worktreePath);
-  const claudeCmd = latestSession ? `${claudeBin} --resume ${latestSession}` : claudeBin;
+  const resumeId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath);
+  const claudeCmd = resumeId ? `${claudeBin} --resume ${resumeId}` : claudeBin;
   inst.mode = 'claude';
+  inst.spawnTime = Date.now();
+  inst.preSpawnSessionIds = snapshotSessionIds(inst.worktreePath);
+  inst.claudeSessionId = resumeId || null;
 
   const args = ['-l', '-c', claudeCmd];
   const ptyProc = pty.spawn(userShell, args, {
