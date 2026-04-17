@@ -187,7 +187,7 @@ window.TerminalManager = (function () {
       var files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
         var paths = files.map(function (f) {
-          var p = f.path;
+          var p = window.klaus.getPathForFile(f);
           return p.includes(' ') ? '"' + p + '"' : p;
         }).join(' ');
         window.klaus.writeTerminal(id, paths);

@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('klaus', {
   // Session persistence
@@ -19,9 +19,12 @@ contextBridge.exposeInMainWorld('klaus', {
   // Multi-window
   newWindow: () => ipcRenderer.invoke('new-window'),
   listWorktrees: () => ipcRenderer.invoke('list-worktrees'),
+  hideWorktree: (worktreePath) => ipcRenderer.invoke('hide-worktree', { worktreePath }),
 
   // Task management
   createTask: (name, repoPath, mode, basePath, envVars) => ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars }),
+  listBranches: (repoPath) => ipcRenderer.invoke('list-branches', { repoPath }),
+  checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
   attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),
   browseDirectory: () => ipcRenderer.invoke('browse-directory'),
   listTasks: () => ipcRenderer.invoke('list-tasks'),
@@ -58,6 +61,9 @@ contextBridge.exposeInMainWorld('klaus', {
   onPreferencesChanged: (callback) => {
     ipcRenderer.on('preferences-changed', (_event, prefs) => callback(prefs));
   },
+
+  // File utilities
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 
   // Terminal I/O
   writeTerminal: (id, data, subId) => ipcRenderer.send('write-terminal', { id, data, subId }),
@@ -140,12 +146,15 @@ contextBridge.exposeInMainWorld('klaus', {
   prReviewComments: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-comments', { worktreePath, prNumber }),
   prAddComment: (worktreePath, prNumber, body) => ipcRenderer.invoke('pr-add-comment', { worktreePath, prNumber, body }),
   prReview: (worktreePath, prNumber, event, body) => ipcRenderer.invoke('pr-review', { worktreePath, prNumber, event, body }),
+  prAiReviewComment: (opts) => ipcRenderer.invoke('pr-ai-review-comment', opts),
+  prReplyToComment: (worktreePath, prNumber, commentId, body) => ipcRenderer.invoke('pr-reply-to-comment', { worktreePath, prNumber, commentId, body }),
 
   // Explain diff
   explainDiff: (worktreePath, file, hunk) => ipcRenderer.invoke('explain-diff', { worktreePath, file, hunk }),
 
   // File viewer (Phase 7) + File tree & search (C1-C3)
   readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
+  writeFile: (filePath, content) => ipcRenderer.invoke('write-file', { filePath, content }),
   listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
   searchFiles: (worktreePath, query) => ipcRenderer.invoke('search-files', { worktreePath, query }),
 

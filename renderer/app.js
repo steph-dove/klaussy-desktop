@@ -451,8 +451,11 @@
     item.className = 'task-item worktree-item';
     item.dataset.path = wt.path;
 
+    var iconColor = AppUtils.iconColor(wt.name);
+    var iconLetter = (wt.name || '?').charAt(0).toUpperCase();
     item.innerHTML =
       '<span class="status-dot idle"></span>' +
+      '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(wt.name) + '">' + iconLetter + '</span>' +
       '<div class="saved-session-info">' +
         '<span class="task-name" title="' + escHtml(wt.path) + '">' + escHtml(wt.name) + '</span>' +
         '<span class="saved-session-detail">' + escHtml(wt.branch) + '</span>' +
@@ -460,6 +463,7 @@
       '<div class="saved-session-actions">' +
         '<button class="worktree-open-claude" title="Open with Claude Code">cc</button>' +
         '<button class="worktree-open-shell" title="Open shell">sh</button>' +
+        '<button class="worktree-remove" title="Remove worktree">\u00d7</button>' +
       '</div>';
 
     item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
@@ -476,6 +480,18 @@
       if (result.error) return;
       addTaskToUI(result);
       switchToTask(result.id);
+    });
+
+    item.querySelector('.worktree-remove').addEventListener('click', async function (e) {
+      e.stopPropagation();
+      await window.klaus.hideWorktree(wt.path);
+      item.remove();
+    });
+
+    item.addEventListener('click', function () {
+      if (AppState.sidebarCollapsed) {
+        item.querySelector('.worktree-open-claude').click();
+      }
     });
 
     taskList.appendChild(item);
@@ -502,8 +518,11 @@
 
       var modeLabel = s.mode === 'shell' ? 'SH' : 'cc';
       var modeTitle = s.mode === 'shell' ? 'Previous shell session' : 'Previous session';
+      var sIconColor = AppUtils.iconColor(s.name);
+      var sIconLetter = (s.name || '?').charAt(0).toUpperCase();
       item.innerHTML =
         '<span class="status-dot saved"></span>' +
+        '<span class="collapsed-icon" style="background:' + sIconColor + '" title="' + escHtml(s.name) + '">' + sIconLetter + '</span>' +
         '<span class="task-mode" title="' + modeTitle + '">' + modeLabel + '</span>' +
         '<div class="saved-session-info">' +
           '<span class="task-name" title="' + escHtml(s.worktreePath || '') + '">' + escHtml(s.name) + '</span>' +
@@ -554,6 +573,12 @@
         item.remove();
         addTaskToUI(result);
         switchToTask(result.id);
+      });
+
+      item.addEventListener('click', function () {
+        if (AppState.sidebarCollapsed) {
+          item.querySelector('.saved-session-resume').click();
+        }
       });
 
       item.querySelector('.saved-session-dismiss').addEventListener('click', function (e) {
@@ -621,6 +646,8 @@
   let selectedWorktreePath = null;
   let selectedBasePath = null;
   let selectedMode = 'claude';
+  let selectedBranch = null;
+  let branchData = [];
 
   // Shell selector
   const shellOptions = document.querySelectorAll('.shell-option');
@@ -632,6 +659,9 @@
   });
 
   // Tab switching
+  var branchFilter = document.getElementById('branch-filter');
+  var branchListEl = document.getElementById('branch-list');
+
   modalTabs.forEach(function (tab) {
     tab.addEventListener('click', function () {
       activeTab = tab.dataset.tab;
@@ -641,7 +671,55 @@
       if (activeTab === 'new') {
         setTimeout(function () { modalInput.focus(); }, 50);
       }
+      if (activeTab === 'branch') {
+        loadBranches();
+        setTimeout(function () { branchFilter.focus(); }, 50);
+      }
     });
+  });
+
+  async function loadBranches() {
+    branchListEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">Loading branches...</div>';
+    selectedBranch = null;
+    var result = await window.klaus.listBranches(AppState.repoPath);
+    if (result.error) {
+      branchListEl.innerHTML = '<div style="padding:12px;color:var(--error);font-size:13px;">' + escHtml(result.error) + '</div>';
+      return;
+    }
+    branchData = result.branches || [];
+    renderBranches('');
+  }
+
+  function renderBranches(filter) {
+    var filtered = branchData;
+    if (filter) {
+      var lc = filter.toLowerCase();
+      filtered = branchData.filter(function (b) { return b.localName.toLowerCase().includes(lc); });
+    }
+    if (filtered.length === 0) {
+      branchListEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">No matching branches</div>';
+      return;
+    }
+    branchListEl.innerHTML = filtered.map(function (b) {
+      return '<div class="branch-item' + (selectedBranch === b.localName ? ' selected' : '') + '" data-branch="' + escHtml(b.localName) + '" data-remote="' + b.isRemote + '">' +
+        '<span class="branch-name">' + escHtml(b.localName) + '</span>' +
+        (b.isRemote ? '<span class="branch-remote-tag">remote</span>' : '') +
+        '<span class="branch-meta">' + escHtml(b.date || '') + '</span>' +
+      '</div>';
+    }).join('');
+  }
+
+  branchListEl.addEventListener('click', function (e) {
+    var item = e.target.closest('.branch-item');
+    if (!item) return;
+    selectedBranch = item.dataset.branch;
+    branchListEl.querySelectorAll('.branch-item').forEach(function (el) {
+      el.classList.toggle('selected', el.dataset.branch === selectedBranch);
+    });
+  });
+
+  branchFilter.addEventListener('input', function () {
+    renderBranches(branchFilter.value.trim());
   });
 
   btnBrowse.addEventListener('click', async function () {
@@ -678,6 +756,10 @@
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
+    selectedBranch = null;
+    branchData = [];
+    branchListEl.innerHTML = '';
+    branchFilter.value = '';
     var envField = document.getElementById('modal-env-vars');
     if (envField) envField.value = '';
     // Show repo picker so user explicitly selects which repo to create worktree from
@@ -921,6 +1003,14 @@
         return;
       }
       result = await window.klaus.createTask(name, AppState.repoPath, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
+    } else if (activeTab === 'branch') {
+      if (!selectedBranch) {
+        modalCreate.disabled = false;
+        modalCreate.textContent = 'Create';
+        modalError.textContent = 'Select a branch first.';
+        return;
+      }
+      result = await window.klaus.checkoutBranch(AppState.repoPath, selectedBranch, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
     } else {
       if (!selectedWorktreePath) {
         modalCreate.disabled = false;

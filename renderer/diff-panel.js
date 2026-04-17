@@ -477,6 +477,23 @@ window.DiffPanel = (function () {
         el.classList.add('selected');
         showFileDiff(file, isStaged);
       });
+
+      el.addEventListener('dblclick', function (e) {
+        if (e.target.closest('.diff-file-action')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        window.getSelection().removeAllRanges();
+        var fab = document.getElementById('explain-selection-btn');
+        if (fab) fab.style.display = 'none';
+        refreshPaused = true;
+        var fullPath = currentWorktreePath + '/' + file;
+        setTimeout(function () {
+          if (typeof window.openFileViewer === 'function') {
+            window.openFileViewer(fullPath, file);
+          }
+          refreshPaused = false;
+        }, 50);
+      });
     });
 
     fileListEl.querySelectorAll('.diff-file-action').forEach(function (btn) {
@@ -571,19 +588,30 @@ window.DiffPanel = (function () {
   }
 
   function renderViewFullFileLink(file) {
-    return '<div class="diff-view-full-file"><a href="#" class="js-view-full-file">View full file</a> <span class="diff-view-full-path">' + escHtml(file) + '</span></div>';
+    return '<div class="diff-view-full-file"><a href="#" class="js-view-full-file">View full file</a><a href="#" class="js-edit-full-file">Edit</a> <span class="diff-view-full-path">' + escHtml(file) + '</span></div>';
   }
 
   function bindViewFullFileLink(file) {
     var link = diffViewEl.querySelector('.js-view-full-file');
-    if (!link) return;
-    link.addEventListener('click', function (e) {
-      e.preventDefault();
-      var fullPath = currentWorktreePath + '/' + file;
-      if (typeof window.openFileViewer === 'function') {
-        window.openFileViewer(fullPath, file);
-      }
-    });
+    if (link) {
+      link.addEventListener('click', function (e) {
+        e.preventDefault();
+        var fullPath = currentWorktreePath + '/' + file;
+        if (typeof window.openFileViewer === 'function') {
+          window.openFileViewer(fullPath, file);
+        }
+      });
+    }
+    var editLink = diffViewEl.querySelector('.js-edit-full-file');
+    if (editLink) {
+      editLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        var fullPath = currentWorktreePath + '/' + file;
+        if (typeof window.openFileViewer === 'function') {
+          window.openFileViewer(fullPath, file);
+        }
+      });
+    }
   }
 
   function bindInlineComments(file) {
@@ -839,6 +867,8 @@ window.DiffPanel = (function () {
     if (result.url) {
       window.klaus.openExternal(result.url);
     }
+    // Refresh PR panel so it picks up the new PR
+    if (window.PRPanel) window.PRPanel.loadPR();
   }
 
   async function stageAll() {

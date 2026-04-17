@@ -15,8 +15,19 @@ window.AppUtils = (function () {
     return days + 'd ago';
   }
 
+  var _iconColors = [
+    '#5b8def', '#e05a33', '#43a047', '#ab47bc',
+    '#ef6c00', '#00897b', '#d81b60', '#5c6bc0'
+  ];
+  function iconColor(name) {
+    var hash = 0;
+    for (var i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
+    return _iconColors[Math.abs(hash) % _iconColors.length];
+  }
+
   return {
     escHtml: escHtml,
     formatAge: formatAge,
+    iconColor: iconColor,
   };
 })();
