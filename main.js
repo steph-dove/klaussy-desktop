@@ -1842,7 +1842,7 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
   try {
     const result = ghExec([
       'pr', 'view', '--json',
-      'number,title,state,body,url,headRefName,baseRefName,additions,deletions,reviewDecision,comments,reviews'
+      'number,title,state,body,url,headRefName,baseRefName,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft'
     ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
     return { pr: JSON.parse(result) };
   } catch (err) {
@@ -1854,6 +1854,19 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
       return { pr: null, error: 'Cannot access this repository. Check that `gh` is authenticated with the correct GitHub account.' };
     }
     return { pr: null, error: msg };
+  }
+});
+
+ipcMain.handle('pr-merge', async (_event, { worktreePath, prNumber, strategy }) => {
+  const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
+  if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
+  try {
+    ghExec(['pr', 'merge', String(prNumber), flag], {
+      cwd: worktreePath, stdio: 'pipe', timeout: 30000
+    });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
 

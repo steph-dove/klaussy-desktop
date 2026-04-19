@@ -108,6 +108,14 @@
                 <button id="btn-pr-comment" title="Post a general comment">Comment</button>
                 <button id="btn-pr-approve" title="Approve this PR">Approve</button>
                 <button id="btn-pr-request-changes" title="Request changes">Request Changes</button>
+                <div id="pr-merge-wrap">
+                  <button id="btn-pr-merge" disabled title="Merge">Merge &#9662;</button>
+                  <div id="pr-merge-menu" class="pr-merge-menu" hidden>
+                    <button type="button" data-strategy="merge">Create a merge commit</button>
+                    <button type="button" data-strategy="squash">Squash and merge</button>
+                    <button type="button" data-strategy="rebase">Rebase and merge</button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

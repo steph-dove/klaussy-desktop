@@ -3,6 +3,7 @@ window.PRPanel = (function () {
   var prInfoEl, commentsListEl, commentInput;
   var currentWorktreePath = null;
   var currentPR = null;
+  var currentChecks = null;
   var replyCounter = 0;
 
   function init() {
@@ -13,6 +14,7 @@ window.PRPanel = (function () {
     document.getElementById('btn-pr-comment').addEventListener('click', submitComment);
     document.getElementById('btn-pr-approve').addEventListener('click', function () { submitReview('approve'); });
     document.getElementById('btn-pr-request-changes').addEventListener('click', function () { submitReview('request-changes'); });
+    initMergeControls();
 
     // Event delegation for all comment interactions
     commentsListEl.addEventListener('click', function (e) {
@@ -68,10 +70,12 @@ window.PRPanel = (function () {
   function setWorktree(worktreePath) {
     currentWorktreePath = worktreePath;
     currentPR = null;
+    currentChecks = null;
     prInfoEl.innerHTML = '';
     commentsListEl.innerHTML = '';
     var checksEl = document.getElementById('pr-checks');
     if (checksEl) checksEl.innerHTML = '';
+    updateMergeButton();
     reloadActiveTab();
   }
 
@@ -108,8 +112,10 @@ window.PRPanel = (function () {
     }
 
     currentPR = result.pr;
+    currentChecks = null;
     renderPRInfo(result.pr);
     renderComments(result.pr);
+    updateMergeButton();
 
     // Fetch CI checks and inline review comments in parallel.
     var prNumber = result.pr.number;
@@ -122,7 +128,9 @@ window.PRPanel = (function () {
     // Drop stale responses if the user switched worktrees/PRs mid-flight.
     if (worktreeAtRequest !== currentWorktreePath || !currentPR || currentPR.number !== prNumber) return;
 
+    currentChecks = checksResult;
     renderPRChecks(checksResult);
+    updateMergeButton();
 
     if (reviewComments.comments && reviewComments.comments.length > 0) {
       renderReviewComments(reviewComments.comments);
@@ -689,6 +697,93 @@ window.PRPanel = (function () {
 
   function escAttr(s) {
     return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
+  }
+
+  // ---- Merge controls (F3) ----
+
+  function initMergeControls() {
+    var btn = document.getElementById('btn-pr-merge');
+    var menu = document.getElementById('pr-merge-menu');
+    if (!btn || !menu) return;
+
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (btn.disabled) return;
+      menu.hidden = !menu.hidden;
+    });
+
+    menu.addEventListener('click', function (e) {
+      var target = e.target.closest('button[data-strategy]');
+      if (!target) return;
+      menu.hidden = true;
+      mergePR(target.dataset.strategy);
+    });
+
+    // Dismiss menu on outside click
+    document.addEventListener('click', function (e) {
+      if (!menu.hidden && !menu.contains(e.target) && e.target !== btn) {
+        menu.hidden = true;
+      }
+    });
+  }
+
+  function mergeGateReason(pr, checks) {
+    if (!pr) return 'No PR loaded';
+    if (pr.state !== 'OPEN') return 'PR is ' + pr.state.toLowerCase();
+    if (pr.isDraft) return 'PR is a draft';
+    if (pr.mergeable === 'CONFLICTING') return 'PR has merge conflicts';
+    if (pr.reviewDecision === 'CHANGES_REQUESTED') return 'Changes requested';
+    // mergeStateStatus values: BLOCKED, CLEAN, DIRTY, DRAFT, HAS_HOOKS, UNKNOWN, UNSTABLE, BEHIND
+    if (pr.mergeStateStatus === 'DIRTY') return 'Branch has conflicts with base';
+    if (pr.mergeStateStatus === 'BLOCKED') {
+      // Refine: prefer a checks-based reason if available
+      if (checks && Array.isArray(checks.checks)) {
+        var failing = checks.checks.filter(function (c) { return (c.bucket || '').toLowerCase() === 'fail'; }).length;
+        if (failing > 0) return failing + ' failing check' + (failing === 1 ? '' : 's');
+      }
+      return 'Blocked by branch protection';
+    }
+    if (pr.mergeStateStatus === 'BEHIND') return 'Branch is behind base';
+    if (pr.mergeable === 'UNKNOWN' && !pr.mergeStateStatus) return 'Mergeability still computing';
+    return null;
+  }
+
+  function updateMergeButton() {
+    var btn = document.getElementById('btn-pr-merge');
+    var menu = document.getElementById('pr-merge-menu');
+    if (!btn) return;
+    if (menu) menu.hidden = true;
+
+    var reason = mergeGateReason(currentPR, currentChecks);
+    if (reason) {
+      btn.disabled = true;
+      btn.title = reason;
+      btn.classList.remove('ready');
+    } else {
+      btn.disabled = false;
+      btn.title = 'Merge this PR';
+      btn.classList.add('ready');
+    }
+  }
+
+  async function mergePR(strategy) {
+    if (!currentPR || !currentWorktreePath) return;
+    var btn = document.getElementById('btn-pr-merge');
+    var origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Merging...';
+
+    var result = await window.klaus.prMerge(currentWorktreePath, currentPR.number, strategy);
+
+    btn.textContent = origText;
+
+    if (result.error) {
+      alert('Merge failed: ' + result.error);
+      updateMergeButton();
+      return;
+    }
+
+    await loadPR();
   }
 
   return { init: init, setWorktree: setWorktree, loadPR: loadPR };
