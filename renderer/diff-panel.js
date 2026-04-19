@@ -65,19 +65,25 @@ window.DiffPanel = (function () {
   // --- Selection-based Explain ---
 
   function initSelectionExplain() {
-    // Create floating explain button
-    var fab = document.createElement('button');
-    fab.id = 'explain-selection-btn';
-    fab.textContent = 'Explain';
+    // Create floating action group (Explain + Comment).
+    var fab = document.createElement('div');
+    fab.id = 'diff-selection-fab';
     fab.style.display = 'none';
+    fab.innerHTML =
+      '<button id="explain-selection-btn" type="button" title="Explain selection">Explain</button>' +
+      '<button id="comment-selection-btn" type="button" title="Post as PR review comment">Comment</button>';
     document.body.appendChild(fab);
 
     // Create right-click context menu
     var menu = document.createElement('div');
     menu.id = 'diff-context-menu';
     menu.style.display = 'none';
-    menu.innerHTML = '<div class="diff-ctx-item" data-action="explain">Explain Selection</div>';
+    menu.innerHTML =
+      '<div class="diff-ctx-item" data-action="explain">Explain Selection</div>' +
+      '<div class="diff-ctx-item" data-action="comment">Post PR Comment…</div>';
     document.body.appendChild(menu);
+
+    var commentBtn = fab.querySelector('#comment-selection-btn');
 
     // Track selection in the diff view area
     var diffContent = document.getElementById('diff-content');
@@ -102,24 +108,25 @@ window.DiffPanel = (function () {
       }
       // Pause refresh while text is selected
       refreshPaused = true;
-      // Position button near the end of the selection
+      // Position near the end of the selection
       var range = sel.getRangeAt(0);
       var rect = range.getBoundingClientRect();
-      fab.style.display = 'block';
+      fab.style.display = 'flex';
       fab.style.top = (rect.top - 32 + window.scrollY) + 'px';
-      fab.style.left = (rect.right - 60) + 'px';
+      fab.style.left = Math.max(4, rect.right - fab.offsetWidth) + 'px';
     });
 
-    // Floating button click
-    fab.addEventListener('mousedown', function (e) {
-      e.preventDefault(); // prevent clearing the selection
-    });
-    fab.addEventListener('click', function () {
+    // Prevent selection loss on button mousedown
+    fab.addEventListener('mousedown', function (e) { e.preventDefault(); });
+
+    fab.querySelector('#explain-selection-btn').addEventListener('click', function () {
       var text = getSelectedDiffText();
-      if (text) {
-        fab.style.display = 'none';
-        explainSelection(text);
-      }
+      if (text) { fab.style.display = 'none'; explainSelection(text); }
+    });
+
+    commentBtn.addEventListener('click', function () {
+      fab.style.display = 'none';
+      commentOnSelection();
     });
 
     // Right-click context menu in diff area
@@ -141,12 +148,123 @@ window.DiffPanel = (function () {
       if (item.dataset.action === 'explain') {
         var text = getSelectedDiffText();
         if (text) explainSelection(text);
+      } else if (item.dataset.action === 'comment') {
+        commentOnSelection();
       }
     });
 
     // Hide context menu on click elsewhere
     document.addEventListener('click', function () {
       menu.style.display = 'none';
+    });
+  }
+
+  // Compute the PR comment range (side + line, optional start) from the current
+  // text selection — maps selected text to .diff-line elements with data-*-ln.
+  function computeSelectionCommentRange() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return null;
+    var range = sel.getRangeAt(0);
+    var allLines = Array.from(diffViewEl.querySelectorAll('.diff-line'));
+    var touched = allLines.filter(function (el) {
+      try { return range.intersectsNode(el); } catch (_) { return false; }
+    });
+    var rightLines = [], leftLines = [];
+    touched.forEach(function (el) {
+      if (el.classList.contains('diff-add') || el.classList.contains('diff-context')) {
+        var n = parseInt(el.dataset.newLn, 10);
+        if (!isNaN(n)) rightLines.push(n);
+      } else if (el.classList.contains('diff-del')) {
+        var o = parseInt(el.dataset.oldLn, 10);
+        if (!isNaN(o)) leftLines.push(o);
+      }
+    });
+    var useRight = rightLines.length > 0;
+    var pool = useRight ? rightLines : leftLines;
+    if (!pool.length) return null;
+    pool.sort(function (a, b) { return a - b; });
+    var side = useRight ? 'RIGHT' : 'LEFT';
+    var first = pool[0], last = pool[pool.length - 1];
+    var out = { side: side, line: last };
+    if (first !== last) { out.startLine = first; out.startSide = side; }
+    // Remember the anchor element for where to insert the composer
+    out.anchorEl = touched[touched.length - 1];
+    return out;
+  }
+
+  function commentOnSelection() {
+    var pr = (window.PRPanel && window.PRPanel.getCurrentPR) ? window.PRPanel.getCurrentPR() : null;
+    if (!pr || !pr.number || !pr.headRefOid) {
+      alert('No PR loaded for this worktree.');
+      return;
+    }
+    var range = computeSelectionCommentRange();
+    if (!range) {
+      alert('Select one or more diff lines (add / delete / context) to comment on.');
+      return;
+    }
+    var file = selectedFile;
+    if (!file) { alert('No file selected.'); return; }
+
+    // Clear selection + dismiss any existing composer
+    window.getSelection().removeAllRanges();
+    var existing = diffViewEl.querySelector('.diff-comment-area');
+    if (existing) existing.remove();
+
+    var rangeLabel = range.startLine
+      ? file + ':L' + range.startLine + '-L' + range.line
+      : file + ':L' + range.line;
+
+    var area = document.createElement('div');
+    area.className = 'diff-comment-area';
+    area.innerHTML =
+      '<div class="diff-comment-header">' +
+        '<span>Comment on <code>' + escHtml(rangeLabel) + '</code></span>' +
+        '<button class="diff-comment-close" type="button" title="Close">&times;</button>' +
+      '</div>' +
+      '<textarea class="diff-comment-input" placeholder="Write a comment..." rows="3"></textarea>' +
+      '<div class="diff-comment-actions">' +
+        '<button class="diff-comment-post" type="button">Post</button>' +
+      '</div>';
+
+    var anchor = range.anchorEl || diffViewEl.lastElementChild;
+    anchor.after(area);
+
+    var ta = area.querySelector('.diff-comment-input');
+    var postBtn = area.querySelector('.diff-comment-post');
+    ta.focus();
+
+    function close() { area.remove(); refreshPaused = false; }
+    area.querySelector('.diff-comment-close').addEventListener('click', close);
+    ta.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') close();
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); postBtn.click(); }
+    });
+
+    postBtn.addEventListener('click', async function () {
+      var body = ta.value.trim();
+      if (!body) return;
+      postBtn.disabled = true;
+      postBtn.textContent = '...';
+      var result = await window.klaus.prAddReviewComment({
+        worktreePath: currentWorktreePath,
+        prNumber: pr.number,
+        body: body,
+        path: file,
+        line: range.line,
+        side: range.side,
+        startLine: range.startLine || null,
+        startSide: range.startSide || null,
+        commitId: pr.headRefOid,
+      });
+      if (result && result.error) {
+        alert('Post failed: ' + result.error);
+        postBtn.disabled = false;
+        postBtn.textContent = 'Post';
+        return;
+      }
+      close();
+      if (window.PRPanel && window.PRPanel.loadPR) window.PRPanel.loadPR();
     });
   }
 
@@ -625,22 +743,20 @@ window.DiffPanel = (function () {
         var existing = diffViewEl.querySelector('.inline-comment');
         if (existing) existing.remove();
 
-        var input = document.createElement('div');
-        input.className = 'inline-comment';
-        input.innerHTML = '<input type="text" placeholder="Comment for Claude..." class="inline-comment-input" />';
-        lineEl.after(input);
+        var wrap = document.createElement('div');
+        wrap.className = 'inline-comment';
+        wrap.innerHTML = '<input type="text" placeholder="Comment for Claude..." class="inline-comment-input" />';
+        lineEl.after(wrap);
 
-        var inp = input.querySelector('input');
+        var inp = wrap.querySelector('input');
         inp.focus();
         inp.addEventListener('keydown', function (e) {
           if (e.key === 'Enter') {
             var text = inp.value.trim();
-            if (text && commentCallback) {
-              commentCallback('Regarding ' + file + ': ' + text);
-            }
-            input.remove();
+            if (text && commentCallback) commentCallback('Regarding ' + file + ': ' + text);
+            wrap.remove();
           }
-          if (e.key === 'Escape') input.remove();
+          if (e.key === 'Escape') wrap.remove();
         });
       });
     });
@@ -769,6 +885,7 @@ window.DiffPanel = (function () {
     }
 
     var html = '';
+    var oldLn = 0, newLn = 0; // running line counters driven by @@ headers
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       var cls = 'diff-line';
@@ -778,6 +895,8 @@ window.DiffPanel = (function () {
         html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
       } else if (line.startsWith('@@')) {
         cls += ' diff-hunk';
+        var hm = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (hm) { oldLn = parseInt(hm[1], 10) - 1; newLn = parseInt(hm[2], 10) - 1; }
         var hi = hunks.findIndex(function (h) { return h.start === i; });
         if (hi >= 0) {
           html += '<div class="' + cls + '" data-hunk-index="' + hi + '">' +
@@ -788,11 +907,13 @@ window.DiffPanel = (function () {
           html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
         }
       } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        newLn++;
         cls += ' diff-add';
-        html += '<div class="' + cls + '"><span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
+        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('-') && !line.startsWith('---')) {
+        oldLn++;
         cls += ' diff-del';
-        html += '<div class="' + cls + '"><span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT"><span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('diff ')) {
         cls += ' diff-header';
         html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
@@ -800,8 +921,9 @@ window.DiffPanel = (function () {
         cls += ' diff-meta';
         html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
       } else {
+        oldLn++; newLn++;
         cls += ' diff-context';
-        html += '<div class="' + cls + '"><span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
       }
     }
 

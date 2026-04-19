@@ -146,6 +146,7 @@ contextBridge.exposeInMainWorld('klaus', {
   prReviewComments: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-comments', { worktreePath, prNumber }),
   prChecks: (worktreePath, prNumber) => ipcRenderer.invoke('pr-checks', { worktreePath, prNumber }),
   prMerge: (worktreePath, prNumber, strategy) => ipcRenderer.invoke('pr-merge', { worktreePath, prNumber, strategy }),
+  prAddReviewComment: (opts) => ipcRenderer.invoke('pr-add-review-comment', opts),
   prAddComment: (worktreePath, prNumber, body) => ipcRenderer.invoke('pr-add-comment', { worktreePath, prNumber, body }),
   prReview: (worktreePath, prNumber, event, body) => ipcRenderer.invoke('pr-review', { worktreePath, prNumber, event, body }),
   prAiReviewComment: (opts) => ipcRenderer.invoke('pr-ai-review-comment', opts),

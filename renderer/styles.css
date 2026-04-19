@@ -1722,6 +1722,92 @@ body {
   border-color: var(--accent);
 }
 
+/* Hunk comment composer */
+.diff-comment-area {
+  margin: 4px 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid #79c0ff;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.diff-comment-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 10px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.diff-comment-header code {
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text);
+}
+
+.diff-comment-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 4px;
+}
+
+.diff-comment-close:hover {
+  color: var(--text);
+}
+
+.diff-comment-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  background: var(--input-bg);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.diff-comment-input:focus {
+  background: var(--surface);
+}
+
+.diff-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 10px;
+}
+
+.diff-comment-post {
+  padding: 5px 14px;
+  background: #132d3d;
+  color: #79c0ff;
+  border: 1px solid rgba(121, 192, 255, 0.2);
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.diff-comment-post:hover {
+  background: #1a3e54;
+}
+
+.diff-comment-post:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 /* Explanation bubble */
 .diff-explanation {
   margin: 4px 8px;
@@ -1763,10 +1849,15 @@ body {
   word-wrap: break-word;
 }
 
-/* Selection Explain button & context menu */
-#explain-selection-btn {
+/* Selection action buttons & context menu */
+#diff-selection-fab {
   position: fixed;
   z-index: 100;
+  display: flex;
+  gap: 4px;
+}
+
+#diff-selection-fab button {
   padding: 4px 12px;
   font-size: 11px;
   font-weight: 600;
@@ -1776,11 +1867,16 @@ body {
   border-radius: 4px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  transition: opacity 0.1s;
+  transition: filter 0.1s;
+  font-family: inherit;
 }
 
-#explain-selection-btn:hover {
+#diff-selection-fab button:hover {
   filter: brightness(1.15);
+}
+
+#comment-selection-btn {
+  background: #1f6feb;
 }
 
 #diff-context-menu {

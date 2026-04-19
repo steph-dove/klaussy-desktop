@@ -1842,7 +1842,7 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
   try {
     const result = ghExec([
       'pr', 'view', '--json',
-      'number,title,state,body,url,headRefName,baseRefName,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft'
+      'number,title,state,body,url,headRefName,baseRefName,headRefOid,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft'
     ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
     return { pr: JSON.parse(result) };
   } catch (err) {
@@ -1854,6 +1854,30 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
       return { pr: null, error: 'Cannot access this repository. Check that `gh` is authenticated with the correct GitHub account.' };
     }
     return { pr: null, error: msg };
+  }
+});
+
+ipcMain.handle('pr-add-review-comment', async (_event, { worktreePath, prNumber, body, path: filePath, line, side, startLine, startSide, commitId }) => {
+  try {
+    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    const repo = JSON.parse(repoResult).nameWithOwner;
+    const args = [
+      'api', '--method', 'POST',
+      `repos/${repo}/pulls/${prNumber}/comments`,
+      '-f', 'body=' + body,
+      '-f', 'path=' + filePath,
+      '-F', 'line=' + line,
+      '-f', 'side=' + (side || 'RIGHT'),
+      '-f', 'commit_id=' + commitId,
+    ];
+    if (startLine && startLine !== line) {
+      args.push('-F', 'start_line=' + startLine);
+      args.push('-f', 'start_side=' + (startSide || side || 'RIGHT'));
+    }
+    ghExec(args, { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
 
