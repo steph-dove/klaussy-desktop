@@ -76,7 +76,26 @@ window.PRPanel = (function () {
     var checksEl = document.getElementById('pr-checks');
     if (checksEl) checksEl.innerHTML = '';
     updateMergeButton();
+    // Background fetch — populates currentPR without rendering into the PR
+    // tab, so the diff-panel Comment action works even from the Changes tab.
+    fetchPRSilent(worktreePath);
     reloadActiveTab();
+  }
+
+  async function fetchPRSilent(worktreePathAtRequest) {
+    if (!worktreePathAtRequest) return;
+    var result;
+    try {
+      result = await window.klaus.prForBranch(worktreePathAtRequest);
+    } catch (_) { return; }
+    // Drop the response if the user has since switched worktrees or the PR tab
+    // has already rendered a fresher result.
+    if (worktreePathAtRequest !== currentWorktreePath) return;
+    if (currentPR) return;
+    if (result && result.pr) {
+      currentPR = result.pr;
+      updateMergeButton();
+    }
   }
 
   function reloadActiveTab() {
@@ -85,10 +104,8 @@ window.PRPanel = (function () {
     var target = activeTab.dataset.tab;
     if (target === 'pr') {
       loadPR();
-    } else if (target !== 'changes') {
-      if (window._reloadDiffTab) {
-        window._reloadDiffTab(target, currentWorktreePath);
-      }
+    } else if (target !== 'changes' && window._reloadDiffTab) {
+      window._reloadDiffTab(target, currentWorktreePath);
     }
   }
 
@@ -786,5 +803,9 @@ window.PRPanel = (function () {
     await loadPR();
   }
 
-  return { init: init, setWorktree: setWorktree, loadPR: loadPR };
+  function getCurrentPR() {
+    return currentPR;
+  }
+
+  return { init: init, setWorktree: setWorktree, loadPR: loadPR, getCurrentPR: getCurrentPR };
 })();
