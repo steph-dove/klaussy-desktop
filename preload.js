@@ -144,6 +144,9 @@ contextBridge.exposeInMainWorld('klaus', {
   // PR interaction
   prForBranch: (worktreePath) => ipcRenderer.invoke('pr-for-branch', { worktreePath }),
   prReviewComments: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-comments', { worktreePath, prNumber }),
+  prReviewThreads: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-threads', { worktreePath, prNumber }),
+  prResolveThread: (worktreePath, threadId) => ipcRenderer.invoke('pr-resolve-thread', { worktreePath, threadId }),
+  prUnresolveThread: (worktreePath, threadId) => ipcRenderer.invoke('pr-unresolve-thread', { worktreePath, threadId }),
   prChecks: (worktreePath, prNumber) => ipcRenderer.invoke('pr-checks', { worktreePath, prNumber }),
   prMerge: (worktreePath, prNumber, strategy) => ipcRenderer.invoke('pr-merge', { worktreePath, prNumber, strategy }),
   prAddReviewComment: (opts) => ipcRenderer.invoke('pr-add-review-comment', opts),

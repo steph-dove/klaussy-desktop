@@ -2350,6 +2350,153 @@ body {
   opacity: 0.95;
 }
 
+/* Review threads (F4) */
+.pr-thread {
+  margin: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg, var(--surface));
+  overflow: hidden;
+}
+
+.pr-thread-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.pr-thread.pr-thread-resolved .pr-thread-header {
+  cursor: pointer;
+}
+
+.pr-thread-path {
+  flex: 1 1 auto;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pr-thread-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pr-thread-badge {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  border: 1px solid transparent;
+}
+
+.pr-thread-badge.resolved {
+  color: #2ea043;
+  background: rgba(46, 160, 67, 0.1);
+  border-color: rgba(46, 160, 67, 0.3);
+}
+
+.pr-thread-badge.outdated {
+  color: var(--text-dim);
+  background: rgba(128, 128, 128, 0.12);
+  border-color: rgba(128, 128, 128, 0.25);
+}
+
+.pr-thread-count {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.pr-thread-resolve-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.pr-thread-resolve-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.pr-thread-resolve-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.pr-thread-body {
+  padding: 4px 10px 8px;
+}
+
+/* Comments nested inside a thread card: flatten the outer chrome so the
+ * thread border is the only "card" around the conversation. */
+.pr-thread .pr-comment-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.pr-thread .pr-comment-item:last-of-type {
+  border-bottom: none;
+}
+
+.pr-thread .pr-inline-comment {
+  border-left: none;
+  background: transparent;
+  margin-left: 0;
+}
+
+.pr-thread .pr-inline-comment.pr-inline-reply {
+  margin-left: 14px;
+  padding-left: 10px;
+  border-left: 2px solid var(--border);
+}
+
+.pr-thread .pr-reply-area {
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.pr-thread-no-hunk {
+  margin: 6px 0;
+  padding: 6px 10px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+/* Collapsed resolved threads: hide the body until the header is clicked */
+.pr-thread-resolved .pr-thread-body {
+  display: none;
+}
+
+.pr-thread-resolved.pr-thread-expanded .pr-thread-body {
+  display: block;
+}
+
+.pr-thread-resolved {
+  opacity: 0.75;
+}
+
+.pr-thread-outdated .pr-thread-path {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-dim);
+}
+
 .pr-loading, .pr-empty, .pr-error {
   padding: 24px 14px;
   font-size: 12px;
