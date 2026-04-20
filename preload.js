@@ -268,6 +268,12 @@ contextBridge.exposeInMainWorld('klaus', {
   prAddIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),
   prReplyToReviewComment: (inReplyTo, body) =>
     ipcRenderer.invoke('pr-reply-to-review-comment', { inReplyTo, body }),
+  prCheckoutLocally: () => ipcRenderer.invoke('pr-checkout-locally'),
+  onPrCheckoutReady: (callback) => {
+    const handler = (_event, task) => callback(task);
+    ipcRenderer.on('pr-checkout-ready', handler);
+    return () => ipcRenderer.removeListener('pr-checkout-ready', handler);
+  },
   popOutPrReview: () => ipcRenderer.invoke('pop-out-pr-review'),
   popInPrReview: () => ipcRenderer.invoke('pop-in-pr-review'),
   onPrReviewState: (callback) => {

@@ -101,6 +101,7 @@ window.PrReview = (function () {
         + '</div>'
         + '<div class="pr-review-actions">'
           + '<a href="#" class="pr-review-external" data-url="' + escHtml(meta.url || '') + '">Open on GitHub</a>'
+          + '<button class="pr-review-btn js-checkout-local" title="Fetch this PR into a new worktree and spawn a task">Check out locally</button>'
           + (isPopout
               ? '<button class="pr-review-btn js-pop-in" title="Return to main window">\u21B2 Pop back in</button>'
               : '<button class="pr-review-btn js-pop-out" title="Open in a separate window">Pop out \u2197</button>')
@@ -518,6 +519,20 @@ window.PrReview = (function () {
     if (popIn) popIn.addEventListener('click', function () { window.klaus.popInPrReview(); });
     var closeBtn = hostEl.querySelector('.js-close');
     if (closeBtn) closeBtn.addEventListener('click', function () { window.klaus.prReviewClose(); });
+    var checkoutBtn = hostEl.querySelector('.js-checkout-local');
+    if (checkoutBtn) checkoutBtn.addEventListener('click', async function () {
+      checkoutBtn.disabled = true;
+      var prev = checkoutBtn.textContent;
+      checkoutBtn.textContent = 'Fetching\u2026';
+      var result = await window.klaus.prCheckoutLocally();
+      if (result && result.error) {
+        alert('Check out failed:\n' + result.error);
+        checkoutBtn.disabled = false;
+        checkoutBtn.textContent = prev;
+      }
+      // Success path: main clears state and broadcasts pr-checkout-ready;
+      // the main-window listener in app.js takes over from here.
+    });
   }
 
   function bindFileList() {

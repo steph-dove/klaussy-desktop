@@ -757,7 +757,7 @@ async function runKlausifyInit(worktreePath, baseBranch) {
   }
 }
 
-function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv) {
+function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber) {
   const id = nextId++;
   const userShell = process.env.SHELL || '/bin/zsh';
 
@@ -789,6 +789,13 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     spawnTime: Date.now(),
     preSpawnSessionIds: mode === 'claude' ? snapshotSessionIds(worktreePath) : new Set(),
     claudeSessionId: mode === 'claude' ? (resumeSessionId || null) : null,
+    // G5: if this task was spawned from a PR review "Check out locally", the
+    // PR number is recorded here so pr-for-branch can load the PR directly
+    // instead of guessing from branch-name heuristics (which fail for fork
+    // PRs where the local branch name differs from the original head ref).
+    prNumber: prNumber || null,
+    prBaseOwner: null,
+    prBaseRepo: null,
   };
   initIdleDetectionFields(instance);
   instances.set(id, instance);
@@ -1914,6 +1921,219 @@ ipcMain.handle('pr-refresh-threads', async () => {
   return { ok: true };
 });
 
+// Walk the user's klausify projects and return the first whose `origin`
+// remote points at <owner>/<repo> (GitHub URL, either SSH or HTTPS form).
+// Returns null when no project matches — the caller surfaces an explicit
+// "add this repo as a project" error.
+function findProjectForRepo(owner, repo) {
+  const config = loadConfig();
+  const projects = config.projects || [];
+  const needle = `${owner}/${repo}`;
+  for (const p of projects) {
+    if (!p || !p.path) continue;
+    try {
+      const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+        cwd: p.path, stdio: 'pipe',
+      }).toString().trim();
+      // Accept https://github.com/owner/repo(.git)? and git@github.com:owner/repo(.git)?
+      const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
+      if (m && `${m[1]}/${m[2]}` === needle) return p.path;
+    } catch (_) { /* skip */ }
+  }
+  return null;
+}
+
+// Scan `git worktree list --porcelain` for the worktree (if any) that has
+// `refs/heads/<branch>` checked out. Returns the worktree path or null.
+function findWorktreeForBranch(cwd, branch) {
+  try {
+    const out = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd, stdio: 'pipe',
+    }).toString();
+    // Entries are blank-line-separated "worktree <path>\nHEAD ...\nbranch ..." blocks.
+    const blocks = out.split(/\n\n+/);
+    for (const block of blocks) {
+      let wtPath = null, wtBranch = null;
+      for (const line of block.split('\n')) {
+        if (line.startsWith('worktree ')) wtPath = line.slice('worktree '.length).trim();
+        else if (line.startsWith('branch ')) wtBranch = line.slice('branch '.length).trim();
+      }
+      if (wtBranch === `refs/heads/${branch}` && wtPath) return wtPath;
+    }
+  } catch (_) {}
+  return null;
+}
+
+// G5: materialize the PR as a worktree/task so the reviewer can run it
+// locally. Uses `pull/N/head` — a virtual ref GitHub provides for every PR,
+// which works for both same-repo and fork PRs without needing the fork URL
+// as a remote.
+ipcMain.handle('pr-checkout-locally', async () => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { number, meta, baseOwner, baseRepo } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo from PR metadata' };
+
+  // The fetch/worktree must happen inside a clone of the PR's *base* repo,
+  // not whatever project happens to be active. Otherwise we'd pollute an
+  // unrelated repo with a random branch. Prefer the active project when it
+  // matches; otherwise walk all known projects for one whose origin points
+  // at baseOwner/baseRepo.
+  const active = currentRepoPath();
+  let cwd = null;
+  if (active) {
+    try {
+      const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+        cwd: active, stdio: 'pipe',
+      }).toString().trim();
+      const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
+      if (m && `${m[1]}/${m[2]}` === `${baseOwner}/${baseRepo}`) cwd = active;
+    } catch (_) {}
+  }
+  if (!cwd) cwd = findProjectForRepo(baseOwner, baseRepo);
+
+  // Auth token — grabbed once and reused for both the (potential) auto-clone
+  // and the subsequent PR-head fetch. Never printed, never embedded in any
+  // error message (URLs get scrubbed before surfacing).
+  let token = '';
+  try {
+    token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
+  } catch (_) {
+    return { error: 'Could not read gh auth token — run `gh auth login` first.' };
+  }
+  const authedUrl = `https://oauth2:${token}@github.com/${baseOwner}/${baseRepo}.git`;
+  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
+
+  // Fallback: auto-clone into klausify's userData dir when the user has no
+  // project matching the PR's base repo. Uses a partial clone (blob:none)
+  // so cloning a large monorepo for a small review doesn't pull every blob
+  // in history — git fetches only the blobs touched by the branch.
+  if (!cwd) {
+    const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
+    const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
+    if (!fs.existsSync(clonePath)) {
+      try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
+      try {
+        execFileSync('git', [
+          'clone', '--filter=blob:none',
+          authedUrl, clonePath,
+        ], { stdio: 'pipe' });
+      } catch (err) {
+        const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
+        return { error: 'Clone failed: ' + scrub(raw) };
+      }
+    }
+    cwd = clonePath;
+  }
+  // Keep the local branch name identical to the PR's head ref so the
+  // existing PR panel (which looks PRs up by headRefName) recognizes it as
+  // a PR branch. The filesystem path gets sanitized separately because
+  // headRefName may contain slashes (e.g. "feature/foo") that would create
+  // unintended nested directories.
+  const localBranch = (meta && meta.headRefName) || `pr-${number}`;
+  const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
+
+  // Pre-flight: the user may already have a worktree on this branch (and an
+  // in-flight task pointing at it, or just an external worktree). Reusing
+  // the existing worktree is friendlier than forcing a re-fetch that would
+  // fail with "refusing to fetch into branch ... checked out at ...".
+  const existingWorktreePath = findWorktreeForBranch(cwd, localBranch);
+  if (existingWorktreePath) {
+    // Already tracked as a task? Focus it instead of spawning a duplicate.
+    const existingTask = Array.from(instances.values()).find(i => i.worktreePath === existingWorktreePath);
+    if (existingTask) {
+      // Make sure the PR hint is set so the panel loads cleanly.
+      if (!existingTask.prNumber) existingTask.prNumber = number;
+      if (!existingTask.prBaseOwner) existingTask.prBaseOwner = baseOwner;
+      if (!existingTask.prBaseRepo) existingTask.prBaseRepo = baseRepo;
+
+      if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
+        activePrReview.popout.close();
+      }
+      activePrReview = null;
+      broadcastPrReview();
+
+      const payload = {
+        id: existingTask.id, name: existingTask.name,
+        worktreePath: existingTask.worktreePath, branch: existingTask.branch, mode: existingTask.mode,
+      };
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', payload);
+      }
+      return { ok: true, task: payload, reused: true };
+    }
+
+    // Worktree exists but no task is attached; spawn one pointing at it.
+    const task = spawnInWorktree(localBranch, existingWorktreePath, localBranch, 'claude', null, null, number);
+    const inst = instances.get(task.id);
+    if (inst) {
+      inst.prBaseOwner = baseOwner;
+      inst.prBaseRepo = baseRepo;
+    }
+    if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
+      activePrReview.popout.close();
+    }
+    activePrReview = null;
+    broadcastPrReview();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', task);
+    }
+    return { ok: true, task, reused: true };
+  }
+
+  // Fetch PR head using the same auth URL as above. Force refspec (+) lets
+  // re-runs update the local branch when new commits land on the PR.
+  try {
+    execFileSync('git', ['fetch', authedUrl, `+refs/pull/${number}/head:refs/heads/${localBranch}`], {
+      cwd, stdio: 'pipe',
+    });
+  } catch (err) {
+    const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
+    return { error: 'Fetch failed: ' + scrub(raw) };
+  }
+
+  const repoBasename = path.basename(cwd);
+  const worktreeDir = path.dirname(cwd);
+  const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitizedForPath);
+
+  if (fs.existsSync(worktreePath)) {
+    return { error: 'A worktree already exists at ' + worktreePath + '. Remove it before checking out again.' };
+  }
+
+  try {
+    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], {
+      cwd, stdio: 'pipe',
+    });
+  } catch (err) {
+    return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
+  }
+
+  try { await runKlausifyInit(worktreePath); } catch (_) { /* non-fatal */ }
+
+  const task = spawnInWorktree(localBranch, worktreePath, localBranch, 'claude', null, null, number);
+  // Stash the base repo so pr-for-branch can target the right repo even
+  // when the user's origin points elsewhere (fork scenarios).
+  const inst = instances.get(task.id);
+  if (inst) {
+    inst.prBaseOwner = activePrReview.baseOwner;
+    inst.prBaseRepo = activePrReview.baseRepo;
+  }
+
+  // Exit review mode first so the task grid is visible again, THEN announce
+  // the new task so the main-window listener can focus it without fighting
+  // the review-mode takeover.
+  if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
+    activePrReview.popout.close();
+  }
+  activePrReview = null;
+  broadcastPrReview();
+
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', task);
+  }
+
+  return { ok: true, task };
+});
+
 // G4: post all pending review comments + decision as one review. The GitHub
 // REST endpoint accepts `comments` inline so we only make one network call.
 // Piping JSON on stdin avoids shell-escaping pain for multiline comment
@@ -2906,10 +3126,32 @@ ipcMain.handle('pr-reply-to-comment', async (_event, { worktreePath, prNumber, c
 // ---- PR Interaction ----
 
 ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
+  const jsonFields = 'number,title,state,body,url,headRefName,baseRefName,headRefOid,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft';
+
+  // G5 fast path: if this worktree was created from "Check out locally",
+  // look up the PR by its recorded number + base repo. Avoids gh's default
+  // branch-matching lookup which fails for cross-repo (fork) PRs and for
+  // any situation where the local branch name doesn't match the head ref.
+  let hintedInst = null;
+  for (const inst of instances.values()) {
+    if (inst.worktreePath === worktreePath && inst.prNumber) { hintedInst = inst; break; }
+  }
+  if (hintedInst) {
+    try {
+      const args = ['pr', 'view', String(hintedInst.prNumber), '--json', jsonFields];
+      if (hintedInst.prBaseOwner && hintedInst.prBaseRepo) {
+        args.push('-R', `${hintedInst.prBaseOwner}/${hintedInst.prBaseRepo}`);
+      }
+      const result = ghExec(args, { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
+      return { pr: JSON.parse(result) };
+    } catch (err) {
+      // Fall through to branch-matching lookup if the hinted one errors.
+    }
+  }
+
   try {
     const result = ghExec([
-      'pr', 'view', '--json',
-      'number,title,state,body,url,headRefName,baseRefName,headRefOid,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft'
+      'pr', 'view', '--json', jsonFields,
     ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
     return { pr: JSON.parse(result) };
   } catch (err) {
