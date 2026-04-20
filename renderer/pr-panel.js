@@ -1171,6 +1171,13 @@ window.PRPanel = (function () {
       'Make focused commits — one per finding or per cluster of related findings.\n\n' + body + '\n';
   }
 
+  function buildFixAllFromReviewPrompt(reviewText) {
+    return 'Please address every issue, suggestion, and concern raised in the PR review below. ' +
+      'Read the referenced file(s), trace the code paths, and implement the changes. ' +
+      'Prioritize the highest-severity items first and make focused commits.\n\n' +
+      '---\n\n' + reviewText + '\n';
+  }
+
   async function sendFix(prompt, btn) {
     if (!currentWorktreePath) { alert('No worktree active.'); return; }
     var origText = btn ? btn.textContent : '';
@@ -1190,10 +1197,18 @@ window.PRPanel = (function () {
   function renderCompletedReview(reviewText, savedAt) {
     var host = document.getElementById('pr-ai-review');
     if (!host) return;
+    var parsed = parseReviewFindings(reviewText);
     var ageLabel = savedAt ? ' <span class="pr-ai-elapsed">saved ' + formatTime(savedAt) + '</span>' : '';
+    var fixAllLabel = parsed.findings.length > 0
+      ? 'Claude fix all (' + parsed.findings.length + ')'
+      : 'Claude fix all';
+    var headerFixBtn = reviewText && reviewText.trim()
+      ? '<button type="button" class="pr-ai-fix-all-header-btn" title="Send the review to the Claude terminal for this worktree to fix">' + fixAllLabel + '</button>'
+      : '';
     host.innerHTML = '<div class="pr-ai-review-card">'
       + '<div class="pr-ai-review-header">'
         + '<strong>Claude\'s PR Review</strong>' + ageLabel
+        + headerFixBtn
         + '<button type="button" class="pr-ai-regen-btn" title="Re-run the review">Re-run</button>'
         + '<button type="button" class="pr-ai-discard-btn" title="Discard cached review">Discard</button>'
         + '<button type="button" class="pr-ai-review-close" title="Dismiss">&times;</button>'
@@ -1203,6 +1218,16 @@ window.PRPanel = (function () {
 
     var bodyEl = host.querySelector('.pr-ai-review-body');
     wireFixButtons(bodyEl, reviewText);
+
+    var headerFix = host.querySelector('.pr-ai-fix-all-header-btn');
+    if (headerFix) {
+      headerFix.addEventListener('click', function () {
+        var prompt = parsed.findings.length > 0
+          ? buildFixAllPrompt(parsed.findings)
+          : buildFixAllFromReviewPrompt(reviewText);
+        sendFix(prompt, headerFix);
+      });
+    }
 
     host.querySelector('.pr-ai-review-close').addEventListener('click', function () { host.innerHTML = ''; });
     host.querySelector('.pr-ai-regen-btn').addEventListener('click', function () { runAiReview(); });
