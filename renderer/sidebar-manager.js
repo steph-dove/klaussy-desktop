@@ -19,6 +19,7 @@ window.Sidebar = (function () {
       '<span class="task-mode" title="' + (task.mode === 'shell' ? 'Shell' : 'Claude Code') + '">' + modeLabel + '</span>' +
       '<span class="task-name" title="' + escHtml(task.worktreePath) + '">' + escHtml(task.name) + '</span>' +
       '<span class="ci-status-icon" title="CI status"></span>' +
+      '<span class="dirty-indicator"></span>' +
       '<span class="unread-badge"></span>' +
       '<button class="task-note-btn" title="Notes">&#9998;</button>' +
       '<button class="task-close" title="Remove">&times;</button>';
@@ -40,6 +41,7 @@ window.Sidebar = (function () {
         name: task.name,
         branch: task.branch || '',
       };
+      stopDirtyWatch(task);
       await window.klaus.killTask(task.id);
       TerminalManager.removeTaskFromUI(task.id);
       window._addWorktreeToSidebar(wt);
@@ -56,6 +58,74 @@ window.Sidebar = (function () {
     });
 
     taskList.appendChild(item);
+    startDirtyWatch(task);
+  }
+
+  // ---- H2: Cross-task dirty indicators ----
+  //
+  // Each task item shows a compact summary of its worktree state: staged /
+  // unstaged / untracked counts plus ahead/behind arrows. We subscribe to H3's
+  // `worktree-changed` event once at module init and refresh only the affected
+  // row (granular, not a full re-render) so a save in one worktree doesn't
+  // restat every sibling.
+
+  function startDirtyWatch(task) {
+    if (!task || !task.worktreePath) return;
+    window.klaus.watchWorktree(task.worktreePath);
+    refreshDirty(task.id);
+  }
+
+  function stopDirtyWatch(task) {
+    if (!task || !task.worktreePath) return;
+    window.klaus.unwatchWorktree(task.worktreePath);
+  }
+
+  async function refreshDirty(taskId) {
+    var state = await window.klaus.getWorktreeState(taskId);
+    if (!state) return;
+    applyDirtyIndicator(taskId, state);
+  }
+
+  function applyDirtyIndicator(taskId, state) {
+    var item = taskList.querySelector('.task-item[data-id="' + taskId + '"]');
+    if (!item) return;
+    var el = item.querySelector('.dirty-indicator');
+    if (!el) return;
+
+    var parts = [];
+    if (state.staged > 0)    parts.push('<span class="dirty-staged"    title="' + state.staged + ' staged">' + state.staged + '</span>');
+    if (state.unstaged > 0)  parts.push('<span class="dirty-unstaged"  title="' + state.unstaged + ' unstaged">' + state.unstaged + '</span>');
+    if (state.untracked > 0) parts.push('<span class="dirty-untracked" title="' + state.untracked + ' untracked">' + state.untracked + '</span>');
+    if (state.ahead > 0)     parts.push('<span class="dirty-ahead"     title="' + state.ahead + ' ahead">&uarr;' + state.ahead + '</span>');
+    if (state.behind > 0)    parts.push('<span class="dirty-behind"    title="' + state.behind + ' behind">&darr;' + state.behind + '</span>');
+    el.innerHTML = parts.join('');
+
+    var hasLocalChanges = state.staged > 0 || state.unstaged > 0 || state.untracked > 0;
+    // has-dirty gates the "dirty only" filter. Ahead/behind alone don't qualify —
+    // pushed/pulled branches aren't waiting on the user.
+    item.classList.toggle('has-dirty', hasLocalChanges);
+  }
+
+  function findTaskIdByWorktree(worktreePath) {
+    for (var entry of tasks) {
+      if (entry[1] && entry[1].worktreePath === worktreePath) return entry[0];
+    }
+    return null;
+  }
+
+  window.klaus.onWorktreeChanged(function (data) {
+    var taskId = findTaskIdByWorktree(data.worktreePath);
+    if (taskId !== null) refreshDirty(taskId);
+  });
+
+  // Filter toggle — hides rows without local changes while active.
+  var dirtyFilterBtn = document.getElementById('btn-dirty-filter');
+  if (dirtyFilterBtn) {
+    dirtyFilterBtn.addEventListener('click', function () {
+      var active = taskList.classList.toggle('dirty-filter-active');
+      dirtyFilterBtn.classList.toggle('active', active);
+      dirtyFilterBtn.title = active ? 'Showing only tasks with changes' : 'Show only tasks with changes';
+    });
   }
 
   // ---- Task Notes Popover ----

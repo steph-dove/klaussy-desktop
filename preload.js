@@ -236,4 +236,8 @@ contextBridge.exposeInMainWorld('klaus', {
     ipcRenderer.on('worktree-changed', handler);
     return () => ipcRenderer.removeListener('worktree-changed', handler);
   },
+
+  // H2: Cross-task review inbox
+  listAllDirtyWorktrees: () => ipcRenderer.invoke('list-all-dirty-worktrees'),
+  getWorktreeState: (taskId) => ipcRenderer.invoke('get-worktree-state', { taskId }),
 });

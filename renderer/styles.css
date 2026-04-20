@@ -3647,6 +3647,61 @@ body {
   display: block;
 }
 
+/* H2: Cross-task dirty indicators */
+.task-item .dirty-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.task-item .dirty-indicator:empty {
+  display: none;
+}
+
+.task-item .dirty-indicator > span {
+  padding: 0 3px;
+  border-radius: 3px;
+  line-height: 14px;
+  font-weight: 600;
+}
+
+.task-item .dirty-indicator .dirty-staged {
+  color: var(--diff-add-fg, #7ce27c);
+  background: rgba(35, 134, 54, 0.18);
+}
+
+.task-item .dirty-indicator .dirty-unstaged {
+  color: var(--diff-del-fg, #e27c7c);
+  background: rgba(218, 54, 51, 0.18);
+}
+
+.task-item .dirty-indicator .dirty-untracked {
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.task-item .dirty-indicator .dirty-ahead,
+.task-item .dirty-indicator .dirty-behind {
+  color: var(--accent);
+  background: transparent;
+  padding: 0;
+  font-weight: 500;
+}
+
+/* "Dirty only" filter */
+#task-list.dirty-filter-active .task-item:not(.has-dirty) {
+  display: none;
+}
+
+#btn-dirty-filter.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* Right-click context menu */
 .context-menu {
   position: fixed;
