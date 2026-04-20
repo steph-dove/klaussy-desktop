@@ -153,6 +153,22 @@ contextBridge.exposeInMainWorld('klaus', {
   prAddComment: (worktreePath, prNumber, body) => ipcRenderer.invoke('pr-add-comment', { worktreePath, prNumber, body }),
   prReview: (worktreePath, prNumber, event, body) => ipcRenderer.invoke('pr-review', { worktreePath, prNumber, event, body }),
   prAiReviewComment: (opts) => ipcRenderer.invoke('pr-ai-review-comment', opts),
+  prReviewCacheGet: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-cache-get', { worktreePath, prNumber }),
+  prReviewCacheSave: (worktreePath, prNumber, review) => ipcRenderer.invoke('pr-review-cache-save', { worktreePath, prNumber, review }),
+  prReviewCacheClear: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-cache-clear', { worktreePath, prNumber }),
+  prFixInTerminal: (worktreePath, text) => ipcRenderer.invoke('pr-fix-in-terminal', { worktreePath, text }),
+  prAiReviewStart: (opts) => ipcRenderer.invoke('pr-ai-review-start', opts),
+  prAiReviewCancel: (requestId) => ipcRenderer.invoke('pr-ai-review-cancel', { requestId }),
+  onPrAiReviewData: (requestId, cb) => {
+    const ch = 'pr-ai-review-data-' + requestId;
+    const handler = (_e, chunk) => cb(chunk);
+    ipcRenderer.on(ch, handler);
+    return () => ipcRenderer.removeListener(ch, handler);
+  },
+  onPrAiReviewDone: (requestId, cb) => {
+    const ch = 'pr-ai-review-done-' + requestId;
+    ipcRenderer.once(ch, (_e, result) => cb(result));
+  },
   prReplyToComment: (worktreePath, prNumber, commentId, body) => ipcRenderer.invoke('pr-reply-to-comment', { worktreePath, prNumber, commentId, body }),
 
   // Explain diff
