@@ -227,4 +227,13 @@ contextBridge.exposeInMainWorld('klaus', {
   onAutoFetchUpdate: (callback) => {
     ipcRenderer.on('auto-fetch-update', (_event, data) => callback(data));
   },
+
+  // H3: Worktree file watcher for instant diff refresh
+  watchWorktree: (worktreePath) => ipcRenderer.invoke('watch-worktree', { worktreePath }),
+  unwatchWorktree: (worktreePath) => ipcRenderer.invoke('unwatch-worktree', { worktreePath }),
+  onWorktreeChanged: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('worktree-changed', handler);
+    return () => ipcRenderer.removeListener('worktree-changed', handler);
+  },
 });
