@@ -948,6 +948,7 @@
       }
     });
 
+    commands.push({ label: 'Review Pull Request\u2026', action: function () { showPrPicker(); } });
     commands.push({ label: 'View Logs', action: showLogViewer });
     commands.push({ label: 'About Klaussy', action: showAboutDialog });
 
@@ -964,6 +965,133 @@
       showCommandPalette();
     }
   });
+
+  // ---- Phase G: PR review takeover ----
+
+  var prReviewRoot = document.getElementById('pr-review-root');
+  var terminalArea = document.getElementById('terminal-area');
+  var diffPanelEl = document.getElementById('diff-panel');
+  var btnReviewPr = document.getElementById('btn-review-pr');
+  var prReviewMounted = false;
+
+  if (btnReviewPr) {
+    btnReviewPr.addEventListener('click', function () { showPrPicker(); });
+  }
+
+  function enterPrReviewMode() {
+    if (prReviewMounted) return;
+    // Hide the worktree-centric layout. Diff panel gets set aside too — the
+    // review has its own diff view and shouldn't compete for the right rail.
+    terminalArea.style.display = 'none';
+    if (diffPanelEl) diffPanelEl.dataset.prevDisplay = diffPanelEl.style.display || '';
+    if (diffPanelEl) diffPanelEl.style.display = 'none';
+    prReviewRoot.style.display = '';
+    window.PrReview.mount({ host: prReviewRoot, isPopout: false });
+    prReviewMounted = true;
+  }
+
+  function exitPrReviewMode() {
+    if (!prReviewMounted) return;
+    window.PrReview.unmount();
+    prReviewRoot.style.display = 'none';
+    terminalArea.style.display = '';
+    if (diffPanelEl) diffPanelEl.style.display = diffPanelEl.dataset.prevDisplay || '';
+    prReviewMounted = false;
+  }
+
+  // Exposed for pr-review.js to call when main clears state.
+  window.exitPrReviewMode = exitPrReviewMode;
+
+  // Keep the main-window panel visibility in sync with main-process state
+  // changes (e.g. the pop-out's "pop back in" button clears popout → we want
+  // the main panel mounted again; prReviewClose from anywhere unmounts us).
+  window.klaus.onPrReviewState(function (state) {
+    if (!state) {
+      exitPrReviewMode();
+    } else if (!state.popped) {
+      // No pop-out → panel should be mounted.
+      if (!prReviewMounted) enterPrReviewMode();
+    } else {
+      // Popped out → hide the main-window panel so both surfaces don't show
+      // the same thing. Keep state in main; remount on pop-in.
+      if (prReviewMounted) {
+        window.PrReview.unmount();
+        prReviewRoot.style.display = 'none';
+        terminalArea.style.display = '';
+        if (diffPanelEl) diffPanelEl.style.display = diffPanelEl.dataset.prevDisplay || '';
+        prReviewMounted = false;
+      }
+    }
+  });
+
+  async function showPrPicker() {
+    var overlay = document.createElement('div');
+    overlay.className = 'pr-picker-overlay';
+    overlay.innerHTML =
+      '<div class="pr-picker">'
+        + '<div class="pr-picker-header">Review a Pull Request</div>'
+        + '<div class="pr-picker-url-row">'
+          + '<input type="text" class="pr-picker-url" placeholder="Paste GitHub PR URL and press Enter" />'
+        + '</div>'
+        + '<div class="pr-picker-list"><div class="pr-picker-loading">Loading open PRs\u2026</div></div>'
+        + '<div class="pr-picker-footer"><button class="pr-picker-cancel">Cancel</button></div>'
+      + '</div>';
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    overlay.querySelector('.pr-picker-cancel').addEventListener('click', close);
+
+    var urlInput = overlay.querySelector('.pr-picker-url');
+    urlInput.focus();
+    urlInput.addEventListener('keydown', async function (e) {
+      if (e.key !== 'Enter') return;
+      var url = urlInput.value.trim();
+      if (!url) return;
+      urlInput.disabled = true;
+      var result = await window.klaus.prLoad({ url: url });
+      if (result.error) {
+        urlInput.disabled = false;
+        alert('Failed to load PR:\n' + result.error);
+        return;
+      }
+      // Mount happens via the pr-review-state subscriber; just close the picker.
+      close();
+    });
+
+    var listEl = overlay.querySelector('.pr-picker-list');
+    var result = await window.klaus.prList();
+    if (result.error) {
+      listEl.innerHTML = '<div class="pr-picker-error">' + (result.error || '').replace(/</g, '&lt;') + '</div>';
+      return;
+    }
+    if (!result.prs || result.prs.length === 0) {
+      listEl.innerHTML = '<div class="pr-picker-empty">No open PRs in this repo.</div>';
+      return;
+    }
+    listEl.innerHTML = result.prs.map(function (pr) {
+      var author = (pr.author && (pr.author.login || pr.author.name)) || '';
+      var stateLabel = pr.isDraft ? 'draft' : (pr.state || '').toLowerCase();
+      return '<div class="pr-picker-item" data-number="' + pr.number + '">'
+        + '<span class="pr-picker-num">#' + pr.number + '</span>'
+        + '<span class="pr-picker-title">' + (pr.title || '').replace(/</g, '&lt;') + '</span>'
+        + '<span class="pr-picker-author">' + author + '</span>'
+        + '<span class="pr-picker-state pr-state-' + stateLabel + '">' + stateLabel + '</span>'
+      + '</div>';
+    }).join('');
+    listEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
+      row.addEventListener('click', async function () {
+        row.style.opacity = '0.5';
+        var loadResult = await window.klaus.prLoad({ number: parseInt(row.dataset.number, 10) });
+        if (loadResult.error) {
+          alert('Failed to load PR:\n' + loadResult.error);
+          row.style.opacity = '1';
+          return;
+        }
+        close();
+      });
+    });
+  }
 
   // Task rename and reorder extracted to sidebar-manager.js
 
