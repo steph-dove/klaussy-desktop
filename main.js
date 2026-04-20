@@ -1298,6 +1298,65 @@ ipcMain.handle('git-ahead-behind', async (_event, { worktreePath }) => {
   }
 });
 
+// ---- H2: Cross-task review inbox aggregator ----
+//
+// Runs git ops truly in parallel (async execFile) so aggregating N worktrees
+// costs ~max(per-worktree) instead of ~sum. Per-worktree errors degrade to a
+// zeroed row with `error:` set rather than rejecting the whole Promise.all.
+const execFileP = require('util').promisify(execFile);
+
+async function collectWorktreeState(task) {
+  const cwd = task.worktreePath;
+  try {
+    const [statusOut, branchOut, ahead] = await Promise.all([
+      execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 })
+        .then(r => r.stdout).catch(() => ''),
+      execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd })
+        .then(r => r.stdout.trim()).catch(() => ''),
+      (async () => {
+        try {
+          const up = (await execFileP('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd })).stdout.trim();
+          const counts = (await execFileP('git', ['rev-list', '--left-right', '--count', up + '...HEAD'], { cwd })).stdout.trim();
+          const [behind, ahead] = counts.split(/\s+/).map(n => parseInt(n, 10) || 0);
+          return { ahead, behind };
+        } catch { return { ahead: 0, behind: 0 }; }
+      })(),
+    ]);
+    // Porcelain status: first col = index (staged), second col = worktree (unstaged).
+    // "??" is untracked. "MM" etc. counts in both staged and unstaged.
+    let staged = 0, unstaged = 0, untracked = 0;
+    for (const line of statusOut.split('\n')) {
+      if (!line) continue;
+      const x = line.charAt(0), y = line.charAt(1);
+      if (x === '?' && y === '?') { untracked++; continue; }
+      if (x !== ' ' && x !== '?') staged++;
+      if (y !== ' ' && y !== '?') unstaged++;
+    }
+    return {
+      taskId: task.id, branch: branchOut,
+      staged, unstaged, untracked,
+      ahead: ahead.ahead, behind: ahead.behind,
+    };
+  } catch (err) {
+    return {
+      taskId: task.id, branch: '',
+      staged: 0, unstaged: 0, untracked: 0,
+      ahead: 0, behind: 0,
+      error: err.message,
+    };
+  }
+}
+
+ipcMain.handle('list-all-dirty-worktrees', async () => {
+  return Promise.all(Array.from(instances.values()).map(collectWorktreeState));
+});
+
+ipcMain.handle('get-worktree-state', async (_event, { taskId }) => {
+  const task = instances.get(taskId);
+  if (!task) return null;
+  return collectWorktreeState(task);
+});
+
 // D2: Branch checkout
 ipcMain.handle('git-checkout', async (_event, { worktreePath, branch }) => {
   try {
@@ -2770,7 +2829,11 @@ function startAutoFetch() {
 
 // ---- H3: Worktree file watcher for instant diff refresh ----
 
-const worktreeWatchers = new Map(); // worktreePath -> { watcher, subscribers: Set<webContents>, debounceTimer }
+// Subscribers is a per-webContents refcount (Map<webContents, number>) rather
+// than a Set, so independent renderer features (diff panel + H2 sidebar) that
+// both watch the same worktree don't clobber each other's subscription when
+// one unsubscribes.
+const worktreeWatchers = new Map(); // worktreePath -> { watcher, subscribers: Map<webContents, number>, debounceTimer }
 
 // Path patterns we ignore — high-churn build output and git internals that don't
 // affect our UI. .git/index and .git/HEAD are NOT ignored: they signal git state
@@ -2781,7 +2844,7 @@ function startWorktreeWatcher(worktreePath) {
   let state = worktreeWatchers.get(worktreePath);
   if (state) return state;
 
-  state = { watcher: null, subscribers: new Set(), debounceTimer: null };
+  state = { watcher: null, subscribers: new Map(), debounceTimer: null };
 
   try {
     state.watcher = fs.watch(worktreePath, { recursive: true }, (_eventType, filename) => {
@@ -2793,7 +2856,7 @@ function startWorktreeWatcher(worktreePath) {
       if (state.debounceTimer) clearTimeout(state.debounceTimer);
       state.debounceTimer = setTimeout(() => {
         state.debounceTimer = null;
-        for (const wc of state.subscribers) {
+        for (const wc of state.subscribers.keys()) {
           if (!wc.isDestroyed()) wc.send('worktree-changed', { worktreePath });
         }
       }, 200);
@@ -2822,15 +2885,20 @@ ipcMain.handle('watch-worktree', (event, { worktreePath }) => {
   if (!worktreePath) return { error: 'no worktreePath' };
   const state = startWorktreeWatcher(worktreePath);
   if (!state) return { error: 'watcher failed to start' };
-  state.subscribers.add(event.sender);
-  // Auto-cleanup when the renderer is destroyed (window closed, reload, etc.)
-  const cleanup = () => {
-    const s = worktreeWatchers.get(worktreePath);
-    if (!s) return;
-    s.subscribers.delete(event.sender);
-    if (s.subscribers.size === 0) stopWorktreeWatcher(worktreePath);
-  };
-  event.sender.once('destroyed', cleanup);
+  const count = state.subscribers.get(event.sender) || 0;
+  state.subscribers.set(event.sender, count + 1);
+  // Auto-cleanup when the renderer is destroyed (window closed, reload, etc.).
+  // Only registered on the first subscription from this sender — refcount
+  // increments don't re-register the destroyed listener.
+  if (count === 0) {
+    const cleanup = () => {
+      const s = worktreeWatchers.get(worktreePath);
+      if (!s) return;
+      s.subscribers.delete(event.sender);
+      if (s.subscribers.size === 0) stopWorktreeWatcher(worktreePath);
+    };
+    event.sender.once('destroyed', cleanup);
+  }
   return { ok: true };
 });
 
@@ -2838,7 +2906,9 @@ ipcMain.handle('unwatch-worktree', (event, { worktreePath }) => {
   if (!worktreePath) return { ok: true };
   const state = worktreeWatchers.get(worktreePath);
   if (!state) return { ok: true };
-  state.subscribers.delete(event.sender);
+  const count = state.subscribers.get(event.sender) || 0;
+  if (count <= 1) state.subscribers.delete(event.sender);
+  else state.subscribers.set(event.sender, count - 1);
   if (state.subscribers.size === 0) stopWorktreeWatcher(worktreePath);
   return { ok: true };
 });
