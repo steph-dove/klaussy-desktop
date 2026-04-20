@@ -13,6 +13,7 @@ window.DiffPanel = (function () {
   let currentDiffStaged = false;
   let selectedLineKeys = new Set();
   let refreshPaused = false;
+  let diffViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('diffViewMode')) || 'unified';
 
   // Branch diff mode state
   let diffMode = 'working'; // 'working' or 'branch'
@@ -727,15 +728,41 @@ window.DiffPanel = (function () {
       return;
     }
     currentRawDiff = result.diff;
-    diffViewEl.innerHTML = renderViewFullFileLink(file) + renderDiff(result.diff);
+    var diffHtml = diffViewMode === 'split' ? renderDiffSplit(result.diff) : renderDiff(result.diff);
+    diffViewEl.innerHTML = renderViewFullFileLink(file) + diffHtml;
     bindViewFullFileLink(file);
+    bindViewModeToggle(file);
     bindInlineComments(file);
     bindExplainButtons(file);
     bindPartialStaging(file);
   }
 
   function renderViewFullFileLink(file) {
-    return '<div class="diff-view-full-file"><a href="#" class="js-view-full-file">View full file</a><a href="#" class="js-edit-full-file">Edit</a> <span class="diff-view-full-path">' + escHtml(file) + '</span></div>';
+    var unifiedActive = diffViewMode === 'unified' ? ' active' : '';
+    var splitActive = diffViewMode === 'split' ? ' active' : '';
+    return '<div class="diff-view-full-file">'
+      + '<a href="#" class="js-view-full-file">View full file</a>'
+      + '<a href="#" class="js-edit-full-file">Edit</a>'
+      + ' <span class="diff-view-full-path">' + escHtml(file) + '</span>'
+      + '<div class="diff-view-mode-toggle" role="group" aria-label="Diff view mode">'
+        + '<button type="button" class="diff-view-mode-btn js-view-mode-unified' + unifiedActive + '" title="Unified view">Unified</button>'
+        + '<button type="button" class="diff-view-mode-btn js-view-mode-split' + splitActive + '" title="Side-by-side view">Split</button>'
+      + '</div>'
+      + '</div>';
+  }
+
+  function bindViewModeToggle(file) {
+    var unifiedBtn = diffViewEl.querySelector('.js-view-mode-unified');
+    var splitBtn = diffViewEl.querySelector('.js-view-mode-split');
+    function setMode(mode) {
+      if (diffViewMode === mode) return;
+      diffViewMode = mode;
+      try { localStorage.setItem('diffViewMode', mode); } catch (_) {}
+      selectedLineKeys = new Set();
+      if (file && selectedFile === file) showFileDiff(file, currentDiffStaged);
+    }
+    if (unifiedBtn) unifiedBtn.addEventListener('click', function () { setMode('unified'); });
+    if (splitBtn) splitBtn.addEventListener('click', function () { setMode('split'); });
   }
 
   function bindViewFullFileLink(file) {
@@ -1013,17 +1040,16 @@ window.DiffPanel = (function () {
     });
   }
 
-  function renderDiff(diffText) {
+  // Parse hunks from raw diff text + bulk-highlight code lines. Shared by
+  // unified and split renderers. Populates currentParsedHunks as a side effect.
+  function parseAndHighlight(diffText) {
     var lines = diffText.split('\n');
-    // Split into hunks for explain feature
     var hunks = [];
     var currentHunk = [];
     var hunkStart = -1;
     for (var i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('@@')) {
-        if (currentHunk.length > 0) {
-          hunks.push({ start: hunkStart, lines: currentHunk.slice() });
-        }
+        if (currentHunk.length > 0) hunks.push({ start: hunkStart, lines: currentHunk.slice() });
         currentHunk = [lines[i]];
         hunkStart = i;
       } else if (hunkStart >= 0) {
@@ -1036,17 +1062,11 @@ window.DiffPanel = (function () {
         }
       }
     }
-    if (currentHunk.length > 0) {
-      hunks.push({ start: hunkStart, lines: currentHunk.slice() });
-    }
+    if (currentHunk.length > 0) hunks.push({ start: hunkStart, lines: currentHunk.slice() });
 
-    // Detect language from the file being diffed
     var lang = detectLang(selectedFile);
-
-    // Collect code lines (without prefixes) for bulk highlighting
-    // This gives hljs full context for better token detection
     var codeLines = [];
-    var lineMap = []; // maps codeLines index -> { originalIndex, prefix, type }
+    var lineMap = [];
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       if (line.startsWith('+') && !line.startsWith('+++')) {
@@ -1059,30 +1079,20 @@ window.DiffPanel = (function () {
                  !line.startsWith('index ') && !line.startsWith('new file') &&
                  !line.startsWith('deleted file') && !line.startsWith('+++') &&
                  !line.startsWith('---')) {
-        // Context line (starts with space)
         codeLines.push(line.length > 0 ? line.substring(1) : '');
         lineMap.push({ idx: i, prefix: ' ', type: 'context' });
       }
     }
 
-    // Highlight all code lines together, then split back per-line
-    // preserving open spans across line boundaries
     var highlightedLines = {};
     if (typeof hljs !== 'undefined' && codeLines.length > 0) {
       var codeBlock = codeLines.join('\n');
       try {
-        var result;
-        if (lang) {
-          result = hljs.highlight(codeBlock, { language: lang, ignoreIllegals: true });
-        } else {
-          result = hljs.highlightAuto(codeBlock);
-        }
+        var result = lang
+          ? hljs.highlight(codeBlock, { language: lang, ignoreIllegals: true })
+          : hljs.highlightAuto(codeBlock);
         var hLines = splitHighlightedLines(result.value);
-        try {
-          hLines = hLines.map(enhanceLine);
-        } catch (enhErr) {
-          // enhanceLine failed, keep base hljs highlighting
-        }
+        try { hLines = hLines.map(enhanceLine); } catch (_) {}
         for (var j = 0; j < lineMap.length && j < hLines.length; j++) {
           highlightedLines[lineMap[j].idx] = hLines[j];
         }
@@ -1090,6 +1100,16 @@ window.DiffPanel = (function () {
         console.error('[hljs] Syntax highlighting failed:', e, e.stack);
       }
     }
+
+    currentParsedHunks = hunks;
+    return { lines: lines, hunks: hunks, highlightedLines: highlightedLines };
+  }
+
+  function renderDiff(diffText) {
+    var parsed = parseAndHighlight(diffText);
+    var lines = parsed.lines;
+    var hunks = parsed.hunks;
+    var highlightedLines = parsed.highlightedLines;
 
     // Partial-staging UI only shown in working mode (not branch diff)
     var allowStaging = diffMode === 'working';
@@ -1158,9 +1178,138 @@ window.DiffPanel = (function () {
       }
     }
 
-    // Store hunks for later use
-    currentParsedHunks = hunks;
     return html;
+  }
+
+  // H1: Side-by-side split view. Reuses parseAndHighlight so hunks + hljs pipeline
+  // match the unified renderer exactly. Pairs consecutive - with + into rows; pure
+  // adds/dels get a blank slot on the opposite side. D6 checkboxes live in the
+  // pane that owns the line (LEFT for -, RIGHT for +).
+  function renderDiffSplit(diffText) {
+    var parsed = parseAndHighlight(diffText);
+    var lines = parsed.lines;
+    var hunks = parsed.hunks;
+    var highlightedLines = parsed.highlightedLines;
+
+    var allowStaging = diffMode === 'working';
+    var stageVerb = currentDiffStaged ? 'Unstage' : 'Stage';
+
+    var html = '';
+
+    // File meta (everything before the first @@ of the first hunk) rendered
+    // full-width above the grid so paths, diff header, new/deleted markers,
+    // and binary-file notices stay visible.
+    var firstHunkLineIdx = hunks.length > 0 ? hunks[0].start : lines.length;
+    for (var i = 0; i < firstHunkLineIdx; i++) {
+      var meta = lines[i];
+      if (!meta) continue;
+      if (meta.startsWith('diff ')) {
+        html += '<div class="diff-split-meta diff-header">' + escHtml(meta) + '</div>';
+      } else {
+        html += '<div class="diff-split-meta diff-meta">' + escHtml(meta) + '</div>';
+      }
+    }
+
+    hunks.forEach(function (hunk, hi) {
+      var header = hunk.lines[0];
+      var hm = header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      var oldLn = hm ? parseInt(hm[1], 10) - 1 : 0;
+      var newLn = hm ? parseInt(hm[2], 10) - 1 : 0;
+
+      var stageBtn = allowStaging
+        ? '<button class="diff-stage-hunk-btn" data-hunk-index="' + hi + '" title="' + stageVerb + ' this hunk">' + stageVerb + ' hunk</button>'
+        : '';
+      html += '<div class="diff-line diff-hunk diff-split-hunk-header" data-hunk-index="' + hi + '">'
+        + '<span class="diff-hunk-text">' + escHtml(header) + '</span>'
+        + '<button class="diff-explain-btn" data-hunk-index="' + hi + '" title="Explain this change">Explain</button>'
+        + stageBtn
+        + '</div>';
+
+      var body = hunk.lines.slice(1);
+      var bodyStartIdx = hunk.start + 1; // index into `lines` for body[0]
+      var b = 0;
+
+      function paneAdd(info) {
+        var cls = 'diff-line diff-split-right diff-add';
+        var cb = allowStaging
+          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + info.key + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
+          : '';
+        var code = highlightedLines[info.idx] || escHtml(info.text);
+        return '<div class="' + cls + '" data-new-ln="' + info.newLn + '" data-side="RIGHT" data-line-key="' + info.key + '">'
+          + '<span class="diff-ln-gutter">' + info.newLn + '</span>'
+          + cb
+          + '<span class="diff-prefix">+</span>'
+          + '<span class="diff-code">' + code + '</span>'
+          + '</div>';
+      }
+      function paneDel(info) {
+        var cls = 'diff-line diff-split-left diff-del';
+        var cb = allowStaging
+          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + info.key + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
+          : '';
+        var code = highlightedLines[info.idx] || escHtml(info.text);
+        return '<div class="' + cls + '" data-old-ln="' + info.oldLn + '" data-side="LEFT" data-line-key="' + info.key + '">'
+          + '<span class="diff-ln-gutter">' + info.oldLn + '</span>'
+          + cb
+          + '<span class="diff-prefix">-</span>'
+          + '<span class="diff-code">' + code + '</span>'
+          + '</div>';
+      }
+      function paneBlank(side) {
+        return '<div class="diff-line diff-blank diff-split-' + side + '"></div>';
+      }
+      function paneContext(info, side) {
+        var cls = 'diff-line diff-split-' + side + ' diff-context';
+        var code = highlightedLines[info.idx] || escHtml(info.text);
+        var lnAttr = side === 'left'
+          ? 'data-old-ln="' + info.oldLn + '"'
+          : 'data-new-ln="' + info.newLn + '" data-side="RIGHT"';
+        var pad = allowStaging ? '<span class="diff-stage-check-placeholder"></span>' : '';
+        var lnVal = side === 'left' ? info.oldLn : info.newLn;
+        return '<div class="' + cls + '" ' + lnAttr + '>'
+          + '<span class="diff-ln-gutter">' + lnVal + '</span>'
+          + pad
+          + '<span class="diff-prefix"> </span>'
+          + '<span class="diff-code">' + code + '</span>'
+          + '</div>';
+      }
+
+      while (b < body.length) {
+        var line = body[b];
+        if (line.startsWith('\\')) { b++; continue; } // no-newline marker — skip in split view
+        if (line.startsWith(' ') || line === '') {
+          oldLn++; newLn++;
+          var ctxInfo = { idx: bodyStartIdx + b, oldLn: oldLn, newLn: newLn, text: line.length > 0 ? line.substring(1) : '' };
+          html += paneContext(ctxInfo, 'left') + paneContext(ctxInfo, 'right');
+          b++;
+        } else {
+          // Line keys use body index (b+1) to match buildPartialPatch, which
+          // is body-index-based. Counting content lines instead would drift
+          // whenever a `\ No newline` marker sits inside the hunk body.
+          var dels = [];
+          while (b < body.length && body[b].startsWith('-')) {
+            oldLn++;
+            dels.push({ idx: bodyStartIdx + b, oldLn: oldLn, key: hi + ':' + (b + 1), text: body[b].substring(1) });
+            b++;
+          }
+          while (b < body.length && body[b].startsWith('\\')) b++;
+          var adds = [];
+          while (b < body.length && body[b].startsWith('+')) {
+            newLn++;
+            adds.push({ idx: bodyStartIdx + b, newLn: newLn, key: hi + ':' + (b + 1), text: body[b].substring(1) });
+            b++;
+          }
+          while (b < body.length && body[b].startsWith('\\')) b++;
+          var rowCount = Math.max(dels.length, adds.length);
+          for (var k = 0; k < rowCount; k++) {
+            html += (dels[k] ? paneDel(dels[k]) : paneBlank('left'));
+            html += (adds[k] ? paneAdd(adds[k]) : paneBlank('right'));
+          }
+        }
+      }
+    });
+
+    return '<div class="diff-split-grid">' + html + '</div>';
   }
 
   function toggleCommitArea() {
