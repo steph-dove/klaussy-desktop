@@ -7,6 +7,9 @@ window.DiffPanel = (function () {
   let commentCallback = null;
   let refreshInterval = null;
   let currentParsedHunks = [];
+  let currentRawDiff = '';
+  let currentDiffStaged = false;
+  let selectedLineKeys = new Set();
   let refreshPaused = false;
 
   // Branch diff mode state
@@ -662,6 +665,8 @@ window.DiffPanel = (function () {
 
   async function showFileDiff(file, staged) {
     var result;
+    currentDiffStaged = !!staged;
+    selectedLineKeys = new Set();
     if (diffMode === 'branch' && baseBranch) {
       result = await window.klaus.gitBranchDiff(currentWorktreePath, baseBranch, file);
     } else {
@@ -699,10 +704,12 @@ window.DiffPanel = (function () {
       diffViewEl.innerHTML = '<div class="diff-empty">No diff available</div>';
       return;
     }
+    currentRawDiff = result.diff;
     diffViewEl.innerHTML = renderViewFullFileLink(file) + renderDiff(result.diff);
     bindViewFullFileLink(file);
     bindInlineComments(file);
     bindExplainButtons(file);
+    bindPartialStaging(file);
   }
 
   function renderViewFullFileLink(file) {
@@ -806,6 +813,184 @@ window.DiffPanel = (function () {
     });
   }
 
+  // D6: Partial-hunk staging
+  // Build a unified patch from a subset of selected lines within currentParsedHunks.
+  //   Stage   (pre=HEAD, post=working; apply forward): unselected - → context, unselected + → drop
+  //   Unstage (pre=HEAD, post=index;   apply with -R): unselected + → context, unselected - → drop
+  // The post-image of the patch must match the state we apply against (working tree for
+  // stage, index for unstage -R), which is why the rules are swapped.
+  function buildPartialPatch(file, lineKeys, reverse) {
+    if (!currentRawDiff || !currentParsedHunks.length) return null;
+
+    // Extract file header: everything from the start of currentRawDiff up to the first @@.
+    var rawLines = currentRawDiff.split('\n');
+    var headerLines = [];
+    for (var i = 0; i < rawLines.length; i++) {
+      if (rawLines[i].startsWith('@@')) break;
+      headerLines.push(rawLines[i]);
+    }
+    // Guard: no diff --git header means we synthesize one so git apply knows the path.
+    var hasGitHeader = headerLines.some(function (l) { return l.startsWith('diff --git'); });
+    if (!hasGitHeader) {
+      headerLines = ['diff --git a/' + file + ' b/' + file, '--- a/' + file, '+++ b/' + file];
+    }
+
+    var patchHunks = [];
+    for (var h = 0; h < currentParsedHunks.length; h++) {
+      var hunk = currentParsedHunks[h];
+      var header = hunk.lines[0];
+      var body = hunk.lines.slice(1);
+
+      // Does this hunk contain any selected lines? If not, skip.
+      var anySelected = false;
+      for (var k = 1; k <= body.length; k++) {
+        if (lineKeys.has(h + ':' + k)) { anySelected = true; break; }
+      }
+      if (!anySelected) continue;
+
+      // Transform body lines
+      var outLines = [];
+      var lastKept = false;
+      for (var b = 0; b < body.length; b++) {
+        var bodyLine = body[b];
+        var key = h + ':' + (b + 1);
+        var selected = lineKeys.has(key);
+
+        if (bodyLine.startsWith('+')) {
+          if (selected) { outLines.push(bodyLine); lastKept = true; }
+          else if (reverse) { outLines.push(' ' + bodyLine.substring(1)); lastKept = true; } // unstage: + → context
+          else { lastKept = false; } // stage: unselected + → drop
+        } else if (bodyLine.startsWith('-')) {
+          if (selected) { outLines.push(bodyLine); lastKept = true; }
+          else if (reverse) { lastKept = false; } // unstage: unselected - → drop
+          else { outLines.push(' ' + bodyLine.substring(1)); lastKept = true; } // stage: - → context
+        } else if (bodyLine.startsWith('\\')) {
+          // "\ No newline at end of file" applies to the previous line
+          if (lastKept) outLines.push(bodyLine);
+        } else {
+          outLines.push(bodyLine); // context
+          lastKept = true;
+        }
+      }
+
+      // Recompute @@ header: old_count = context + '-' lines; new_count = context + '+' lines.
+      var hm = header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
+      if (!hm) continue;
+      var oldStart = parseInt(hm[1], 10);
+      var newStart = parseInt(hm[2], 10);
+      var trailing = hm[3] || '';
+      var oldCount = 0, newCount = 0;
+      for (var o = 0; o < outLines.length; o++) {
+        var c = outLines[o].charAt(0);
+        if (c === ' ') { oldCount++; newCount++; }
+        else if (c === '-') { oldCount++; }
+        else if (c === '+') { newCount++; }
+      }
+      // Skip hunks that became no-ops (all context) — can happen if all selections dropped.
+      var hasChange = outLines.some(function (l) {
+        return l.charAt(0) === '+' || l.charAt(0) === '-';
+      });
+      if (!hasChange) continue;
+
+      var newHeader = '@@ -' + oldStart + ',' + oldCount + ' +' + newStart + ',' + newCount + ' @@' + trailing;
+      patchHunks.push(newHeader);
+      patchHunks = patchHunks.concat(outLines);
+    }
+
+    if (patchHunks.length === 0) return null;
+
+    return headerLines.concat(patchHunks).join('\n') + '\n';
+  }
+
+  async function applyPartialPatch(file, lineKeys, reverse) {
+    var patch = buildPartialPatch(file, lineKeys, reverse);
+    if (!patch) {
+      alert('Nothing to ' + (reverse ? 'unstage' : 'stage') + '.');
+      return;
+    }
+    var result = await window.klaus.gitApplyPatch(currentWorktreePath, patch, reverse);
+    if (result.error) {
+      alert((reverse ? 'Unstage' : 'Stage') + ' failed:\n' + result.error);
+      return;
+    }
+    selectedLineKeys = new Set();
+    await refresh();
+  }
+
+  function bindPartialStaging(file) {
+    if (diffMode !== 'working') return;
+
+    // Checkbox selection
+    diffViewEl.querySelectorAll('.diff-stage-check').forEach(function (cb) {
+      cb.addEventListener('click', function (e) {
+        e.stopPropagation(); // don't trigger bindInlineComments click-to-comment
+      });
+      cb.addEventListener('change', function () {
+        var key = cb.dataset.lineKey;
+        if (cb.checked) selectedLineKeys.add(key);
+        else selectedLineKeys.delete(key);
+        updatePartialActionBar(file);
+      });
+    });
+
+    // "Stage hunk" / "Unstage hunk" buttons
+    diffViewEl.querySelectorAll('.diff-stage-hunk-btn').forEach(function (btn) {
+      btn.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        var hi = parseInt(btn.dataset.hunkIndex, 10);
+        var hunk = currentParsedHunks[hi];
+        if (!hunk) return;
+        // Select every +/- line in this hunk.
+        var keys = new Set();
+        for (var b = 0; b < hunk.lines.length - 1; b++) {
+          var line = hunk.lines[b + 1];
+          if (line.startsWith('+') || line.startsWith('-')) {
+            keys.add(hi + ':' + (b + 1));
+          }
+        }
+        btn.disabled = true;
+        btn.textContent = '...';
+        await applyPartialPatch(file, keys, currentDiffStaged);
+      });
+    });
+
+    updatePartialActionBar(file);
+  }
+
+  function updatePartialActionBar(file) {
+    var existing = document.getElementById('diff-partial-action-bar');
+    if (existing) existing.remove();
+    if (selectedLineKeys.size === 0) {
+      refreshPaused = false;
+      return;
+    }
+    // Keep auto-refresh from wiping the selection.
+    refreshPaused = true;
+
+    var verb = currentDiffStaged ? 'Unstage' : 'Stage';
+    var bar = document.createElement('div');
+    bar.id = 'diff-partial-action-bar';
+    bar.innerHTML =
+      '<span class="partial-count">' + selectedLineKeys.size + ' line' + (selectedLineKeys.size === 1 ? '' : 's') + ' selected</span>' +
+      '<button class="partial-cancel" type="button">Cancel</button>' +
+      '<button class="partial-apply" type="button">' + verb + ' selected</button>';
+
+    // Prefer inserting after the diff-view element inside the diff panel, stuck to bottom
+    var diffContent = document.getElementById('diff-content');
+    (diffContent || diffViewEl).appendChild(bar);
+
+    bar.querySelector('.partial-cancel').addEventListener('click', function () {
+      selectedLineKeys = new Set();
+      diffViewEl.querySelectorAll('.diff-stage-check').forEach(function (cb) { cb.checked = false; });
+      updatePartialActionBar(file);
+    });
+    bar.querySelector('.partial-apply').addEventListener('click', async function () {
+      bar.querySelector('.partial-apply').disabled = true;
+      bar.querySelector('.partial-apply').textContent = '...';
+      await applyPartialPatch(file, selectedLineKeys, currentDiffStaged);
+    });
+  }
+
   function renderDiff(diffText) {
     var lines = diffText.split('\n');
     // Split into hunks for explain feature
@@ -884,8 +1069,14 @@ window.DiffPanel = (function () {
       }
     }
 
+    // Partial-staging UI only shown in working mode (not branch diff)
+    var allowStaging = diffMode === 'working';
+    var stageVerb = currentDiffStaged ? 'Unstage' : 'Stage';
+
     var html = '';
     var oldLn = 0, newLn = 0; // running line counters driven by @@ headers
+    var currentHunkIdx = -1;
+    var lineInHunk = 0;
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       var cls = 'diff-line';
@@ -898,22 +1089,38 @@ window.DiffPanel = (function () {
         var hm = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
         if (hm) { oldLn = parseInt(hm[1], 10) - 1; newLn = parseInt(hm[2], 10) - 1; }
         var hi = hunks.findIndex(function (h) { return h.start === i; });
+        currentHunkIdx = hi;
+        lineInHunk = 0;
         if (hi >= 0) {
+          var stageBtn = allowStaging
+            ? '<button class="diff-stage-hunk-btn" data-hunk-index="' + hi + '" title="' + stageVerb + ' this hunk">' + stageVerb + ' hunk</button>'
+            : '';
           html += '<div class="' + cls + '" data-hunk-index="' + hi + '">' +
             '<span class="diff-hunk-text">' + escHtml(line) + '</span>' +
             '<button class="diff-explain-btn" data-hunk-index="' + hi + '" title="Explain this change">Explain</button>' +
+            stageBtn +
             '</div>';
         } else {
           html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
         }
       } else if (line.startsWith('+') && !line.startsWith('+++')) {
         newLn++;
+        lineInHunk++;
         cls += ' diff-add';
-        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
+        var addKey = currentHunkIdx + ':' + lineInHunk;
+        var addCheckbox = allowStaging
+          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + addKey + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
+          : '';
+        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT" data-line-key="' + addKey + '">' + addCheckbox + '<span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('-') && !line.startsWith('---')) {
         oldLn++;
+        lineInHunk++;
         cls += ' diff-del';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT"><span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
+        var delKey = currentHunkIdx + ':' + lineInHunk;
+        var delCheckbox = allowStaging
+          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + delKey + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
+          : '';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT" data-line-key="' + delKey + '">' + delCheckbox + '<span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('diff ')) {
         cls += ' diff-header';
         html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
@@ -922,8 +1129,10 @@ window.DiffPanel = (function () {
         html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
       } else {
         oldLn++; newLn++;
+        if (currentHunkIdx >= 0) lineInHunk++;
         cls += ' diff-context';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
+        var ctxPad = allowStaging ? '<span class="diff-stage-check-placeholder"></span>' : '';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT">' + ctxPad + '<span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
       }
     }
 

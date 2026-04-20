@@ -1722,6 +1722,106 @@ body {
   border-color: var(--accent);
 }
 
+/* D6: Partial-hunk staging */
+.diff-stage-hunk-btn {
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 8px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.diff-line.diff-hunk:hover .diff-stage-hunk-btn {
+  opacity: 1;
+}
+
+.diff-stage-hunk-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.diff-stage-hunk-btn:disabled {
+  opacity: 1;
+  cursor: wait;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.diff-stage-check,
+.diff-stage-check-placeholder {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+  user-select: none;
+}
+
+.diff-line:hover .diff-stage-check {
+  opacity: 1;
+}
+
+.diff-stage-check:checked {
+  opacity: 1;
+}
+
+#diff-partial-action-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.2);
+  z-index: 5;
+  font-size: 12px;
+}
+
+#diff-partial-action-bar .partial-count {
+  color: var(--text-dim);
+  flex: 1;
+}
+
+#diff-partial-action-bar button {
+  padding: 4px 12px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+#diff-partial-action-bar .partial-apply {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+#diff-partial-action-bar .partial-apply:hover {
+  filter: brightness(1.1);
+}
+
+#diff-partial-action-bar .partial-apply:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+#diff-partial-action-bar .partial-cancel:hover {
+  background: var(--bg);
+}
+
 /* Hunk comment composer */
 .diff-comment-area {
   margin: 4px 8px;
