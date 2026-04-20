@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('klaus', {
   // Git operations (Phase 2)
   gitStage: (worktreePath, files) => ipcRenderer.invoke('git-stage', { worktreePath, files }),
   gitUnstage: (worktreePath, files) => ipcRenderer.invoke('git-unstage', { worktreePath, files }),
+  gitApplyPatch: (worktreePath, patch, reverse) => ipcRenderer.invoke('git-apply-patch', { worktreePath, patch, reverse }),
   gitDiscard: (worktreePath, files) => ipcRenderer.invoke('git-discard', { worktreePath, files }),
   gitCommit: (worktreePath, message) => ipcRenderer.invoke('git-commit', { worktreePath, message }),
   gitPush: (worktreePath) => ipcRenderer.invoke('git-push', { worktreePath }),

@@ -1206,6 +1206,21 @@ ipcMain.handle('git-unstage', async (_event, { worktreePath, files }) => {
   }
 });
 
+ipcMain.handle('git-apply-patch', async (_event, { worktreePath, patch, reverse }) => {
+  try {
+    const args = ['apply', '--cached', '--whitespace=nowarn'];
+    if (reverse) args.push('-R');
+    execFileSync('git', args, {
+      cwd: worktreePath,
+      input: patch,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
 ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
   try {
     for (const file of files) {
