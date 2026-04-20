@@ -3221,7 +3221,8 @@ body {
 .pr-ai-fix-all-btn,
 .pr-ai-fix-btn,
 .pr-ai-regen-btn,
-.pr-ai-discard-btn {
+.pr-ai-discard-btn,
+.pr-ai-fix-all-header-btn {
   padding: 3px 10px;
   font-size: 11px;
   font-family: inherit;
@@ -3235,7 +3236,8 @@ body {
 .pr-ai-fix-all-btn:hover,
 .pr-ai-fix-btn:hover,
 .pr-ai-regen-btn:hover,
-.pr-ai-discard-btn:hover {
+.pr-ai-discard-btn:hover,
+.pr-ai-fix-all-header-btn:hover {
   background: var(--accent);
   color: #fff;
 }
@@ -3243,9 +3245,21 @@ body {
 .pr-ai-fix-all-btn:disabled,
 .pr-ai-fix-btn:disabled,
 .pr-ai-regen-btn:disabled,
-.pr-ai-discard-btn:disabled {
+.pr-ai-discard-btn:disabled,
+.pr-ai-fix-all-header-btn:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+
+.pr-ai-fix-all-header-btn {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.pr-ai-fix-all-header-btn:hover {
+  filter: brightness(1.1);
 }
 
 .pr-ai-discard-btn {
