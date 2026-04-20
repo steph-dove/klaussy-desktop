@@ -35,6 +35,20 @@ window.PRPanel = (function () {
         expandBtn.remove();
         return;
       }
+      var resolveBtn = e.target.closest('.pr-thread-resolve-btn');
+      if (resolveBtn) {
+        handleToggleResolve(resolveBtn);
+        return;
+      }
+      // Expand a resolved thread when its header is clicked (but ignore button clicks).
+      var header = e.target.closest('.pr-thread-header');
+      if (header && !e.target.closest('button')) {
+        var thread = header.closest('.pr-thread');
+        if (thread && thread.classList.contains('pr-thread-resolved')) {
+          thread.classList.toggle('pr-thread-expanded');
+        }
+        return;
+      }
     });
 
     // Tab switching
@@ -134,12 +148,12 @@ window.PRPanel = (function () {
     renderComments(result.pr);
     updateMergeButton();
 
-    // Fetch CI checks and inline review comments in parallel.
+    // Fetch CI checks and inline review threads in parallel.
     var prNumber = result.pr.number;
     var worktreeAtRequest = currentWorktreePath;
-    var [checksResult, reviewComments] = await Promise.all([
+    var [checksResult, threadsResult] = await Promise.all([
       window.klaus.prChecks(worktreeAtRequest, prNumber),
-      window.klaus.prReviewComments(worktreeAtRequest, prNumber),
+      window.klaus.prReviewThreads(worktreeAtRequest, prNumber),
     ]);
 
     // Drop stale responses if the user switched worktrees/PRs mid-flight.
@@ -149,8 +163,13 @@ window.PRPanel = (function () {
     renderPRChecks(checksResult);
     updateMergeButton();
 
-    if (reviewComments.comments && reviewComments.comments.length > 0) {
-      renderReviewComments(reviewComments.comments);
+    if (threadsResult.error) {
+      commentsListEl.insertAdjacentHTML('beforeend',
+        '<div class="pr-error" style="text-align:left;padding:8px 14px;">Review threads failed: '
+        + escHtml(threadsResult.error) + '</div>');
+    }
+    if (threadsResult.threads && threadsResult.threads.length > 0) {
+      renderReviewThreads(threadsResult.threads);
     }
   }
 
@@ -390,46 +409,102 @@ window.PRPanel = (function () {
     return html;
   }
 
-  function renderReviewComments(comments) {
-    if (comments.length === 0) return;
+  function renderReviewThreads(threads) {
+    if (!threads || threads.length === 0) return;
+
+    // Drop any truly empty threads (should be rare) and warn for debugging.
+    var rendered = threads.filter(function (t) {
+      var hasComments = t.comments && t.comments.nodes && t.comments.nodes.length > 0;
+      if (!hasComments) console.warn('[pr-panel] dropping empty thread', t);
+      return hasComments;
+    });
+    if (rendered.length < threads.length) {
+      console.warn('[pr-panel] ' + (threads.length - rendered.length) + ' thread(s) had no comments and were skipped');
+    }
+
+    // Count unresolved threads for the header summary
+    var unresolved = rendered.filter(function (t) { return !t.isResolved; }).length;
+    var summary = rendered.length + ' thread' + (rendered.length === 1 ? '' : 's');
+    if (unresolved !== rendered.length) {
+      summary += ' (' + unresolved + ' unresolved)';
+    }
 
     var html = '<div class="pr-comments-section">';
-    html += '<div class="pr-comments-header">Inline Review Comments (' + comments.length + ')</div>';
-    comments.forEach(function (c) {
-      var time = formatTime(c.created_at);
-      var author = c.user ? c.user.login : 'unknown';
-      var commentId = c.id || '';
-      var side = c.side || 'RIGHT';
-      var targetLine = side === 'LEFT' ? (c.original_line || c.original_position) : (c.line || c.position);
-      var pathLabel = c.path
-        ? (c.path + (targetLine != null ? ':' + targetLine : ''))
-        : '';
+    html += '<div class="pr-comments-header">Inline Review Comments — ' + summary + '</div>';
 
-      var isReply = !!c.in_reply_to_id;
-      var itemCls = 'pr-comment-item pr-inline-comment' + (isReply ? ' pr-inline-reply' : '');
-      html += '<div class="' + itemCls + '">';
-      html += '<div class="pr-comment-meta">';
-      html += '<strong>' + escHtml(author) + '</strong>';
-      html += ' <span class="pr-comment-time">' + escHtml(time) + '</span>';
-      if (!isReply && pathLabel) {
-        html += ' on <span class="pr-comment-file">' + escHtml(pathLabel) + '</span>';
+    rendered.forEach(function (t) {
+      var comments = t.comments.nodes;
+
+      var root = comments[0];
+      var rootDbId = root.databaseId || '';
+      var rootAuthor = (root.author && root.author.login) || 'unknown';
+
+      var side = t.diffSide || root.side || 'RIGHT';
+      var line = side === 'LEFT' ? (t.originalLine || root.originalLine) : (t.line || root.line);
+      var pathLabel = t.path ? (t.path + (line != null ? ':' + line : '')) : '';
+
+      var threadCls = 'pr-thread' + (t.isResolved ? ' pr-thread-resolved' : '')
+                                  + (t.isOutdated ? ' pr-thread-outdated' : '');
+      html += '<div class="' + threadCls + '" data-thread-id="' + escAttr(t.id) + '">';
+
+      // Thread header: path:line + state badges + resolve toggle
+      html += '<div class="pr-thread-header">';
+      html += '<span class="pr-thread-path">' + escHtml(pathLabel) + '</span>';
+      html += '<span class="pr-thread-meta">';
+      if (t.isOutdated) html += '<span class="pr-thread-badge outdated">outdated</span>';
+      if (t.isResolved) {
+        html += '<span class="pr-thread-badge resolved">resolved</span>';
+        html += '<span class="pr-thread-count">' + comments.length + ' comment' + (comments.length === 1 ? '' : 's') + '</span>';
       }
+      html += '<button type="button" class="pr-thread-resolve-btn" data-thread-id="' + escAttr(t.id) + '" data-resolved="' + (t.isResolved ? '1' : '0') + '">'
+           +  (t.isResolved ? 'Unresolve' : 'Resolve') + '</button>';
       html += '</div>';
-      if (!isReply) html += renderReviewHunk(c);
-      html += '<div class="pr-comment-body">' + renderMarkdown(c.body) + '</div>';
-      // Reply area — inline review comments support threading
+      html += '</div>';
+
+      // Collapsible body: hunk + conversation + reply box
+      html += '<div class="pr-thread-body">';
+      // Hunk once at top, using root comment's diffHunk + thread's line/side
+      var hunkHtml = renderReviewHunk({
+        diff_hunk: root.diffHunk,
+        line: t.line,
+        original_line: t.originalLine,
+        side: side,
+      });
+      if (!hunkHtml && pathLabel) {
+        hunkHtml = '<div class="pr-thread-no-hunk">' + escHtml(pathLabel) + '</div>';
+      }
+      html += hunkHtml;
+
+      // Conversation
+      comments.forEach(function (c, idx) {
+        var author = (c.author && c.author.login) || 'unknown';
+        var time = formatTime(c.createdAt);
+        var isReply = idx > 0;
+        var cCls = 'pr-comment-item pr-inline-comment' + (isReply ? ' pr-inline-reply' : '');
+        html += '<div class="' + cCls + '">';
+        html += '<div class="pr-comment-meta">';
+        html += '<strong>' + escHtml(author) + '</strong>';
+        html += ' <span class="pr-comment-time">' + escHtml(time) + '</span>';
+        html += '</div>';
+        html += '<div class="pr-comment-body">' + renderMarkdown(c.body) + '</div>';
+        html += '</div>';
+      });
+
+      // Single reply composer per thread, anchored to the root comment
       html += buildReplyArea({
-        commentId: commentId,
-        author: author,
-        body: c.body,
-        filePath: c.path || null,
-        diffHunk: c.diff_hunk || null,
+        commentId: rootDbId,
+        author: rootAuthor,
+        body: root.body,
+        filePath: t.path || null,
+        diffHunk: root.diffHunk || null,
         threadable: true,
       });
-      html += '</div>';
-    });
-    html += '</div>';
 
+      html += '</div>'; // .pr-thread-body
+      html += '</div>'; // .pr-thread
+    });
+
+    html += '</div>';
     commentsListEl.innerHTML += html;
   }
 
@@ -534,6 +609,39 @@ window.PRPanel = (function () {
       aiEl.style.display = 'none';
       aiEl.innerHTML = '';
     }
+  }
+
+  // ---- Resolve / unresolve review thread ----
+
+  async function handleToggleResolve(btn) {
+    if (!currentWorktreePath) return;
+    var threadId = btn.dataset.threadId;
+    var wasResolved = btn.dataset.resolved === '1';
+    if (!threadId) return;
+
+    var origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    var fn = wasResolved ? window.klaus.prUnresolveThread : window.klaus.prResolveThread;
+    var result = await fn(currentWorktreePath, threadId);
+
+    if (result && result.error) {
+      btn.disabled = false;
+      btn.textContent = origText;
+      alert('Failed to ' + (wasResolved ? 'unresolve' : 'resolve') + ' thread: ' + result.error);
+      return;
+    }
+
+    // Reflect state locally without a full PR reload
+    var thread = btn.closest('.pr-thread');
+    if (thread) {
+      thread.classList.toggle('pr-thread-resolved', !wasResolved);
+      if (wasResolved) thread.classList.remove('pr-thread-expanded');
+    }
+    btn.disabled = false;
+    btn.dataset.resolved = wasResolved ? '0' : '1';
+    btn.textContent = wasResolved ? 'Resolve' : 'Unresolve';
   }
 
   // ---- Bottom form: general comment / approve / request changes ----

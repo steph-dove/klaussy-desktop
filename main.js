@@ -1916,6 +1916,75 @@ ipcMain.handle('pr-checks', async (_event, { worktreePath, prNumber }) => {
   }
 });
 
+ipcMain.handle('pr-review-threads', async (_event, { worktreePath, prNumber }) => {
+  try {
+    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    const [owner, repo] = JSON.parse(repoResult).nameWithOwner.split('/');
+    const query = 'query($owner: String!, $repo: String!, $number: Int!) {'
+      + '  repository(owner: $owner, name: $repo) {'
+      + '    pullRequest(number: $number) {'
+      + '      reviewThreads(first: 100) {'
+      + '        nodes {'
+      + '          id isResolved isOutdated path line originalLine startLine originalStartLine diffSide'
+      + '          comments(first: 100) { nodes { databaseId author { login } createdAt body diffHunk } }'
+      + '        }'
+      + '      }'
+      + '    }'
+      + '  }'
+      + '}';
+    const out = ghExec([
+      'api', 'graphql',
+      '-f', 'query=' + query,
+      '-f', 'owner=' + owner,
+      '-f', 'repo=' + repo,
+      '-F', 'number=' + prNumber,
+    ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
+    const parsed = JSON.parse(out);
+    if (parsed && parsed.errors && parsed.errors.length) {
+      return { threads: [], error: parsed.errors.map(e => e.message).join('; ') };
+    }
+    const threads = (parsed && parsed.data && parsed.data.repository && parsed.data.repository.pullRequest
+      && parsed.data.repository.pullRequest.reviewThreads && parsed.data.repository.pullRequest.reviewThreads.nodes) || [];
+    return { threads };
+  } catch (err) {
+    const stderr = err.stderr ? err.stderr.toString() : '';
+    // `gh api graphql` often writes the JSON error body to stdout even on non-zero exit
+    if (err.stdout) {
+      try {
+        const parsed = JSON.parse(err.stdout.toString());
+        if (parsed.errors && parsed.errors.length) {
+          return { threads: [], error: parsed.errors.map(e => e.message).join('; ') };
+        }
+      } catch {}
+    }
+    return { threads: [], error: stderr || err.message };
+  }
+});
+
+function resolveOrUnresolveThread(worktreePath, threadId, resolve) {
+  const mutation = resolve
+    ? 'mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }'
+    : 'mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }';
+  try {
+    ghExec([
+      'api', 'graphql',
+      '-f', 'query=' + mutation,
+      '-F', 'id=' + threadId,
+    ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+}
+
+ipcMain.handle('pr-resolve-thread', (_event, { worktreePath, threadId }) => {
+  return resolveOrUnresolveThread(worktreePath, threadId, true);
+});
+
+ipcMain.handle('pr-unresolve-thread', (_event, { worktreePath, threadId }) => {
+  return resolveOrUnresolveThread(worktreePath, threadId, false);
+});
+
 ipcMain.handle('pr-review-comments', async (_event, { worktreePath, prNumber }) => {
   try {
     // Get inline review comments via gh api
