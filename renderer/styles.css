@@ -1822,6 +1822,109 @@ body {
   background: var(--bg);
 }
 
+/* H1: Side-by-side diff view */
+.diff-view-mode-toggle {
+  display: inline-flex;
+  margin-left: auto;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.diff-view-full-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diff-view-mode-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-left: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.diff-view-mode-btn:first-child {
+  border-left: none;
+}
+
+.diff-view-mode-btn:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.diff-view-mode-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.diff-split-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 1px;
+  background: var(--border);
+}
+
+.diff-split-grid > .diff-line {
+  background: var(--bg);
+}
+
+.diff-split-grid > .diff-split-hunk-header,
+.diff-split-grid > .diff-split-meta,
+.diff-split-grid > .inline-comment,
+.diff-split-grid > .diff-explanation {
+  grid-column: 1 / -1;
+}
+
+.diff-split-meta {
+  padding: 2px 8px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.diff-split-meta.diff-header {
+  color: var(--accent);
+  font-weight: 600;
+  padding-top: 8px;
+}
+
+.diff-line.diff-blank {
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    rgba(128, 128, 128, 0.06) 4px,
+    rgba(128, 128, 128, 0.06) 8px
+  );
+}
+
+.diff-ln-gutter {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 36px;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--text-muted);
+  opacity: 0.5;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-split-grid .diff-line {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.diff-split-grid .diff-code {
+  overflow-x: auto;
+}
+
 /* Hunk comment composer */
 .diff-comment-area {
   margin: 4px 8px;
