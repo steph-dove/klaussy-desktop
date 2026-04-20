@@ -1002,6 +1002,13 @@
   // Exposed for pr-review.js to call when main clears state.
   window.exitPrReviewMode = exitPrReviewMode;
 
+  // G5: when "Check out locally" finishes in main, pick up the new task in
+  // the main window (pop-out closes itself via the null state broadcast).
+  window.klaus.onPrCheckoutReady(function (task) {
+    if (!task || typeof task.id !== 'number') return;
+    addTaskToUI(task);
+  });
+
   // Keep the main-window panel visibility in sync with main-process state
   // changes (e.g. the pop-out's "pop back in" button clears popout → we want
   // the main panel mounted again; prReviewClose from anywhere unmounts us).
