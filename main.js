@@ -1914,6 +1914,151 @@ ipcMain.handle('pr-refresh-threads', async () => {
   return { ok: true };
 });
 
+// G4: post all pending review comments + decision as one review. The GitHub
+// REST endpoint accepts `comments` inline so we only make one network call.
+// Piping JSON on stdin avoids shell-escaping pain for multiline comment
+// bodies.
+// General issue comment on the PR — no line context, just a body.
+ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo, number } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  if (!body || !body.trim()) return { error: 'Comment body is empty' };
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
+  const cwd = currentRepoPath() || require('os').homedir();
+  const { spawn } = require('child_process');
+
+  return new Promise((resolve) => {
+    const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdoutBuf = '', stderrBuf = '';
+    proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.on('error', (err) => resolve({ error: err.message }));
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        let msg = stderrBuf.trim();
+        if (stdoutBuf) {
+          try {
+            const parsed = JSON.parse(stdoutBuf);
+            if (parsed.message) msg = parsed.message;
+          } catch (_) {}
+        }
+        resolve({ error: msg || ('gh exited with code ' + code) });
+        return;
+      }
+      resolve({ ok: true });
+    });
+    proc.stdin.write(JSON.stringify({ body }));
+    proc.stdin.end();
+  });
+});
+
+// Reply to a specific review comment (threaded). `inReplyTo` is the parent
+// comment's REST databaseId — the same id GraphQL returns on each review
+// comment so we can thread using data we already fetch. Uses GitHub's
+// dedicated replies endpoint so we don't have to fake a new-comment shape.
+ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body }) => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo, number } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const parentId = parseInt(inReplyTo, 10);
+  if (!parentId) return { error: 'Missing or invalid parent comment id' };
+  if (!body || !body.trim()) return { error: 'Reply body is empty' };
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/comments/${parentId}/replies`;
+  const cwd = currentRepoPath() || require('os').homedir();
+  const { spawn } = require('child_process');
+
+  return new Promise((resolve) => {
+    const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdoutBuf = '', stderrBuf = '';
+    proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.on('error', (err) => resolve({ error: err.message }));
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        let msg = stderrBuf.trim();
+        if (stdoutBuf) {
+          try {
+            const parsed = JSON.parse(stdoutBuf);
+            if (parsed.message) msg = parsed.message + (parsed.errors ? ': ' + JSON.stringify(parsed.errors) : '');
+          } catch (_) {}
+        }
+        resolve({ error: msg || ('gh exited with code ' + code) });
+        return;
+      }
+      resolve({ ok: true });
+    });
+    proc.stdin.write(JSON.stringify({ body }));
+    proc.stdin.end();
+  });
+});
+
+ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo, number } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  if (!event) return { error: 'Missing review event (APPROVE / REQUEST_CHANGES / COMMENT)' };
+
+  const payload = {
+    event,
+    body: body || '',
+    comments: (comments || []).map((c) => {
+      const out = {
+        path: c.path,
+        body: c.body,
+        side: c.side || 'RIGHT',
+      };
+      // GitHub requires `line` always; `start_line` only for multi-line.
+      if (typeof c.line === 'number') out.line = c.line;
+      if (typeof c.startLine === 'number' && c.startLine !== c.line) {
+        out.start_line = c.startLine;
+        out.start_side = c.startSide || out.side;
+      }
+      return out;
+    }),
+  };
+
+  const cwd = currentRepoPath() || require('os').homedir();
+  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/reviews`;
+  const { spawn } = require('child_process');
+
+  return new Promise((resolve) => {
+    const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdoutBuf = '', stderrBuf = '';
+    proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.on('error', (err) => resolve({ error: err.message }));
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        // gh often writes JSON errors to stdout on non-zero exit.
+        let msg = stderrBuf.trim();
+        if (stdoutBuf) {
+          try {
+            const parsed = JSON.parse(stdoutBuf);
+            if (parsed.message) msg = parsed.message + (parsed.errors ? ': ' + JSON.stringify(parsed.errors) : '');
+          } catch (_) {}
+        }
+        resolve({ error: msg || ('gh exited with code ' + code) });
+        return;
+      }
+      resolve({ ok: true });
+    });
+    proc.stdin.write(JSON.stringify(payload));
+    proc.stdin.end();
+  });
+});
+
 ipcMain.handle('pr-review-state', () => activePrReview ? sanitizePrReview(activePrReview) : null);
 
 ipcMain.handle('pr-review-close', () => {

@@ -22,6 +22,9 @@ window.PrReview = (function () {
   var activeTab = 'files'; // 'files' | 'conversation'
   var selectionFab = null;
   var onSelectionChange = null;
+  // G4: draft review comments accumulated client-side until the user submits
+  // a review. Structure: { id, path, line, side, startLine?, startSide?, body }
+  var pendingComments = [];
 
   function mount(options) {
     hostEl = options.host;
@@ -123,31 +126,149 @@ window.PrReview = (function () {
     if (activeTab === 'files') {
       bindFileList();
       injectInlineThreads(threadsByPath);
+      injectPendingComments();
+    } else if (activeTab === 'conversation') {
+      bindConversationComposer();
+      bindReplyButtons();
     }
     renderThreadsStatusBadge(state);
+    renderPendingReviewBar(state);
   }
 
-  // Floating "Explain" button that appears when the user selects text inside
-  // the review diff — same UX as the Changes tab's selection explain. The FAB
-  // lives on document.body so it can float outside the scroll container; we
-  // position it by the selection's bounding rect.
+  function bindConversationComposer() {
+    var composer = hostEl.querySelector('.pr-conv-new-comment');
+    if (!composer) return;
+    var ta = composer.querySelector('.pr-conv-new-body');
+    var btn = composer.querySelector('.pr-conv-new-post');
+
+    async function post() {
+      var body = ta.value.trim();
+      if (!body) return;
+      btn.disabled = true;
+      btn.textContent = 'Posting\u2026';
+      var result = await window.klaus.prAddIssueComment(body);
+      if (result.error) {
+        btn.disabled = false;
+        btn.textContent = 'Comment';
+        alert('Post failed: ' + result.error);
+        return;
+      }
+      ta.value = '';
+      await window.klaus.prRefreshThreads();
+      // render is re-triggered by the pr-review-state broadcast.
+    }
+
+    btn.addEventListener('click', post);
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); }
+    });
+  }
+
+  function bindReplyButtons() {
+    hostEl.querySelectorAll('.pr-conv-reply-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        openReplyComposer(btn);
+      });
+    });
+  }
+
+  function openReplyComposer(btn) {
+    var parentId = btn.dataset.replyTo;
+    if (!parentId) return;
+    var inlineEl = btn.closest('.pr-conv-inline');
+    if (!inlineEl) return;
+    // One composer per comment at a time.
+    var existing = inlineEl.querySelector('.pr-conv-reply-composer');
+    if (existing) { existing.remove(); return; }
+
+    var composer = document.createElement('div');
+    composer.className = 'pr-conv-reply-composer';
+    composer.innerHTML =
+      '<textarea class="pr-conv-reply-body" placeholder="Reply (\u2318\u23CE to post)" rows="2"></textarea>'
+      + '<div class="pr-conv-reply-actions">'
+        + '<button class="pr-conv-reply-cancel" type="button">Cancel</button>'
+        + '<button class="pr-conv-reply-send" type="button">Reply</button>'
+      + '</div>';
+    inlineEl.appendChild(composer);
+
+    var ta = composer.querySelector('textarea');
+    var sendBtn = composer.querySelector('.pr-conv-reply-send');
+    ta.focus();
+
+    composer.querySelector('.pr-conv-reply-cancel').addEventListener('click', function () {
+      composer.remove();
+    });
+
+    async function send() {
+      var body = ta.value.trim();
+      if (!body) return;
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Posting\u2026';
+      var result = await window.klaus.prReplyToReviewComment(parentId, body);
+      if (result.error) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Reply';
+        alert('Reply failed: ' + result.error);
+        return;
+      }
+      composer.remove();
+      await window.klaus.prRefreshThreads();
+    }
+
+    sendBtn.addEventListener('click', send);
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
+      if (e.key === 'Escape') composer.remove();
+    });
+  }
+
+  function renderPendingReviewBar(state) {
+    var actions = hostEl.querySelector('.pr-review-actions');
+    if (!actions) return;
+    var prev = actions.querySelector('.pr-pending-review-bar');
+    if (prev) prev.remove();
+    if (pendingComments.length === 0) return;
+
+    var bar = document.createElement('span');
+    bar.className = 'pr-pending-review-bar';
+    bar.innerHTML = '<span class="pr-pending-count">' + pendingComments.length + ' pending</span>'
+      + '<button class="pr-review-btn pr-pending-submit" type="button">Finish review\u2026</button>';
+    actions.insertBefore(bar, actions.firstChild);
+    bar.querySelector('.pr-pending-submit').addEventListener('click', openSubmitReviewDialog);
+  }
+
+  // Floating action bar that appears when the user selects text inside the
+  // review diff — mirrors the Changes tab's selection FAB but adds a Comment
+  // button so reviewers can leave line comments (G4). Lives on document.body
+  // so it can float outside the scroll container.
   function initSelectionExplain() {
     if (selectionFab) return;
     selectionFab = document.createElement('div');
     selectionFab.id = 'pr-review-selection-fab';
     selectionFab.style.display = 'none';
-    selectionFab.innerHTML = '<button type="button" title="Explain selection">Explain</button>';
+    selectionFab.innerHTML =
+      '<button type="button" data-action="explain" title="Explain selection">Explain</button>'
+      + '<button type="button" data-action="comment" title="Leave a review comment">Comment</button>';
     document.body.appendChild(selectionFab);
 
     // Prevent the click from collapsing the selection before we read it.
     selectionFab.addEventListener('mousedown', function (e) { e.preventDefault(); });
-    selectionFab.querySelector('button').addEventListener('click', function () {
+    selectionFab.querySelector('[data-action="explain"]').addEventListener('click', function () {
       var sel = window.getSelection();
       if (!sel || sel.isCollapsed) return;
       var text = sel.toString().trim();
       if (!text) return;
       selectionFab.style.display = 'none';
       explainSelection(text);
+    });
+    selectionFab.querySelector('[data-action="comment"]').addEventListener('click', function () {
+      var range = computeCommentRange();
+      selectionFab.style.display = 'none';
+      if (!range) {
+        alert('Select one or more diff lines (add / delete / context) to comment on.');
+        return;
+      }
+      openCommentComposer(range);
     });
 
     onSelectionChange = function () {
@@ -408,6 +529,214 @@ window.PrReview = (function () {
     });
   }
 
+  // ---- G4: draft review comments ----
+
+  // Map the current text selection to a GitHub line-comment range. Mirrors
+  // the diff-panel's F5 logic: pool the touched diff-line elements by side
+  // (RIGHT if any addition/context touched, else LEFT) and collapse to
+  // first/last line. Returns null if nothing usable is selected.
+  function computeCommentRange() {
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return null;
+    var diffArea = hostEl.querySelector('.pr-review-diff');
+    if (!diffArea) return null;
+    if (!diffArea.contains(sel.anchorNode) && !diffArea.contains(sel.focusNode)) return null;
+
+    var range = sel.getRangeAt(0);
+    var allLines = Array.from(diffArea.querySelectorAll('.diff-line[data-line]'));
+    var touched = allLines.filter(function (el) {
+      try { return range.intersectsNode(el); } catch (_) { return false; }
+    });
+    var rightLines = [], leftLines = [];
+    touched.forEach(function (el) {
+      var ln = parseInt(el.dataset.line, 10);
+      if (isNaN(ln)) return;
+      if (el.dataset.side === 'LEFT') leftLines.push(ln);
+      else rightLines.push(ln);
+    });
+    var useRight = rightLines.length > 0;
+    var pool = useRight ? rightLines : leftLines;
+    if (!pool.length) return null;
+    pool.sort(function (a, b) { return a - b; });
+    var side = useRight ? 'RIGHT' : 'LEFT';
+    var first = pool[0], last = pool[pool.length - 1];
+    return {
+      path: selectedFile,
+      side: side,
+      line: last,
+      startLine: first !== last ? first : null,
+      startSide: first !== last ? side : null,
+      anchorEl: touched[touched.length - 1],
+    };
+  }
+
+  function openCommentComposer(range) {
+    if (!range || !range.path) return;
+    window.getSelection().removeAllRanges();
+    // Only one composer at a time — and it's modal-ish for the active range.
+    var existing = hostEl.querySelector('.pr-comment-composer');
+    if (existing) existing.remove();
+
+    var label = range.startLine
+      ? range.path + ':L' + range.startLine + '-L' + range.line
+      : range.path + ':L' + range.line;
+
+    var composer = document.createElement('div');
+    composer.className = 'pr-comment-composer';
+    composer.innerHTML =
+      '<div class="pr-comment-composer-head">'
+        + '<span>Draft comment on <code>' + escHtml(label) + '</code></span>'
+        + '<button class="pr-comment-composer-close" type="button" title="Cancel">&times;</button>'
+      + '</div>'
+      + '<textarea class="pr-comment-composer-input" placeholder="Comment (\u2318\u23CE to save)" rows="3"></textarea>'
+      + '<div class="pr-comment-composer-actions">'
+        + '<span class="pr-comment-composer-hint">Saved to your pending review; submit from the header when you\u2019re done.</span>'
+        + '<button class="pr-comment-composer-save" type="button">Add comment</button>'
+      + '</div>';
+    range.anchorEl.insertAdjacentElement('afterend', composer);
+
+    var ta = composer.querySelector('textarea');
+    var saveBtn = composer.querySelector('.pr-comment-composer-save');
+    ta.focus();
+
+    function close() { composer.remove(); }
+    composer.querySelector('.pr-comment-composer-close').addEventListener('click', close);
+    ta.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') close();
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveBtn.click(); }
+    });
+    saveBtn.addEventListener('click', function () {
+      var body = ta.value.trim();
+      if (!body) return;
+      pendingComments.push({
+        id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+        path: range.path,
+        line: range.line,
+        side: range.side,
+        startLine: range.startLine,
+        startSide: range.startSide,
+        body: body,
+      });
+      close();
+      if (lastState) render(lastState);
+    });
+  }
+
+  function removePendingComment(id) {
+    pendingComments = pendingComments.filter(function (c) { return c.id !== id; });
+    if (lastState) render(lastState);
+  }
+
+  function renderPendingCount() {
+    return pendingComments.length;
+  }
+
+  function injectPendingComments() {
+    if (!selectedFile) return;
+    var forFile = pendingComments.filter(function (c) { return c.path === selectedFile; });
+    if (forFile.length === 0) return;
+    var diffPre = hostEl.querySelector('.pr-review-diff-pre');
+    if (!diffPre) return;
+
+    var lineAnchors = {};
+    diffPre.querySelectorAll('[data-line]').forEach(function (el) {
+      var key = el.dataset.side + ':' + el.dataset.line;
+      if (!lineAnchors[key]) lineAnchors[key] = el;
+    });
+
+    forFile.forEach(function (c) {
+      var anchor = lineAnchors[c.side + ':' + c.line];
+      if (!anchor) return;
+      // Chain after any existing pending/real threads on the same line.
+      var after = anchor;
+      while (after.nextElementSibling
+        && (after.nextElementSibling.classList.contains('pr-inline-thread')
+            || after.nextElementSibling.classList.contains('pr-pending-comment'))) {
+        after = after.nextElementSibling;
+      }
+      var el = document.createElement('div');
+      el.className = 'pr-pending-comment';
+      el.dataset.pendingId = c.id;
+      el.innerHTML =
+        '<div class="pr-pending-head">'
+          + '<span class="pr-pending-badge">draft</span>'
+          + '<span class="pr-pending-summary">' + escHtml(firstTwoLines(c.body)) + '</span>'
+          + '<button class="pr-pending-remove" type="button" title="Discard draft">&times;</button>'
+        + '</div>'
+        + '<div class="pr-pending-body">' + renderCommentBody(c.body) + '</div>';
+      after.insertAdjacentElement('afterend', el);
+      el.querySelector('.pr-pending-remove').addEventListener('click', function () {
+        removePendingComment(c.id);
+      });
+    });
+  }
+
+  function openSubmitReviewDialog() {
+    if (pendingComments.length === 0) {
+      if (!confirm('No pending comments. Submit review anyway (summary only)?')) return;
+    }
+    var overlay = document.createElement('div');
+    overlay.className = 'pr-submit-overlay';
+    overlay.innerHTML =
+      '<div class="pr-submit-dialog">'
+        + '<div class="pr-submit-head">Submit review</div>'
+        + '<div class="pr-submit-count">' + pendingComments.length
+          + ' pending comment' + (pendingComments.length === 1 ? '' : 's') + '</div>'
+        + '<textarea class="pr-submit-body" placeholder="Overall summary (optional)" rows="4"></textarea>'
+        + '<div class="pr-submit-events">'
+          + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="COMMENT" checked /> <span class="pr-submit-event-label">Comment</span><span class="pr-submit-event-hint">Submit without approval</span></label>'
+          + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="APPROVE" /> <span class="pr-submit-event-label">Approve</span><span class="pr-submit-event-hint">Submit feedback and approve</span></label>'
+          + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="REQUEST_CHANGES" /> <span class="pr-submit-event-label">Request changes</span><span class="pr-submit-event-hint">Submit feedback that must be addressed</span></label>'
+        + '</div>'
+        + '<div class="pr-submit-actions">'
+          + '<button class="pr-submit-cancel" type="button">Cancel</button>'
+          + '<button class="pr-submit-send" type="button">Submit review</button>'
+        + '</div>'
+        + '<div class="pr-submit-error" style="display:none;"></div>'
+      + '</div>';
+    document.body.appendChild(overlay);
+
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    overlay.querySelector('.pr-submit-cancel').addEventListener('click', close);
+
+    var bodyTa = overlay.querySelector('.pr-submit-body');
+    var sendBtn = overlay.querySelector('.pr-submit-send');
+    var errEl = overlay.querySelector('.pr-submit-error');
+    bodyTa.focus();
+
+    sendBtn.addEventListener('click', async function () {
+      var event = overlay.querySelector('input[name="pr-event"]:checked').value;
+      var body = bodyTa.value.trim();
+      // GitHub requires a body for REQUEST_CHANGES and COMMENT reviews (with
+      // no inline comments); surface that ahead of the round trip.
+      if (event === 'REQUEST_CHANGES' && !body) {
+        errEl.style.display = '';
+        errEl.textContent = 'Please provide a summary when requesting changes.';
+        return;
+      }
+      if (event === 'COMMENT' && !body && pendingComments.length === 0) {
+        errEl.style.display = '';
+        errEl.textContent = 'Add a summary or at least one line comment.';
+        return;
+      }
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Submitting\u2026';
+      var result = await window.klaus.prSubmitReview({ event: event, body: body, comments: pendingComments });
+      if (result.error) {
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Submit review';
+        errEl.style.display = '';
+        errEl.textContent = result.error;
+        return;
+      }
+      pendingComments = [];
+      close();
+      // Pull in the newly-posted threads so they replace the drafts inline.
+      await window.klaus.prRefreshThreads();
+    });
+  }
+
   // ---- G3: inline review threads ----
 
   function injectInlineThreads(threadsByPath) {
@@ -533,11 +862,19 @@ window.PrReview = (function () {
       + '<div class="pr-conv-body">' + (meta.body ? renderCommentBody(meta.body) : '<em class="pr-conv-empty">No description provided.</em>') + '</div>'
     + '</div>';
 
-    if (items.length === 0) {
-      return body + '<div class="pr-conv-empty-feed">No comments or reviews yet.</div>';
-    }
+    var feed = items.length === 0
+      ? '<div class="pr-conv-empty-feed">No comments or reviews yet.</div>'
+      : items.map(renderConversationItem).join('');
 
-    return body + items.map(renderConversationItem).join('');
+    var composer = '<div class="pr-conv-new-comment">'
+        + '<div class="pr-conv-new-head">Add a comment</div>'
+        + '<textarea class="pr-conv-new-body" placeholder="Write a general comment (\u2318\u23CE to post)" rows="3"></textarea>'
+        + '<div class="pr-conv-new-actions">'
+          + '<button class="pr-conv-new-post" type="button">Comment</button>'
+        + '</div>'
+      + '</div>';
+
+    return body + feed + composer;
   }
 
   function buildConversationItems(state) {
@@ -545,16 +882,39 @@ window.PrReview = (function () {
     (state.issueComments || []).forEach(function (c) {
       items.push({ kind: 'comment', when: c.createdAt, data: c });
     });
+
+    // Thread lookup: each PR review comment belongs to a reviewThread, and
+    // the thread holds *all* replies regardless of which review submission
+    // wrapped them. Mirror GitHub's UI: show each thread in full under the
+    // review that originated it, and hide pure-reply review wrappers.
+    var threadByCommentId = {};
+    (state.threads || []).forEach(function (t) {
+      var threadComments = (t.comments && t.comments.nodes) || [];
+      threadComments.forEach(function (c) {
+        if (c.databaseId) threadByCommentId[c.databaseId] = t;
+      });
+    });
+
     (state.reviews || []).forEach(function (r) {
-      // Skip pending reviews (submittedAt null) — usually our own draft.
       if (!r.submittedAt) return;
-      // "COMMENTED" reviews with no body and no inline comments are the "User
-      // left a review" wrapper around inline comments — they'd render as
-      // empty cards. Skip them; the inline comments still surface elsewhere.
       var hasBody = r.body && r.body.trim();
-      var inlineCount = (r.comments && r.comments.nodes && r.comments.nodes.length) || 0;
-      if (r.state === 'COMMENTED' && !hasBody && inlineCount === 0) return;
-      items.push({ kind: 'review', when: r.submittedAt, data: r });
+      var reviewComments = (r.comments && r.comments.nodes) || [];
+
+      // A review "originates" a thread when the thread's first comment is
+      // one of this review's comments. Reply-only reviews never originate
+      // anything and drop out of the feed.
+      var originatedThreads = [];
+      reviewComments.forEach(function (rc) {
+        var t = threadByCommentId[rc.databaseId];
+        if (!t) return;
+        var firstInThread = t.comments && t.comments.nodes && t.comments.nodes[0];
+        if (firstInThread && firstInThread.databaseId === rc.databaseId) {
+          originatedThreads.push(t);
+        }
+      });
+
+      if (!hasBody && originatedThreads.length === 0) return;
+      items.push({ kind: 'review', when: r.submittedAt, data: r, originatedThreads: originatedThreads });
     });
     items.sort(function (a, b) {
       return new Date(a.when || 0) - new Date(b.when || 0);
@@ -564,7 +924,7 @@ window.PrReview = (function () {
 
   function renderConversationItem(item) {
     if (item.kind === 'comment') return renderIssueComment(item.data);
-    if (item.kind === 'review') return renderReviewSubmission(item.data);
+    if (item.kind === 'review') return renderReviewSubmission(item.data, item.originatedThreads);
     return '';
   }
 
@@ -581,24 +941,17 @@ window.PrReview = (function () {
     + '</div>';
   }
 
-  function renderReviewSubmission(r) {
+  function renderReviewSubmission(r, originatedThreads) {
     var author = (r.author && r.author.login) || 'unknown';
     var when = r.submittedAt ? new Date(r.submittedAt).toLocaleString() : '';
     var stateLabel = reviewStateLabel(r.state);
     var stateCls = 'pr-conv-state pr-conv-state-' + (r.state || '').toLowerCase();
-    var inline = (r.comments && r.comments.nodes) || [];
+    var threads = originatedThreads || [];
 
-    var inlineHtml = '';
-    if (inline.length > 0) {
-      inlineHtml = '<div class="pr-conv-inline-list">'
-        + inline.map(function (ic) {
-          var path = ic.path ? ic.path + (ic.line ? ':' + ic.line : '') : '';
-          return '<div class="pr-conv-inline">'
-            + (path ? '<div class="pr-conv-inline-path">' + escHtml(path) + '</div>' : '')
-            + (ic.diffHunk ? '<pre class="pr-conv-inline-hunk">' + escHtml(lastLinesOfHunk(ic.diffHunk, 4)) + '</pre>' : '')
-            + '<div class="pr-conv-inline-body">' + renderCommentBody(ic.body) + '</div>'
-          + '</div>';
-        }).join('')
+    var threadsHtml = '';
+    if (threads.length > 0) {
+      threadsHtml = '<div class="pr-conv-inline-list">'
+        + threads.map(renderConversationThread).join('')
       + '</div>';
     }
 
@@ -608,11 +961,51 @@ window.PrReview = (function () {
       + '<div class="pr-conv-head">'
         + '<span class="pr-conv-author">' + escHtml(author) + '</span>'
         + '<span class="' + stateCls + '">' + escHtml(stateLabel) + '</span>'
-        + (inline.length > 0 ? '<span class="pr-conv-inline-count">' + inline.length + ' inline</span>' : '')
+        + (threads.length > 0 ? '<span class="pr-conv-inline-count">' + threads.length + ' inline</span>' : '')
         + '<span class="pr-conv-when">' + escHtml(when) + '</span>'
       + '</div>'
       + bodyHtml
-      + inlineHtml
+      + threadsHtml
+    + '</div>';
+  }
+
+  // Render a full thread: the hunk context once, then every comment in the
+  // thread stacked (originator + replies), and a Reply composer trigger on
+  // the *last* comment so replying posts to the right parent.
+  function renderConversationThread(thread) {
+    var comments = (thread.comments && thread.comments.nodes) || [];
+    if (comments.length === 0) return '';
+    var first = comments[0];
+    var path = first.path ? first.path + (first.line != null ? ':' + first.line : (thread.line != null ? ':' + thread.line : '')) : (thread.path || '');
+
+    var resolvedCls = thread.isResolved ? ' resolved' : '';
+    var outdatedCls = thread.isOutdated ? ' outdated' : '';
+    var replyParentId = comments[comments.length - 1].databaseId;
+
+    var commentsHtml = comments.map(function (c, i) {
+      var author = (c.author && c.author.login) || 'unknown';
+      var when = c.createdAt ? new Date(c.createdAt).toLocaleString() : '';
+      return '<div class="pr-conv-thread-comment' + (i === 0 ? ' first' : '') + '">'
+        + '<div class="pr-conv-thread-comment-head">'
+          + '<span class="pr-conv-author">' + escHtml(author) + '</span>'
+          + '<span class="pr-conv-when">' + escHtml(when) + '</span>'
+        + '</div>'
+        + '<div class="pr-conv-thread-comment-body">' + renderCommentBody(c.body) + '</div>'
+      + '</div>';
+    }).join('');
+
+    var replyBtn = replyParentId
+      ? '<button class="pr-conv-reply-btn" type="button" data-reply-to="' + replyParentId + '">Reply</button>'
+      : '';
+
+    return '<div class="pr-conv-inline pr-conv-thread' + resolvedCls + outdatedCls + '">'
+      + (path ? '<div class="pr-conv-inline-path">' + escHtml(path)
+          + (thread.isResolved ? ' <span class="pr-inline-thread-badge resolved">resolved</span>' : '')
+          + (thread.isOutdated ? ' <span class="pr-inline-thread-badge outdated">outdated</span>' : '')
+        + '</div>' : '')
+      + (first.diffHunk ? '<pre class="pr-conv-inline-hunk">' + escHtml(lastLinesOfHunk(first.diffHunk, 4)) + '</pre>' : '')
+      + '<div class="pr-conv-thread-comments">' + commentsHtml + '</div>'
+      + (replyBtn ? '<div class="pr-conv-inline-actions">' + replyBtn + '</div>' : '')
     + '</div>';
   }
 
