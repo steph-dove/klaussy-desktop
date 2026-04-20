@@ -240,4 +240,18 @@ contextBridge.exposeInMainWorld('klaus', {
   // H2: Cross-task review inbox
   listAllDirtyWorktrees: () => ipcRenderer.invoke('list-all-dirty-worktrees'),
   getWorktreeState: (taskId) => ipcRenderer.invoke('get-worktree-state', { taskId }),
+
+  // Phase G: Review others' PRs
+  prList: () => ipcRenderer.invoke('pr-list'),
+  prLookupUrl: (url) => ipcRenderer.invoke('pr-lookup-url', { url }),
+  prLoad: ({ number, url }) => ipcRenderer.invoke('pr-load', { number, url }),
+  prReviewState: () => ipcRenderer.invoke('pr-review-state'),
+  prReviewClose: () => ipcRenderer.invoke('pr-review-close'),
+  popOutPrReview: () => ipcRenderer.invoke('pop-out-pr-review'),
+  popInPrReview: () => ipcRenderer.invoke('pop-in-pr-review'),
+  onPrReviewState: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('pr-review-state', handler);
+    return () => ipcRenderer.removeListener('pr-review-state', handler);
+  },
 });

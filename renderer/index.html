@@ -26,6 +26,7 @@
           <button id="btn-diff" title="Toggle diff panel">&#916;</button>
           <button id="btn-layout" title="Cycle layout: single / columns / grid">&#9638;</button>
           <button id="btn-dirty-filter" title="Show only tasks with changes">!</button>
+          <button id="btn-review-pr" title="Review a Pull Request…">PR</button>
           <button id="btn-new-task" title="New Task">+</button>
         </div>
       </div>
@@ -57,6 +58,9 @@
         </div>
         <div id="terminals"></div>
       </div>
+
+      <!-- Phase G: Review others' PRs. Takes over the main area while active. -->
+      <div id="pr-review-root" style="display:none;"></div>
 
       <!-- Diff panel (Phase 1, 2, 6) -->
       <div id="diff-panel">
@@ -324,6 +328,7 @@
   <script src="project-switcher.js"></script>
   <script src="sidebar-manager.js"></script>
   <script src="terminal-manager.js"></script>
+  <script src="pr-review.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

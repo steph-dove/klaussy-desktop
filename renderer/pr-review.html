@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Klaussy — Review</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="pr-review-popout">
+  <div id="pr-review-root"></div>
+  <script src="utils.js"></script>
+  <script src="pr-review.js"></script>
+  <script>
+    // Host is the window itself; no other renderer modules are loaded here.
+    window.PrReview.mount({
+      host: document.getElementById('pr-review-root'),
+      isPopout: true,
+    });
+  </script>
+</body>
+</html>

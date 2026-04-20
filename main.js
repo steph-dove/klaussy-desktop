@@ -178,6 +178,8 @@ app.whenReady().then(() => {
         { type: 'separator' },
         { role: 'cut' },
         { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
         { role: 'selectAll' },
       ],
     },
@@ -1694,6 +1696,158 @@ ipcMain.handle('pop-out-task', (_event, { id }) => {
     inst.popoutWindows.delete(popout);
   });
 
+  return { ok: true };
+});
+
+// ---- Phase G: Review others' PRs ----
+//
+// activePrReview is the single source of truth so the main-window panel and
+// the detached pop-out see the same state (no duplicate fetches, no lost
+// pending comments). null = no review open.
+
+let activePrReview = null; // { repo, number, meta, diff, popout: BrowserWindow|null }
+
+function broadcastPrReview() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed()) continue;
+    win.webContents.send('pr-review-state', activePrReview ? sanitizePrReview(activePrReview) : null);
+  }
+}
+
+function sanitizePrReview(s) {
+  // Strip the BrowserWindow reference — not serializable across IPC.
+  const { popout, ...rest } = s;
+  return { ...rest, popped: !!popout };
+}
+
+function ghJson(args, cwd) {
+  return new Promise((resolve, reject) => {
+    execFile('gh', args, { cwd, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        err.stderr = stderr;
+        return reject(err);
+      }
+      try { resolve(JSON.parse(stdout)); }
+      catch (e) { reject(new Error('gh returned non-JSON: ' + stdout.slice(0, 200))); }
+    });
+  });
+}
+
+function ghText(args, cwd) {
+  return new Promise((resolve, reject) => {
+    execFile('gh', args, { cwd, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) { err.stderr = stderr; return reject(err); }
+      resolve(stdout);
+    });
+  });
+}
+
+function currentRepoPath() {
+  const config = loadConfig();
+  return config.repoPath || null;
+}
+
+ipcMain.handle('pr-list', async () => {
+  const cwd = currentRepoPath();
+  if (!cwd) return { error: 'No active project. Add a project first.' };
+  try {
+    const prs = await ghJson([
+      'pr', 'list',
+      '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url',
+      '--limit', '50',
+    ], cwd);
+    return { prs };
+  } catch (err) {
+    return { error: (err.stderr || err.message || '').trim() };
+  }
+});
+
+ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
+  const cwd = currentRepoPath();
+  if (!cwd) return { error: 'No active project. Add a project first.' };
+  try {
+    const meta = await ghJson([
+      'pr', 'view', url,
+      '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
+    ], cwd);
+    return { meta };
+  } catch (err) {
+    return { error: (err.stderr || err.message || '').trim() };
+  }
+});
+
+ipcMain.handle('pr-load', async (_event, { number, url }) => {
+  const cwd = currentRepoPath();
+  if (!cwd) return { error: 'No active project. Add a project first.' };
+  const target = url || String(number);
+  try {
+    const [meta, diff] = await Promise.all([
+      ghJson([
+        'pr', 'view', target,
+        '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
+      ], cwd),
+      ghText(['pr', 'diff', target], cwd),
+    ]);
+    const repo = meta.headRepositoryOwner && meta.headRepository
+      ? `${meta.headRepositoryOwner.login}/${meta.headRepository.name}`
+      : null;
+    activePrReview = { repo, number: meta.number, meta, diff, popout: null };
+    broadcastPrReview();
+    return { ok: true };
+  } catch (err) {
+    return { error: (err.stderr || err.message || '').trim() };
+  }
+});
+
+ipcMain.handle('pr-review-state', () => activePrReview ? sanitizePrReview(activePrReview) : null);
+
+ipcMain.handle('pr-review-close', () => {
+  if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
+    activePrReview.popout.close();
+  }
+  activePrReview = null;
+  broadcastPrReview();
+  return { ok: true };
+});
+
+ipcMain.handle('pop-out-pr-review', () => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  if (activePrReview.popout && !activePrReview.popout.isDestroyed()) {
+    activePrReview.popout.focus();
+    return { ok: true };
+  }
+
+  const popout = new BrowserWindow({
+    width: 1100,
+    height: 800,
+    title: `Review \u2014 #${activePrReview.number} ${activePrReview.meta.title || ''}`,
+    icon: path.join(__dirname, 'icon.icns'),
+    backgroundColor: '#1a1a2e',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  popout.loadFile(path.join(__dirname, 'renderer', 'pr-review.html'));
+  activePrReview.popout = popout;
+  broadcastPrReview();
+
+  popout.on('closed', () => {
+    if (activePrReview && activePrReview.popout === popout) {
+      activePrReview.popout = null;
+      broadcastPrReview();
+    }
+  });
+
+  return { ok: true };
+});
+
+ipcMain.handle('pop-in-pr-review', () => {
+  if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
+    activePrReview.popout.close();
+  }
   return { ok: true };
 });
 
