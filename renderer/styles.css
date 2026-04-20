@@ -3773,12 +3773,164 @@ body.pr-review-popout #pr-review-root {
 }
 .pr-review-btn:hover { background: var(--surface-hover); }
 
+.pr-review-tabs {
+  display: flex;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 0 14px;
+}
+.pr-review-tab {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 8px 14px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pr-review-tab:hover { color: var(--text); }
+.pr-review-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.pr-tab-count {
+  background: rgba(128, 128, 128, 0.2);
+  color: var(--text-dim);
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pr-review-tab.active .pr-tab-count {
+  background: var(--accent);
+  color: #fff;
+}
+
 .pr-review-body {
   flex: 1;
   display: grid;
   grid-template-columns: 260px 1fr;
   min-height: 0;
   overflow: hidden;
+}
+
+.pr-review-body.conversation-mode {
+  grid-template-columns: 1fr;
+}
+
+.pr-review-conversation {
+  overflow-y: auto;
+  padding: 20px 24px 40px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.pr-conv-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+
+.pr-conv-description { border-left: 3px solid var(--accent); }
+
+.pr-conv-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.pr-conv-author { color: var(--text); font-weight: 600; }
+.pr-conv-kind { color: var(--text-dim); }
+.pr-conv-when { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+
+.pr-conv-body {
+  padding: 12px 14px;
+  color: var(--text);
+  line-height: 1.6;
+  word-break: break-word;
+}
+.pr-conv-empty { color: var(--text-muted); font-style: italic; }
+.pr-conv-empty-feed {
+  text-align: center;
+  padding: 20px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pr-conv-state {
+  padding: 1px 8px;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.pr-conv-state-approved          { background: rgba(35, 134, 54, 0.2);  color: var(--diff-add-fg, #7ce27c); }
+.pr-conv-state-changes_requested { background: rgba(218, 54, 51, 0.2);  color: var(--diff-del-fg, #e27c7c); }
+.pr-conv-state-commented         { background: rgba(128, 128, 128, 0.2); color: var(--text-dim); }
+.pr-conv-state-dismissed         { background: rgba(128, 128, 128, 0.15); color: var(--text-muted); }
+.pr-conv-state-pending           { background: rgba(180, 140, 40, 0.2); color: #d4b454; }
+
+.pr-conv-inline-count {
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--text-dim);
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+}
+
+.pr-conv-inline-list {
+  padding: 0 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pr-conv-inline {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.pr-conv-inline-path {
+  padding: 6px 10px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+}
+.pr-conv-inline-hunk {
+  margin: 0;
+  padding: 6px 10px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  white-space: pre;
+  overflow-x: auto;
+  line-height: 1.4;
+}
+.pr-conv-inline-body {
+  padding: 10px;
+  color: var(--text);
+  line-height: 1.5;
+  font-size: 12px;
 }
 
 .pr-review-file-list {
@@ -3825,6 +3977,196 @@ body.pr-review-popout #pr-review-root {
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* Floating "Explain" button shown when text is selected in the review diff.
+   Mirrors #diff-selection-fab from the Changes tab but lives on its own
+   element so the two features don't fight over the same node. */
+#pr-review-selection-fab {
+  position: absolute;
+  z-index: 600;
+  display: flex;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+#pr-review-selection-fab button {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  font-family: inherit;
+}
+
+#pr-review-selection-fab button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Rotating status label while streaming explain. The pulse makes it obvious
+   the UI is waiting rather than stuck; the cycling text tells the user which
+   stage we're at. Removed once the first token arrives. */
+.diff-explanation-body.status-pulse {
+  color: var(--text-dim);
+  font-style: italic;
+  animation: pr-review-status-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pr-review-status-pulse {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+/* G3: inline review threads */
+
+.pr-file-threads {
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+
+.pr-threads-status {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.12);
+}
+.pr-threads-status.error { color: var(--diff-del-fg, #e27c7c); }
+
+.pr-inline-thread {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  margin: 4px 12px;
+  border-radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 12px;
+  overflow: hidden;
+  /* Reset inherited pre styling — threads live inside <pre class="pr-review-diff-pre">. */
+  white-space: normal;
+  tab-size: initial;
+}
+
+.pr-inline-thread.resolved {
+  border-left-color: var(--diff-add-fg, #7ce27c);
+  opacity: 0.7;
+}
+
+.pr-inline-thread.outdated {
+  border-left-color: var(--text-muted);
+}
+
+.pr-inline-thread-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.pr-inline-thread-head:hover { background: var(--surface-hover); }
+
+.pr-inline-thread-chevron {
+  flex-shrink: 0;
+  transition: transform 0.1s;
+  color: var(--text-muted);
+}
+.pr-inline-thread:not(.collapsed) .pr-inline-thread-chevron {
+  transform: rotate(90deg);
+}
+
+.pr-inline-thread-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.pr-inline-thread-author {
+  color: var(--text);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pr-inline-thread-preview {
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+.pr-inline-thread-count {
+  color: var(--text-muted);
+  background: rgba(128, 128, 128, 0.2);
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.pr-inline-thread-badge {
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.pr-inline-thread-badge.resolved { background: rgba(35, 134, 54, 0.25); color: var(--diff-add-fg, #7ce27c); }
+.pr-inline-thread-badge.outdated { background: rgba(128, 128, 128, 0.25); color: var(--text-muted); }
+
+.pr-inline-thread-body {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.pr-inline-thread.collapsed .pr-inline-thread-body { display: none; }
+
+.pr-inline-comment {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.pr-inline-comment:last-child { border-bottom: none; }
+
+.pr-inline-comment-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+}
+.pr-inline-author { color: var(--text); font-weight: 600; font-size: 11px; }
+.pr-inline-when { color: var(--text-muted); font-size: 10px; }
+.pr-inline-comment-body {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pr-inline-thread-outdated {
+  margin: 12px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.pr-inline-thread-outdated-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.3px;
+}
+.pr-inline-thread-outdated .pr-inline-thread { margin: 4px 0; }
 
 /* Picker overlay */
 .pr-picker-overlay {
