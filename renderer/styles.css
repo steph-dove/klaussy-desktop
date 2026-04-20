@@ -2111,6 +2111,9 @@ body {
 
 .pr-url {
   margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .pr-link {
@@ -2121,6 +2124,39 @@ body {
 
 .pr-link:hover {
   text-decoration: underline;
+}
+
+.pr-ai-review-btn {
+  margin-left: auto;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(139, 92, 246, 0.35);
+  transition: transform 0.08s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.pr-ai-review-btn:hover {
+  filter: brightness(1.12);
+  box-shadow: 0 3px 10px rgba(139, 92, 246, 0.5);
+  transform: translateY(-1px);
+}
+
+.pr-ai-review-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(139, 92, 246, 0.3);
+}
+
+.pr-ai-review-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+  box-shadow: none;
+  transform: none;
 }
 
 .pr-body {
@@ -2919,6 +2955,244 @@ body {
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 8px;
+}
+
+/* Whole-PR review (F6) */
+#pr-ai-review:empty {
+  display: none;
+}
+
+.pr-ai-review-card {
+  margin: 10px 12px;
+  background: rgba(139, 92, 246, 0.04);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.pr-ai-review-card > .pr-ai-review-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(139, 92, 246, 0.08);
+  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.pr-ai-review-card > .pr-ai-review-header strong {
+  flex: 1 1 auto;
+}
+
+.pr-ai-elapsed {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.pr-ai-cancel-btn {
+  padding: 2px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  background: transparent;
+  color: #e27c7c;
+  border: 1px solid rgba(226, 124, 124, 0.4);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pr-ai-cancel-btn:hover {
+  background: rgba(226, 124, 124, 0.1);
+}
+
+.pr-ai-review-close {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+}
+
+.pr-ai-review-close:hover {
+  color: var(--text);
+}
+
+/* Progress chips (live tool-use events from stream-json) */
+.pr-ai-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.12);
+  min-height: 0;
+}
+
+.pr-ai-progress:empty {
+  display: none;
+}
+
+.pr-ai-progress-chip {
+  font-size: 10px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  padding: 1px 7px;
+  background: rgba(139, 92, 246, 0.10);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+  border-radius: 10px;
+  color: var(--text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pr-ai-progress-chip.pr-ai-progress-system {
+  background: rgba(128, 128, 128, 0.1);
+  border-color: rgba(128, 128, 128, 0.25);
+}
+
+.pr-ai-review-card > .pr-ai-review-body {
+  padding: 8px 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.pr-ai-section {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.12);
+}
+
+.pr-ai-section:last-child {
+  border-bottom: none;
+}
+
+.pr-ai-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.pr-ai-section-concerns .pr-ai-section-title {
+  color: #e27c7c;
+}
+
+.pr-ai-section-suggestions .pr-ai-section-title {
+  color: #d29922;
+}
+
+.pr-ai-section-body {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.pr-ai-truncated {
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: rgba(210, 153, 34, 0.08);
+  border: 1px solid rgba(210, 153, 34, 0.3);
+  border-radius: 4px;
+}
+
+/* Findings + Fix buttons */
+.pr-ai-findings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0 10px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.pr-ai-findings-count {
+  flex: 1 1 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.pr-ai-fix-all-btn,
+.pr-ai-fix-btn,
+.pr-ai-regen-btn,
+.pr-ai-discard-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pr-ai-fix-all-btn:hover,
+.pr-ai-fix-btn:hover,
+.pr-ai-regen-btn:hover,
+.pr-ai-discard-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.pr-ai-fix-all-btn:disabled,
+.pr-ai-fix-btn:disabled,
+.pr-ai-regen-btn:disabled,
+.pr-ai-discard-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.pr-ai-discard-btn {
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+
+.pr-ai-discard-btn:hover {
+  background: rgba(226, 124, 124, 0.15);
+  color: #e27c7c;
+  border-color: #e27c7c;
+}
+
+.pr-ai-finding {
+  padding: 8px 10px;
+  margin: 6px 0;
+  background: rgba(139, 92, 246, 0.03);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 6px 6px 0;
+}
+
+.pr-ai-finding-sev-blocker { border-left-color: #b84545; background: rgba(184, 69, 69, 0.06); }
+.pr-ai-finding-sev-high    { border-left-color: #e27c7c; background: rgba(226, 124, 124, 0.05); }
+.pr-ai-finding-sev-medium  { border-left-color: #d29922; background: rgba(210, 153, 34, 0.05); }
+.pr-ai-finding-sev-low     { border-left-color: #79c0ff; background: rgba(121, 192, 255, 0.04); }
+.pr-ai-finding-sev-warn    { border-left-color: #d29922; background: rgba(210, 153, 34, 0.04); }
+.pr-ai-finding-sev-nit     { border-left-color: var(--text-dim); background: rgba(128, 128, 128, 0.04); }
+
+.pr-ai-finding-body {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.55;
+  word-wrap: break-word;
+}
+
+.pr-ai-finding-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.pr-ai-postamble {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(139, 92, 246, 0.18);
 }
 
 .pr-ai-review-header {

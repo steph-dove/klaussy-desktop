@@ -89,6 +89,8 @@ window.PRPanel = (function () {
     commentsListEl.innerHTML = '';
     var checksEl = document.getElementById('pr-checks');
     if (checksEl) checksEl.innerHTML = '';
+    var aiEl = document.getElementById('pr-ai-review');
+    if (aiEl) aiEl.innerHTML = '';
     updateMergeButton();
     // Background fetch — populates currentPR without rendering into the PR
     // tab, so the diff-panel Comment action works even from the Changes tab.
@@ -129,6 +131,8 @@ window.PRPanel = (function () {
     commentsListEl.innerHTML = '';
     var checksEl = document.getElementById('pr-checks');
     if (checksEl) checksEl.innerHTML = '';
+    var aiEl = document.getElementById('pr-ai-review');
+    if (aiEl) aiEl.innerHTML = '';
 
     var result = await window.klaus.prForBranch(currentWorktreePath);
 
@@ -171,6 +175,18 @@ window.PRPanel = (function () {
     if (threadsResult.threads && threadsResult.threads.length > 0) {
       renderReviewThreads(threadsResult.threads);
     }
+
+    // Load cached AI review (non-blocking; renders if present)
+    loadCachedAiReview(worktreeAtRequest, prNumber);
+  }
+
+  async function loadCachedAiReview(worktreeAtRequest, prNumber) {
+    var host = document.getElementById('pr-ai-review');
+    if (!host) return;
+    var cacheResult = await window.klaus.prReviewCacheGet(worktreeAtRequest, prNumber);
+    if (worktreeAtRequest !== currentWorktreePath || !currentPR || currentPR.number !== prNumber) return;
+    if (!cacheResult || !cacheResult.cached) return;
+    renderCompletedReview(cacheResult.cached.review, cacheResult.cached.savedAt);
   }
 
   function renderPRChecks(result) {
@@ -287,7 +303,10 @@ window.PRPanel = (function () {
     }
     html += '</div>';
     if (pr.url) {
-      html += '<div class="pr-url"><a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on GitHub</a></div>';
+      html += '<div class="pr-url">';
+      html += '<a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on GitHub</a>';
+      html += ' <button type="button" class="pr-ai-review-btn" title="Ask Claude for a structured review of the whole PR">Review with Claude</button>';
+      html += '</div>';
     }
     if (pr.body) {
       html += '<div class="pr-body">' + renderMarkdown(pr.body) + '</div>';
@@ -302,6 +321,10 @@ window.PRPanel = (function () {
         e.preventDefault();
         window.klaus.openExternal(link.dataset.url);
       });
+    }
+    var aiBtn = prInfoEl.querySelector('.pr-ai-review-btn');
+    if (aiBtn) {
+      aiBtn.addEventListener('click', runAiReview);
     }
   }
 
@@ -644,6 +667,155 @@ window.PRPanel = (function () {
     btn.textContent = wasResolved ? 'Resolve' : 'Unresolve';
   }
 
+  // ---- Whole-PR AI review (F6) ----
+
+  var currentAiReviewId = null;
+
+  async function runAiReview() {
+    if (!currentPR || !currentWorktreePath) return;
+    var host = document.getElementById('pr-ai-review');
+    if (!host) return;
+    var btn = prInfoEl.querySelector('.pr-ai-review-btn');
+
+    var requestId = 'ai-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    currentAiReviewId = requestId;
+
+    host.innerHTML = '<div class="pr-ai-review-card">'
+      + '<div class="pr-ai-review-header">'
+        + '<strong>Claude\'s PR Review</strong>'
+        + '<span class="pr-ai-elapsed">0s</span>'
+        + '<button type="button" class="pr-ai-cancel-btn" title="Cancel review">Cancel</button>'
+        + '<button type="button" class="pr-ai-review-close" title="Dismiss">&times;</button>'
+      + '</div>'
+      + '<div class="pr-ai-progress"></div>'
+      + '<div class="pr-ai-review-body">'
+        + '<div class="pr-ai-loading">Starting review — small PRs take ~1 min, large PRs (≥150 lines) fan out to 4 parallel agents…</div>'
+      + '</div>'
+      + '</div>';
+
+    var bodyEl = host.querySelector('.pr-ai-review-body');
+    var progressEl = host.querySelector('.pr-ai-progress');
+    var elapsedEl = host.querySelector('.pr-ai-elapsed');
+    var cancelBtn = host.querySelector('.pr-ai-cancel-btn');
+    var closeBtn = host.querySelector('.pr-ai-review-close');
+
+    var startedAt = Date.now();
+    var elapsedTimer = setInterval(function () {
+      var secs = Math.floor((Date.now() - startedAt) / 1000);
+      var mins = Math.floor(secs / 60);
+      elapsedEl.textContent = mins > 0 ? mins + 'm ' + (secs % 60) + 's' : secs + 's';
+    }, 1000);
+
+    closeBtn.addEventListener('click', function () {
+      window.klaus.prAiReviewCancel(requestId);
+      clearInterval(elapsedTimer);
+      host.innerHTML = '';
+    });
+
+    cancelBtn.addEventListener('click', function () {
+      window.klaus.prAiReviewCancel(requestId);
+    });
+
+    if (btn) { btn.disabled = true; btn.textContent = 'Reviewing…'; }
+
+    // Stream handler: parse stream-json events and accumulate the final
+    // assistant text; show tool-use calls as progress chips.
+    var finalText = '';
+    var buffered = '';
+    var progressEvents = [];
+
+    function handleEvent(ev) {
+      if (!ev || !ev.type) return;
+      if (ev.type === 'assistant' && ev.message && ev.message.content) {
+        ev.message.content.forEach(function (block) {
+          if (block.type === 'text' && block.text) {
+            finalText = block.text; // final assistant text block — keep latest
+          } else if (block.type === 'tool_use' && block.name) {
+            progressEvents.push({ kind: 'tool', name: block.name, input: block.input });
+          }
+        });
+      } else if (ev.type === 'result' && ev.result) {
+        finalText = ev.result;
+      } else if (ev.type === 'system' && ev.subtype) {
+        progressEvents.push({ kind: 'system', text: ev.subtype });
+      }
+      renderProgress();
+      renderFinal();
+    }
+
+    function renderProgress() {
+      var recent = progressEvents.slice(-6).map(function (p) {
+        if (p.kind === 'tool') {
+          var hint = '';
+          if (p.input) {
+            if (p.input.command) hint = String(p.input.command).slice(0, 50);
+            else if (p.input.file_path) hint = String(p.input.file_path).split('/').pop();
+            else if (p.input.pattern) hint = String(p.input.pattern).slice(0, 30);
+            else if (p.input.description) hint = String(p.input.description).slice(0, 40);
+          }
+          var label = p.name + (hint ? ': ' + hint : '');
+          return '<span class="pr-ai-progress-chip">' + escHtml(label) + '</span>';
+        }
+        return '<span class="pr-ai-progress-chip pr-ai-progress-system">' + escHtml(p.text) + '</span>';
+      }).join('');
+      progressEl.innerHTML = recent;
+    }
+
+    function renderFinal() {
+      if (!finalText) return;
+      bodyEl.innerHTML = renderReviewContent(finalText);
+      wireFixButtons(bodyEl, finalText);
+    }
+
+    var unsubscribe = window.klaus.onPrAiReviewData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try { handleEvent(JSON.parse(line)); } catch (e) { /* ignore parse errors */ }
+      }
+    });
+
+    window.klaus.onPrAiReviewDone(requestId, function (result) {
+      clearInterval(elapsedTimer);
+      unsubscribe();
+      if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
+      if (currentAiReviewId !== requestId) return; // stale
+      if (cancelBtn) cancelBtn.remove();
+      if (result && result.cancelled) {
+        bodyEl.innerHTML = '<div class="pr-ai-error">Cancelled.</div>';
+        return;
+      }
+      if (result && result.error) {
+        bodyEl.innerHTML = '<div class="pr-ai-error">Failed: ' + escHtml(result.error) + '</div>';
+        return;
+      }
+      // Render final text (if we didn't already via stream events)
+      renderFinal();
+      progressEl.innerHTML = ''; // clear progress chips once done
+
+      // Persist so reopening the app doesn't lose the review
+      if (finalText && currentPR) {
+        window.klaus.prReviewCacheSave(currentWorktreePath, currentPR.number, finalText);
+      }
+    });
+
+    var startResult = await window.klaus.prAiReviewStart({
+      worktreePath: currentWorktreePath,
+      baseBranch: currentPR.baseRefName || 'main',
+      requestId: requestId,
+    });
+
+    if (startResult && startResult.error) {
+      clearInterval(elapsedTimer);
+      unsubscribe();
+      bodyEl.innerHTML = '<div class="pr-ai-error">Failed to start: ' + escHtml(startResult.error) + '</div>';
+      if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
+    }
+  }
+
   // ---- Bottom form: general comment / approve / request changes ----
 
   async function submitComment() {
@@ -909,6 +1081,136 @@ window.PRPanel = (function () {
     }
 
     await loadPR();
+  }
+
+  // ---- F6 finding parser + Fix button wiring ----
+
+  // Split Claude's review text into preamble / findings / postamble. Each
+  // finding starts at a `**[Severity: …]**` line; postamble begins at the
+  // final "**Overall verdict:**" if present.
+  function parseReviewFindings(text) {
+    if (!text) return { preamble: '', findings: [], postamble: '' };
+    var parts = text.split(/(?=^\s*\*\*\[Severity:)/m);
+    if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
+    var preamble = parts[0].trim();
+    var findings = [];
+    var postamble = '';
+    for (var i = 1; i < parts.length; i++) {
+      var block = parts[i];
+      var m = block.match(/(^|\n)\s*\*\*Overall verdict:/i);
+      if (m) {
+        findings.push(block.slice(0, m.index).trim());
+        postamble = block.slice(m.index).trim();
+      } else {
+        findings.push(block.trim());
+      }
+    }
+    return { preamble: preamble, findings: findings, postamble: postamble };
+  }
+
+  function severityOf(findingText) {
+    var m = findingText.match(/\*\*\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*\*/);
+    return m ? m[1].trim().toLowerCase() : '';
+  }
+
+  function renderReviewContent(text) {
+    var parsed = parseReviewFindings(text);
+    var html = '';
+    if (parsed.findings.length > 0) {
+      html += '<div class="pr-ai-findings-header">';
+      html += '<span class="pr-ai-findings-count">' + parsed.findings.length + ' finding' + (parsed.findings.length === 1 ? '' : 's') + '</span>';
+      html += '<button type="button" class="pr-ai-fix-all-btn" title="Send all findings to the Claude terminal for this worktree">Fix all findings</button>';
+      html += '</div>';
+    }
+    if (parsed.preamble) {
+      html += '<div class="pr-ai-section"><div class="pr-ai-section-body">' + renderMarkdown(parsed.preamble) + '</div></div>';
+    }
+    parsed.findings.forEach(function (f, idx) {
+      var sev = severityOf(f);
+      var sevCls = sev ? ' pr-ai-finding-sev-' + sev.replace(/\s+/g, '-') : '';
+      html += '<div class="pr-ai-finding' + sevCls + '" data-finding-index="' + idx + '">';
+      html += '<div class="pr-ai-finding-body">' + renderMarkdown(f) + '</div>';
+      html += '<div class="pr-ai-finding-actions">';
+      html += '<button type="button" class="pr-ai-fix-btn" data-finding-index="' + idx + '">Fix this</button>';
+      html += '</div>';
+      html += '</div>';
+    });
+    if (parsed.postamble) {
+      html += '<div class="pr-ai-section pr-ai-postamble"><div class="pr-ai-section-body">' + renderMarkdown(parsed.postamble) + '</div></div>';
+    }
+    return html || ('<div class="pr-ai-section"><div class="pr-ai-section-body">' + renderMarkdown(text) + '</div></div>');
+  }
+
+  function wireFixButtons(container, reviewText) {
+    var parsed = parseReviewFindings(reviewText);
+    var fixAll = container.querySelector('.pr-ai-fix-all-btn');
+    if (fixAll) {
+      fixAll.addEventListener('click', function () {
+        sendFix(buildFixAllPrompt(parsed.findings), fixAll);
+      });
+    }
+    container.querySelectorAll('.pr-ai-fix-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = parseInt(btn.dataset.findingIndex, 10);
+        if (isNaN(idx) || !parsed.findings[idx]) return;
+        sendFix(buildFixSinglePrompt(parsed.findings[idx]), btn);
+      });
+    });
+  }
+
+  function buildFixSinglePrompt(finding) {
+    return 'Please fix the following PR review finding. Read the file(s) referenced, ' +
+      'trace the code path, and implement the suggested change. Prefer small, focused commits.\n\n' +
+      finding + '\n';
+  }
+
+  function buildFixAllPrompt(findings) {
+    var body = findings.map(function (f, i) { return '### Finding ' + (i + 1) + '\n\n' + f; }).join('\n\n');
+    return 'Please address all of the following PR review findings, highest severity first. ' +
+      'For each: read the referenced file(s), trace the code path, and implement the suggested change. ' +
+      'Make focused commits — one per finding or per cluster of related findings.\n\n' + body + '\n';
+  }
+
+  async function sendFix(prompt, btn) {
+    if (!currentWorktreePath) { alert('No worktree active.'); return; }
+    var origText = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    var result = await window.klaus.prFixInTerminal(currentWorktreePath, prompt);
+    if (btn) { btn.disabled = false; btn.textContent = origText; }
+    if (result && result.error) {
+      alert('Could not send to terminal: ' + result.error);
+      return;
+    }
+    if (btn) {
+      btn.textContent = 'Sent ✓';
+      setTimeout(function () { btn.textContent = origText; }, 2000);
+    }
+  }
+
+  function renderCompletedReview(reviewText, savedAt) {
+    var host = document.getElementById('pr-ai-review');
+    if (!host) return;
+    var ageLabel = savedAt ? ' <span class="pr-ai-elapsed">saved ' + formatTime(savedAt) + '</span>' : '';
+    host.innerHTML = '<div class="pr-ai-review-card">'
+      + '<div class="pr-ai-review-header">'
+        + '<strong>Claude\'s PR Review</strong>' + ageLabel
+        + '<button type="button" class="pr-ai-regen-btn" title="Re-run the review">Re-run</button>'
+        + '<button type="button" class="pr-ai-discard-btn" title="Discard cached review">Discard</button>'
+        + '<button type="button" class="pr-ai-review-close" title="Dismiss">&times;</button>'
+      + '</div>'
+      + '<div class="pr-ai-review-body">' + renderReviewContent(reviewText) + '</div>'
+      + '</div>';
+
+    var bodyEl = host.querySelector('.pr-ai-review-body');
+    wireFixButtons(bodyEl, reviewText);
+
+    host.querySelector('.pr-ai-review-close').addEventListener('click', function () { host.innerHTML = ''; });
+    host.querySelector('.pr-ai-regen-btn').addEventListener('click', function () { runAiReview(); });
+    host.querySelector('.pr-ai-discard-btn').addEventListener('click', async function () {
+      if (!currentPR) return;
+      await window.klaus.prReviewCacheClear(currentWorktreePath, currentPR.number);
+      host.innerHTML = '';
+    });
   }
 
   function getCurrentPR() {
