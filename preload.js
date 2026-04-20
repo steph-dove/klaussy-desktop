@@ -174,6 +174,21 @@ contextBridge.exposeInMainWorld('klaus', {
 
   // Explain diff
   explainDiff: (worktreePath, file, hunk) => ipcRenderer.invoke('explain-diff', { worktreePath, file, hunk }),
+  explainDiffStreamStart: (requestId, worktreePath, file, hunk) =>
+    ipcRenderer.invoke('explain-diff-stream-start', { requestId, worktreePath, file, hunk }),
+  explainDiffStreamCancel: (requestId) => ipcRenderer.invoke('explain-diff-stream-cancel', { requestId }),
+  onExplainDiffChunk: (requestId, callback) => {
+    const channel = 'explain-diff-chunk-' + requestId;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onExplainDiffDone: (requestId, callback) => {
+    const channel = 'explain-diff-done-' + requestId;
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.once(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
 
   // File viewer (Phase 7) + File tree & search (C1-C3)
   readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
@@ -247,6 +262,7 @@ contextBridge.exposeInMainWorld('klaus', {
   prLoad: ({ number, url }) => ipcRenderer.invoke('pr-load', { number, url }),
   prReviewState: () => ipcRenderer.invoke('pr-review-state'),
   prReviewClose: () => ipcRenderer.invoke('pr-review-close'),
+  prRefreshThreads: () => ipcRenderer.invoke('pr-refresh-threads'),
   popOutPrReview: () => ipcRenderer.invoke('pop-out-pr-review'),
   popInPrReview: () => ipcRenderer.invoke('pop-in-pr-review'),
   onPrReviewState: (callback) => {

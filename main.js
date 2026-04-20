@@ -1776,6 +1776,16 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   }
 });
 
+// GitHub PR URLs always encode the base repo: /{owner}/{repo}/pull/{n}.
+// Using the URL avoids an extra gh call and works for both the picker path
+// and the paste-URL path, since `gh pr view --json url` is always populated.
+function parseBaseFromUrl(url) {
+  if (!url) return null;
+  const m = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/pull\/\d+/);
+  if (!m) return null;
+  return { owner: m[1], name: m[2] };
+}
+
 ipcMain.handle('pr-load', async (_event, { number, url }) => {
   const cwd = currentRepoPath();
   if (!cwd) return { error: 'No active project. Add a project first.' };
@@ -1784,19 +1794,124 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
     const [meta, diff] = await Promise.all([
       ghJson([
         'pr', 'view', target,
-        '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
+        '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
       ], cwd),
       ghText(['pr', 'diff', target], cwd),
     ]);
-    const repo = meta.headRepositoryOwner && meta.headRepository
-      ? `${meta.headRepositoryOwner.login}/${meta.headRepository.name}`
-      : null;
-    activePrReview = { repo, number: meta.number, meta, diff, popout: null };
+    const base = parseBaseFromUrl(meta.url);
+    const repo = base ? `${base.owner}/${base.name}` : null;
+    activePrReview = {
+      repo, number: meta.number, meta, diff,
+      baseOwner: base ? base.owner : null,
+      baseRepo: base ? base.name : null,
+      threads: null, // null = loading, [] = loaded-empty
+      threadsError: null,
+      popout: null,
+    };
     broadcastPrReview();
+
+    // Fire-and-forget thread fetch; broadcasts again when ready so the renderer
+    // can paint the shell immediately without waiting on the GraphQL round-trip.
+    fetchThreadsForActive();
+
     return { ok: true };
   } catch (err) {
     return { error: (err.stderr || err.message || '').trim() };
   }
+});
+
+// GraphQL-backed thread fetch. Scoped to the *base* repo (target), not the
+// head repo (fork), because threads live on the target.
+async function fetchThreadsForActive() {
+  if (!activePrReview) return;
+  const cwd = currentRepoPath();
+  if (!cwd) return;
+  if (!activePrReview.baseOwner || !activePrReview.baseRepo) {
+    activePrReview.threadsError = 'Could not parse base repo from PR url';
+    broadcastPrReview();
+    return;
+  }
+  const owner = activePrReview.baseOwner;
+  const repo = activePrReview.baseRepo;
+  const number = activePrReview.number;
+
+  // One round trip for threads + issue-comments + reviews. Conversation tab
+  // reads from comments + reviews; Files tab reads from reviewThreads. There's
+  // duplication between review.comments and reviewThreads.comments, but the
+  // two consumers render different shapes, so we keep both and let them pick.
+  const query = 'query($owner: String!, $repo: String!, $number: Int!) {'
+    + '  repository(owner: $owner, name: $repo) {'
+    + '    pullRequest(number: $number) {'
+    + '      reviewThreads(first: 100) {'
+    + '        nodes {'
+    + '          id isResolved isOutdated path line originalLine startLine originalStartLine diffSide'
+    + '          comments(first: 100) { nodes { databaseId author { login } createdAt body diffHunk } }'
+    + '        }'
+    + '      }'
+    + '      comments(first: 100) {'
+    + '        nodes { databaseId author { login } createdAt body url }'
+    + '      }'
+    + '      reviews(first: 100) {'
+    + '        nodes {'
+    + '          databaseId state body submittedAt author { login }'
+    + '          comments(first: 100) { nodes { databaseId body path line diffHunk } }'
+    + '        }'
+    + '      }'
+    + '    }'
+    + '  }'
+    + '}';
+
+  try {
+    const out = await new Promise((resolve, reject) => {
+      execFile('gh', [
+        'api', 'graphql',
+        '-f', 'query=' + query,
+        '-f', 'owner=' + owner,
+        '-f', 'repo=' + repo,
+        '-F', 'number=' + number,
+      ], { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
+        if (err) { err.stderr = stderr; err.stdout = stdout; return reject(err); }
+        resolve(stdout);
+      });
+    });
+    const parsed = JSON.parse(out);
+    if (parsed.errors && parsed.errors.length) {
+      if (!activePrReview || activePrReview.number !== number) return;
+      activePrReview.threadsError = parsed.errors.map(e => e.message).join('; ');
+      broadcastPrReview();
+      return;
+    }
+    const pr = parsed.data && parsed.data.repository && parsed.data.repository.pullRequest;
+    const threads = (pr && pr.reviewThreads && pr.reviewThreads.nodes) || [];
+    const issueComments = (pr && pr.comments && pr.comments.nodes) || [];
+    const reviews = (pr && pr.reviews && pr.reviews.nodes) || [];
+    // User may have navigated away while we were fetching; bail if the review
+    // behind us was swapped for a different PR.
+    if (!activePrReview || activePrReview.number !== number) return;
+    activePrReview.threads = threads;
+    activePrReview.issueComments = issueComments;
+    activePrReview.reviews = reviews;
+    activePrReview.threadsError = null;
+    broadcastPrReview();
+  } catch (err) {
+    if (!activePrReview || activePrReview.number !== number) return;
+    // gh api writes error JSON to stdout on non-zero exit
+    let msg = (err.stderr || err.message || '').trim();
+    if (err.stdout) {
+      try {
+        const parsed = JSON.parse(err.stdout.toString());
+        if (parsed.errors) msg = parsed.errors.map(e => e.message).join('; ');
+      } catch (_) {}
+    }
+    activePrReview.threadsError = msg;
+    broadcastPrReview();
+  }
+}
+
+ipcMain.handle('pr-refresh-threads', async () => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  await fetchThreadsForActive();
+  return { ok: true };
 });
 
 ipcMain.handle('pr-review-state', () => activePrReview ? sanitizePrReview(activePrReview) : null);
@@ -1994,11 +2109,18 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query }) => {
 
 // ---- Explain Diff ----
 
+function explainPrompt(file, hunk) {
+  return `Explain this specific code concisely. What does it do and why might it have been written this way?\n\nFile: ${file}\n\nSelected code:\n\`\`\`\n${hunk}\n\`\`\``;
+}
+
 ipcMain.handle('explain-diff', async (_event, { worktreePath, file, hunk }) => {
-  const prompt = `Explain this specific code concisely. What does it do and why might it have been written this way?\n\nFile: ${file}\n\nSelected code:\n\`\`\`\n${hunk}\n\`\`\``;
+  // PR review mode calls this without a worktree — fall back to the current
+  // project path (or the user's home as a last resort) since execFile insists
+  // on a valid cwd. Claude doesn't actually need repo context for this prompt.
+  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
   return new Promise((resolve) => {
-    const child = execFile('claude', ['-p', prompt], {
-      cwd: worktreePath,
+    execFile('claude', ['-p', explainPrompt(file, hunk)], {
+      cwd,
       timeout: 30000,
       maxBuffer: 1024 * 1024,
     }, (err, stdout, stderr) => {
@@ -2009,6 +2131,64 @@ ipcMain.handle('explain-diff', async (_event, { worktreePath, file, hunk }) => {
       }
     });
   });
+});
+
+// Streaming variant. Pipes claude stdout to the renderer in real time so the
+// user sees tokens as they arrive instead of staring at a 10-second spinner.
+// Callers pass a requestId; chunks arrive on `explain-diff-chunk-<id>` and
+// completion on `explain-diff-done-<id>`.
+const explainStreamProcs = new Map();
+
+ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, file, hunk }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (explainStreamProcs.has(requestId)) return { error: 'Already streaming' };
+
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
+  const { spawn } = require('child_process');
+
+  const proc = spawn(claudeBin, ['-p', explainPrompt(file, hunk)], {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  explainStreamProcs.set(requestId, proc);
+
+  const chunkChannel = 'explain-diff-chunk-' + requestId;
+  const doneChannel = 'explain-diff-done-' + requestId;
+  const sender = event.sender;
+  let stderrBuf = '';
+
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+
+  proc.on('error', (err) => {
+    explainStreamProcs.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+
+  proc.on('exit', (code, signal) => {
+    explainStreamProcs.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      sender.send(doneChannel, { cancelled: true });
+    } else if (code !== 0) {
+      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
+    } else {
+      sender.send(doneChannel, { ok: true });
+    }
+  });
+
+  return { ok: true };
+});
+
+ipcMain.handle('explain-diff-stream-cancel', (_event, { requestId }) => {
+  const proc = explainStreamProcs.get(requestId);
+  if (!proc) return { ok: false };
+  try { proc.kill('SIGTERM'); } catch {}
+  return { ok: true };
 });
 
 // ---- Whole-PR AI Review ----
