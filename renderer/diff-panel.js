@@ -6,6 +6,8 @@ window.DiffPanel = (function () {
   let selectedFile = null;
   let commentCallback = null;
   let refreshInterval = null;
+  let watchedWorktreePath = null;
+  let unsubscribeWatcher = null;
   let currentParsedHunks = [];
   let currentRawDiff = '';
   let currentDiffStaged = false;
@@ -316,6 +318,29 @@ window.DiffPanel = (function () {
     }
   }
 
+  // H3: file-watch replaces 5s polling. A 30s safety-net interval catches the
+  // rare case where fs.watch misses an event (e.g. filesystem remounts).
+  function startWatching(worktreePath) {
+    if (watchedWorktreePath === worktreePath) return;
+    stopWatching();
+    if (!worktreePath) return;
+    watchedWorktreePath = worktreePath;
+    window.klaus.watchWorktree(worktreePath);
+    unsubscribeWatcher = window.klaus.onWorktreeChanged(function (data) {
+      if (data.worktreePath !== watchedWorktreePath) return;
+      refresh();
+      updateAheadBehind();
+    });
+    if (refreshInterval) clearInterval(refreshInterval);
+    refreshInterval = setInterval(refresh, 30000);
+  }
+
+  function stopWatching() {
+    if (unsubscribeWatcher) { try { unsubscribeWatcher(); } catch (_) {} unsubscribeWatcher = null; }
+    if (watchedWorktreePath) { window.klaus.unwatchWorktree(watchedWorktreePath); watchedWorktreePath = null; }
+    if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
+  }
+
   async function show(worktreePath) {
     currentWorktreePath = worktreePath;
     panelEl.classList.add('visible');
@@ -325,18 +350,14 @@ window.DiffPanel = (function () {
     diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
     await refresh();
     updateAheadBehind();
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(refresh, 5000);
+    startWatching(worktreePath);
     // Trigger refit after panel appears
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
   }
 
   function hide() {
     panelEl.classList.remove('visible');
-    if (refreshInterval) {
-      clearInterval(refreshInterval);
-      refreshInterval = null;
-    }
+    stopWatching();
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
   }
 
@@ -355,6 +376,7 @@ window.DiffPanel = (function () {
     refreshPaused = false;
     refresh();
     updateAheadBehind();
+    if (isVisible()) startWatching(worktreePath);
     // Reload the currently active non-Changes tab
     if (window._reloadDiffTab) {
       var activeTab = document.querySelector('#diff-tabs .diff-tab.active');

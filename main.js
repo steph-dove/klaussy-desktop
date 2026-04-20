@@ -2768,6 +2768,81 @@ function startAutoFetch() {
   }, interval);
 }
 
+// ---- H3: Worktree file watcher for instant diff refresh ----
+
+const worktreeWatchers = new Map(); // worktreePath -> { watcher, subscribers: Set<webContents>, debounceTimer }
+
+// Path patterns we ignore — high-churn build output and git internals that don't
+// affect our UI. .git/index and .git/HEAD are NOT ignored: they signal git state
+// changes we want to reflect (commits, stages made from the terminal, etc.).
+const WATCH_IGNORE_RE = /(^|\/)(node_modules|dist|build|out|\.next|\.nuxt|__pycache__|\.pytest_cache|\.mypy_cache|\.turbo|target|\.DS_Store)(\/|$)|^\.git\/(objects|logs|refs|packed-refs|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG)/;
+
+function startWorktreeWatcher(worktreePath) {
+  let state = worktreeWatchers.get(worktreePath);
+  if (state) return state;
+
+  state = { watcher: null, subscribers: new Set(), debounceTimer: null };
+
+  try {
+    state.watcher = fs.watch(worktreePath, { recursive: true }, (_eventType, filename) => {
+      if (!filename) return;
+      // Normalize separators — on macOS we get forward slashes already, but be safe.
+      const rel = filename.replace(/\\/g, '/');
+      if (WATCH_IGNORE_RE.test(rel)) return;
+
+      if (state.debounceTimer) clearTimeout(state.debounceTimer);
+      state.debounceTimer = setTimeout(() => {
+        state.debounceTimer = null;
+        for (const wc of state.subscribers) {
+          if (!wc.isDestroyed()) wc.send('worktree-changed', { worktreePath });
+        }
+      }, 200);
+    });
+    state.watcher.on('error', (err) => {
+      console.error('[watch]', worktreePath, err.message);
+    });
+  } catch (err) {
+    console.error('[watch] failed to start', worktreePath, err.message);
+    return null;
+  }
+
+  worktreeWatchers.set(worktreePath, state);
+  return state;
+}
+
+function stopWorktreeWatcher(worktreePath) {
+  const state = worktreeWatchers.get(worktreePath);
+  if (!state) return;
+  if (state.debounceTimer) clearTimeout(state.debounceTimer);
+  try { state.watcher && state.watcher.close(); } catch (_) {}
+  worktreeWatchers.delete(worktreePath);
+}
+
+ipcMain.handle('watch-worktree', (event, { worktreePath }) => {
+  if (!worktreePath) return { error: 'no worktreePath' };
+  const state = startWorktreeWatcher(worktreePath);
+  if (!state) return { error: 'watcher failed to start' };
+  state.subscribers.add(event.sender);
+  // Auto-cleanup when the renderer is destroyed (window closed, reload, etc.)
+  const cleanup = () => {
+    const s = worktreeWatchers.get(worktreePath);
+    if (!s) return;
+    s.subscribers.delete(event.sender);
+    if (s.subscribers.size === 0) stopWorktreeWatcher(worktreePath);
+  };
+  event.sender.once('destroyed', cleanup);
+  return { ok: true };
+});
+
+ipcMain.handle('unwatch-worktree', (event, { worktreePath }) => {
+  if (!worktreePath) return { ok: true };
+  const state = worktreeWatchers.get(worktreePath);
+  if (!state) return { ok: true };
+  state.subscribers.delete(event.sender);
+  if (state.subscribers.size === 0) stopWorktreeWatcher(worktreePath);
+  return { ok: true };
+});
+
 // ---- Phase 7: File Viewer ----
 
 ipcMain.handle('read-file', async (_event, { filePath }) => {
