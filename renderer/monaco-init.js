@@ -1,0 +1,46 @@
+// Boot Monaco via its AMD loader. The renderer has `contextIsolation: true`
+// and `nodeIntegration: false`, so the loader's web path is what runs here.
+//
+// Workers: Chrome disallows loading a Worker from a file:// script unless we
+// pre-build the worker URL as a data: URL that importScripts the real worker
+// relative to Monaco's base. Standard Electron+Monaco pattern.
+//
+// Exposes:
+//   window.MonacoReady — promise that resolves with the `monaco` global once
+//   editor.main has loaded. Consumers should `await MonacoReady` before use.
+
+(function () {
+  var loaderScript = document.querySelector('script[src*="monaco-editor/min/vs/loader.js"]');
+  if (!loaderScript) {
+    console.error('[monaco] loader.js script tag not found; did index.html drop it?');
+    return;
+  }
+
+  // Absolute file:// URL of monaco-editor/min/vs/, used by workers to locate siblings.
+  var loaderSrc = loaderScript.src; // e.g. file:///…/node_modules/monaco-editor/min/vs/loader.js
+  var vsBase = loaderSrc.replace(/loader\.js$/, ''); // …/min/vs/
+  var minBase = vsBase.replace(/vs\/$/, ''); // …/min/
+
+  self.MonacoEnvironment = {
+    getWorkerUrl: function (_moduleId, _label) {
+      var src =
+        'self.MonacoEnvironment = { baseUrl: ' + JSON.stringify(minBase) + ' };\n' +
+        'importScripts(' + JSON.stringify(vsBase + 'base/worker/workerMain.js') + ');';
+      return 'data:text/javascript;charset=utf-8,' + encodeURIComponent(src);
+    },
+  };
+
+  window.MonacoReady = new Promise(function (resolve, reject) {
+    if (typeof require !== 'function' || !require.config) {
+      reject(new Error('Monaco AMD loader did not expose require.config'));
+      return;
+    }
+    require.config({ paths: { vs: vsBase.replace(/\/$/, '') } });
+    require(['vs/editor/editor.main'], function () {
+      resolve(window.monaco);
+    }, function (err) {
+      console.error('[monaco] editor.main failed to load', err);
+      reject(err);
+    });
+  });
+})();

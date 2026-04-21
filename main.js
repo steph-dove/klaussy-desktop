@@ -145,6 +145,31 @@ function createWindow(opts) {
   return win;
 }
 
+// macOS apps launched from Finder/Dock get a minimal PATH from launchd
+// (~/usr/bin:/bin:/usr/sbin:/sbin), missing brew + the user's local bin
+// dirs where gh + claude usually live. Spawning them then errors with
+// ENOENT. Prepend the well-known locations so the installed .app can find
+// them regardless of how it was launched.
+function fixSpawnPath() {
+  const homedir = require('os').homedir();
+  const candidates = [
+    '/opt/homebrew/bin',          // Apple Silicon brew
+    '/opt/homebrew/sbin',
+    '/usr/local/bin',             // Intel brew + manual installs
+    '/usr/local/sbin',
+    path.join(homedir, '.local/bin'),
+    path.join(homedir, 'bin'),
+    path.join(homedir, '.cargo/bin'),
+    '/Applications/Cursor.app/Contents/Resources/app/bin',
+  ];
+  const have = (process.env.PATH || '').split(':').filter(Boolean);
+  const want = candidates.filter((p) => !have.includes(p));
+  if (want.length) {
+    process.env.PATH = want.concat(have).join(':');
+  }
+}
+fixSpawnPath();
+
 app.whenReady().then(() => {
   // Force the macOS app menu name. In dev (`npx electron .`) the bundled
   // Info.plist still says "Electron" — setName at startup overrides what
@@ -241,6 +266,13 @@ app.whenReady().then(() => {
           click: (_item, focusedWindow) => {
             const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
             if (win && !win.isDestroyed()) win.webContents.send('show-plugins');
+          },
+        },
+        {
+          label: 'GitHub Accounts',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-gh-accounts');
           },
         },
         {
@@ -797,6 +829,29 @@ ipcMain.handle('browse-directory', async () => {
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
+});
+
+// Open a plain directory (not a git worktree). Git-dependent panels will
+// degrade gracefully because `branch` is empty — auto-fetch and CI polling
+// explicitly skip instances without a branch.
+ipcMain.handle('open-folder', async (_event, { folderPath, mode }) => {
+  if (!folderPath) {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select folder to open',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    folderPath = result.filePaths[0];
+  }
+  try {
+    if (!fs.statSync(folderPath).isDirectory()) {
+      return { error: 'Not a directory: ' + folderPath };
+    }
+  } catch {
+    return { error: 'Folder does not exist: ' + folderPath };
+  }
+  const name = path.basename(folderPath) || 'folder';
+  return spawnInWorktree(name, folderPath, '', mode || 'claude');
 });
 
 let klausifyAvailable = null; // null = unchecked, true/false after first check
@@ -1483,6 +1538,45 @@ ipcMain.handle('create-skill-file', (_event, { type, scope, name }) => {
     return { path: filePath, name: name, type: type };
   } catch (err) {
     return { error: 'Could not write file: ' + err.message };
+  }
+});
+
+// Parse `gh auth status` to surface authed accounts + which one is active.
+// gh's output looks like:
+//   github.com
+//     ✓ Logged in to github.com account stephanie913 (keyring)
+//       - Active account: true
+//   ...
+// We just need (account, isActive) per host.
+ipcMain.handle('gh-list-accounts', async () => {
+  try {
+    const out = execFileSync('gh', ['auth', 'status'], { stdio: 'pipe', timeout: 5000 }).toString();
+    const lines = out.split('\n');
+    const accounts = [];
+    let pending = null;
+    for (const raw of lines) {
+      const m = raw.match(/account\s+([^\s]+)/);
+      if (m) {
+        if (pending) accounts.push(pending);
+        pending = { username: m[1], active: false };
+        continue;
+      }
+      if (pending && /Active account:\s*true/.test(raw)) pending.active = true;
+    }
+    if (pending) accounts.push(pending);
+    return { accounts };
+  } catch (err) {
+    return { accounts: [], error: (err.stderr ? err.stderr.toString() : err.message).trim() };
+  }
+});
+
+ipcMain.handle('gh-switch-account', async (_event, { username }) => {
+  if (!username) return { error: 'Missing username' };
+  try {
+    execFileSync('gh', ['auth', 'switch', '-u', username], { stdio: 'pipe', timeout: 5000 });
+    return { ok: true };
+  } catch (err) {
+    return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
   }
 });
 
@@ -3307,37 +3401,103 @@ ipcMain.handle('get-claude-info', async () => {
 
 // ---- File Tree & Search (C1-C3) ----
 
+// Directories we never descend into during the plain-fs fallback. Mirrors
+// the patterns used by the H3 watcher.
+const WALK_IGNORE = new Set([
+  '.git', 'node_modules', 'dist', 'build', 'out', '.next', '.nuxt',
+  '__pycache__', '.pytest_cache', '.mypy_cache', '.turbo', 'target',
+  '.DS_Store', '.venv', 'venv', '.tox', 'coverage',
+]);
+const WALK_FILE_CAP = 10000;
+
+function walkDirectory(root) {
+  const results = [];
+  const stack = [''];
+  while (stack.length && results.length < WALK_FILE_CAP) {
+    const rel = stack.pop();
+    const abs = rel ? path.join(root, rel) : root;
+    let entries;
+    try {
+      entries = fs.readdirSync(abs, { withFileTypes: true });
+    } catch { continue; }
+    for (const ent of entries) {
+      if (WALK_IGNORE.has(ent.name)) continue;
+      const childRel = rel ? rel + '/' + ent.name : ent.name;
+      if (ent.isDirectory()) {
+        stack.push(childRel);
+      } else if (ent.isFile()) {
+        results.push(childRel);
+        if (results.length >= WALK_FILE_CAP) break;
+      }
+    }
+  }
+  return results;
+}
+
 ipcMain.handle('list-files', async (_event, { worktreePath }) => {
+  // Try git first — for a checked-out repo, ls-files respects .gitignore.
   try {
     const output = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
       cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024,
     }).toString();
-    const files = output.split('\n').filter(Boolean);
-    return { files };
+    return { files: output.split('\n').filter(Boolean) };
   } catch (err) {
-    return { files: [], error: err.message };
+    // Not a git repo (open-folder flow) — walk the directory directly.
+    const msg = err.stderr ? err.stderr.toString() : err.message;
+    if (/not a git repository/i.test(msg)) {
+      try {
+        return { files: walkDirectory(worktreePath) };
+      } catch (walkErr) {
+        return { files: [], error: walkErr.message };
+      }
+    }
+    return { files: [], error: msg };
   }
 });
 
+function parseGrepOutput(output) {
+  const results = [];
+  output.split('\n').filter(Boolean).forEach(function (line) {
+    const match = line.match(/^([^:]+):(\d+):(.*)$/);
+    if (match) {
+      results.push({ file: match[1], line: parseInt(match[2], 10), text: match[3] });
+    }
+  });
+  return results.slice(0, 100);
+}
+
 ipcMain.handle('search-files', async (_event, { worktreePath, query }) => {
+  // Try git grep — respects .gitignore and is fast.
   try {
     const args = ['grep', '-n', '--no-color', '-I', '-r', '--max-count=5', query];
     const output = execFileSync('git', args, {
       cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
     }).toString();
-    const results = [];
-    output.split('\n').filter(Boolean).forEach(function (line) {
-      var match = line.match(/^([^:]+):(\d+):(.*)$/);
-      if (match) {
-        results.push({ file: match[1], line: parseInt(match[2], 10), text: match[3] });
-      }
-    });
-    // Cap at 100 results
-    return { results: results.slice(0, 100) };
+    return { results: parseGrepOutput(output) };
   } catch (err) {
-    // git grep returns exit code 1 when no matches found
+    const msg = err.stderr ? err.stderr.toString() : err.message;
+    if (/not a git repository/i.test(msg)) {
+      // fall through to plain-grep fallback
+    } else if (err.status === 1) {
+      return { results: [] };
+    } else {
+      return { results: [], error: msg };
+    }
+  }
+  // Non-git fallback — plain `grep -rn -I` with the same ignore list the walker uses.
+  try {
+    const args = ['-rn', '-I', '--max-count=5'];
+    for (const dir of WALK_IGNORE) args.push('--exclude-dir=' + dir);
+    args.push('--', query, '.');
+    const output = execFileSync('grep', args, {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
+    }).toString();
+    // grep prefixes paths with "./" — trim for consistency with git grep.
+    const normalized = output.split('\n').map(l => l.replace(/^\.\//, '')).join('\n');
+    return { results: parseGrepOutput(normalized) };
+  } catch (err) {
     if (err.status === 1) return { results: [] };
-    return { results: [], error: err.message };
+    return { results: [], error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
 
@@ -4264,6 +4424,8 @@ const ciPollingIntervals = new Map(); // taskId -> intervalId
 
 function startCIPolling(id, worktreePath, branch) {
   stopCIPolling(id);
+  // No branch = plain folder (open-folder flow). CI has nothing to poll for.
+  if (!branch) return;
   const poll = () => {
     try {
       const output = ghExec([
@@ -4396,6 +4558,8 @@ function startAutoFetch() {
   autoFetchIntervalId = setInterval(() => {
     for (const [id, inst] of instances) {
       if (!inst.alive || !inst.worktreePath) continue;
+      // Plain-folder tasks (opened via open-folder) have no branch — skip git.
+      if (!inst.branch) continue;
       try {
         execFileSync('git', ['fetch', '--prune'], { cwd: inst.worktreePath, stdio: 'pipe', timeout: 10000 });
         // Compute ahead/behind

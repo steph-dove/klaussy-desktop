@@ -44,7 +44,9 @@ window.Sidebar = (function () {
       stopDirtyWatch(task);
       await window.klaus.killTask(task.id);
       TerminalManager.removeTaskFromUI(task.id);
-      window._addWorktreeToSidebar(wt);
+      // Plain-folder tasks have no branch — re-attaching requires a git repo,
+      // so don't offer the reopen row; the user can re-launch via Open Folder.
+      if (wt.branch) window._addWorktreeToSidebar(wt);
     });
 
     // Task notes

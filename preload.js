@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('klaus', {
   checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
   attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),
   browseDirectory: () => ipcRenderer.invoke('browse-directory'),
+  openFolder: (folderPath, mode) => ipcRenderer.invoke('open-folder', { folderPath, mode }),
   listTasks: () => ipcRenderer.invoke('list-tasks'),
   killTask: (id) => ipcRenderer.invoke('kill-task', { id }),
   restartTask: (id, cols, rows) => ipcRenderer.invoke('restart-task', { id, cols, rows }),
@@ -272,9 +273,16 @@ contextBridge.exposeInMainWorld('klaus', {
   onShowShortcuts: (callback) => {
     ipcRenderer.on('show-shortcuts', () => callback());
   },
+  onShowGhAccounts: (callback) => {
+    ipcRenderer.on('show-gh-accounts', () => callback());
+  },
 
   // First-run dependency probe (gh + claude installed/authed?).
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+
+  // gh account switching (handles users with multiple authed accounts).
+  ghListAccounts: () => ipcRenderer.invoke('gh-list-accounts'),
+  ghSwitchAccount: (username) => ipcRenderer.invoke('gh-switch-account', { username }),
 
   // Skills + slash commands inventory for the Skills dialog.
   listSkills: () => ipcRenderer.invoke('list-skills'),
