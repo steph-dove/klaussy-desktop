@@ -196,6 +196,8 @@ contextBridge.exposeInMainWorld('klaus', {
   readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('write-file', { filePath, content }),
   listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
+  readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
+    ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),
   searchFiles: (worktreePath, query) => ipcRenderer.invoke('search-files', { worktreePath, query }),
 
   // Sub-terminal multiplexing (Feature 5)
