@@ -1,5 +1,6 @@
 {
   "name": "klaus-desktop",
+  "productName": "Klaussy",
   "version": "0.1.0",
   "description": "Multi-terminal Claude Code worktree manager",
   "main": "main.js",

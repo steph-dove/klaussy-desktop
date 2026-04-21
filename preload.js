@@ -22,7 +22,8 @@ contextBridge.exposeInMainWorld('klaus', {
   hideWorktree: (worktreePath) => ipcRenderer.invoke('hide-worktree', { worktreePath }),
 
   // Task management
-  createTask: (name, repoPath, mode, basePath, envVars) => ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars }),
+  createTask: (name, repoPath, mode, basePath, envVars, baseBranch) =>
+    ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch }),
   listBranches: (repoPath) => ipcRenderer.invoke('list-branches', { repoPath }),
   checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
   attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),

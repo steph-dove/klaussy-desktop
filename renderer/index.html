@@ -8,15 +8,6 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Repo selection overlay -->
-  <div id="repo-overlay" class="overlay" style="display: none;">
-    <div class="overlay-content">
-      <h2>Select Repository</h2>
-      <p>Choose the git repository you want to create worktrees for.</p>
-      <button id="btn-select-repo">Select Repository</button>
-    </div>
-  </div>
-
   <!-- Main app -->
   <div id="app" style="display: none;">
     <div id="sidebar">
@@ -203,15 +194,21 @@
     <div id="modal">
       <div id="modal-tabs">
         <button class="modal-tab active" data-tab="new">New Worktree</button>
-        <button class="modal-tab" data-tab="branch">From Branch</button>
-        <button class="modal-tab" data-tab="existing">Existing Dir</button>
+        <button class="modal-tab" data-tab="existing">Existing Worktree</button>
       </div>
 
       <!-- New worktree tab -->
       <div id="tab-new" class="tab-content active">
         <div id="modal-repo-indicator" class="modal-repo-indicator"></div>
-        <p>Enter a name. A git worktree and Claude Code instance will be created.</p>
+        <p>Enter a name (creates a new branch off the default), or pick an existing branch to continue working on it in a worktree.</p>
         <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
+        <div id="basebranch-picker">
+          <label>Branch:</label>
+          <div id="basebranch-combobox">
+            <input id="modal-base-branch-input" type="text" placeholder="Search branches..." autocomplete="off" spellcheck="false" />
+            <div id="modal-base-branch-list" hidden></div>
+          </div>
+        </div>
         <div id="basepath-picker">
           <label>Location:</label>
           <div id="basepath-row">
@@ -219,14 +216,6 @@
             <button id="btn-basepath">Change</button>
           </div>
         </div>
-      </div>
-
-      <!-- From branch tab -->
-      <div id="tab-branch" class="tab-content">
-        <p>Select a branch to check out into a new worktree.</p>
-        <input type="text" id="branch-filter" placeholder="Filter branches..." autocomplete="off" spellcheck="false" />
-        <div id="branch-list"></div>
-        <input type="hidden" id="selected-branch" />
       </div>
 
       <!-- Existing worktree tab -->
