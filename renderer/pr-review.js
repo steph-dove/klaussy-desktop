@@ -36,11 +36,13 @@ window.PrReview = (function () {
     error: null,
     cancelled: false,
     worktreePath: null,         // where the implement IPCs will run
-    findings: [],               // [{ id, text, severity, status, ignored, implementId, implementOut, implementError }]
+    findings: [],               // [{ id, text, severity, status, ignored, implementId, implementOut, implementError, usage }]
     implementAllId: null,
     implementAllProgress: [],
     implementAllError: null,
     implementAllSummary: null,
+    implementAllUsage: null,
+    usage: null,                // { cost, inputTokens, outputTokens, durationMs }
   };
 
   function mount(options) {
@@ -108,6 +110,7 @@ window.PrReview = (function () {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
         worktreePath: null, findings: [],
         implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
+        implementAllUsage: null, usage: null,
       };
       // Fire-and-forget. Pass the PR number explicitly — lastState isn't
       // assigned until below, and the async handler would otherwise compare
@@ -626,9 +629,12 @@ window.PrReview = (function () {
         if (saved.implementError) f.implementError = saved.implementError;
         if (saved.commentStatus) f.commentStatus = saved.commentStatus;
         if (saved.commentError) f.commentError = saved.commentError;
+        if (saved.usage) f.usage = saved.usage;
       });
     }
     if (cached.implementAllSummary) aiReview.implementAllSummary = cached.implementAllSummary;
+    if (cached.implementAllUsage) aiReview.implementAllUsage = cached.implementAllUsage;
+    if (cached.usage) aiReview.usage = cached.usage;
     repaintAiReviewTab();
     // Tab badge was set to 0 in the new-PR reset; rerender meta to update it.
     var tabBtn = hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
@@ -647,6 +653,7 @@ window.PrReview = (function () {
         implementError: f.implementError || null,
         commentStatus: f.commentStatus || 'idle',
         commentError: f.commentError || null,
+        usage: f.usage || null,
       };
     });
     window.klaus.prReviewCacheSaveByPr(
@@ -656,6 +663,8 @@ window.PrReview = (function () {
         finalText: aiReview.finalText,
         findingState: findingState,
         implementAllSummary: aiReview.implementAllSummary || null,
+        implementAllUsage: aiReview.implementAllUsage || null,
+        usage: aiReview.usage || null,
       }
     );
   }
@@ -762,6 +771,7 @@ window.PrReview = (function () {
     var openFindings = aiReview.findings.filter(function (f) { return !f.ignored; });
     var unimplementedOpen = openFindings.filter(function (f) { return f.status !== 'implemented' && f.status !== 'implementing'; });
 
+    var usageStr = aiReview.usage ? formatUsage(aiReview.usage) : '';
     var head = '<div class="pr-ai-head">'
       + '<span class="pr-ai-title">'
         + (aiReview.requestId ? 'Reviewing\u2026'
@@ -769,6 +779,7 @@ window.PrReview = (function () {
             : aiReview.cancelled && !aiReview.finalText ? 'Cancelled'
             : aiReview.findings.length + ' finding' + (aiReview.findings.length === 1 ? '' : 's'))
       + '</span>'
+      + (usageStr ? '<span class="pr-ai-usage" title="Reported by claude for this review run; charged to your Anthropic account">' + escHtml(usageStr) + '</span>' : '')
       + (aiReview.requestId
           ? '<button class="pr-ai-cancel pr-review-btn" type="button">Cancel</button>'
           : '')
@@ -790,8 +801,12 @@ window.PrReview = (function () {
       + '</div>'
       : '';
 
+    var implementAllUsageStr = aiReview.implementAllUsage ? formatUsage(aiReview.implementAllUsage) : '';
     var implementAllSummary = aiReview.implementAllSummary
-      ? '<div class="pr-ai-implement-all-summary">' + escHtml(aiReview.implementAllSummary) + '</div>'
+      ? '<div class="pr-ai-implement-all-summary">'
+          + escHtml(aiReview.implementAllSummary)
+          + (implementAllUsageStr ? '<div class="pr-ai-implement-usage">' + escHtml(implementAllUsageStr) + '</div>' : '')
+        + '</div>'
       : '';
     var implementAllError = aiReview.implementAllError
       ? '<div class="pr-ai-implement-all-error">' + escHtml(aiReview.implementAllError) + '</div>'
@@ -861,10 +876,13 @@ window.PrReview = (function () {
         + '<button class="pr-ai-finding-implement" type="button">Implement</button>';
     }
 
+    var implementOutTxt = f.implementError || f.implementOut || '';
+    var implementUsage = f.usage ? formatUsage(f.usage) : '';
     var implementOut = (f.status === 'implementing' || f.status === 'implemented' || f.status === 'failed')
-      && (f.implementOut || f.implementError)
+      && (implementOutTxt || implementUsage)
       ? '<div class="pr-ai-finding-implement-out' + (f.implementError ? ' error' : '') + '">'
-          + escHtml(f.implementError || f.implementOut)
+          + (implementOutTxt ? escHtml(implementOutTxt) : '')
+          + (implementUsage ? '<div class="pr-ai-implement-usage">' + escHtml(implementUsage) + '</div>' : '')
         + '</div>'
       : '';
 
@@ -913,6 +931,7 @@ window.PrReview = (function () {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
         worktreePath: aiReview.worktreePath, findings: [],
         implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
+        implementAllUsage: null, usage: null,
       };
       startAiReview();
     });
@@ -966,6 +985,7 @@ window.PrReview = (function () {
     aiReview.error = null;
     aiReview.cancelled = false;
     aiReview.findings = [];
+    aiReview.usage = null;
     repaintAiReviewTab();
 
     var buffered = '';
@@ -1023,11 +1043,40 @@ window.PrReview = (function () {
           aiReview.progress.push({ kind: 'tool', label: block.name + (hint ? ': ' + hint : '') });
         }
       });
-    } else if (ev.type === 'result' && ev.result) {
-      aiReview.finalText = ev.result;
+    } else if (ev.type === 'result') {
+      if (ev.result) aiReview.finalText = ev.result;
+      // Capture usage so we can show the user what this run cost on their
+      // own Anthropic account. Klaussy doesn't bill — we just surface what
+      // claude already reports.
+      aiReview.usage = extractUsage(ev);
     } else if (ev.type === 'system' && ev.subtype) {
       aiReview.progress.push({ kind: 'system', label: ev.subtype });
     }
+  }
+
+  // Pull usage + cost out of a stream-json `result` event into a small,
+  // renderer-friendly shape. Returns null if the event doesn't carry it.
+  function extractUsage(ev) {
+    if (!ev) return null;
+    var u = ev.usage || {};
+    var input = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+    var output = u.output_tokens || 0;
+    if (!input && !output && typeof ev.total_cost_usd !== 'number') return null;
+    return {
+      cost: typeof ev.total_cost_usd === 'number' ? ev.total_cost_usd : null,
+      durationMs: typeof ev.duration_ms === 'number' ? ev.duration_ms : null,
+      inputTokens: input,
+      outputTokens: output,
+    };
+  }
+
+  function formatUsage(u) {
+    if (!u) return '';
+    var bits = [];
+    if (typeof u.cost === 'number') bits.push('$' + u.cost.toFixed(u.cost < 0.01 ? 4 : 2));
+    if (u.inputTokens || u.outputTokens) bits.push((u.inputTokens || 0).toLocaleString() + ' in / ' + (u.outputTokens || 0).toLocaleString() + ' out');
+    if (u.durationMs) bits.push((u.durationMs / 1000).toFixed(1) + 's');
+    return bits.join(' \u00b7 ');
   }
 
   function startImplement(f) {
@@ -1053,8 +1102,9 @@ window.PrReview = (function () {
             ev.message.content.forEach(function (block) {
               if (block.type === 'text' && block.text) f.implementOut = block.text;
             });
-          } else if (ev.type === 'result' && ev.result) {
-            f.implementOut = ev.result;
+          } else if (ev.type === 'result') {
+            if (ev.result) f.implementOut = ev.result;
+            f.usage = extractUsage(ev);
           }
         } catch (_) {}
       }
@@ -1151,8 +1201,9 @@ window.PrReview = (function () {
                 aiReview.implementAllProgress.push({ kind: 'tool', label: block.name + (hint ? ': ' + hint : '') });
               }
             });
-          } else if (ev.type === 'result' && ev.result) {
-            finalText = ev.result;
+          } else if (ev.type === 'result') {
+            if (ev.result) finalText = ev.result;
+            aiReview.implementAllUsage = extractUsage(ev);
           }
         } catch (_) {}
       }
@@ -1838,6 +1889,10 @@ window.PrReview = (function () {
       bodyEl.textContent = DEBUG_STATUS_MESSAGES[statusIdx];
     }, 1800);
 
+    // Debug uses plain `claude -p` (text streaming, not stream-json) — so
+    // we don't get a usage envelope here. Show duration instead so the user
+    // still gets a sense of cost.
+    var startedAt = Date.now();
     var unsubChunk = window.klaus.onPrDebugCheckChunk(requestId, function (chunk) {
       if (!accumulated) {
         bodyEl.classList.remove('status-pulse');
@@ -1855,7 +1910,14 @@ window.PrReview = (function () {
         bodyEl.classList.remove('status-pulse');
         bodyEl.classList.add('diff-error');
         bodyEl.textContent = result.error;
+        return;
       }
+      // Append a small footer so the user sees roughly how long the call ran.
+      var seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      var footer = document.createElement('div');
+      footer.className = 'pr-check-debug-usage';
+      footer.textContent = 'Ran in ' + seconds + 's on your Anthropic account';
+      panel.appendChild(footer);
     });
 
     panel.querySelector('.pr-check-debug-close').addEventListener('click', function () {
