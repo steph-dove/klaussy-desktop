@@ -244,6 +244,22 @@ contextBridge.exposeInMainWorld('klaus', {
     ipcRenderer.on('auto-fetch-update', (_event, data) => callback(data));
   },
 
+  // Triggered by the View → How to use Klaussy menu item.
+  onShowHowToUse: (callback) => {
+    ipcRenderer.on('show-how-to-use', () => callback());
+  },
+  // Triggered by the View → Send feedback menu item.
+  onShowFeedback: (callback) => {
+    ipcRenderer.on('show-feedback', () => callback());
+  },
+  // Triggered by the View → Logs menu item.
+  onShowLogs: (callback) => {
+    ipcRenderer.on('show-logs', () => callback());
+  },
+
+  // First-run dependency probe (gh + claude installed/authed?).
+  checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+
   // H3: Worktree file watcher for instant diff refresh
   watchWorktree: (worktreePath) => ipcRenderer.invoke('watch-worktree', { worktreePath }),
   unwatchWorktree: (worktreePath) => ipcRenderer.invoke('unwatch-worktree', { worktreePath }),
