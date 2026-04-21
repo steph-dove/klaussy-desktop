@@ -1038,8 +1038,10 @@
       '<div class="pr-picker">'
         + '<div class="pr-picker-header">Review a Pull Request</div>'
         + '<div class="pr-picker-url-row">'
-          + '<input type="text" class="pr-picker-url" placeholder="Paste GitHub PR URL and press Enter" />'
+          + '<input type="text" class="pr-picker-url" placeholder="Paste a GitHub PR URL" />'
+          + '<button class="pr-picker-start" type="button" disabled>Start review</button>'
         + '</div>'
+        + '<div class="pr-picker-recent"></div>'
         + '<div class="pr-picker-list"><div class="pr-picker-loading">Loading open PRs\u2026</div></div>'
         + '<div class="pr-picker-footer"><button class="pr-picker-cancel">Cancel</button></div>'
       + '</div>';
@@ -1050,42 +1052,88 @@
     overlay.querySelector('.pr-picker-cancel').addEventListener('click', close);
 
     var urlInput = overlay.querySelector('.pr-picker-url');
+    var startBtn = overlay.querySelector('.pr-picker-start');
     urlInput.focus();
-    urlInput.addEventListener('keydown', async function (e) {
-      if (e.key !== 'Enter') return;
+
+    function updateStartEnabled() { startBtn.disabled = !urlInput.value.trim(); }
+    urlInput.addEventListener('input', updateStartEnabled);
+
+    async function startFromUrl() {
       var url = urlInput.value.trim();
       if (!url) return;
       urlInput.disabled = true;
+      startBtn.disabled = true;
+      startBtn.textContent = 'Loading\u2026';
       var result = await window.klaus.prLoad({ url: url });
       if (result.error) {
         urlInput.disabled = false;
+        startBtn.textContent = 'Start review';
+        updateStartEnabled();
         alert('Failed to load PR:\n' + result.error);
         return;
       }
-      // Mount happens via the pr-review-state subscriber; just close the picker.
       close();
+    }
+
+    urlInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); startFromUrl(); }
+    });
+    startBtn.addEventListener('click', startFromUrl);
+
+    // Kick both lists off in parallel — neither blocks the user from
+    // pasting a URL.
+    var recentEl = overlay.querySelector('.pr-picker-recent');
+    var listEl = overlay.querySelector('.pr-picker-list');
+
+    window.klaus.prRecent().then(function (r) {
+      var items = (r && r.items) || [];
+      if (items.length === 0) { recentEl.style.display = 'none'; return; }
+      recentEl.innerHTML = '<div class="pr-picker-section-head">Recently reviewed</div>'
+        + items.map(function (it) {
+          var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
+          return '<div class="pr-picker-item" data-url="' + (it.url || '').replace(/"/g, '&quot;') + '">'
+            + '<span class="pr-picker-num">#' + it.number + '</span>'
+            + '<span class="pr-picker-title">' + (it.title || '').replace(/</g, '&lt;') + '</span>'
+            + '<span class="pr-picker-author">' + (it.author || '') + '</span>'
+            + '<span class="pr-picker-state pr-state-' + stateLabel + '">' + stateLabel + '</span>'
+          + '</div>';
+        }).join('');
+      recentEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
+        row.addEventListener('click', async function () {
+          row.style.opacity = '0.5';
+          var loadResult = await window.klaus.prLoad({ url: row.dataset.url });
+          if (loadResult.error) {
+            alert('Failed to load PR:\n' + loadResult.error);
+            row.style.opacity = '1';
+            return;
+          }
+          close();
+        });
+      });
     });
 
-    var listEl = overlay.querySelector('.pr-picker-list');
     var result = await window.klaus.prList();
     if (result.error) {
-      listEl.innerHTML = '<div class="pr-picker-error">' + (result.error || '').replace(/</g, '&lt;') + '</div>';
+      listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
+        + '<div class="pr-picker-error">' + (result.error || '').replace(/</g, '&lt;') + '</div>';
       return;
     }
     if (!result.prs || result.prs.length === 0) {
-      listEl.innerHTML = '<div class="pr-picker-empty">No open PRs in this repo.</div>';
+      listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
+        + '<div class="pr-picker-empty">No open PRs in this repo.</div>';
       return;
     }
-    listEl.innerHTML = result.prs.map(function (pr) {
-      var author = (pr.author && (pr.author.login || pr.author.name)) || '';
-      var stateLabel = pr.isDraft ? 'draft' : (pr.state || '').toLowerCase();
-      return '<div class="pr-picker-item" data-number="' + pr.number + '">'
-        + '<span class="pr-picker-num">#' + pr.number + '</span>'
-        + '<span class="pr-picker-title">' + (pr.title || '').replace(/</g, '&lt;') + '</span>'
-        + '<span class="pr-picker-author">' + author + '</span>'
-        + '<span class="pr-picker-state pr-state-' + stateLabel + '">' + stateLabel + '</span>'
-      + '</div>';
-    }).join('');
+    listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
+      + result.prs.map(function (pr) {
+        var author = (pr.author && (pr.author.login || pr.author.name)) || '';
+        var stateLabel = pr.isDraft ? 'draft' : (pr.state || '').toLowerCase();
+        return '<div class="pr-picker-item" data-number="' + pr.number + '">'
+          + '<span class="pr-picker-num">#' + pr.number + '</span>'
+          + '<span class="pr-picker-title">' + (pr.title || '').replace(/</g, '&lt;') + '</span>'
+          + '<span class="pr-picker-author">' + author + '</span>'
+          + '<span class="pr-picker-state pr-state-' + stateLabel + '">' + stateLabel + '</span>'
+        + '</div>';
+      }).join('');
     listEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
       row.addEventListener('click', async function () {
         row.style.opacity = '0.5';
