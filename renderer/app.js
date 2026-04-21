@@ -1023,7 +1023,10 @@
     });
 
     commands.push({ label: 'Review Pull Request\u2026', action: function () { showPrPicker(); } });
+    commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
+    commands.push({ label: 'Check dependencies\u2026', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: showLogViewer });
+    commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
     commands.push({ label: 'About Klaussy', action: showAboutDialog });
 
     return commands;
@@ -1188,8 +1191,13 @@
 
     var result = await window.klaus.prList();
     if (result.error) {
+      // No active project is the most common case here; treat it as an info
+      // hint rather than a hard error so the user can still paste a URL.
+      var msg = result.error || '';
+      var isNoProject = /no active project/i.test(msg);
+      var cls = isNoProject ? 'pr-picker-empty' : 'pr-picker-error';
       listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-        + '<div class="pr-picker-error">' + (result.error || '').replace(/</g, '&lt;') + '</div>';
+        + '<div class="' + cls + '">' + (isNoProject ? 'Add a project to list its open PRs, or paste a URL above to review any PR you have access to.' : msg.replace(/</g, '&lt;')) + '</div>';
       return;
     }
     if (!result.prs || result.prs.length === 0) {
@@ -1228,6 +1236,22 @@
 
   var showAboutDialog = Dialogs.showAbout;
   var showLogViewer = Dialogs.showLog;
+
+  // View → How to use Klaussy menu item routes here.
+  if (window.klaus.onShowHowToUse) {
+    window.klaus.onShowHowToUse(function () { Dialogs.showHowToUse(); });
+  }
+  if (window.klaus.onShowFeedback) {
+    window.klaus.onShowFeedback(function () { Dialogs.openFeedback(); });
+  }
+  if (window.klaus.onShowLogs) {
+    window.klaus.onShowLogs(function () { Dialogs.showLog(); });
+  }
+
+  // Probe gh + claude on startup (silent if everything's set up). Stays out
+  // of the way for steady-state users; only first-runs / broken setups see
+  // the dialog. Manual invocation also available via the command palette.
+  setTimeout(function () { Dialogs.checkAndPromptDeps(); }, 800);
 
   // ---- E3: Parse env vars from modal ----
 

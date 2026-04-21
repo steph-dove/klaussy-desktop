@@ -200,6 +200,28 @@ app.whenReady().then(() => {
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
+        { type: 'separator' },
+        {
+          label: 'Logs',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-logs');
+          },
+        },
+        {
+          label: 'How to use Klaussy',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-how-to-use');
+          },
+        },
+        {
+          label: 'Send feedback…',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-feedback');
+          },
+        },
       ],
     },
     {
@@ -1102,6 +1124,41 @@ ipcMain.handle('get-about-info', async () => {
   };
 });
 
+// Pre-launch dep check: probe gh + claude so a first-run dialog can guide
+// the user through setup instead of letting them hit cryptic IPC errors
+// downstream when these CLIs are missing or unauthed.
+ipcMain.handle('check-dependencies', async () => {
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+
+  function probe(cmd, args) {
+    try {
+      const out = execFileSync(cmd, args, { stdio: 'pipe', timeout: 5000 }).toString().trim();
+      return { ok: true, output: out };
+    } catch (err) {
+      return { ok: false, error: (err.stderr ? err.stderr.toString() : err.message).trim() };
+    }
+  }
+
+  const ghVersion = probe('gh', ['--version']);
+  const ghAuth = ghVersion.ok ? probe('gh', ['auth', 'status']) : { ok: false, error: 'gh not installed' };
+  const claudeVersion = probe(claudeBin, ['--version']);
+
+  return {
+    gh: {
+      installed: ghVersion.ok,
+      authed: ghAuth.ok,
+      version: ghVersion.ok ? ghVersion.output.split('\n')[0] : null,
+      authError: ghAuth.ok ? null : ghAuth.error,
+    },
+    claude: {
+      installed: claudeVersion.ok,
+      version: claudeVersion.ok ? claudeVersion.output : null,
+      path: claudeBin,
+    },
+  };
+});
+
 // ---- Rename Task (A4) ----
 
 ipcMain.handle('rename-task', (_event, { id, newName }) => {
@@ -1804,8 +1861,10 @@ ipcMain.handle('pr-list', async () => {
 });
 
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
-  const cwd = currentRepoPath();
-  if (!cwd) return { error: 'No active project. Add a project first.' };
+  // gh just needs a valid cwd (any git repo or non-repo dir works for a
+  // URL-targeted call). Falling back to homedir lets reviewers use Klaussy
+  // without first adding a klausify project.
+  const cwd = currentRepoPath() || require('os').homedir();
   try {
     const meta = await ghJson([
       'pr', 'view', url,
@@ -1828,8 +1887,13 @@ function parseBaseFromUrl(url) {
 }
 
 ipcMain.handle('pr-load', async (_event, { number, url }) => {
-  const cwd = currentRepoPath();
-  if (!cwd) return { error: 'No active project. Add a project first.' };
+  // URL-form calls don't need an active project — gh derives the repo from
+  // the URL. The number-only form (used by the picker's "open in current
+  // project" list) does, since gh resolves it against the cwd's origin.
+  if (!url && !currentRepoPath()) {
+    return { error: 'Add a project to look up PRs by number, or paste a full PR URL.' };
+  }
+  const cwd = currentRepoPath() || require('os').homedir();
   const target = url || String(number);
   try {
     const [meta, diff] = await Promise.all([
@@ -1894,8 +1958,10 @@ ipcMain.handle('pr-recent', () => {
 // head repo (fork), because threads live on the target.
 async function fetchThreadsForActive() {
   if (!activePrReview) return;
-  const cwd = currentRepoPath();
-  if (!cwd) return;
+  // gh api graphql doesn't need to run inside the target repo — owner/repo
+  // are passed as query variables. Falling back to homedir means reviewers
+  // without an active klausify project still get threads + comments.
+  const cwd = currentRepoPath() || require('os').homedir();
   if (!activePrReview.baseOwner || !activePrReview.baseRepo) {
     activePrReview.threadsError = 'Could not parse base repo from PR url';
     broadcastPrReview();
@@ -2090,24 +2156,36 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
   // GitHub job links look like:
   //   https://github.com/<owner>/<repo>/actions/runs/<runId>/job/<jobId>
   const m = checkLink.match(/\/actions\/runs\/(\d+)\/job\/(\d+)/);
+  const runId = m ? m[1] : null;
   const jobId = m ? m[2] : null;
-  if (!jobId) return { error: 'Could not parse job id from link: ' + checkLink };
+  if (!runId || !jobId) return { error: 'Could not parse run/job id from link: ' + checkLink };
 
   const cwd = currentRepoPath() || require('os').homedir();
   const sender = event.sender;
   const chunkChannel = 'pr-debug-check-chunk-' + requestId;
   const doneChannel = 'pr-debug-check-done-' + requestId;
 
-  // Fetch logs first (synchronously-ish), then spawn claude with the full
-  // prompt. Logs can be large; cap to last ~400 lines so we don't blow the
-  // model's context with setup noise.
+  // Fetch logs. gh run view follows the 302-to-download redirect properly,
+  // unlike the bare `gh api .../jobs/{id}/logs` call which often surfaces
+  // as HTTP 404. Fall back to the api endpoint if `gh run view` fails (e.g.
+  // wrong repo, expired retention).
   let logs = '';
   try {
     logs = execFileSync('gh', [
-      'api', `/repos/${baseOwner}/${baseRepo}/actions/jobs/${jobId}/logs`,
-    ], { cwd, stdio: 'pipe', timeout: 20000, maxBuffer: 50 * 1024 * 1024 }).toString();
-  } catch (err) {
-    return { error: 'Could not fetch logs: ' + (err.stderr ? err.stderr.toString().trim() : err.message) };
+      'run', 'view', String(runId),
+      '-R', `${baseOwner}/${baseRepo}`,
+      '--log-failed',
+    ], { cwd, stdio: 'pipe', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }).toString();
+  } catch (errA) {
+    try {
+      logs = execFileSync('gh', [
+        'api', `/repos/${baseOwner}/${baseRepo}/actions/jobs/${jobId}/logs`,
+      ], { cwd, stdio: 'pipe', timeout: 20000, maxBuffer: 50 * 1024 * 1024 }).toString();
+    } catch (errB) {
+      const msg = (errA.stderr ? errA.stderr.toString().trim() : errA.message)
+        || (errB.stderr ? errB.stderr.toString().trim() : errB.message);
+      return { error: 'Could not fetch logs: ' + msg };
+    }
   }
   const logLines = logs.split('\n');
   const logTail = logLines.slice(-400).join('\n');
