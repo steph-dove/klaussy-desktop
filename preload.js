@@ -287,6 +287,42 @@ contextBridge.exposeInMainWorld('klaus', {
     return () => ipcRenderer.removeListener(channel, handler);
   },
   prCheckoutLocally: () => ipcRenderer.invoke('pr-checkout-locally'),
+  prReviewAiStart: (requestId) => ipcRenderer.invoke('pr-review-ai-start', { requestId }),
+  prReviewAiCancel: (requestId) => ipcRenderer.invoke('pr-review-ai-cancel', { requestId }),
+  onPrReviewAiData: (requestId, callback) => {
+    const channel = 'pr-review-ai-data-' + requestId;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onPrReviewAiDone: (requestId, callback) => {
+    const channel = 'pr-review-ai-done-' + requestId;
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.once(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  prReviewImplementStart: (requestId, mode, body) =>
+    ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body }),
+  prReviewImplementCancel: (requestId) =>
+    ipcRenderer.invoke('pr-review-implement-cancel', { requestId }),
+  prReviewCacheGetByPr: (owner, repo, number) =>
+    ipcRenderer.invoke('pr-review-cache-get-by-pr', { owner, repo, number }),
+  prReviewCacheSaveByPr: (owner, repo, number, data) =>
+    ipcRenderer.invoke('pr-review-cache-save-by-pr', { owner, repo, number, data }),
+  prReviewCacheClearByPr: (owner, repo, number) =>
+    ipcRenderer.invoke('pr-review-cache-clear-by-pr', { owner, repo, number }),
+  onPrReviewImplementData: (requestId, callback) => {
+    const channel = 'pr-review-implement-data-' + requestId;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onPrReviewImplementDone: (requestId, callback) => {
+    const channel = 'pr-review-implement-done-' + requestId;
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.once(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
   onPrCheckoutReady: (callback) => {
     const handler = (_event, task) => callback(task);
     ipcRenderer.on('pr-checkout-ready', handler);

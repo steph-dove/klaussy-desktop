@@ -27,6 +27,21 @@ window.PrReview = (function () {
   var pendingComments = [];
   // G6: latest checks result for the active PR. null = not yet fetched.
   var currentChecks = null;
+  // G7: in-flight AI review state. requestId is set while streaming; the
+  // panel persists across re-renders until the user closes it.
+  var aiReview = {
+    requestId: null,           // streaming review-generation IPC
+    finalText: '',              // accumulated review markdown
+    progress: [],               // chips while streaming
+    error: null,
+    cancelled: false,
+    worktreePath: null,         // where the implement IPCs will run
+    findings: [],               // [{ id, text, severity, status, ignored, implementId, implementOut, implementError }]
+    implementAllId: null,
+    implementAllProgress: [],
+    implementAllError: null,
+    implementAllSummary: null,
+  };
 
   function mount(options) {
     hostEl = options.host;
@@ -82,10 +97,27 @@ window.PrReview = (function () {
     if (isNewPr) {
       selectedFile = null;
       currentChecks = null;
+      // Tear down any in-flight AI work for the previous PR so we don't bleed
+      // findings/state across PRs.
+      if (aiReview.requestId) window.klaus.prReviewAiCancel(aiReview.requestId);
+      if (aiReview.implementAllId) window.klaus.prReviewImplementCancel(aiReview.implementAllId);
+      aiReview.findings.forEach(function (f) {
+        if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
+      });
+      aiReview = {
+        requestId: null, finalText: '', progress: [], error: null, cancelled: false,
+        worktreePath: null, findings: [],
+        implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
+      };
       // Fire-and-forget. Pass the PR number explicitly — lastState isn't
       // assigned until below, and the async handler would otherwise compare
       // against a null on first load and drop its own result.
       fetchAndRenderChecks(state.number);
+      // Restore cached AI review (text + per-finding ignore/implement state)
+      // for this PR if we have one. Async; the tab repaints when it lands.
+      if (state.baseOwner && state.baseRepo) {
+        loadAiReviewCache(state.baseOwner, state.baseRepo, state.number);
+      }
     }
     lastState = state;
 
@@ -114,6 +146,7 @@ window.PrReview = (function () {
         + '</div>'
         + '<div class="pr-review-actions">'
           + '<a href="#" class="pr-review-external" data-url="' + escHtml(meta.url || '') + '">Open on GitHub</a>'
+          + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this PR">Review with Claude</button>'
           + '<button class="pr-review-btn js-checkout-local" title="Fetch this PR into a new worktree and spawn a task">Check out locally</button>'
           + renderMergeControl(state)
           + (isPopout
@@ -128,6 +161,7 @@ window.PrReview = (function () {
         + '<button class="pr-review-tab' + (activeTab === 'files' ? ' active' : '') + '" data-tab="files">Files <span class="pr-tab-count">' + files.length + '</span></button>'
         + '<button class="pr-review-tab' + (activeTab === 'conversation' ? ' active' : '') + '" data-tab="conversation">Conversation' + renderConversationCount(state) + '</button>'
         + '<button class="pr-review-tab' + (activeTab === 'checks' ? ' active' : '') + '" data-tab="checks">Checks' + renderChecksTabCount() + '</button>'
+        + '<button class="pr-review-tab' + (activeTab === 'ai-review' ? ' active' : '') + '" data-tab="ai-review">Review' + renderAiReviewTabCount() + '</button>'
       + '</div>'
       + '<div class="pr-review-body' + (activeTab !== 'files' ? ' one-col' : '') + '">'
         + (activeTab === 'files'
@@ -135,7 +169,9 @@ window.PrReview = (function () {
               + '<div class="pr-review-diff">' + renderSelectedFileDiff(files) + '</div>'
             : activeTab === 'conversation'
               ? '<div class="pr-review-conversation">' + renderConversation(state) + '</div>'
-              : '<div class="pr-review-checks-tab">' + renderChecksTab() + '</div>'
+              : activeTab === 'checks'
+                ? '<div class="pr-review-checks-tab">' + renderChecksTab() + '</div>'
+                : '<div class="pr-review-ai-tab">' + renderAiReviewTab() + '</div>'
           )
       + '</div>';
 
@@ -152,6 +188,8 @@ window.PrReview = (function () {
       bindReplyButtons();
     } else if (activeTab === 'checks') {
       bindChecksTab();
+    } else if (activeTab === 'ai-review') {
+      bindAiReviewTab();
     }
     renderThreadsStatusBadge(state);
     renderPendingReviewBar(state);
@@ -553,6 +591,585 @@ window.PrReview = (function () {
       }
       // Success path: main clears state and broadcasts pr-checkout-ready;
       // the main-window listener in app.js takes over from here.
+    });
+    var aiBtn = hostEl.querySelector('.js-ai-review');
+    if (aiBtn) aiBtn.addEventListener('click', function () {
+      // Always swing the user over to the Review tab; start a run if there
+      // isn't one in flight or completed already.
+      activeTab = 'ai-review';
+      if (!aiReview.requestId && !aiReview.finalText) {
+        startAiReview();
+      } else if (lastState) {
+        render(lastState);
+      }
+    });
+  }
+
+  // ---- G7: AI review cache ----
+
+  async function loadAiReviewCache(owner, repo, number) {
+    var result = await window.klaus.prReviewCacheGetByPr(owner, repo, number);
+    if (!result || !result.cached) return;
+    // Bail if the user navigated to a different PR while we were loading.
+    if (!lastState || lastState.number !== number) return;
+    var cached = result.cached;
+
+    aiReview.finalText = cached.finalText || '';
+    reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+    if (cached.findingState) {
+      aiReview.findings.forEach(function (f) {
+        var saved = cached.findingState[f.key];
+        if (!saved) return;
+        f.ignored = !!saved.ignored;
+        f.status = saved.status || 'open';
+        if (saved.implementOut) f.implementOut = saved.implementOut;
+        if (saved.implementError) f.implementError = saved.implementError;
+        if (saved.commentStatus) f.commentStatus = saved.commentStatus;
+        if (saved.commentError) f.commentError = saved.commentError;
+      });
+    }
+    if (cached.implementAllSummary) aiReview.implementAllSummary = cached.implementAllSummary;
+    repaintAiReviewTab();
+    // Tab badge was set to 0 in the new-PR reset; rerender meta to update it.
+    var tabBtn = hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
+    if (tabBtn) tabBtn.innerHTML = 'Review' + renderAiReviewTabCount();
+  }
+
+  function saveAiReviewCache() {
+    if (!lastState || !lastState.baseOwner || !lastState.baseRepo) return;
+    if (!aiReview.finalText && aiReview.findings.length === 0) return;
+    var findingState = {};
+    aiReview.findings.forEach(function (f) {
+      findingState[f.key] = {
+        ignored: !!f.ignored,
+        status: f.status,
+        implementOut: f.implementOut || '',
+        implementError: f.implementError || null,
+        commentStatus: f.commentStatus || 'idle',
+        commentError: f.commentError || null,
+      };
+    });
+    window.klaus.prReviewCacheSaveByPr(
+      lastState.baseOwner, lastState.baseRepo, lastState.number,
+      {
+        savedAt: new Date().toISOString(),
+        finalText: aiReview.finalText,
+        findingState: findingState,
+        implementAllSummary: aiReview.implementAllSummary || null,
+      }
+    );
+  }
+
+  // ---- G7: AI review tab ----
+
+  // F6's review template emits findings prefixed with `**[Severity: ...]**`;
+  // split the streaming text into preamble + findings + postamble. If the
+  // parser doesn't match (memory says it can be unreliable) we fall back to
+  // a single card containing the whole review.
+  function parseReviewFindings(text) {
+    if (!text) return { preamble: '', findings: [], postamble: '' };
+    var parts = text.split(/(?=^\s*\*\*\[Severity:)/m);
+    if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
+    var preamble = parts[0].trim();
+    var findings = [];
+    var postamble = '';
+    for (var i = 1; i < parts.length; i++) {
+      var block = parts[i];
+      var m = block.match(/(^|\n)\s*\*\*Overall verdict:/i);
+      if (m) {
+        findings.push(block.slice(0, m.index).trim());
+        postamble = block.slice(m.index).trim();
+      } else {
+        findings.push(block.trim());
+      }
+    }
+    return { preamble: preamble, findings: findings, postamble: postamble };
+  }
+
+  function severityOf(text) {
+    var m = (text || '').match(/\*\*\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*\*/);
+    return m ? m[1].trim().toLowerCase() : '';
+  }
+
+  // Reconcile parsed-finding text with our state's findings list. Parsing
+  // happens on every chunk during streaming, so we want to preserve any
+  // per-card status (ignored, implementing, implemented) when the same
+  // finding text reappears. Keying on the first-line snippet survives
+  // chunk boundaries better than full-text equality.
+  function reconcileFindings(parsedFindings) {
+    var byKey = {};
+    aiReview.findings.forEach(function (f) { byKey[f.key] = f; });
+    var next = parsedFindings.map(function (text, idx) {
+      var key = findingKey(text, idx);
+      var prev = byKey[key];
+      if (prev) {
+        prev.text = text;
+        prev.severity = severityOf(text);
+        return prev;
+      }
+      return {
+        id: 'f-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).slice(2, 6),
+        key: key,
+        text: text,
+        severity: severityOf(text),
+        status: 'open',
+        implementId: null,
+        implementOut: '',
+        implementError: null,
+        commentStatus: 'idle', // 'idle' | 'posting' | 'posted' | 'failed'
+        commentError: null,
+      };
+    });
+    aiReview.findings = next;
+  }
+
+  function findingKey(text, idx) {
+    // First non-empty line tends to be unique (it's the title); fall back to
+    // the index so keys are still stable for unparseable findings.
+    var firstLine = (text || '').split('\n').find(function (l) { return l.trim(); }) || '';
+    return idx + '|' + firstLine.slice(0, 80);
+  }
+
+  function renderAiReviewTabCount() {
+    var openFindings = aiReview.findings.filter(function (f) { return !f.ignored && f.status !== 'implemented'; }).length;
+    if (!openFindings && !aiReview.requestId && !aiReview.finalText) return '';
+    if (!openFindings) return '';
+    return ' <span class="pr-tab-count">' + openFindings + '</span>';
+  }
+
+  function renderAiReviewTab() {
+    if (!aiReview.requestId && !aiReview.finalText && !aiReview.error && !aiReview.cancelled) {
+      return '<div class="pr-ai-empty">'
+        + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
+        + '<div class="pr-ai-empty-hint">Spawns Claude in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
+      + '</div>';
+    }
+
+    var status = aiReview.requestId ? 'streaming' : aiReview.error ? 'error' : aiReview.cancelled ? 'cancelled' : 'done';
+    var openFindings = aiReview.findings.filter(function (f) { return !f.ignored; });
+    var unimplementedOpen = openFindings.filter(function (f) { return f.status !== 'implemented' && f.status !== 'implementing'; });
+
+    var head = '<div class="pr-ai-head">'
+      + '<span class="pr-ai-title">'
+        + (aiReview.requestId ? 'Reviewing\u2026'
+            : aiReview.error ? 'Failed'
+            : aiReview.cancelled && !aiReview.finalText ? 'Cancelled'
+            : aiReview.findings.length + ' finding' + (aiReview.findings.length === 1 ? '' : 's'))
+      + '</span>'
+      + (aiReview.requestId
+          ? '<button class="pr-ai-cancel pr-review-btn" type="button">Cancel</button>'
+          : '')
+      + (!aiReview.requestId && unimplementedOpen.length > 1
+          ? '<button class="pr-ai-implement-all pr-review-btn" type="button"' + (aiReview.implementAllId ? ' disabled' : '') + '>'
+              + (aiReview.implementAllId ? 'Implementing all\u2026' : 'Implement all (' + unimplementedOpen.length + ')')
+            + '</button>'
+          : '')
+      + (!aiReview.requestId
+          ? '<button class="pr-ai-rerun pr-review-btn" type="button" title="Run a fresh review">Rerun</button>'
+          : '')
+    + '</div>';
+
+    var progress = (aiReview.requestId || aiReview.implementAllId) && (aiReview.progress.length || aiReview.implementAllProgress.length)
+      ? '<div class="pr-ai-progress">'
+        + (aiReview.progress.slice(-6).concat(aiReview.implementAllProgress.slice(-6))).map(function (p) {
+            return '<span class="pr-ai-progress-chip' + (p.kind === 'system' ? ' system' : '') + '">' + escHtml(p.label) + '</span>';
+          }).join('')
+      + '</div>'
+      : '';
+
+    var implementAllSummary = aiReview.implementAllSummary
+      ? '<div class="pr-ai-implement-all-summary">' + escHtml(aiReview.implementAllSummary) + '</div>'
+      : '';
+    var implementAllError = aiReview.implementAllError
+      ? '<div class="pr-ai-implement-all-error">' + escHtml(aiReview.implementAllError) + '</div>'
+      : '';
+
+    var body;
+    if (aiReview.error) {
+      body = '<div class="pr-ai-body error">' + escHtml(aiReview.error) + '</div>';
+    } else if (!aiReview.finalText && aiReview.requestId) {
+      body = '<div class="pr-ai-body status-pulse">Working\u2026</div>';
+    } else if (aiReview.findings.length === 0) {
+      // Parser found nothing — show the raw text as one fallback card so the
+      // user still sees the review even when the structured shape is off.
+      body = '<div class="pr-ai-fallback-card">'
+        + '<div class="pr-ai-fallback-head">Review (unparsed)</div>'
+        + '<pre class="pr-ai-fallback-body">' + escHtml(aiReview.finalText || '') + '</pre>'
+      + '</div>';
+    } else {
+      body = '<div class="pr-ai-findings">'
+        + aiReview.findings.map(renderFindingCard).join('')
+      + '</div>';
+    }
+
+    return '<div class="pr-ai-tab pr-ai-' + status + '">'
+      + head + progress + implementAllSummary + implementAllError + body
+    + '</div>';
+  }
+
+  function renderFindingCard(f) {
+    var sevCls = f.severity ? ' pr-ai-finding-sev-' + f.severity.replace(/\s+/g, '-') : '';
+    var statusCls = f.ignored ? ' ignored'
+      : f.status === 'implementing' ? ' implementing'
+      : f.status === 'implemented' ? ' implemented'
+      : f.status === 'failed' ? ' failed'
+      : '';
+
+    // Comment status renders as a small badge that's independent of the
+    // implement/ignore lifecycle — a reviewer can both post a comment AND
+    // implement the same finding.
+    var commentBadge = '';
+    var commentBtn = '';
+    if (f.commentStatus === 'posted') {
+      commentBadge = '<span class="pr-ai-finding-comment-status posted" title="Posted to the PR">\u2713 Commented</span>';
+    } else if (f.commentStatus === 'posting') {
+      commentBadge = '<span class="pr-ai-finding-comment-status posting">Posting\u2026</span>';
+    } else if (f.commentStatus === 'failed') {
+      commentBadge = '<span class="pr-ai-finding-comment-status failed" title="' + escHtml(f.commentError || '') + '">! Comment failed</span>';
+      commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Try again">Add to PR</button>';
+    } else {
+      commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Post this finding as an issue comment on the PR">Add to PR</button>';
+    }
+
+    var actions;
+    if (f.ignored) {
+      actions = commentBadge + '<button class="pr-ai-finding-undo" type="button">Restore</button>';
+    } else if (f.status === 'implementing') {
+      actions = commentBadge + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
+    } else if (f.status === 'implemented') {
+      actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
+        + commentBadge
+        + commentBtn
+        + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
+    } else {
+      actions = commentBadge
+        + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
+        + commentBtn
+        + '<button class="pr-ai-finding-implement" type="button">Implement</button>';
+    }
+
+    var implementOut = (f.status === 'implementing' || f.status === 'implemented' || f.status === 'failed')
+      && (f.implementOut || f.implementError)
+      ? '<div class="pr-ai-finding-implement-out' + (f.implementError ? ' error' : '') + '">'
+          + escHtml(f.implementError || f.implementOut)
+        + '</div>'
+      : '';
+
+    return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
+      + '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>'
+      + '<div class="pr-ai-finding-actions">' + actions + '</div>'
+      + implementOut
+    + '</div>';
+  }
+
+  // Minimal markdown renderer: bold + inline code + line breaks + fenced
+  // code blocks. Enough for review text without pulling in a real markdown
+  // library.
+  function renderMarkdown(text) {
+    var src = (text || '').toString();
+    // Pull out fenced code blocks first so their inner content isn't escaped twice.
+    var blocks = [];
+    src = src.replace(/```([a-zA-Z0-9_-]*)\n([\s\S]*?)```/g, function (_, lang, code) {
+      var idx = blocks.length;
+      blocks.push('<pre class="pr-ai-code"><code>' + escHtml(code) + '</code></pre>');
+      return '\u0000CODEBLOCK' + idx + '\u0000';
+    });
+    src = escHtml(src)
+      .replace(/`([^`]+)`/g, '<code class="pr-ai-inline-code">$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+    src = src.replace(/\u0000CODEBLOCK(\d+)\u0000/g, function (_, i) { return blocks[parseInt(i, 10)]; });
+    return src;
+  }
+
+  function bindAiReviewTab() {
+    var runBtn = hostEl.querySelector('.pr-ai-run');
+    if (runBtn) runBtn.addEventListener('click', function () { startAiReview(); });
+
+    var rerunBtn = hostEl.querySelector('.pr-ai-rerun');
+    if (rerunBtn) rerunBtn.addEventListener('click', function () {
+      if (aiReview.implementAllId) window.klaus.prReviewImplementCancel(aiReview.implementAllId);
+      aiReview.findings.forEach(function (f) {
+        if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
+      });
+      // Clear the disk cache so Rerun gives a clean slate.
+      if (lastState && lastState.baseOwner && lastState.baseRepo) {
+        window.klaus.prReviewCacheClearByPr(lastState.baseOwner, lastState.baseRepo, lastState.number);
+      }
+      aiReview = {
+        requestId: null, finalText: '', progress: [], error: null, cancelled: false,
+        worktreePath: aiReview.worktreePath, findings: [],
+        implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
+      };
+      startAiReview();
+    });
+
+    var cancelBtn = hostEl.querySelector('.pr-ai-cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', function () {
+      if (aiReview.requestId) window.klaus.prReviewAiCancel(aiReview.requestId);
+    });
+
+    var implementAllBtn = hostEl.querySelector('.pr-ai-implement-all');
+    if (implementAllBtn) implementAllBtn.addEventListener('click', function () { startImplementAll(); });
+
+    hostEl.querySelectorAll('.pr-ai-finding').forEach(function (card) {
+      var fid = card.dataset.findingId;
+      var f = aiReview.findings.find(function (x) { return x.id === fid; });
+      if (!f) return;
+      var ignore = card.querySelector('.pr-ai-finding-ignore');
+      var implementBtn = card.querySelector('.pr-ai-finding-implement');
+      var redoBtn = card.querySelector('.pr-ai-finding-redo');
+      var undoBtn = card.querySelector('.pr-ai-finding-undo');
+      var cancelImpl = card.querySelector('.pr-ai-finding-cancel');
+      var commentBtn = card.querySelector('.pr-ai-finding-comment');
+      if (ignore) ignore.addEventListener('click', function () { f.ignored = true; repaintAiReviewTab(); saveAiReviewCache(); });
+      if (undoBtn) undoBtn.addEventListener('click', function () { f.ignored = false; repaintAiReviewTab(); saveAiReviewCache(); });
+      if (implementBtn) implementBtn.addEventListener('click', function () { startImplement(f); });
+      if (redoBtn) redoBtn.addEventListener('click', function () { startImplement(f); });
+      if (cancelImpl) cancelImpl.addEventListener('click', function () {
+        if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
+      });
+      if (commentBtn) commentBtn.addEventListener('click', function () { postFindingAsComment(f); });
+    });
+  }
+
+  function repaintAiReviewTab() {
+    if (activeTab !== 'ai-review') return;
+    var tab = hostEl.querySelector('.pr-review-ai-tab');
+    if (!tab) return;
+    tab.innerHTML = renderAiReviewTab();
+    bindAiReviewTab();
+    // Update tab count badge as findings change.
+    var tabBtn = hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
+    if (tabBtn) tabBtn.innerHTML = 'Review' + renderAiReviewTabCount();
+  }
+
+  function startAiReview() {
+    if (aiReview.requestId) return;
+    var requestId = 'air-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    aiReview.requestId = requestId;
+    aiReview.finalText = '';
+    aiReview.progress = [{ kind: 'system', label: 'Preparing worktree\u2026' }];
+    aiReview.error = null;
+    aiReview.cancelled = false;
+    aiReview.findings = [];
+    repaintAiReviewTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.onPrReviewAiData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try { handleAiEvent(JSON.parse(line)); } catch (_) {}
+      }
+      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      repaintAiReviewTab();
+    });
+    window.klaus.onPrReviewAiDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (aiReview.requestId !== requestId) return;
+      aiReview.requestId = null;
+      if (result && result.error) aiReview.error = result.error;
+      if (result && result.cancelled) aiReview.cancelled = true;
+      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      repaintAiReviewTab();
+      // Persist as soon as we have any content (even partial / cancelled —
+      // user may still want to revisit the partial findings).
+      if (aiReview.finalText) saveAiReviewCache();
+    });
+
+    window.klaus.prReviewAiStart(requestId).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        aiReview.requestId = null;
+        aiReview.error = r.error;
+        repaintAiReviewTab();
+      } else if (r && r.worktreePath) {
+        aiReview.worktreePath = r.worktreePath;
+      }
+    });
+  }
+
+  function handleAiEvent(ev) {
+    if (!ev || !ev.type) return;
+    if (ev.type === 'assistant' && ev.message && ev.message.content) {
+      ev.message.content.forEach(function (block) {
+        if (block.type === 'text' && block.text) {
+          aiReview.finalText = block.text;
+        } else if (block.type === 'tool_use' && block.name) {
+          var hint = '';
+          if (block.input) {
+            if (block.input.command) hint = String(block.input.command).slice(0, 50);
+            else if (block.input.file_path) hint = String(block.input.file_path).split('/').pop();
+            else if (block.input.pattern) hint = String(block.input.pattern).slice(0, 30);
+            else if (block.input.description) hint = String(block.input.description).slice(0, 40);
+          }
+          aiReview.progress.push({ kind: 'tool', label: block.name + (hint ? ': ' + hint : '') });
+        }
+      });
+    } else if (ev.type === 'result' && ev.result) {
+      aiReview.finalText = ev.result;
+    } else if (ev.type === 'system' && ev.subtype) {
+      aiReview.progress.push({ kind: 'system', label: ev.subtype });
+    }
+  }
+
+  function startImplement(f) {
+    if (f.implementId) return;
+    var requestId = 'impl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    f.implementId = requestId;
+    f.status = 'implementing';
+    f.implementOut = '';
+    f.implementError = null;
+    repaintAiReviewTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.onPrReviewImplementData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) f.implementOut = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            f.implementOut = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintAiReviewTab();
+    });
+    window.klaus.onPrReviewImplementDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (f.implementId !== requestId) return;
+      f.implementId = null;
+      if (result && result.error) {
+        f.status = 'failed';
+        f.implementError = result.error;
+      } else if (result && result.cancelled) {
+        f.status = 'open';
+      } else {
+        f.status = 'implemented';
+      }
+      repaintAiReviewTab();
+      saveAiReviewCache();
+    });
+
+    window.klaus.prReviewImplementStart(requestId, 'one', f.text).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        f.implementId = null;
+        f.status = 'failed';
+        f.implementError = r.error;
+        repaintAiReviewTab();
+      }
+    });
+  }
+
+  // Post a single AI-review finding as a general PR issue comment. Uses the
+  // existing G4 IPC. Wraps the body with a small attribution header so the
+  // PR author can see it came from the reviewer's AI pass.
+  async function postFindingAsComment(f) {
+    if (f.commentStatus === 'posting' || f.commentStatus === 'posted') return;
+    f.commentStatus = 'posting';
+    f.commentError = null;
+    repaintAiReviewTab();
+
+    var body = '> *AI-generated review finding (via Klaussy):*\n\n' + (f.text || '');
+    var result = await window.klaus.prAddIssueComment(body);
+    if (result && result.error) {
+      f.commentStatus = 'failed';
+      f.commentError = result.error;
+    } else {
+      f.commentStatus = 'posted';
+    }
+    repaintAiReviewTab();
+    saveAiReviewCache();
+    // Pull the newly-posted comment into the Conversation tab.
+    if (f.commentStatus === 'posted') window.klaus.prRefreshThreads();
+  }
+
+  function startImplementAll() {
+    if (aiReview.implementAllId) return;
+    var pending = aiReview.findings.filter(function (f) {
+      return !f.ignored && f.status !== 'implemented' && f.status !== 'implementing';
+    });
+    if (pending.length === 0) return;
+    var requestId = 'impla-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    aiReview.implementAllId = requestId;
+    aiReview.implementAllProgress = [{ kind: 'system', label: 'Implementing ' + pending.length + ' findings\u2026' }];
+    aiReview.implementAllError = null;
+    aiReview.implementAllSummary = null;
+    repaintAiReviewTab();
+
+    // Mark all targeted findings as implementing — the single claude run will
+    // touch all of them at once. We mark them implemented on success.
+    pending.forEach(function (f) { f.status = 'implementing'; });
+
+    var combined = pending.map(function (f, i) {
+      return '### Finding ' + (i + 1) + '\n' + f.text;
+    }).join('\n\n');
+
+    var buffered = '';
+    var finalText = '';
+    var unsubData = window.klaus.onPrReviewImplementData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) finalText = block.text;
+              else if (block.type === 'tool_use' && block.name) {
+                var hint = (block.input && (block.input.file_path || block.input.command || block.input.pattern)) || '';
+                if (typeof hint === 'string') hint = hint.split('/').pop().slice(0, 40);
+                aiReview.implementAllProgress.push({ kind: 'tool', label: block.name + (hint ? ': ' + hint : '') });
+              }
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            finalText = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintAiReviewTab();
+    });
+    window.klaus.onPrReviewImplementDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (aiReview.implementAllId !== requestId) return;
+      aiReview.implementAllId = null;
+      if (result && result.error) {
+        aiReview.implementAllError = result.error;
+        pending.forEach(function (f) { f.status = 'failed'; f.implementError = result.error; });
+      } else if (result && result.cancelled) {
+        pending.forEach(function (f) { if (f.status === 'implementing') f.status = 'open'; });
+      } else {
+        aiReview.implementAllSummary = finalText;
+        pending.forEach(function (f) { f.status = 'implemented'; f.implementOut = finalText; });
+      }
+      repaintAiReviewTab();
+      saveAiReviewCache();
+    });
+
+    window.klaus.prReviewImplementStart(requestId, 'all', combined).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        aiReview.implementAllId = null;
+        aiReview.implementAllError = r.error;
+        pending.forEach(function (f) { f.status = 'failed'; f.implementError = r.error; });
+        repaintAiReviewTab();
+      }
     });
   }
 
