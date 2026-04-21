@@ -223,6 +223,35 @@ app.whenReady().then(() => {
           },
         },
         {
+          label: 'Memory (CLAUDE.md)',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-memory');
+          },
+        },
+        {
+          label: 'MCP Servers',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-mcp');
+          },
+        },
+        {
+          label: 'Plugins',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-plugins');
+          },
+        },
+        {
+          label: 'Keyboard Shortcuts',
+          accelerator: 'CmdOrCtrl+/',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-shortcuts');
+          },
+        },
+        {
           label: 'Send feedback…',
           click: (_item, focusedWindow) => {
             const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
@@ -1256,6 +1285,150 @@ ipcMain.handle('write-skill-file', (_event, { filePath, content }) => {
   if (typeof content !== 'string') return { error: 'Content must be a string' };
   try {
     fs.writeFileSync(filePath, content, 'utf8');
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// List CLAUDE.md memory files across scopes. Each scope has at most one
+// memory file — the dialog uses this to show what's there vs. missing.
+ipcMain.handle('list-memory-files', () => {
+  const homedir = require('os').homedir();
+  const out = [];
+  const scopes = [
+    { kind: 'user', label: 'user', file: path.join(homedir, '.claude', 'CLAUDE.md') },
+  ];
+  const config = loadConfig();
+  const projects = config.projects || [];
+  for (const p of projects) {
+    if (!p || !p.path) continue;
+    // Project root is the canonical location; fall back to .claude/CLAUDE.md
+    // if the user keeps it there instead.
+    const rootFile = path.join(p.path, 'CLAUDE.md');
+    const dotFile = path.join(p.path, '.claude', 'CLAUDE.md');
+    const file = fs.existsSync(rootFile) ? rootFile : (fs.existsSync(dotFile) ? dotFile : rootFile);
+    scopes.push({ kind: 'project', label: p.name || path.basename(p.path), file });
+  }
+  for (const s of scopes) {
+    out.push({
+      scope: s.label,
+      kind: s.kind,
+      path: s.file,
+      exists: fs.existsSync(s.file),
+    });
+  }
+  return { entries: out };
+});
+
+// MCP server inventory. Reads user + project mcp configs from the canonical
+// locations claude looks at. Returns each entry's name, command, args, env
+// vars (keys only — never values) so the dialog can render a status table.
+ipcMain.handle('list-mcp-servers', () => {
+  const homedir = require('os').homedir();
+  const sources = [
+    { kind: 'user', label: 'user', files: [
+      path.join(homedir, '.claude.json'),
+      path.join(homedir, '.claude', 'mcp.json'),
+    ] },
+  ];
+  const config = loadConfig();
+  const projects = config.projects || [];
+  for (const p of projects) {
+    if (!p || !p.path) continue;
+    sources.push({
+      kind: 'project',
+      label: p.name || path.basename(p.path),
+      files: [
+        path.join(p.path, '.mcp.json'),
+        path.join(p.path, '.claude', 'mcp.json'),
+      ],
+    });
+  }
+  const servers = [];
+  for (const src of sources) {
+    for (const file of src.files) {
+      if (!fs.existsSync(file)) continue;
+      try {
+        const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const map = (raw && raw.mcpServers) || {};
+        for (const [name, def] of Object.entries(map)) {
+          if (!def || typeof def !== 'object') continue;
+          servers.push({
+            name,
+            source: src.label,
+            sourceKind: src.kind,
+            sourceFile: file,
+            command: def.command || '',
+            args: Array.isArray(def.args) ? def.args : [],
+            envKeys: def.env && typeof def.env === 'object' ? Object.keys(def.env) : [],
+            type: def.type || 'stdio',
+          });
+        }
+      } catch (_) { /* malformed config — skip silently */ }
+    }
+  }
+  servers.sort((a, b) => {
+    if (a.sourceKind === 'user' && b.sourceKind !== 'user') return -1;
+    if (b.sourceKind === 'user' && a.sourceKind !== 'user') return 1;
+    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    return a.name.localeCompare(b.name);
+  });
+  return { servers };
+});
+
+// Plugin inventory. Plugins live under ~/.claude/plugins/<name>/ — we read
+// each plugin's plugin.json (or package.json fallback) to get name +
+// description + what it bundles (skills/commands/agents).
+ipcMain.handle('list-plugins', () => {
+  const homedir = require('os').homedir();
+  const root = path.join(homedir, '.claude', 'plugins');
+  const out = [];
+  let entries = [];
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { return { plugins: out }; }
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    const pluginDir = path.join(root, ent.name);
+    let manifest = {};
+    for (const candidate of ['plugin.json', 'package.json', 'manifest.json']) {
+      const f = path.join(pluginDir, candidate);
+      if (!fs.existsSync(f)) continue;
+      try { manifest = JSON.parse(fs.readFileSync(f, 'utf8')); break; } catch (_) {}
+    }
+    // Rough inventory of what the plugin bundles.
+    const bundles = [];
+    for (const sub of ['skills', 'commands', 'agents', 'hooks']) {
+      const d = path.join(pluginDir, sub);
+      try {
+        const items = fs.readdirSync(d).filter((f) => !f.startsWith('.'));
+        if (items.length > 0) bundles.push(sub + ' (' + items.length + ')');
+      } catch (_) {}
+    }
+    out.push({
+      name: manifest.name || ent.name,
+      description: manifest.description || '',
+      version: manifest.version || '',
+      author: typeof manifest.author === 'string' ? manifest.author : (manifest.author && manifest.author.name) || '',
+      path: pluginDir,
+      bundles,
+    });
+  }
+  out.sort((a, b) => a.name.localeCompare(b.name));
+  return { plugins: out };
+});
+
+ipcMain.handle('create-memory-file', (_event, { filePath }) => {
+  if (!filePath) return { error: 'No file path' };
+  if (fs.existsSync(filePath)) return { error: 'File already exists.' };
+  const dir = path.dirname(filePath);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const starter = '# Project memory\n\n'
+      + 'Notes Claude should keep in mind for this scope. Examples:\n\n'
+      + '- Coding conventions to follow.\n'
+      + '- Files / folders to ignore.\n'
+      + '- Domain terminology that may otherwise be ambiguous.\n';
+    fs.writeFileSync(filePath, starter, 'utf8');
     return { ok: true };
   } catch (err) {
     return { error: err.message };

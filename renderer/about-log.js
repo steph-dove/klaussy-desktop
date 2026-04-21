@@ -550,6 +550,237 @@ window.Dialogs = (function () {
     + '</div>';
   }
 
+  // ---- Memory (CLAUDE.md) ----
+  function showMemory() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'skills-dialog';
+    dialog.innerHTML =
+      '<div class="skills-head">'
+        + '<h2>Memory (CLAUDE.md)</h2>'
+        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="skills-body">'
+        + '<div class="skills-list-pane"><div class="skills-loading">Reading\u2026</div></div>'
+        + '<div class="skills-preview-pane"><div class="skills-preview-empty">Select a scope on the left.</div></div>'
+      + '</div>';
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
+    var listPane = dialog.querySelector('.skills-list-pane');
+    var previewPane = dialog.querySelector('.skills-preview-pane');
+
+    function refresh(targetPath) {
+      window.klaus.listMemoryFiles().then(function (r) {
+        var entries = (r && r.entries) || [];
+        listPane.innerHTML =
+          '<div class="skills-section-head">Scopes <span class="skills-section-count">' + entries.length + '</span></div>'
+          + '<div class="skills-list">' + entries.map(function (e) {
+            var sourceCls = e.kind === 'user' ? 'skills-source-user' : 'skills-source-project';
+            var statusCls = e.exists ? 'memory-exists' : 'memory-missing';
+            return '<div class="skills-row ' + statusCls + '" data-path="' + cssEscape(e.path) + '" data-exists="' + (e.exists ? '1' : '0') + '" title="' + escHtml(e.path) + '">'
+              + '<div class="skills-row-main">'
+                + '<span class="skills-row-name">' + escHtml(e.scope) + '</span>'
+                + '<span class="skills-row-source ' + sourceCls + '">' + escHtml(e.scope) + '</span>'
+              + '</div>'
+              + '<div class="skills-row-desc">' + (e.exists ? 'CLAUDE.md exists' : 'No CLAUDE.md yet') + '</div>'
+            + '</div>';
+          }).join('') + '</div>';
+        listPane.querySelectorAll('.skills-row').forEach(function (row) {
+          row.addEventListener('click', function () {
+            listPane.querySelectorAll('.skills-row').forEach(function (r) { r.classList.remove('selected'); });
+            row.classList.add('selected');
+            var p = row.dataset.path;
+            var exists = row.dataset.exists === '1';
+            if (exists) {
+              loadSkillPreview(previewPane, p, p.split('/').pop());
+            } else {
+              renderMemoryCreate(previewPane, p, function () { refresh(p); });
+            }
+          });
+        });
+        var target = targetPath
+          ? listPane.querySelector('.skills-row[data-path="' + cssEscape(targetPath) + '"]')
+          : listPane.querySelector('.skills-row');
+        if (target) target.click();
+      });
+    }
+    refresh();
+  }
+
+  function renderMemoryCreate(pane, filePath, onCreated) {
+    pane.innerHTML =
+      '<div class="skills-preview-head">'
+        + '<div class="skills-preview-title">No CLAUDE.md here yet</div>'
+      + '</div>'
+      + '<div class="skills-preview-path">' + escHtml(filePath) + '</div>'
+      + '<div class="skills-create-form">'
+        + '<p class="skills-create-hint" style="margin:0">Create a starter CLAUDE.md for this scope. You can edit it in place after.</p>'
+        + '<div class="skills-create-error" hidden></div>'
+        + '<div class="skills-create-actions">'
+          + '<button class="skills-create-go" type="button">Create CLAUDE.md</button>'
+        + '</div>'
+      + '</div>';
+    var go = pane.querySelector('.skills-create-go');
+    var err = pane.querySelector('.skills-create-error');
+    go.addEventListener('click', async function () {
+      go.disabled = true;
+      go.textContent = 'Creating\u2026';
+      var r = await window.klaus.createMemoryFile(filePath);
+      if (r && r.error) {
+        err.hidden = false;
+        err.textContent = r.error;
+        go.disabled = false;
+        go.textContent = 'Create CLAUDE.md';
+        return;
+      }
+      if (typeof onCreated === 'function') onCreated();
+    });
+  }
+
+  // ---- Keyboard shortcuts ----
+  var SHORTCUTS = [
+    { keys: '\u2318K', label: 'Open command palette' },
+    { keys: '\u2318G', label: 'Toggle diff panel for current task' },
+    { keys: '\u2318N', label: 'New window' },
+    { keys: '\u2318R', label: 'Reload (resets renderer; main-process state survives)' },
+    { keys: '\u2318+ / \u2318\u2212', label: 'Zoom in / out (terminal text)' },
+    { keys: '\u23180', label: 'Reset zoom' },
+    { keys: '\u2318\u21E7F', label: 'Search inside the active terminal (xterm find)' },
+    { keys: 'Double-click task name', label: 'Rename a task' },
+    { keys: 'Drag task row', label: 'Reorder tasks in the sidebar' },
+    { keys: 'Right-click task row', label: 'Task context menu (kill, restart, pop out, notes\u2026)' },
+    { keys: 'Cmd+\u23CE in any composer', label: 'Submit comment / reply / save' },
+    { keys: 'Esc', label: 'Close composer / cancel selection / dismiss palette' },
+  ];
+
+  function showShortcuts() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'shortcuts-dialog';
+    dialog.innerHTML =
+      '<div class="skills-head">'
+        + '<h2>Keyboard shortcuts</h2>'
+        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="shortcuts-body">'
+        + SHORTCUTS.map(function (s) {
+          return '<div class="shortcuts-row">'
+            + '<span class="shortcuts-keys">' + escHtml(s.keys) + '</span>'
+            + '<span class="shortcuts-label">' + escHtml(s.label) + '</span>'
+          + '</div>';
+        }).join('')
+      + '</div>';
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
+  }
+
+  // ---- MCP servers ----
+  function showMcpServers() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'skills-dialog';
+    dialog.innerHTML =
+      '<div class="skills-head">'
+        + '<h2>MCP servers</h2>'
+        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="skills-body" style="grid-template-columns:1fr">'
+        + '<div class="skills-list-pane" style="border-right:none;">'
+          + '<div class="skills-loading">Reading mcp configs\u2026</div>'
+        + '</div>'
+      + '</div>';
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
+    var pane = dialog.querySelector('.skills-list-pane');
+
+    window.klaus.listMcpServers().then(function (r) {
+      var servers = (r && r.servers) || [];
+      if (servers.length === 0) {
+        pane.innerHTML = '<div class="skills-empty">'
+          + '<p>No MCP servers configured.</p>'
+          + '<p class="skills-empty-hint">Klaussy looks at ~/.claude.json, ~/.claude/mcp.json, and each project\u2019s .mcp.json or .claude/mcp.json. Configure servers there and reopen.</p>'
+        + '</div>';
+        return;
+      }
+      pane.innerHTML =
+        '<div class="skills-section-head">Configured <span class="skills-section-count">' + servers.length + '</span></div>'
+        + '<div class="skills-list">' + servers.map(function (s) {
+          var sourceCls = s.sourceKind === 'user' ? 'skills-source-user' : 'skills-source-project';
+          var argLine = s.command + (s.args.length ? ' ' + s.args.join(' ') : '');
+          return '<div class="skills-row" title="' + escHtml(s.sourceFile) + '">'
+            + '<div class="skills-row-main">'
+              + '<span class="skills-row-name">' + escHtml(s.name) + '</span>'
+              + '<span class="skills-row-source ' + sourceCls + '">' + escHtml(s.source) + '</span>'
+              + '<span class="mcp-type">' + escHtml(s.type) + '</span>'
+            + '</div>'
+            + '<div class="skills-row-desc"><code class="mcp-cmd">' + escHtml(argLine) + '</code></div>'
+            + (s.envKeys.length
+              ? '<div class="skills-row-desc">env: ' + s.envKeys.map(function (k) { return '<code class="mcp-envkey">' + escHtml(k) + '</code>'; }).join(' ') + '</div>'
+              : '')
+          + '</div>';
+        }).join('') + '</div>';
+    });
+  }
+
+  // ---- Plugins ----
+  function showPlugins() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'skills-dialog';
+    dialog.innerHTML =
+      '<div class="skills-head">'
+        + '<h2>Plugins</h2>'
+        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="skills-body" style="grid-template-columns:1fr">'
+        + '<div class="skills-list-pane" style="border-right:none;">'
+          + '<div class="skills-loading">Reading ~/.claude/plugins\u2026</div>'
+        + '</div>'
+      + '</div>';
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
+    var pane = dialog.querySelector('.skills-list-pane');
+
+    window.klaus.listPlugins().then(function (r) {
+      var plugins = (r && r.plugins) || [];
+      if (plugins.length === 0) {
+        pane.innerHTML = '<div class="skills-empty">'
+          + '<p>No plugins installed.</p>'
+          + '<p class="skills-empty-hint">Install plugins via <code>claude plugin install</code>; they live in ~/.claude/plugins/.</p>'
+        + '</div>';
+        return;
+      }
+      pane.innerHTML =
+        '<div class="skills-section-head">Installed <span class="skills-section-count">' + plugins.length + '</span></div>'
+        + '<div class="skills-list">' + plugins.map(function (p) {
+          return '<div class="skills-row" data-path="' + cssEscape(p.path) + '" title="' + escHtml(p.path) + '">'
+            + '<div class="skills-row-main">'
+              + '<span class="skills-row-name">' + escHtml(p.name) + '</span>'
+              + (p.version ? '<span class="plugin-version">' + escHtml(p.version) + '</span>' : '')
+              + (p.author ? '<span class="plugin-author">by ' + escHtml(p.author) + '</span>' : '')
+            + '</div>'
+            + (p.description ? '<div class="skills-row-desc">' + escHtml(p.description) + '</div>' : '')
+            + (p.bundles.length ? '<div class="skills-row-desc">includes: ' + p.bundles.map(escHtml).join(', ') + '</div>' : '')
+          + '</div>';
+        }).join('') + '</div>';
+      pane.querySelectorAll('.skills-row').forEach(function (row) {
+        row.addEventListener('click', function () { window.klaus.openSkillFile(row.dataset.path); });
+      });
+    });
+  }
+
   return {
     showAbout: showAbout,
     showLog: showLog,
@@ -557,5 +788,9 @@ window.Dialogs = (function () {
     checkAndPromptDeps: checkAndPromptDeps,
     openFeedback: openFeedback,
     showSkills: showSkills,
+    showMemory: showMemory,
+    showShortcuts: showShortcuts,
+    showMcpServers: showMcpServers,
+    showPlugins: showPlugins,
   };
 })();

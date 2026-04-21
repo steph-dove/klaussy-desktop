@@ -5652,6 +5652,7 @@ body.pr-review-popout #pr-review-root {
   border-radius: 12px;
   width: 880px;
   max-width: calc(100vw - 60px);
+  height: 600px;
   max-height: calc(100vh - 120px);
   display: flex;
   flex-direction: column;
@@ -5760,6 +5761,87 @@ body.pr-review-popout #pr-review-root {
 }
 .skills-create-go:hover { filter: brightness(1.1); }
 .skills-create-go:disabled { opacity: 0.6; cursor: wait; }
+
+/* Memory dialog: gray-out missing-CLAUDE.md rows. */
+.skills-row.memory-missing { opacity: 0.65; }
+
+/* MCP server rows. */
+.mcp-type {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.mcp-cmd {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  word-break: break-all;
+}
+.mcp-envkey {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  background: rgba(128, 128, 128, 0.15);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+
+/* Plugin rows. */
+.plugin-version {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.plugin-author { font-size: 11px; color: var(--text-muted); }
+
+/* Keyboard shortcuts dialog. */
+.shortcuts-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 540px;
+  max-width: calc(100vw - 60px);
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  align-self: flex-start;
+}
+.shortcuts-body {
+  overflow-y: auto;
+  padding: 8px 18px 16px;
+}
+.shortcuts-row {
+  display: grid;
+  grid-template-columns: 180px 1fr;
+  gap: 14px;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.shortcuts-row:last-child { border-bottom: none; }
+.shortcuts-keys {
+  font-family: 'SF Mono', Menlo, monospace;
+  color: var(--text);
+  padding: 3px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shortcuts-label { color: var(--text-dim); }
 .skills-close {
   background: transparent;
   border: none;
@@ -5773,6 +5855,7 @@ body.pr-review-popout #pr-review-root {
 .skills-body {
   display: grid;
   grid-template-columns: 320px 1fr;
+  grid-template-rows: 1fr;
   flex: 1;
   min-height: 0;
   overflow: hidden;
