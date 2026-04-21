@@ -4170,6 +4170,34 @@ body.pr-review-popout #pr-review-root {
   font-size: 13px;
 }
 .pr-ai-tab .pr-ai-title { flex: 1; font-weight: 600; color: var(--text); }
+.pr-ai-usage {
+  font-size: 11px;
+  font-family: 'SF Mono', Menlo, monospace;
+  color: var(--text-dim);
+  background: rgba(128, 128, 128, 0.12);
+  padding: 2px 8px;
+  border-radius: 10px;
+  letter-spacing: 0.2px;
+}
+
+.pr-ai-implement-usage {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.pr-check-debug-usage {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .pr-ai-implement-all {
   background: var(--accent) !important;
   color: #fff !important;
