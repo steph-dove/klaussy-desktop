@@ -3434,6 +3434,26 @@ function walkDirectory(root) {
   return results;
 }
 
+// Bulk-read many files in one IPC round-trip. Used by the Monaco file
+// viewer to hydrate sibling TS/JS models for cross-file IntelliSense.
+// Per-file size is capped to avoid shipping giant minified bundles; total
+// file count is capped by the caller.
+ipcMain.handle('read-files-bulk', async (_event, { worktreePath, relPaths, maxBytesPerFile }) => {
+  const cap = maxBytesPerFile || 256 * 1024; // 256KB per file default
+  const out = {};
+  for (const rel of relPaths) {
+    // Reject path traversal — every entry must stay under the worktree.
+    const abs = path.resolve(worktreePath, rel);
+    if (!abs.startsWith(path.resolve(worktreePath) + path.sep)) continue;
+    try {
+      const stat = fs.statSync(abs);
+      if (!stat.isFile() || stat.size > cap) continue;
+      out[rel] = fs.readFileSync(abs, 'utf-8');
+    } catch {}
+  }
+  return { files: out };
+});
+
 ipcMain.handle('list-files', async (_event, { worktreePath }) => {
   // Try git first — for a checked-out repo, ls-files respects .gitignore.
   try {

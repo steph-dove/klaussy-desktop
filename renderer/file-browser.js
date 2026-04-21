@@ -14,11 +14,15 @@ window.FileBrowser = (function () {
   var fileViewerWorktree = null;
 
   // Monaco editor instance + its model are owned by the module so we can
-  // dispose them across file switches. Both must be disposed or workers leak.
+  // dispose them across file switches. The editor is always disposed on
+  // switch. The model is disposed only if it's a one-off (non-project) model
+  // — project models are shared with the TS worker for cross-file intel and
+  // disposing them silently breaks sibling diagnostics.
   var currentEditor = null;
   var currentModel = null;
-  var currentBlameLines = null; // when set, lineNumbers renderer shows blame
-  var currentViewerWorktree = null; // which worktree the open file belongs to
+  var currentModelIsProject = false;
+  var currentBlameLines = null;
+  var currentViewerWorktree = null;
 
   function currentMonacoTheme() {
     // ThemeManager adds `light-syntax` to body when the active preset uses
@@ -35,9 +39,21 @@ window.FileBrowser = (function () {
 
   function disposeCurrentEditor() {
     if (currentEditor) { try { currentEditor.dispose(); } catch (_) {} currentEditor = null; }
-    if (currentModel) { try { currentModel.dispose(); } catch (_) {} currentModel = null; }
+    if (currentModel && !currentModelIsProject) {
+      try { currentModel.dispose(); } catch (_) {}
+    }
+    currentModel = null;
+    currentModelIsProject = false;
     currentBlameLines = null;
     currentViewerWorktree = null;
+  }
+
+  // Whether we should eagerly load sibling TS/JS models for cross-file intel.
+  // Only kicks in for TS/JS/JSX/TSX/D.TS — other languages (JSON, CSS, HTML,
+  // Markdown…) work fine in isolation and don't benefit from project-wide
+  // model population.
+  function isTsJsPath(filePath) {
+    return /\.(t|j)sx?$|\.d\.ts$/i.test(filePath);
   }
 
   // Called from terminal-manager.switchToTask when the active task changes.
@@ -119,14 +135,30 @@ window.FileBrowser = (function () {
     var mountEl = body.querySelector('.file-editor-monaco');
     currentViewerWorktree = fileViewerWorktree;
 
+    // For TS/JS, kick off the project scan in the background so cross-file
+    // imports resolve. Awaited below so the current file's model, if the
+    // scan created one for it, is available to reuse.
+    var projectReady = null;
+    if (fileViewerWorktree && window.MonacoProject && isTsJsPath(filePath)) {
+      projectReady = window.MonacoProject.loadWorktree(fileViewerWorktree);
+    }
+    if (projectReady) { try { await projectReady; } catch (_) {} }
+
     // `monaco.Uri.file` gives Monaco a proper URI so it can auto-detect the
-    // language from the extension. Each model needs a unique URI — strip any
-    // stale model at this URI before creating (can happen if the user opens
-    // the same file twice and the previous dispose lost the race).
+    // language from the extension. If the project scan already created a
+    // model at this URI, reuse it — disposing it would pull the file out of
+    // the TS worker's view and silently break cross-file diagnostics. Sync
+    // its content to disk only if it hasn't been edited in memory.
     var uri = monaco.Uri.file(filePath);
-    var prior = monaco.editor.getModel(uri);
-    if (prior) { try { prior.dispose(); } catch (_) {} }
-    currentModel = monaco.editor.createModel(result.content, undefined, uri);
+    var existing = monaco.editor.getModel(uri);
+    if (existing && window.MonacoProject && window.MonacoProject.isProjectModel(uri)) {
+      currentModel = existing;
+      currentModelIsProject = true;
+    } else {
+      if (existing) { try { existing.dispose(); } catch (_) {} }
+      currentModel = monaco.editor.createModel(result.content, undefined, uri);
+      currentModelIsProject = false;
+    }
 
     currentEditor = monaco.editor.create(mountEl, {
       model: currentModel,
@@ -153,7 +185,7 @@ window.FileBrowser = (function () {
       if (word && word.word) searchSymbol(word.word, fileViewerWorktree);
     });
 
-    currentEditor.onDidChangeModelContent(function () {
+    function refreshDirtyState() {
       if (!currentModel) return;
       var dirty = currentModel.getValue() !== savedContent;
       if (dirty) {
@@ -164,7 +196,14 @@ window.FileBrowser = (function () {
         statusEl.className = 'file-editor-status';
       }
       if (saveBtn) saveBtn.disabled = !dirty;
-    });
+    }
+
+    currentEditor.onDidChangeModelContent(refreshDirtyState);
+
+    // When we reuse a project model, it may already carry unsaved edits from
+    // a prior viewing session. Evaluate dirty state now so the Modified
+    // indicator and Save button come up correctly without waiting for a keystroke.
+    if (currentModelIsProject) refreshDirtyState();
 
     if (lineNumber) {
       var lineCount = currentModel.getLineCount();
@@ -252,6 +291,10 @@ window.FileBrowser = (function () {
       disposeCurrentEditor();
       fileViewerContent.style.display = 'none';
       fileViewerView.innerHTML = '';
+      // Drop the old worktree's sibling TS/JS models — they'd otherwise
+      // linger across navigations and pollute the TS worker with stale
+      // files from unrelated projects.
+      if (window.MonacoProject) window.MonacoProject.unloadWorktree();
     }
     if (!wt) {
       fileTree.innerHTML = '<div class="file-tree-empty">No active task</div>';
