@@ -57,8 +57,11 @@
       "identity": null,
       "hardenedRuntime": false,
       "gatekeeperAssess": false,
-      "darkModeSupport": true
+      "darkModeSupport": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
+    "afterSign": "build/notarize.js",
     "dmg": {
       "title": "Klaussy ${version}",
       "icon": "icon.icns"
