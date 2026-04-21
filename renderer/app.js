@@ -1037,7 +1037,11 @@
 
     commands.push({ label: 'Review Pull Request\u2026', action: function () { showPrPicker(); } });
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
+    commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
     commands.push({ label: 'Skills & Commands', action: function () { Dialogs.showSkills(); } });
+    commands.push({ label: 'Memory (CLAUDE.md)', action: function () { Dialogs.showMemory(); } });
+    commands.push({ label: 'MCP Servers', action: function () { Dialogs.showMcpServers(); } });
+    commands.push({ label: 'Plugins', action: function () { Dialogs.showPlugins(); } });
     commands.push({ label: 'Check dependencies\u2026', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: showLogViewer });
     commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
@@ -1263,6 +1267,18 @@
   }
   if (window.klaus.onShowSkills) {
     window.klaus.onShowSkills(function () { Dialogs.showSkills(); });
+  }
+  if (window.klaus.onShowMemory) {
+    window.klaus.onShowMemory(function () { Dialogs.showMemory(); });
+  }
+  if (window.klaus.onShowMcp) {
+    window.klaus.onShowMcp(function () { Dialogs.showMcpServers(); });
+  }
+  if (window.klaus.onShowPlugins) {
+    window.klaus.onShowPlugins(function () { Dialogs.showPlugins(); });
+  }
+  if (window.klaus.onShowShortcuts) {
+    window.klaus.onShowShortcuts(function () { Dialogs.showShortcuts(); });
   }
 
   // Probe gh + claude on startup (silent if everything's set up). Stays out

@@ -260,6 +260,18 @@ contextBridge.exposeInMainWorld('klaus', {
   onShowSkills: (callback) => {
     ipcRenderer.on('show-skills', () => callback());
   },
+  onShowMemory: (callback) => {
+    ipcRenderer.on('show-memory', () => callback());
+  },
+  onShowMcp: (callback) => {
+    ipcRenderer.on('show-mcp', () => callback());
+  },
+  onShowPlugins: (callback) => {
+    ipcRenderer.on('show-plugins', () => callback());
+  },
+  onShowShortcuts: (callback) => {
+    ipcRenderer.on('show-shortcuts', () => callback());
+  },
 
   // First-run dependency probe (gh + claude installed/authed?).
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
@@ -270,6 +282,14 @@ contextBridge.exposeInMainWorld('klaus', {
   readSkillFile: (filePath) => ipcRenderer.invoke('read-skill-file', { filePath }),
   writeSkillFile: (filePath, content) => ipcRenderer.invoke('write-skill-file', { filePath, content }),
   createSkillFile: ({ type, scope, name }) => ipcRenderer.invoke('create-skill-file', { type, scope, name }),
+
+  // Memory (CLAUDE.md) inventory + create.
+  listMemoryFiles: () => ipcRenderer.invoke('list-memory-files'),
+  createMemoryFile: (filePath) => ipcRenderer.invoke('create-memory-file', { filePath }),
+
+  // MCP servers + plugins (read-only browsers).
+  listMcpServers: () => ipcRenderer.invoke('list-mcp-servers'),
+  listPlugins: () => ipcRenderer.invoke('list-plugins'),
 
   // H3: Worktree file watcher for instant diff refresh
   watchWorktree: (worktreePath) => ipcRenderer.invoke('watch-worktree', { worktreePath }),
