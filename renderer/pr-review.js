@@ -683,6 +683,19 @@ window.PrReview = (function () {
         findings.push(block.trim());
       }
     }
+    // Drop empty entries (e.g. a Severity marker followed immediately by the
+    // verdict block, or a stray blank section between findings) — they'd
+    // otherwise render as empty cards with action buttons but no body.
+    findings = findings.filter(function (f) {
+      // A "real" finding has more than just a Severity marker — require at
+      // least one non-marker line of content.
+      if (!f) return false;
+      var lines = f.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      if (lines.length === 0) return false;
+      // If the only line is the bracketed marker itself, treat as empty.
+      var meaningful = lines.filter(function (l) { return !/^\*?\*?\[[^\]]+\]\*?\*?$/.test(l); });
+      return meaningful.length > 0;
+    });
     return { preamble: preamble, findings: findings, postamble: postamble };
   }
 
