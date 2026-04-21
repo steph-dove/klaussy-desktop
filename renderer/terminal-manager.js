@@ -47,10 +47,23 @@ window.TerminalManager = (function () {
     var container = document.createElement('div');
     container.className = 'terminal-container';
     container.dataset.id = id;
+    if (!branch) container.classList.add('branchless');
 
     var label = document.createElement('div');
     label.className = 'grid-label';
     label.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>' + escHtml(name);
+
+    // Branchless (Open Folder) tasks get a persistent warning banner inside
+    // their own terminal container so it only covers that pane — never the
+    // neighboring worktree terminals in grid/columns view.
+    if (!branch) {
+      var warning = document.createElement('div');
+      warning.className = 'terminal-warning';
+      warning.innerHTML =
+        '<span class="terminal-warning-icon" aria-hidden="true">&#9888;</span>' +
+        '<span class="terminal-warning-text">Not in a git worktree. For the best experience, open this folder as a worktree to unlock diff, commit, branch and PR features.</span>';
+      container.appendChild(warning);
+    }
 
     label.addEventListener('click', function () {
       if (currentLayout() === 'single') {
@@ -59,6 +72,8 @@ window.TerminalManager = (function () {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
         var t = tasks.get(id);
+        if (window.BranchlessUI) window.BranchlessUI.apply(t || null);
+        if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(t ? t.worktreePath : null);
         if (t && DiffPanel.isVisible()) {
           DiffPanel.updateWorktree(t.worktreePath);
           PRPanel.setWorktree(t.worktreePath);
@@ -136,6 +151,8 @@ window.TerminalManager = (function () {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
         var t = tasks.get(id);
+        if (window.BranchlessUI) window.BranchlessUI.apply(t || null);
+        if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(t ? t.worktreePath : null);
         if (t && DiffPanel.isVisible()) {
           DiffPanel.updateWorktree(t.worktreePath);
           PRPanel.setWorktree(t.worktreePath);
@@ -247,6 +264,8 @@ window.TerminalManager = (function () {
       AppState.focusedTaskId = id;
       AppState.activeTaskId = id;
       var t = tasks.get(id);
+      if (window.BranchlessUI) window.BranchlessUI.apply(t || null);
+      if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(t ? t.worktreePath : null);
       if (t && DiffPanel.isVisible()) {
         DiffPanel.updateWorktree(t.worktreePath);
         DiffPanel.refresh();
@@ -456,6 +475,8 @@ window.TerminalManager = (function () {
         switchToTask(remaining[0]);
       } else {
         emptyState.style.display = 'flex';
+        if (window.BranchlessUI) window.BranchlessUI.apply(null);
+        if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(null);
       }
     }
   }
@@ -476,6 +497,10 @@ window.TerminalManager = (function () {
     });
 
     var task = tasks.get(id);
+    if (window.BranchlessUI) window.BranchlessUI.apply(task || null);
+    if (window.closeFileViewerOnTaskSwitch) {
+      window.closeFileViewerOnTaskSwitch(task ? task.worktreePath : null);
+    }
     if (task) {
       setTimeout(function () {
         if (task.activeSubId !== null && task.activeSubId !== undefined) {

@@ -18,6 +18,7 @@
           <button id="btn-layout" title="Cycle layout: single / columns / grid">&#9638;</button>
           <button id="btn-dirty-filter" title="Show only tasks with changes">!</button>
           <button id="btn-review-pr" title="Review a Pull Request…">PR</button>
+          <button id="btn-open-folder" title="Open a folder (no git required)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h3.5c.412 0 .807.164 1.098.455L7.44 2.544a.25.25 0 0 0 .177.073h6.633c.966 0 1.75.784 1.75 1.75v8.883A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75C0 1.784.784 1 1.75 1zm0 1.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4.367a.25.25 0 0 0-.25-.25H7.617a1.75 1.75 0 0 1-1.237-.513L5.293 2.517a.25.25 0 0 0-.177-.073H1.75z"/></svg></button>
           <button id="btn-new-task" title="New Task">+</button>
         </div>
       </div>
@@ -47,11 +48,13 @@
           <div id="empty-state-default">
             <p>Click <strong>+</strong> to create a new task</p>
             <p class="sub">Each task creates a git worktree and spawns Claude Code in it.</p>
+            <p class="sub" style="margin-top:14px;">No git? <a href="#" id="empty-state-open-folder" class="empty-state-link">Open a folder</a> to run Claude in any directory.</p>
           </div>
           <div id="empty-state-no-project" style="display:none;">
             <p><strong>Welcome to Klaussy.</strong></p>
             <p class="sub">Add a git project to get started — click the <strong>+</strong> next to the project switcher above.</p>
             <button id="empty-state-add-project" class="empty-state-cta" type="button">Add a project</button>
+            <p class="sub" style="margin-top:18px;">Or <a href="#" id="empty-state-open-folder-np" class="empty-state-link">open any folder</a> to run Claude without git.</p>
             <p class="sub" style="margin-top:18px;">Or paste a GitHub PR URL into <strong>PR</strong> in the sidebar to review one without a local clone.</p>
           </div>
         </div>
@@ -128,6 +131,7 @@
 
         <!-- Files tab content (C2) -->
         <div id="files-tab-content" style="display: none;">
+          <div id="file-tree-worktree-label" title="Active worktree / folder"></div>
           <div id="file-tree-filter-bar">
             <input type="text" id="file-tree-filter" placeholder="Filter files..." autocomplete="off" spellcheck="false" />
           </div>
@@ -307,6 +311,8 @@
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
+  <script src="monaco-init.js"></script>
   <script src="hljs-bundle.js"></script>
   <script src="app-state.js"></script>
   <script src="utils.js"></script>

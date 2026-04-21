@@ -13,6 +13,46 @@ window.FileBrowser = (function () {
   var fileTreeWorktree = null;
   var fileViewerWorktree = null;
 
+  // Monaco editor instance + its model are owned by the module so we can
+  // dispose them across file switches. Both must be disposed or workers leak.
+  var currentEditor = null;
+  var currentModel = null;
+  var currentBlameLines = null; // when set, lineNumbers renderer shows blame
+  var currentViewerWorktree = null; // which worktree the open file belongs to
+
+  function currentMonacoTheme() {
+    // ThemeManager adds `light-syntax` to body when the active preset uses
+    // GitHub-style light syntax colors; its absence means dark.
+    var isLight = document.body.classList.contains('light-syntax');
+    return isLight ? 'vs' : 'vs-dark';
+  }
+
+  window.addEventListener('theme-changed', function () {
+    if (window.monaco && window.monaco.editor) {
+      window.monaco.editor.setTheme(currentMonacoTheme());
+    }
+  });
+
+  function disposeCurrentEditor() {
+    if (currentEditor) { try { currentEditor.dispose(); } catch (_) {} currentEditor = null; }
+    if (currentModel) { try { currentModel.dispose(); } catch (_) {} currentModel = null; }
+    currentBlameLines = null;
+    currentViewerWorktree = null;
+  }
+
+  // Called from terminal-manager.switchToTask when the active task changes.
+  // The file viewer belongs to one worktree at a time; showing it against a
+  // different worktree is confusing (and blame / diff hooks would target the
+  // wrong repo), so we close it on task switch.
+  window.closeFileViewerOnTaskSwitch = function (_newWorktreePath) {
+    // Always close on task switch. The real close trigger for worktree
+    // changes lives inside loadFileTree (it has a reliable signal); this
+    // hook is a backup for task removal / no-active-task transitions.
+    disposeCurrentEditor();
+    fileViewerContent.style.display = 'none';
+    fileViewerView.innerHTML = '';
+  };
+
   // ---- File Viewer (C1) ----
 
   window.openFileViewer = async function (filePath, fileName, lineNumber) {
@@ -38,102 +78,114 @@ window.FileBrowser = (function () {
       '<div class="file-viewer-header-inline">' +
         '<span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span>' +
         '<span class="file-editor-status"></span>' +
+        '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
         '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
       '</div>' +
-      '<div class="file-viewer-body">Loading...</div>';
+      '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>';
 
+    var statusEl = fileViewerView.querySelector('.file-editor-status');
+    var saveBtn = fileViewerView.querySelector('.file-viewer-save-btn');
     fileViewerView.querySelector('.file-viewer-blame-btn').addEventListener('click', function () {
       window.toggleBlame();
     });
+    saveBtn.addEventListener('click', function () { saveFile(); });
+
+    // Dispose any prior instance eagerly so a failed read doesn't leave the
+    // editor from the previous file hanging around behind an error state.
+    disposeCurrentEditor();
 
     var result = await window.klaus.readFile(filePath);
     var body = fileViewerView.querySelector('.file-viewer-body');
-    var statusEl = fileViewerView.querySelector('.file-editor-status');
     if (result.error) {
       body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
       return;
     }
 
+    if (!window.MonacoReady) {
+      body.innerHTML = '<span style="color: var(--error)">Editor failed to load (Monaco not initialized).</span>';
+      return;
+    }
+
+    var monaco;
+    try {
+      monaco = await window.MonacoReady;
+    } catch (err) {
+      body.innerHTML = '<span style="color: var(--error)">Editor failed to load: ' + escHtml(err.message || String(err)) + '</span>';
+      return;
+    }
+
     var savedContent = result.content;
     var currentFilePath = filePath;
+    var mountEl = body.querySelector('.file-editor-monaco');
+    currentViewerWorktree = fileViewerWorktree;
 
-    // Build textarea editor with line numbers gutter
-    body.innerHTML =
-      '<div class="file-editor-wrap">' +
-        '<div class="file-line-gutter" aria-hidden="true"></div>' +
-        '<textarea class="file-editor-textarea" spellcheck="false"></textarea>' +
-      '</div>';
+    // `monaco.Uri.file` gives Monaco a proper URI so it can auto-detect the
+    // language from the extension. Each model needs a unique URI — strip any
+    // stale model at this URI before creating (can happen if the user opens
+    // the same file twice and the previous dispose lost the race).
+    var uri = monaco.Uri.file(filePath);
+    var prior = monaco.editor.getModel(uri);
+    if (prior) { try { prior.dispose(); } catch (_) {} }
+    currentModel = monaco.editor.createModel(result.content, undefined, uri);
 
-    var textarea = body.querySelector('.file-editor-textarea');
-    var gutter = body.querySelector('.file-line-gutter');
-    textarea.value = result.content;
-
-    function updateGutter() {
-      var count = textarea.value.split('\n').length;
-      var nums = [];
-      for (var i = 1; i <= count; i++) nums.push(i);
-      gutter.textContent = nums.join('\n');
-    }
-    updateGutter();
-
-    // Sync gutter scroll with textarea
-    textarea.addEventListener('scroll', function () {
-      gutter.scrollTop = textarea.scrollTop;
+    currentEditor = monaco.editor.create(mountEl, {
+      model: currentModel,
+      theme: currentMonacoTheme(),
+      automaticLayout: true,
+      minimap: { enabled: true },
+      scrollBeyondLastLine: false,
+      fontSize: 13,
+      fontFamily: "'SF Mono', 'Fira Code', Menlo, monospace",
+      tabSize: 2,
+      renderWhitespace: 'selection',
     });
 
-    // Jump to line
-    if (lineNumber) {
-      var lines = textarea.value.split('\n');
-      var pos = 0;
-      for (var i = 0; i < Math.min(lineNumber - 1, lines.length); i++) {
-        pos += lines[i].length + 1;
-      }
-      textarea.setSelectionRange(pos, pos);
-      // Scroll line into view — approximate line height
-      requestAnimationFrame(function () {
-        textarea.focus();
-        var approxLineH = parseFloat(getComputedStyle(textarea).lineHeight) || 18;
-        textarea.scrollTop = Math.max(0, (lineNumber - 5) * approxLineH);
-        gutter.scrollTop = textarea.scrollTop;
-      });
-    }
+    // Cmd+S intercepts the browser Save page shortcut and routes to our writer.
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () { saveFile(); });
 
-    // Track modifications
-    textarea.addEventListener('input', function () {
-      updateGutter();
-      if (textarea.value !== savedContent) {
+    // Cmd+click on a word jumps to the Search tab with that symbol, mirroring
+    // the old textarea behavior. A proper go-to-definition lands in Phase I3.
+    currentEditor.onMouseDown(function (e) {
+      var orig = e.event.browserEvent;
+      if (!orig || !(orig.metaKey || orig.ctrlKey)) return;
+      if (!e.target || !e.target.position || !fileViewerWorktree) return;
+      var word = currentModel.getWordAtPosition(e.target.position);
+      if (word && word.word) searchSymbol(word.word, fileViewerWorktree);
+    });
+
+    currentEditor.onDidChangeModelContent(function () {
+      if (!currentModel) return;
+      var dirty = currentModel.getValue() !== savedContent;
+      if (dirty) {
         statusEl.textContent = 'Modified';
         statusEl.className = 'file-editor-status modified';
       } else {
         statusEl.textContent = '';
         statusEl.className = 'file-editor-status';
       }
+      if (saveBtn) saveBtn.disabled = !dirty;
     });
 
-    // Tab inserts spaces, Cmd/Ctrl+S saves
-    textarea.addEventListener('keydown', function (e) {
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        var start = textarea.selectionStart;
-        var end = textarea.selectionEnd;
-        textarea.value = textarea.value.substring(0, start) + '  ' + textarea.value.substring(end);
-        textarea.selectionStart = textarea.selectionEnd = start + 2;
-        textarea.dispatchEvent(new Event('input'));
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault();
-        saveFile();
-      }
-    });
+    if (lineNumber) {
+      var lineCount = currentModel.getLineCount();
+      var target = Math.max(1, Math.min(lineNumber, lineCount));
+      currentEditor.revealLineInCenter(target);
+      currentEditor.setPosition({ lineNumber: target, column: 1 });
+    }
+    currentEditor.focus();
 
     async function saveFile() {
+      if (!currentModel) return;
+      var content = currentModel.getValue();
+      if (content === savedContent) return;
       statusEl.textContent = 'Saving...';
       statusEl.className = 'file-editor-status saving';
-      var content = textarea.value;
+      if (saveBtn) saveBtn.disabled = true;
       var writeResult = await window.klaus.writeFile(currentFilePath, content);
       if (writeResult.error) {
         statusEl.textContent = 'Save failed';
         statusEl.className = 'file-editor-status error';
+        if (saveBtn) saveBtn.disabled = false;
         return;
       }
       savedContent = content;
@@ -180,9 +232,27 @@ window.FileBrowser = (function () {
 
   // ---- File Tree (C2) ----
 
+  function updateWorktreeLabel(wt) {
+    var el = document.getElementById('file-tree-worktree-label');
+    if (!el) return;
+    if (!wt) { el.textContent = ''; el.title = ''; return; }
+    var basename = wt.split('/').filter(Boolean).pop() || wt;
+    el.textContent = basename;
+    el.title = wt;
+  }
+
   async function loadFileTree(overrideWt) {
     var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
     var wt = overrideWt || (task ? task.worktreePath : null);
+    updateWorktreeLabel(wt);
+    // Belt-and-suspenders: the file-tree reload is the most reliable signal
+    // that the active worktree changed. If the open file belongs to a
+    // different worktree, close it here regardless of the switchToTask hook.
+    if (currentViewerWorktree && currentViewerWorktree !== wt) {
+      disposeCurrentEditor();
+      fileViewerContent.style.display = 'none';
+      fileViewerView.innerHTML = '';
+    }
     if (!wt) {
       fileTree.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
@@ -321,6 +391,11 @@ window.FileBrowser = (function () {
   // Event listeners for tab switching
   window.addEventListener('load-file-tree', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
   window.addEventListener('reload-tab-files', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
+  // Switching projects invalidates any open file — the path may not even
+  // exist in the new project. Always close.
+  window.addEventListener('klaussy:project-changed', function () {
+    if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(null);
+  });
   window.addEventListener('load-search', function (e) {
     if (projectSearchInput.value.trim()) doProjectSearch(e.detail && e.detail.worktreePath);
   });
@@ -345,36 +420,38 @@ window.FileBrowser = (function () {
   window.toggleBlame = async function () {
     var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
     if (!task) return;
+    if (!currentEditor || !currentModel || !window.monaco) return;
     var header = fileViewerView.querySelector('.file-viewer-header-inline');
     if (!header) return;
     var pathEl = header.querySelector('.file-viewer-path');
     if (!pathEl) return;
     var fileName = pathEl.textContent;
-    var wt = task.worktreePath;
-    var gutter = fileViewerView.querySelector('.file-line-gutter');
-    if (!gutter) return;
 
-    // Toggle off if blame is showing
-    if (gutter.dataset.blame === '1') {
-      gutter.dataset.blame = '';
-      gutter.classList.remove('blame-active');
-      var textarea = fileViewerView.querySelector('.file-editor-textarea');
-      if (textarea) {
-        var count = textarea.value.split('\n').length;
-        var nums = [];
-        for (var i = 1; i <= count; i++) nums.push(i);
-        gutter.textContent = nums.join('\n');
-      }
+    // Toggle off if blame is already rendering — restore default line numbers.
+    if (currentBlameLines) {
+      currentBlameLines = null;
+      currentEditor.updateOptions({ lineNumbers: 'on', lineNumbersMinChars: 5 });
+      fileViewerView.classList.remove('blame-active');
       return;
     }
 
-    var result = await window.klaus.gitBlame(wt, fileName);
-    if (result.error || result.lines.length === 0) return;
-    gutter.dataset.blame = '1';
-    gutter.classList.add('blame-active');
-    gutter.textContent = result.lines.map(function (blame, i) {
-      return blame.hash.substring(0, 7) + ' ' + blame.author.substring(0, 10);
-    }).join('\n');
+    var result = await window.klaus.gitBlame(task.worktreePath, fileName);
+    if (result.error || !result.lines || result.lines.length === 0) return;
+
+    // Replace the line-number column with "<hash> <author>" — mirrors the
+    // pre-Monaco behavior (git blame swaps out numbers). Monaco re-renders
+    // when the function reference changes, so the closure-captured blame
+    // array updates the gutter without any explicit refresh call.
+    currentBlameLines = result.lines;
+    currentEditor.updateOptions({
+      lineNumbers: function (ln) {
+        var b = currentBlameLines ? currentBlameLines[ln - 1] : null;
+        if (!b) return String(ln);
+        return ((b.hash || '').substring(0, 7) + ' ' + (b.author || '').substring(0, 10)).trim();
+      },
+      lineNumbersMinChars: 22,
+    });
+    fileViewerView.classList.add('blame-active');
   };
 
   return {

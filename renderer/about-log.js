@@ -550,6 +550,62 @@ window.Dialogs = (function () {
     + '</div>';
   }
 
+  // ---- GitHub accounts ----
+  function showGhAccounts() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'gh-accounts-dialog';
+    dialog.innerHTML =
+      '<div class="skills-head">'
+        + '<h2>GitHub accounts</h2>'
+        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="gh-accounts-body"><div class="skills-loading">Reading gh auth status\u2026</div></div>';
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
+    var body = dialog.querySelector('.gh-accounts-body');
+
+    function refresh() {
+      body.innerHTML = '<div class="skills-loading">Reading gh auth status\u2026</div>';
+      window.klaus.ghListAccounts().then(function (r) {
+        var accounts = (r && r.accounts) || [];
+        if (accounts.length === 0) {
+          body.innerHTML = '<div class="skills-empty">'
+            + '<p>No gh accounts found.</p>'
+            + '<p class="skills-empty-hint">Run <code>gh auth login</code> in a terminal, then reopen this dialog.</p>'
+          + '</div>';
+          return;
+        }
+        body.innerHTML = '<p class="gh-accounts-intro">Klaussy uses whichever gh account is active. Click another to switch.</p>'
+          + accounts.map(function (a) {
+            return '<button class="gh-account-row' + (a.active ? ' active' : '') + '" type="button" data-username="' + escHtml(a.username) + '"' + (a.active ? ' disabled' : '') + '>'
+              + '<span class="gh-account-name">' + escHtml(a.username) + '</span>'
+              + (a.active ? '<span class="gh-account-badge">active</span>' : '<span class="gh-account-switch">Switch</span>')
+            + '</button>';
+          }).join('');
+        body.querySelectorAll('.gh-account-row[data-username]').forEach(function (btn) {
+          btn.addEventListener('click', async function () {
+            if (btn.disabled) return;
+            btn.disabled = true;
+            var orig = btn.querySelector('.gh-account-switch');
+            if (orig) orig.textContent = 'Switching\u2026';
+            var result = await window.klaus.ghSwitchAccount(btn.dataset.username);
+            if (result && result.error) {
+              alert('Switch failed: ' + result.error);
+              refresh();
+              return;
+            }
+            refresh();
+          });
+        });
+      });
+    }
+    refresh();
+  }
+
   // ---- Memory (CLAUDE.md) ----
   function showMemory() {
     var overlay = document.createElement('div');
@@ -792,5 +848,6 @@ window.Dialogs = (function () {
     showShortcuts: showShortcuts,
     showMcpServers: showMcpServers,
     showPlugins: showPlugins,
+    showGhAccounts: showGhAccounts,
   };
 })();

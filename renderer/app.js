@@ -142,9 +142,35 @@
         PRPanel.setWorktree(task.worktreePath);
 
         btnDiff.classList.add('active');
+        if (!task.branch) forceFilesTab();
       }
     }
   });
+
+  // ---- Branchless-task UI (Open Folder flow) ----
+  //
+  // Tasks opened via "Open Folder" have no branch. The orange warning banner
+  // lives inside the specific terminal's container (not globally), so it only
+  // covers that pane in grid/columns view. What the active-task signal still
+  // controls: which tabs are visible in the diff panel (git-only tabs hide
+  // when the active task is branchless) and the default Files tab selection.
+  var filesTabBtn = document.querySelector('#diff-tabs .diff-tab[data-tab="files"]');
+
+  function forceFilesTab() {
+    if (filesTabBtn && !filesTabBtn.classList.contains('active')) filesTabBtn.click();
+  }
+
+  window.BranchlessUI = {
+    apply: function (task) {
+      var branchless = !!(task && !task.branch);
+      document.body.classList.toggle('task-branchless', branchless);
+      if (branchless && DiffPanel.isVisible()) {
+        var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
+        var hidden = activeTab && ['changes', 'pr', 'history', 'stash', 'env'].indexOf(activeTab.dataset.tab) !== -1;
+        if (hidden) forceFilesTab();
+      }
+    },
+  };
 
   // ---- Diff Panel Resize ----
   (function () {
@@ -996,9 +1022,23 @@
 
   // ---- Command Palette (A3) ----
 
+  async function openFolderAsTask(mode) {
+    var dir = await window.klaus.browseDirectory();
+    if (!dir) return;
+    var result = await window.klaus.openFolder(dir, mode || 'claude');
+    if (!result || result.error) {
+      if (result && result.error) alert(result.error);
+      return;
+    }
+    addTaskToUI(result);
+    switchToTask(result.id);
+  }
+
   function buildPaletteCommands() {
     var commands = [
       { label: 'New Task', action: function () { showModal(); } },
+      { label: 'Open Folder…', action: function () { openFolderAsTask('claude'); } },
+      { label: 'Open Folder in Shell…', action: function () { openFolderAsTask('shell'); } },
       { label: 'Toggle Diff Panel', action: function () { btnDiff.click(); } },
       { label: 'Change Theme', action: function () { showThemePicker(); } },
       { label: 'Preferences', action: function () { window.klaus.openPreferences(); } },
@@ -1042,6 +1082,7 @@
     commands.push({ label: 'Memory (CLAUDE.md)', action: function () { Dialogs.showMemory(); } });
     commands.push({ label: 'MCP Servers', action: function () { Dialogs.showMcpServers(); } });
     commands.push({ label: 'Plugins', action: function () { Dialogs.showPlugins(); } });
+    commands.push({ label: 'GitHub accounts', action: function () { Dialogs.showGhAccounts(); } });
     commands.push({ label: 'Check dependencies\u2026', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: showLogViewer });
     commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
@@ -1066,6 +1107,11 @@
   var prReviewRoot = document.getElementById('pr-review-root');
   var terminalArea = document.getElementById('terminal-area');
   var diffPanelEl = document.getElementById('diff-panel');
+  var btnOpenFolder = document.getElementById('btn-open-folder');
+  if (btnOpenFolder) {
+    btnOpenFolder.addEventListener('click', function () { openFolderAsTask('claude'); });
+  }
+
   var btnReviewPr = document.getElementById('btn-review-pr');
   var prReviewMounted = false;
 
@@ -1280,6 +1326,9 @@
   if (window.klaus.onShowShortcuts) {
     window.klaus.onShowShortcuts(function () { Dialogs.showShortcuts(); });
   }
+  if (window.klaus.onShowGhAccounts) {
+    window.klaus.onShowGhAccounts(function () { Dialogs.showGhAccounts(); });
+  }
 
   // Probe gh + claude on startup (silent if everything's set up). Stays out
   // of the way for steady-state users; only first-runs / broken setups see
@@ -1295,6 +1344,14 @@
       if (btn) btn.click();
     });
   }
+  ['empty-state-open-folder', 'empty-state-open-folder-np'].forEach(function (linkId) {
+    var link = document.getElementById(linkId);
+    if (!link) return;
+    link.addEventListener('click', function (e) {
+      e.preventDefault();
+      openFolderAsTask('claude');
+    });
+  });
   // Empty state stays in sync with project changes — the project-switcher
   // module dispatches `klaussy:project-changed` when projects change so we
   // can re-run the no-project check without polling.
