@@ -2217,20 +2217,19 @@ function findWorktreeForBranch(cwd, branch) {
   return null;
 }
 
-// G5: materialize the PR as a worktree/task so the reviewer can run it
-// locally. Uses `pull/N/head` — a virtual ref GitHub provides for every PR,
-// which works for both same-repo and fork PRs without needing the fork URL
-// as a remote.
-ipcMain.handle('pr-checkout-locally', async () => {
+// Shared helper: ensure a worktree exists for activePrReview's PR head and
+// return its path. Used by G5 (which then spawns a task) and G7 (which runs
+// the AI review there). Resolves cwd in this order:
+//   1. active project's origin matches the PR base repo
+//   2. another klausify project's origin matches
+//   3. auto-clone into userData/pr-checkouts (partial clone)
+// Reuses an existing worktree on the branch instead of fighting git when
+// the user has it checked out already.
+async function ensureWorktreeForActivePr() {
   if (!activePrReview) return { error: 'No active PR review' };
   const { number, meta, baseOwner, baseRepo } = activePrReview;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo from PR metadata' };
 
-  // The fetch/worktree must happen inside a clone of the PR's *base* repo,
-  // not whatever project happens to be active. Otherwise we'd pollute an
-  // unrelated repo with a random branch. Prefer the active project when it
-  // matches; otherwise walk all known projects for one whose origin points
-  // at baseOwner/baseRepo.
   const active = currentRepoPath();
   let cwd = null;
   if (active) {
@@ -2244,9 +2243,6 @@ ipcMain.handle('pr-checkout-locally', async () => {
   }
   if (!cwd) cwd = findProjectForRepo(baseOwner, baseRepo);
 
-  // Auth token — grabbed once and reused for both the (potential) auto-clone
-  // and the subsequent PR-head fetch. Never printed, never embedded in any
-  // error message (URLs get scrubbed before surfacing).
   let token = '';
   try {
     token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
@@ -2256,20 +2252,13 @@ ipcMain.handle('pr-checkout-locally', async () => {
   const authedUrl = `https://oauth2:${token}@github.com/${baseOwner}/${baseRepo}.git`;
   const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
 
-  // Fallback: auto-clone into klausify's userData dir when the user has no
-  // project matching the PR's base repo. Uses a partial clone (blob:none)
-  // so cloning a large monorepo for a small review doesn't pull every blob
-  // in history — git fetches only the blobs touched by the branch.
   if (!cwd) {
     const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
     const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
     if (!fs.existsSync(clonePath)) {
       try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
       try {
-        execFileSync('git', [
-          'clone', '--filter=blob:none',
-          authedUrl, clonePath,
-        ], { stdio: 'pipe' });
+        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe' });
       } catch (err) {
         const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
         return { error: 'Clone failed: ' + scrub(raw) };
@@ -2277,64 +2266,15 @@ ipcMain.handle('pr-checkout-locally', async () => {
     }
     cwd = clonePath;
   }
-  // Keep the local branch name identical to the PR's head ref so the
-  // existing PR panel (which looks PRs up by headRefName) recognizes it as
-  // a PR branch. The filesystem path gets sanitized separately because
-  // headRefName may contain slashes (e.g. "feature/foo") that would create
-  // unintended nested directories.
+
   const localBranch = (meta && meta.headRefName) || `pr-${number}`;
   const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
 
-  // Pre-flight: the user may already have a worktree on this branch (and an
-  // in-flight task pointing at it, or just an external worktree). Reusing
-  // the existing worktree is friendlier than forcing a re-fetch that would
-  // fail with "refusing to fetch into branch ... checked out at ...".
   const existingWorktreePath = findWorktreeForBranch(cwd, localBranch);
   if (existingWorktreePath) {
-    // Already tracked as a task? Focus it instead of spawning a duplicate.
-    const existingTask = Array.from(instances.values()).find(i => i.worktreePath === existingWorktreePath);
-    if (existingTask) {
-      // Make sure the PR hint is set so the panel loads cleanly.
-      if (!existingTask.prNumber) existingTask.prNumber = number;
-      if (!existingTask.prBaseOwner) existingTask.prBaseOwner = baseOwner;
-      if (!existingTask.prBaseRepo) existingTask.prBaseRepo = baseRepo;
-
-      if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
-        activePrReview.popout.close();
-      }
-      activePrReview = null;
-      broadcastPrReview();
-
-      const payload = {
-        id: existingTask.id, name: existingTask.name,
-        worktreePath: existingTask.worktreePath, branch: existingTask.branch, mode: existingTask.mode,
-      };
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', payload);
-      }
-      return { ok: true, task: payload, reused: true };
-    }
-
-    // Worktree exists but no task is attached; spawn one pointing at it.
-    const task = spawnInWorktree(localBranch, existingWorktreePath, localBranch, 'claude', null, null, number);
-    const inst = instances.get(task.id);
-    if (inst) {
-      inst.prBaseOwner = baseOwner;
-      inst.prBaseRepo = baseRepo;
-    }
-    if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
-      activePrReview.popout.close();
-    }
-    activePrReview = null;
-    broadcastPrReview();
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', task);
-    }
-    return { ok: true, task, reused: true };
+    return { worktreePath: existingWorktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true };
   }
 
-  // Fetch PR head using the same auth URL as above. Force refspec (+) lets
-  // re-runs update the local branch when new commits land on the PR.
   try {
     execFileSync('git', ['fetch', authedUrl, `+refs/pull/${number}/head:refs/heads/${localBranch}`], {
       cwd, stdio: 'pipe',
@@ -2349,26 +2289,47 @@ ipcMain.handle('pr-checkout-locally', async () => {
   const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitizedForPath);
 
   if (fs.existsSync(worktreePath)) {
-    return { error: 'A worktree already exists at ' + worktreePath + '. Remove it before checking out again.' };
+    // Stale dir from a prior run we never wired up — reuse silently rather
+    // than failing. git worktree add would error if it's still registered.
+    return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true };
   }
 
   try {
-    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], {
-      cwd, stdio: 'pipe',
-    });
+    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], { cwd, stdio: 'pipe' });
   } catch (err) {
     return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
 
-  try { await runKlausifyInit(worktreePath); } catch (_) { /* non-fatal */ }
+  try { await runKlausifyInit(worktreePath); } catch (_) {}
+  return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: false };
+}
 
-  const task = spawnInWorktree(localBranch, worktreePath, localBranch, 'claude', null, null, number);
-  // Stash the base repo so pr-for-branch can target the right repo even
-  // when the user's origin points elsewhere (fork scenarios).
-  const inst = instances.get(task.id);
-  if (inst) {
-    inst.prBaseOwner = activePrReview.baseOwner;
-    inst.prBaseRepo = activePrReview.baseRepo;
+// G5: materialize the PR as a worktree + spawn a task in it.
+ipcMain.handle('pr-checkout-locally', async () => {
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+  const { worktreePath, branch } = ensured;
+  const { number, baseOwner, baseRepo } = activePrReview;
+
+  // Already tracked as a task? Focus it instead of spawning a duplicate.
+  const existingTask = Array.from(instances.values()).find(i => i.worktreePath === worktreePath);
+  let payload;
+  if (existingTask) {
+    if (!existingTask.prNumber) existingTask.prNumber = number;
+    if (!existingTask.prBaseOwner) existingTask.prBaseOwner = baseOwner;
+    if (!existingTask.prBaseRepo) existingTask.prBaseRepo = baseRepo;
+    payload = {
+      id: existingTask.id, name: existingTask.name,
+      worktreePath: existingTask.worktreePath, branch: existingTask.branch, mode: existingTask.mode,
+    };
+  } else {
+    const task = spawnInWorktree(branch, worktreePath, branch, 'claude', null, null, number);
+    const inst = instances.get(task.id);
+    if (inst) {
+      inst.prBaseOwner = baseOwner;
+      inst.prBaseRepo = baseRepo;
+    }
+    payload = task;
   }
 
   // Exit review mode first so the task grid is visible again, THEN announce
@@ -2381,10 +2342,191 @@ ipcMain.handle('pr-checkout-locally', async () => {
   broadcastPrReview();
 
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', task);
+    if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', payload);
   }
+  return { ok: true, task: payload, reused: !!existingTask };
+});
 
-  return { ok: true, task };
+// G7: AI review in the PR review surface. Ensures a worktree (auto-cloning
+// if needed) and spawns claude with the PR_REVIEW_TEMPLATE, streaming
+// stream-json events back to the renderer. Mirrors F6's protocol so the
+// renderer can reuse the same chunk parser.
+const reviewSurfaceAiProcs = new Map();
+
+ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (reviewSurfaceAiProcs.has(requestId)) return { error: 'Already in flight' };
+  if (!activePrReview) return { error: 'No active PR review' };
+
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+
+  const baseBranch = (activePrReview.meta && activePrReview.meta.baseRefName) || 'main';
+  const prompt = PR_REVIEW_TEMPLATE
+    .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch)
+    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
+
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const { spawn } = require('child_process');
+  const proc = spawn(claudeBin, [
+    '-p', prompt,
+    '--output-format', 'stream-json',
+    '--verbose',
+  ], {
+    cwd: ensured.worktreePath,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  reviewSurfaceAiProcs.set(requestId, proc);
+
+  const dataChannel = 'pr-review-ai-data-' + requestId;
+  const doneChannel = 'pr-review-ai-done-' + requestId;
+  const sender = event.sender;
+  let stderrBuf = '';
+
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.on('error', (err) => {
+    reviewSurfaceAiProcs.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    reviewSurfaceAiProcs.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      sender.send(doneChannel, { cancelled: true });
+    } else if (code !== 0) {
+      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
+    } else {
+      sender.send(doneChannel, { ok: true });
+    }
+  });
+
+  return { ok: true, worktreePath: ensured.worktreePath };
+});
+
+ipcMain.handle('pr-review-ai-cancel', (_event, { requestId }) => {
+  const proc = reviewSurfaceAiProcs.get(requestId);
+  if (!proc) return { ok: false };
+  try { proc.kill('SIGTERM'); } catch {}
+  return { ok: true };
+});
+
+// G7: implement a single finding (or "all findings" via one big prompt) by
+// spawning claude in the PR's worktree with edit tools. Mirrors the AI-review
+// streaming protocol so the renderer can show progress chips + result.
+const implementProcs = new Map();
+
+ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, body }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (implementProcs.has(requestId)) return { error: 'Already in flight' };
+  if (!activePrReview) return { error: 'No active PR review' };
+  if (!body || !body.trim()) return { error: 'Empty implement body' };
+
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+
+  // Two prompts depending on whether we're implementing one finding or many.
+  // Both share guardrails so claude doesn't drift into unrelated cleanup or
+  // start running tests/commits.
+  const guardrails =
+    `\n\nGuidelines:\n`
+    + `- Only change what the finding(s) ask for; do not add unrelated cleanup.\n`
+    + `- Do not run tests, install deps, or commit/push.\n`
+    + `- After making the changes, summarize each change in one short bullet,\n`
+    + `  prefixed with the file path. Be terse.\n`;
+  const prompt = mode === 'all'
+    ? `Apply the following code-review findings to the codebase:\n\n${body}` + guardrails
+    : `Apply the following code-review finding to the codebase:\n\n${body}` + guardrails;
+
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const { spawn } = require('child_process');
+  const proc = spawn(claudeBin, [
+    '-p', prompt,
+    '--output-format', 'stream-json',
+    '--verbose',
+  ], {
+    cwd: ensured.worktreePath,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  implementProcs.set(requestId, proc);
+
+  const dataChannel = 'pr-review-implement-data-' + requestId;
+  const doneChannel = 'pr-review-implement-done-' + requestId;
+  const sender = event.sender;
+  let stderrBuf = '';
+
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.on('error', (err) => {
+    implementProcs.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    implementProcs.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      sender.send(doneChannel, { cancelled: true });
+    } else if (code !== 0) {
+      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
+    } else {
+      sender.send(doneChannel, { ok: true, worktreePath: ensured.worktreePath });
+    }
+  });
+
+  return { ok: true, worktreePath: ensured.worktreePath };
+});
+
+ipcMain.handle('pr-review-implement-cancel', (_event, { requestId }) => {
+  const proc = implementProcs.get(requestId);
+  if (!proc) return { ok: false };
+  try { proc.kill('SIGTERM'); } catch {}
+  return { ok: true };
+});
+
+// G7 persistence: cache a PR's AI review + per-finding state by
+// (owner, repo, number) so re-opening a PR (or restarting the app) restores
+// the prior review and the user's Ignore / Implemented marks.
+function reviewCachePathFor(owner, repo, number) {
+  const dir = path.join(app.getPath('userData'), 'pr-review-cache');
+  const safe = `${owner}-${repo}-${number}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  return { dir, file: path.join(dir, safe + '.json') };
+}
+
+ipcMain.handle('pr-review-cache-get-by-pr', (_event, { owner, repo, number }) => {
+  if (!owner || !repo || !number) return { cached: null };
+  const { file } = reviewCachePathFor(owner, repo, number);
+  try {
+    if (!fs.existsSync(file)) return { cached: null };
+    const raw = fs.readFileSync(file, 'utf8');
+    return { cached: JSON.parse(raw) };
+  } catch (err) {
+    return { cached: null, error: err.message };
+  }
+});
+
+ipcMain.handle('pr-review-cache-save-by-pr', (_event, { owner, repo, number, data }) => {
+  if (!owner || !repo || !number) return { ok: false, error: 'Missing key' };
+  const { dir, file } = reviewCachePathFor(owner, repo, number);
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('pr-review-cache-clear-by-pr', (_event, { owner, repo, number }) => {
+  if (!owner || !repo || !number) return { ok: false };
+  const { file } = reviewCachePathFor(owner, repo, number);
+  try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch (_) {}
+  return { ok: true };
 });
 
 // G4: post all pending review comments + decision as one review. The GitHub

@@ -3979,6 +3979,312 @@ body.pr-review-popout #pr-review-root {
   color: var(--diff-del-fg, #e27c7c);
 }
 
+/* G7: AI review banner — sits below the tabs above the active tab body. */
+.pr-ai-review-slot { padding: 0; }
+.pr-ai-review-slot:empty { display: none; }
+
+.pr-ai-panel {
+  margin: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+.pr-ai-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.pr-ai-title {
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+.pr-ai-cancel, .pr-ai-close {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+}
+.pr-ai-close { border: none; padding: 0 6px; font-size: 16px; color: var(--text-muted); }
+.pr-ai-close:hover { color: var(--text); }
+.pr-ai-cancel:hover { background: var(--surface-hover); }
+
+.pr-ai-progress {
+  padding: 6px 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.pr-ai-progress-chip {
+  padding: 2px 8px;
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--text-dim);
+  border-radius: 10px;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+.pr-ai-progress-chip.system { background: rgba(137, 87, 229, 0.15); color: #b48cff; }
+
+.pr-ai-body {
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.pr-ai-body.error { color: var(--diff-del-fg, #e27c7c); }
+
+/* G7: Review tab content */
+.pr-review-ai-tab {
+  overflow-y: auto;
+  padding: 16px 20px 40px;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.pr-ai-empty {
+  text-align: center;
+  padding: 60px 20px;
+}
+.pr-ai-empty .pr-ai-run {
+  font-size: 13px;
+  padding: 8px 18px;
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.pr-ai-empty .pr-ai-run:hover { filter: brightness(1.1); }
+.pr-ai-empty-hint {
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pr-ai-tab .pr-ai-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 12px 0;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+}
+.pr-ai-tab .pr-ai-title { flex: 1; font-weight: 600; color: var(--text); }
+.pr-ai-implement-all {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+.pr-ai-implement-all:hover { filter: brightness(1.1); }
+.pr-ai-implement-all:disabled { opacity: 0.6; }
+
+.pr-ai-implement-all-summary {
+  margin: 0 0 14px 0;
+  padding: 10px 12px;
+  background: rgba(46, 160, 67, 0.1);
+  border: 1px solid rgba(46, 160, 67, 0.3);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+.pr-ai-implement-all-error {
+  margin: 0 0 14px 0;
+  padding: 10px 12px;
+  background: rgba(218, 54, 51, 0.1);
+  border: 1px solid rgba(218, 54, 51, 0.3);
+  border-radius: 6px;
+  color: var(--diff-del-fg, #e27c7c);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.pr-ai-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pr-ai-finding {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: opacity 0.1s;
+}
+.pr-ai-finding.ignored { opacity: 0.5; }
+.pr-ai-finding.implementing { border-left-color: var(--accent); }
+.pr-ai-finding.implemented { border-left-color: var(--diff-add-fg, #7ce27c); }
+.pr-ai-finding.failed { border-left-color: var(--diff-del-fg, #e27c7c); }
+
+.pr-ai-finding-sev-blocker, .pr-ai-finding-sev-blocking, .pr-ai-finding-sev-critical { border-left-color: #f85149; }
+.pr-ai-finding-sev-major, .pr-ai-finding-sev-high { border-left-color: #f85149; }
+.pr-ai-finding-sev-medium { border-left-color: #d29922; }
+.pr-ai-finding-sev-minor, .pr-ai-finding-sev-low { border-left-color: #4493f8; }
+.pr-ai-finding-sev-nit { border-left-color: var(--text-muted); }
+/* Status colors win over severity if implementing/implemented/failed. */
+.pr-ai-finding.implementing { border-left-color: var(--accent); }
+.pr-ai-finding.implemented { border-left-color: var(--diff-add-fg, #7ce27c); }
+.pr-ai-finding.failed { border-left-color: var(--diff-del-fg, #e27c7c); }
+
+.pr-ai-finding-body {
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.pr-ai-finding-body strong { color: var(--text); font-weight: 600; }
+.pr-ai-finding-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  align-items: center;
+}
+.pr-ai-finding-actions button {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+.pr-ai-finding-ignore:hover, .pr-ai-finding-undo:hover { background: var(--surface-hover); }
+.pr-ai-finding-implement, .pr-ai-finding-redo {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+.pr-ai-finding-implement:hover, .pr-ai-finding-redo:hover { filter: brightness(1.1); }
+.pr-ai-finding-cancel { background: var(--diff-del-fg, #e27c7c) !important; color: #fff !important; border-color: var(--diff-del-fg, #e27c7c) !important; }
+.pr-ai-finding-status {
+  color: var(--diff-add-fg, #7ce27c);
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.pr-ai-finding-comment {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.pr-ai-finding-comment:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.pr-ai-finding-comment-status {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  margin-right: auto;
+}
+.pr-ai-finding-comment-status.posted {
+  color: var(--diff-add-fg, #7ce27c);
+  background: rgba(46, 160, 67, 0.12);
+}
+.pr-ai-finding-comment-status.posting {
+  color: var(--text-dim);
+  background: rgba(128, 128, 128, 0.15);
+  font-style: italic;
+}
+.pr-ai-finding-comment-status.failed {
+  color: var(--diff-del-fg, #e27c7c);
+  background: rgba(218, 54, 51, 0.12);
+}
+.pr-ai-finding-implement-out {
+  padding: 10px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
+  line-height: 1.5;
+}
+.pr-ai-finding-implement-out.error {
+  color: var(--diff-del-fg, #e27c7c);
+}
+
+.pr-ai-fallback-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pr-ai-fallback-head {
+  padding: 8px 14px;
+  background: var(--surface-hover);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.pr-ai-fallback-body {
+  margin: 0;
+  padding: 12px 14px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  color: var(--text);
+  line-height: 1.5;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.pr-ai-inline-code {
+  background: rgba(128, 128, 128, 0.18);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+}
+.pr-ai-code {
+  margin: 8px 0;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.45;
+}
+
 .pr-review-tabs {
   display: flex;
   background: var(--surface);
