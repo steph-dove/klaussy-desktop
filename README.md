@@ -42,9 +42,31 @@ npm run dist:intel    # x64 (Intel Macs)
 npm run dist:universal  # both archs in one bundle
 ```
 
-Output lands in `dist/Klaussy-<version>-<arch>.dmg`. The build is currently
-**unsigned** — recipients will need to right-click → Open the first time, or
-remove the quarantine attribute with `xattr -d com.apple.quarantine /Applications/Klaussy.app`.
+Output lands in `dist/Klaussy-<version>-<arch>.dmg`.
+
+### Installing an unsigned build
+
+The build is currently **unsigned**, so macOS Gatekeeper blocks it on first
+launch. Pick one:
+
+**Option A — right-click open (recommended for first launch)**
+
+1. Open the `.dmg` and drag `Klaussy.app` into `/Applications`.
+2. In `/Applications`, **right-click** Klaussy → **Open** → confirm "Open".
+3. From then on, double-click works normally.
+
+**Option B — strip the quarantine flag**
+
+```bash
+xattr -d com.apple.quarantine /Applications/Klaussy.app
+```
+
+Run once after dragging the app into Applications. Then double-click works
+without any prompt.
+
+> Apple Developer ID signing + notarization is on the roadmap; once enabled,
+> recipients will be able to install with no friction. See the commented-out
+> `mac.identity` block in `package.json` for the pre-staged config.
 
 ## Quick tour
 

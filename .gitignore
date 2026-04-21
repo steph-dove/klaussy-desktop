@@ -1,7 +1,13 @@
 node_modules/
 dist/
 out/
-build/
+# build/ is electron-builder's output dir — ignore everything *inside* it
+# but allow the source files we ship (entitlements + notarize hook). Using
+# `build/*` instead of `build/` so git walks the dir and the re-includes
+# below take effect.
+build/*
+!build/entitlements.mac.plist
+!build/notarize.js
 icon.iconset/
 *.log
 npm-debug.log*
