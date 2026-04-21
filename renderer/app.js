@@ -5,9 +5,7 @@
   const layouts = ['single', 'columns', 'grid'];
   const layoutIcons = { single: '\u25A8', columns: '\u2759\u2759', grid: '\u2637' };
 
-  const repoOverlay = document.getElementById('repo-overlay');
   const appEl = document.getElementById('app');
-  const btnSelectRepo = document.getElementById('btn-select-repo');
   const taskList = document.getElementById('task-list');
   const btnNewTask = document.getElementById('btn-new-task');
   const btnLayout = document.getElementById('btn-layout');
@@ -388,24 +386,13 @@
 
   // ---- Init ----
   AppState.repoPath = await window.klaus.getRepo();
-  if (AppState.repoPath) {
-    showApp();
-  } else {
-    repoOverlay.style.display = 'flex';
-  }
-
-  btnSelectRepo.addEventListener('click', async function () {
-    var selected = await window.klaus.selectRepo();
-    if (selected) {
-      AppState.repoPath = selected;
-      // Also add to projects list
-      await window.klaus.addProject();
-      showApp();
-    }
-  });
+  // Always show the app — the project-switcher's `+` button is the canonical
+  // way to add a repo. The old "Select Repository" splash blocked startup
+  // for first-runs without a project; the empty task list + project picker
+  // handle that case fine on their own.
+  showApp();
 
   async function showApp() {
-    repoOverlay.style.display = 'none';
     appEl.style.display = 'flex';
     await loadProjects();
     if (isSecondaryWindow) {
@@ -646,8 +633,7 @@
   let selectedWorktreePath = null;
   let selectedBasePath = null;
   let selectedMode = 'claude';
-  let selectedBranch = null;
-  let branchData = [];
+  let selectedBaseBranch = '';
 
   // Shell selector
   const shellOptions = document.querySelectorAll('.shell-option');
@@ -659,8 +645,10 @@
   });
 
   // Tab switching
-  var branchFilter = document.getElementById('branch-filter');
-  var branchListEl = document.getElementById('branch-list');
+  var baseBranchInput = document.getElementById('modal-base-branch-input');
+  var baseBranchList = document.getElementById('modal-base-branch-list');
+  var baseBranchData = []; // [{ localName, isRemote, ... }]
+  var baseBranchDefault = ''; // pre-selected branch (dev > main > master fallback)
 
   modalTabs.forEach(function (tab) {
     tab.addEventListener('click', function () {
@@ -671,56 +659,129 @@
       if (activeTab === 'new') {
         setTimeout(function () { modalInput.focus(); }, 50);
       }
-      if (activeTab === 'branch') {
-        loadBranches();
-        setTimeout(function () { branchFilter.focus(); }, 50);
+    });
+  });
+
+  // Combobox wiring — input shows the picked branch (or filter text); list
+  // opens on focus; click outside dismisses; arrow keys navigate.
+  if (baseBranchInput) {
+    baseBranchInput.addEventListener('focus', function () {
+      // First focus = clear placeholder default + open list with everything visible.
+      if (baseBranchInput.classList.contains('has-default')) {
+        baseBranchInput.classList.remove('has-default');
+        baseBranchInput.value = '';
+      }
+      renderBaseBranchOptions('');
+      baseBranchList.hidden = false;
+    });
+    baseBranchInput.addEventListener('input', function () {
+      renderBaseBranchOptions(baseBranchInput.value.trim());
+      baseBranchList.hidden = false;
+    });
+    baseBranchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { baseBranchList.hidden = true; baseBranchInput.blur(); }
+      else if (e.key === 'Enter') {
+        var first = baseBranchList.querySelector('.basebranch-option');
+        if (first) { e.preventDefault(); pickBaseBranch(first.dataset.branch); }
       }
     });
-  });
-
-  async function loadBranches() {
-    branchListEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">Loading branches...</div>';
-    selectedBranch = null;
-    var result = await window.klaus.listBranches(AppState.repoPath);
-    if (result.error) {
-      branchListEl.innerHTML = '<div style="padding:12px;color:var(--error);font-size:13px;">' + escHtml(result.error) + '</div>';
-      return;
-    }
-    branchData = result.branches || [];
-    renderBranches('');
-  }
-
-  function renderBranches(filter) {
-    var filtered = branchData;
-    if (filter) {
-      var lc = filter.toLowerCase();
-      filtered = branchData.filter(function (b) { return b.localName.toLowerCase().includes(lc); });
-    }
-    if (filtered.length === 0) {
-      branchListEl.innerHTML = '<div style="padding:12px;color:var(--text-muted);font-size:13px;">No matching branches</div>';
-      return;
-    }
-    branchListEl.innerHTML = filtered.map(function (b) {
-      return '<div class="branch-item' + (selectedBranch === b.localName ? ' selected' : '') + '" data-branch="' + escHtml(b.localName) + '" data-remote="' + b.isRemote + '">' +
-        '<span class="branch-name">' + escHtml(b.localName) + '</span>' +
-        (b.isRemote ? '<span class="branch-remote-tag">remote</span>' : '') +
-        '<span class="branch-meta">' + escHtml(b.date || '') + '</span>' +
-      '</div>';
-    }).join('');
-  }
-
-  branchListEl.addEventListener('click', function (e) {
-    var item = e.target.closest('.branch-item');
-    if (!item) return;
-    selectedBranch = item.dataset.branch;
-    branchListEl.querySelectorAll('.branch-item').forEach(function (el) {
-      el.classList.toggle('selected', el.dataset.branch === selectedBranch);
+    document.addEventListener('mousedown', function (e) {
+      if (!document.getElementById('basebranch-combobox').contains(e.target)) {
+        baseBranchList.hidden = true;
+        // Restore the picked value if the user typed nothing then dismissed.
+        if (selectedBaseBranch && baseBranchInput.value.trim() === '') {
+          setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
+        }
+      }
     });
-  });
+  }
 
-  branchFilter.addEventListener('input', function () {
-    renderBranches(branchFilter.value.trim());
-  });
+  function setBaseBranchInputDisplay(branchName, isDefault) {
+    if (!baseBranchInput) return;
+    baseBranchInput.value = branchName + (isDefault ? ' (default)' : '');
+    baseBranchInput.classList.toggle('has-default', !!isDefault);
+  }
+
+  function pickBaseBranch(name) {
+    selectedBaseBranch = name;
+    setBaseBranchInputDisplay(name, name === baseBranchDefault);
+    baseBranchList.hidden = true;
+  }
+
+  function renderBaseBranchOptions(filter) {
+    if (!baseBranchList) return;
+    var lc = (filter || '').toLowerCase();
+    var matches = baseBranchData.filter(function (b) {
+      return !lc || b.localName.toLowerCase().includes(lc);
+    });
+    if (matches.length === 0) {
+      baseBranchList.innerHTML = '<div class="basebranch-option-empty">No matching branches</div>';
+      return;
+    }
+    baseBranchList.innerHTML = matches.map(function (b) {
+      var defCls = b.localName === baseBranchDefault ? ' is-default' : '';
+      var tag = b.localName === baseBranchDefault ? 'default'
+        : b.isRemote ? 'remote' : '';
+      return '<div class="basebranch-option' + defCls + '" data-branch="' + escHtml(b.localName) + '">'
+        + '<span>' + escHtml(b.localName) + '</span>'
+        + (tag ? '<span class="basebranch-option-tag">' + tag + '</span>' : '')
+      + '</div>';
+    }).join('');
+    baseBranchList.querySelectorAll('.basebranch-option').forEach(function (el) {
+      el.addEventListener('mousedown', function (e) {
+        // mousedown (not click) so we fire before the input's blur dismiss.
+        e.preventDefault();
+        pickBaseBranch(el.dataset.branch);
+      });
+    });
+  }
+
+  // Optimistic populate from cached refs; then `git fetch` in the background
+  // and re-render so remote branches stay fresh without blocking the modal.
+  async function populateBaseBranchSelect() {
+    if (!baseBranchInput) return;
+    if (!AppState.repoPath) {
+      baseBranchData = [];
+      baseBranchDefault = '';
+      baseBranchInput.value = 'No project selected';
+      baseBranchInput.classList.add('has-default');
+      return;
+    }
+    await loadBaseBranchData();
+    try { await window.klaus.gitFetch(AppState.repoPath); } catch (_) {}
+    await loadBaseBranchData();
+  }
+
+  async function loadBaseBranchData() {
+    var result = await window.klaus.listBranches(AppState.repoPath);
+    if (result.error || !result.branches) {
+      baseBranchData = [];
+      baseBranchDefault = '';
+      return;
+    }
+
+    // Preferred default order — pick the first branch that exists.
+    var preferred = ['dev', 'main', 'master'];
+    var localNames = result.branches.map(function (b) { return b.localName; });
+    baseBranchDefault = preferred.find(function (p) { return localNames.indexOf(p) !== -1; })
+      || result.defaultBranch
+      || (result.branches[0] && result.branches[0].localName)
+      || '';
+
+    // Pin the default to the top of the list, then everything else alphabetically.
+    var sorted = result.branches.slice().sort(function (a, b) {
+      if (a.localName === baseBranchDefault) return -1;
+      if (b.localName === baseBranchDefault) return 1;
+      return a.localName.localeCompare(b.localName);
+    });
+    baseBranchData = sorted;
+
+    // Initial selection = default. Preserve user's prior pick across re-renders.
+    if (!selectedBaseBranch || localNames.indexOf(selectedBaseBranch) === -1) {
+      selectedBaseBranch = baseBranchDefault;
+    }
+    setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
+  }
 
   btnBrowse.addEventListener('click', async function () {
     var dir = await window.klaus.browseDirectory();
@@ -740,6 +801,13 @@
     }
   });
 
+  function defaultBasePathDisplay() {
+    if (!AppState.repoPath) return 'Default';
+    var p = AppState.repoPath;
+    var slash = p.lastIndexOf('/');
+    return slash > 0 ? p.substring(0, slash) : 'Default';
+  }
+
   function showModal() {
     modalOverlay.style.display = 'flex';
     modalInput.value = '';
@@ -749,17 +817,17 @@
     pathDisplay.textContent = 'No directory selected';
     pathDisplay.classList.remove('has-path');
     selectedBasePath = null;
-    basepathDisplay.textContent = 'Default';
+    // Show the actual default location (the repo's parent dir) so the user
+    // can see where the worktree will land without clicking Change.
+    basepathDisplay.textContent = defaultBasePathDisplay();
     basepathDisplay.classList.remove('has-path');
     activeTab = 'new';
     selectedMode = AppState.savedPrefs.defaultMode || 'claude';
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
-    selectedBranch = null;
-    branchData = [];
-    branchListEl.innerHTML = '';
-    branchFilter.value = '';
+    selectedBaseBranch = '';
+    populateBaseBranchSelect();
     var envField = document.getElementById('modal-env-vars');
     if (envField) envField.value = '';
     // Show repo picker so user explicitly selects which repo to create worktree from
@@ -775,6 +843,12 @@
         if (dir) {
           AppState.repoPath = dir;
           document.getElementById('modal-repo-path').textContent = dir;
+          // Switching repos: clear the cached selection then re-fetch +
+          // re-populate the branch dropdown for the new project. Update
+          // the location display unless the user already overrode it.
+          selectedBaseBranch = '';
+          populateBaseBranchSelect();
+          if (!selectedBasePath) basepathDisplay.textContent = defaultBasePathDisplay();
         }
       });
     }
@@ -1180,20 +1254,33 @@
 
     if (activeTab === 'new') {
       var name = modalInput.value.trim();
-      if (!name) {
+      if (name) {
+        // Name typed: create a new branch with that name, based on the
+        // selected branch (or the default if none picked).
+        result = await window.klaus.createTask(
+          name,
+          AppState.repoPath,
+          selectedMode,
+          selectedBasePath,
+          Object.keys(envVars).length > 0 ? envVars : undefined,
+          selectedBaseBranch || null,
+        );
+      } else if (selectedBaseBranch) {
+        // No name + branch picked: check that branch out directly so the
+        // user can continue work on it in a fresh worktree.
+        result = await window.klaus.checkoutBranch(
+          AppState.repoPath,
+          selectedBaseBranch,
+          selectedMode,
+          selectedBasePath,
+          Object.keys(envVars).length > 0 ? envVars : undefined,
+        );
+      } else {
         modalCreate.disabled = false;
         modalCreate.textContent = 'Create';
+        modalError.textContent = 'Enter a name (creates a new branch) or pick an existing branch to continue.';
         return;
       }
-      result = await window.klaus.createTask(name, AppState.repoPath, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
-    } else if (activeTab === 'branch') {
-      if (!selectedBranch) {
-        modalCreate.disabled = false;
-        modalCreate.textContent = 'Create';
-        modalError.textContent = 'Select a branch first.';
-        return;
-      }
-      result = await window.klaus.checkoutBranch(AppState.repoPath, selectedBranch, selectedMode, selectedBasePath, Object.keys(envVars).length > 0 ? envVars : undefined);
     } else {
       if (!selectedWorktreePath) {
         modalCreate.disabled = false;

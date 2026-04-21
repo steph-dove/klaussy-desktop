@@ -146,6 +146,12 @@ function createWindow(opts) {
 }
 
 app.whenReady().then(() => {
+  // Force the macOS app menu name. In dev (`npx electron .`) the bundled
+  // Info.plist still says "Electron" — setName at startup overrides what
+  // the menu template's `label: app.name` resolves to so the menu bar
+  // shows "Klaussy" instead.
+  app.setName('Klaussy');
+
   // Set dock icon on macOS using PNG (avoids icon cache issues with .icns)
   if (process.platform === 'darwin' && app.dock) {
     const { nativeImage } = require('electron');
@@ -522,7 +528,7 @@ ipcMain.handle('get-repo', () => {
   return null;
 });
 
-ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars }) => {
+ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase }) => {
   // Validate repoPath is a git repo
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
@@ -534,33 +540,43 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   const branch = `${sanitized}`;
 
   // Match klausify CLI convention: worktree as sibling of repo
-  // e.g. /projects/myrepo -> /projects/myrepo-fix-login
   const repoBasename = path.basename(repoPath);
   const worktreeDir = basePath || path.dirname(repoPath);
   const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitized);
 
-  // Check worktree doesn't already exist
   if (fs.existsSync(worktreePath)) {
     return { error: 'Worktree directory already exists: ' + worktreePath };
   }
 
-  // Get the default branch to branch from
-  let baseBranch;
-  try {
-    baseBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD --short', {
-      cwd: repoPath,
-      stdio: 'pipe',
-    }).toString().trim().replace('origin/', '');
-  } catch {
-    // Try common branch names
-    for (const candidate of ['main', 'master', 'develop']) {
+  // Resolve the base. Caller can pass an explicit branch (chosen from the
+  // dropdown); otherwise fall back to origin/HEAD or the usual defaults.
+  let baseBranch = (requestedBase || '').trim();
+  if (baseBranch) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', baseBranch], { cwd: repoPath, stdio: 'pipe' });
+    } catch {
       try {
-        execFileSync('git', ['rev-parse', '--verify', candidate], { cwd: repoPath, stdio: 'pipe' });
-        baseBranch = candidate;
-        break;
-      } catch {}
+        execFileSync('git', ['branch', baseBranch, 'origin/' + baseBranch], { cwd: repoPath, stdio: 'pipe' });
+      } catch (err) {
+        return { error: 'Base branch "' + baseBranch + '" not found locally or on origin.' };
+      }
     }
-    if (!baseBranch) baseBranch = 'main';
+  }
+  if (!baseBranch) {
+    try {
+      baseBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD --short', {
+        cwd: repoPath, stdio: 'pipe',
+      }).toString().trim().replace('origin/', '');
+    } catch {
+      for (const candidate of ['main', 'master', 'develop']) {
+        try {
+          execFileSync('git', ['rev-parse', '--verify', candidate], { cwd: repoPath, stdio: 'pipe' });
+          baseBranch = candidate;
+          break;
+        } catch {}
+      }
+      if (!baseBranch) baseBranch = 'main';
+    }
   }
 
   // Create the worktree (matching klausify CLI: git worktree add ../<repo>-<branch> -b <branch>)
@@ -635,7 +651,25 @@ ipcMain.handle('list-branches', async (_event, { repoPath }) => {
       seen.set(b.localName, b);
     }
   }
-  return { branches: Array.from(seen.values()) };
+
+  // Resolve the default branch (origin/HEAD target). Falls back to the usual
+  // suspects if the symbolic ref isn't set on the remote.
+  let defaultBranch = '';
+  try {
+    defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD --short', {
+      cwd: repoPath, stdio: 'pipe',
+    }).toString().trim().replace('origin/', '');
+  } catch {
+    for (const candidate of ['main', 'master', 'develop']) {
+      try {
+        execFileSync('git', ['rev-parse', '--verify', candidate], { cwd: repoPath, stdio: 'pipe' });
+        defaultBranch = candidate;
+        break;
+      } catch {}
+    }
+  }
+
+  return { branches: Array.from(seen.values()), defaultBranch };
 });
 
 // Create worktree from an existing branch

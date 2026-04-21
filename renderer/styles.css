@@ -143,11 +143,11 @@ body {
 
 #sidebar-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   padding: 16px;
   border-bottom: 1px solid var(--border);
-  gap: 6px;
+  gap: 10px;
 }
 
 #sidebar.collapsed #sidebar-header {
@@ -828,6 +828,83 @@ body {
   align-items: center;
   gap: 10px;
   margin-top: 12px;
+}
+
+#basebranch-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+#basebranch-picker label {
+  font-size: 13px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+#basebranch-combobox {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+#modal-base-branch-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+#modal-base-branch-input:focus { border-color: var(--accent); }
+#modal-base-branch-input.has-default { color: var(--text-dim); font-style: italic; }
+#modal-base-branch-list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+}
+#modal-base-branch-list[hidden] { display: none; }
+.basebranch-option {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.basebranch-option:hover, .basebranch-option.active {
+  background: var(--surface-hover);
+}
+.basebranch-option.is-default { color: var(--accent); font-weight: 600; }
+.basebranch-option-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  background: rgba(128, 128, 128, 0.15);
+  padding: 0 6px;
+  border-radius: 3px;
+  align-self: center;
+}
+.basebranch-option-empty {
+  padding: 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 #basepath-picker label {
