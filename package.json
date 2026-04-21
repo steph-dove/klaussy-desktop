@@ -64,7 +64,8 @@
     "afterSign": "build/notarize.js",
     "dmg": {
       "title": "Klaussy ${version}",
-      "icon": "icon.icns"
+      "icon": "icon.icns",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   }
 }
