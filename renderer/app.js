@@ -392,9 +392,22 @@
   // handle that case fine on their own.
   showApp();
 
+  // Swap the empty-state copy based on whether the user has a project yet.
+  // Helps first-runs — without a project, "Click + to create a new task"
+  // is a dead end since task creation needs a repo.
+  function updateEmptyState() {
+    var defaultEl = document.getElementById('empty-state-default');
+    var noProjEl = document.getElementById('empty-state-no-project');
+    if (!defaultEl || !noProjEl) return;
+    var noProject = !AppState.repoPath;
+    defaultEl.style.display = noProject ? 'none' : '';
+    noProjEl.style.display = noProject ? '' : 'none';
+  }
+
   async function showApp() {
     appEl.style.display = 'flex';
     await loadProjects();
+    updateEmptyState();
     if (isSecondaryWindow) {
       await loadWorktreeList();
     } else {
@@ -1024,6 +1037,7 @@
 
     commands.push({ label: 'Review Pull Request\u2026', action: function () { showPrPicker(); } });
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
+    commands.push({ label: 'Skills & Commands', action: function () { Dialogs.showSkills(); } });
     commands.push({ label: 'Check dependencies\u2026', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: showLogViewer });
     commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
@@ -1247,11 +1261,28 @@
   if (window.klaus.onShowLogs) {
     window.klaus.onShowLogs(function () { Dialogs.showLog(); });
   }
+  if (window.klaus.onShowSkills) {
+    window.klaus.onShowSkills(function () { Dialogs.showSkills(); });
+  }
 
   // Probe gh + claude on startup (silent if everything's set up). Stays out
   // of the way for steady-state users; only first-runs / broken setups see
   // the dialog. Manual invocation also available via the command palette.
   setTimeout(function () { Dialogs.checkAndPromptDeps(); }, 800);
+
+  // Empty-state CTA: "Add a project" delegates to the same flow as the
+  // project switcher's `+` button.
+  var emptyAddProj = document.getElementById('empty-state-add-project');
+  if (emptyAddProj) {
+    emptyAddProj.addEventListener('click', function () {
+      var btn = document.getElementById('btn-add-project');
+      if (btn) btn.click();
+    });
+  }
+  // Empty state stays in sync with project changes — the project-switcher
+  // module dispatches `klaussy:project-changed` when projects change so we
+  // can re-run the no-project check without polling.
+  window.addEventListener('klaussy:project-changed', updateEmptyState);
 
   // ---- E3: Parse env vars from modal ----
 

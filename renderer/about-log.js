@@ -301,11 +301,75 @@ window.Dialogs = (function () {
     });
   }
 
+  // Browse Claude skills + slash commands installed on the user's machine
+  // (user-level + project-level). Discoverability win: lots of devs install
+  // skills then forget what they have.
+  function showSkills() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+
+    var dialog = document.createElement('div');
+    dialog.className = 'skills-dialog';
+    dialog.innerHTML =
+      '<div class="skills-head">'
+        + '<h2>Skills &amp; Commands</h2>'
+        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="skills-body"><div class="skills-loading">Reading ~/.claude\u2026</div></div>';
+
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
+
+    window.klaus.listSkills().then(function (result) {
+      var body = dialog.querySelector('.skills-body');
+      var skills = (result && result.skills) || [];
+      var commands = (result && result.commands) || [];
+      if (skills.length === 0 && commands.length === 0) {
+        body.innerHTML =
+          '<div class="skills-empty">'
+            + '<p>No skills or slash commands found on this machine.</p>'
+            + '<p class="skills-empty-hint">Drop a SKILL.md into ~/.claude/skills/&lt;name&gt;/ '
+            + 'or a slash command into ~/.claude/commands/&lt;name&gt;.md and reopen this dialog.</p>'
+          + '</div>';
+        return;
+      }
+      var html = '';
+      if (skills.length > 0) {
+        html += '<div class="skills-section-head">Skills <span class="skills-section-count">' + skills.length + '</span></div>';
+        html += '<div class="skills-list">' + skills.map(renderSkillRow).join('') + '</div>';
+      }
+      if (commands.length > 0) {
+        html += '<div class="skills-section-head">Slash commands <span class="skills-section-count">' + commands.length + '</span></div>';
+        html += '<div class="skills-list">' + commands.map(renderSkillRow).join('') + '</div>';
+      }
+      body.innerHTML = html;
+      body.querySelectorAll('.skills-row').forEach(function (row) {
+        row.addEventListener('click', function () {
+          window.klaus.openSkillFile(row.dataset.path);
+        });
+      });
+    });
+  }
+
+  function renderSkillRow(s) {
+    var sourceCls = s.source === 'user' ? 'skills-source-user' : 'skills-source-project';
+    return '<div class="skills-row" data-path="' + escHtml(s.path) + '" title="Open ' + escHtml(s.path) + '">'
+      + '<div class="skills-row-main">'
+        + '<span class="skills-row-name">' + escHtml(s.name) + '</span>'
+        + '<span class="skills-row-source ' + sourceCls + '">' + escHtml(s.source) + '</span>'
+      + '</div>'
+      + (s.description ? '<div class="skills-row-desc">' + escHtml(s.description) + '</div>' : '')
+    + '</div>';
+  }
+
   return {
     showAbout: showAbout,
     showLog: showLog,
     showHowToUse: showHowToUse,
     checkAndPromptDeps: checkAndPromptDeps,
     openFeedback: openFeedback,
+    showSkills: showSkills,
   };
 })();

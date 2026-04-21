@@ -61,6 +61,9 @@ window.ProjectSwitcher = (function () {
     if (result) {
       AppState.repoPath = result.path;
       await loadProjects();
+      // Notify other modules (e.g. the empty-state guidance in app.js) that
+      // the active project changed so they can re-render without polling.
+      window.dispatchEvent(new CustomEvent('klaussy:project-changed'));
     }
   });
 
