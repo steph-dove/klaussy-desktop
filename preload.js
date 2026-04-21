@@ -260,6 +260,7 @@ contextBridge.exposeInMainWorld('klaus', {
   prList: () => ipcRenderer.invoke('pr-list'),
   prLookupUrl: (url) => ipcRenderer.invoke('pr-lookup-url', { url }),
   prLoad: ({ number, url }) => ipcRenderer.invoke('pr-load', { number, url }),
+  prRecent: () => ipcRenderer.invoke('pr-recent'),
   prReviewState: () => ipcRenderer.invoke('pr-review-state'),
   prReviewClose: () => ipcRenderer.invoke('pr-review-close'),
   prRefreshThreads: () => ipcRenderer.invoke('pr-refresh-threads'),
@@ -268,6 +269,23 @@ contextBridge.exposeInMainWorld('klaus', {
   prAddIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),
   prReplyToReviewComment: (inReplyTo, body) =>
     ipcRenderer.invoke('pr-reply-to-review-comment', { inReplyTo, body }),
+  prReviewChecks: () => ipcRenderer.invoke('pr-review-checks'),
+  prReviewMerge: (strategy) => ipcRenderer.invoke('pr-review-merge', { strategy }),
+  prDebugCheckStart: (requestId, checkLink, checkName) =>
+    ipcRenderer.invoke('pr-debug-check-start', { requestId, checkLink, checkName }),
+  prDebugCheckCancel: (requestId) => ipcRenderer.invoke('pr-debug-check-cancel', { requestId }),
+  onPrDebugCheckChunk: (requestId, callback) => {
+    const channel = 'pr-debug-check-chunk-' + requestId;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onPrDebugCheckDone: (requestId, callback) => {
+    const channel = 'pr-debug-check-done-' + requestId;
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.once(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
   prCheckoutLocally: () => ipcRenderer.invoke('pr-checkout-locally'),
   onPrCheckoutReady: (callback) => {
     const handler = (_event, task) => callback(task);

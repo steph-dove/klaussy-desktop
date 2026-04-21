@@ -25,6 +25,8 @@ window.PrReview = (function () {
   // G4: draft review comments accumulated client-side until the user submits
   // a review. Structure: { id, path, line, side, startLine?, startSide?, body }
   var pendingComments = [];
+  // G6: latest checks result for the active PR. null = not yet fetched.
+  var currentChecks = null;
 
   function mount(options) {
     hostEl = options.host;
@@ -73,8 +75,18 @@ window.PrReview = (function () {
   }
 
   function render(state) {
-    // Preserve selection across updates unless the PR number changed.
-    if (lastState && lastState.number !== state.number) selectedFile = null;
+    // Preserve selection across updates unless the PR number changed, and
+    // fire a one-shot checks fetch when a new PR comes into view (also
+    // covers first-load since lastState is null then).
+    var isNewPr = !lastState || lastState.number !== state.number;
+    if (isNewPr) {
+      selectedFile = null;
+      currentChecks = null;
+      // Fire-and-forget. Pass the PR number explicitly — lastState isn't
+      // assigned until below, and the async handler would otherwise compare
+      // against a null on first load and drop its own result.
+      fetchAndRenderChecks(state.number);
+    }
     lastState = state;
 
     var files = parseDiffFiles(state.diff || '');
@@ -98,10 +110,12 @@ window.PrReview = (function () {
           + (reviewDecision ? '<span class="pr-review-decision pr-decision-' + escHtml(reviewDecision.toLowerCase()) + '">' + escHtml(reviewDecision.replace('_', ' ')) + '</span>' : '')
           + '<span class="pr-review-author">' + escHtml(author) + '</span>'
           + '<span class="pr-review-branch">' + escHtml(meta.headRefName || '') + ' \u2192 ' + escHtml(meta.baseRefName || '') + '</span>'
+          + '<span class="pr-review-checks-slot"></span>'
         + '</div>'
         + '<div class="pr-review-actions">'
           + '<a href="#" class="pr-review-external" data-url="' + escHtml(meta.url || '') + '">Open on GitHub</a>'
           + '<button class="pr-review-btn js-checkout-local" title="Fetch this PR into a new worktree and spawn a task">Check out locally</button>'
+          + renderMergeControl(state)
           + (isPopout
               ? '<button class="pr-review-btn js-pop-in" title="Return to main window">\u21B2 Pop back in</button>'
               : '<button class="pr-review-btn js-pop-out" title="Open in a separate window">Pop out \u2197</button>')
@@ -113,16 +127,21 @@ window.PrReview = (function () {
       + '<div class="pr-review-tabs">'
         + '<button class="pr-review-tab' + (activeTab === 'files' ? ' active' : '') + '" data-tab="files">Files <span class="pr-tab-count">' + files.length + '</span></button>'
         + '<button class="pr-review-tab' + (activeTab === 'conversation' ? ' active' : '') + '" data-tab="conversation">Conversation' + renderConversationCount(state) + '</button>'
+        + '<button class="pr-review-tab' + (activeTab === 'checks' ? ' active' : '') + '" data-tab="checks">Checks' + renderChecksTabCount() + '</button>'
       + '</div>'
-      + '<div class="pr-review-body' + (activeTab === 'conversation' ? ' conversation-mode' : '') + '">'
+      + '<div class="pr-review-body' + (activeTab !== 'files' ? ' one-col' : '') + '">'
         + (activeTab === 'files'
             ? '<div class="pr-review-file-list">' + renderFileList(files, threadsByPath) + '</div>'
               + '<div class="pr-review-diff">' + renderSelectedFileDiff(files) + '</div>'
-            : '<div class="pr-review-conversation">' + renderConversation(state) + '</div>'
+            : activeTab === 'conversation'
+              ? '<div class="pr-review-conversation">' + renderConversation(state) + '</div>'
+              : '<div class="pr-review-checks-tab">' + renderChecksTab() + '</div>'
           )
       + '</div>';
 
     bindHeader(state);
+    bindMergeControl(state);
+    renderChecksIntoSlot();
     bindTabs();
     if (activeTab === 'files') {
       bindFileList();
@@ -131,6 +150,8 @@ window.PrReview = (function () {
     } else if (activeTab === 'conversation') {
       bindConversationComposer();
       bindReplyButtons();
+    } else if (activeTab === 'checks') {
+      bindChecksTab();
     }
     renderThreadsStatusBadge(state);
     renderPendingReviewBar(state);
@@ -1040,6 +1061,324 @@ window.PrReview = (function () {
   function lastLinesOfHunk(hunk, n) {
     var lines = (hunk || '').split('\n');
     return lines.slice(Math.max(0, lines.length - n)).join('\n');
+  }
+
+  // ---- G6: CI checks + merge ----
+
+  async function fetchAndRenderChecks(forNumber) {
+    var result = await window.klaus.prReviewChecks();
+    // Drop stale results if the user switched PRs mid-flight.
+    if (!lastState || lastState.number !== forNumber) return;
+    currentChecks = result;
+    renderChecksIntoSlot();
+    // Merge gate depends on checks, so repaint the merge control too.
+    var mergeWrap = hostEl.querySelector('.pr-merge-wrap');
+    if (mergeWrap) updateMergeGate(mergeWrap, lastState);
+  }
+
+  function renderChecksTabCount() {
+    if (!currentChecks || !currentChecks.checks) return '';
+    var n = currentChecks.checks.length;
+    if (!n) return '';
+    return ' <span class="pr-tab-count">' + n + '</span>';
+  }
+
+  function renderChecksTab() {
+    if (!currentChecks) {
+      return '<div class="pr-conv-empty-feed">Loading checks\u2026</div>';
+    }
+    if (currentChecks.error) {
+      return '<div class="pr-checks-error">Checks failed: ' + escHtml(currentChecks.error) + '</div>';
+    }
+    var checks = currentChecks.checks || [];
+    if (checks.length === 0) {
+      return '<div class="pr-conv-empty-feed">No checks reported for this PR.</div>';
+    }
+    // Group by bucket so the user sees failures first; pending next; pass last.
+    var order = ['fail', 'pending', 'cancel', 'skipping', 'pass'];
+    function bucketOf(c) {
+      if (c.bucket) return c.bucket;
+      var s = (c.state || '').toLowerCase();
+      if (s === 'success' || s === 'neutral') return 'pass';
+      if (s === 'failure' || s === 'timed_out' || s === 'action_required' || s === 'error') return 'fail';
+      if (s === 'cancelled') return 'cancel';
+      if (s === 'skipped') return 'skipping';
+      return 'pending';
+    }
+    var sorted = checks.slice().sort(function (a, b) {
+      return order.indexOf(bucketOf(a)) - order.indexOf(bucketOf(b));
+    });
+    var header = '<div class="pr-checks-tab-head">'
+      + '<span>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + '</span>'
+      + '<button type="button" class="pr-review-btn pr-checks-refresh">Refresh</button>'
+    + '</div>';
+    return header + '<div class="pr-checks-list">'
+      + sorted.map(function (c) {
+        var b = bucketOf(c);
+        var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
+        var linkAttr = c.link ? ' data-link="' + escHtml(c.link) + '"' : '';
+        var debugBtn = (b === 'fail' && c.link)
+          ? '<button class="pr-check-debug-btn" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" title="Use Claude to diagnose this failure">Debug</button>'
+          : '';
+        return '<div class="pr-check-row pr-check-' + b + '"' + linkAttr + '>'
+          + '<span class="pr-check-icon">' + icon + '</span>'
+          + '<div class="pr-check-labels">'
+            + '<div class="pr-check-name">' + escHtml(c.name || '(unnamed)') + '</div>'
+            + (c.workflow ? '<div class="pr-check-workflow">' + escHtml(c.workflow) + '</div>' : '')
+            + (c.description ? '<div class="pr-check-desc">' + escHtml(c.description) + '</div>' : '')
+          + '</div>'
+          + '<span class="pr-check-state">' + escHtml((c.state || b).toLowerCase()) + '</span>'
+          + debugBtn
+          + (c.link ? '<span class="pr-check-arrow">\u2197</span>' : '')
+        + '</div>';
+      }).join('')
+      + '</div>';
+  }
+
+  function bindChecksTab() {
+    var refresh = hostEl.querySelector('.pr-checks-refresh');
+    if (refresh) {
+      refresh.addEventListener('click', function () {
+        refresh.disabled = true;
+        refresh.textContent = 'Refreshing\u2026';
+        fetchAndRenderChecks(lastState && lastState.number).then(function () {
+          // Re-render the tab to pick up new data.
+          if (lastState) render(lastState);
+        });
+      });
+    }
+    hostEl.querySelectorAll('.pr-check-row[data-link]').forEach(function (row) {
+      row.addEventListener('click', function (e) {
+        // Don't open the run URL when the user clicks the inline Debug btn.
+        if (e.target.closest('.pr-check-debug-btn')) return;
+        var url = row.dataset.link;
+        if (url) window.klaus.openExternal(url);
+      });
+    });
+    hostEl.querySelectorAll('.pr-check-debug-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        startDebugCheck(btn);
+      });
+    });
+  }
+
+  var DEBUG_STATUS_MESSAGES = [
+    'Fetching failing job log\u2026',
+    'Reading PR diff\u2026',
+    'Looking for the failing line\u2026',
+    'Comparing failure to the change\u2026',
+    'Drafting analysis\u2026',
+  ];
+
+  function startDebugCheck(btn) {
+    var row = btn.closest('.pr-check-row');
+    if (!row) return;
+
+    // One panel per row at a time — clicking again cancels the in-flight one.
+    var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-debug-panel')
+      ? row.nextElementSibling : null;
+    if (existing) {
+      var existingId = existing.dataset.requestId;
+      if (existingId) window.klaus.prDebugCheckCancel(existingId);
+      existing.remove();
+      return;
+    }
+
+    var requestId = 'dbg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    var panel = document.createElement('div');
+    panel.className = 'pr-check-debug-panel';
+    panel.dataset.requestId = requestId;
+    panel.innerHTML =
+      '<div class="pr-check-debug-head">'
+        + '<span>Debugging \u2014 ' + escHtml(btn.dataset.name || '') + '</span>'
+        + '<button class="pr-check-debug-close" type="button" title="Cancel / close">&times;</button>'
+      + '</div>'
+      + '<div class="pr-check-debug-body status-pulse">' + escHtml(DEBUG_STATUS_MESSAGES[0]) + '</div>';
+    row.insertAdjacentElement('afterend', panel);
+
+    var bodyEl = panel.querySelector('.pr-check-debug-body');
+    var accumulated = '';
+
+    var statusIdx = 0;
+    var statusTimer = setInterval(function () {
+      if (!bodyEl.isConnected) { clearInterval(statusTimer); return; }
+      if (accumulated) { clearInterval(statusTimer); return; }
+      statusIdx = (statusIdx + 1) % DEBUG_STATUS_MESSAGES.length;
+      bodyEl.textContent = DEBUG_STATUS_MESSAGES[statusIdx];
+    }, 1800);
+
+    var unsubChunk = window.klaus.onPrDebugCheckChunk(requestId, function (chunk) {
+      if (!accumulated) {
+        bodyEl.classList.remove('status-pulse');
+        bodyEl.textContent = '';
+      }
+      accumulated += chunk;
+      bodyEl.textContent = accumulated;
+      bodyEl.scrollTop = bodyEl.scrollHeight;
+    });
+    var unsubDone = window.klaus.onPrDebugCheckDone(requestId, function (result) {
+      clearInterval(statusTimer);
+      if (unsubChunk) unsubChunk();
+      if (!bodyEl.isConnected) return;
+      if (result && result.error) {
+        bodyEl.classList.remove('status-pulse');
+        bodyEl.classList.add('diff-error');
+        bodyEl.textContent = result.error;
+      }
+    });
+
+    panel.querySelector('.pr-check-debug-close').addEventListener('click', function () {
+      clearInterval(statusTimer);
+      window.klaus.prDebugCheckCancel(requestId);
+      if (unsubChunk) unsubChunk();
+      if (unsubDone) unsubDone();
+      panel.remove();
+    });
+
+    btn.disabled = true;
+    var origText = btn.textContent;
+    btn.textContent = 'Debugging\u2026';
+    // Re-enable button after start so the user can click it again to cancel.
+    setTimeout(function () { btn.disabled = false; btn.textContent = origText; }, 200);
+
+    window.klaus.prDebugCheckStart(requestId, btn.dataset.link, btn.dataset.name).then(function (r) {
+      if (r && r.error) {
+        clearInterval(statusTimer);
+        bodyEl.classList.remove('status-pulse');
+        bodyEl.classList.add('diff-error');
+        bodyEl.textContent = r.error;
+      }
+    });
+  }
+
+  function renderChecksIntoSlot() {
+    var slot = hostEl.querySelector('.pr-review-checks-slot');
+    if (!slot) return;
+    if (!currentChecks) { slot.innerHTML = ''; return; }
+    if (currentChecks.error) {
+      slot.innerHTML = '<span class="pr-check-pill fail" title="' + escHtml(currentChecks.error) + '">checks: error</span>';
+      return;
+    }
+    var checks = currentChecks.checks || [];
+    if (checks.length === 0) {
+      slot.innerHTML = '<span class="pr-check-pill pending">no checks</span>';
+      return;
+    }
+    var counts = { pass: 0, fail: 0, pending: 0, cancel: 0, skipping: 0 };
+    checks.forEach(function (c) {
+      var b = c.bucket;
+      if (!b) {
+        var s = (c.state || '').toLowerCase();
+        if (s === 'success' || s === 'neutral') b = 'pass';
+        else if (s === 'failure' || s === 'timed_out' || s === 'action_required' || s === 'error') b = 'fail';
+        else if (s === 'cancelled') b = 'cancel';
+        else if (s === 'skipped') b = 'skipping';
+        else b = 'pending';
+      }
+      counts[b] = (counts[b] || 0) + 1;
+    });
+    var bits = [];
+    if (counts.pass)     bits.push('<span class="pr-check-pill pass" title="Passing">\u2713 ' + counts.pass + '</span>');
+    if (counts.fail)     bits.push('<span class="pr-check-pill fail" title="Failing">\u2717 ' + counts.fail + '</span>');
+    if (counts.pending)  bits.push('<span class="pr-check-pill pending" title="Pending">\u25CB ' + counts.pending + '</span>');
+    if (counts.cancel)   bits.push('<span class="pr-check-pill cancel" title="Cancelled">\u2296 ' + counts.cancel + '</span>');
+    if (counts.skipping) bits.push('<span class="pr-check-pill skipping" title="Skipped">\u2298 ' + counts.skipping + '</span>');
+    slot.innerHTML = bits.join(' ');
+  }
+
+  function renderMergeControl(state) {
+    var meta = state.meta || {};
+    // Only show for open, non-draft PRs. Merged/closed PRs get a badge.
+    var openState = (meta.state || '').toUpperCase() === 'OPEN';
+    if (!openState) return '';
+    return '<span class="pr-merge-wrap">'
+      + '<button class="pr-review-btn pr-merge-btn" type="button" disabled title="Checking mergeability\u2026">Merge \u25BE</button>'
+      + '<div class="pr-merge-menu" hidden>'
+        + '<button type="button" data-strategy="merge">Create a merge commit</button>'
+        + '<button type="button" data-strategy="squash">Squash and merge</button>'
+        + '<button type="button" data-strategy="rebase">Rebase and merge</button>'
+      + '</div>'
+    + '</span>';
+  }
+
+  function bindMergeControl(state) {
+    var wrap = hostEl.querySelector('.pr-merge-wrap');
+    if (!wrap) return;
+    var btn = wrap.querySelector('.pr-merge-btn');
+    var menu = wrap.querySelector('.pr-merge-menu');
+
+    updateMergeGate(wrap, state);
+
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (btn.disabled) return;
+      menu.hidden = !menu.hidden;
+    });
+
+    menu.addEventListener('click', async function (e) {
+      var target = e.target.closest('[data-strategy]');
+      if (!target) return;
+      menu.hidden = true;
+      var strategy = target.dataset.strategy;
+      var label = target.textContent;
+      if (!confirm('Merge with "' + label + '"?')) return;
+      btn.disabled = true;
+      btn.textContent = 'Merging\u2026';
+      var result = await window.klaus.prReviewMerge(strategy);
+      if (result && result.error) {
+        alert('Merge failed:\n' + result.error);
+        btn.textContent = 'Merge \u25BE';
+        updateMergeGate(wrap, lastState);
+        return;
+      }
+      // State reload is triggered on the main side; the resulting broadcast
+      // re-renders the header with the updated state pill.
+    });
+
+    // Click-outside dismiss.
+    document.addEventListener('click', function onDoc(ev) {
+      if (!wrap.contains(ev.target)) {
+        menu.hidden = true;
+      }
+    });
+  }
+
+  function updateMergeGate(wrap, state) {
+    var btn = wrap.querySelector('.pr-merge-btn');
+    if (!btn) return;
+    var reason = mergeGateReason(state);
+    if (reason) {
+      btn.disabled = true;
+      btn.title = reason;
+      btn.classList.remove('ready');
+    } else {
+      btn.disabled = false;
+      btn.title = 'Merge this PR';
+      btn.classList.add('ready');
+    }
+  }
+
+  // Mirrors the subset of pr-panel.js's mergeGateReason that applies to
+  // someone else's PR. We don't have commit-sign branch-protection nuance
+  // here — GitHub itself will reject if the PR isn't mergeable.
+  function mergeGateReason(state) {
+    var meta = (state && state.meta) || {};
+    if ((meta.state || '').toUpperCase() !== 'OPEN') return 'Only open PRs can be merged';
+    if (meta.isDraft) return 'PR is a draft';
+    if (meta.mergeable === 'CONFLICTING') return 'Has conflicts';
+    if (currentChecks && currentChecks.checks) {
+      var failing = currentChecks.checks.some(function (c) {
+        var b = c.bucket || '';
+        var s = (c.state || '').toLowerCase();
+        return b === 'fail' || s === 'failure' || s === 'error' || s === 'timed_out';
+      });
+      if (failing) return 'Failing checks';
+    }
+    if (meta.mergeStateStatus === 'BEHIND') return 'Branch is behind base';
+    if (meta.mergeable === 'UNKNOWN' && !meta.mergeStateStatus) return 'Mergeability still computing\u2026';
+    if (!currentChecks) return 'Checking mergeability\u2026';
+    return null;
   }
 
   function renderThreadsStatusBadge(state) {

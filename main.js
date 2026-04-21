@@ -1801,7 +1801,7 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
     const [meta, diff] = await Promise.all([
       ghJson([
         'pr', 'view', target,
-        '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
+        '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
       ], cwd),
       ghText(['pr', 'diff', target], cwd),
     ]);
@@ -1817,6 +1817,11 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
     };
     broadcastPrReview();
 
+    // Record this PR in review history (most recent first, deduped by URL,
+    // capped at 20). Separate from load-path so a storage hiccup can't break
+    // the review UI.
+    try { pushReviewHistory(meta); } catch (_) {}
+
     // Fire-and-forget thread fetch; broadcasts again when ready so the renderer
     // can paint the shell immediately without waiting on the GraphQL round-trip.
     fetchThreadsForActive();
@@ -1825,6 +1830,30 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
   } catch (err) {
     return { error: (err.stderr || err.message || '').trim() };
   }
+});
+
+function pushReviewHistory(meta) {
+  if (!meta || !meta.url) return;
+  const config = loadConfig();
+  const history = (config.reviewHistory || []).filter(e => e.url !== meta.url);
+  history.unshift({
+    url: meta.url,
+    number: meta.number,
+    title: meta.title || '',
+    author: (meta.author && (meta.author.login || meta.author.name)) || '',
+    state: meta.state || '',
+    isDraft: !!meta.isDraft,
+    headRefName: meta.headRefName || '',
+    baseRefName: meta.baseRefName || '',
+    viewedAt: new Date().toISOString(),
+  });
+  config.reviewHistory = history.slice(0, 20);
+  saveConfig(config);
+}
+
+ipcMain.handle('pr-recent', () => {
+  const config = loadConfig();
+  return { items: config.reviewHistory || [] };
 });
 
 // GraphQL-backed thread fetch. Scoped to the *base* repo (target), not the
@@ -1920,6 +1949,230 @@ ipcMain.handle('pr-refresh-threads', async () => {
   await fetchThreadsForActive();
   return { ok: true };
 });
+
+// G6: CI checks scoped to the PR review surface. `gh pr checks -R …`
+// mangles the repo name in its GraphQL query on some gh versions. Using
+// `gh pr view -R … --json statusCheckRollup` reads the same rollup through a
+// different code path that handles the -R flag cleanly, and reshapes to the
+// { name, state, bucket, link, workflow, description } shape the renderer
+// already knows how to draw.
+ipcMain.handle('pr-review-checks', async () => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { meta, baseOwner, baseRepo } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const sha = meta && meta.headRefOid;
+  if (!sha) return { checks: [], error: 'Missing head commit sha' };
+  const cwd = currentRepoPath() || require('os').homedir();
+
+  // REST endpoint is more forgiving than gh's GraphQL path for this repo
+  // (which throws "Could not resolve to a Repository" on both `gh pr checks`
+  // and a custom gh api graphql call). Runs + statuses are separate APIs,
+  // so we fetch both in parallel and merge.
+  async function run(args) {
+    return new Promise((resolve) => {
+      execFile('gh', ['api'].concat(args), { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15000 },
+        (err, stdout, stderr) => resolve({ err, stdout, stderr }));
+    });
+  }
+  const [runsRes, statusRes] = await Promise.all([
+    run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate']),
+    run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/status`]),
+  ]);
+
+  const checks = [];
+  if (!runsRes.err) {
+    try {
+      const parsed = JSON.parse(runsRes.stdout);
+      const runs = parsed.check_runs || [];
+      runs.forEach((r) => checks.push(normalizeCheckRun(r)));
+    } catch (_) {}
+  }
+  if (!statusRes.err) {
+    try {
+      const parsed = JSON.parse(statusRes.stdout);
+      const statuses = parsed.statuses || [];
+      statuses.forEach((s) => checks.push(normalizeStatus(s)));
+    } catch (_) {}
+  }
+
+  // Both calls failed — surface the first real error so the user sees why.
+  if (checks.length === 0 && (runsRes.err || statusRes.err)) {
+    const first = runsRes.err || statusRes.err;
+    const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
+    return { checks: [], error: raw.trim() };
+  }
+  return { checks };
+});
+
+function bucketFromState(rawState) {
+  const s = (rawState || '').toLowerCase();
+  if (s === 'success' || s === 'neutral') return 'pass';
+  if (s === 'failure' || s === 'timed_out' || s === 'action_required' || s === 'error') return 'fail';
+  if (s === 'cancelled') return 'cancel';
+  if (s === 'skipped') return 'skipping';
+  if (['queued', 'in_progress', 'pending', 'waiting', 'expected', 'requested'].includes(s)) return 'pending';
+  return 'pending';
+}
+
+function normalizeCheckRun(r) {
+  // GitHub REST check-run: { name, status, conclusion, details_url, output: {...}, app: { name }, ... }
+  const rawState = (r.conclusion || r.status || '').toLowerCase();
+  return {
+    name: r.name || '(unnamed)',
+    state: rawState,
+    bucket: bucketFromState(rawState),
+    link: r.details_url || r.html_url || '',
+    workflow: (r.app && r.app.name) || '',
+    description: (r.output && r.output.title) || '',
+  };
+}
+
+function normalizeStatus(s) {
+  // Legacy REST status: { context, state, target_url, description, ... }
+  return {
+    name: s.context || '(unnamed)',
+    state: (s.state || '').toLowerCase(),
+    bucket: bucketFromState(s.state),
+    link: s.target_url || '',
+    workflow: '',
+    description: s.description || '',
+  };
+}
+
+// Debug a single failing CI check. Pulls the failing job's logs, builds a
+// prompt with PR description + diff + log tail, and streams claude's analysis
+// back to the renderer. Same chunk/done event protocol as Explain so the
+// renderer can reuse the same UX.
+const debugCheckProcs = new Map();
+
+ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { meta, baseOwner, baseRepo, diff } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  if (!checkLink) return { error: 'Check has no run link to fetch logs from' };
+
+  // GitHub job links look like:
+  //   https://github.com/<owner>/<repo>/actions/runs/<runId>/job/<jobId>
+  const m = checkLink.match(/\/actions\/runs\/(\d+)\/job\/(\d+)/);
+  const jobId = m ? m[2] : null;
+  if (!jobId) return { error: 'Could not parse job id from link: ' + checkLink };
+
+  const cwd = currentRepoPath() || require('os').homedir();
+  const sender = event.sender;
+  const chunkChannel = 'pr-debug-check-chunk-' + requestId;
+  const doneChannel = 'pr-debug-check-done-' + requestId;
+
+  // Fetch logs first (synchronously-ish), then spawn claude with the full
+  // prompt. Logs can be large; cap to last ~400 lines so we don't blow the
+  // model's context with setup noise.
+  let logs = '';
+  try {
+    logs = execFileSync('gh', [
+      'api', `/repos/${baseOwner}/${baseRepo}/actions/jobs/${jobId}/logs`,
+    ], { cwd, stdio: 'pipe', timeout: 20000, maxBuffer: 50 * 1024 * 1024 }).toString();
+  } catch (err) {
+    return { error: 'Could not fetch logs: ' + (err.stderr ? err.stderr.toString().trim() : err.message) };
+  }
+  const logLines = logs.split('\n');
+  const logTail = logLines.slice(-400).join('\n');
+
+  // Truncate diff too — long PRs can easily exceed the prompt budget. The
+  // file list + first ~600 lines is usually enough to let claude judge
+  // whether the PR caused the failure; full diff is rarely needed.
+  const diffSnippet = (diff || '').split('\n').slice(0, 600).join('\n')
+    + ((diff || '').split('\n').length > 600 ? '\n\n[... diff truncated ...]\n' : '');
+
+  const prompt =
+    `A pull request has a failing CI check. Help diagnose it.\n\n`
+    + `## PR\n#${meta.number}: ${meta.title || ''}\n`
+    + (meta.body ? `\n${meta.body.slice(0, 2000)}\n` : '')
+    + `\n## Failing check\nName: ${checkName || '(unnamed)'}\nLink: ${checkLink}\n`
+    + `\n## Last lines of the failing job log\n\`\`\`\n${logTail}\n\`\`\`\n`
+    + `\n## PR diff (truncated to 600 lines)\n\`\`\`\n${diffSnippet}\n\`\`\`\n`
+    + `\nAnswer in this structure:\n`
+    + `1. **What broke** — one or two sentences naming the actual failure.\n`
+    + `2. **Caused by this PR?** — yes / no / likely, with the specific evidence from the diff vs log.\n`
+    + `3. **Fix** — concrete, code-level suggestion. Use file:line references when possible.\n`
+    + `Keep it tight; no preamble.`;
+
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const { spawn } = require('child_process');
+  const proc = spawn(claudeBin, ['-p', prompt], {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  debugCheckProcs.set(requestId, proc);
+
+  let stderrBuf = '';
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.on('error', (err) => {
+    debugCheckProcs.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    debugCheckProcs.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      sender.send(doneChannel, { cancelled: true });
+    } else if (code !== 0) {
+      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
+    } else {
+      sender.send(doneChannel, { ok: true });
+    }
+  });
+
+  return { ok: true };
+});
+
+ipcMain.handle('pr-debug-check-cancel', (_event, { requestId }) => {
+  const proc = debugCheckProcs.get(requestId);
+  if (!proc) return { ok: false };
+  try { proc.kill('SIGTERM'); } catch {}
+  return { ok: true };
+});
+
+ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
+  if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
+  const { meta } = activePrReview;
+  if (!meta || !meta.url) return { error: 'Could not determine PR URL' };
+  const cwd = currentRepoPath() || require('os').homedir();
+  try {
+    // URL form bypasses gh's buggy -R repo resolution (see pr-review-checks
+    // for the failure mode we're avoiding).
+    ghExec(['pr', 'merge', meta.url, flag], {
+      cwd, stdio: 'pipe', timeout: 30000,
+    });
+    await reloadActivePrReviewMeta();
+    fetchThreadsForActive();
+    return { ok: true };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+async function reloadActivePrReviewMeta() {
+  if (!activePrReview) return;
+  const { meta: existingMeta } = activePrReview;
+  if (!existingMeta || !existingMeta.url) return;
+  const cwd = currentRepoPath() || require('os').homedir();
+  try {
+    const meta = await ghJson([
+      'pr', 'view', existingMeta.url,
+      '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
+    ], cwd);
+    if (!activePrReview || activePrReview.number !== meta.number) return;
+    activePrReview.meta = Object.assign({}, activePrReview.meta, meta);
+    broadcastPrReview();
+  } catch (_) { /* non-fatal */ }
+}
 
 // Walk the user's klausify projects and return the first whose `origin`
 // remote points at <owner>/<repo> (GitHub URL, either SSH or HTTPS form).
