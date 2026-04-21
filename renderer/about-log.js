@@ -302,8 +302,9 @@ window.Dialogs = (function () {
   }
 
   // Browse Claude skills + slash commands installed on the user's machine
-  // (user-level + project-level). Discoverability win: lots of devs install
-  // skills then forget what they have.
+  // (user-level + every klausify project). Click a row to preview the file
+  // contents in-app; an explicit "Open in editor" button kicks out to the
+  // user's default editor when they actually want to edit.
   function showSkills() {
     var overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
@@ -313,25 +314,42 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="skills-head">'
         + '<h2>Skills &amp; Commands</h2>'
-        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+        + '<div class="skills-head-actions">'
+          + '<button class="skills-new" type="button" title="Create a new skill or slash command">+ New</button>'
+          + '<button class="skills-close" type="button" title="Close">&times;</button>'
+        + '</div>'
       + '</div>'
-      + '<div class="skills-body"><div class="skills-loading">Reading ~/.claude\u2026</div></div>';
+      + '<div class="skills-body">'
+        + '<div class="skills-list-pane"><div class="skills-loading">Reading ~/.claude\u2026</div></div>'
+        + '<div class="skills-preview-pane"><div class="skills-preview-empty">Select a skill or command on the left to preview.</div></div>'
+      + '</div>';
 
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
 
-    window.klaus.listSkills().then(function (result) {
-      var body = dialog.querySelector('.skills-body');
+    var listPane = dialog.querySelector('.skills-list-pane');
+    var previewPane = dialog.querySelector('.skills-preview-pane');
+
+    function refreshAndSelect(targetPath) {
+      window.klaus.listSkills().then(function (r) { renderList(r, targetPath); });
+    }
+
+    dialog.querySelector('.skills-new').addEventListener('click', function () {
+      openCreateForm(previewPane, function (created) {
+        if (created && created.path) refreshAndSelect(created.path);
+      });
+    });
+
+    function renderList(result, autoSelectPath) {
       var skills = (result && result.skills) || [];
       var commands = (result && result.commands) || [];
       if (skills.length === 0 && commands.length === 0) {
-        body.innerHTML =
+        listPane.innerHTML =
           '<div class="skills-empty">'
-            + '<p>No skills or slash commands found on this machine.</p>'
-            + '<p class="skills-empty-hint">Drop a SKILL.md into ~/.claude/skills/&lt;name&gt;/ '
-            + 'or a slash command into ~/.claude/commands/&lt;name&gt;.md and reopen this dialog.</p>'
+            + '<p>No skills or slash commands yet.</p>'
+            + '<p class="skills-empty-hint">Click <strong>+ New</strong> above to create one, or drop files into ~/.claude/skills/ or ~/.claude/commands/ and reopen.</p>'
           + '</div>';
         return;
       }
@@ -344,10 +362,178 @@ window.Dialogs = (function () {
         html += '<div class="skills-section-head">Slash commands <span class="skills-section-count">' + commands.length + '</span></div>';
         html += '<div class="skills-list">' + commands.map(renderSkillRow).join('') + '</div>';
       }
-      body.innerHTML = html;
-      body.querySelectorAll('.skills-row').forEach(function (row) {
+      listPane.innerHTML = html;
+      listPane.querySelectorAll('.skills-row').forEach(function (row) {
         row.addEventListener('click', function () {
-          window.klaus.openSkillFile(row.dataset.path);
+          listPane.querySelectorAll('.skills-row').forEach(function (r) { r.classList.remove('selected'); });
+          row.classList.add('selected');
+          loadSkillPreview(previewPane, row.dataset.path, row.dataset.name);
+        });
+      });
+      // Selection priority: an explicit autoSelectPath (e.g. just-created
+      // file) → otherwise first row.
+      var target = autoSelectPath
+        ? listPane.querySelector('.skills-row[data-path="' + cssEscape(autoSelectPath) + '"]')
+        : listPane.querySelector('.skills-row');
+      if (target) target.click();
+    }
+
+    window.klaus.listSkills().then(function (result) { renderList(result); });
+  }
+
+  // Helper for selector-safe path attribute lookup. Path may contain dots,
+  // slashes, etc. — escape the few that break attribute selectors.
+  function cssEscape(s) {
+    return String(s).replace(/(["\\])/g, '\\$1');
+  }
+
+  // Inline create-form rendered into the preview pane. Lets the user pick
+  // type (skill / command), scope (user or any klausify project), and a
+  // name; on success refreshes the list and opens the new file for editing.
+  function openCreateForm(pane, onCreated) {
+    Promise.all([
+      window.klaus.listProjects(),
+    ]).then(function (results) {
+      var projects = results[0] || [];
+      var scopeOpts = '<option value="user">User (~/.claude)</option>';
+      projects.forEach(function (p) {
+        scopeOpts += '<option value="' + cssEscape(p.path) + '">' + escHtml(p.name) + ' (project)</option>';
+      });
+      pane.innerHTML =
+        '<div class="skills-preview-head">'
+          + '<div class="skills-preview-title">New skill or command</div>'
+        + '</div>'
+        + '<div class="skills-create-form">'
+          + '<label class="skills-create-row">'
+            + '<span>Type</span>'
+            + '<div class="skills-create-toggle">'
+              + '<button type="button" data-type="skill" class="active">Skill</button>'
+              + '<button type="button" data-type="command">Slash command</button>'
+            + '</div>'
+          + '</label>'
+          + '<label class="skills-create-row">'
+            + '<span>Scope</span>'
+            + '<select class="skills-create-scope">' + scopeOpts + '</select>'
+          + '</label>'
+          + '<label class="skills-create-row">'
+            + '<span>Name</span>'
+            + '<input type="text" class="skills-create-name" placeholder="my-skill" autocomplete="off" spellcheck="false" />'
+          + '</label>'
+          + '<div class="skills-create-hint">Letters, numbers, dashes, underscores.</div>'
+          + '<div class="skills-create-error" hidden></div>'
+          + '<div class="skills-create-actions">'
+            + '<button type="button" class="skills-create-cancel">Cancel</button>'
+            + '<button type="button" class="skills-create-go">Create</button>'
+          + '</div>'
+        + '</div>';
+
+      var typeBtns = pane.querySelectorAll('.skills-create-toggle button');
+      var nameInput = pane.querySelector('.skills-create-name');
+      var scopeSel = pane.querySelector('.skills-create-scope');
+      var goBtn = pane.querySelector('.skills-create-go');
+      var cancelBtn = pane.querySelector('.skills-create-cancel');
+      var errEl = pane.querySelector('.skills-create-error');
+      var selectedType = 'skill';
+
+      typeBtns.forEach(function (b) {
+        b.addEventListener('click', function () {
+          typeBtns.forEach(function (x) { x.classList.remove('active'); });
+          b.classList.add('active');
+          selectedType = b.dataset.type;
+        });
+      });
+
+      cancelBtn.addEventListener('click', function () {
+        pane.innerHTML = '<div class="skills-preview-empty">Select a skill or command on the left to preview.</div>';
+      });
+
+      async function submit() {
+        var name = nameInput.value.trim();
+        if (!name) { errEl.hidden = false; errEl.textContent = 'Name is required.'; return; }
+        goBtn.disabled = true;
+        goBtn.textContent = 'Creating\u2026';
+        errEl.hidden = true;
+        var r = await window.klaus.createSkillFile({ type: selectedType, scope: scopeSel.value, name: name });
+        if (r && r.error) {
+          errEl.hidden = false;
+          errEl.textContent = r.error;
+          goBtn.disabled = false;
+          goBtn.textContent = 'Create';
+          return;
+        }
+        if (typeof onCreated === 'function') onCreated(r);
+      }
+      goBtn.addEventListener('click', submit);
+      nameInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); submit(); }
+        if (e.key === 'Escape') cancelBtn.click();
+      });
+      setTimeout(function () { nameInput.focus(); }, 50);
+    });
+  }
+
+  function loadSkillPreview(pane, filePath, name) {
+    pane.innerHTML = '<div class="skills-preview-loading">Loading\u2026</div>';
+    window.klaus.readSkillFile(filePath).then(function (result) {
+      if (result && result.error) {
+        pane.innerHTML = '<div class="skills-preview-empty">Failed to read: ' + escHtml(result.error) + '</div>';
+        return;
+      }
+      var original = (result && result.content) || '';
+      pane.innerHTML =
+        '<div class="skills-preview-head">'
+          + '<div class="skills-preview-title">' + escHtml(name || filePath.split('/').pop()) + '<span class="skills-preview-dirty" hidden>\u00b7 unsaved</span></div>'
+          + '<div class="skills-preview-actions">'
+            + '<button class="skills-preview-copy" type="button" title="Copy file contents">Copy</button>'
+            + '<button class="skills-preview-save" type="button" title="Save (\u2318S)" disabled>Save</button>'
+          + '</div>'
+        + '</div>'
+        + '<div class="skills-preview-path">' + escHtml(filePath) + '</div>'
+        + '<textarea class="skills-preview-editor" spellcheck="false"></textarea>';
+
+      var ta = pane.querySelector('.skills-preview-editor');
+      var saveBtn = pane.querySelector('.skills-preview-save');
+      var dirtyMark = pane.querySelector('.skills-preview-dirty');
+      var copyBtn = pane.querySelector('.skills-preview-copy');
+      ta.value = original;
+
+      function setDirty(d) {
+        saveBtn.disabled = !d;
+        dirtyMark.hidden = !d;
+      }
+
+      ta.addEventListener('input', function () { setDirty(ta.value !== original); });
+      ta.addEventListener('keydown', function (e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); saveBtn.click(); }
+      });
+
+      async function save() {
+        if (saveBtn.disabled) return;
+        saveBtn.disabled = true;
+        var origText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving\u2026';
+        var r = await window.klaus.writeSkillFile(filePath, ta.value);
+        if (r && r.error) {
+          alert('Save failed: ' + r.error);
+          saveBtn.disabled = false;
+          saveBtn.textContent = origText;
+          return;
+        }
+        original = ta.value;
+        saveBtn.textContent = 'Saved';
+        dirtyMark.hidden = true;
+        setTimeout(function () {
+          saveBtn.textContent = 'Save';
+          // Stay disabled until next edit.
+        }, 900);
+      }
+      saveBtn.addEventListener('click', save);
+
+      copyBtn.addEventListener('click', function () {
+        navigator.clipboard.writeText(ta.value).then(function () {
+          var orig = copyBtn.textContent;
+          copyBtn.textContent = 'Copied';
+          setTimeout(function () { copyBtn.textContent = orig; }, 900);
         });
       });
     });
@@ -355,7 +541,7 @@ window.Dialogs = (function () {
 
   function renderSkillRow(s) {
     var sourceCls = s.source === 'user' ? 'skills-source-user' : 'skills-source-project';
-    return '<div class="skills-row" data-path="' + escHtml(s.path) + '" title="Open ' + escHtml(s.path) + '">'
+    return '<div class="skills-row" data-path="' + escHtml(s.path) + '" data-name="' + escHtml(s.name) + '" title="' + escHtml(s.path) + '">'
       + '<div class="skills-row-main">'
         + '<span class="skills-row-name">' + escHtml(s.name) + '</span>'
         + '<span class="skills-row-source ' + sourceCls + '">' + escHtml(s.source) + '</span>'

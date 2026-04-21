@@ -5650,7 +5650,7 @@ body.pr-review-popout #pr-review-root {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  width: 580px;
+  width: 880px;
   max-width: calc(100vw - 60px);
   max-height: calc(100vh - 120px);
   display: flex;
@@ -5666,6 +5666,100 @@ body.pr-review-popout #pr-review-root {
   border-bottom: 1px solid var(--border);
 }
 .skills-head h2 { margin: 0; font-size: 15px; color: var(--text); }
+.skills-head-actions { display: flex; align-items: center; gap: 8px; }
+.skills-new {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.skills-new:hover { filter: brightness(1.1); }
+
+.skills-create-form {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: inherit;
+}
+.skills-create-row {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.skills-create-row > span {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.skills-create-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.skills-create-toggle button {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: 5px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border-left: 1px solid var(--border);
+}
+.skills-create-toggle button:first-child { border-left: none; }
+.skills-create-toggle button.active { background: var(--accent); color: #fff; }
+.skills-create-scope, .skills-create-name {
+  background: var(--input-bg, var(--bg));
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.skills-create-scope:focus, .skills-create-name:focus { border-color: var(--accent); }
+.skills-create-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 92px;
+}
+.skills-create-error {
+  margin-left: 92px;
+  color: var(--diff-del-fg, #e27c7c);
+  font-size: 11px;
+}
+.skills-create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.skills-create-cancel, .skills-create-go {
+  padding: 5px 14px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.skills-create-cancel { background: transparent; color: var(--text); }
+.skills-create-cancel:hover { background: var(--surface-hover); }
+.skills-create-go {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.skills-create-go:hover { filter: brightness(1.1); }
+.skills-create-go:disabled { opacity: 0.6; cursor: wait; }
 .skills-close {
   background: transparent;
   border: none;
@@ -5677,10 +5771,125 @@ body.pr-review-popout #pr-review-root {
 }
 .skills-close:hover { color: var(--text); }
 .skills-body {
-  overflow-y: auto;
-  padding: 8px 0 14px;
+  display: grid;
+  grid-template-columns: 320px 1fr;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+.skills-list-pane {
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 8px 0;
+}
+.skills-preview-pane {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.skills-preview-empty {
+  padding: 30px 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.skills-preview-loading { padding: 20px; color: var(--text-muted); font-size: 12px; }
+.skills-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 6px;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.skills-preview-title {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+.skills-preview-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.skills-preview-copy, .skills-preview-open {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.skills-preview-copy:hover, .skills-preview-open:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+.skills-preview-path {
+  padding: 0 16px 8px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  word-break: break-all;
+  flex-shrink: 0;
+}
+.skills-preview-body {
+  margin: 0 16px 14px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+}
+.skills-preview-body code { font-family: inherit; }
+
+.skills-preview-editor {
+  margin: 0 16px 14px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+  resize: none;
+  outline: none;
+  flex: 1;
+  min-height: 0;
+  box-sizing: border-box;
+  width: calc(100% - 32px);
+}
+.skills-preview-editor:focus { border-color: var(--accent); }
+
+.skills-preview-dirty {
+  margin-left: 8px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+}
+.skills-preview-save {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+.skills-preview-save:disabled {
+  background: var(--surface-hover) !important;
+  color: var(--text-muted) !important;
+  border-color: var(--border) !important;
+  font-weight: 400;
+  cursor: default;
 }
 .skills-loading, .skills-empty {
   padding: 30px 18px;
@@ -5724,6 +5933,9 @@ body.pr-review-popout #pr-review-root {
   border-left: 3px solid transparent;
 }
 .skills-row:hover {
+  background: var(--surface-hover);
+}
+.skills-row.selected {
   background: var(--surface-hover);
   border-left-color: var(--accent);
 }

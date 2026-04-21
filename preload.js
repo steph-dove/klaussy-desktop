@@ -267,6 +267,9 @@ contextBridge.exposeInMainWorld('klaus', {
   // Skills + slash commands inventory for the Skills dialog.
   listSkills: () => ipcRenderer.invoke('list-skills'),
   openSkillFile: (filePath) => ipcRenderer.invoke('open-skill-file', { filePath }),
+  readSkillFile: (filePath) => ipcRenderer.invoke('read-skill-file', { filePath }),
+  writeSkillFile: (filePath, content) => ipcRenderer.invoke('write-skill-file', { filePath, content }),
+  createSkillFile: ({ type, scope, name }) => ipcRenderer.invoke('create-skill-file', { type, scope, name }),
 
   // H3: Worktree file watcher for instant diff refresh
   watchWorktree: (worktreePath) => ipcRenderer.invoke('watch-worktree', { worktreePath }),

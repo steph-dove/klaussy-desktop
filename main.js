@@ -1241,6 +1241,78 @@ ipcMain.handle('open-skill-file', (_event, { filePath }) => {
   return { ok: true };
 });
 
+ipcMain.handle('read-skill-file', (_event, { filePath }) => {
+  if (!filePath) return { error: 'No file path' };
+  try {
+    const content = fs.readFileSync(filePath, 'utf8');
+    return { content };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('write-skill-file', (_event, { filePath, content }) => {
+  if (!filePath) return { error: 'No file path' };
+  if (typeof content !== 'string') return { error: 'Content must be a string' };
+  try {
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Create a new skill or slash-command in the chosen scope. Writes a starter
+// file with frontmatter so the user has somewhere to start instead of an
+// empty doc; the dialog opens it for editing immediately.
+ipcMain.handle('create-skill-file', (_event, { type, scope, name }) => {
+  if (type !== 'skill' && type !== 'command') return { error: 'Unknown type: ' + type };
+  if (!name || !/^[a-zA-Z0-9_-][a-zA-Z0-9_-]*$/.test(name)) {
+    return { error: 'Name must contain only letters, numbers, dashes, and underscores.' };
+  }
+  // Resolve the scope's .claude root.
+  let root;
+  if (scope === 'user') {
+    root = path.join(require('os').homedir(), '.claude');
+  } else {
+    // scope is the absolute project path.
+    if (!scope || !fs.existsSync(scope)) return { error: 'Invalid project scope: ' + scope };
+    root = path.join(scope, '.claude');
+  }
+
+  let filePath, starter;
+  if (type === 'skill') {
+    const skillDir = path.join(root, 'skills', name);
+    filePath = path.join(skillDir, 'SKILL.md');
+    if (fs.existsSync(filePath)) return { error: 'A skill named "' + name + '" already exists in this scope.' };
+    try { fs.mkdirSync(skillDir, { recursive: true }); }
+    catch (err) { return { error: 'Could not create skill dir: ' + err.message }; }
+    starter = '---\n'
+      + 'name: ' + name + '\n'
+      + 'description: One-line description used by Claude to decide when to apply this skill.\n'
+      + '---\n\n'
+      + '# ' + name + '\n\n'
+      + 'Describe what this skill does, when to use it, and any guardrails.\n';
+  } else {
+    const cmdsDir = path.join(root, 'commands');
+    filePath = path.join(cmdsDir, name + '.md');
+    if (fs.existsSync(filePath)) return { error: 'A slash command named "' + name + '" already exists in this scope.' };
+    try { fs.mkdirSync(cmdsDir, { recursive: true }); }
+    catch (err) { return { error: 'Could not create commands dir: ' + err.message }; }
+    starter = '---\n'
+      + 'description: One-line description shown when the user types /\n'
+      + '---\n\n'
+      + 'Instructions Claude should follow when /' + name + ' is invoked.\n';
+  }
+
+  try {
+    fs.writeFileSync(filePath, starter, 'utf8');
+    return { path: filePath, name: name, type: type };
+  } catch (err) {
+    return { error: 'Could not write file: ' + err.message };
+  }
+});
+
 // Pre-launch dep check: probe gh + claude so a first-run dialog can guide
 // the user through setup instead of letting them hit cryptic IPC errors
 // downstream when these CLIs are missing or unauthed.
