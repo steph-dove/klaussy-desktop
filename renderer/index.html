@@ -44,8 +44,16 @@
     <div id="main-panel">
       <div id="terminal-area">
         <div id="empty-state">
-          <p>Click <strong>+</strong> to create a new task</p>
-          <p class="sub">Each task creates a git worktree and spawns Claude Code in it.</p>
+          <div id="empty-state-default">
+            <p>Click <strong>+</strong> to create a new task</p>
+            <p class="sub">Each task creates a git worktree and spawns Claude Code in it.</p>
+          </div>
+          <div id="empty-state-no-project" style="display:none;">
+            <p><strong>Welcome to Klaussy.</strong></p>
+            <p class="sub">Add a git project to get started — click the <strong>+</strong> next to the project switcher above.</p>
+            <button id="empty-state-add-project" class="empty-state-cta" type="button">Add a project</button>
+            <p class="sub" style="margin-top:18px;">Or paste a GitHub PR URL into <strong>PR</strong> in the sidebar to review one without a local clone.</p>
+          </div>
         </div>
         <div id="terminals"></div>
       </div>

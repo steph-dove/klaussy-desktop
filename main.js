@@ -216,6 +216,13 @@ app.whenReady().then(() => {
           },
         },
         {
+          label: 'Skills && Commands',
+          click: (_item, focusedWindow) => {
+            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            if (win && !win.isDestroyed()) win.webContents.send('show-skills');
+          },
+        },
+        {
           label: 'Send feedback…',
           click: (_item, focusedWindow) => {
             const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
@@ -1122,6 +1129,116 @@ ipcMain.handle('get-about-info', async () => {
     claudePath: claudeBin,
     claudeVersion,
   };
+});
+
+// List Claude skills + slash commands from disk so users can discover what
+// they have installed without leaving Klaussy. Walks user-level skills + a
+// source per klausify project (most users keep skills per-repo, so showing
+// just the active project would hide most of what they have).
+ipcMain.handle('list-skills', async () => {
+  const homedir = require('os').homedir();
+  const sources = [
+    { kind: 'user', label: 'user', skillsDir: path.join(homedir, '.claude', 'skills'), cmdsDir: path.join(homedir, '.claude', 'commands') },
+  ];
+  const config = loadConfig();
+  const projects = config.projects || [];
+  for (const p of projects) {
+    if (!p || !p.path) continue;
+    sources.push({
+      kind: 'project',
+      label: p.name || path.basename(p.path),
+      skillsDir: path.join(p.path, '.claude', 'skills'),
+      cmdsDir: path.join(p.path, '.claude', 'commands'),
+    });
+  }
+  // Belt-and-suspenders: include the currently-active repo even if it
+  // isn't in config.projects (rare, but happens during transient setup).
+  const active = currentRepoPath();
+  if (active && !projects.find((p) => p && p.path === active)) {
+    sources.push({
+      kind: 'project',
+      label: path.basename(active),
+      skillsDir: path.join(active, '.claude', 'skills'),
+      cmdsDir: path.join(active, '.claude', 'commands'),
+    });
+  }
+
+  function parseFrontmatter(text) {
+    if (!text) return { name: '', description: '' };
+    const m = text.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (!m) return { name: '', description: '' };
+    const out = {};
+    m[1].split('\n').forEach((line) => {
+      const kv = line.match(/^([a-zA-Z_][a-zA-Z0-9_-]*):\s*(.*)$/);
+      if (!kv) return;
+      let val = kv[2].trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+        val = val.slice(1, -1);
+      }
+      out[kv[1]] = val;
+    });
+    return out;
+  }
+
+  const skills = [];
+  const commands = [];
+
+  for (const src of sources) {
+    // Skills: each subdirectory of skillsDir is a skill; SKILL.md inside.
+    try {
+      const entries = fs.readdirSync(src.skillsDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const skillFile = path.join(src.skillsDir, ent.name, 'SKILL.md');
+        if (!fs.existsSync(skillFile)) continue;
+        const text = fs.readFileSync(skillFile, 'utf8');
+        const fm = parseFrontmatter(text);
+        skills.push({
+          name: fm.name || ent.name,
+          description: fm.description || '',
+          source: src.label,
+          path: skillFile,
+        });
+      }
+    } catch (_) { /* dir doesn't exist — fine */ }
+
+    // Slash commands: <name>.md files in commands dir.
+    try {
+      const entries = fs.readdirSync(src.cmdsDir, { withFileTypes: true });
+      for (const ent of entries) {
+        if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+        const file = path.join(src.cmdsDir, ent.name);
+        const text = fs.readFileSync(file, 'utf8');
+        const fm = parseFrontmatter(text);
+        // Body after frontmatter for a fallback description.
+        let body = text.replace(/^---[\s\S]*?\n---\s*/, '').trim();
+        commands.push({
+          name: '/' + ent.name.replace(/\.md$/, ''),
+          description: fm.description || body.split('\n')[0].slice(0, 160),
+          source: src.label,
+          path: file,
+        });
+      }
+    } catch (_) {}
+  }
+
+  // Sort: user first, then projects alphabetically by label, then by name
+  // within each source.
+  const sorter = (a, b) => {
+    if (a.source === 'user' && b.source !== 'user') return -1;
+    if (b.source === 'user' && a.source !== 'user') return 1;
+    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    return a.name.localeCompare(b.name);
+  };
+  skills.sort(sorter);
+  commands.sort(sorter);
+  return { skills, commands };
+});
+
+ipcMain.handle('open-skill-file', (_event, { filePath }) => {
+  if (!filePath) return { ok: false };
+  shell.openPath(filePath);
+  return { ok: true };
 });
 
 // Pre-launch dep check: probe gh + claude so a first-run dialog can guide

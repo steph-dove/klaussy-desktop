@@ -256,9 +256,17 @@ contextBridge.exposeInMainWorld('klaus', {
   onShowLogs: (callback) => {
     ipcRenderer.on('show-logs', () => callback());
   },
+  // Triggered by the View → Skills & commands menu item.
+  onShowSkills: (callback) => {
+    ipcRenderer.on('show-skills', () => callback());
+  },
 
   // First-run dependency probe (gh + claude installed/authed?).
   checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+
+  // Skills + slash commands inventory for the Skills dialog.
+  listSkills: () => ipcRenderer.invoke('list-skills'),
+  openSkillFile: (filePath) => ipcRenderer.invoke('open-skill-file', { filePath }),
 
   // H3: Worktree file watcher for instant diff refresh
   watchWorktree: (worktreePath) => ipcRenderer.invoke('watch-worktree', { worktreePath }),
