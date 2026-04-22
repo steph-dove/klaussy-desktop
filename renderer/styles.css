@@ -3730,6 +3730,35 @@ body.task-branchless #ahead-behind {
   white-space: nowrap;
 }
 
+/* K8: status bar below the editor. */
+.file-viewer-statusbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt, var(--surface));
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  user-select: none;
+  height: 22px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+}
+
+.file-viewer-statusbar .statusbar-left,
+.file-viewer-statusbar .statusbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statusbar-item {
+  white-space: nowrap;
+}
+
+.statusbar-item[hidden] { display: none; }
+
 /* K7: git gutter change markers. Monaco puts linesDecorationsClassName
    on a thin element in the gutter left of line numbers. We paint a solid
    color bar for added/modified, and a wedge for deletions. */

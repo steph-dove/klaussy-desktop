@@ -103,6 +103,40 @@ window.FileBrowser = (function () {
     currentFilePath = null;
   }
 
+  // K8 — status bar helpers.
+  function updateStatusPosition(line, col) {
+    var el = fileViewerView.querySelector('.statusbar-position');
+    if (el) el.textContent = 'Ln ' + line + ', Col ' + col;
+  }
+  function updateStatusLanguage(model) {
+    var el = fileViewerView.querySelector('.statusbar-language');
+    if (!el) return;
+    var id = model && !model.isDisposed() ? (model.getLanguageId() || '') : '';
+    el.textContent = id;
+  }
+  function updateStatusDiagnostics(monaco, model) {
+    var el = fileViewerView.querySelector('.statusbar-diagnostics');
+    if (!el) return;
+    if (!model || model.isDisposed()) { el.hidden = true; return; }
+    var markers = monaco.editor.getModelMarkers({ resource: model.uri });
+    var errors = 0, warnings = 0;
+    for (var i = 0; i < markers.length; i++) {
+      if (markers[i].severity === monaco.MarkerSeverity.Error) errors += 1;
+      else warnings += 1;
+    }
+    if (errors + warnings === 0) { el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = '⛔ ' + errors + '  ⚠ ' + warnings;
+  }
+  function updateStatusBranch() {
+    var el = fileViewerView.querySelector('.statusbar-branch');
+    if (!el) return;
+    var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
+    var branch = task && task.branch ? task.branch : '';
+    el.textContent = branch ? '⎇ ' + branch : '';
+    el.hidden = !branch;
+  }
+
   // Count markers by severity on the model and update the pill. Monaco's
   // MarkerSeverity: 8=Error, 4=Warning, 2=Info, 1=Hint. We roll Info/Hint
   // under the "warning" visual (amber) to keep the pill binary — users
@@ -327,7 +361,18 @@ window.FileBrowser = (function () {
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
         '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
       '</div>' +
-      '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>';
+      '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>' +
+      '<div class="file-viewer-statusbar">' +
+        '<span class="statusbar-left">' +
+          '<span class="statusbar-item statusbar-position">Ln 1, Col 1</span>' +
+          '<span class="statusbar-item statusbar-language"></span>' +
+        '</span>' +
+        '<span class="statusbar-right">' +
+          '<span class="statusbar-item statusbar-diagnostics" hidden></span>' +
+          '<span class="statusbar-item statusbar-branch"></span>' +
+          '<span class="statusbar-item statusbar-encoding">UTF-8</span>' +
+        '</span>' +
+      '</div>';
 
     fileViewerView.querySelectorAll('.file-viewer-nav-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -406,12 +451,19 @@ window.FileBrowser = (function () {
     interceptCrossFileOpen(currentEditor, monaco);
 
     currentEditor.onDidChangeModelContent(refreshDirtyState);
+    currentEditor.onDidChangeCursorPosition(function (e) {
+      updateStatusPosition(e.position.lineNumber, e.position.column);
+    });
     currentMarkerDisposable = monaco.editor.onDidChangeMarkers(function (uris) {
       var tab = tabs[activeTabIndex];
       if (!tab || !tab.model || tab.model.isDisposed()) return;
       var our = tab.model.uri.toString();
       for (var i = 0; i < uris.length; i++) {
-        if (uris[i].toString() === our) { updateProblemsBadge(monaco, tab.model); return; }
+        if (uris[i].toString() === our) {
+          updateProblemsBadge(monaco, tab.model);
+          updateStatusDiagnostics(monaco, tab.model);
+          return;
+        }
       }
     });
 
@@ -488,6 +540,11 @@ window.FileBrowser = (function () {
     updateRunButtonForTab(tab.filePath);
     refreshDirtyState();
     updateProblemsBadge(monaco, tab.model);
+    updateStatusDiagnostics(monaco, tab.model);
+    updateStatusLanguage(tab.model);
+    updateStatusBranch();
+    var pos = currentEditor && currentEditor.getPosition();
+    if (pos) updateStatusPosition(pos.lineNumber, pos.column);
     refreshGitGutter();
   }
 
