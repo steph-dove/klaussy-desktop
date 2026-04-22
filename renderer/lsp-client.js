@@ -171,6 +171,17 @@
           hover: { contentFormat: ['markdown', 'plaintext'] },
           definition: { linkSupport: true },
           publishDiagnostics: { relatedInformation: true, versionSupport: false },
+          formatting: { dynamicRegistration: false },
+          rangeFormatting: { dynamicRegistration: false },
+          rename: { dynamicRegistration: false, prepareSupport: false },
+          codeAction: {
+            dynamicRegistration: false,
+            codeActionLiteralSupport: {
+              codeActionKind: {
+                valueSet: ['quickfix', 'refactor', 'refactor.extract', 'refactor.inline', 'source', 'source.organizeImports'],
+              },
+            },
+          },
         },
         workspace: {
           workspaceFolders: true,
@@ -521,13 +532,17 @@
   // ---- Monaco provider registrations ----
 
   function registerProvidersForLanguage(monaco, languageId) {
-    ['completion', 'hover', 'definition'].forEach(function (kind) {
+    ['completion', 'hover', 'definition', 'formatting', 'rangeFormatting', 'rename', 'codeAction'].forEach(function (kind) {
       var key = languageId + ':' + kind;
       if (providerRegistered.get(key)) return;
       providerRegistered.set(key, true);
       if (kind === 'completion') registerCompletion(monaco, languageId);
       if (kind === 'hover') registerHover(monaco, languageId);
       if (kind === 'definition') registerDefinition(monaco, languageId);
+      if (kind === 'formatting') registerFormatting(monaco, languageId);
+      if (kind === 'rangeFormatting') registerRangeFormatting(monaco, languageId);
+      if (kind === 'rename') registerRename(monaco, languageId);
+      if (kind === 'codeAction') registerCodeAction(monaco, languageId);
     });
   }
 
@@ -632,6 +647,175 @@
             return { uri: monaco.Uri.parse(uri), range: lspRangeToMonaco(range) };
           })
           .filter(Boolean);
+      },
+    });
+  }
+
+  // Convert an LSP TextEdit[] into Monaco's edit operation shape. Shared by
+  // formatting, range formatting, and rename — they all hand back TextEdit[].
+  function lspEditsToMonaco(edits) {
+    if (!Array.isArray(edits)) return [];
+    return edits.map(function (e) {
+      return { range: lspRangeToMonaco(e.range), text: e.newText || '' };
+    });
+  }
+
+  function registerFormatting(monaco, languageId) {
+    monaco.languages.registerDocumentFormattingEditProvider(languageId, {
+      provideDocumentFormattingEdits: async function (model) {
+        var session = sessionForModel(model);
+        if (!session) return null;
+        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/formatting', {
+          textDocument: { uri: model.uri.toString() },
+          options: { tabSize: model.getOptions().tabSize || 2, insertSpaces: true },
+        });
+        if (!resp || resp.error || !resp.result) return null;
+        return lspEditsToMonaco(resp.result);
+      },
+    });
+  }
+
+  function registerRangeFormatting(monaco, languageId) {
+    monaco.languages.registerDocumentRangeFormattingEditProvider(languageId, {
+      provideDocumentRangeFormattingEdits: async function (model, range) {
+        var session = sessionForModel(model);
+        if (!session) return null;
+        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/rangeFormatting', {
+          textDocument: { uri: model.uri.toString() },
+          range: {
+            start: monacoPositionToLsp({ lineNumber: range.startLineNumber, column: range.startColumn }),
+            end: monacoPositionToLsp({ lineNumber: range.endLineNumber, column: range.endColumn }),
+          },
+          options: { tabSize: model.getOptions().tabSize || 2, insertSpaces: true },
+        });
+        if (!resp || resp.error || !resp.result) return null;
+        return lspEditsToMonaco(resp.result);
+      },
+    });
+  }
+
+  // Apply a WorkspaceEdit (returned by rename / code actions). LSP sends
+  // { changes: { uri: TextEdit[] } } or { documentChanges: [...] } — we
+  // handle the simple `changes` shape and let Monaco apply per-model edits.
+  async function applyWorkspaceEdit(monaco, edit) {
+    if (!edit) return;
+    var changes = edit.changes || {};
+    // documentChanges (newer format) — flatten into the same shape as changes.
+    if (edit.documentChanges) {
+      edit.documentChanges.forEach(function (dc) {
+        if (dc.textDocument && Array.isArray(dc.edits)) {
+          changes[dc.textDocument.uri] = (changes[dc.textDocument.uri] || []).concat(dc.edits);
+        }
+      });
+    }
+    Object.keys(changes).forEach(function (uri) {
+      var model = monaco.editor.getModel(monaco.Uri.parse(uri));
+      if (!model) return;
+      var ops = lspEditsToMonaco(changes[uri]).map(function (e) {
+        return { range: e.range, text: e.text, forceMoveMarkers: true };
+      });
+      model.pushEditOperations([], ops, function () { return null; });
+    });
+  }
+
+  function registerRename(monaco, languageId) {
+    monaco.languages.registerRenameProvider(languageId, {
+      provideRenameEdits: async function (model, position, newName) {
+        var session = sessionForModel(model);
+        if (!session) return null;
+        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/rename', {
+          textDocument: { uri: model.uri.toString() },
+          position: monacoPositionToLsp(position),
+          newName: newName,
+        });
+        if (!resp || resp.error || !resp.result) return null;
+        // Monaco wants a WorkspaceEdit in its own format: { edits: [{ resource, textEdit }] }
+        var workspaceEdit = resp.result;
+        var out = { edits: [] };
+        var changes = workspaceEdit.changes || {};
+        if (workspaceEdit.documentChanges) {
+          workspaceEdit.documentChanges.forEach(function (dc) {
+            if (dc.textDocument && Array.isArray(dc.edits)) {
+              changes[dc.textDocument.uri] = (changes[dc.textDocument.uri] || []).concat(dc.edits);
+            }
+          });
+        }
+        Object.keys(changes).forEach(function (uri) {
+          changes[uri].forEach(function (ed) {
+            out.edits.push({
+              resource: monaco.Uri.parse(uri),
+              textEdit: { range: lspRangeToMonaco(ed.range), text: ed.newText || '' },
+              versionId: undefined,
+            });
+          });
+        });
+        return out;
+      },
+    });
+  }
+
+  function registerCodeAction(monaco, languageId) {
+    monaco.languages.registerCodeActionProvider(languageId, {
+      provideCodeActions: async function (model, range, context) {
+        var session = sessionForModel(model);
+        if (!session) return { actions: [], dispose: function () {} };
+        var diagnostics = (context && context.markers) ? context.markers.map(function (m) {
+          return {
+            range: {
+              start: { line: m.startLineNumber - 1, character: m.startColumn - 1 },
+              end: { line: m.endLineNumber - 1, character: m.endColumn - 1 },
+            },
+            message: m.message,
+            severity: m.severity === monaco.MarkerSeverity.Error ? 1 :
+                      m.severity === monaco.MarkerSeverity.Warning ? 2 :
+                      m.severity === monaco.MarkerSeverity.Info ? 3 : 4,
+            source: m.source,
+            code: m.code,
+          };
+        }) : [];
+        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/codeAction', {
+          textDocument: { uri: model.uri.toString() },
+          range: {
+            start: monacoPositionToLsp({ lineNumber: range.startLineNumber, column: range.startColumn }),
+            end: monacoPositionToLsp({ lineNumber: range.endLineNumber, column: range.endColumn }),
+          },
+          context: { diagnostics: diagnostics },
+        });
+        if (!resp || resp.error || !Array.isArray(resp.result)) return { actions: [], dispose: function () {} };
+        var actions = resp.result.map(function (a) {
+          // LSP can return CodeAction or Command. Normalize to CodeAction.
+          if (a.command && !a.edit && !a.kind) {
+            return { title: a.title, kind: 'quickfix', edit: null, command: a };
+          }
+          var mEdit = null;
+          if (a.edit) {
+            mEdit = { edits: [] };
+            var changes = a.edit.changes || {};
+            if (a.edit.documentChanges) {
+              a.edit.documentChanges.forEach(function (dc) {
+                if (dc.textDocument && Array.isArray(dc.edits)) {
+                  changes[dc.textDocument.uri] = (changes[dc.textDocument.uri] || []).concat(dc.edits);
+                }
+              });
+            }
+            Object.keys(changes).forEach(function (uri) {
+              changes[uri].forEach(function (ed) {
+                mEdit.edits.push({
+                  resource: monaco.Uri.parse(uri),
+                  textEdit: { range: lspRangeToMonaco(ed.range), text: ed.newText || '' },
+                });
+              });
+            });
+          }
+          return {
+            title: a.title,
+            kind: a.kind || 'quickfix',
+            isPreferred: !!a.isPreferred,
+            edit: mEdit,
+            diagnostics: [],
+          };
+        });
+        return { actions: actions, dispose: function () {} };
       },
     });
   }
