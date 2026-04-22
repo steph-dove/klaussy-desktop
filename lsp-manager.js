@@ -149,6 +149,19 @@ const LAUNCHERS = {
       'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
       '  xcode-select --install',
   },
+  'objective-c': {
+    // Same sourcekit-lsp binary as Swift — it handles Swift and C-family
+    // (C / C++ / ObjC / ObjC++). Separate language entry so our didOpen
+    // sends languageId=objective-c and the server parses accordingly.
+    candidates: ['sourcekit-lsp'],
+    args: [],
+    friendly: 'sourcekit-lsp (Objective-C)',
+    installers: [],
+    installHint:
+      'Objective-C intel comes from sourcekit-lsp (the Swift toolchain).\n\n' +
+      'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
+      '  xcode-select --install',
+  },
   kotlin: {
     candidates: ['kotlin-language-server'],
     args: [],

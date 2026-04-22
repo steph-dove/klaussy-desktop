@@ -3916,6 +3916,15 @@ body.task-branchless #ahead-behind {
 
 .statusbar-item[hidden] { display: none; }
 
+.statusbar-ai-toggle {
+  font-weight: 500;
+  padding: 0 6px;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.statusbar-ai-toggle:hover { background: var(--surface-hover); color: var(--text); }
+.statusbar-ai-toggle.active { color: var(--accent); }
+
 /* K7: git gutter change markers. Monaco puts linesDecorationsClassName
    on a thin element in the gutter left of line numbers. We paint a solid
    color bar for added/modified, and a wedge for deletions. */
