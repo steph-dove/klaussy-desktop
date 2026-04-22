@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld('klaus', {
   // Git status & diff (Phase 1)
   gitStatus: (worktreePath) => ipcRenderer.invoke('git-status', { worktreePath }),
   gitDiff: (worktreePath, file, staged) => ipcRenderer.invoke('git-diff', { worktreePath, file, staged }),
+  gitFileHunks: (worktreePath, file) => ipcRenderer.invoke('git-file-hunks', { worktreePath, file }),
 
   // Branch diff mode
   gitBranches: (worktreePath) => ipcRenderer.invoke('git-branches', { worktreePath }),

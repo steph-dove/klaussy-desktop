@@ -3730,6 +3730,24 @@ body.task-branchless #ahead-behind {
   white-space: nowrap;
 }
 
+/* K7: git gutter change markers. Monaco puts linesDecorationsClassName
+   on a thin element in the gutter left of line numbers. We paint a solid
+   color bar for added/modified, and a wedge for deletions. */
+.git-gutter-added,
+.git-gutter-modified,
+.git-gutter-deleted {
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+.git-gutter-added { background: #4ade80; }      /* green */
+.git-gutter-modified { background: #fbbf24; }   /* amber */
+.git-gutter-deleted {
+  background: transparent;
+  border-top: 4px solid #ef4444;                /* red, points at the deletion */
+  height: 0 !important;
+}
+
 .file-viewer-tabs {
   display: flex;
   align-items: stretch;
