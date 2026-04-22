@@ -98,6 +98,22 @@ contextBridge.exposeInMainWorld('klaus', {
   gitDiff: (worktreePath, file, staged) => ipcRenderer.invoke('git-diff', { worktreePath, file, staged }),
   gitFileHunks: (worktreePath, file) => ipcRenderer.invoke('git-file-hunks', { worktreePath, file }),
 
+  // K3 inline AI edit
+  inlineEditStart: (opts) => ipcRenderer.invoke('inline-edit-start', opts),
+  inlineEditCancel: (requestId) => ipcRenderer.invoke('inline-edit-cancel', { requestId }),
+  onInlineEditChunk: (requestId, callback) => {
+    const channel = `inline-edit-chunk-${requestId}`;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onInlineEditDone: (requestId, callback) => {
+    const channel = `inline-edit-done-${requestId}`;
+    const handler = (_e, msg) => callback(msg);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+
   // Branch diff mode
   gitBranches: (worktreePath) => ipcRenderer.invoke('git-branches', { worktreePath }),
   gitBranchFiles: (worktreePath, baseBranch) => ipcRenderer.invoke('git-branch-files', { worktreePath, baseBranch }),

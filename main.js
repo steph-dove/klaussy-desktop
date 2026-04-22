@@ -2741,6 +2741,65 @@ ipcMain.handle('pr-debug-check-cancel', (_event, { requestId }) => {
   return { ok: true };
 });
 
+// K3: inline AI edit — streams a claude -p replacement for a selection.
+// Kept deliberately strict: the prompt tells claude to emit ONLY the
+// replacement code so the renderer can paste it back verbatim without
+// having to strip markdown fences or preamble.
+const inlineEditProcs = new Map();
+ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instruction, selection, languageId, filePath }) => {
+  const sender = event.sender;
+  const chunkChannel = `inline-edit-chunk-${requestId}`;
+  const doneChannel = `inline-edit-done-${requestId}`;
+
+  const prompt =
+    'You are editing code inline. Apply this instruction to the code below and return ONLY the replacement code.\n\n' +
+    'Rules (strict):\n' +
+    '- Respond with ONLY the replacement code — no explanations, no markdown code fences, no preamble, no trailing commentary.\n' +
+    '- Preserve the indentation style of the original (tabs vs spaces, width).\n' +
+    '- Keep the replacement self-contained: it will replace the exact selection in-place.\n' +
+    '- Do not add imports unless the instruction requires them; if you do, they belong inside the replacement, not elsewhere.\n\n' +
+    (filePath ? `File: ${filePath}\n` : '') +
+    (languageId ? `Language: ${languageId}\n\n` : '\n') +
+    `Instruction: ${instruction}\n\n` +
+    'Original selection:\n' +
+    selection + '\n';
+
+  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const { spawn } = require('child_process');
+  const proc = spawn(claudeBin, ['-p', prompt], {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  inlineEditProcs.set(requestId, proc);
+
+  let stderrBuf = '';
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.on('error', (err) => {
+    inlineEditProcs.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    inlineEditProcs.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') sender.send(doneChannel, { cancelled: true });
+    else if (code !== 0) sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
+    else sender.send(doneChannel, { ok: true });
+  });
+  return { ok: true };
+});
+
+ipcMain.handle('inline-edit-cancel', (_event, { requestId }) => {
+  const proc = inlineEditProcs.get(requestId);
+  if (!proc) return { ok: false };
+  try { proc.kill('SIGTERM'); } catch {}
+  return { ok: true };
+});
+
 ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (!activePrReview) return { error: 'No active PR review' };
   const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];

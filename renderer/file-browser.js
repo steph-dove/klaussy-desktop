@@ -438,6 +438,15 @@ window.FileBrowser = (function () {
     currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, function () {
       if (activeTabIndex >= 0) closeTab(activeTabIndex);
     });
+    // K3: inline AI edit. Cmd+K in the editor starts the prompt widget.
+    // The document-level Cmd+K (command palette in app.js) only fires when
+    // the editor isn't focused, since Monaco's addCommand stops propagation.
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyK, function () {
+      if (window.InlineEdit) window.InlineEdit.start(currentEditor);
+    });
+    if (window.InlineEdit && window.InlineEdit.setWorktreeGetter) {
+      window.InlineEdit.setWorktreeGetter(function () { return currentViewerWorktree; });
+    }
     // Cmd+1 … Cmd+9 switches to the Nth tab (1-indexed, matches VS Code).
     for (var i = 0; i < 9; i++) {
       (function (n) {
