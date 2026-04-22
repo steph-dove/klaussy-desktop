@@ -1149,20 +1149,12 @@ window.DiffPanel = (function () {
         newLn++;
         lineInHunk++;
         cls += ' diff-add';
-        var addKey = currentHunkIdx + ':' + lineInHunk;
-        var addCheckbox = allowStaging
-          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + addKey + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
-          : '';
-        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT" data-line-key="' + addKey + '">' + addCheckbox + '<span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
+        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('-') && !line.startsWith('---')) {
         oldLn++;
         lineInHunk++;
         cls += ' diff-del';
-        var delKey = currentHunkIdx + ':' + lineInHunk;
-        var delCheckbox = allowStaging
-          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + delKey + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
-          : '';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT" data-line-key="' + delKey + '">' + delCheckbox + '<span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT"><span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('diff ')) {
         cls += ' diff-header';
         html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
@@ -1173,8 +1165,7 @@ window.DiffPanel = (function () {
         oldLn++; newLn++;
         if (currentHunkIdx >= 0) lineInHunk++;
         cls += ' diff-context';
-        var ctxPad = allowStaging ? '<span class="diff-stage-check-placeholder"></span>' : '';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT">' + ctxPad + '<span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
       }
     }
 
@@ -1231,26 +1222,18 @@ window.DiffPanel = (function () {
 
       function paneAdd(info) {
         var cls = 'diff-line diff-split-right diff-add';
-        var cb = allowStaging
-          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + info.key + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
-          : '';
         var code = highlightedLines[info.idx] || escHtml(info.text);
-        return '<div class="' + cls + '" data-new-ln="' + info.newLn + '" data-side="RIGHT" data-line-key="' + info.key + '">'
+        return '<div class="' + cls + '" data-new-ln="' + info.newLn + '" data-side="RIGHT">'
           + '<span class="diff-ln-gutter">' + info.newLn + '</span>'
-          + cb
           + '<span class="diff-prefix">+</span>'
           + '<span class="diff-code">' + code + '</span>'
           + '</div>';
       }
       function paneDel(info) {
         var cls = 'diff-line diff-split-left diff-del';
-        var cb = allowStaging
-          ? '<input type="checkbox" class="diff-stage-check" data-line-key="' + info.key + '" title="Select to ' + stageVerb.toLowerCase() + '" />'
-          : '';
         var code = highlightedLines[info.idx] || escHtml(info.text);
-        return '<div class="' + cls + '" data-old-ln="' + info.oldLn + '" data-side="LEFT" data-line-key="' + info.key + '">'
+        return '<div class="' + cls + '" data-old-ln="' + info.oldLn + '" data-side="LEFT">'
           + '<span class="diff-ln-gutter">' + info.oldLn + '</span>'
-          + cb
           + '<span class="diff-prefix">-</span>'
           + '<span class="diff-code">' + code + '</span>'
           + '</div>';
@@ -1264,11 +1247,9 @@ window.DiffPanel = (function () {
         var lnAttr = side === 'left'
           ? 'data-old-ln="' + info.oldLn + '"'
           : 'data-new-ln="' + info.newLn + '" data-side="RIGHT"';
-        var pad = allowStaging ? '<span class="diff-stage-check-placeholder"></span>' : '';
         var lnVal = side === 'left' ? info.oldLn : info.newLn;
         return '<div class="' + cls + '" ' + lnAttr + '>'
           + '<span class="diff-ln-gutter">' + lnVal + '</span>'
-          + pad
           + '<span class="diff-prefix"> </span>'
           + '<span class="diff-code">' + code + '</span>'
           + '</div>';
