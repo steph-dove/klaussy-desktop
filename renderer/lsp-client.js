@@ -33,9 +33,25 @@
     { re: /\.rs$/i, languageId: 'rust' },
     { re: /\.go$/i, languageId: 'go' },
     // Ruby + Rails: ruby-lsp handles .rb source, .erb templates (Rails views),
-    // and .rake task files under the same 'ruby' languageId.
+    // and .rake task files under the same 'ruby' languageId. Rails-specific
+    // intel activates automatically via the ruby-lsp-rails add-on.
     { re: /\.(rb|erb|rake)$/i, languageId: 'ruby' },
     { re: /\.java$/i, languageId: 'java' },
+    // clangd covers both C and C++ from one binary. Headers too.
+    { re: /\.(c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx|h\+\+)$/i, languageId: 'cpp' },
+    { re: /\.(php|phtml)$/i, languageId: 'php' },
+    { re: /\.cs$/i, languageId: 'csharp' },
+    { re: /\.swift$/i, languageId: 'swift' },
+    { re: /\.(kt|kts)$/i, languageId: 'kotlin' },
+    { re: /\.vue$/i, languageId: 'vue' },
+    { re: /\.svelte$/i, languageId: 'svelte' },
+    { re: /\.astro$/i, languageId: 'astro' },
+    // Dockerfile detection is filename-based, not extension-based. Match
+    // `Dockerfile`, `Dockerfile.dev`, `Dockerfile.prod`, and `foo.dockerfile`.
+    { re: /(^|\/)Dockerfile(\.[^/]+)?$|\.dockerfile$/i, languageId: 'dockerfile' },
+    { re: /\.(yaml|yml)$/i, languageId: 'yaml' },
+    { re: /\.(md|markdown)$/i, languageId: 'markdown' },
+    { re: /\.lua$/i, languageId: 'lua' },
   ];
 
   function languageIdForPath(filePath) {
@@ -191,14 +207,52 @@
     return session;
   }
 
+  var FRIENDLY_NAMES = {
+    python: 'pyright',
+    rust: 'rust-analyzer',
+    go: 'gopls',
+    ruby: 'ruby-lsp',
+    java: 'jdtls',
+    cpp: 'clangd',
+    php: 'intelephense',
+    csharp: 'csharp-ls',
+    swift: 'sourcekit-lsp',
+    kotlin: 'kotlin-language-server',
+    vue: '@vue/language-server',
+    svelte: 'svelte-language-server',
+    astro: '@astrojs/language-server',
+    dockerfile: 'docker-langserver',
+    yaml: 'yaml-language-server',
+    markdown: 'marksman',
+    lua: 'lua-language-server',
+  };
+
   function friendlyName(languageId) {
-    if (languageId === 'python') return 'pyright';
-    if (languageId === 'rust') return 'rust-analyzer';
-    if (languageId === 'go') return 'gopls';
-    if (languageId === 'ruby') return 'ruby-lsp';
-    if (languageId === 'java') return 'jdtls';
-    return languageId;
+    return FRIENDLY_NAMES[languageId] || languageId;
   }
+
+  // Config envelope pushed after `initialized`. For pyright this is load-
+  // bearing (pyright's analysis pipeline gates on the push arriving — see I4
+  // notes); for the rest it's a cheap belt-and-suspenders that mirrors VS
+  // Code's own behavior. Settings are mostly empty — defaults are fine.
+  var CONFIG_SECTION_KEYS = {
+    rust: 'rust-analyzer',
+    go: 'gopls',
+    ruby: 'rubyLsp',
+    java: 'java',
+    cpp: 'clangd',
+    php: 'intelephense',
+    csharp: 'csharp',
+    swift: 'sourcekit-lsp',
+    kotlin: 'kotlin',
+    vue: 'vue',
+    svelte: 'svelte',
+    astro: 'astro',
+    dockerfile: 'docker',
+    yaml: 'yaml',
+    markdown: 'marksman',
+    lua: 'Lua',
+  };
 
   function settingsForLanguage(languageId) {
     if (languageId === 'python') {
@@ -212,15 +266,11 @@
         },
       };
     }
-    // Rust / Go / Ruby / Java: defaults are sane. Pushing the envelope (even
-    // empty) is what matters — some servers gate their analysis pipeline on
-    // workspace/didChangeConfiguration arriving. Specific settings can layer
-    // in later if / when we want to expose per-language preferences.
-    if (languageId === 'rust') return { 'rust-analyzer': {} };
-    if (languageId === 'go') return { gopls: {} };
-    if (languageId === 'ruby') return { rubyLsp: {} };
-    if (languageId === 'java') return { java: {} };
-    return {};
+    var key = CONFIG_SECTION_KEYS[languageId];
+    if (!key) return {};
+    var settings = {};
+    settings[key] = {};
+    return settings;
   }
 
   // Drive the auto-install flow end to end: stream pipx/npm lines into the

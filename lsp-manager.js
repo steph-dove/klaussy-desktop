@@ -69,18 +69,22 @@ const LAUNCHERS = {
   },
   ruby: {
     // ruby-lsp auto-detects Rails projects (checks for config/application.rb)
-    // and hot-swaps its analysis to include Rails-specific intel — one binary
-    // covers plain Ruby and Rails with no per-project switching here.
+    // and hot-swaps to include Rails-specific intel via the ruby-lsp-rails
+    // add-on — one binary covers plain Ruby + Rails with no per-project entry
+    // here. We also install ruby-lsp-rails globally for convenience, but the
+    // add-on only activates when a Rails project's Gemfile references it.
     candidates: ['ruby-lsp'],
     args: [],
     friendly: 'ruby-lsp',
     installers: [
-      { cmd: 'gem', args: ['install', 'ruby-lsp'] },
+      { cmd: 'gem', args: ['install', 'ruby-lsp', 'ruby-lsp-rails'] },
     ],
     installHint:
       'Install ruby-lsp with:\n' +
-      '  gem install ruby-lsp\n\n' +
-      'Needs Ruby. If `gem install` puts it in a non-PATH bin dir, add it to your shell and relaunch Klaussy.',
+      '  gem install ruby-lsp ruby-lsp-rails\n\n' +
+      'For Rails-specific intel, also add to your Gemfile:\n' +
+      "  gem 'ruby-lsp-rails', require: false, group: :development\n\n" +
+      'If `gem install` puts binaries in a non-PATH bin dir, add it to your shell and relaunch Klaussy.',
   },
   java: {
     candidates: ['jdtls'],
@@ -93,6 +97,151 @@ const LAUNCHERS = {
       'Install jdtls with:\n' +
       '  brew install jdtls\n\n' +
       'Needs a JDK (Homebrew pulls one in as a dependency). On non-macOS, download from https://download.eclipse.org/jdtls/snapshots/',
+  },
+  cpp: {
+    // clangd covers both C and C++ from one binary — routed to either from
+    // the file-extension mapping in the renderer.
+    candidates: ['clangd'],
+    args: [],
+    friendly: 'clangd',
+    installers: [
+      { cmd: 'brew', args: ['install', 'llvm'] },
+    ],
+    installHint:
+      'Install clangd with:\n' +
+      '  brew install llvm\n\n' +
+      "llvm's bin dir is keg-only on Homebrew — follow brew's post-install instructions to add it to PATH, or symlink /opt/homebrew/opt/llvm/bin/clangd into /usr/local/bin.",
+  },
+  php: {
+    candidates: ['intelephense'],
+    args: ['--stdio'],
+    friendly: 'intelephense',
+    installers: [
+      { cmd: 'npm', args: ['install', '-g', 'intelephense'] },
+    ],
+    installHint:
+      'Install intelephense with:\n' +
+      '  npm install -g intelephense\n\n' +
+      "Free tier covers most features. Pro license unlocks some advanced refactors but isn't required.",
+  },
+  csharp: {
+    candidates: ['csharp-ls'],
+    args: [],
+    friendly: 'csharp-ls',
+    installers: [
+      { cmd: 'dotnet', args: ['tool', 'install', '-g', 'csharp-ls'] },
+    ],
+    installHint:
+      'Install csharp-ls with:\n' +
+      '  dotnet tool install -g csharp-ls\n\n' +
+      'Needs the .NET SDK (`brew install --cask dotnet-sdk`). Adds to ~/.dotnet/tools — ensure that path is on PATH.',
+  },
+  swift: {
+    // sourcekit-lsp ships with the Swift toolchain — there's no standalone
+    // installer. If the binary isn't on PATH the user needs Xcode (or the
+    // Swift toolchain) installed.
+    candidates: ['sourcekit-lsp'],
+    args: [],
+    friendly: 'sourcekit-lsp',
+    installers: [],
+    installHint:
+      'sourcekit-lsp ships with Xcode / the Swift toolchain — there is no standalone installer.\n\n' +
+      'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
+      '  xcode-select --install',
+  },
+  kotlin: {
+    candidates: ['kotlin-language-server'],
+    args: [],
+    friendly: 'kotlin-language-server',
+    installers: [
+      { cmd: 'brew', args: ['install', 'kotlin-language-server'] },
+    ],
+    installHint:
+      'Install kotlin-language-server with:\n' +
+      '  brew install kotlin-language-server\n\n' +
+      'Needs a JDK (brew pulls one in).',
+  },
+  vue: {
+    // Volar's @vue/language-server — the replacement for the old `vls` from
+    // Vetur. Binary name from the npm package is `vue-language-server`.
+    candidates: ['vue-language-server'],
+    args: ['--stdio'],
+    friendly: 'vue-language-server',
+    installers: [
+      { cmd: 'npm', args: ['install', '-g', '@vue/language-server'] },
+    ],
+    installHint:
+      'Install Vue language server with:\n' +
+      '  npm install -g @vue/language-server\n\n' +
+      'For deep TypeScript-in-SFC support you may also need typescript-language-server in your project.',
+  },
+  svelte: {
+    candidates: ['svelteserver'],
+    args: ['--stdio'],
+    friendly: 'svelte-language-server',
+    installers: [
+      { cmd: 'npm', args: ['install', '-g', 'svelte-language-server'] },
+    ],
+    installHint:
+      'Install Svelte language server with:\n' +
+      '  npm install -g svelte-language-server',
+  },
+  astro: {
+    candidates: ['astro-ls'],
+    args: ['--stdio'],
+    friendly: '@astrojs/language-server',
+    installers: [
+      { cmd: 'npm', args: ['install', '-g', '@astrojs/language-server'] },
+    ],
+    installHint:
+      'Install Astro language server with:\n' +
+      '  npm install -g @astrojs/language-server',
+  },
+  dockerfile: {
+    candidates: ['docker-langserver'],
+    args: ['--stdio'],
+    friendly: 'docker-langserver',
+    installers: [
+      { cmd: 'npm', args: ['install', '-g', 'dockerfile-language-server-nodejs'] },
+    ],
+    installHint:
+      'Install Dockerfile language server with:\n' +
+      '  npm install -g dockerfile-language-server-nodejs',
+  },
+  yaml: {
+    candidates: ['yaml-language-server'],
+    args: ['--stdio'],
+    friendly: 'yaml-language-server',
+    installers: [
+      { cmd: 'npm', args: ['install', '-g', 'yaml-language-server'] },
+    ],
+    installHint:
+      'Install YAML language server with:\n' +
+      '  npm install -g yaml-language-server\n\n' +
+      'Ships with schema awareness for Kubernetes / GitHub Actions / Compose out of the box.',
+  },
+  markdown: {
+    candidates: ['marksman'],
+    args: ['server'],
+    friendly: 'marksman',
+    installers: [
+      { cmd: 'brew', args: ['install', 'marksman'] },
+    ],
+    installHint:
+      'Install marksman (Markdown LSP) with:\n' +
+      '  brew install marksman\n\n' +
+      'Provides wikilink resolution + cross-file references across docs folders.',
+  },
+  lua: {
+    candidates: ['lua-language-server'],
+    args: [],
+    friendly: 'lua-language-server',
+    installers: [
+      { cmd: 'brew', args: ['install', 'lua-language-server'] },
+    ],
+    installHint:
+      'Install lua-language-server with:\n' +
+      '  brew install lua-language-server',
   },
 };
 
