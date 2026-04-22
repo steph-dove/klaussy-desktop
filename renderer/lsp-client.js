@@ -28,10 +28,20 @@
   // never sees "saved" notifications out of order with the actual content.
   var pendingFlushes = new Map();
 
-  var PYTHON_FILE_RE = /\.py$/i;
+  var LANGUAGE_PATTERNS = [
+    { re: /\.py$/i, languageId: 'python' },
+    { re: /\.rs$/i, languageId: 'rust' },
+    { re: /\.go$/i, languageId: 'go' },
+    // Ruby + Rails: ruby-lsp handles .rb source, .erb templates (Rails views),
+    // and .rake task files under the same 'ruby' languageId.
+    { re: /\.(rb|erb|rake)$/i, languageId: 'ruby' },
+    { re: /\.java$/i, languageId: 'java' },
+  ];
 
   function languageIdForPath(filePath) {
-    if (PYTHON_FILE_RE.test(filePath)) return 'python';
+    for (var i = 0; i < LANGUAGE_PATTERNS.length; i++) {
+      if (LANGUAGE_PATTERNS[i].re.test(filePath)) return LANGUAGE_PATTERNS[i].languageId;
+    }
     return null;
   }
 
@@ -183,6 +193,10 @@
 
   function friendlyName(languageId) {
     if (languageId === 'python') return 'pyright';
+    if (languageId === 'rust') return 'rust-analyzer';
+    if (languageId === 'go') return 'gopls';
+    if (languageId === 'ruby') return 'ruby-lsp';
+    if (languageId === 'java') return 'jdtls';
     return languageId;
   }
 
@@ -198,6 +212,14 @@
         },
       };
     }
+    // Rust / Go / Ruby / Java: defaults are sane. Pushing the envelope (even
+    // empty) is what matters — some servers gate their analysis pipeline on
+    // workspace/didChangeConfiguration arriving. Specific settings can layer
+    // in later if / when we want to expose per-language preferences.
+    if (languageId === 'rust') return { 'rust-analyzer': {} };
+    if (languageId === 'go') return { gopls: {} };
+    if (languageId === 'ruby') return { rubyLsp: {} };
+    if (languageId === 'java') return { java: {} };
     return {};
   }
 

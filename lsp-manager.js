@@ -38,6 +38,62 @@ const LAUNCHERS = {
       '  pipx install pyright\n' +
       '  npm install -g pyright',
   },
+  rust: {
+    candidates: ['rust-analyzer'],
+    args: [],
+    friendly: 'rust-analyzer',
+    installers: [
+      // rustup-managed rust-analyzer is the upstream-recommended install; it
+      // tracks the toolchain and updates with `rustup update`. `cargo install`
+      // also works but compiles from source (slow). We try rustup first.
+      { cmd: 'rustup', args: ['component', 'add', 'rust-analyzer'] },
+    ],
+    installHint:
+      'Install rust-analyzer with:\n' +
+      '  rustup component add rust-analyzer\n\n' +
+      'Needs rustup. If you don\'t have it, install from https://rustup.rs',
+  },
+  go: {
+    candidates: ['gopls'],
+    // `serve` is the explicit LSP-over-stdio mode; omitting it works too but
+    // this is the documented form and doesn't rely on gopls's tty detection.
+    args: ['serve'],
+    friendly: 'gopls',
+    installers: [
+      { cmd: 'go', args: ['install', 'golang.org/x/tools/gopls@latest'] },
+    ],
+    installHint:
+      'Install gopls with:\n' +
+      '  go install golang.org/x/tools/gopls@latest\n\n' +
+      'Needs Go 1.19+. Also make sure $(go env GOBIN) (or $GOPATH/bin) is on your PATH.',
+  },
+  ruby: {
+    // ruby-lsp auto-detects Rails projects (checks for config/application.rb)
+    // and hot-swaps its analysis to include Rails-specific intel — one binary
+    // covers plain Ruby and Rails with no per-project switching here.
+    candidates: ['ruby-lsp'],
+    args: [],
+    friendly: 'ruby-lsp',
+    installers: [
+      { cmd: 'gem', args: ['install', 'ruby-lsp'] },
+    ],
+    installHint:
+      'Install ruby-lsp with:\n' +
+      '  gem install ruby-lsp\n\n' +
+      'Needs Ruby. If `gem install` puts it in a non-PATH bin dir, add it to your shell and relaunch Klaussy.',
+  },
+  java: {
+    candidates: ['jdtls'],
+    args: [],
+    friendly: 'jdtls',
+    installers: [
+      { cmd: 'brew', args: ['install', 'jdtls'] },
+    ],
+    installHint:
+      'Install jdtls with:\n' +
+      '  brew install jdtls\n\n' +
+      'Needs a JDK (Homebrew pulls one in as a dependency). On non-macOS, download from https://download.eclipse.org/jdtls/snapshots/',
+  },
 };
 
 function resolveExecutable(candidates) {
