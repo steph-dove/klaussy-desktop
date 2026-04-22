@@ -5764,6 +5764,27 @@ body.pr-review-popout #pr-review-root {
   color: #fff;
 }
 
+.quick-open-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+}
+
+.quick-open-basename { font-weight: 600; }
+
+.quick-open-dir {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.quick-open-item.selected .quick-open-dir { color: rgba(255, 255, 255, 0.75); }
+
 /* ---- Task Drag Reorder (A5) ---- */
 
 .task-item.dragging {
