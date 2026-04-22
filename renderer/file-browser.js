@@ -46,6 +46,34 @@ window.FileBrowser = (function () {
     return -1;
   }
 
+  // K7 — gutter decorations for git-changed lines. `gitGutterDecorationIds`
+  // holds the last-applied decoration IDs so we can swap them on refresh.
+  var gitGutterDecorationIds = [];
+
+  async function refreshGitGutter() {
+    if (!currentEditor || !currentFilePath || !currentViewerWorktree) return;
+    // Path relative to the worktree — git diff wants the relative form.
+    var rel = currentFilePath;
+    if (rel.indexOf(currentViewerWorktree + '/') === 0) {
+      rel = rel.slice(currentViewerWorktree.length + 1);
+    }
+    var result = await window.klaus.gitFileHunks(currentViewerWorktree, rel);
+    var hunks = (result && result.hunks) || [];
+    var monaco = await window.MonacoReady;
+    var decorations = hunks.map(function (h) {
+      var cls = 'git-gutter-' + h.type;
+      return {
+        range: new monaco.Range(h.from, 1, h.to, 1),
+        options: {
+          isWholeLine: false,
+          linesDecorationsClassName: cls,
+          stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+        },
+      };
+    });
+    gitGutterDecorationIds = currentEditor.deltaDecorations(gitGutterDecorationIds, decorations);
+  }
+
   function currentMonacoTheme() {
     // ThemeManager adds `light-syntax` to body when the active preset uses
     // GitHub-style light syntax colors; its absence means dark.
@@ -460,6 +488,7 @@ window.FileBrowser = (function () {
     updateRunButtonForTab(tab.filePath);
     refreshDirtyState();
     updateProblemsBadge(monaco, tab.model);
+    refreshGitGutter();
   }
 
   function closeTab(index) {
@@ -560,6 +589,7 @@ window.FileBrowser = (function () {
     refreshDirtyState();
     if (window.DiffPanel && window.DiffPanel.isVisible()) window.DiffPanel.refresh();
     if (window.LspClient) window.LspClient.notifyDidSave(tab.filePath);
+    refreshGitGutter();
   }
 
   window.openFileViewer = async function (filePath, fileName, lineNumber) {
@@ -872,6 +902,8 @@ window.FileBrowser = (function () {
   // Event listeners for tab switching
   window.addEventListener('load-file-tree', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
   window.addEventListener('reload-tab-files', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
+  // H3's watcher: file changed outside our save path — refresh the gutter.
+  window.addEventListener('worktree-changed', function () { refreshGitGutter(); });
   // Switching projects invalidates any open file — the path may not even
   // exist in the new project. Always close.
   window.addEventListener('klaussy:project-changed', function () {

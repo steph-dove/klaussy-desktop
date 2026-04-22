@@ -1702,6 +1702,41 @@ ipcMain.handle('git-diff', async (_event, { worktreePath, file, staged }) => {
   }
 });
 
+// K7: parsed hunks for a single file against HEAD (or the index if staged).
+// Returns line-level change info for the gutter overlay — renderer turns
+// these into Monaco decorations. -U0 gives minimal hunks so the ranges
+// don't span unchanged context.
+ipcMain.handle('git-file-hunks', async (_event, { worktreePath, file }) => {
+  try {
+    const diff = execFileSync('git', ['diff', '-U0', 'HEAD', '--', file], {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024,
+    }).toString();
+    const hunks = [];
+    const hunkRe = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/gm;
+    let m;
+    while ((m = hunkRe.exec(diff))) {
+      const oldCount = m[2] === undefined ? 1 : parseInt(m[2], 10);
+      const newStart = parseInt(m[3], 10);
+      const newCount = m[4] === undefined ? 1 : parseInt(m[4], 10);
+      let type;
+      if (oldCount === 0) type = 'added';
+      else if (newCount === 0) type = 'deleted';
+      else type = 'modified';
+      // For pure deletions, newCount is 0 — the gutter marker goes on the
+      // line where the deletion was visible (newStart, which is the line
+      // after the insertion point). Single-line stub for renderer to draw.
+      const from = newStart;
+      const to = newCount === 0 ? newStart : newStart + newCount - 1;
+      hunks.push({ type, from, to });
+    }
+    return { hunks };
+  } catch (err) {
+    // Not in a repo, file is untracked, or unmodified — return empty.
+    if (err.status === 128 || err.status === 1) return { hunks: [] };
+    return { hunks: [], error: err.message };
+  }
+});
+
 // ---- Branch Diff Mode ----
 
 ipcMain.handle('git-branches', async (_event, { worktreePath }) => {
