@@ -8,9 +8,9 @@
   "scripts": {
     "start": "electron .",
     "rebuild": "electron-rebuild",
-    "dist": "electron-builder --mac --arm64",
+    "dist": "electron-builder --mac --arm64 --x64",
+    "dist:arm64": "electron-builder --mac --arm64",
     "dist:intel": "electron-builder --mac --x64",
-    "dist:universal": "electron-builder --mac --arm64 --x64",
     "postinstall": "cp icon.icns node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns 2>/dev/null || true; plutil -replace CFBundleName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true; plutil -replace CFBundleDisplayName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true"
   },
   "dependencies": {
@@ -38,6 +38,7 @@
     },
     "files": [
       "main.js",
+      "lsp-manager.js",
       "preload.js",
       "renderer/**/*",
       "node_modules/**/*",
