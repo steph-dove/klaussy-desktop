@@ -3730,6 +3730,163 @@ body.task-branchless #ahead-behind {
   white-space: nowrap;
 }
 
+/* K3: inline AI edit. */
+.inline-edit-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.inline-edit-prompt::before {
+  content: '✨';
+  padding: 0 6px 0 10px;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+/* Using inline-flex + size-by-ch lets the widget hug its content until
+   the user starts typing; then the input grows naturally with text. */
+.inline-edit-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 4px;
+  width: 28ch;
+  min-width: 28ch;
+  max-width: 70vw;
+}
+
+.inline-edit-input::placeholder { color: var(--text-muted); }
+
+.inline-edit-submit {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+.inline-edit-submit::before { content: '⏎'; }
+.inline-edit-submit:hover { background: var(--accent); color: white; }
+
+.inline-edit-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.inline-edit-dismiss:hover { background: var(--surface-hover); color: var(--text); }
+
+.inline-edit-status {
+  font-size: 13px;
+  color: var(--text);
+  padding: 8px 10px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* file-viewer-body already has display:flex, so we need relative for the
+   absolutely-positioned overlay to anchor to it. */
+.file-viewer-body { position: relative; }
+
+.inline-edit-stream {
+  position: absolute;
+  left: 12px;
+  right: 80px;       /* clear of Monaco's minimap (~60px) + breathing room */
+  bottom: 12px;
+  max-height: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  z-index: 10;
+}
+
+.inline-edit-stream-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-edit-stream-header::before {
+  content: '✨';
+  font-size: 10px;
+}
+
+.inline-edit-stream.ready .inline-edit-stream-header {
+  color: var(--text);
+}
+
+.inline-edit-stream-body {
+  margin: 0;
+  white-space: pre;
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: auto;
+  flex: 1;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.inline-edit-stream-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-hover);
+}
+
+.inline-edit-accept,
+.inline-edit-reject {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: system-ui, -apple-system, sans-serif;
+  pointer-events: auto;
+  user-select: none;
+}
+.inline-edit-accept {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.inline-edit-accept:disabled { opacity: 0.4; cursor: not-allowed; }
+.inline-edit-accept:hover:not(:disabled) { filter: brightness(1.1); }
+.inline-edit-reject:hover:not(:disabled) { background: var(--surface-hover); }
+
 /* K8: status bar below the editor. */
 .file-viewer-statusbar {
   display: flex;
