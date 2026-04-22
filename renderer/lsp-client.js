@@ -123,7 +123,6 @@
 
     session.disposeMessageHandler = window.klaus.onLspMessage(session.serverId, function (msg) {
       if (!msg) return;
-      console.log('[lsp ←]', msg.type, msg.method || '', msg.params ? Object.keys(msg.params).join(',') : '');
       if (msg.type === 'notification') handleServerNotification(session, msg);
       if (msg.type === 'exit') teardownSession(session, /*serverExited*/true);
     });
@@ -163,10 +162,17 @@
       teardownSession(session);
       return null;
     }
-    console.log('[lsp] initialize result', initResult && initResult.result ? Object.keys(initResult.result.capabilities || {}) : '(no capabilities)');
     await window.klaus.lspNotify(session.serverId, 'initialized', {});
     session.initialized = true;
-    console.log('[lsp] session ready', languageId, worktreePath);
+    // Push initial settings. Pyright specifically will NOT scan the workspace
+    // or publish diagnostics until it sees a workspace/didChangeConfiguration
+    // — even though it also advertises pull-via-workspace/configuration. The
+    // pull never happens because pyright's internal queue is gated on the
+    // push. Without this, didOpen goes silent forever. Confirmed via standalone
+    // LSP repro (`scripts/pyright-repro.js`).
+    await window.klaus.lspNotify(session.serverId, 'workspace/didChangeConfiguration', {
+      settings: settingsForLanguage(languageId),
+    });
 
     // Register Monaco providers once per language on first successful init.
     var monaco = await window.MonacoReady;
@@ -178,6 +184,21 @@
   function friendlyName(languageId) {
     if (languageId === 'python') return 'pyright';
     return languageId;
+  }
+
+  function settingsForLanguage(languageId) {
+    if (languageId === 'python') {
+      return {
+        python: {
+          analysis: {
+            diagnosticMode: 'openFilesOnly',
+            useLibraryCodeForTypes: true,
+            autoSearchPaths: true,
+          },
+        },
+      };
+    }
+    return {};
   }
 
   // Drive the auto-install flow end to end: stream pipx/npm lines into the
@@ -288,19 +309,34 @@
       return;
     }
 
-    var uri = fileUri(filePath);
-    // Reset whatever pyright thinks it knows about this URI under an old
-    // model. didClose on a never-opened file is a no-op on pyright's side.
-    console.log('[lsp →] didClose (reset-before-open)', uri);
-    window.klaus.lspNotify(session.serverId, 'textDocument/didClose', {
-      textDocument: { uri: uri },
-    });
-    session.openDocs.delete(uri);
+    // Use the model's own URI so any diagnostics pyright echoes back match
+    // what `monaco.editor.getModel(Uri.parse(...))` can look up. Mixing our
+    // own fileUri() encoder with Monaco's parse has produced subtle mismatches
+    // (trailing slashes, case folding on macOS) that silently drop diagnostics.
+    var uri = model.uri.toString();
+    // Only reset if we think pyright has this URI open under a prior model.
+    // Sending didClose on a file pyright has never seen can interfere with
+    // pyright's first analysis pass on open.
+    if (session.openDocs.has(uri)) {
+      window.klaus.lspNotify(session.serverId, 'textDocument/didClose', {
+        textDocument: { uri: uri },
+      });
+      session.openDocs.delete(uri);
+    }
 
     modelToSession.set(model, session);
     session.openDocs.add(uri);
 
-    console.log('[lsp →] didOpen', uri, 'bytes=', model.getValue().length);
+    // If pyright already published diagnostics for this URI before the model
+    // existed (common on first-open race), replay them now.
+    if (session.pendingDiagnostics && session.pendingDiagnostics.has(uri)) {
+      var stashed = session.pendingDiagnostics.get(uri);
+      session.pendingDiagnostics.delete(uri);
+      // Schedule after the microtask so the model lookup in applyDiagnostics
+      // sees the model we're about to register.
+      Promise.resolve().then(function () { applyDiagnostics(session, stashed); });
+    }
+
     window.klaus.lspNotify(session.serverId, 'textDocument/didOpen', {
       textDocument: {
         uri: uri,
@@ -320,7 +356,6 @@
       if (changeTimer) { clearTimeout(changeTimer); changeTimer = null; }
       if (model.isDisposed()) return;
       version += 1;
-      console.log('[lsp →] didChange', uri, 'v=' + version, 'bytes=', model.getValue().length);
       window.klaus.lspNotify(session.serverId, 'textDocument/didChange', {
         textDocument: { uri: uri, version: version },
         contentChanges: [{ text: model.getValue() }],
@@ -342,7 +377,6 @@
       try { disposable.dispose(); } catch (_) {}
       if (session.openDocs.has(uri)) {
         session.openDocs.delete(uri);
-        console.log('[lsp →] didClose', uri);
         window.klaus.lspNotify(session.serverId, 'textDocument/didClose', {
           textDocument: { uri: uri },
         });
@@ -350,7 +384,6 @@
         // anyone references it next. Without this, pyright's cached analysis
         // tree can hold the pre-rename view and downstream files (importers)
         // won't see stale-import errors on their next open.
-        console.log('[lsp →] didChangeWatchedFiles (close)', uri);
         window.klaus.lspNotify(session.serverId, 'workspace/didChangeWatchedFiles', {
           changes: [{ uri: uri, type: 2 }],
         });
@@ -368,44 +401,34 @@
     if (flush) try { flush(); } catch (_) {}
     sessions.forEach(function (session) {
       if (session && session.openDocs && session.openDocs.has(uri)) {
-        console.log('[lsp →] didSave', uri);
         window.klaus.lspNotify(session.serverId, 'textDocument/didSave', {
           textDocument: { uri: uri },
         });
       }
-      console.log('[lsp →] didChangeWatchedFiles (save)', uri);
       window.klaus.lspNotify(session.serverId, 'workspace/didChangeWatchedFiles', {
         changes: [{ uri: uri, type: 2 }],
       });
     });
   }
-
-  // Diagnostic logging — while we're debugging the stale-import issue. Safe
-  // to leave in; it only fires when a server publishes markers.
-  function logPublishedDiagnostics(params) {
-    if (!params || !params.uri) return;
-    console.log('[lsp diagnostics]', params.uri, (params.diagnostics || []).length + ' markers');
-    (params.diagnostics || []).forEach(function (d) {
-      console.log('  ·', d.severity, d.range && d.range.start, d.message);
-    });
-  }
-
   // ---- Server → client notifications ----
 
   function handleServerNotification(session, msg) {
     if (msg.method === 'textDocument/publishDiagnostics') {
-      logPublishedDiagnostics(msg.params);
       applyDiagnostics(session, msg.params);
     }
-    // Other notifications (window/showMessage, $/progress, telemetry/event)
-    // are logged but otherwise ignored for now.
   }
 
   async function applyDiagnostics(session, params) {
     var monaco = await window.MonacoReady;
     if (!params || !params.uri) return;
     var model = monaco.editor.getModel(monaco.Uri.parse(params.uri));
-    if (!model) return;
+    if (!model) {
+      // Race: diagnostics arrived before attachModel registered the model.
+      // Stash and replay when the model is registered.
+      session.pendingDiagnostics = session.pendingDiagnostics || new Map();
+      session.pendingDiagnostics.set(params.uri, params);
+      return;
+    }
     var markers = (params.diagnostics || []).map(function (d) {
       var r = lspRangeToMonaco(d.range) || { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 };
       return {
