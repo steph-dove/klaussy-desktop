@@ -31,6 +31,21 @@ window.FileBrowser = (function () {
   var currentFilePath = null;
   var currentMarkerDisposable = null;
 
+  // ---- K1: Tabs state ----
+  // Each open file is a tab with its own model + savedContent. The single
+  // currentEditor swaps its model on tab switch. Tabs share the header
+  // (save button, breadcrumbs, run, blame) — those all reflect the active tab.
+  var tabs = []; // [{ filePath, model, isProjectModel, savedContent }]
+  var activeTabIndex = -1;
+  var viewerInitialized = false;
+
+  function findTab(filePath) {
+    for (var i = 0; i < tabs.length; i++) {
+      if (tabs[i].filePath === filePath) return i;
+    }
+    return -1;
+  }
+
   function currentMonacoTheme() {
     // ThemeManager adds `light-syntax` to body when the active preset uses
     // GitHub-style light syntax colors; its absence means dark.
@@ -47,9 +62,12 @@ window.FileBrowser = (function () {
   function disposeCurrentEditor() {
     if (currentMarkerDisposable) { try { currentMarkerDisposable.dispose(); } catch (_) {} currentMarkerDisposable = null; }
     if (currentEditor) { try { currentEditor.dispose(); } catch (_) {} currentEditor = null; }
-    if (currentModel && !currentModelIsProject) {
-      try { currentModel.dispose(); } catch (_) {}
-    }
+    tabs.forEach(function (t) {
+      if (!t.isProjectModel) { try { t.model.dispose(); } catch (_) {} }
+    });
+    tabs = [];
+    activeTabIndex = -1;
+    viewerInitialized = false;
     currentModel = null;
     currentModelIsProject = false;
     currentBlameLines = null;
@@ -262,7 +280,287 @@ window.FileBrowser = (function () {
     fileViewerView.innerHTML = '';
   };
 
-  // ---- File Viewer (C1) ----
+  // ---- File Viewer (C1 + K1 tabs) ----
+
+  // Builds the persistent viewer shell: tab bar + header + editor container.
+  // Runs once per "session" (until a worktree switch wipes everything); after
+  // that we just swap the editor's model on tab clicks instead of rebuilding.
+  async function ensureViewerInitialized() {
+    if (viewerInitialized) return true;
+    fileViewerView.innerHTML =
+      '<div class="file-viewer-tabs"></div>' +
+      '<div class="file-viewer-header-inline">' +
+        '<button class="file-viewer-nav-btn" data-nav="back" title="Back (⌘⌥←)" disabled>◀</button>' +
+        '<button class="file-viewer-nav-btn" data-nav="forward" title="Forward (⌘⌥→)" disabled>▶</button>' +
+        '<span class="file-viewer-breadcrumbs"></span>' +
+        '<span class="file-editor-status"></span>' +
+        '<span class="file-viewer-problems-badge" hidden></span>' +
+        '<button class="file-viewer-run-btn" title="Run" hidden>▶</button>' +
+        '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
+        '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
+      '</div>' +
+      '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>';
+
+    fileViewerView.querySelectorAll('.file-viewer-nav-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.dataset.nav === 'back') goBack();
+        else goForward();
+      });
+    });
+    fileViewerView.querySelector('.file-viewer-blame-btn').addEventListener('click', function () {
+      window.toggleBlame();
+    });
+    fileViewerView.querySelector('.file-viewer-save-btn').addEventListener('click', saveFile);
+    fileViewerView.querySelector('.file-viewer-run-btn').addEventListener('click', runCurrentFile);
+
+    // Tab bar: click switches, close X closes, middle-click closes.
+    var tabBar = fileViewerView.querySelector('.file-viewer-tabs');
+    tabBar.addEventListener('click', function (e) {
+      var tabEl = e.target.closest('.file-viewer-tab');
+      if (!tabEl) return;
+      var idx = parseInt(tabEl.dataset.tabIndex, 10);
+      if (isNaN(idx)) return;
+      if (e.target.classList.contains('tab-close')) {
+        e.stopPropagation();
+        closeTab(idx);
+      } else {
+        activateTab(idx);
+      }
+    });
+    tabBar.addEventListener('auxclick', function (e) {
+      if (e.button !== 1) return; // middle-click only
+      var tabEl = e.target.closest('.file-viewer-tab');
+      if (!tabEl) return;
+      var idx = parseInt(tabEl.dataset.tabIndex, 10);
+      if (!isNaN(idx)) closeTab(idx);
+    });
+
+    if (!window.MonacoReady) {
+      fileViewerView.querySelector('.file-viewer-body').innerHTML =
+        '<span style="color: var(--error)">Editor failed to load (Monaco not initialized).</span>';
+      return false;
+    }
+    var monaco;
+    try { monaco = await window.MonacoReady; }
+    catch (err) {
+      fileViewerView.querySelector('.file-viewer-body').innerHTML =
+        '<span style="color: var(--error)">Editor failed to load: ' + escHtml(err.message || String(err)) + '</span>';
+      return false;
+    }
+
+    currentEditor = monaco.editor.create(fileViewerView.querySelector('.file-editor-monaco'), {
+      theme: currentMonacoTheme(),
+      automaticLayout: true,
+      minimap: { enabled: true },
+      scrollBeyondLastLine: false,
+      fontSize: 13,
+      fontFamily: "'SF Mono', 'Fira Code', Menlo, monospace",
+      tabSize: 2,
+      renderWhitespace: 'selection',
+    });
+
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow, goBack);
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.RightArrow, goForward);
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyW, function () {
+      if (activeTabIndex >= 0) closeTab(activeTabIndex);
+    });
+    // Cmd+1 … Cmd+9 switches to the Nth tab (1-indexed, matches VS Code).
+    for (var i = 0; i < 9; i++) {
+      (function (n) {
+        currentEditor.addCommand(
+          monaco.KeyMod.CtrlCmd | (monaco.KeyCode.Digit1 + n),
+          function () { if (tabs[n]) activateTab(n); }
+        );
+      })(i);
+    }
+
+    interceptCrossFileOpen(currentEditor, monaco);
+
+    currentEditor.onDidChangeModelContent(refreshDirtyState);
+    currentMarkerDisposable = monaco.editor.onDidChangeMarkers(function (uris) {
+      var tab = tabs[activeTabIndex];
+      if (!tab || !tab.model || tab.model.isDisposed()) return;
+      var our = tab.model.uri.toString();
+      for (var i = 0; i < uris.length; i++) {
+        if (uris[i].toString() === our) { updateProblemsBadge(monaco, tab.model); return; }
+      }
+    });
+
+    viewerInitialized = true;
+    return true;
+  }
+
+  // Reads the file, attaches the model to the LSP layer, and pushes a tab
+  // entry. Returns the tab index, or -1 on error. Does NOT activate the tab
+  // — caller decides when to switch.
+  async function createTab(filePath) {
+    var result = await window.klaus.readFile(filePath);
+    if (result.error) {
+      var body = fileViewerView.querySelector('.file-viewer-body');
+      if (body) body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
+      return -1;
+    }
+
+    var monaco = await window.MonacoReady;
+
+    // For TS/JS, kick off the project scan so cross-file imports resolve.
+    // Awaited here so a reusable project model, if any, is available below.
+    if (fileViewerWorktree && window.MonacoProject && isTsJsPath(filePath)) {
+      try { await window.MonacoProject.loadWorktree(fileViewerWorktree); } catch (_) {}
+    }
+
+    // monaco.Uri.file assigns the URI Monaco uses for this file. If the
+    // project scan already created a model at this URI, reuse it — disposing
+    // it would pull the file out of the TS worker's cross-file view.
+    var uri = monaco.Uri.file(filePath);
+    var existing = monaco.editor.getModel(uri);
+    var model, isProjectModel;
+    if (existing && window.MonacoProject && window.MonacoProject.isProjectModel(uri)) {
+      model = existing;
+      isProjectModel = true;
+    } else {
+      if (existing) { try { existing.dispose(); } catch (_) {} }
+      model = monaco.editor.createModel(result.content, undefined, uri);
+      isProjectModel = false;
+    }
+
+    if (window.LspClient && fileViewerWorktree) {
+      window.LspClient.attachModel(model, filePath, fileViewerWorktree);
+    }
+
+    tabs.push({ filePath: filePath, model: model, isProjectModel: isProjectModel, savedContent: result.content });
+    return tabs.length - 1;
+  }
+
+  async function activateTab(index, line) {
+    if (index < 0 || index >= tabs.length) return;
+    activeTabIndex = index;
+    var tab = tabs[index];
+    currentModel = tab.model;
+    currentFilePath = tab.filePath;
+    currentModelIsProject = tab.isProjectModel;
+    currentViewerWorktree = fileViewerWorktree;
+    var monaco = await window.MonacoReady;
+
+    if (currentEditor) currentEditor.setModel(tab.model);
+
+    if (line) {
+      var lineCount = tab.model.getLineCount();
+      var target = Math.max(1, Math.min(line, lineCount));
+      if (currentEditor) {
+        currentEditor.revealLineInCenter(target);
+        currentEditor.setPosition({ lineNumber: target, column: 1 });
+      }
+    }
+    if (currentEditor) currentEditor.focus();
+
+    renderTabs();
+    renderBreadcrumbs(tab.filePath);
+    updateRunButtonForTab(tab.filePath);
+    refreshDirtyState();
+    updateProblemsBadge(monaco, tab.model);
+  }
+
+  function closeTab(index) {
+    if (index < 0 || index >= tabs.length) return;
+    var tab = tabs[index];
+    if (!tab.isProjectModel) {
+      try { tab.model.dispose(); } catch (_) {}
+    }
+    tabs.splice(index, 1);
+    if (tabs.length === 0) {
+      // Last tab closed — hide the viewer entirely and reset state. Next
+      // openFileViewer will rebuild the shell.
+      disposeCurrentEditor();
+      fileViewerContent.style.display = 'none';
+      fileViewerView.innerHTML = '';
+      return;
+    }
+    if (index < activeTabIndex) {
+      activeTabIndex -= 1;
+      renderTabs();
+    } else if (index === activeTabIndex) {
+      activeTabIndex = Math.min(index, tabs.length - 1);
+      activateTab(activeTabIndex);
+    } else {
+      renderTabs();
+    }
+  }
+
+  function renderTabs() {
+    var container = fileViewerView.querySelector('.file-viewer-tabs');
+    if (!container) return;
+    container.innerHTML = tabs.map(function (tab, i) {
+      var basename = tab.filePath.split('/').pop();
+      var active = i === activeTabIndex ? ' active' : '';
+      var dirty = tab.model && !tab.model.isDisposed() && tab.model.getValue() !== tab.savedContent ? ' dirty' : '';
+      return '<div class="file-viewer-tab' + active + dirty + '" data-tab-index="' + i + '" title="' + escHtml(tab.filePath) + '">' +
+               '<span class="tab-name">' + escHtml(basename) + '</span>' +
+               '<span class="tab-dirty-dot">●</span>' +
+               '<button class="tab-close" title="Close (⌘W)">×</button>' +
+             '</div>';
+    }).join('');
+  }
+
+  function updateRunButtonForTab(filePath) {
+    var btn = fileViewerView.querySelector('.file-viewer-run-btn');
+    if (!btn) return;
+    var runCmd = runCommandForPath(filePath);
+    if (runCmd) {
+      btn.hidden = false;
+      btn.title = 'Run ' + runCmd.friendly;
+    } else {
+      btn.hidden = true;
+    }
+  }
+
+  function refreshDirtyState() {
+    var statusEl = fileViewerView.querySelector('.file-editor-status');
+    var saveBtn = fileViewerView.querySelector('.file-viewer-save-btn');
+    var tab = tabs[activeTabIndex];
+    if (!tab || !statusEl || !saveBtn || !tab.model || tab.model.isDisposed()) return;
+    var dirty = tab.model.getValue() !== tab.savedContent;
+    if (dirty) {
+      statusEl.textContent = 'Modified';
+      statusEl.className = 'file-editor-status modified';
+    } else {
+      statusEl.textContent = '';
+      statusEl.className = 'file-editor-status';
+    }
+    saveBtn.disabled = !dirty;
+    // Update the active tab's dirty-dot class without re-rendering the whole bar.
+    var tabEl = fileViewerView.querySelectorAll('.file-viewer-tab')[activeTabIndex];
+    if (tabEl) tabEl.classList.toggle('dirty', dirty);
+  }
+
+  async function saveFile() {
+    var tab = tabs[activeTabIndex];
+    if (!tab || !tab.model || tab.model.isDisposed()) return;
+    var content = tab.model.getValue();
+    if (content === tab.savedContent) return;
+    var statusEl = fileViewerView.querySelector('.file-editor-status');
+    var saveBtn = fileViewerView.querySelector('.file-viewer-save-btn');
+    if (statusEl) { statusEl.textContent = 'Saving...'; statusEl.className = 'file-editor-status saving'; }
+    if (saveBtn) saveBtn.disabled = true;
+    var writeResult = await window.klaus.writeFile(tab.filePath, content);
+    if (writeResult.error) {
+      if (statusEl) { statusEl.textContent = 'Save failed'; statusEl.className = 'file-editor-status error'; }
+      if (saveBtn) saveBtn.disabled = false;
+      return;
+    }
+    tab.savedContent = content;
+    if (statusEl) { statusEl.textContent = 'Saved'; statusEl.className = 'file-editor-status saved'; }
+    setTimeout(function () {
+      if (statusEl && statusEl.textContent === 'Saved') {
+        statusEl.textContent = '';
+        statusEl.className = 'file-editor-status';
+      }
+    }, 2000);
+    refreshDirtyState();
+    if (window.DiffPanel && window.DiffPanel.isVisible()) window.DiffPanel.refresh();
+    if (window.LspClient) window.LspClient.notifyDidSave(tab.filePath);
+  }
 
   window.openFileViewer = async function (filePath, fileName, lineNumber) {
     var diffPanel = document.getElementById('diff-panel');
@@ -283,202 +581,20 @@ window.FileBrowser = (function () {
     fileViewerWorktree = task ? task.worktreePath : null;
 
     fileViewerContent.style.display = 'flex';
-    var runCmd = runCommandForPath(filePath);
-    fileViewerView.innerHTML =
-      '<div class="file-viewer-header-inline">' +
-        '<button class="file-viewer-nav-btn" data-nav="back" title="Back (⌘⌥←)" disabled>◀</button>' +
-        '<button class="file-viewer-nav-btn" data-nav="forward" title="Forward (⌘⌥→)" disabled>▶</button>' +
-        '<span class="file-viewer-breadcrumbs"></span>' +
-        '<span class="file-editor-status"></span>' +
-        '<span class="file-viewer-problems-badge" hidden></span>' +
-        (runCmd ? '<button class="file-viewer-run-btn" title="Run ' + escHtml(runCmd.friendly) + '">▶</button>' : '') +
-        '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
-        '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
-      '</div>' +
-      '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>';
 
-    renderBreadcrumbs(filePath);
-    updateNavButtons();
-    fileViewerView.querySelectorAll('.file-viewer-nav-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        if (btn.dataset.nav === 'back') goBack();
-        else goForward();
-      });
-    });
     if (!programmaticNav) pushNav(filePath, lineNumber || 1);
 
-    var statusEl = fileViewerView.querySelector('.file-editor-status');
-    var saveBtn = fileViewerView.querySelector('.file-viewer-save-btn');
-    fileViewerView.querySelector('.file-viewer-blame-btn').addEventListener('click', function () {
-      window.toggleBlame();
-    });
-    saveBtn.addEventListener('click', function () { saveFile(); });
-    var runBtn = fileViewerView.querySelector('.file-viewer-run-btn');
-    if (runBtn) {
-      runBtn.addEventListener('click', function () { runCurrentFile(); });
-    }
+    var ok = await ensureViewerInitialized();
+    if (!ok) return;
 
-    // Dispose any prior instance eagerly so a failed read doesn't leave the
-    // editor from the previous file hanging around behind an error state.
-    disposeCurrentEditor();
-
-    var result = await window.klaus.readFile(filePath);
-    var body = fileViewerView.querySelector('.file-viewer-body');
-    if (result.error) {
-      body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
+    var existing = findTab(filePath);
+    if (existing >= 0) {
+      await activateTab(existing, lineNumber);
       return;
     }
-
-    if (!window.MonacoReady) {
-      body.innerHTML = '<span style="color: var(--error)">Editor failed to load (Monaco not initialized).</span>';
-      return;
-    }
-
-    var monaco;
-    try {
-      monaco = await window.MonacoReady;
-    } catch (err) {
-      body.innerHTML = '<span style="color: var(--error)">Editor failed to load: ' + escHtml(err.message || String(err)) + '</span>';
-      return;
-    }
-
-    var savedContent = result.content;
-    currentFilePath = filePath;
-    var mountEl = body.querySelector('.file-editor-monaco');
-    currentViewerWorktree = fileViewerWorktree;
-
-    // For TS/JS, kick off the project scan in the background so cross-file
-    // imports resolve. Awaited below so the current file's model, if the
-    // scan created one for it, is available to reuse.
-    var projectReady = null;
-    if (fileViewerWorktree && window.MonacoProject && isTsJsPath(filePath)) {
-      projectReady = window.MonacoProject.loadWorktree(fileViewerWorktree);
-    }
-    if (projectReady) { try { await projectReady; } catch (_) {} }
-
-    // For LSP-backed languages (currently Python via pyright), start the
-    // server on first file open per worktree. LspClient.attachModel handles
-    // didOpen/didChange/didClose wiring once the model exists.
-    // Triggered after model creation below.
-
-    // `monaco.Uri.file` gives Monaco a proper URI so it can auto-detect the
-    // language from the extension. If the project scan already created a
-    // model at this URI, reuse it — disposing it would pull the file out of
-    // the TS worker's view and silently break cross-file diagnostics. Sync
-    // its content to disk only if it hasn't been edited in memory.
-    var uri = monaco.Uri.file(filePath);
-    var existing = monaco.editor.getModel(uri);
-    if (existing && window.MonacoProject && window.MonacoProject.isProjectModel(uri)) {
-      currentModel = existing;
-      currentModelIsProject = true;
-    } else {
-      if (existing) { try { existing.dispose(); } catch (_) {} }
-      currentModel = monaco.editor.createModel(result.content, undefined, uri);
-      currentModelIsProject = false;
-    }
-
-    // Register the model with the LSP layer (no-op unless the language has
-    // an LSP server configured). Safe to call before editor creation —
-    // LspClient only needs the model + the file path.
-    if (window.LspClient && fileViewerWorktree) {
-      window.LspClient.attachModel(currentModel, filePath, fileViewerWorktree);
-    }
-
-    currentEditor = monaco.editor.create(mountEl, {
-      model: currentModel,
-      theme: currentMonacoTheme(),
-      automaticLayout: true,
-      minimap: { enabled: true },
-      scrollBeyondLastLine: false,
-      fontSize: 13,
-      fontFamily: "'SF Mono', 'Fira Code', Menlo, monospace",
-      tabSize: 2,
-      renderWhitespace: 'selection',
-    });
-
-    // Cmd+S intercepts the browser Save page shortcut and routes to our writer.
-    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () { saveFile(); });
-    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow, function () { goBack(); });
-    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.RightArrow, function () { goForward(); });
-
-    // Problems badge: watch markers on this model and update the count pill.
-    // onDidChangeMarkers fires with the list of affected URIs; we update only
-    // when our current model's URI is in the list. Initial render covers the
-    // case where markers already exist (e.g. pyright's first publish landed
-    // before the editor was mounted — the stash-and-replay path in lsp-client).
-    updateProblemsBadge(monaco, currentModel);
-    currentMarkerDisposable = monaco.editor.onDidChangeMarkers(function (uris) {
-      if (!currentModel || currentModel.isDisposed()) return;
-      var our = currentModel.uri.toString();
-      for (var i = 0; i < uris.length; i++) {
-        if (uris[i].toString() === our) { updateProblemsBadge(monaco, currentModel); return; }
-      }
-    });
-
-    // Cmd+click → go-to-definition is wired up by Monaco via the LSP /
-    // TS-worker definition providers. We just need to route cross-file
-    // targets back through openFileViewer — Monaco calls the code-editor
-    // service to open a URI it doesn't own, and by default falls back to
-    // null (no-op). Overriding openCodeEditor is the standard Monaco-in-a-
-    // host pattern for 0.45.
-    interceptCrossFileOpen(currentEditor, monaco);
-
-    function refreshDirtyState() {
-      if (!currentModel) return;
-      var dirty = currentModel.getValue() !== savedContent;
-      if (dirty) {
-        statusEl.textContent = 'Modified';
-        statusEl.className = 'file-editor-status modified';
-      } else {
-        statusEl.textContent = '';
-        statusEl.className = 'file-editor-status';
-      }
-      if (saveBtn) saveBtn.disabled = !dirty;
-    }
-
-    currentEditor.onDidChangeModelContent(refreshDirtyState);
-
-    // When we reuse a project model, it may already carry unsaved edits from
-    // a prior viewing session. Evaluate dirty state now so the Modified
-    // indicator and Save button come up correctly without waiting for a keystroke.
-    if (currentModelIsProject) refreshDirtyState();
-
-    if (lineNumber) {
-      var lineCount = currentModel.getLineCount();
-      var target = Math.max(1, Math.min(lineNumber, lineCount));
-      currentEditor.revealLineInCenter(target);
-      currentEditor.setPosition({ lineNumber: target, column: 1 });
-    }
-    currentEditor.focus();
-
-    async function saveFile() {
-      if (!currentModel) return;
-      var content = currentModel.getValue();
-      if (content === savedContent) return;
-      statusEl.textContent = 'Saving...';
-      statusEl.className = 'file-editor-status saving';
-      if (saveBtn) saveBtn.disabled = true;
-      var writeResult = await window.klaus.writeFile(currentFilePath, content);
-      if (writeResult.error) {
-        statusEl.textContent = 'Save failed';
-        statusEl.className = 'file-editor-status error';
-        if (saveBtn) saveBtn.disabled = false;
-        return;
-      }
-      savedContent = content;
-      statusEl.textContent = 'Saved';
-      statusEl.className = 'file-editor-status saved';
-      setTimeout(function () {
-        if (statusEl.textContent === 'Saved') {
-          statusEl.textContent = '';
-          statusEl.className = 'file-editor-status';
-        }
-      }, 2000);
-      if (window.DiffPanel && window.DiffPanel.isVisible()) {
-        window.DiffPanel.refresh();
-      }
-      if (window.LspClient) window.LspClient.notifyDidSave(currentFilePath);
-    }
+    var newIndex = await createTab(filePath);
+    if (newIndex < 0) return;
+    await activateTab(newIndex, lineNumber);
   };
 
   // ---- File Tree (C2) ----
@@ -811,12 +927,12 @@ window.FileBrowser = (function () {
   window.toggleBlame = async function () {
     var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
     if (!task) return;
-    if (!currentEditor || !currentModel || !window.monaco) return;
-    var header = fileViewerView.querySelector('.file-viewer-header-inline');
-    if (!header) return;
-    var pathEl = header.querySelector('.file-viewer-path');
-    if (!pathEl) return;
-    var fileName = pathEl.textContent;
+    if (!currentEditor || !currentModel || !window.monaco || !currentFilePath) return;
+    // git blame wants the path relative to the worktree.
+    var fileName = currentFilePath;
+    if (currentViewerWorktree && fileName.indexOf(currentViewerWorktree + '/') === 0) {
+      fileName = fileName.slice(currentViewerWorktree.length + 1);
+    }
 
     // Toggle off if blame is already rendering — restore default line numbers.
     if (currentBlameLines) {

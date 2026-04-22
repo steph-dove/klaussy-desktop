@@ -1119,6 +1119,24 @@
     });
   }
 
+  var btnTreeCollapse = document.getElementById('btn-tree-collapse');
+  if (btnTreeCollapse) {
+    var filesTabContent = document.getElementById('files-tab-content');
+    var TREE_COLLAPSED_KEY = 'klaussy.fileTreeCollapsed';
+    // Restore on load — user's preference sticks across sessions.
+    if (localStorage.getItem(TREE_COLLAPSED_KEY) === '1') {
+      filesTabContent.classList.add('tree-collapsed');
+      btnTreeCollapse.textContent = '▸';
+      btnTreeCollapse.title = 'Show file tree';
+    }
+    btnTreeCollapse.addEventListener('click', function () {
+      var collapsed = filesTabContent.classList.toggle('tree-collapsed');
+      btnTreeCollapse.textContent = collapsed ? '▸' : '▾';
+      btnTreeCollapse.title = collapsed ? 'Show file tree' : 'Collapse file tree';
+      localStorage.setItem(TREE_COLLAPSED_KEY, collapsed ? '1' : '0');
+    });
+  }
+
   var btnReviewPr = document.getElementById('btn-review-pr');
   var prReviewMounted = false;
 
