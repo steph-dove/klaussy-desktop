@@ -23,6 +23,7 @@ window.FileBrowser = (function () {
   var currentModelIsProject = false;
   var currentBlameLines = null;
   var currentViewerWorktree = null;
+  var currentFilePath = null;
 
   function currentMonacoTheme() {
     // ThemeManager adds `light-syntax` to body when the active preset uses
@@ -46,6 +47,7 @@ window.FileBrowser = (function () {
     currentModelIsProject = false;
     currentBlameLines = null;
     currentViewerWorktree = null;
+    currentFilePath = null;
   }
 
   // Whether we should eagerly load sibling TS/JS models for cross-file intel.
@@ -55,6 +57,58 @@ window.FileBrowser = (function () {
   function isTsJsPath(filePath) {
     return /\.(t|j)sx?$|\.d\.ts$/i.test(filePath);
   }
+
+  // Map file extensions to their run commands. Only the small set of languages
+  // where per-file `cmd path` execution is idiomatic — things like Rust or Go
+  // that need project-level build/run are handled by the Run App button instead.
+  function runCommandForPath(filePath) {
+    var ext = (filePath.split('.').pop() || '').toLowerCase();
+    var basename = filePath.split('/').pop();
+    if (ext === 'py') return { cmd: 'python3', friendly: 'python3 ' + basename };
+    if (ext === 'js' || ext === 'mjs' || ext === 'cjs') return { cmd: 'node', friendly: 'node ' + basename };
+    if (ext === 'ts' || ext === 'tsx') return { cmd: 'npx tsx', friendly: 'npx tsx ' + basename };
+    if (ext === 'sh' || ext === 'bash') return { cmd: 'bash', friendly: 'bash ' + basename };
+    if (ext === 'rb') return { cmd: 'ruby', friendly: 'ruby ' + basename };
+    return null;
+  }
+
+  // Shell-quote a single argument for zsh/bash. We pass the absolute file path,
+  // which may contain spaces or `$` — single-quoting is enough for our inputs.
+  function shellQuote(s) {
+    return "'" + String(s).replace(/'/g, "'\\''") + "'";
+  }
+
+  function runCurrentFile() {
+    if (!currentFilePath) return;
+    var run = runCommandForPath(currentFilePath);
+    if (!run) return;
+    var taskId = AppState.activeTaskId;
+    if (taskId == null) return;
+    var command = run.cmd + ' ' + shellQuote(currentFilePath);
+    if (window.TerminalManager && window.TerminalManager.runInSubTerminal) {
+      window.TerminalManager.runInSubTerminal(taskId, '▶ Run', command);
+    }
+  }
+
+  // Fire the "figure out how to run this app and run it" flow. Hands the job
+  // to Claude Code running in a sub-terminal — it inspects README / package.json
+  // / pyproject / etc., picks a command, and (with tool-use approval) runs it.
+  // User sees the full session interactively.
+  function runApp() {
+    var taskId = AppState.activeTaskId;
+    if (taskId == null) return;
+    var prompt = 'Find how to run this app in the current working directory ' +
+      'and run it. Show its output. If there is ambiguity between dev vs prod ' +
+      'or between multiple entry points, pick the most likely dev entry point ' +
+      'and note your choice.';
+    var command = 'claude ' + shellQuote(prompt);
+    if (window.TerminalManager && window.TerminalManager.runInSubTerminal) {
+      window.TerminalManager.runInSubTerminal(taskId, '▶ Run App', command);
+    }
+  }
+
+  // Expose runApp for the file-tree header button.
+  window.runApp = runApp;
 
   // Called from terminal-manager.switchToTask when the active task changes.
   // The file viewer belongs to one worktree at a time; showing it against a
@@ -90,10 +144,12 @@ window.FileBrowser = (function () {
     fileViewerWorktree = task ? task.worktreePath : null;
 
     fileViewerContent.style.display = 'flex';
+    var runCmd = runCommandForPath(filePath);
     fileViewerView.innerHTML =
       '<div class="file-viewer-header-inline">' +
         '<span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span>' +
         '<span class="file-editor-status"></span>' +
+        (runCmd ? '<button class="file-viewer-run-btn" title="Run ' + escHtml(runCmd.friendly) + '">▶</button>' : '') +
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
         '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
       '</div>' +
@@ -105,6 +161,10 @@ window.FileBrowser = (function () {
       window.toggleBlame();
     });
     saveBtn.addEventListener('click', function () { saveFile(); });
+    var runBtn = fileViewerView.querySelector('.file-viewer-run-btn');
+    if (runBtn) {
+      runBtn.addEventListener('click', function () { runCurrentFile(); });
+    }
 
     // Dispose any prior instance eagerly so a failed read doesn't leave the
     // editor from the previous file hanging around behind an error state.
@@ -131,7 +191,7 @@ window.FileBrowser = (function () {
     }
 
     var savedContent = result.content;
-    var currentFilePath = filePath;
+    currentFilePath = filePath;
     var mountEl = body.querySelector('.file-editor-monaco');
     currentViewerWorktree = fileViewerWorktree;
 

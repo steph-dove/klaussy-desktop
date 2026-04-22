@@ -1112,6 +1112,13 @@
     btnOpenFolder.addEventListener('click', function () { openFolderAsTask('claude'); });
   }
 
+  var btnRunApp = document.getElementById('btn-run-app');
+  if (btnRunApp) {
+    btnRunApp.addEventListener('click', function () {
+      if (typeof window.runApp === 'function') window.runApp();
+    });
+  }
+
   var btnReviewPr = document.getElementById('btn-review-pr');
   var prReviewMounted = false;
 

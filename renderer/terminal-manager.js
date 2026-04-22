@@ -452,6 +452,43 @@ window.TerminalManager = (function () {
     }, 50);
   }
 
+  // ---- runInSubTerminal (Run buttons) ----
+
+  // Find-or-create a sub-terminal with `label` on the active task, focus it,
+  // and type `command` + Enter. Reuses an existing terminal with the same
+  // label to avoid piling up one per invocation; clears it first so output
+  // starts fresh. The boot delay before typing is longer when creating a new
+  // shell because the login shell needs time to print its prompt.
+  async function runInSubTerminal(taskId, label, command) {
+    var taskEntry = tasks.get(taskId);
+    if (!taskEntry) return { error: 'No active task' };
+
+    var existing = taskEntry.subTerminals.find(function (s) {
+      return s.label === label && s.alive;
+    });
+    var subEntry;
+    var isNew = false;
+    if (existing) {
+      existing.terminal.clear();
+      subEntry = existing;
+    } else {
+      var result = await window.klaus.addSubTerminal(taskId, label);
+      if (result.error) return { error: result.error };
+      addSubTerminalTab(taskEntry, result.subId, result.label);
+      subEntry = taskEntry.subTerminals[taskEntry.subTerminals.length - 1];
+      isNew = true;
+    }
+
+    switchSubTerminal(taskEntry, subEntry.subId);
+
+    setTimeout(function () {
+      if (!subEntry.alive) return;
+      window.klaus.writeTerminal(taskId, command + '\r', subEntry.subId);
+    }, isNew ? 400 : 50);
+
+    return { ok: true };
+  }
+
   // ---- rewireTerminal ----
 
   function rewireTerminal(id) {
@@ -639,5 +676,6 @@ window.TerminalManager = (function () {
     zoomIn: zoomIn,
     zoomOut: zoomOut,
     zoomReset: zoomReset,
+    runInSubTerminal: runInSubTerminal,
   };
 })();
