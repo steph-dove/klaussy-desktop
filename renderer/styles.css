@@ -1092,6 +1092,17 @@ body {
   flex-shrink: 0;
 }
 
+.terminal-warning-link {
+  color: #fff;
+  text-decoration: underline;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.terminal-warning-link:hover {
+  text-decoration: none;
+}
+
 /* Only the active branchless container takes over its full area in single
    view; grid/columns keep their layout and this simply adds the banner on
    top via the existing flex-column rules. */
@@ -4406,6 +4417,82 @@ body.pr-review-popout #pr-review-root {
   color: var(--diff-del-fg, #e27c7c);
   background: rgba(218, 54, 51, 0.12);
 }
+
+.pr-ai-finding-comment-edited {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 3px;
+  color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.pr-ai-finding-edit-comment {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  min-width: 26px;
+}
+.pr-ai-finding-edit-comment:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.pr-ai-finding-composer {
+  padding: 10px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pr-ai-finding-composer-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 80px;
+  outline: none;
+}
+.pr-ai-finding-composer-input:focus {
+  border-color: var(--accent);
+}
+.pr-ai-finding-composer-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.pr-ai-finding-composer-actions button {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+.pr-ai-finding-composer-reset {
+  margin-right: auto;
+  color: var(--text-muted) !important;
+}
+.pr-ai-finding-composer-save {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+}
+.pr-ai-finding-composer-save:hover {
+  background: var(--accent-hover) !important;
+}
+
 .pr-ai-finding-implement-out {
   padding: 10px 14px;
   background: var(--bg);
@@ -4725,6 +4812,74 @@ body.pr-review-popout #pr-review-root {
 .pr-conv-reply-send { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
 .pr-conv-reply-send:hover { filter: brightness(1.1); }
 .pr-conv-reply-send:disabled { opacity: 0.7; cursor: wait; }
+
+/* Edit existing comment */
+.pr-conv-edit-btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0 6px;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: auto;
+}
+.pr-conv-edit-btn:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+  border-color: var(--border);
+}
+
+.pr-conv-edit-wrap {
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pr-conv-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 70px;
+}
+.pr-conv-edit-input:focus { outline: none; border-color: var(--accent); }
+.pr-conv-edit-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.pr-conv-edit-error {
+  margin-right: auto;
+  color: var(--error);
+  font-size: 11px;
+}
+.pr-conv-edit-actions button {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+.pr-conv-edit-save {
+  background: var(--accent) !important;
+  color: #fff !important;
+  border-color: var(--accent) !important;
+  font-weight: 600;
+}
+.pr-conv-edit-save:hover { filter: brightness(1.1); }
+.pr-conv-edit-save:disabled { opacity: 0.7; cursor: wait; }
 
 /* Bottom-of-feed general comment composer */
 .pr-conv-new-comment {
@@ -6741,6 +6896,54 @@ body.pr-review-popout #pr-review-root {
 
 body.task-branchless .file-viewer-blame-btn {
   display: none;
+}
+
+/* LSP auto-install banner — inline above the editor while pyright et al.
+   are being installed. Flex-shrink: 0 so it doesn't steal editor height. */
+.lsp-install-banner {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 12px;
+  font-size: 12px;
+  flex-shrink: 0;
+  display: block;
+}
+
+.lsp-install-banner[hidden] {
+  display: none;
+}
+
+.lsp-install-banner.error {
+  background: rgba(255, 82, 82, 0.12);
+  border-bottom-color: var(--error);
+}
+
+.lsp-install-banner.success {
+  background: rgba(46, 160, 67, 0.12);
+}
+
+.lsp-install-banner-message {
+  font-weight: 600;
+}
+
+.lsp-install-banner-hint {
+  margin: 6px 0 0 0;
+  padding: 0;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+.lsp-install-banner-detail {
+  margin-top: 4px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Inline file editing */

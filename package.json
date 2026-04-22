@@ -20,7 +20,9 @@
     "@xterm/xterm": "^5.5.0",
     "highlight.js": "^11.11.1",
     "monaco-editor": "^0.45.0",
-    "node-pty": "^1.0.0"
+    "node-pty": "^1.0.0",
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.0",

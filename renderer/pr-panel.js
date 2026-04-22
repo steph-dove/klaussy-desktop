@@ -1090,7 +1090,10 @@ window.PRPanel = (function () {
   // final "**Overall verdict:**" if present.
   function parseReviewFindings(text) {
     if (!text) return { preamble: '', findings: [], postamble: '' };
-    var parts = text.split(/(?=^\s*\*\*\[Severity:)/m);
+    // Tolerant split: line start, optional whitespace, 0–2 asterisks, then
+    // `[Severity:`. Kept in lockstep with pr-review.js. Looser markdown
+    // prefixes caused false splits on `---` rules.
+    var parts = text.split(/(?=^\s*\*{0,2}\[Severity:)/m);
     if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
     var preamble = parts[0].trim();
     var findings = [];
@@ -1105,11 +1108,26 @@ window.PRPanel = (function () {
         findings.push(block.trim());
       }
     }
+    // Junk filter (mirrors pr-review.js): drop findings that don't actually
+    // contain a severity marker, or whose only content is a `---`/`===`
+    // separator. Safety net against loose split boundaries.
+    findings = findings.filter(function (f) {
+      if (!f) return false;
+      if (!/\*{0,2}\[Severity:/i.test(f)) return false;
+      var lines = f.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+      var meaningful = lines.filter(function (l) {
+        if (/^\*?\*?\[[^\]]+\]\*?\*?$/.test(l)) return false;
+        if (/^-{3,}$/.test(l)) return false;
+        if (/^={3,}$/.test(l)) return false;
+        return true;
+      });
+      return meaningful.length > 0;
+    });
     return { preamble: preamble, findings: findings, postamble: postamble };
   }
 
   function severityOf(findingText) {
-    var m = findingText.match(/\*\*\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*\*/);
+    var m = (findingText || '').match(/\*{0,2}\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*{0,2}/);
     return m ? m[1].trim().toLowerCase() : '';
   }
 
