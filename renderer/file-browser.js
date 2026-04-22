@@ -6,8 +6,13 @@ window.FileBrowser = (function () {
   var fileTree = document.getElementById('file-tree');
   var fileTreeFilter = document.getElementById('file-tree-filter');
   var projectSearchInput = document.getElementById('project-search-input');
+  var projectReplaceInput = document.getElementById('project-replace-input');
+  var projectReplaceBtn = document.getElementById('project-replace-btn');
   var projectSearchResults = document.getElementById('project-search-results');
   var searchTimer = null;
+  var lastSearchHits = []; // { file, line, text }[] from the last search
+  var lastSearchQuery = '';
+  var excludedFiles = new Set(); // files deselected from replace
 
   var fileTreeData = [];
   var fileTreeWorktree = null;
@@ -594,9 +599,12 @@ window.FileBrowser = (function () {
   // ---- Project Search (C3) ----
 
   async function doProjectSearch(overrideWt) {
-    var query = projectSearchInput.value.trim();
+    var query = projectSearchInput.value;
     if (!query) {
       projectSearchResults.innerHTML = '';
+      lastSearchHits = [];
+      lastSearchQuery = '';
+      updateReplaceButton();
       return;
     }
     var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
@@ -606,39 +614,143 @@ window.FileBrowser = (function () {
       return;
     }
     projectSearchResults.innerHTML = '<div class="file-tree-empty">Searching...</div>';
-    var result = await window.klaus.searchFiles(wt, query);
+    // When the replace field has content, fetch more matches per file so the
+    // user can see everything they're about to change. 100 is a soft cap —
+    // enough to cover most practical cases without blowing the UI.
+    var maxPerFile = projectReplaceInput.value ? 100 : 5;
+    var result = await window.klaus.searchFiles(wt, query, maxPerFile);
     if (result.error) {
       projectSearchResults.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
     }
     if (result.results.length === 0) {
       projectSearchResults.innerHTML = '<div class="file-tree-empty">No matches found</div>';
+      lastSearchHits = [];
+      lastSearchQuery = query;
+      updateReplaceButton();
       return;
     }
+    lastSearchHits = result.results;
+    lastSearchQuery = query;
+    excludedFiles.clear();
+    renderSearchResults(wt);
+    updateReplaceButton();
+  }
+
+  function renderSearchResults(wt) {
     var grouped = {};
-    result.results.forEach(function (r) {
+    lastSearchHits.forEach(function (r) {
       if (!grouped[r.file]) grouped[r.file] = [];
       grouped[r.file].push(r);
     });
+    var replaceText = projectReplaceInput.value;
+    var query = lastSearchQuery;
     projectSearchResults.innerHTML = '';
     Object.keys(grouped).forEach(function (file) {
+      var hits = grouped[file];
       var fileHeader = document.createElement('div');
       fileHeader.className = 'search-result-file';
-      fileHeader.textContent = file;
-      fileHeader.addEventListener('click', function () {
-        window.openFileViewer(wt + '/' + file, file);
+      // Per-file checkbox visible in replace mode. Unchecked files are skipped
+      // when the user hits Apply.
+      var checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.className = 'search-result-file-check';
+      checkbox.checked = !excludedFiles.has(file);
+      checkbox.title = 'Include this file in replace';
+      checkbox.addEventListener('click', function (e) { e.stopPropagation(); });
+      checkbox.addEventListener('change', function () {
+        if (checkbox.checked) excludedFiles.delete(file);
+        else excludedFiles.add(file);
+        updateReplaceButton();
       });
+      fileHeader.appendChild(checkbox);
+      var label = document.createElement('span');
+      label.className = 'search-result-file-label';
+      label.textContent = file + '  (' + hits.length + ')';
+      label.addEventListener('click', function () { window.openFileViewer(wt + '/' + file, file); });
+      fileHeader.appendChild(label);
       projectSearchResults.appendChild(fileHeader);
-      grouped[file].forEach(function (match) {
+      hits.forEach(function (match) {
         var line = document.createElement('div');
         line.className = 'search-result-line';
-        line.innerHTML = '<span class="search-line-num">' + match.line + '</span>' + escHtml(match.text.substring(0, 200));
-        line.addEventListener('click', function () {
-          window.openFileViewer(wt + '/' + file, file, match.line);
-        });
+        var text = match.text.substring(0, 200);
+        var html = '<span class="search-line-num">' + match.line + '</span>' + highlightMatches(text, query);
+        if (replaceText) {
+          var afterText = text.split(query).join(replaceText);
+          html += '<div class="search-result-replace-preview">→ ' +
+            highlightReplacements(afterText.substring(0, 200), replaceText) + '</div>';
+        }
+        line.innerHTML = html;
+        line.addEventListener('click', function () { window.openFileViewer(wt + '/' + file, file, match.line); });
         projectSearchResults.appendChild(line);
       });
     });
+  }
+
+  function highlightMatches(text, query) {
+    if (!query) return escHtml(text);
+    var parts = text.split(query);
+    return parts
+      .map(function (p) { return escHtml(p); })
+      .join('<mark class="search-hit-match">' + escHtml(query) + '</mark>');
+  }
+
+  function highlightReplacements(text, replacement) {
+    if (!replacement) return escHtml(text);
+    var parts = text.split(replacement);
+    return parts
+      .map(function (p) { return escHtml(p); })
+      .join('<mark class="search-hit-replace">' + escHtml(replacement) + '</mark>');
+  }
+
+  function updateReplaceButton() {
+    if (!projectReplaceBtn) return;
+    var includedFiles = new Set();
+    lastSearchHits.forEach(function (r) {
+      if (!excludedFiles.has(r.file)) includedFiles.add(r.file);
+    });
+    var hitCount = lastSearchHits.filter(function (r) { return !excludedFiles.has(r.file); }).length;
+    var hasReplace = !!projectReplaceInput.value;
+    projectReplaceBtn.disabled = !hasReplace || hitCount === 0 || !lastSearchQuery;
+    projectReplaceBtn.textContent = hitCount > 0
+      ? 'Replace in ' + includedFiles.size + ' file' + (includedFiles.size === 1 ? '' : 's')
+      : 'Replace';
+  }
+
+  async function doProjectReplace() {
+    var query = lastSearchQuery;
+    var replacement = projectReplaceInput.value;
+    if (!query) return;
+    var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
+    var wt = task ? task.worktreePath : null;
+    if (!wt) return;
+    var files = [];
+    var seen = new Set();
+    lastSearchHits.forEach(function (r) {
+      if (excludedFiles.has(r.file)) return;
+      if (seen.has(r.file)) return;
+      seen.add(r.file);
+      files.push(r.file);
+    });
+    if (!files.length) return;
+    var ok = window.confirm(
+      'Replace "' + query + '" with "' + replacement + '" in ' + files.length + ' file' +
+      (files.length === 1 ? '' : 's') + '?\n\nThis rewrites files on disk and cannot be undone from here.'
+    );
+    if (!ok) return;
+    projectReplaceBtn.disabled = true;
+    projectReplaceBtn.textContent = 'Replacing…';
+    var result = await window.klaus.replaceInFiles(wt, files, query, replacement);
+    if (result.error) {
+      alert('Replace failed: ' + result.error);
+      updateReplaceButton();
+      return;
+    }
+    // Re-run search so the UI reflects the post-replace state (usually zero
+    // hits for the original query).
+    projectReplaceInput.value = '';
+    await doProjectSearch(wt);
+    if (window.DiffPanel && window.DiffPanel.isVisible()) window.DiffPanel.refresh();
   }
 
   // Event listeners for tab switching
@@ -667,6 +779,32 @@ window.FileBrowser = (function () {
       doProjectSearch();
     }
   });
+
+  if (projectReplaceInput) {
+    var replaceInputModeArmed = false;
+    projectReplaceInput.addEventListener('input', function () {
+      var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
+      var wt = task ? task.worktreePath : null;
+      // First time the replace field gets content during this search, re-query
+      // so the per-file match cap jumps from 5 → 100. After that, subsequent
+      // keystrokes just re-render the preview locally; the hit set is stable.
+      if (projectReplaceInput.value && !replaceInputModeArmed && lastSearchHits.length && wt) {
+        replaceInputModeArmed = true;
+        doProjectSearch(wt);
+        return;
+      }
+      if (!projectReplaceInput.value) replaceInputModeArmed = false;
+      if (wt && lastSearchHits.length) renderSearchResults(wt);
+      updateReplaceButton();
+    });
+    projectReplaceInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !projectReplaceBtn.disabled) {
+        e.preventDefault();
+        doProjectReplace();
+      }
+    });
+  }
+  if (projectReplaceBtn) projectReplaceBtn.addEventListener('click', doProjectReplace);
 
   // ---- Blame toggle (D5) ----
 
