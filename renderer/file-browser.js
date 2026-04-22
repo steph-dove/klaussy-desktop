@@ -144,6 +144,11 @@ window.FileBrowser = (function () {
     }
     if (projectReady) { try { await projectReady; } catch (_) {} }
 
+    // For LSP-backed languages (currently Python via pyright), start the
+    // server on first file open per worktree. LspClient.attachModel handles
+    // didOpen/didChange/didClose wiring once the model exists.
+    // Triggered after model creation below.
+
     // `monaco.Uri.file` gives Monaco a proper URI so it can auto-detect the
     // language from the extension. If the project scan already created a
     // model at this URI, reuse it — disposing it would pull the file out of
@@ -158,6 +163,13 @@ window.FileBrowser = (function () {
       if (existing) { try { existing.dispose(); } catch (_) {} }
       currentModel = monaco.editor.createModel(result.content, undefined, uri);
       currentModelIsProject = false;
+    }
+
+    // Register the model with the LSP layer (no-op unless the language has
+    // an LSP server configured). Safe to call before editor creation —
+    // LspClient only needs the model + the file path.
+    if (window.LspClient && fileViewerWorktree) {
+      window.LspClient.attachModel(currentModel, filePath, fileViewerWorktree);
     }
 
     currentEditor = monaco.editor.create(mountEl, {
@@ -239,6 +251,7 @@ window.FileBrowser = (function () {
       if (window.DiffPanel && window.DiffPanel.isVisible()) {
         window.DiffPanel.refresh();
       }
+      if (window.LspClient) window.LspClient.notifyDidSave(currentFilePath);
     }
   };
 
@@ -288,6 +301,7 @@ window.FileBrowser = (function () {
     // that the active worktree changed. If the open file belongs to a
     // different worktree, close it here regardless of the switchToTask hook.
     if (currentViewerWorktree && currentViewerWorktree !== wt) {
+      var prevWorktree = currentViewerWorktree;
       disposeCurrentEditor();
       fileViewerContent.style.display = 'none';
       fileViewerView.innerHTML = '';
@@ -295,6 +309,8 @@ window.FileBrowser = (function () {
       // linger across navigations and pollute the TS worker with stale
       // files from unrelated projects.
       if (window.MonacoProject) window.MonacoProject.unloadWorktree();
+      // Shut down any LSP servers tied to the old worktree.
+      if (window.LspClient) window.LspClient.unloadWorktree(prevWorktree);
     }
     if (!wt) {
       fileTree.innerHTML = '<div class="file-tree-empty">No active task</div>';

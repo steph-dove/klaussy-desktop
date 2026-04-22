@@ -61,7 +61,18 @@ window.TerminalManager = (function () {
       warning.className = 'terminal-warning';
       warning.innerHTML =
         '<span class="terminal-warning-icon" aria-hidden="true">&#9888;</span>' +
-        '<span class="terminal-warning-text">Not in a git worktree. For the best experience, open this folder as a worktree to unlock diff, commit, branch and PR features.</span>';
+        '<span class="terminal-warning-text">Not in a git worktree. ' +
+          '<a href="#" class="terminal-warning-link">Open as a worktree</a> ' +
+          'to unlock diff, commit, branch and PR features.' +
+        '</span>';
+      warning.querySelector('.terminal-warning-link').addEventListener('click', function (e) {
+        e.preventDefault();
+        // Reuse the sidebar + button's existing modal — the "New Worktree"
+        // and "Existing Worktree" tabs cover both the "promote this folder"
+        // and "attach a sibling" cases.
+        var btn = document.getElementById('btn-new-task');
+        if (btn) btn.click();
+      });
       container.appendChild(warning);
     }
 
@@ -165,7 +176,16 @@ window.TerminalManager = (function () {
       if (e.type !== 'keydown') return true;
       var meta = e.metaKey;
       if (e.key === 'Enter' && e.shiftKey) {
-        window.klaus.writeTerminal(id, '\x1b[13;2u');
+        // Known limitation: Claude Code's Ink input layer inside our
+        // xterm.js PTY doesn't reliably distinguish Shift+Enter from Enter.
+        // None of `\r`, `\n`, `\x1b\r` (Meta+Enter), `\x1b[13;2u` (CSI-u
+        // Shift+Enter), or bracketed-paste `\x1b[200~\n\x1b[201~` caused a
+        // newline insertion in testing — all submitted. The only thing that
+        // reliably triggers Claude's multi-line mode is the backslash-
+        // escape (`\<Enter>`), which works on an empty prompt and leaves
+        // a trailing `\` on non-empty prompts. We ship that as the best
+        // partial behavior — users can always type `\<Enter>` manually.
+        window.klaus.writeTerminal(id, '\\\r');
         return false;
       }
       if (meta && e.key === 'c') {

@@ -198,6 +198,25 @@ contextBridge.exposeInMainWorld('klaus', {
   listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
   readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
     ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),
+
+  // LSP (Phase I3)
+  lspStart: (worktreePath, languageId) => ipcRenderer.invoke('lsp-start', { worktreePath, languageId }),
+  lspStop: (serverId) => ipcRenderer.invoke('lsp-stop', { serverId }),
+  lspRequest: (serverId, method, params) => ipcRenderer.invoke('lsp-request', { serverId, method, params }),
+  lspNotify: (serverId, method, params) => ipcRenderer.invoke('lsp-notify', { serverId, method, params }),
+  lspInstall: (languageId) => ipcRenderer.invoke('lsp-install', { languageId }),
+  onLspMessage: (serverId, callback) => {
+    const channel = `lsp-message-${serverId}`;
+    const handler = (_e, msg) => callback(msg);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onLspInstallProgress: (languageId, callback) => {
+    const channel = `lsp-install-progress-${languageId}`;
+    const handler = (_e, msg) => callback(msg);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
   searchFiles: (worktreePath, query) => ipcRenderer.invoke('search-files', { worktreePath, query }),
 
   // Sub-terminal multiplexing (Feature 5)
@@ -327,6 +346,11 @@ contextBridge.exposeInMainWorld('klaus', {
   prAddIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),
   prReplyToReviewComment: (inReplyTo, body) =>
     ipcRenderer.invoke('pr-reply-to-review-comment', { inReplyTo, body }),
+  prEditIssueComment: (commentId, body) =>
+    ipcRenderer.invoke('pr-edit-issue-comment', { commentId, body }),
+  prEditReviewComment: (commentId, body) =>
+    ipcRenderer.invoke('pr-edit-review-comment', { commentId, body }),
+  prCurrentUser: () => ipcRenderer.invoke('pr-current-user'),
   prReviewChecks: () => ipcRenderer.invoke('pr-review-checks'),
   prReviewMerge: (strategy) => ipcRenderer.invoke('pr-review-merge', { strategy }),
   prDebugCheckStart: (requestId, checkLink, checkName) =>

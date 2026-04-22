@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const { execSync, execFileSync, execFile } = require('child_process');
 const pty = require('node-pty');
+const lspManager = require('./lsp-manager');
 
 let mainWindow;
 const allWindows = new Set();
@@ -3140,6 +3141,98 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   });
 });
 
+// Patch an existing issue comment. `commentId` is the REST numeric id
+// (GraphQL exposes it as databaseId). Posts to the `/issues/comments/{id}`
+// REST endpoint — distinct from review comments which live under `/pulls/`.
+ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const id = parseInt(commentId, 10);
+  if (!id) return { error: 'Missing or invalid comment id' };
+  if (!body || !body.trim()) return { error: 'Comment body is empty' };
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/issues/comments/${id}`;
+  const cwd = currentRepoPath() || require('os').homedir();
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
+      cwd, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdoutBuf = '', stderrBuf = '';
+    proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.on('error', (err) => resolve({ error: err.message }));
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        let msg = stderrBuf.trim();
+        if (stdoutBuf) {
+          try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+        }
+        resolve({ error: msg || ('gh exited with code ' + code) });
+        return;
+      }
+      resolve({ ok: true, body });
+    });
+    proc.stdin.write(JSON.stringify({ body }));
+    proc.stdin.end();
+  });
+});
+
+// Patch an existing inline/review comment. Separate endpoint from issue
+// comments: `/repos/{o}/{r}/pulls/comments/{id}`.
+ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => {
+  if (!activePrReview) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo } = activePrReview;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const id = parseInt(commentId, 10);
+  if (!id) return { error: 'Missing or invalid comment id' };
+  if (!body || !body.trim()) return { error: 'Comment body is empty' };
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/comments/${id}`;
+  const cwd = currentRepoPath() || require('os').homedir();
+  const { spawn } = require('child_process');
+  return new Promise((resolve) => {
+    const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
+      cwd, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdoutBuf = '', stderrBuf = '';
+    proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.on('error', (err) => resolve({ error: err.message }));
+    proc.on('exit', (code) => {
+      if (code !== 0) {
+        let msg = stderrBuf.trim();
+        if (stdoutBuf) {
+          try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+        }
+        resolve({ error: msg || ('gh exited with code ' + code) });
+        return;
+      }
+      resolve({ ok: true, body });
+    });
+    proc.stdin.write(JSON.stringify({ body }));
+    proc.stdin.end();
+  });
+});
+
+// Cache the current gh-authed user so we only show the edit control on
+// comments this user can actually modify. gh api /user is the cheap
+// canonical endpoint; we call it once per review session.
+let cachedCurrentUser = null;
+ipcMain.handle('pr-current-user', async () => {
+  if (cachedCurrentUser) return { login: cachedCurrentUser };
+  try {
+    const out = execFileSync('gh', ['api', 'user', '--jq', '.login'], {
+      stdio: 'pipe', timeout: 10000,
+    }).toString().trim();
+    if (out) cachedCurrentUser = out;
+    return { login: cachedCurrentUser };
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
 // Reply to a specific review comment (threaded). `inReplyTo` is the parent
 // comment's REST databaseId — the same id GraphQL returns on each review
 // comment so we can thread using data we already fetch. Uses GitHub's
@@ -3433,6 +3526,40 @@ function walkDirectory(root) {
   }
   return results;
 }
+
+// ---- LSP (Phase I3) ----
+//
+// The renderer never touches child_process; lsp-manager.js owns server
+// lifecycles and proxies JSON-RPC. Each renderer webContents registers
+// servers tied to it so we can tear them down if the window closes.
+
+ipcMain.handle('lsp-start', async (event, { worktreePath, languageId }) => {
+  return lspManager.startServer({
+    worktreePath,
+    languageId,
+    webContents: event.sender,
+  });
+});
+
+ipcMain.handle('lsp-stop', async (_event, { serverId }) => {
+  return lspManager.stopServer(serverId);
+});
+
+ipcMain.handle('lsp-request', async (_event, { serverId, method, params }) => {
+  return lspManager.request(serverId, method, params);
+});
+
+ipcMain.handle('lsp-notify', async (_event, { serverId, method, params }) => {
+  return lspManager.notify(serverId, method, params);
+});
+
+ipcMain.handle('lsp-install', async (event, { languageId }) => {
+  return lspManager.installServer({ languageId, webContents: event.sender });
+});
+
+app.on('before-quit', () => {
+  lspManager.stopAllServers();
+});
 
 // Bulk-read many files in one IPC round-trip. Used by the Monaco file
 // viewer to hydrate sibling TS/JS models for cross-file IntelliSense.

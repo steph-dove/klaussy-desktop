@@ -20,6 +20,18 @@ window.PrReview = (function () {
   var lastState = null;
   var selectedFile = null;
   var activeTab = 'files'; // 'files' | 'conversation'
+  // Current gh user login — used to gate the edit pencil on comments. Fetched
+  // once per review session; stays null if gh api fails (which just means
+  // the edit UI never appears, not an error state).
+  var currentUserLogin = null;
+  // In-flight edit: which comment is in edit mode, and what kind (for PATCH
+  // endpoint selection). Kind: 'issue' | 'review'.
+  var editingCommentId = null;
+  var editingCommentKind = null;
+  // When a comment has been locally edited (PATCH succeeded), we stash the
+  // new body here until the next refresh overwrites the nodes, so the UI
+  // doesn't flicker back to the old text.
+  var editedCommentOverrides = {}; // { [commentDatabaseId]: newBody }
   var selectionFab = null;
   var onSelectionChange = null;
   // G4: draft review comments accumulated client-side until the user submits
@@ -51,6 +63,18 @@ window.PrReview = (function () {
     hostEl.classList.add('pr-review-host');
     renderLoading();
     initSelectionExplain();
+
+    // Fetch the current gh user once per mount. Drives whether the edit
+    // pencil shows on a comment. If this fails we simply don't show the
+    // pencil anywhere — no error state needed.
+    if (!currentUserLogin) {
+      window.klaus.prCurrentUser().then(function (r) {
+        if (r && r.login) {
+          currentUserLogin = r.login;
+          if (lastState) render(lastState);
+        }
+      });
+    }
 
     unsubState = window.klaus.onPrReviewState(function (state) {
       if (!state) {
@@ -189,6 +213,7 @@ window.PrReview = (function () {
     } else if (activeTab === 'conversation') {
       bindConversationComposer();
       bindReplyButtons();
+      bindEditCommentButtons();
     } else if (activeTab === 'checks') {
       bindChecksTab();
     } else if (activeTab === 'ai-review') {
@@ -231,6 +256,57 @@ window.PrReview = (function () {
     hostEl.querySelectorAll('.pr-conv-reply-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         openReplyComposer(btn);
+      });
+    });
+  }
+
+  function bindEditCommentButtons() {
+    // Enter edit mode — swap the body for a textarea on the next render.
+    hostEl.querySelectorAll('.pr-conv-edit-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        editingCommentId = parseInt(btn.dataset.id, 10);
+        editingCommentKind = btn.dataset.kind;
+        if (lastState) render(lastState);
+      });
+    });
+    // Cancel / Save handlers for any currently-open composer.
+    hostEl.querySelectorAll('.pr-conv-edit-wrap').forEach(function (wrap) {
+      var dbid = parseInt(wrap.dataset.id, 10);
+      var kind = wrap.dataset.kind;
+      var ta = wrap.querySelector('.pr-conv-edit-input');
+      var saveBtn = wrap.querySelector('.pr-conv-edit-save');
+      var cancelBtn = wrap.querySelector('.pr-conv-edit-cancel');
+      var errEl = wrap.querySelector('.pr-conv-edit-error');
+      if (ta) ta.focus();
+      if (cancelBtn) cancelBtn.addEventListener('click', function () {
+        editingCommentId = null;
+        editingCommentKind = null;
+        if (lastState) render(lastState);
+      });
+      if (saveBtn) saveBtn.addEventListener('click', async function () {
+        var body = ta ? ta.value : '';
+        if (!body.trim()) {
+          if (errEl) errEl.textContent = 'Comment body cannot be empty.';
+          return;
+        }
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        if (errEl) errEl.textContent = '';
+        var fn = kind === 'review' ? window.klaus.prEditReviewComment : window.klaus.prEditIssueComment;
+        var result = await fn(dbid, body);
+        if (result && result.error) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+          if (errEl) errEl.textContent = 'Save failed: ' + result.error;
+          return;
+        }
+        editedCommentOverrides[dbid] = body;
+        editingCommentId = null;
+        editingCommentKind = null;
+        // Ask the main process for fresh threads so our state reflects the
+        // canonical server view — the override is there for the brief gap.
+        window.klaus.prRefreshThreads();
+        if (lastState) render(lastState);
       });
     });
   }
@@ -629,6 +705,7 @@ window.PrReview = (function () {
         if (saved.implementError) f.implementError = saved.implementError;
         if (saved.commentStatus) f.commentStatus = saved.commentStatus;
         if (saved.commentError) f.commentError = saved.commentError;
+        if (saved.commentBody != null) f.commentBody = saved.commentBody;
         if (saved.usage) f.usage = saved.usage;
       });
     }
@@ -653,6 +730,7 @@ window.PrReview = (function () {
         implementError: f.implementError || null,
         commentStatus: f.commentStatus || 'idle',
         commentError: f.commentError || null,
+        commentBody: f.commentBody != null ? f.commentBody : null,
         usage: f.usage || null,
       };
     });
@@ -677,7 +755,12 @@ window.PrReview = (function () {
   // a single card containing the whole review.
   function parseReviewFindings(text) {
     if (!text) return { preamble: '', findings: [], postamble: '' };
-    var parts = text.split(/(?=^\s*\*\*\[Severity:)/m);
+    // Split anchor: line start (multiline), optional whitespace, 0–2 leading
+    // asterisks, then `[Severity:`. Allowing 0 asterisks covers the case
+    // where the AI drops the bold wrappers; broader markdown prefixes
+    // (`-`, `#`, `1.`, `>`) caused over-splitting on `---` rules and other
+    // ambient content that referenced "Severity" nearby.
+    var parts = text.split(/(?=^\s*\*{0,2}\[Severity:)/m);
     if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
     var preamble = parts[0].trim();
     var findings = [];
@@ -692,24 +775,36 @@ window.PrReview = (function () {
         findings.push(block.trim());
       }
     }
-    // Drop empty entries (e.g. a Severity marker followed immediately by the
-    // verdict block, or a stray blank section between findings) — they'd
-    // otherwise render as empty cards with action buttons but no body.
+    // Drop empty or junk entries: every real finding must actually start
+    // with a severity marker, have some body beyond that marker, and not
+    // be just a separator (`---`, empty lines, etc.). Prevents stray blocks
+    // of just `---` from rendering as cards when the split regex picks up
+    // an ambient reference near the separator.
     findings = findings.filter(function (f) {
-      // A "real" finding has more than just a Severity marker — require at
-      // least one non-marker line of content.
       if (!f) return false;
+      // Must contain a severity marker near the top — split anchor requires
+      // this, but a lenient split could emit text that *follows* the anchor
+      // without the marker itself; sanity-check here.
+      if (!/\*{0,2}\[Severity:/i.test(f)) return false;
       var lines = f.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
       if (lines.length === 0) return false;
-      // If the only line is the bracketed marker itself, treat as empty.
-      var meaningful = lines.filter(function (l) { return !/^\*?\*?\[[^\]]+\]\*?\*?$/.test(l); });
+      // Require at least one line of real content beyond the bracket marker,
+      // horizontal rules, and other decoration.
+      var meaningful = lines.filter(function (l) {
+        if (/^\*?\*?\[[^\]]+\]\*?\*?$/.test(l)) return false; // bare [X] marker
+        if (/^-{3,}$/.test(l)) return false;                  // ---
+        if (/^={3,}$/.test(l)) return false;                  // ===
+        return true;
+      });
       return meaningful.length > 0;
     });
     return { preamble: preamble, findings: findings, postamble: postamble };
   }
 
   function severityOf(text) {
-    var m = (text || '').match(/\*\*\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*\*/);
+    // Mirror the parser's tolerance: accept `[Severity: …]` with 0–2 stars
+    // on either side, matching however the AI ended up formatting it.
+    var m = (text || '').match(/\*{0,2}\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*{0,2}/);
     return m ? m[1].trim().toLowerCase() : '';
   }
 
@@ -740,6 +835,11 @@ window.PrReview = (function () {
         implementError: null,
         commentStatus: 'idle', // 'idle' | 'posting' | 'posted' | 'failed'
         commentError: null,
+        // Customized comment body — null means "post the finding text as-is".
+        // Set to a string when the user edits via the inline composer; the
+        // post flow uses `commentBody ?? text` as the body.
+        commentBody: null,
+        commentEditing: false,
       };
     });
     aiReview.findings = next;
@@ -848,6 +948,13 @@ window.PrReview = (function () {
     // implement the same finding.
     var commentBadge = '';
     var commentBtn = '';
+    var editCommentBtn = '';
+    // Customized comment body — null means "post f.text verbatim"; non-null
+    // string is an override entered via the inline composer.
+    var customized = f.commentBody != null && f.commentBody.trim() !== '';
+    var editedBadge = customized
+      ? '<span class="pr-ai-finding-comment-edited" title="Comment will be posted with your edits">✎ edited</span>'
+      : '';
     if (f.commentStatus === 'posted') {
       commentBadge = '<span class="pr-ai-finding-comment-status posted" title="Posted to the PR">\u2713 Commented</span>';
     } else if (f.commentStatus === 'posting') {
@@ -855,8 +962,10 @@ window.PrReview = (function () {
     } else if (f.commentStatus === 'failed') {
       commentBadge = '<span class="pr-ai-finding-comment-status failed" title="' + escHtml(f.commentError || '') + '">! Comment failed</span>';
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Try again">Add to PR</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit comment before posting">✎</button>';
     } else {
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Post this finding as an issue comment on the PR">Add to PR</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit comment before posting">✎</button>';
     }
 
     var actions;
@@ -866,11 +975,11 @@ window.PrReview = (function () {
       actions = commentBadge + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
-        + commentBadge
+        + commentBadge + editedBadge + editCommentBtn
         + commentBtn
         + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
     } else {
-      actions = commentBadge
+      actions = commentBadge + editedBadge + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
         + '<button class="pr-ai-finding-implement" type="button">Implement</button>';
@@ -886,8 +995,25 @@ window.PrReview = (function () {
         + '</div>'
       : '';
 
+    // Inline comment composer. Shown when the user clicks ✎; pre-filled with
+    // whatever would be posted (edited body if any, otherwise the AI's text).
+    var composer = '';
+    if (f.commentEditing) {
+      var initial = f.commentBody != null ? f.commentBody : f.text;
+      composer =
+        '<div class="pr-ai-finding-composer">'
+        + '<textarea class="pr-ai-finding-composer-input" rows="6" placeholder="Comment body (markdown supported)…">' + escHtml(initial) + '</textarea>'
+        + '<div class="pr-ai-finding-composer-actions">'
+          + (customized ? '<button class="pr-ai-finding-composer-reset" type="button" title="Discard edits and post the AI text verbatim">Reset to AI text</button>' : '')
+          + '<button class="pr-ai-finding-composer-cancel" type="button">Cancel</button>'
+          + '<button class="pr-ai-finding-composer-save" type="button">Save</button>'
+        + '</div>'
+      + '</div>';
+    }
+
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
       + '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>'
+      + composer
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
       + implementOut
     + '</div>';
@@ -962,6 +1088,39 @@ window.PrReview = (function () {
         if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
       });
       if (commentBtn) commentBtn.addEventListener('click', function () { postFindingAsComment(f); });
+
+      var editComment = card.querySelector('.pr-ai-finding-edit-comment');
+      if (editComment) editComment.addEventListener('click', function () {
+        f.commentEditing = true;
+        repaintAiReviewTab();
+        // Focus the composer after repaint so the user can start typing.
+        var ta = hostEl.querySelector('.pr-ai-finding[data-finding-id="' + f.id + '"] .pr-ai-finding-composer-input');
+        if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+      });
+      var composerSave = card.querySelector('.pr-ai-finding-composer-save');
+      var composerCancel = card.querySelector('.pr-ai-finding-composer-cancel');
+      var composerReset = card.querySelector('.pr-ai-finding-composer-reset');
+      if (composerSave) composerSave.addEventListener('click', function () {
+        var ta = card.querySelector('.pr-ai-finding-composer-input');
+        if (!ta) return;
+        var val = ta.value;
+        // An empty textarea reverts to the AI text (null) rather than posting
+        // an actually-empty comment.
+        f.commentBody = val.trim() === '' ? null : val;
+        f.commentEditing = false;
+        repaintAiReviewTab();
+        saveAiReviewCache();
+      });
+      if (composerCancel) composerCancel.addEventListener('click', function () {
+        f.commentEditing = false;
+        repaintAiReviewTab();
+      });
+      if (composerReset) composerReset.addEventListener('click', function () {
+        f.commentBody = null;
+        f.commentEditing = false;
+        repaintAiReviewTab();
+        saveAiReviewCache();
+      });
     });
   }
 
@@ -1146,7 +1305,14 @@ window.PrReview = (function () {
     f.commentError = null;
     repaintAiReviewTab();
 
-    var body = '> *AI-generated review finding (via Klaussy):*\n\n' + (f.text || '');
+    // Prefer the user's edited body if they customized it; otherwise post
+    // the AI's text verbatim. Only prepend the "AI-generated" attribution
+    // header when posting verbatim — a user-edited comment is no longer a
+    // direct AI output and shouldn't be labelled as such.
+    var bodyText = (f.commentBody != null && f.commentBody.trim() !== '') ? f.commentBody : f.text;
+    var body = (f.commentBody != null && f.commentBody.trim() !== '')
+      ? bodyText
+      : '> *AI-generated review finding (via Klaussy):*\n\n' + (bodyText || '');
     var result = await window.klaus.prAddIssueComment(body);
     if (result && result.error) {
       f.commentStatus = 'failed';
@@ -1648,13 +1814,38 @@ window.PrReview = (function () {
   function renderIssueComment(c) {
     var author = (c.author && c.author.login) || 'unknown';
     var when = c.createdAt ? new Date(c.createdAt).toLocaleString() : '';
+    var dbid = c.databaseId;
+    var displayBody = (dbid != null && editedCommentOverrides[dbid] != null)
+      ? editedCommentOverrides[dbid]
+      : c.body;
+    var mine = currentUserLogin && author === currentUserLogin;
+    var isEditing = editingCommentId === dbid && editingCommentKind === 'issue';
     return '<div class="pr-conv-item pr-conv-comment">'
       + '<div class="pr-conv-head">'
         + '<span class="pr-conv-author">' + escHtml(author) + '</span>'
         + '<span class="pr-conv-kind">commented</span>'
         + '<span class="pr-conv-when">' + escHtml(when) + '</span>'
+        + (mine && !isEditing && dbid != null
+            ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit">✎</button>'
+            : '')
       + '</div>'
-      + '<div class="pr-conv-body">' + renderCommentBody(c.body) + '</div>'
+      + (isEditing
+          ? renderCommentEditor(dbid, 'issue', displayBody)
+          : '<div class="pr-conv-body">' + renderCommentBody(displayBody) + '</div>')
+    + '</div>';
+  }
+
+  // Shared composer markup used by both issue comments and inline review
+  // thread comments. The save handler picks the PATCH endpoint based on
+  // `kind` (stored on the wrapper via data-kind).
+  function renderCommentEditor(dbid, kind, body) {
+    return '<div class="pr-conv-edit-wrap" data-id="' + dbid + '" data-kind="' + kind + '">'
+      + '<textarea class="pr-conv-edit-input" rows="5">' + escHtml(body || '') + '</textarea>'
+      + '<div class="pr-conv-edit-actions">'
+        + '<span class="pr-conv-edit-error"></span>'
+        + '<button class="pr-conv-edit-cancel" type="button">Cancel</button>'
+        + '<button class="pr-conv-edit-save" type="button">Save</button>'
+      + '</div>'
     + '</div>';
   }
 
@@ -1702,12 +1893,23 @@ window.PrReview = (function () {
     var commentsHtml = comments.map(function (c, i) {
       var author = (c.author && c.author.login) || 'unknown';
       var when = c.createdAt ? new Date(c.createdAt).toLocaleString() : '';
+      var dbid = c.databaseId;
+      var displayBody = (dbid != null && editedCommentOverrides[dbid] != null)
+        ? editedCommentOverrides[dbid]
+        : c.body;
+      var mine = currentUserLogin && author === currentUserLogin;
+      var isEditing = editingCommentId === dbid && editingCommentKind === 'review';
       return '<div class="pr-conv-thread-comment' + (i === 0 ? ' first' : '') + '">'
         + '<div class="pr-conv-thread-comment-head">'
           + '<span class="pr-conv-author">' + escHtml(author) + '</span>'
           + '<span class="pr-conv-when">' + escHtml(when) + '</span>'
+          + (mine && !isEditing && dbid != null
+              ? '<button class="pr-conv-edit-btn" type="button" data-kind="review" data-id="' + dbid + '" title="Edit">✎</button>'
+              : '')
         + '</div>'
-        + '<div class="pr-conv-thread-comment-body">' + renderCommentBody(c.body) + '</div>'
+        + (isEditing
+            ? renderCommentEditor(dbid, 'review', displayBody)
+            : '<div class="pr-conv-thread-comment-body">' + renderCommentBody(displayBody) + '</div>')
       + '</div>';
     }).join('');
 
