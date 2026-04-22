@@ -3730,6 +3730,75 @@ body.task-branchless #ahead-behind {
   white-space: nowrap;
 }
 
+.file-viewer-tabs {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt, var(--surface));
+  flex-shrink: 0;
+  min-height: 30px;
+  scrollbar-width: thin;
+}
+
+.file-viewer-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  user-select: none;
+  max-width: 200px;
+  min-width: 0;
+}
+
+.file-viewer-tab:hover { background: var(--surface-hover); }
+
+.file-viewer-tab.active {
+  background: var(--bg);
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: -1px;
+}
+
+.file-viewer-tab .tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-viewer-tab .tab-dirty-dot {
+  color: var(--accent);
+  font-size: 10px;
+  visibility: hidden;
+}
+
+.file-viewer-tab.dirty .tab-dirty-dot { visibility: visible; }
+.file-viewer-tab.dirty:not(:hover) .tab-close { display: none; }
+
+.file-viewer-tab .tab-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.file-viewer-tab:hover .tab-close,
+.file-viewer-tab.active .tab-close { opacity: 1; }
+
+.file-viewer-tab .tab-close:hover { background: var(--surface-hover); color: var(--text); }
+
 .file-viewer-body {
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
   font-size: 13px;
@@ -6527,6 +6596,24 @@ body.pr-review-popout #pr-review-root {
 
 #btn-run-app:hover { filter: brightness(1.1); }
 #btn-run-app:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#btn-tree-collapse {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 2px 8px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 3px;
+}
+
+#btn-tree-collapse:hover { background: var(--surface-hover); color: var(--text); }
+
+/* When collapsed, hide the tree + filter bar; editor fills the space. */
+#files-tab-content.tree-collapsed #file-tree,
+#files-tab-content.tree-collapsed #file-tree-filter-bar { display: none; }
 
 #file-tree-filter-bar,
 #project-search-bar {
