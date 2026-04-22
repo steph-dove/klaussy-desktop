@@ -217,7 +217,10 @@ contextBridge.exposeInMainWorld('klaus', {
     ipcRenderer.on(channel, handler);
     return () => ipcRenderer.removeListener(channel, handler);
   },
-  searchFiles: (worktreePath, query) => ipcRenderer.invoke('search-files', { worktreePath, query }),
+  searchFiles: (worktreePath, query, maxPerFile) =>
+    ipcRenderer.invoke('search-files', { worktreePath, query, maxPerFile }),
+  replaceInFiles: (worktreePath, relPaths, query, replacement) =>
+    ipcRenderer.invoke('replace-in-files', { worktreePath, relPaths, query, replacement }),
 
   // Sub-terminal multiplexing (Feature 5)
   addSubTerminal: (taskId, label) => ipcRenderer.invoke('add-sub-terminal', { taskId, label }),

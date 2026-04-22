@@ -3613,10 +3613,16 @@ function parseGrepOutput(output) {
   return results.slice(0, 100);
 }
 
-ipcMain.handle('search-files', async (_event, { worktreePath, query }) => {
+ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile }) => {
+  // Literal (fixed-string) search via -F. Matches what the I7 replace path
+  // does under the hood (content.split(query)), so preview and replace are
+  // guaranteed to see the same hits. If regex search is ever needed, it
+  // should land as an explicit opt-in flag rather than the default — the
+  // replace path can't honor it safely.
+  const cap = '--max-count=' + (typeof maxPerFile === 'number' ? maxPerFile : 5);
   // Try git grep — respects .gitignore and is fast.
   try {
-    const args = ['grep', '-n', '--no-color', '-I', '-r', '--max-count=5', query];
+    const args = ['grep', '-n', '--no-color', '-I', '-r', '-F', cap, query];
     const output = execFileSync('git', args, {
       cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
     }).toString();
@@ -3631,9 +3637,9 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query }) => {
       return { results: [], error: msg };
     }
   }
-  // Non-git fallback — plain `grep -rn -I` with the same ignore list the walker uses.
+  // Non-git fallback — plain `grep -rnF -I` with the same ignore list the walker uses.
   try {
-    const args = ['-rn', '-I', '--max-count=5'];
+    const args = ['-rnF', '-I', cap];
     for (const dir of WALK_IGNORE) args.push('--exclude-dir=' + dir);
     args.push('--', query, '.');
     const output = execFileSync('grep', args, {
@@ -3646,6 +3652,50 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query }) => {
     if (err.status === 1) return { results: [] };
     return { results: [], error: err.stderr ? err.stderr.toString() : err.message };
   }
+});
+
+// Replace-in-files (I7). Takes the same worktree + a list of file-relative
+// paths plus a (literal) search string and replacement string. For each file
+// we read, replaceAll, and write. Returns per-file counts so the caller can
+// report "N replacements in M files".
+//
+// Intentionally literal-only: regex replace opens the door to capture-group
+// surprises and destructive mistakes. If needed later we can add a flag.
+ipcMain.handle('replace-in-files', async (_event, { worktreePath, relPaths, query, replacement }) => {
+  if (!worktreePath || !Array.isArray(relPaths) || !query) {
+    return { error: 'Missing required arguments' };
+  }
+  const path = require('path');
+  const fs = require('fs');
+  const wtReal = fs.realpathSync(worktreePath);
+  const perFile = [];
+  let totalReplacements = 0;
+  for (const rel of relPaths) {
+    const abs = path.resolve(wtReal, rel);
+    // Path traversal guard — the relPaths come from our own search results
+    // but keep the defensive check in case of symlinks or crafted input.
+    if (!abs.startsWith(wtReal + path.sep) && abs !== wtReal) {
+      perFile.push({ file: rel, error: 'Path escapes worktree' });
+      continue;
+    }
+    try {
+      const content = fs.readFileSync(abs, 'utf8');
+      // Fast literal count via split; avoids needing to regex-escape the query.
+      const parts = content.split(query);
+      const count = parts.length - 1;
+      if (count === 0) {
+        perFile.push({ file: rel, replaced: 0 });
+        continue;
+      }
+      const next = parts.join(replacement);
+      fs.writeFileSync(abs, next);
+      perFile.push({ file: rel, replaced: count });
+      totalReplacements += count;
+    } catch (err) {
+      perFile.push({ file: rel, error: err.message });
+    }
+  }
+  return { ok: true, totalReplacements, files: perFile };
 });
 
 // ---- Explain Diff ----

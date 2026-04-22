@@ -6533,10 +6533,14 @@ body.pr-review-popout #pr-review-root {
   padding: 8px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 #file-tree-filter,
-#project-search-input {
+#project-search-input,
+#project-replace-input {
   width: 100%;
   background: var(--input-bg);
   border: 1px solid var(--border);
@@ -6545,7 +6549,23 @@ body.pr-review-popout #pr-review-root {
   color: var(--text);
   font-size: 12px;
   outline: none;
+  box-sizing: border-box;
 }
+
+#project-replace-btn {
+  align-self: flex-end;
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#project-replace-btn:hover:not(:disabled) { filter: brightness(1.1); }
+#project-replace-btn:disabled { opacity: 0.4; cursor: not-allowed; background: var(--surface-hover); color: var(--text-muted); }
 
 #file-tree-filter:focus,
 #project-search-input:focus {
@@ -6634,14 +6654,46 @@ body.pr-review-popout #pr-review-root {
   font-size: 12px;
   font-weight: 600;
   color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.search-result-file .search-result-file-label {
   cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.search-result-file .search-result-file-label:hover { text-decoration: underline; }
+
+.search-result-file-check { cursor: pointer; flex-shrink: 0; }
+
+.search-result-replace-preview {
+  padding-left: 32px;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.search-result-file:hover {
-  text-decoration: underline;
+mark.search-hit-match {
+  background: rgba(255, 180, 0, 0.35);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
+}
+
+mark.search-hit-replace {
+  background: rgba(80, 200, 120, 0.3);
+  color: inherit;
+  padding: 0 1px;
+  border-radius: 2px;
 }
 
 .search-result-line {
