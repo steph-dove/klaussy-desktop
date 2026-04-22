@@ -2800,6 +2800,65 @@ ipcMain.handle('inline-edit-cancel', (_event, { requestId }) => {
   return { ok: true };
 });
 
+// K6: inline AI completion — predicts what comes at the cursor.
+// Context-before / context-after let claude see both sides of the insertion
+// point so completions respect what already exists on the next line.
+const inlineCompleteProcs = new Map();
+ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, before, after, languageId, filePath }) => {
+  const sender = event.sender;
+  const chunkChannel = `inline-complete-chunk-${requestId}`;
+  const doneChannel = `inline-complete-done-${requestId}`;
+
+  const prompt =
+    'You are an inline code-completion engine. Predict what belongs at the cursor position.\n\n' +
+    'Rules (strict):\n' +
+    '- Return ONLY the insertion text — no explanations, no markdown fences, no preamble.\n' +
+    '- Keep it concise: a few lines at most; stop when the natural unit ends (statement, block, close paren).\n' +
+    '- Do NOT repeat the text that already comes before or after the cursor.\n' +
+    '- Match the surrounding indentation style exactly.\n' +
+    '- If nothing obvious should go here, return an empty response.\n\n' +
+    (filePath ? `File: ${filePath}\n` : '') +
+    (languageId ? `Language: ${languageId}\n\n` : '\n') +
+    'Before cursor:\n' + before + '\n\n' +
+    '<CURSOR>\n\n' +
+    'After cursor:\n' + after + '\n';
+
+  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const { spawn } = require('child_process');
+  const proc = spawn(claudeBin, ['-p', prompt], {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  inlineCompleteProcs.set(requestId, proc);
+
+  let stderrBuf = '';
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.on('error', (err) => {
+    inlineCompleteProcs.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    inlineCompleteProcs.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') sender.send(doneChannel, { cancelled: true });
+    else if (code !== 0) sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
+    else sender.send(doneChannel, { ok: true });
+  });
+  return { ok: true };
+});
+
+ipcMain.handle('inline-complete-cancel', (_event, { requestId }) => {
+  const proc = inlineCompleteProcs.get(requestId);
+  if (!proc) return { ok: false };
+  try { proc.kill('SIGTERM'); } catch {}
+  return { ok: true };
+});
+
 ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (!activePrReview) return { error: 'No active PR review' };
   const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];

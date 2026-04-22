@@ -447,6 +447,15 @@ window.FileBrowser = (function () {
     if (window.InlineEdit && window.InlineEdit.setWorktreeGetter) {
       window.InlineEdit.setWorktreeGetter(function () { return currentViewerWorktree; });
     }
+    // K6: manual AI completion trigger. Cmd+Shift+Space fires claude with
+    // the cursor context; response shows as ghost text via Monaco's inline
+    // completions. Tab accepts, Esc dismisses (both Monaco-native).
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Space, function () {
+      if (window.InlineComplete) window.InlineComplete.trigger(currentEditor);
+    });
+    if (window.InlineComplete && window.InlineComplete.setWorktreeGetter) {
+      window.InlineComplete.setWorktreeGetter(function () { return currentViewerWorktree; });
+    }
     // Cmd+1 … Cmd+9 switches to the Nth tab (1-indexed, matches VS Code).
     for (var i = 0; i < 9; i++) {
       (function (n) {
