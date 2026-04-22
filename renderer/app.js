@@ -1100,6 +1100,18 @@
       e.preventDefault();
       showCommandPalette();
     }
+    // Cmd+P: quick open. `capture: false` is fine — Monaco doesn't rebind
+    // this by default, and we have no other Cmd+P consumer.
+    if (e.metaKey && e.key === 'p' && !e.shiftKey) {
+      e.preventDefault();
+      if (window.QuickOpen) window.QuickOpen.show();
+    }
+  });
+
+  // Invalidate QuickOpen's file cache when the active worktree changes —
+  // otherwise stale results for one worktree show up after switching tasks.
+  window.addEventListener('load-file-tree', function () {
+    if (window.QuickOpen) window.QuickOpen.invalidate();
   });
 
   // ---- Phase G: PR review takeover ----
