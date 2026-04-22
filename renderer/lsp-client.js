@@ -42,6 +42,10 @@
     { re: /\.(php|phtml)$/i, languageId: 'php' },
     { re: /\.cs$/i, languageId: 'csharp' },
     { re: /\.swift$/i, languageId: 'swift' },
+    // .m (Objective-C) and .mm (Objective-C++). sourcekit-lsp handles both;
+    // .h files already route to cpp/clangd — that's fine, clangd handles ObjC
+    // headers too and the separate server doesn't conflict.
+    { re: /\.(m|mm)$/i, languageId: 'objective-c' },
     { re: /\.(kt|kts)$/i, languageId: 'kotlin' },
     { re: /\.vue$/i, languageId: 'vue' },
     { re: /\.svelte$/i, languageId: 'svelte' },
@@ -228,6 +232,7 @@
     php: 'intelephense',
     csharp: 'csharp-ls',
     swift: 'sourcekit-lsp',
+    'objective-c': 'sourcekit-lsp (Objective-C)',
     kotlin: 'kotlin-language-server',
     vue: '@vue/language-server',
     svelte: 'svelte-language-server',
@@ -255,6 +260,7 @@
     php: 'intelephense',
     csharp: 'csharp',
     swift: 'sourcekit-lsp',
+    'objective-c': 'sourcekit-lsp',
     kotlin: 'kotlin',
     vue: 'vue',
     svelte: 'svelte',
