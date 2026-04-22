@@ -114,6 +114,22 @@ contextBridge.exposeInMainWorld('klaus', {
     return () => ipcRenderer.removeListener(channel, handler);
   },
 
+  // K6 inline AI completion
+  inlineCompleteStart: (opts) => ipcRenderer.invoke('inline-complete-start', opts),
+  inlineCompleteCancel: (requestId) => ipcRenderer.invoke('inline-complete-cancel', { requestId }),
+  onInlineCompleteChunk: (requestId, callback) => {
+    const channel = `inline-complete-chunk-${requestId}`;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onInlineCompleteDone: (requestId, callback) => {
+    const channel = `inline-complete-done-${requestId}`;
+    const handler = (_e, msg) => callback(msg);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+
   // Branch diff mode
   gitBranches: (worktreePath) => ipcRenderer.invoke('git-branches', { worktreePath }),
   gitBranchFiles: (worktreePath, baseBranch) => ipcRenderer.invoke('git-branch-files', { worktreePath, baseBranch }),
