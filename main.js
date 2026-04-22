@@ -171,6 +171,30 @@ function fixSpawnPath() {
 }
 fixSpawnPath();
 
+function checkExternalCLIs() {
+  const deps = [
+    { bin: 'gh', name: 'GitHub CLI', uses: 'PR review and GitHub features' },
+    { bin: 'claude', name: 'Claude Code', uses: 'AI features (inline edits, ghost text, completions)' },
+  ];
+  const missing = [];
+  let remaining = deps.length;
+  deps.forEach((d) => {
+    execFile('which', [d.bin], { timeout: 2000 }, (err) => {
+      if (err) missing.push(d);
+      if (--remaining === 0 && missing.length) {
+        const detail = missing.map((m) => `• ${m.name} (${m.bin}) — used for ${m.uses}`).join('\n');
+        dialog.showMessageBox({
+          type: 'info',
+          title: 'Optional CLIs not found',
+          message: 'Klaussy will run, but some features need these CLIs on your PATH:',
+          detail,
+          buttons: ['OK'],
+        });
+      }
+    });
+  });
+}
+
 app.whenReady().then(() => {
   // Force the macOS app menu name. In dev (`npx electron .`) the bundled
   // Info.plist still says "Electron" — setName at startup overrides what
@@ -309,6 +333,7 @@ app.whenReady().then(() => {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   createWindow();
+  checkExternalCLIs();
 
   // Periodically save sessions in case quit events don't fire
   setInterval(() => {
