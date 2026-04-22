@@ -24,6 +24,7 @@ window.FileBrowser = (function () {
   var currentBlameLines = null;
   var currentViewerWorktree = null;
   var currentFilePath = null;
+  var currentMarkerDisposable = null;
 
   function currentMonacoTheme() {
     // ThemeManager adds `light-syntax` to body when the active preset uses
@@ -39,6 +40,7 @@ window.FileBrowser = (function () {
   });
 
   function disposeCurrentEditor() {
+    if (currentMarkerDisposable) { try { currentMarkerDisposable.dispose(); } catch (_) {} currentMarkerDisposable = null; }
     if (currentEditor) { try { currentEditor.dispose(); } catch (_) {} currentEditor = null; }
     if (currentModel && !currentModelIsProject) {
       try { currentModel.dispose(); } catch (_) {}
@@ -48,6 +50,38 @@ window.FileBrowser = (function () {
     currentBlameLines = null;
     currentViewerWorktree = null;
     currentFilePath = null;
+  }
+
+  // Count markers by severity on the model and update the pill. Monaco's
+  // MarkerSeverity: 8=Error, 4=Warning, 2=Info, 1=Hint. We roll Info/Hint
+  // under the "warning" visual (amber) to keep the pill binary — users
+  // care most about "anything to fix here" vs "hard errors".
+  function updateProblemsBadge(monaco, model) {
+    var badge = document.querySelector('.file-viewer-problems-badge');
+    if (!badge) return;
+    if (!model || model.isDisposed()) {
+      badge.hidden = true;
+      return;
+    }
+    var markers = monaco.editor.getModelMarkers({ resource: model.uri });
+    var errors = 0, warnings = 0;
+    for (var i = 0; i < markers.length; i++) {
+      var s = markers[i].severity;
+      if (s === monaco.MarkerSeverity.Error) errors += 1;
+      else warnings += 1;
+    }
+    var total = errors + warnings;
+    if (total === 0) {
+      badge.hidden = true;
+      return;
+    }
+    badge.hidden = false;
+    badge.className = 'file-viewer-problems-badge' + (errors > 0 ? ' has-error' : ' has-warning');
+    var parts = [];
+    if (errors > 0) parts.push(errors + ' error' + (errors === 1 ? '' : 's'));
+    if (warnings > 0) parts.push(warnings + ' warning' + (warnings === 1 ? '' : 's'));
+    badge.textContent = (errors > 0 ? '⛔ ' : '⚠ ') + total;
+    badge.title = parts.join(', ');
   }
 
   // Whether we should eagerly load sibling TS/JS models for cross-file intel.
@@ -110,6 +144,106 @@ window.FileBrowser = (function () {
   // Expose runApp for the file-tree header button.
   window.runApp = runApp;
 
+  // ---- Multi-file navigation (I6) ----
+
+  // Browser-style history of viewer navigations. Each entry is
+  // { filePath, line }. navIndex points at the currently-displayed entry;
+  // back/forward move along the stack without pushing new entries.
+  // programmaticNav suppresses the push on openFileViewer calls that come
+  // from back/forward themselves.
+  var navStack = [];
+  var navIndex = -1;
+  var programmaticNav = false;
+
+  function pushNav(filePath, line) {
+    // Collapse consecutive duplicates at the same file+line. Also drop any
+    // forward history past navIndex — Chrome-style: new nav replaces the
+    // abandoned forward branch.
+    var top = navStack[navIndex];
+    if (top && top.filePath === filePath && top.line === line) return;
+    navStack = navStack.slice(0, navIndex + 1);
+    navStack.push({ filePath: filePath, line: line || 1 });
+    navIndex = navStack.length - 1;
+    updateNavButtons();
+  }
+
+  async function goBack() {
+    if (navIndex <= 0) return;
+    navIndex -= 1;
+    var entry = navStack[navIndex];
+    programmaticNav = true;
+    try {
+      await window.openFileViewer(entry.filePath, entry.filePath.split('/').pop(), entry.line);
+    } finally {
+      programmaticNav = false;
+      updateNavButtons();
+    }
+  }
+
+  async function goForward() {
+    if (navIndex >= navStack.length - 1) return;
+    navIndex += 1;
+    var entry = navStack[navIndex];
+    programmaticNav = true;
+    try {
+      await window.openFileViewer(entry.filePath, entry.filePath.split('/').pop(), entry.line);
+    } finally {
+      programmaticNav = false;
+      updateNavButtons();
+    }
+  }
+
+  function updateNavButtons() {
+    var back = document.querySelector('.file-viewer-nav-btn[data-nav="back"]');
+    var fwd = document.querySelector('.file-viewer-nav-btn[data-nav="forward"]');
+    if (back) back.disabled = navIndex <= 0;
+    if (fwd) fwd.disabled = navIndex >= navStack.length - 1;
+  }
+
+  function renderBreadcrumbs(filePath) {
+    var el = document.querySelector('.file-viewer-breadcrumbs');
+    if (!el) return;
+    var wt = fileViewerWorktree;
+    // Show the path relative to the worktree when possible — absolute paths
+    // are noisy and the worktree root is implicit from the Files tab header.
+    var rel = filePath;
+    if (wt && filePath.indexOf(wt + '/') === 0) rel = filePath.slice(wt.length + 1);
+    var parts = rel.split('/').filter(Boolean);
+    el.innerHTML = parts
+      .map(function (p, i) {
+        var cls = i === parts.length - 1 ? 'crumb-leaf' : 'crumb-dir';
+        return '<span class="' + cls + '">' + escHtml(p) + '</span>';
+      })
+      .join('<span class="crumb-sep">/</span>');
+  }
+
+  // Monaco delegates cross-file opens (e.g. go-to-def that lands in another
+  // file) to `_codeEditorService.openCodeEditor`. In an embedded host the
+  // default returns null — meaning "I don't know how to open that, do nothing."
+  // Overriding it lets us route the target URI to our own viewer.
+  function interceptCrossFileOpen(editor, monaco) {
+    try {
+      var svc = editor._codeEditorService;
+      if (!svc || svc.__klaussyPatched) return;
+      var orig = svc.openCodeEditor ? svc.openCodeEditor.bind(svc) : null;
+      svc.openCodeEditor = async function (input, sourceEditor, sideBySide) {
+        var result = orig ? await orig(input, sourceEditor, sideBySide) : null;
+        if (result) return result;
+        // Monaco couldn't open it via its internal services — route to us.
+        if (!input || !input.resource) return null;
+        var fsPath = input.resource.fsPath || input.resource.path;
+        if (!fsPath) return null;
+        var selection = input.options && input.options.selection;
+        var line = selection ? selection.startLineNumber : 1;
+        window.openFileViewer(fsPath, fsPath.split('/').pop(), line);
+        return sourceEditor;
+      };
+      svc.__klaussyPatched = true;
+    } catch (err) {
+      console.warn('[nav] cross-file opener patch failed', err);
+    }
+  }
+
   // Called from terminal-manager.switchToTask when the active task changes.
   // The file viewer belongs to one worktree at a time; showing it against a
   // different worktree is confusing (and blame / diff hooks would target the
@@ -147,13 +281,26 @@ window.FileBrowser = (function () {
     var runCmd = runCommandForPath(filePath);
     fileViewerView.innerHTML =
       '<div class="file-viewer-header-inline">' +
-        '<span class="file-viewer-path">' + escHtml(fileName || filePath) + '</span>' +
+        '<button class="file-viewer-nav-btn" data-nav="back" title="Back (⌘⌥←)" disabled>◀</button>' +
+        '<button class="file-viewer-nav-btn" data-nav="forward" title="Forward (⌘⌥→)" disabled>▶</button>' +
+        '<span class="file-viewer-breadcrumbs"></span>' +
         '<span class="file-editor-status"></span>' +
+        '<span class="file-viewer-problems-badge" hidden></span>' +
         (runCmd ? '<button class="file-viewer-run-btn" title="Run ' + escHtml(runCmd.friendly) + '">▶</button>' : '') +
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
         '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
       '</div>' +
       '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>';
+
+    renderBreadcrumbs(filePath);
+    updateNavButtons();
+    fileViewerView.querySelectorAll('.file-viewer-nav-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        if (btn.dataset.nav === 'back') goBack();
+        else goForward();
+      });
+    });
+    if (!programmaticNav) pushNav(filePath, lineNumber || 1);
 
     var statusEl = fileViewerView.querySelector('.file-editor-status');
     var saveBtn = fileViewerView.querySelector('.file-viewer-save-btn');
@@ -246,16 +393,30 @@ window.FileBrowser = (function () {
 
     // Cmd+S intercepts the browser Save page shortcut and routes to our writer.
     currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, function () { saveFile(); });
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow, function () { goBack(); });
+    currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.RightArrow, function () { goForward(); });
 
-    // Cmd+click on a word jumps to the Search tab with that symbol, mirroring
-    // the old textarea behavior. A proper go-to-definition lands in Phase I3.
-    currentEditor.onMouseDown(function (e) {
-      var orig = e.event.browserEvent;
-      if (!orig || !(orig.metaKey || orig.ctrlKey)) return;
-      if (!e.target || !e.target.position || !fileViewerWorktree) return;
-      var word = currentModel.getWordAtPosition(e.target.position);
-      if (word && word.word) searchSymbol(word.word, fileViewerWorktree);
+    // Problems badge: watch markers on this model and update the count pill.
+    // onDidChangeMarkers fires with the list of affected URIs; we update only
+    // when our current model's URI is in the list. Initial render covers the
+    // case where markers already exist (e.g. pyright's first publish landed
+    // before the editor was mounted — the stash-and-replay path in lsp-client).
+    updateProblemsBadge(monaco, currentModel);
+    currentMarkerDisposable = monaco.editor.onDidChangeMarkers(function (uris) {
+      if (!currentModel || currentModel.isDisposed()) return;
+      var our = currentModel.uri.toString();
+      for (var i = 0; i < uris.length; i++) {
+        if (uris[i].toString() === our) { updateProblemsBadge(monaco, currentModel); return; }
+      }
     });
+
+    // Cmd+click → go-to-definition is wired up by Monaco via the LSP /
+    // TS-worker definition providers. We just need to route cross-file
+    // targets back through openFileViewer — Monaco calls the code-editor
+    // service to open a URI it doesn't own, and by default falls back to
+    // null (no-op). Overriding openCodeEditor is the standard Monaco-in-a-
+    // host pattern for 0.45.
+    interceptCrossFileOpen(currentEditor, monaco);
 
     function refreshDirtyState() {
       if (!currentModel) return;
@@ -314,33 +475,6 @@ window.FileBrowser = (function () {
       if (window.LspClient) window.LspClient.notifyDidSave(currentFilePath);
     }
   };
-
-  function getWordAtPoint(element, x, y) {
-    if (!element || !element.textContent) return null;
-    var range = document.caretRangeFromPoint(x, y);
-    if (!range) return null;
-    var node = range.startNode || range.startContainer;
-    if (node.nodeType !== Node.TEXT_NODE) return null;
-    var text = node.textContent;
-    var offset = range.startOffset;
-    var start = offset;
-    var end = offset;
-    var wordChars = /[a-zA-Z0-9_$]/;
-    while (start > 0 && wordChars.test(text[start - 1])) start--;
-    while (end < text.length && wordChars.test(text[end])) end++;
-    return text.substring(start, end);
-  }
-
-  function searchSymbol(word, worktreePath) {
-    document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
-    document.querySelector('#diff-tabs .diff-tab[data-tab="search"]').classList.add('active');
-    ['changes-tab-content', 'pr-tab-content', 'files-tab-content'].forEach(function (id) {
-      document.getElementById(id).style.display = 'none';
-    });
-    document.getElementById('search-tab-content').style.display = '';
-    projectSearchInput.value = word;
-    doProjectSearch();
-  }
 
   // ---- File Tree (C2) ----
 
