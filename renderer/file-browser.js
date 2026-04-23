@@ -408,13 +408,17 @@ window.FileBrowser = (function () {
       if (!isNaN(idx)) closeTab(idx);
     });
 
-    if (!window.MonacoReady) {
+    // Monaco is lazy-loaded; first `await window.MonacoReady` starts the
+    // require(). If the init module itself never loaded (wrong path / bad
+    // bundle), `window.getMonaco` won't be defined and we bail without
+    // triggering a rejected-promise path.
+    if (typeof window.getMonaco !== 'function') {
       fileViewerView.querySelector('.file-viewer-body').innerHTML =
         '<span style="color: var(--error)">Editor failed to load (Monaco not initialized).</span>';
       return false;
     }
     var monaco;
-    try { monaco = await window.MonacoReady; }
+    try { monaco = await window.getMonaco(); }
     catch (err) {
       fileViewerView.querySelector('.file-viewer-body').innerHTML =
         '<span style="color: var(--error)">Editor failed to load: ' + escHtml(err.message || String(err)) + '</span>';
@@ -431,6 +435,15 @@ window.FileBrowser = (function () {
       tabSize: 2,
       renderWhitespace: 'selection',
     });
+
+    // Word-completion provider needs Monaco to exist. Previously
+    // word-complete.js wired itself via MonacoReady.then() at module init,
+    // which triggered the lazy Monaco load even if the user never opened a
+    // file. Register on editor creation instead — the provider is a global
+    // monaco.languages registration, so once is enough.
+    if (window.WordComplete && typeof window.WordComplete.register === 'function') {
+      try { window.WordComplete.register(monaco); } catch (_) {}
+    }
 
     currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, saveFile);
     currentEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.LeftArrow, goBack);

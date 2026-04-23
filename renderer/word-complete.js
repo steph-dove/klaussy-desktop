@@ -93,10 +93,10 @@ window.WordComplete = (function () {
     return true;
   }
 
-  // Wait for Monaco, then register.
-  if (window.MonacoReady) {
-    window.MonacoReady.then(register);
-  }
+  // NB: don't eagerly `window.MonacoReady.then(register)` here — that would
+  // trigger the lazy Monaco load at module-init time, defeating the point of
+  // it being lazy. Instead, file-browser.js calls WordComplete.register(monaco)
+  // right after it creates the first Monaco editor.
 
   return { register: register };
 })();
