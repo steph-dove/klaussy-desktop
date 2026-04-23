@@ -224,7 +224,7 @@ Phase 2:
 - [x] main/state/pr-review.js
 
 Phase 3:
-- [ ] main/ipc/windows-ipc.js
+- [x] main/ipc/windows-ipc.js
 - [ ] main/ipc/lsp.js
 - [ ] main/ipc/skills.js
 - [ ] main/ipc/files.js
