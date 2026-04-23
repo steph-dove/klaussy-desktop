@@ -39,6 +39,85 @@ function appendStderr(buf, chunk) {
   return s.slice(s.length - STDERR_CAP_BYTES);
 }
 
+// Shared streaming-claude primitive. Before this lived in 7 near-identical
+// handler bodies with subtle drift (stderr sometimes dropped on zero-exit,
+// some handlers didn't kill the subprocess when the renderer went away,
+// exit-branch order varied). One helper, one place to fix bugs.
+//
+// Channel naming convention:
+//   `${channelPrefix}-${streamJson ? 'data' : 'chunk'}-${requestId}` for output
+//   `${channelPrefix}-done-${requestId}` for completion/error/cancel
+// Callers supply the proc map (so cancel handlers can look up the proc),
+// the prompt, the cwd, and any extra fields to merge into the done payload
+// on successful (zero-exit) completion.
+function spawnClaudeStream({
+  requestId,
+  procMap,
+  channelPrefix,
+  sender,
+  cwd,
+  prompt,
+  streamJson = false,
+  extraDoneFields = null,
+}) {
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  const args = streamJson
+    ? ['-p', prompt, '--output-format', 'stream-json', '--verbose']
+    : ['-p', prompt];
+  const proc = spawn(claudeBin, args, {
+    cwd,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  procMap.set(requestId, proc);
+
+  const chunkChannel = `${channelPrefix}-${streamJson ? 'data' : 'chunk'}-${requestId}`;
+  const doneChannel = `${channelPrefix}-done-${requestId}`;
+
+  let stderrBuf = '';
+  proc.stdout.on('data', (chunk) => {
+    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
+  });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
+  proc.on('error', (err) => {
+    procMap.delete(requestId);
+    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
+  });
+  proc.on('exit', (code, signal) => {
+    procMap.delete(requestId);
+    if (sender.isDestroyed()) return;
+    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
+      sender.send(doneChannel, { cancelled: true });
+    } else if (code !== 0) {
+      sender.send(doneChannel, { error: stderrBuf.trim() || `claude exited with code ${code}` });
+    } else {
+      const payload = { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined };
+      if (extraDoneFields) Object.assign(payload, extraDoneFields);
+      sender.send(doneChannel, payload);
+    }
+  });
+
+  // If the renderer goes away while the stream is in flight (window close,
+  // reload, crash), kill the subprocess. Previously the proc would keep
+  // running to natural completion, silently eating Anthropic quota.
+  sender.once('destroyed', () => {
+    if (!proc.killed) { try { proc.kill('SIGTERM'); } catch {} }
+  });
+
+  return proc;
+}
+
+// Tiny helper that produces the cancel handler function for a given proc map.
+// All 7 cancel handlers were identical modulo the map reference.
+function makeClaudeCancelHandler(procMap) {
+  return (_event, { requestId }) => {
+    const proc = procMap.get(requestId);
+    if (!proc) return { ok: false };
+    try { proc.kill('SIGTERM'); } catch {}
+    return { ok: true };
+  };
+}
+
 // Persistent log file — ring buffer is in-memory only, which loses context
 // across a crash. Keep a small rotating file in userData so users can attach
 // it to a bug report even after the app restarts.
@@ -3085,8 +3164,6 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
 
   const cwd = currentRepoPath() || require('os').homedir();
   const sender = event.sender;
-  const chunkChannel = 'pr-debug-check-chunk-' + requestId;
-  const doneChannel = 'pr-debug-check-done-' + requestId;
 
   // Fetch logs. gh run view follows the 302-to-download redirect properly,
   // unlike the bare `gh api .../jobs/{id}/logs` call which often surfaces
@@ -3132,45 +3209,14 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
     + `3. **Fix** — concrete, code-level suggestion. Use file:line references when possible.\n`
     + `Keep it tight; no preamble.`;
 
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  // `spawn` is imported at the top of the file.
-  const proc = spawn(claudeBin, ['-p', prompt], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  spawnClaudeStream({
+    requestId, procMap: debugCheckProcs, channelPrefix: 'pr-debug-check',
+    sender, cwd, prompt,
   });
-  debugCheckProcs.set(requestId, proc);
-
-  let stderrBuf = '';
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-  proc.on('error', (err) => {
-    debugCheckProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-  proc.on('exit', (code, signal) => {
-    debugCheckProcs.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-      sender.send(doneChannel, { cancelled: true });
-    } else if (code !== 0) {
-      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    } else {
-      sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
-    }
-  });
-
   return { ok: true };
 });
 
-ipcMain.handle('pr-debug-check-cancel', (_event, { requestId }) => {
-  const proc = debugCheckProcs.get(requestId);
-  if (!proc) return { ok: false };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('pr-debug-check-cancel', makeClaudeCancelHandler(debugCheckProcs));
 
 // K3: inline AI edit — streams a claude -p replacement for a selection.
 // Kept deliberately strict: the prompt tells claude to emit ONLY the
@@ -3178,10 +3224,6 @@ ipcMain.handle('pr-debug-check-cancel', (_event, { requestId }) => {
 // having to strip markdown fences or preamble.
 const inlineEditProcs = new Map();
 ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instruction, selection, languageId, filePath }) => {
-  const sender = event.sender;
-  const chunkChannel = `inline-edit-chunk-${requestId}`;
-  const doneChannel = `inline-edit-done-${requestId}`;
-
   const prompt =
     'You are editing code inline. Apply this instruction to the code below and return ONLY the replacement code.\n\n' +
     'Rules (strict):\n' +
@@ -3195,51 +3237,22 @@ ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instructi
     'Original selection:\n' +
     selection + '\n';
 
-  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  // `spawn` is imported at the top of the file.
-  const proc = spawn(claudeBin, ['-p', prompt], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  inlineEditProcs.set(requestId, proc);
-
-  let stderrBuf = '';
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-  proc.on('error', (err) => {
-    inlineEditProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-  proc.on('exit', (code, signal) => {
-    inlineEditProcs.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') sender.send(doneChannel, { cancelled: true });
-    else if (code !== 0) sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    else sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
+  spawnClaudeStream({
+    requestId, procMap: inlineEditProcs, channelPrefix: 'inline-edit',
+    sender: event.sender,
+    cwd: worktreePath || currentRepoPath() || require('os').homedir(),
+    prompt,
   });
   return { ok: true };
 });
 
-ipcMain.handle('inline-edit-cancel', (_event, { requestId }) => {
-  const proc = inlineEditProcs.get(requestId);
-  if (!proc) return { ok: false };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('inline-edit-cancel', makeClaudeCancelHandler(inlineEditProcs));
 
 // K6: inline AI completion — predicts what comes at the cursor.
 // Context-before / context-after let claude see both sides of the insertion
 // point so completions respect what already exists on the next line.
 const inlineCompleteProcs = new Map();
 ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, before, after, languageId, filePath }) => {
-  const sender = event.sender;
-  const chunkChannel = `inline-complete-chunk-${requestId}`;
-  const doneChannel = `inline-complete-done-${requestId}`;
-
   const prompt =
     'You are an inline code-completion engine. Predict what belongs at the cursor position.\n\n' +
     'Rules (strict):\n' +
@@ -3254,41 +3267,16 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
     '<CURSOR>\n\n' +
     'After cursor:\n' + after + '\n';
 
-  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  // `spawn` is imported at the top of the file.
-  const proc = spawn(claudeBin, ['-p', prompt], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  inlineCompleteProcs.set(requestId, proc);
-
-  let stderrBuf = '';
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-  proc.on('error', (err) => {
-    inlineCompleteProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-  proc.on('exit', (code, signal) => {
-    inlineCompleteProcs.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') sender.send(doneChannel, { cancelled: true });
-    else if (code !== 0) sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    else sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
+  spawnClaudeStream({
+    requestId, procMap: inlineCompleteProcs, channelPrefix: 'inline-complete',
+    sender: event.sender,
+    cwd: worktreePath || currentRepoPath() || require('os').homedir(),
+    prompt,
   });
   return { ok: true };
 });
 
-ipcMain.handle('inline-complete-cancel', (_event, { requestId }) => {
-  const proc = inlineCompleteProcs.get(requestId);
-  if (!proc) return { ok: false };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('inline-complete-cancel', makeClaudeCancelHandler(inlineCompleteProcs));
 
 ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (!activePrReview) return { error: 'No active PR review' };
@@ -3530,53 +3518,17 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
     .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch)
     .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
 
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  // `spawn` is imported at the top of the file.
-  const proc = spawn(claudeBin, [
-    '-p', prompt,
-    '--output-format', 'stream-json',
-    '--verbose',
-  ], {
+  spawnClaudeStream({
+    requestId, procMap: reviewSurfaceAiProcs, channelPrefix: 'pr-review-ai',
+    sender: event.sender,
     cwd: ensured.worktreePath,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    prompt,
+    streamJson: true,
   });
-  reviewSurfaceAiProcs.set(requestId, proc);
-
-  const dataChannel = 'pr-review-ai-data-' + requestId;
-  const doneChannel = 'pr-review-ai-done-' + requestId;
-  const sender = event.sender;
-  let stderrBuf = '';
-
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-  proc.on('error', (err) => {
-    reviewSurfaceAiProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-  proc.on('exit', (code, signal) => {
-    reviewSurfaceAiProcs.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-      sender.send(doneChannel, { cancelled: true });
-    } else if (code !== 0) {
-      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    } else {
-      sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
-    }
-  });
-
   return { ok: true, worktreePath: ensured.worktreePath };
 });
 
-ipcMain.handle('pr-review-ai-cancel', (_event, { requestId }) => {
-  const proc = reviewSurfaceAiProcs.get(requestId);
-  if (!proc) return { ok: false };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('pr-review-ai-cancel', makeClaudeCancelHandler(reviewSurfaceAiProcs));
 
 // G7: implement a single finding (or "all findings" via one big prompt) by
 // spawning claude in the PR's worktree with edit tools. Mirrors the AI-review
@@ -3605,53 +3557,18 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     ? `Apply the following code-review findings to the codebase:\n\n${body}` + guardrails
     : `Apply the following code-review finding to the codebase:\n\n${body}` + guardrails;
 
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  // `spawn` is imported at the top of the file.
-  const proc = spawn(claudeBin, [
-    '-p', prompt,
-    '--output-format', 'stream-json',
-    '--verbose',
-  ], {
+  spawnClaudeStream({
+    requestId, procMap: implementProcs, channelPrefix: 'pr-review-implement',
+    sender: event.sender,
     cwd: ensured.worktreePath,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    prompt,
+    streamJson: true,
+    extraDoneFields: { worktreePath: ensured.worktreePath },
   });
-  implementProcs.set(requestId, proc);
-
-  const dataChannel = 'pr-review-implement-data-' + requestId;
-  const doneChannel = 'pr-review-implement-done-' + requestId;
-  const sender = event.sender;
-  let stderrBuf = '';
-
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-  proc.on('error', (err) => {
-    implementProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-  proc.on('exit', (code, signal) => {
-    implementProcs.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-      sender.send(doneChannel, { cancelled: true });
-    } else if (code !== 0) {
-      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    } else {
-      sender.send(doneChannel, { ok: true, worktreePath: ensured.worktreePath });
-    }
-  });
-
   return { ok: true, worktreePath: ensured.worktreePath };
 });
 
-ipcMain.handle('pr-review-implement-cancel', (_event, { requestId }) => {
-  const proc = implementProcs.get(requestId);
-  if (!proc) return { ok: false };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('pr-review-implement-cancel', makeClaudeCancelHandler(implementProcs));
 
 // G7 persistence: cache a PR's AI review + per-finding state by
 // (owner, repo, number) so re-opening a PR (or restarting the app) restores
@@ -4330,54 +4247,16 @@ const explainStreamProcs = new Map();
 ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, file, hunk }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (explainStreamProcs.has(requestId)) return { error: 'Already streaming' };
-
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  const cwd = worktreePath || currentRepoPath() || require('os').homedir();
-  // `spawn` is imported at the top of the file.
-
-  const proc = spawn(claudeBin, ['-p', explainPrompt(file, hunk)], {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  spawnClaudeStream({
+    requestId, procMap: explainStreamProcs, channelPrefix: 'explain-diff',
+    sender: event.sender,
+    cwd: worktreePath || currentRepoPath() || require('os').homedir(),
+    prompt: explainPrompt(file, hunk),
   });
-  explainStreamProcs.set(requestId, proc);
-
-  const chunkChannel = 'explain-diff-chunk-' + requestId;
-  const doneChannel = 'explain-diff-done-' + requestId;
-  const sender = event.sender;
-  let stderrBuf = '';
-
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-
-  proc.on('error', (err) => {
-    explainStreamProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-
-  proc.on('exit', (code, signal) => {
-    explainStreamProcs.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-      sender.send(doneChannel, { cancelled: true });
-    } else if (code !== 0) {
-      sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    } else {
-      sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
-    }
-  });
-
   return { ok: true };
 });
 
-ipcMain.handle('explain-diff-stream-cancel', (_event, { requestId }) => {
-  const proc = explainStreamProcs.get(requestId);
-  if (!proc) return { ok: false };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('explain-diff-stream-cancel', makeClaudeCancelHandler(explainStreamProcs));
 
 // ---- Whole-PR AI Review ----
 
@@ -4845,61 +4724,19 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
     .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch || 'main')
     .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
 
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  // `spawn` is imported at the top of the file.
   // stream-json gives us a JSONL event per assistant/tool/result block so we
   // can surface progress in the UI instead of a 15-minute silent spinner.
-  const proc = spawn(claudeBin, [
-    '-p', prompt,
-    '--output-format', 'stream-json',
-    '--verbose',
-  ], {
+  spawnClaudeStream({
+    requestId, procMap: aiReviewProcs, channelPrefix: 'pr-ai-review',
+    sender: event.sender,
     cwd: worktreePath,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    prompt,
+    streamJson: true,
   });
-
-  aiReviewProcs.set(requestId, proc);
-
-  const dataChannel = 'pr-ai-review-data-' + requestId;
-  const doneChannel = 'pr-ai-review-done-' + requestId;
-  let stderrBuf = '';
-  const sender = event.sender;
-
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => {
-    stderrBuf = appendStderr(stderrBuf, chunk);
-  });
-
-  proc.on('error', (err) => {
-    aiReviewProcs.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-
-  proc.on('exit', (code, signal) => {
-    aiReviewProcs.delete(requestId);
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-      if (!sender.isDestroyed()) sender.send(doneChannel, { cancelled: true });
-      return;
-    }
-    if (code !== 0) {
-      if (!sender.isDestroyed()) sender.send(doneChannel, { error: stderrBuf || `claude exited with code ${code}` });
-      return;
-    }
-    if (!sender.isDestroyed()) sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
-  });
-
   return { ok: true };
 });
 
-ipcMain.handle('pr-ai-review-cancel', (_event, { requestId }) => {
-  const proc = aiReviewProcs.get(requestId);
-  if (!proc) return { ok: false, error: 'No in-flight review' };
-  try { proc.kill('SIGTERM'); } catch {}
-  return { ok: true };
-});
+ipcMain.handle('pr-ai-review-cancel', makeClaudeCancelHandler(aiReviewProcs));
 
 // ---- PR Comment AI Review ----
 
