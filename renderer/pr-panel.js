@@ -98,6 +98,17 @@ window.PRPanel = (function () {
     reloadActiveTab();
   }
 
+  // Subscribe to the renderer event bus for task switches. The public
+  // setWorktree stays callable for any code that needs to force a reload.
+  Events.on('task:switched', function (detail) {
+    var task = detail && detail.task;
+    if (!task) return;
+    // Match the old gating — PRPanel only updated when DiffPanel was visible
+    // (PRPanel renders inside the diff-panel tab strip).
+    if (window.DiffPanel && window.DiffPanel.isVisible && !window.DiffPanel.isVisible()) return;
+    setWorktree(task.worktreePath);
+  });
+
   async function fetchPRSilent(worktreePathAtRequest) {
     if (!worktreePathAtRequest) return;
     var result;

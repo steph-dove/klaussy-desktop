@@ -329,18 +329,18 @@ window.FileBrowser = (function () {
     }
   }
 
-  // Called from terminal-manager.switchToTask when the active task changes.
   // The file viewer belongs to one worktree at a time; showing it against a
   // different worktree is confusing (and blame / diff hooks would target the
-  // wrong repo), so we close it on task switch.
-  window.closeFileViewerOnTaskSwitch = function (_newWorktreePath) {
-    // Always close on task switch. The real close trigger for worktree
-    // changes lives inside loadFileTree (it has a reliable signal); this
-    // hook is a backup for task removal / no-active-task transitions.
+  // wrong repo), so we close it on task switch. Subscribes via the event
+  // bus instead of being poked directly from terminal-manager.
+  function closeFileViewerOnTaskSwitch() {
     disposeCurrentEditor();
     fileViewerContent.style.display = 'none';
     fileViewerView.innerHTML = '';
-  };
+  }
+  Events.on('task:switched', closeFileViewerOnTaskSwitch);
+  // Back-compat for older callers that still invoke this as a function.
+  window.closeFileViewerOnTaskSwitch = closeFileViewerOnTaskSwitch;
 
   // ---- File Viewer (C1 + K1 tabs) ----
 
