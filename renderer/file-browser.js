@@ -766,9 +766,11 @@ window.FileBrowser = (function () {
 
   function renderFileTree(filter) {
     var filtered = fileTreeData;
+    var hasFilter = false;
     if (filter) {
       var q = filter.toLowerCase();
       filtered = fileTreeData.filter(function (f) { return f.toLowerCase().includes(q); });
+      hasFilter = true;
     }
     var tree = {};
     filtered.forEach(function (filepath) {
@@ -785,30 +787,20 @@ window.FileBrowser = (function () {
       });
     });
     fileTree.innerHTML = '';
-    renderTreeNode(tree, fileTree, 0);
+    // With a filter active, auto-expand matched paths so the user sees the
+    // results without having to click through directories. Without a filter,
+    // lazy mode keeps the initial render cheap — collapsed directories don't
+    // build their subtrees until the user opens them.
+    renderTreeNode(tree, fileTree, 0, { autoExpand: hasFilter });
   }
 
-  function renderTreeNode(node, container, depth) {
+  // Build the children of a single directory node. Pulled out of renderTreeNode
+  // so it can be called lazily on click (collapsed dirs defer their child DOM)
+  // and eagerly in filter mode (expanded automatically).
+  function buildChildren(node, container, depth, opts) {
     var dirs = Object.keys(node).filter(function (k) { return k !== '_files'; }).sort();
     dirs.forEach(function (dir) {
-      var dirEl = document.createElement('div');
-      dirEl.className = 'file-tree-dir';
-      var label = document.createElement('div');
-      label.className = 'file-tree-label';
-      label.style.paddingLeft = (depth * 16 + 8) + 'px';
-      label.innerHTML = '<span class="file-tree-arrow">&#9654;</span> ' + escHtml(dir);
-      var children = document.createElement('div');
-      children.className = 'file-tree-children';
-      children.style.display = 'none';
-      label.addEventListener('click', function () {
-        var open = children.style.display !== 'none';
-        children.style.display = open ? 'none' : '';
-        label.querySelector('.file-tree-arrow').innerHTML = open ? '&#9654;' : '&#9660;';
-      });
-      dirEl.appendChild(label);
-      dirEl.appendChild(children);
-      container.appendChild(dirEl);
-      renderTreeNode(node[dir], children, depth + 1);
+      renderDir(dir, node[dir], container, depth, opts);
     });
     if (node._files) {
       node._files.sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -824,6 +816,51 @@ window.FileBrowser = (function () {
         container.appendChild(fileEl);
       });
     }
+  }
+
+  function renderDir(name, node, container, depth, opts) {
+    var autoExpand = opts && opts.autoExpand;
+    var dirEl = document.createElement('div');
+    dirEl.className = 'file-tree-dir';
+    var label = document.createElement('div');
+    label.className = 'file-tree-label';
+    label.style.paddingLeft = (depth * 16 + 8) + 'px';
+    label.innerHTML = '<span class="file-tree-arrow">&#9654;</span> ' + escHtml(name);
+    var children = document.createElement('div');
+    children.className = 'file-tree-children';
+    children.style.display = 'none';
+
+    // Lazy: don't build the child DOM until this directory is first opened.
+    // Tracking with a flag on the element so we only build once, then toggle
+    // display on subsequent clicks. Saves O(files) DOM construction on tree
+    // render for collapsed subtrees — the main perf win of virtualization
+    // without needing a flat-list windowing framework.
+    var built = false;
+    function openDir() {
+      if (!built) {
+        buildChildren(node, children, depth + 1, opts);
+        built = true;
+      }
+      children.style.display = '';
+      label.querySelector('.file-tree-arrow').innerHTML = '&#9660;';
+    }
+    function closeDir() {
+      children.style.display = 'none';
+      label.querySelector('.file-tree-arrow').innerHTML = '&#9654;';
+    }
+    label.addEventListener('click', function () {
+      if (children.style.display === 'none') openDir(); else closeDir();
+    });
+
+    dirEl.appendChild(label);
+    dirEl.appendChild(children);
+    container.appendChild(dirEl);
+
+    if (autoExpand) openDir();
+  }
+
+  function renderTreeNode(node, container, depth, opts) {
+    buildChildren(node, container, depth, opts);
   }
 
   // Debounce: rebuilding the entire tree synchronously on every keystroke
