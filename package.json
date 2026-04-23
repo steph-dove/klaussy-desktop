@@ -42,6 +42,7 @@
     },
     "files": [
       "main.js",
+      "main/**/*",
       "lsp-manager.js",
       "preload.js",
       "renderer/**/*",

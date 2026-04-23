@@ -210,7 +210,7 @@ Earlier modules have NO dependencies on later modules. Later modules can freely 
 ## 7. Progress tracker (update as you go)
 
 Phase 1:
-- [ ] main/util/logging.js
+- [x] main/util/logging.js
 - [ ] main/util/path-gate.js
 - [ ] main/util/exec.js
 - [ ] main/util/config.js
