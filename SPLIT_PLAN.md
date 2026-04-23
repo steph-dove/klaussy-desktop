@@ -221,7 +221,7 @@ Phase 2:
 - [x] main/state/claude-streaming.js
 - [x] main/state/watcher.js
 - [x] main/state/ci-poll.js
-- [ ] main/state/pr-review.js
+- [x] main/state/pr-review.js
 
 Phase 3:
 - [ ] main/ipc/windows-ipc.js
