@@ -1074,8 +1074,19 @@ window.FileBrowser = (function () {
     fileViewerView.classList.add('blame-active');
   };
 
+  // Cmd+K is overloaded (global command palette vs in-editor inline-edit).
+  // Export a getter so app.js's document-level handler can tell whether to
+  // route to inline-edit when a file is open — without depending on focus,
+  // which is unreliable after clicks on the tab bar or elsewhere in the
+  // file viewer.
+  function getActiveEditor() {
+    // `currentEditor` is closed over; if no file is open it's undefined.
+    return (typeof currentEditor !== 'undefined') ? currentEditor : null;
+  }
+
   return {
     loadFileTree: loadFileTree,
     doProjectSearch: doProjectSearch,
+    getActiveEditor: getActiveEditor,
   };
 })();

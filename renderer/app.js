@@ -1097,8 +1097,38 @@
     CommandPalette.show(buildPaletteCommands());
   }
 
+  // Cmd+K is overloaded: globally it opens the command palette, but inside a
+  // Monaco editor it starts inline-edit (K3). Monaco's addCommand requires
+  // the editor to have text focus; if the user clicked the tab bar or anywhere
+  // in the file viewer that isn't the text area, focus is lost and pressing
+  // Cmd+K here would hijack to the palette. So we route directly to inline-edit
+  // whenever the Monaco editor exists — via its hasTextFocus() (best signal)
+  // OR by inspecting the target/active element for a .monaco-editor ancestor.
+  function shouldInlineEdit(e) {
+    var target = e && e.target;
+    if (target && target.closest && target.closest('.monaco-editor')) return true;
+    var active = document.activeElement;
+    if (active && active.closest && active.closest('.monaco-editor')) return true;
+    var ed = window.FileBrowser && window.FileBrowser.getActiveEditor
+      && window.FileBrowser.getActiveEditor();
+    if (ed && ed.hasTextFocus && ed.hasTextFocus()) return true;
+    return false;
+  }
+
   document.addEventListener('keydown', function (e) {
     if (e.metaKey && e.key === 'k') {
+      if (shouldInlineEdit(e)) {
+        // Let Monaco's own Cmd+K binding fire — we're just yielding here. If
+        // Monaco's binding doesn't catch it for some reason (out-of-date focus
+        // state), start inline-edit explicitly.
+        var ed = window.FileBrowser && window.FileBrowser.getActiveEditor
+          && window.FileBrowser.getActiveEditor();
+        if (ed && window.InlineEdit && window.InlineEdit.start) {
+          e.preventDefault();
+          window.InlineEdit.start(ed);
+        }
+        return;
+      }
       e.preventDefault();
       showCommandPalette();
     }
