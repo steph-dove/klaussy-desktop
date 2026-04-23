@@ -82,13 +82,7 @@ window.TerminalManager = (function () {
       } else {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
-        var t = tasks.get(id);
-        if (window.BranchlessUI) window.BranchlessUI.apply(t || null);
-        if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(t ? t.worktreePath : null);
-        if (t && DiffPanel.isVisible()) {
-          DiffPanel.updateWorktree(t.worktreePath);
-          PRPanel.setWorktree(t.worktreePath);
-        }
+        Events.emit('task:switched', { task: tasks.get(id) || null });
       }
     });
 
@@ -161,13 +155,7 @@ window.TerminalManager = (function () {
       if (AppState.focusedTaskId !== id) {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
-        var t = tasks.get(id);
-        if (window.BranchlessUI) window.BranchlessUI.apply(t || null);
-        if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(t ? t.worktreePath : null);
-        if (t && DiffPanel.isVisible()) {
-          DiffPanel.updateWorktree(t.worktreePath);
-          PRPanel.setWorktree(t.worktreePath);
-        }
+        Events.emit('task:switched', { task: tasks.get(id) || null });
       }
     });
 
@@ -283,14 +271,10 @@ window.TerminalManager = (function () {
       e.stopPropagation();
       AppState.focusedTaskId = id;
       AppState.activeTaskId = id;
-      var t = tasks.get(id);
-      if (window.BranchlessUI) window.BranchlessUI.apply(t || null);
-      if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(t ? t.worktreePath : null);
-      if (t && DiffPanel.isVisible()) {
-        DiffPanel.updateWorktree(t.worktreePath);
-        DiffPanel.refresh();
-        PRPanel.setWorktree(t.worktreePath);
-      }
+      // Subscriber for diff-panel refresh flag is conveyed via a second
+      // event — the sub-tab click is the only caller that wants DiffPanel
+      // to force a refresh (others just update the worktree).
+      Events.emit('task:switched', { task: tasks.get(id) || null, refreshDiff: true });
     });
 
     subTabBar.querySelector('.sub-tab[data-sub-id="0"]').addEventListener('click', function () {
@@ -557,11 +541,11 @@ window.TerminalManager = (function () {
     });
 
     var task = tasks.get(id);
-    if (window.BranchlessUI) window.BranchlessUI.apply(task || null);
-    if (window.closeFileViewerOnTaskSwitch) {
-      window.closeFileViewerOnTaskSwitch(task ? task.worktreePath : null);
-    }
+    Events.emit('task:switched', { task: task || null });
     if (task) {
+      // Terminal focus/resize is the one thing that's intrinsically owned by
+      // terminal-manager — not an event subscriber, since only this module
+      // knows the xterm instance handle.
       setTimeout(function () {
         if (task.activeSubId !== null && task.activeSubId !== undefined) {
           var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
@@ -577,11 +561,6 @@ window.TerminalManager = (function () {
           task.terminal.focus();
         }
       }, 50);
-
-      if (DiffPanel.isVisible()) {
-        DiffPanel.updateWorktree(task.worktreePath);
-        PRPanel.setWorktree(task.worktreePath);
-      }
     }
   }
 

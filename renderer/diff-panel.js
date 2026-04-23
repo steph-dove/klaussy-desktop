@@ -21,6 +21,19 @@ window.DiffPanel = (function () {
   let branchList = [];
   let remoteList = [];
 
+  // Subscribe to the renderer event bus for task switches. updateWorktree is
+  // the expensive path (re-fetches git state); skip when the panel isn't
+  // visible — the original direct callers guarded with DiffPanel.isVisible().
+  // Registered at module-load rather than inside init() so the subscription
+  // is live even before init runs (task switches emit during startup).
+  Events.on('task:switched', function (detail) {
+    var task = detail && detail.task;
+    if (!task) return;
+    if (!isVisible()) return;
+    updateWorktree(task.worktreePath);
+    if (detail.refreshDiff) refresh();
+  });
+
   function init() {
     panelEl = document.getElementById('diff-panel');
     fileListEl = document.getElementById('diff-file-list');

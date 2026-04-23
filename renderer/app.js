@@ -175,6 +175,12 @@
       }
     },
   };
+  // Subscribe to the task-switch event instead of being called directly from
+  // terminal-manager. The `.apply` method stays exposed for any caller that
+  // needs to force a re-evaluation without a full task switch.
+  Events.on('task:switched', function (detail) {
+    window.BranchlessUI.apply(detail && detail.task);
+  });
 
   // ---- Diff Panel Resize ----
   (function () {
