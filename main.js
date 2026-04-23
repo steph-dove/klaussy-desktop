@@ -38,6 +38,13 @@ const {
 const {
   startCIPolling, stopCIPolling, startAutoFetch,
 } = require('./main/state/ci-poll');
+const prReviewModule = require('./main/state/pr-review');
+const {
+  prReview,
+  broadcastPrReview, sanitizePrReview, currentRepoPath, parseBaseFromUrl,
+  pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
+  findProjectForRepo, findWorktreeForBranch, ensureWorktreeForActivePr,
+} = prReviewModule;
 
 let isQuitting = false;
 
@@ -53,6 +60,10 @@ instancesModule.setDeps({
   isQuitting: () => isQuitting,
   startCIPolling,
 });
+// pr-review needs ghJson (stays in main.js until ipc/pr-review.js in Phase 3)
+// and runKlausifyInit (moves with bootstrap/app-events.js in Phase 4). Both
+// are hoisted function declarations, so passing them by name here is safe.
+prReviewModule.setDeps({ ghJson, runKlausifyInit });
 
 ipcMain.on('subscribe-terminal', (event, channel) => {
   if (typeof channel !== 'string') return;
@@ -2176,24 +2187,10 @@ ipcMain.handle('pop-out-task', (_event, { id }) => {
 
 // ---- Phase G: Review others' PRs ----
 //
-// activePrReview is the single source of truth so the main-window panel and
-// the detached pop-out see the same state (no duplicate fetches, no lost
-// pending comments). null = no review open.
-
-let activePrReview = null; // { repo, number, meta, diff, popout: BrowserWindow|null }
-
-function broadcastPrReview() {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    win.webContents.send('pr-review-state', activePrReview ? sanitizePrReview(activePrReview) : null);
-  }
-}
-
-function sanitizePrReview(s) {
-  // Strip the BrowserWindow reference — not serializable across IPC.
-  const { popout, ...rest } = s;
-  return { ...rest, popped: !!popout };
-}
+// State (prReview.active) + fetch/broadcast helpers live in
+// main/state/pr-review.js; this file owns only the IPC handlers + the
+// ghJson / ghText helpers they share. The ipc/pr-review.js module will
+// absorb both in Phase 3.
 
 function ghJson(args, cwd) {
   return new Promise((resolve, reject) => {
@@ -2215,11 +2212,6 @@ function ghText(args, cwd) {
       resolve(stdout);
     });
   });
-}
-
-function currentRepoPath() {
-  const config = loadConfig();
-  return config.repoPath || null;
 }
 
 ipcMain.handle('pr-list', async () => {
@@ -2253,17 +2245,6 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   }
 });
 
-// GitHub PR URLs always encode the base repo: /{owner}/{repo}/pull/{n}.
-// Using the URL avoids an extra gh call and works for both the picker path
-// and the paste-URL path, since `gh pr view --json url` is always populated.
-function parseBaseFromUrl(url) {
-  if (!url) return null;
-  // Match any host (github.com, github.corp.example, etc.) so GHE works too.
-  const m = url.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/\d+/);
-  if (!m) return null;
-  return { owner: m[1], name: m[2].replace(/\.git$/, '') };
-}
-
 ipcMain.handle('pr-load', async (_event, { number, url }) => {
   // URL-form calls don't need an active project — gh derives the repo from
   // the URL. The number-only form (used by the picker's "open in current
@@ -2283,7 +2264,7 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
     ]);
     const base = parseBaseFromUrl(meta.url);
     const repo = base ? `${base.owner}/${base.name}` : null;
-    activePrReview = {
+    prReview.active = {
       repo, number: meta.number, meta, diff,
       baseOwner: base ? base.owner : null,
       baseRepo: base ? base.name : null,
@@ -2308,132 +2289,13 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
   }
 });
 
-function pushReviewHistory(meta) {
-  if (!meta || !meta.url) return;
-  const config = loadConfig();
-  const history = (config.reviewHistory || []).filter(e => e.url !== meta.url);
-  history.unshift({
-    url: meta.url,
-    number: meta.number,
-    title: meta.title || '',
-    author: (meta.author && (meta.author.login || meta.author.name)) || '',
-    state: meta.state || '',
-    isDraft: !!meta.isDraft,
-    headRefName: meta.headRefName || '',
-    baseRefName: meta.baseRefName || '',
-    viewedAt: new Date().toISOString(),
-  });
-  config.reviewHistory = history.slice(0, 20);
-  saveConfig(config);
-}
-
 ipcMain.handle('pr-recent', () => {
   const config = loadConfig();
   return { items: config.reviewHistory || [] };
 });
 
-// GraphQL-backed thread fetch. Scoped to the *base* repo (target), not the
-// head repo (fork), because threads live on the target.
-//
-// Epoch guard: overlapping refreshes (user hits refresh twice; merge-handler
-// piggybacks a refresh during the user's manual refresh) can return out of
-// order. We only commit results from the most-recent fetch; stale responses
-// are silently dropped to avoid overwriting newer data with older data.
-let _threadsFetchEpoch = 0;
-async function fetchThreadsForActive() {
-  if (!activePrReview) return;
-  const epoch = ++_threadsFetchEpoch;
-  // gh api graphql doesn't need to run inside the target repo — owner/repo
-  // are passed as query variables. Falling back to homedir means reviewers
-  // without an active klausify project still get threads + comments.
-  const cwd = currentRepoPath() || require('os').homedir();
-  if (!activePrReview.baseOwner || !activePrReview.baseRepo) {
-    activePrReview.threadsError = 'Could not parse base repo from PR url';
-    broadcastPrReview();
-    return;
-  }
-  const owner = activePrReview.baseOwner;
-  const repo = activePrReview.baseRepo;
-  const number = activePrReview.number;
-  const stale = () => epoch !== _threadsFetchEpoch
-    || !activePrReview
-    || activePrReview.number !== number;
-
-  // One round trip for threads + issue-comments + reviews. Conversation tab
-  // reads from comments + reviews; Files tab reads from reviewThreads. There's
-  // duplication between review.comments and reviewThreads.comments, but the
-  // two consumers render different shapes, so we keep both and let them pick.
-  const query = 'query($owner: String!, $repo: String!, $number: Int!) {'
-    + '  repository(owner: $owner, name: $repo) {'
-    + '    pullRequest(number: $number) {'
-    + '      reviewThreads(first: 100) {'
-    + '        nodes {'
-    + '          id isResolved isOutdated path line originalLine startLine originalStartLine diffSide'
-    + '          comments(first: 100) { nodes { databaseId author { login } createdAt body diffHunk } }'
-    + '        }'
-    + '      }'
-    + '      comments(first: 100) {'
-    + '        nodes { databaseId author { login } createdAt body url }'
-    + '      }'
-    + '      reviews(first: 100) {'
-    + '        nodes {'
-    + '          databaseId state body submittedAt author { login }'
-    + '          comments(first: 100) { nodes { databaseId body path line diffHunk } }'
-    + '        }'
-    + '      }'
-    + '    }'
-    + '  }'
-    + '}';
-
-  try {
-    const out = await new Promise((resolve, reject) => {
-      execFile('gh', [
-        'api', 'graphql',
-        '-f', 'query=' + query,
-        '-f', 'owner=' + owner,
-        '-f', 'repo=' + repo,
-        '-F', 'number=' + number,
-      ], { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
-        if (err) { err.stderr = stderr; err.stdout = stdout; return reject(err); }
-        resolve(stdout);
-      });
-    });
-    const parsed = JSON.parse(out);
-    if (parsed.errors && parsed.errors.length) {
-      if (stale()) return;
-      activePrReview.threadsError = parsed.errors.map(e => e.message).join('; ');
-      broadcastPrReview();
-      return;
-    }
-    const pr = parsed.data && parsed.data.repository && parsed.data.repository.pullRequest;
-    const threads = (pr && pr.reviewThreads && pr.reviewThreads.nodes) || [];
-    const issueComments = (pr && pr.comments && pr.comments.nodes) || [];
-    const reviews = (pr && pr.reviews && pr.reviews.nodes) || [];
-    // User may have navigated away while we were fetching; bail if the review
-    // behind us was swapped for a different PR.
-    if (stale()) return;
-    activePrReview.threads = threads;
-    activePrReview.issueComments = issueComments;
-    activePrReview.reviews = reviews;
-    activePrReview.threadsError = null;
-    broadcastPrReview();
-  } catch (err) {
-    if (stale()) return;
-    // gh api writes error JSON to stdout on non-zero exit
-    let msg = (err.stderr || err.message || '').trim();
-    if (err.stdout) {
-      try {
-        const parsed = JSON.parse(err.stdout.toString());
-        if (parsed.errors) msg = parsed.errors.map(e => e.message).join('; ');
-      } catch (_) {}
-    }
-    activePrReview.threadsError = msg;
-    broadcastPrReview();
-  }
-}
-
 ipcMain.handle('pr-refresh-threads', async () => {
-  if (!activePrReview) return { error: 'No active PR review' };
+  if (!prReview.active) return { error: 'No active PR review' };
   await fetchThreadsForActive();
   return { ok: true };
 });
@@ -2445,8 +2307,8 @@ ipcMain.handle('pr-refresh-threads', async () => {
 // { name, state, bucket, link, workflow, description } shape the renderer
 // already knows how to draw.
 ipcMain.handle('pr-review-checks', async () => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { meta, baseOwner, baseRepo } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   const sha = meta && meta.headRefOid;
   if (!sha) return { checks: [], error: 'Missing head commit sha' };
@@ -2536,8 +2398,8 @@ function normalizeStatus(s) {
 ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo, diff } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { meta, baseOwner, baseRepo, diff } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   if (!checkLink) return { error: 'Check has no run link to fetch logs from' };
 
@@ -2663,10 +2525,10 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
 ipcMain.handle('inline-complete-cancel', makeClaudeCancelHandler(inlineCompleteProcs));
 
 ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
-  if (!activePrReview) return { error: 'No active PR review' };
+  if (!prReview.active) return { error: 'No active PR review' };
   const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
   if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
-  const { meta } = activePrReview;
+  const { meta } = prReview.active;
   if (!meta || !meta.url) return { error: 'Could not determine PR URL' };
   const cwd = currentRepoPath() || require('os').homedir();
   try {
@@ -2683,169 +2545,12 @@ ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   }
 });
 
-async function reloadActivePrReviewMeta() {
-  if (!activePrReview) return;
-  const { meta: existingMeta } = activePrReview;
-  if (!existingMeta || !existingMeta.url) return;
-  const cwd = currentRepoPath() || require('os').homedir();
-  try {
-    const meta = await ghJson([
-      'pr', 'view', existingMeta.url,
-      '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-    ], cwd);
-    if (!activePrReview || activePrReview.number !== meta.number) return;
-    activePrReview.meta = Object.assign({}, activePrReview.meta, meta);
-    broadcastPrReview();
-  } catch (_) { /* non-fatal */ }
-}
-
-// Walk the user's klausify projects and return the first whose `origin`
-// remote points at <owner>/<repo> (GitHub URL, either SSH or HTTPS form).
-// Returns null when no project matches — the caller surfaces an explicit
-// "add this repo as a project" error.
-function findProjectForRepo(owner, repo) {
-  const config = loadConfig();
-  const projects = config.projects || [];
-  const needle = `${owner}/${repo}`;
-  for (const p of projects) {
-    if (!p || !p.path) continue;
-    try {
-      const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
-        cwd: p.path, stdio: 'pipe',
-      }).toString().trim();
-      // Accept https://github.com/owner/repo(.git)? and git@github.com:owner/repo(.git)?
-      const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
-      if (m && `${m[1]}/${m[2]}` === needle) return p.path;
-    } catch (_) { /* skip */ }
-  }
-  return null;
-}
-
-// Scan `git worktree list --porcelain` for the worktree (if any) that has
-// `refs/heads/<branch>` checked out. Returns the worktree path or null.
-function findWorktreeForBranch(cwd, branch) {
-  try {
-    const out = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-      cwd, stdio: 'pipe',
-    }).toString();
-    // Entries are blank-line-separated "worktree <path>\nHEAD ...\nbranch ..." blocks.
-    const blocks = out.split(/\n\n+/);
-    for (const block of blocks) {
-      let wtPath = null, wtBranch = null;
-      for (const line of block.split('\n')) {
-        if (line.startsWith('worktree ')) wtPath = line.slice('worktree '.length).trim();
-        else if (line.startsWith('branch ')) wtBranch = line.slice('branch '.length).trim();
-      }
-      if (wtBranch === `refs/heads/${branch}` && wtPath) return wtPath;
-    }
-  } catch (_) {}
-  return null;
-}
-
-// Shared helper: ensure a worktree exists for activePrReview's PR head and
-// return its path. Used by G5 (which then spawns a task) and G7 (which runs
-// the AI review there). Resolves cwd in this order:
-//   1. active project's origin matches the PR base repo
-//   2. another klausify project's origin matches
-//   3. auto-clone into userData/pr-checkouts (partial clone)
-// Reuses an existing worktree on the branch instead of fighting git when
-// the user has it checked out already.
-async function ensureWorktreeForActivePr() {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { number, meta, baseOwner, baseRepo } = activePrReview;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo from PR metadata' };
-
-  const active = currentRepoPath();
-  let cwd = null;
-  if (active) {
-    try {
-      const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
-        cwd: active, stdio: 'pipe',
-      }).toString().trim();
-      const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
-      if (m && `${m[1]}/${m[2]}` === `${baseOwner}/${baseRepo}`) cwd = active;
-    } catch (_) {}
-  }
-  if (!cwd) cwd = findProjectForRepo(baseOwner, baseRepo);
-
-  let token = '';
-  try {
-    token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
-  } catch (_) {
-    return { error: 'Could not read gh auth token — run `gh auth login` first.' };
-  }
-  const authedUrl = `https://oauth2:${token}@github.com/${baseOwner}/${baseRepo}.git`;
-  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
-
-  // Token-bearing remote URL: DON'T let git persist this into .git/config.
-  // Instead we pass it only for the single clone/fetch call (via argv), then
-  // immediately rewrite the stored remote URL to the clean form. This way
-  // the token isn't in .git/config forever — and `ps` exposure is bounded
-  // to the lifetime of the single operation.
-  const cleanUrl = `https://github.com/${baseOwner}/${baseRepo}.git`;
-
-  if (!cwd) {
-    const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
-    const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
-    if (!fs.existsSync(clonePath)) {
-      try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
-      try {
-        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe' });
-      } catch (err) {
-        const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-        return { error: 'Clone failed: ' + scrub(raw) };
-      }
-      // Strip token from persisted origin URL.
-      try {
-        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe' });
-      } catch {}
-    }
-    cwd = clonePath;
-  }
-
-  const localBranch = (meta && meta.headRefName) || `pr-${number}`;
-  const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
-
-  const existingWorktreePath = findWorktreeForBranch(cwd, localBranch);
-  if (existingWorktreePath) {
-    return { worktreePath: existingWorktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true };
-  }
-
-  try {
-    execFileSync('git', ['fetch', authedUrl, `+refs/pull/${number}/head:refs/heads/${localBranch}`], {
-      cwd, stdio: 'pipe',
-    });
-  } catch (err) {
-    const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-    return { error: 'Fetch failed: ' + scrub(raw) };
-  }
-
-  const repoBasename = path.basename(cwd);
-  const worktreeDir = path.dirname(cwd);
-  const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitizedForPath);
-
-  if (fs.existsSync(worktreePath)) {
-    // Stale dir from a prior run we never wired up — reuse silently rather
-    // than failing. git worktree add would error if it's still registered.
-    return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true };
-  }
-
-  try {
-    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], { cwd, stdio: 'pipe' });
-  } catch (err) {
-    return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
-  }
-
-  try { await runKlausifyInit(worktreePath); } catch (_) {}
-  return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: false };
-}
-
 // G5: materialize the PR as a worktree + spawn a task in it.
 ipcMain.handle('pr-checkout-locally', async () => {
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
   const { worktreePath, branch } = ensured;
-  const { number, baseOwner, baseRepo } = activePrReview;
+  const { number, baseOwner, baseRepo } = prReview.active;
 
   // Already tracked as a task? Focus it instead of spawning a duplicate.
   const existingTask = Array.from(instances.values()).find(i => i.worktreePath === worktreePath);
@@ -2871,10 +2576,10 @@ ipcMain.handle('pr-checkout-locally', async () => {
   // Exit review mode first so the task grid is visible again, THEN announce
   // the new task so the main-window listener can focus it without fighting
   // the review-mode takeover.
-  if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
-    activePrReview.popout.close();
+  if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
+    prReview.active.popout.close();
   }
-  activePrReview = null;
+  prReview.active = null;
   broadcastPrReview();
 
   for (const win of BrowserWindow.getAllWindows()) {
@@ -2890,12 +2595,12 @@ ipcMain.handle('pr-checkout-locally', async () => {
 ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (reviewSurfaceAiProcs.has(requestId)) return { error: 'Already in flight' };
-  if (!activePrReview) return { error: 'No active PR review' };
+  if (!prReview.active) return { error: 'No active PR review' };
 
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
 
-  const baseBranch = (activePrReview.meta && activePrReview.meta.baseRefName) || 'main';
+  const baseBranch = (prReview.active.meta && prReview.active.meta.baseRefName) || 'main';
   const prompt = PR_REVIEW_TEMPLATE
     .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch)
     .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
@@ -2918,7 +2623,7 @@ ipcMain.handle('pr-review-ai-cancel', makeClaudeCancelHandler(reviewSurfaceAiPro
 ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, body }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (implementProcs.has(requestId)) return { error: 'Already in flight' };
-  if (!activePrReview) return { error: 'No active PR review' };
+  if (!prReview.active) return { error: 'No active PR review' };
   if (!body || !body.trim()) return { error: 'Empty implement body' };
 
   const ensured = await ensureWorktreeForActivePr();
@@ -2996,8 +2701,8 @@ ipcMain.handle('pr-review-cache-clear-by-pr', (_event, { owner, repo, number }) 
 // bodies.
 // General issue comment on the PR — no line context, just a body.
 ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo, number } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo, number } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
@@ -3037,8 +2742,8 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
 // (GraphQL exposes it as databaseId). Posts to the `/issues/comments/{id}`
 // REST endpoint — distinct from review comments which live under `/pulls/`.
 ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   const id = parseInt(commentId, 10);
   if (!id) return { error: 'Missing or invalid comment id' };
@@ -3074,8 +2779,8 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
 // Patch an existing inline/review comment. Separate endpoint from issue
 // comments: `/repos/{o}/{r}/pulls/comments/{id}`.
 ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   const id = parseInt(commentId, 10);
   if (!id) return { error: 'Missing or invalid comment id' };
@@ -3130,8 +2835,8 @@ ipcMain.handle('pr-current-user', async () => {
 // comment so we can thread using data we already fetch. Uses GitHub's
 // dedicated replies endpoint so we don't have to fake a new-comment shape.
 ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body }) => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo, number } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo, number } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   const parentId = parseInt(inReplyTo, 10);
   if (!parentId) return { error: 'Missing or invalid parent comment id' };
@@ -3170,8 +2875,8 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
 });
 
 ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo, number } = activePrReview;
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { baseOwner, baseRepo, number } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   if (!event) return { error: 'Missing review event (APPROVE / REQUEST_CHANGES / COMMENT)' };
 
@@ -3227,28 +2932,28 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   });
 });
 
-ipcMain.handle('pr-review-state', () => activePrReview ? sanitizePrReview(activePrReview) : null);
+ipcMain.handle('pr-review-state', () => prReview.active ? sanitizePrReview(prReview.active) : null);
 
 ipcMain.handle('pr-review-close', () => {
-  if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
-    activePrReview.popout.close();
+  if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
+    prReview.active.popout.close();
   }
-  activePrReview = null;
+  prReview.active = null;
   broadcastPrReview();
   return { ok: true };
 });
 
 ipcMain.handle('pop-out-pr-review', () => {
-  if (!activePrReview) return { error: 'No active PR review' };
-  if (activePrReview.popout && !activePrReview.popout.isDestroyed()) {
-    activePrReview.popout.focus();
+  if (!prReview.active) return { error: 'No active PR review' };
+  if (prReview.active.popout && !prReview.active.popout.isDestroyed()) {
+    prReview.active.popout.focus();
     return { ok: true };
   }
 
   const popout = new BrowserWindow({
     width: 1100,
     height: 800,
-    title: `Review \u2014 #${activePrReview.number} ${activePrReview.meta.title || ''}`,
+    title: `Review \u2014 #${prReview.active.number} ${prReview.active.meta.title || ''}`,
     icon: path.join(__dirname, 'icon.icns'),
     backgroundColor: '#1a1a2e',
     webPreferences: {
@@ -3260,12 +2965,12 @@ ipcMain.handle('pop-out-pr-review', () => {
   hardenWindow(popout);
 
   popout.loadFile(path.join(__dirname, 'renderer', 'pr-review.html'));
-  activePrReview.popout = popout;
+  prReview.active.popout = popout;
   broadcastPrReview();
 
   popout.on('closed', () => {
-    if (activePrReview && activePrReview.popout === popout) {
-      activePrReview.popout = null;
+    if (prReview.active && prReview.active.popout === popout) {
+      prReview.active.popout = null;
       broadcastPrReview();
     }
   });
@@ -3274,8 +2979,8 @@ ipcMain.handle('pop-out-pr-review', () => {
 });
 
 ipcMain.handle('pop-in-pr-review', () => {
-  if (activePrReview && activePrReview.popout && !activePrReview.popout.isDestroyed()) {
-    activePrReview.popout.close();
+  if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
+    prReview.active.popout.close();
   }
   return { ok: true };
 });
