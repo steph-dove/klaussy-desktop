@@ -220,7 +220,7 @@ Phase 2:
 - [x] main/state/instances.js
 - [x] main/state/claude-streaming.js
 - [x] main/state/watcher.js
-- [ ] main/state/ci-poll.js
+- [x] main/state/ci-poll.js
 - [ ] main/state/pr-review.js
 
 Phase 3:
