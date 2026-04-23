@@ -192,9 +192,8 @@ contextBridge.exposeInMainWorld('klaus', {
   prAddComment: (worktreePath, prNumber, body) => ipcRenderer.invoke('pr-add-comment', { worktreePath, prNumber, body }),
   prReview: (worktreePath, prNumber, event, body) => ipcRenderer.invoke('pr-review', { worktreePath, prNumber, event, body }),
   prAiReviewComment: (opts) => ipcRenderer.invoke('pr-ai-review-comment', opts),
-  prReviewCacheGet: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-cache-get', { worktreePath, prNumber }),
-  prReviewCacheSave: (worktreePath, prNumber, review) => ipcRenderer.invoke('pr-review-cache-save', { worktreePath, prNumber, review }),
-  prReviewCacheClear: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-cache-clear', { worktreePath, prNumber }),
+  // Legacy pr-review-cache-{get,save,clear} methods retired; callers use the
+  // `*ByPr` variants below which hit the file-per-PR cache directly.
   prFixInTerminal: (worktreePath, text) => ipcRenderer.invoke('pr-fix-in-terminal', { worktreePath, text }),
   prAiReviewStart: (opts) => ipcRenderer.invoke('pr-ai-review-start', opts),
   prAiReviewCancel: (requestId) => ipcRenderer.invoke('pr-ai-review-cancel', { requestId }),

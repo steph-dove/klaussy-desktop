@@ -237,6 +237,65 @@ function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
 }
 
+// One-time migration: the original PR review cache (G-series) stored reviews
+// under `config.prReviews[owner/repo#n] = { review, savedAt }`. The current
+// cache (G7) is file-per-PR at `userData/pr-review-cache/<owner>-<repo>-<n>.json`
+// with a richer shape. We ran both in parallel for a release, which let saves
+// from one path invisibly diverge from the other. Bring the legacy entries
+// forward on startup and drop the config key so there's exactly one cache.
+function migratePrReviewCache() {
+  try {
+    const config = loadConfig();
+    const legacy = config.prReviews;
+    if (!legacy || typeof legacy !== 'object' || Object.keys(legacy).length === 0) return;
+
+    const dir = path.join(app.getPath('userData'), 'pr-review-cache');
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+
+    let migrated = 0;
+    for (const [key, value] of Object.entries(legacy)) {
+      // Legacy key shape: "owner/repo#n"
+      const hashAt = key.lastIndexOf('#');
+      if (hashAt <= 0) continue;
+      const repoFull = key.slice(0, hashAt);
+      const number = key.slice(hashAt + 1);
+      const slashAt = repoFull.indexOf('/');
+      if (slashAt <= 0) continue;
+      const owner = repoFull.slice(0, slashAt);
+      const repo = repoFull.slice(slashAt + 1);
+      if (!owner || !repo || !number) continue;
+
+      const safe = `${owner}-${repo}-${number}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+      const target = path.join(dir, safe + '.json');
+      // Don't clobber the new-format cache if it's already populated — the
+      // new data is strictly richer (findingState, per-finding usage, etc.)
+      // and a legacy write here would overwrite it.
+      if (fs.existsSync(target)) continue;
+
+      const out = {
+        savedAt: (value && value.savedAt) || new Date().toISOString(),
+        finalText: (value && value.review) || '',
+      };
+      try {
+        fs.writeFileSync(target, JSON.stringify(out, null, 2));
+        migrated++;
+      } catch {}
+    }
+
+    // saveConfig merges via Object.assign. To actually remove `prReviews`
+    // from disk we set it to undefined (copied by Object.assign, dropped by
+    // JSON.stringify) rather than deleting the key locally.
+    config.prReviews = undefined;
+    saveConfig(config);
+    if (migrated > 0) {
+      console.log(`pr-review-cache: migrated ${migrated} legacy entries to userData/pr-review-cache/`);
+    }
+  } catch (err) {
+    console.error('pr-review-cache migration failed:', err && err.message);
+  }
+}
+migratePrReviewCache();
+
 // Collect every filesystem root the renderer is allowed to read/write. Used
 // by read-file/write-file/read-files-bulk — an XSS in the renderer must not
 // be able to hand us ~/.ssh/id_rsa or ~/.config/gh/hosts.yml.
@@ -4641,47 +4700,10 @@ Do NOT write any files. Output the final review directly as your response to thi
 // so the renderer can cancel them.
 const aiReviewProcs = new Map();
 
-// Cached PR reviews persist across app restarts: config.prReviews[repo#n] = { review, savedAt }
-function prReviewKey(repo, prNumber) { return repo + '#' + prNumber; }
-
-ipcMain.handle('pr-review-cache-get', (_event, { worktreePath, prNumber }) => {
-  try {
-    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const repo = JSON.parse(repoResult).nameWithOwner;
-    const config = loadConfig();
-    const cached = (config.prReviews || {})[prReviewKey(repo, prNumber)];
-    return { cached: cached || null };
-  } catch {
-    return { cached: null };
-  }
-});
-
-ipcMain.handle('pr-review-cache-save', (_event, { worktreePath, prNumber, review }) => {
-  try {
-    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const repo = JSON.parse(repoResult).nameWithOwner;
-    const config = loadConfig();
-    if (!config.prReviews) config.prReviews = {};
-    config.prReviews[prReviewKey(repo, prNumber)] = { review: review, savedAt: new Date().toISOString() };
-    saveConfig(config);
-    return { ok: true };
-  } catch (err) {
-    return { error: err.message };
-  }
-});
-
-ipcMain.handle('pr-review-cache-clear', (_event, { worktreePath, prNumber }) => {
-  try {
-    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const repo = JSON.parse(repoResult).nameWithOwner;
-    const config = loadConfig();
-    if (config.prReviews) delete config.prReviews[prReviewKey(repo, prNumber)];
-    saveConfig(config);
-    return { ok: true };
-  } catch (err) {
-    return { error: err.message };
-  }
-});
+// Legacy config.prReviews cache was retired in favor of the file-per-PR cache
+// in userData/pr-review-cache/. Entries are migrated once on startup via
+// migratePrReviewCache(); see the file-per-PR handlers above for the current
+// shape and the *-by-pr IPCs.
 
 // Send text to the Claude terminal for a given worktree (via bracketed paste,
 // so multi-line content doesn't submit partial lines). Returns the task id.
