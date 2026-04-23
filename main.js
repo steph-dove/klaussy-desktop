@@ -2,6 +2,10 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notificat
 const path = require('path');
 const fs = require('fs');
 const { execSync, execFileSync, execFile, spawn } = require('child_process');
+// Promisified execFile — every git IPC handler should prefer this over the
+// sync `execFileSync` form. Sync ops on the main thread freeze every window
+// (input, menus, IPC) until git returns; async keeps the event loop breathing.
+const execFileP = require('util').promisify(execFile);
 const pty = require('node-pty');
 const lspManager = require('./lsp-manager');
 
@@ -1080,7 +1084,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
 // List branches for a repo (local + remote, excluding those already checked out in worktrees)
 ipcMain.handle('list-branches', async (_event, { repoPath }) => {
   try {
-    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
+    await execFileP('git', ['rev-parse', '--git-dir'], { cwd: repoPath });
   } catch {
     return { error: 'Not a git repository: ' + repoPath };
   }
@@ -1088,7 +1092,7 @@ ipcMain.handle('list-branches', async (_event, { repoPath }) => {
   // Get branches already checked out in worktrees
   let worktreeBranches = new Set();
   try {
-    const wtList = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath, stdio: 'pipe' }).toString();
+    const { stdout: wtList } = await execFileP('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath });
     for (const line of wtList.split('\n')) {
       if (line.startsWith('branch ')) {
         worktreeBranches.add(line.replace('branch refs/heads/', ''));
@@ -1098,9 +1102,10 @@ ipcMain.handle('list-branches', async (_event, { repoPath }) => {
 
   let branches = [];
   try {
-    const raw = execFileSync('git', ['branch', '-a', '--format', '%(refname:short)\t%(objectname:short)\t%(committerdate:relative)'], {
-      cwd: repoPath, stdio: 'pipe'
-    }).toString().trim();
+    const { stdout } = await execFileP('git', ['branch', '-a', '--format', '%(refname:short)\t%(objectname:short)\t%(committerdate:relative)'], {
+      cwd: repoPath,
+    });
+    const raw = stdout.trim();
     for (const line of raw.split('\n')) {
       if (!line) continue;
       const [ref, hash, date] = line.split('\t');
@@ -2176,8 +2181,12 @@ ipcMain.handle('duplicate-task', async (_event, { id }) => {
 
 ipcMain.handle('git-status', async (_event, { worktreePath }) => {
   try {
-    const status = execFileSync('git', ['status', '--porcelain'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
+    const [statusRes, branchRes] = await Promise.all([
+      execFileP('git', ['status', '--porcelain'], { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 }),
+      execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath }),
+    ]);
+    const status = statusRes.stdout;
+    const branch = branchRes.stdout.trim();
     const files = status.split('\n').filter(Boolean).map(line => {
       const xy = line.substring(0, 2);
       const file = line.substring(3);
@@ -2207,8 +2216,8 @@ ipcMain.handle('git-diff', async (_event, { worktreePath, file, staged }) => {
     const args = ['diff'];
     if (staged) args.push('--cached');
     if (file) args.push('--', file);
-    const diff = execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 }).toString();
-    return { diff };
+    const { stdout } = await execFileP('git', args, { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 });
+    return { diff: stdout };
   } catch (err) {
     return { diff: '', error: err.message };
   }
@@ -2220,9 +2229,9 @@ ipcMain.handle('git-diff', async (_event, { worktreePath, file, staged }) => {
 // don't span unchanged context.
 ipcMain.handle('git-file-hunks', async (_event, { worktreePath, file }) => {
   try {
-    const diff = execFileSync('git', ['diff', '-U0', 'HEAD', '--', file], {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024,
-    }).toString();
+    const { stdout: diff } = await execFileP('git', ['diff', '-U0', 'HEAD', '--', file], {
+      cwd: worktreePath, maxBuffer: 5 * 1024 * 1024,
+    });
     const hunks = [];
     const hunkRe = /^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s+@@/gm;
     let m;
@@ -2244,7 +2253,8 @@ ipcMain.handle('git-file-hunks', async (_event, { worktreePath, file }) => {
     return { hunks };
   } catch (err) {
     // Not in a repo, file is untracked, or unmodified — return empty.
-    if (err.status === 128 || err.status === 1) return { hunks: [] };
+    // execFile's promisified form exposes exit code on err.code.
+    if (err.code === 128 || err.code === 1) return { hunks: [] };
     return { hunks: [], error: err.message };
   }
 });
@@ -2253,10 +2263,12 @@ ipcMain.handle('git-file-hunks', async (_event, { worktreePath, file }) => {
 
 ipcMain.handle('git-branches', async (_event, { worktreePath }) => {
   try {
-    const local = execFileSync('git', ['branch', '--format=%(refname:short)'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const remote = execFileSync('git', ['branch', '-r', '--format=%(refname:short)'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const branches = local.split('\n').filter(Boolean);
-    const remotes = remote.split('\n').filter(Boolean).filter(b => !b.includes('HEAD'));
+    const [localRes, remoteRes] = await Promise.all([
+      execFileP('git', ['branch', '--format=%(refname:short)'], { cwd: worktreePath }),
+      execFileP('git', ['branch', '-r', '--format=%(refname:short)'], { cwd: worktreePath }),
+    ]);
+    const branches = localRes.stdout.split('\n').filter(Boolean);
+    const remotes = remoteRes.stdout.split('\n').filter(Boolean).filter(b => !b.includes('HEAD'));
     return { branches, remotes };
   } catch (err) {
     return { branches: [], remotes: [], error: err.message };
@@ -2266,8 +2278,9 @@ ipcMain.handle('git-branches', async (_event, { worktreePath }) => {
 ipcMain.handle('git-branch-files', async (_event, { worktreePath, baseBranch }) => {
   try {
     // Use merge-base to find the branch point, then diff against working tree
-    const mergeBase = execFileSync('git', ['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
-    const output = execFileSync('git', ['diff', '--name-status', mergeBase], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    const mbRes = await execFileP('git', ['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath });
+    const mergeBase = mbRes.stdout.trim();
+    const { stdout: output } = await execFileP('git', ['diff', '--name-status', mergeBase], { cwd: worktreePath });
     const files = output.split('\n').filter(Boolean).map(line => {
       const parts = line.split('\t');
       return { status: parts[0], file: parts.slice(1).join('\t') };
@@ -2280,10 +2293,11 @@ ipcMain.handle('git-branch-files', async (_event, { worktreePath, baseBranch }) 
 
 ipcMain.handle('git-branch-diff', async (_event, { worktreePath, baseBranch, file }) => {
   try {
-    const mergeBase = execFileSync('git', ['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
+    const mbRes = await execFileP('git', ['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath });
+    const mergeBase = mbRes.stdout.trim();
     const args = ['diff', mergeBase];
     if (file) args.push('--', file);
-    const diff = execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024 }).toString();
+    const { stdout: diff } = await execFileP('git', args, { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 });
     return { diff };
   } catch (err) {
     return { diff: '', error: err.message };
@@ -2424,10 +2438,16 @@ ipcMain.handle('git-pull', async (_event, { worktreePath }) => {
 
 ipcMain.handle('git-ahead-behind', async (_event, { worktreePath }) => {
   try {
-    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
-    const upstream = execFileSync('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
-    const counts = execFileSync('git', ['rev-list', '--left-right', '--count', upstream + '...HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
-    const parts = counts.split(/\s+/);
+    // The previous sync version had a dead branch-lookup call before upstream;
+    // we drop it here — upstream fails the same way if the repo is broken.
+    const { stdout: upstream } = await execFileP(
+      'git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd: worktreePath },
+    );
+    const { stdout: counts } = await execFileP(
+      'git', ['rev-list', '--left-right', '--count', upstream.trim() + '...HEAD'],
+      { cwd: worktreePath },
+    );
+    const parts = counts.trim().split(/\s+/);
     return { behind: parseInt(parts[0], 10) || 0, ahead: parseInt(parts[1], 10) || 0 };
   } catch {
     return { behind: 0, ahead: 0 };
@@ -2439,8 +2459,6 @@ ipcMain.handle('git-ahead-behind', async (_event, { worktreePath }) => {
 // Runs git ops truly in parallel (async execFile) so aggregating N worktrees
 // costs ~max(per-worktree) instead of ~sum. Per-worktree errors degrade to a
 // zeroed row with `error:` set rather than rejecting the whole Promise.all.
-const execFileP = require('util').promisify(execFile);
-
 async function collectWorktreeState(task) {
   const cwd = task.worktreePath;
   try {
@@ -2542,10 +2560,10 @@ ipcMain.handle('git-stash-list', async (_event, { worktreePath }) => {
 // D4: Commit history
 ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
   try {
-    const output = execFileSync('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '-' + (count || 50)], {
-      cwd: worktreePath, stdio: 'pipe',
-    }).toString();
-    const commits = output.split('\n').filter(Boolean).map(function (line) {
+    const { stdout } = await execFileP('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '-' + (count || 50)], {
+      cwd: worktreePath,
+    });
+    const commits = stdout.split('\n').filter(Boolean).map(function (line) {
       const p = line.split('\t');
       return { hash: p[0], short: p[1], author: p[2], date: p[3], subject: p[4] };
     });
@@ -2557,10 +2575,10 @@ ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
 
 ipcMain.handle('git-show', async (_event, { worktreePath, hash }) => {
   try {
-    const diff = execFileSync('git', ['show', '--format=', hash], {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024,
-    }).toString();
-    return { diff };
+    const { stdout } = await execFileP('git', ['show', '--format=', hash], {
+      cwd: worktreePath, maxBuffer: 10 * 1024 * 1024,
+    });
+    return { diff: stdout };
   } catch (err) {
     return { diff: '', error: err.message };
   }
@@ -2569,9 +2587,9 @@ ipcMain.handle('git-show', async (_event, { worktreePath, hash }) => {
 // D5: Blame
 ipcMain.handle('git-blame', async (_event, { worktreePath, file }) => {
   try {
-    const output = execFileSync('git', ['blame', '--porcelain', file], {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 10 * 1024 * 1024,
-    }).toString();
+    const { stdout: output } = await execFileP('git', ['blame', '--porcelain', file], {
+      cwd: worktreePath, maxBuffer: 10 * 1024 * 1024,
+    });
     // Parse porcelain blame into per-line annotations
     const lines = [];
     let current = {};
@@ -2613,10 +2631,10 @@ ipcMain.handle('git-blame', async (_event, { worktreePath, file }) => {
 // D7: Conflict detection
 ipcMain.handle('git-conflicts', async (_event, { worktreePath }) => {
   try {
-    const output = execFileSync('git', ['diff', '--name-only', '--diff-filter=U'], {
-      cwd: worktreePath, stdio: 'pipe',
-    }).toString();
-    const files = output.split('\n').filter(Boolean);
+    const { stdout } = await execFileP('git', ['diff', '--name-only', '--diff-filter=U'], {
+      cwd: worktreePath,
+    });
+    const files = stdout.split('\n').filter(Boolean);
     return { files };
   } catch {
     return { files: [] };
@@ -2746,23 +2764,22 @@ ipcMain.handle('new-window', () => {
   return { ok: true };
 });
 
-ipcMain.handle('list-worktrees', () => {
+ipcMain.handle('list-worktrees', async () => {
   const config = loadConfig();
   const repoPath = config.repoPath;
   if (!repoPath) return [];
 
   // Verify it's a git repo before listing worktrees
   try {
-    execSync('git rev-parse --git-dir', { cwd: repoPath, stdio: 'pipe' });
+    await execFileP('git', ['rev-parse', '--git-dir'], { cwd: repoPath });
   } catch {
     return [];
   }
 
   try {
-    const output = execSync('git worktree list --porcelain', {
+    const { stdout: output } = await execFileP('git', ['worktree', 'list', '--porcelain'], {
       cwd: repoPath,
-      stdio: 'pipe',
-    }).toString();
+    });
 
     const worktrees = [];
     let current = {};
@@ -5132,10 +5149,10 @@ ipcMain.handle('ci-run-logs', async (_event, { worktreePath, runId }) => {
 
 ipcMain.handle('git-tags', async (_event, { worktreePath }) => {
   try {
-    const output = execFileSync('git', ['tag', '-l', '--sort=-creatordate',
+    const { stdout } = await execFileP('git', ['tag', '-l', '--sort=-creatordate',
       '--format=%(refname:short)\t%(objectname:short)\t%(subject)\t%(creatordate:short)'],
-      { cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 }).toString();
-    const tags = output.split('\n').filter(Boolean).map(line => {
+      { cwd: worktreePath, maxBuffer: 5 * 1024 * 1024 });
+    const tags = stdout.split('\n').filter(Boolean).map(line => {
       const [name, commit, message, date] = line.split('\t');
       return { name, commit, message: message || '', date: date || '' };
     });
