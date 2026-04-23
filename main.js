@@ -16,9 +16,10 @@ const {
 const {
   getConfigPath, loadConfig, saveConfig, flushSaveConfig, migratePrReviewCache,
 } = require('./main/util/config');
+const {
+  allWindows, getMainWindow, hardenWindow, createWindow,
+} = require('./main/state/windows');
 
-let mainWindow;
-const allWindows = new Set();
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
 let isQuitting = false;
@@ -159,56 +160,6 @@ function getWorktreeDir(repoPath) {
 }
 
 migratePrReviewCache();
-
-// Harden every BrowserWindow we create:
-//  * deny `window.open` / `target="_blank"` — renderer must go through the
-//    scheme-allowlisted `open-external` IPC for outbound links.
-//  * block navigation away from file:// — otherwise an XSS can set
-//    `window.location = 'https://evil'` and the attacker page inherits the
-//    preload (and thus `window.klaus.*`).
-//  * when the webContents is destroyed (reload, close, crash), kill any
-//    LSP subprocesses it started so they don't leak as zombie processes.
-function hardenWindow(win) {
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('will-navigate', (e, url) => {
-    if (!url.startsWith('file://')) e.preventDefault();
-  });
-  win.webContents.on('destroyed', () => {
-    try { lspManager.stopServersForWebContents(win.webContents); } catch {}
-  });
-}
-
-function createWindow(opts) {
-  opts = opts || {};
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    title: 'Klaussy',
-    icon: path.join(__dirname, 'icon.icns'),
-    backgroundColor: '#1a1a2e',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  hardenWindow(win);
-
-  var url = path.join(__dirname, 'renderer', 'index.html');
-  if (opts.secondary) {
-    win.loadFile(url, { query: { secondary: '1' } });
-  } else {
-    win.loadFile(url);
-  }
-  allWindows.add(win);
-  win.on('closed', () => { allWindows.delete(win); });
-
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    mainWindow = win;
-  }
-
-  return win;
-}
 
 // macOS apps launched from Finder/Dock get a minimal PATH from launchd
 // (~/usr/bin:/bin:/usr/sbin:/sbin), missing brew + the user's local bin
@@ -602,10 +553,11 @@ function sendIdleNotification(inst, reason) {
   });
 
   notification.on('click', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.show();
-      mainWindow.focus();
-      mainWindow.webContents.send('notification-clicked', { id: inst.id });
+    const mw = getMainWindow();
+    if (mw && !mw.isDestroyed()) {
+      mw.show();
+      mw.focus();
+      mw.webContents.send('notification-clicked', { id: inst.id });
     }
   });
 
@@ -718,7 +670,7 @@ ipcMain.handle('dismiss-saved-session', (_event, { worktreePath, sessionId }) =>
 });
 
 ipcMain.handle('select-repo', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog(getMainWindow(), {
     title: 'Select the git repository to manage',
     properties: ['openDirectory'],
   });
@@ -957,7 +909,7 @@ ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode }) => {
 
 // Browse for a directory (used by the existing worktree tab)
 ipcMain.handle('browse-directory', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog(getMainWindow(), {
     title: 'Select existing worktree directory',
     properties: ['openDirectory'],
   });
@@ -970,7 +922,7 @@ ipcMain.handle('browse-directory', async () => {
 // explicitly skip instances without a branch.
 ipcMain.handle('open-folder', async (_event, { folderPath, mode }) => {
   if (!folderPath) {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const result = await dialog.showOpenDialog(getMainWindow(), {
       title: 'Select folder to open',
       properties: ['openDirectory'],
     });
@@ -1002,8 +954,9 @@ function checkKlausifyInstalled() {
 }
 
 async function promptKlausifyInstall() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  const { response } = await dialog.showMessageBox(mainWindow, {
+  const mw = getMainWindow();
+  if (!mw || mw.isDestroyed()) return false;
+  const { response } = await dialog.showMessageBox(mw, {
     type: 'question',
     buttons: ['Install with pipx', 'Skip'],
     defaultId: 0,
@@ -2371,7 +2324,7 @@ ipcMain.handle('export-transcript', async (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  const result = await dialog.showSaveDialog(mainWindow, {
+  const result = await dialog.showSaveDialog(getMainWindow(), {
     title: 'Export Session Transcript',
     defaultPath: path.join(app.getPath('documents'), inst.name + '-transcript.txt'),
     filters: [{ name: 'Text', extensions: ['txt'] }, { name: 'Markdown', extensions: ['md'] }],
@@ -2409,7 +2362,7 @@ ipcMain.handle('list-projects', () => {
 });
 
 ipcMain.handle('add-project', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
+  const result = await dialog.showOpenDialog(getMainWindow(), {
     title: 'Select a git repository',
     properties: ['openDirectory'],
   });
@@ -2423,7 +2376,7 @@ ipcMain.handle('add-project', async () => {
   } catch {}
 
   if (!isGitRepo) {
-    const { response } = await dialog.showMessageBox(mainWindow, {
+    const { response } = await dialog.showMessageBox(getMainWindow(), {
       type: 'question',
       buttons: ['Initialize Git', 'Cancel'],
       defaultId: 0,

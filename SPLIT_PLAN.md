@@ -216,7 +216,7 @@ Phase 1:
 - [x] main/util/config.js
 
 Phase 2:
-- [ ] main/state/windows.js
+- [x] main/state/windows.js
 - [ ] main/state/instances.js
 - [ ] main/state/claude-streaming.js
 - [ ] main/state/watcher.js
