@@ -1,6 +1,18 @@
 window.AppUtils = (function () {
   function escHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  // Stricter escape for values interpolated into HTML attributes. Same rules
+  // as escHtml for now; kept distinct so callers can signal intent and so we
+  // can harden attribute-only rules (e.g. backtick) without touching text.
+  function escAttr(s) {
+    return escHtml(s);
   }
 
   function formatAge(isoString) {
@@ -27,6 +39,7 @@ window.AppUtils = (function () {
 
   return {
     escHtml: escHtml,
+    escAttr: escAttr,
     formatAge: formatAge,
     iconColor: iconColor,
   };

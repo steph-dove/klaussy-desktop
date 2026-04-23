@@ -127,7 +127,10 @@ window.InlineEdit = (function () {
     s.requestId = 'ie-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
     var worktree = typeof fileViewerWorktreeGetter === 'function'
       ? fileViewerWorktreeGetter() : null;
-    var filePath = (window.FileBrowserState && window.FileBrowserState.filePath) || null;
+    // Prefer the model's URI path — `window.FileBrowserState` was never
+    // actually populated anywhere, so this always landed as null and the
+    // prompt lost the `File:` hint.
+    var filePath = (s.model && s.model.uri && s.model.uri.fsPath) || null;
     var languageId = s.model.getLanguageId ? s.model.getLanguageId() : undefined;
     s.disposeChunk = window.klaus.onInlineEditChunk(s.requestId, function (chunk) {
       s.buffer += chunk;

@@ -113,22 +113,26 @@
   });
 
   // ---- Save UI state before quit ----
-  window.klaus.onBeforeQuit(function () {
-    var state = {
-      diffPanelOpen: DiffPanel.isVisible(),
-      selectedFile: DiffPanel.getSelectedFile(),
-    };
-    window.klaus.saveUIState(state);
-  });
+  // Only the main window owns the persistent UI state — secondary windows
+  // and popouts would otherwise clobber each other on their own timer ticks.
+  if (!isSecondaryWindow) {
+    window.klaus.onBeforeQuit(function () {
+      var state = {
+        diffPanelOpen: DiffPanel.isVisible(),
+        selectedFile: DiffPanel.getSelectedFile(),
+      };
+      window.klaus.saveUIState(state);
+    });
 
-  // Also save periodically in case of crash
-  setInterval(function () {
-    var state = {
-      diffPanelOpen: DiffPanel.isVisible(),
-      selectedFile: DiffPanel.getSelectedFile(),
-    };
-    window.klaus.saveUIState(state);
-  }, 10000);
+    // Also save periodically in case of crash
+    setInterval(function () {
+      var state = {
+        diffPanelOpen: DiffPanel.isVisible(),
+        selectedFile: DiffPanel.getSelectedFile(),
+      };
+      window.klaus.saveUIState(state);
+    }, 10000);
+  }
 
   // Diff panel toggle
   btnDiff.addEventListener('click', function () {
@@ -610,13 +614,11 @@
       item.querySelector('.saved-session-dismiss').addEventListener('click', function (e) {
         e.stopPropagation();
         item.remove();
-        // Clear this session from saved list
-        sessions.splice(idx, 1);
-        var config_sessions = sessions.filter(function () { return true; });
-        // If all dismissed, clear saved sessions entirely
-        if (taskList.querySelectorAll('.saved-session').length === 0) {
-          window.klaus.clearSavedSessions();
-        }
+        // Persist removal by stable identity (worktreePath + sessionId) rather
+        // than the captured `idx` — splice-by-idx silently removed the wrong
+        // row after any earlier dismiss shifted the array, and the removal
+        // was only persisted when ALL rows had been dismissed.
+        window.klaus.dismissSavedSession(s);
       });
 
       taskList.appendChild(item);
@@ -992,7 +994,7 @@
           var line = buf.getLine(i);
           if (line) lines.push(line.translateToString(true));
         }
-        await window.klaus.writeTranscript(result.filePath, lines.join('\n'));
+        await window.klaus.writeTranscript(id, lines.join('\n'));
       }},
     ];
 
@@ -1215,6 +1217,11 @@
     overlay.innerHTML =
       '<div class="pr-picker">'
         + '<div class="pr-picker-header">Review a Pull Request</div>'
+        + '<div class="pr-picker-account-row">'
+          + '<label class="pr-picker-account-label">Account:</label>'
+          + '<select class="pr-picker-account"><option>Loading…</option></select>'
+          + '<span class="pr-picker-account-hint" aria-live="polite"></span>'
+        + '</div>'
         + '<div class="pr-picker-url-row">'
           + '<input type="text" class="pr-picker-url" placeholder="Paste a GitHub PR URL" />'
           + '<button class="pr-picker-start" type="button" disabled>Start review</button>'
@@ -1233,12 +1240,44 @@
     var startBtn = overlay.querySelector('.pr-picker-start');
     urlInput.focus();
 
+    var accountSelect = overlay.querySelector('.pr-picker-account');
+    var accountHint = overlay.querySelector('.pr-picker-account-hint');
+    var recentEl = overlay.querySelector('.pr-picker-recent');
+    var listEl = overlay.querySelector('.pr-picker-list');
+
     function updateStartEnabled() { startBtn.disabled = !urlInput.value.trim(); }
-    urlInput.addEventListener('input', updateStartEnabled);
+    urlInput.addEventListener('input', function () {
+      updateStartEnabled();
+      // Typing/pasting a new URL invalidates any "Switched to X" hint.
+      accountHint.textContent = '';
+    });
+
+    // Parse {owner, repo, number} from a GitHub PR URL for autodetect.
+    function parsePrUrl(s) {
+      if (!s) return null;
+      var m = s.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+      if (!m) return null;
+      return { owner: m[1], repo: m[2].replace(/\.git$/, ''), number: parseInt(m[3], 10) };
+    }
+
+    // Before loading, check whether the currently-active gh account can see
+    // this PR. If a different logged-in account has access, silently switch.
+    async function ensureAccountCanSeeUrl(url) {
+      var parsed = parsePrUrl(url);
+      if (!parsed) return;
+      var det = await window.klaus.ghDetectAccountForRepo(parsed.owner, parsed.repo, parsed.number);
+      if (!det || det.error || !det.username) return;
+      if (det.active) return;
+      var sw = await window.klaus.ghSwitchAccount(det.username);
+      if (sw && sw.error) return;
+      accountHint.textContent = 'Switched to ' + det.username;
+      if (accountSelect) accountSelect.value = det.username;
+    }
 
     async function startFromUrl() {
       var url = urlInput.value.trim();
       if (!url) return;
+      try { await ensureAccountCanSeeUrl(url); } catch (_) {}
       urlInput.disabled = true;
       startBtn.disabled = true;
       startBtn.textContent = 'Loading\u2026';
@@ -1258,28 +1297,90 @@
     });
     startBtn.addEventListener('click', startFromUrl);
 
-    // Kick both lists off in parallel — neither blocks the user from
-    // pasting a URL.
-    var recentEl = overlay.querySelector('.pr-picker-recent');
-    var listEl = overlay.querySelector('.pr-picker-list');
+    // Populate the account dropdown from `gh auth status`. Active account is
+    // the selected option. Hide the row when there's only one account (or
+    // gh isn't authed) so the UI doesn't get cluttered.
+    async function populateAccountSelect() {
+      var res = await window.klaus.ghListAccounts();
+      var accounts = (res && res.accounts) || [];
+      if (accounts.length === 0) {
+        var row = overlay.querySelector('.pr-picker-account-row');
+        if (row) row.style.display = 'none';
+        return;
+      }
+      accountSelect.innerHTML = accounts.map(function (a) {
+        var sel = a.active ? ' selected' : '';
+        return '<option value="' + AppUtils.escAttr(a.username) + '"' + sel + '>'
+          + AppUtils.escHtml(a.username) + (a.active ? ' (active)' : '')
+          + '</option>';
+      }).join('');
+    }
 
-    window.klaus.prRecent().then(function (r) {
-      var items = (r && r.items) || [];
-      if (items.length === 0) { recentEl.style.display = 'none'; return; }
-      recentEl.innerHTML = '<div class="pr-picker-section-head">Recently reviewed</div>'
-        + items.map(function (it) {
-          var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
-          return '<div class="pr-picker-item" data-url="' + (it.url || '').replace(/"/g, '&quot;') + '">'
-            + '<span class="pr-picker-num">#' + it.number + '</span>'
-            + '<span class="pr-picker-title">' + (it.title || '').replace(/</g, '&lt;') + '</span>'
-            + '<span class="pr-picker-author">' + (it.author || '') + '</span>'
-            + '<span class="pr-picker-state pr-state-' + stateLabel + '">' + stateLabel + '</span>'
+    // Recent + project-open lists, extracted so account-switch can re-run it.
+    async function refreshLists() {
+      recentEl.innerHTML = '';
+      recentEl.style.display = '';
+      listEl.innerHTML = '<div class="pr-picker-loading">Loading open PRs…</div>';
+
+      window.klaus.prRecent().then(function (r) {
+        var items = (r && r.items) || [];
+        if (items.length === 0) { recentEl.style.display = 'none'; return; }
+        recentEl.innerHTML = '<div class="pr-picker-section-head">Recently reviewed</div>'
+          + items.map(function (it) {
+            var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
+            return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(it.url || '') + '">'
+              + '<span class="pr-picker-num">#' + AppUtils.escHtml(it.number) + '</span>'
+              + '<span class="pr-picker-title">' + AppUtils.escHtml(it.title || '') + '</span>'
+              + '<span class="pr-picker-author">' + AppUtils.escHtml(it.author || '') + '</span>'
+              + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
+            + '</div>';
+          }).join('');
+        recentEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
+          row.addEventListener('click', async function () {
+            row.style.opacity = '0.5';
+            try { await ensureAccountCanSeeUrl(row.dataset.url); } catch (_) {}
+            var loadResult = await window.klaus.prLoad({ url: row.dataset.url });
+            if (loadResult.error) {
+              alert('Failed to load PR:\n' + loadResult.error);
+              row.style.opacity = '1';
+              return;
+            }
+            close();
+          });
+        });
+      });
+
+      var result = await window.klaus.prList();
+      if (result.error) {
+        // No active project is the most common case here; treat it as an info
+        // hint rather than a hard error so the user can still paste a URL.
+        var msg = result.error || '';
+        var isNoProject = /no active project/i.test(msg);
+        var cls = isNoProject ? 'pr-picker-empty' : 'pr-picker-error';
+        listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
+          + '<div class="' + AppUtils.escAttr(cls) + '">' + (isNoProject ? 'Add a project to list its open PRs, or paste a URL above to review any PR you have access to.' : AppUtils.escHtml(msg)) + '</div>';
+        return;
+      }
+      if (!result.prs || result.prs.length === 0) {
+        listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
+          + '<div class="pr-picker-empty">No open PRs in this repo.</div>';
+        return;
+      }
+      listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
+        + result.prs.map(function (pr) {
+          var author = (pr.author && (pr.author.login || pr.author.name)) || '';
+          var stateLabel = pr.isDraft ? 'draft' : (pr.state || '').toLowerCase();
+          return '<div class="pr-picker-item" data-number="' + AppUtils.escAttr(String(pr.number)) + '">'
+            + '<span class="pr-picker-num">#' + AppUtils.escHtml(pr.number) + '</span>'
+            + '<span class="pr-picker-title">' + AppUtils.escHtml(pr.title || '') + '</span>'
+            + '<span class="pr-picker-author">' + AppUtils.escHtml(author) + '</span>'
+            + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
           + '</div>';
         }).join('');
-      recentEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
+      listEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
         row.addEventListener('click', async function () {
           row.style.opacity = '0.5';
-          var loadResult = await window.klaus.prLoad({ url: row.dataset.url });
+          var loadResult = await window.klaus.prLoad({ number: parseInt(row.dataset.number, 10) });
           if (loadResult.error) {
             alert('Failed to load PR:\n' + loadResult.error);
             row.style.opacity = '1';
@@ -1288,47 +1389,27 @@
           close();
         });
       });
+    }
+
+    accountSelect.addEventListener('change', async function () {
+      var target = accountSelect.value;
+      if (!target) return;
+      accountHint.textContent = 'Switching…';
+      accountSelect.disabled = true;
+      var sw = await window.klaus.ghSwitchAccount(target);
+      accountSelect.disabled = false;
+      if (sw && sw.error) {
+        accountHint.textContent = 'Switch failed: ' + sw.error;
+        await populateAccountSelect();
+        return;
+      }
+      accountHint.textContent = 'Switched to ' + target;
+      await populateAccountSelect();
+      await refreshLists();
     });
 
-    var result = await window.klaus.prList();
-    if (result.error) {
-      // No active project is the most common case here; treat it as an info
-      // hint rather than a hard error so the user can still paste a URL.
-      var msg = result.error || '';
-      var isNoProject = /no active project/i.test(msg);
-      var cls = isNoProject ? 'pr-picker-empty' : 'pr-picker-error';
-      listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-        + '<div class="' + cls + '">' + (isNoProject ? 'Add a project to list its open PRs, or paste a URL above to review any PR you have access to.' : msg.replace(/</g, '&lt;')) + '</div>';
-      return;
-    }
-    if (!result.prs || result.prs.length === 0) {
-      listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-        + '<div class="pr-picker-empty">No open PRs in this repo.</div>';
-      return;
-    }
-    listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-      + result.prs.map(function (pr) {
-        var author = (pr.author && (pr.author.login || pr.author.name)) || '';
-        var stateLabel = pr.isDraft ? 'draft' : (pr.state || '').toLowerCase();
-        return '<div class="pr-picker-item" data-number="' + pr.number + '">'
-          + '<span class="pr-picker-num">#' + pr.number + '</span>'
-          + '<span class="pr-picker-title">' + (pr.title || '').replace(/</g, '&lt;') + '</span>'
-          + '<span class="pr-picker-author">' + author + '</span>'
-          + '<span class="pr-picker-state pr-state-' + stateLabel + '">' + stateLabel + '</span>'
-        + '</div>';
-      }).join('');
-    listEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
-      row.addEventListener('click', async function () {
-        row.style.opacity = '0.5';
-        var loadResult = await window.klaus.prLoad({ number: parseInt(row.dataset.number, 10) });
-        if (loadResult.error) {
-          alert('Failed to load PR:\n' + loadResult.error);
-          row.style.opacity = '1';
-          return;
-        }
-        close();
-      });
-    });
+    await populateAccountSelect();
+    await refreshLists();
   }
 
   // Task rename and reorder extracted to sidebar-manager.js
