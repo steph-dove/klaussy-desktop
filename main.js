@@ -11,12 +11,19 @@ const lspManager = require('./lsp-manager');
 // Require early: installs console hooks + uncaught handlers on load so every
 // subsequent log/error routes through the ring buffer + rolling file.
 const { getLogBuffer } = require('./main/util/logging');
+const pathGate = require('./main/util/path-gate');
+const { pathUnder, pathUnderAnyRoot, getRendererAllowedRoots } = pathGate;
 
 let mainWindow;
 const allWindows = new Set();
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
 let isQuitting = false;
+
+// Inject path-gate deps. loadConfig is a hoisted function declaration so it's
+// safe to reference here; instances is already initialized above. Phase 2
+// will replace these with direct imports once state/instances.js exists.
+pathGate.setDeps({ loadConfig: () => loadConfig(), getInstances: () => instances });
 
 // Subscription-based PTY broadcast. Previously every onData chunk was sent to
 // EVERY BrowserWindow via allWindows + instance.popoutWindows — a 2 main +
@@ -264,65 +271,6 @@ function migratePrReviewCache() {
   }
 }
 migratePrReviewCache();
-
-// Collect every filesystem root the renderer is allowed to read/write. Used
-// by read-file/write-file/read-files-bulk — an XSS in the renderer must not
-// be able to hand us ~/.ssh/id_rsa or ~/.config/gh/hosts.yml.
-function getRendererAllowedRoots() {
-  const roots = new Set();
-  try {
-    const config = loadConfig();
-    if (config.repoPath) roots.add(config.repoPath);
-    if (Array.isArray(config.projects)) {
-      for (const p of config.projects) if (p && p.path) roots.add(p.path);
-    }
-  } catch {}
-  for (const inst of instances.values()) {
-    if (inst && inst.worktreePath) roots.add(inst.worktreePath);
-  }
-  // Klaussy-owned directories (pr-checkouts clones, userData for caches).
-  try { roots.add(app.getPath('userData')); } catch {}
-  return Array.from(roots);
-}
-
-// Check if `candidate` resolves under any known renderer-allowed root.
-// Returns the canonical resolved path on success, null on reject.
-function pathUnderAnyRoot(candidate) {
-  for (const root of getRendererAllowedRoots()) {
-    const safe = pathUnder(root, candidate);
-    if (safe) return safe;
-  }
-  return null;
-}
-
-// Resolve `candidate` (absolute or relative to `root`) and confirm the final
-// real path is contained within `root`'s real path. Refuses traversal (`..`)
-// and symlink escapes. Returns the canonical absolute path, or null on reject.
-// Use for every IPC that takes a filesystem path from the renderer.
-function pathUnder(root, candidate) {
-  if (typeof root !== 'string' || typeof candidate !== 'string') return null;
-  try {
-    const rootReal = fs.realpathSync(root);
-    const absCandidate = path.isAbsolute(candidate)
-      ? candidate
-      : path.resolve(rootReal, candidate);
-    // realpath only works if the path exists. For write targets the file may
-    // not exist yet — realpath the parent dir instead and rejoin the basename.
-    let resolved;
-    try {
-      resolved = fs.realpathSync(absCandidate);
-    } catch {
-      const parent = path.dirname(absCandidate);
-      const parentReal = fs.realpathSync(parent);
-      resolved = path.join(parentReal, path.basename(absCandidate));
-    }
-    const rootWithSep = rootReal.endsWith(path.sep) ? rootReal : rootReal + path.sep;
-    if (resolved === rootReal || resolved.startsWith(rootWithSep)) return resolved;
-    return null;
-  } catch {
-    return null;
-  }
-}
 
 // Resolve the correct gh auth token for a given repo directory.
 // Matches the remote owner (e.g. "steph-dove") to a logged-in gh account.
