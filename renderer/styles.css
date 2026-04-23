@@ -2299,6 +2299,7 @@ body.task-branchless #ahead-behind {
 /* Commit area & footer */
 #commit-area {
   display: flex;
+  flex-direction: column;
   padding: 8px;
   gap: 6px;
   border-top: 1px solid var(--border);
@@ -2315,11 +2316,45 @@ body.task-branchless #ahead-behind {
   font-size: 12px;
   font-family: 'SF Mono', monospace;
   outline: none;
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.4;
 }
 
 #commit-message:focus {
   border-color: var(--accent);
 }
+
+#commit-area-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+/* Ephemeral status banner inside the diff panel — shows commit / push
+   results so the user gets visible feedback instead of an alert modal. */
+.diff-status-banner {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: 90%;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', monospace;
+  background: var(--surface, #222);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  z-index: 100;
+  max-height: 120px;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.diff-status-success { border-color: #3c9a3c; }
+.diff-status-error { border-color: #c0392b; color: #ff6b6b; }
 
 #btn-do-commit {
   background: var(--accent);
@@ -2340,6 +2375,20 @@ body.task-branchless #ahead-behind {
   opacity: 0.5;
   cursor: default;
 }
+
+#btn-claude-commit-msg {
+  background: var(--surface, transparent);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1;
+}
+#btn-claude-commit-msg:hover { background: var(--surface-hover, var(--bg)); }
+#btn-claude-commit-msg:disabled { opacity: 0.7; cursor: default; }
 
 #diff-footer {
   display: flex;

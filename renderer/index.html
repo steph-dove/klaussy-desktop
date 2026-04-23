@@ -94,8 +94,11 @@
             <pre id="diff-view"></pre>
           </div>
           <div id="commit-area" style="display: none;">
-            <input type="text" id="commit-message" placeholder="Commit message..." autocomplete="off" spellcheck="false" />
-            <button id="btn-do-commit">Commit</button>
+            <textarea id="commit-message" rows="5" placeholder="Commit message... (Cmd+Enter to commit)" autocomplete="off" spellcheck="false"></textarea>
+            <div id="commit-area-actions">
+              <button id="btn-claude-commit-msg" title="Write commit message with Claude">✨</button>
+              <button id="btn-do-commit">Commit</button>
+            </div>
           </div>
           <div id="diff-footer">
             <button id="btn-commit" title="Commit staged changes">Commit</button>

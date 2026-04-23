@@ -227,6 +227,25 @@ contextBridge.exposeInMainWorld('klaus', {
     return () => ipcRenderer.removeListener(channel, handler);
   },
 
+  // Claude-authored commit message — streams tokens into the commit input so
+  // the user sees the message build up and can edit or cancel at any point.
+  claudeCommitMessageStart: (requestId, worktreePath) =>
+    ipcRenderer.invoke('claude-commit-message-start', { requestId, worktreePath }),
+  claudeCommitMessageCancel: (requestId) =>
+    ipcRenderer.invoke('claude-commit-message-cancel', { requestId }),
+  onClaudeCommitMessageChunk: (requestId, callback) => {
+    const channel = 'claude-commit-message-chunk-' + requestId;
+    const handler = (_e, chunk) => callback(chunk);
+    ipcRenderer.on(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+  onClaudeCommitMessageDone: (requestId, callback) => {
+    const channel = 'claude-commit-message-done-' + requestId;
+    const handler = (_e, data) => callback(data);
+    ipcRenderer.once(channel, handler);
+    return () => ipcRenderer.removeListener(channel, handler);
+  },
+
   // File viewer (Phase 7) + File tree & search (C1-C3)
   readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
   writeFile: (filePath, content) => ipcRenderer.invoke('write-file', { filePath, content }),

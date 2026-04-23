@@ -2308,7 +2308,7 @@ ipcMain.handle('git-branch-diff', async (_event, { worktreePath, baseBranch, fil
 
 ipcMain.handle('git-stage', async (_event, { worktreePath, files }) => {
   try {
-    execFileSync('git', ['add', '--'].concat(files), { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', ['add', '--'].concat(files), { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2317,7 +2317,7 @@ ipcMain.handle('git-stage', async (_event, { worktreePath, files }) => {
 
 ipcMain.handle('git-unstage', async (_event, { worktreePath, files }) => {
   try {
-    execFileSync('git', ['reset', 'HEAD', '--'].concat(files), { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', ['reset', 'HEAD', '--'].concat(files), { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2328,14 +2328,22 @@ ipcMain.handle('git-apply-patch', async (_event, { worktreePath, patch, reverse 
   try {
     const args = ['apply', '--cached', '--whitespace=nowarn'];
     if (reverse) args.push('-R');
-    execFileSync('git', args, {
-      cwd: worktreePath,
-      input: patch,
-      stdio: ['pipe', 'pipe', 'pipe'],
+    // execFile doesn't take `input` the way execFileSync does — spawn, pipe
+    // the patch into stdin, and await exit.
+    await new Promise((resolve, reject) => {
+      const proc = spawn('git', args, { cwd: worktreePath, stdio: ['pipe', 'pipe', 'pipe'] });
+      let stderr = '';
+      proc.stderr.on('data', (c) => { stderr += c.toString(); });
+      proc.on('error', reject);
+      proc.on('exit', (code) => {
+        if (code === 0) resolve();
+        else { const err = new Error(stderr || `git apply exited ${code}`); err.stderr = stderr; reject(err); }
+      });
+      proc.stdin.end(patch);
     });
     return { ok: true };
   } catch (err) {
-    return { error: err.stderr ? err.stderr.toString() : err.message };
+    return { error: err.stderr || err.message };
   }
 });
 
@@ -2348,9 +2356,10 @@ ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
   for (const file of files) {
     let status = '';
     try {
-      status = execFileSync('git', ['status', '--porcelain', '--', file], {
-        cwd: worktreePath, stdio: 'pipe',
-      }).toString();
+      const { stdout } = await execFileP('git', ['status', '--porcelain', '--', file], {
+        cwd: worktreePath,
+      });
+      status = stdout;
     } catch (err) {
       perFile.push({ file, error: err.stderr ? err.stderr.toString() : err.message });
       continue;
@@ -2360,20 +2369,20 @@ ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
     try {
       if (xy === '??') {
         // Untracked: remove it.
-        execFileSync('git', ['clean', '-f', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+        await execFileP('git', ['clean', '-f', '--', file], { cwd: worktreePath });
       } else if (xy[0] === 'A') {
         // Staged new file: unstage, then leave the working-tree file alone
         // (user may want to keep the content; `discard` on a new file means
         // "take it back to untracked"). This avoids the prior data-loss case
         // where the staged content was wiped.
-        execFileSync('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+        await execFileP('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath });
       } else {
         // Tracked with unstaged and/or staged changes: reset the index to HEAD
         // for this path, then checkout to restore working tree to HEAD.
         try {
-          execFileSync('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+          await execFileP('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath });
         } catch {}
-        execFileSync('git', ['checkout', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+        await execFileP('git', ['checkout', '--', file], { cwd: worktreePath });
       }
       perFile.push({ file, ok: true });
     } catch (err) {
@@ -2389,7 +2398,7 @@ ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
 
 ipcMain.handle('git-commit', async (_event, { worktreePath, message }) => {
   try {
-    execFileSync('git', ['commit', '-m', message], { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', ['commit', '-m', message], { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2398,11 +2407,21 @@ ipcMain.handle('git-commit', async (_event, { worktreePath, message }) => {
 
 ipcMain.handle('git-push', async (_event, { worktreePath }) => {
   try {
-    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
-    execFileSync('git', ['push', '-u', 'origin', branch], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 });
-    return { ok: true };
+    const { stdout: br } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath });
+    const branch = br.trim();
+    // git writes progress + the "To ...refs..." summary to stderr even on
+    // success. Capture it so the renderer can surface a useful "pushed X to
+    // origin/Y" toast / log entry instead of pretending nothing happened.
+    const { stderr } = await execFileP('git', ['push', '-u', 'origin', branch], {
+      cwd: worktreePath, timeout: 30000,
+    });
+    return { ok: true, branch, output: (stderr || '').trim() };
   } catch (err) {
-    return { error: err.stderr ? err.stderr.toString() : err.message };
+    return {
+      error: err.stderr ? err.stderr.toString().trim() : err.message,
+      code: err.code,
+      signal: err.signal,
+    };
   }
 });
 
@@ -2420,7 +2439,7 @@ ipcMain.handle('create-pr', async (_event, { worktreePath, title, body }) => {
 // D1: Fetch & Pull
 ipcMain.handle('git-fetch', async (_event, { worktreePath }) => {
   try {
-    execFileSync('git', ['fetch', '--prune'], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 });
+    await execFileP('git', ['fetch', '--prune'], { cwd: worktreePath, timeout: 30000 });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2429,8 +2448,8 @@ ipcMain.handle('git-fetch', async (_event, { worktreePath }) => {
 
 ipcMain.handle('git-pull', async (_event, { worktreePath }) => {
   try {
-    const output = execFileSync('git', ['pull'], { cwd: worktreePath, stdio: 'pipe', timeout: 30000 }).toString().trim();
-    return { ok: true, output };
+    const { stdout } = await execFileP('git', ['pull'], { cwd: worktreePath, timeout: 30000 });
+    return { ok: true, output: stdout.trim() };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
   }
@@ -2514,7 +2533,7 @@ ipcMain.handle('get-worktree-state', async (_event, { taskId }) => {
 // D2: Branch checkout
 ipcMain.handle('git-checkout', async (_event, { worktreePath, branch }) => {
   try {
-    execFileSync('git', ['checkout', branch], { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', ['checkout', branch], { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2526,7 +2545,7 @@ ipcMain.handle('git-stash-push', async (_event, { worktreePath, message }) => {
   try {
     const args = ['stash', 'push'];
     if (message) args.push('-m', message);
-    execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', args, { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2537,7 +2556,7 @@ ipcMain.handle('git-stash-pop', async (_event, { worktreePath, index }) => {
   try {
     const args = ['stash', 'pop'];
     if (index !== undefined) args.push('stash@{' + index + '}');
-    execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', args, { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -2546,8 +2565,8 @@ ipcMain.handle('git-stash-pop', async (_event, { worktreePath, index }) => {
 
 ipcMain.handle('git-stash-list', async (_event, { worktreePath }) => {
   try {
-    const output = execFileSync('git', ['stash', 'list', '--format=%gd\t%s'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const stashes = output.split('\n').filter(Boolean).map(function (line) {
+    const { stdout } = await execFileP('git', ['stash', 'list', '--format=%gd\t%s'], { cwd: worktreePath });
+    const stashes = stdout.split('\n').filter(Boolean).map(function (line) {
       const parts = line.split('\t');
       return { ref: parts[0], message: parts.slice(1).join('\t') };
     });
@@ -4173,10 +4192,10 @@ ipcMain.handle('read-files-bulk', async (_event, { worktreePath, relPaths, maxBy
 ipcMain.handle('list-files', async (_event, { worktreePath }) => {
   // Try git first — for a checked-out repo, ls-files respects .gitignore.
   try {
-    const output = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024,
-    }).toString();
-    return { files: output.split('\n').filter(Boolean) };
+    const { stdout } = await execFileP('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+      cwd: worktreePath, maxBuffer: 5 * 1024 * 1024,
+    });
+    return { files: stdout.split('\n').filter(Boolean) };
   } catch (err) {
     // Not a git repo (open-folder flow) — walk the directory directly.
     const msg = err.stderr ? err.stderr.toString() : err.message;
@@ -4215,9 +4234,9 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile 
     // long flag git-grep recognizes) is parsed as an option rather than
     // the search pattern. `-F` alone doesn't fully defend against that.
     const args = ['grep', '-n', '--no-color', '-I', '-r', '-F', cap, '--', query];
-    const output = execFileSync('git', args, {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
-    }).toString();
+    const { stdout: output } = await execFileP('git', args, {
+      cwd: worktreePath, maxBuffer: 5 * 1024 * 1024, timeout: 10000,
+    });
     return { results: parseGrepOutput(output) };
   } catch (err) {
     const msg = err.stderr ? err.stderr.toString() : err.message;
@@ -4234,14 +4253,15 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile 
     const args = ['-rnF', '-I', cap];
     for (const dir of WALK_IGNORE) args.push('--exclude-dir=' + dir);
     args.push('--', query, '.');
-    const output = execFileSync('grep', args, {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
-    }).toString();
+    const { stdout: output } = await execFileP('grep', args, {
+      cwd: worktreePath, maxBuffer: 5 * 1024 * 1024, timeout: 10000,
+    });
     // grep prefixes paths with "./" — trim for consistency with git grep.
     const normalized = output.split('\n').map(l => l.replace(/^\.\//, '')).join('\n');
     return { results: parseGrepOutput(normalized) };
   } catch (err) {
-    if (err.status === 1) return { results: [] };
+    // grep exits 1 when nothing matched (promisified exposes this on err.code).
+    if (err.code === 1) return { results: [] };
     return { results: [], error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
@@ -4331,6 +4351,65 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
   });
   return { ok: true };
 });
+
+// Streams a suggested commit message for the staged changes into the diff
+// panel. Renderer shows a sparkle button next to the commit input; the result
+// is editable before the user actually commits. Pulls the last few commit
+// subjects so claude can match the repo's tone (conventional / prefix / etc.)
+// without us prescribing a style.
+const commitMsgProcs = new Map();
+ipcMain.handle('claude-commit-message-start', async (event, { requestId, worktreePath }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (commitMsgProcs.has(requestId)) return { error: 'Already generating' };
+  if (!worktreePath) return { error: 'Missing worktreePath' };
+
+  let diff = '';
+  try {
+    const { stdout } = await execFileP('git', ['diff', '--cached'], {
+      cwd: worktreePath, maxBuffer: 5 * 1024 * 1024,
+    });
+    diff = stdout;
+  } catch (err) {
+    return { error: 'Could not read staged diff: ' + (err.stderr || err.message) };
+  }
+  if (!diff.trim()) return { error: 'No staged changes to summarize' };
+
+  // Cap diff to keep the prompt inside a reasonable budget. If the staged diff
+  // is huge, trim and tell claude we truncated so it doesn't hallucinate whole
+  // regions of the change.
+  const MAX = 80 * 1024;
+  const diffForPrompt = diff.length > MAX
+    ? diff.slice(0, MAX) + '\n\n[... diff truncated ...]\n'
+    : diff;
+
+  let recent = '';
+  try {
+    const { stdout } = await execFileP('git', ['log', '-n', '10', '--format=%s'], {
+      cwd: worktreePath,
+    });
+    recent = stdout.trim();
+  } catch { /* brand-new repo or no commits; omit style sample */ }
+
+  const prompt =
+    'Write a commit message for the staged changes below.\n\n' +
+    'Rules (strict):\n' +
+    '- Output ONLY the commit message — no explanations, no code fences, no preamble.\n' +
+    '- First line is the subject: imperative mood, under 72 chars, no trailing period.\n' +
+    '- If the change is non-trivial, add a blank line and a short body explaining the "why".\n' +
+    '- Match the style (prefix conventions, length, tone) of the recent subjects shown below.\n\n' +
+    (recent ? 'Recent commit subjects (for style only):\n' + recent + '\n\n' : '') +
+    'Staged diff:\n' + diffForPrompt;
+
+  spawnClaudeStream({
+    requestId, procMap: commitMsgProcs, channelPrefix: 'claude-commit-message',
+    sender: event.sender,
+    cwd: worktreePath,
+    prompt,
+  });
+  return { ok: true };
+});
+
+ipcMain.handle('claude-commit-message-cancel', makeClaudeCancelHandler(commitMsgProcs));
 
 ipcMain.handle('explain-diff-stream-cancel', makeClaudeCancelHandler(explainStreamProcs));
 
@@ -5042,7 +5121,7 @@ ipcMain.handle('write-resolved-file', async (_event, { worktreePath, file, conte
   try {
     fs.writeFileSync(safe, content, 'utf-8');
     // Use the original relative `file` arg for `git add` (git wants a repo-relative path).
-    execFileSync('git', ['add', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', ['add', '--', file], { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -5171,7 +5250,7 @@ ipcMain.handle('git-tag-create', async (_event, { worktreePath, name, message, c
       args.push(name);
     }
     if (commit) args.push(commit);
-    execFileSync('git', args, { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', args, { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -5180,7 +5259,7 @@ ipcMain.handle('git-tag-create', async (_event, { worktreePath, name, message, c
 
 ipcMain.handle('git-tag-delete', async (_event, { worktreePath, name }) => {
   try {
-    execFileSync('git', ['tag', '-d', name], { cwd: worktreePath, stdio: 'pipe' });
+    await execFileP('git', ['tag', '-d', name], { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -5189,7 +5268,7 @@ ipcMain.handle('git-tag-delete', async (_event, { worktreePath, name }) => {
 
 ipcMain.handle('git-tag-push', async (_event, { worktreePath, name }) => {
   try {
-    execFileSync('git', ['push', 'origin', name], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
+    await execFileP('git', ['push', 'origin', name], { cwd: worktreePath, timeout: 15000 });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
