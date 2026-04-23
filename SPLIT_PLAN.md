@@ -225,7 +225,7 @@ Phase 2:
 
 Phase 3:
 - [x] main/ipc/windows-ipc.js
-- [ ] main/ipc/lsp.js
+- [x] main/ipc/lsp.js
 - [ ] main/ipc/skills.js
 - [ ] main/ipc/files.js
 - [ ] main/ipc/gh.js
