@@ -27,6 +27,11 @@ const {
   processIdleDetection, clearIdleTimer,
   spawnInWorktree, convertInstanceToShell,
 } = instancesModule;
+const {
+  spawnClaudeStream, makeClaudeCancelHandler,
+  debugCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
+  implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs,
+} = require('./main/state/claude-streaming');
 
 let isQuitting = false;
 
@@ -53,85 +58,6 @@ ipcMain.on('unsubscribe-terminal', (event, channel) => {
   if (typeof channel !== 'string') return;
   unsubscribeTerminalChannel(channel, event.sender);
 });
-
-// Shared streaming-claude primitive. Before this lived in 7 near-identical
-// handler bodies with subtle drift (stderr sometimes dropped on zero-exit,
-// some handlers didn't kill the subprocess when the renderer went away,
-// exit-branch order varied). One helper, one place to fix bugs.
-//
-// Channel naming convention:
-//   `${channelPrefix}-${streamJson ? 'data' : 'chunk'}-${requestId}` for output
-//   `${channelPrefix}-done-${requestId}` for completion/error/cancel
-// Callers supply the proc map (so cancel handlers can look up the proc),
-// the prompt, the cwd, and any extra fields to merge into the done payload
-// on successful (zero-exit) completion.
-function spawnClaudeStream({
-  requestId,
-  procMap,
-  channelPrefix,
-  sender,
-  cwd,
-  prompt,
-  streamJson = false,
-  extraDoneFields = null,
-}) {
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  const args = streamJson
-    ? ['-p', prompt, '--output-format', 'stream-json', '--verbose']
-    : ['-p', prompt];
-  const proc = spawn(claudeBin, args, {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  procMap.set(requestId, proc);
-
-  const chunkChannel = `${channelPrefix}-${streamJson ? 'data' : 'chunk'}-${requestId}`;
-  const doneChannel = `${channelPrefix}-done-${requestId}`;
-
-  let stderrBuf = '';
-  proc.stdout.on('data', (chunk) => {
-    if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
-  });
-  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
-  proc.on('error', (err) => {
-    procMap.delete(requestId);
-    if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
-  });
-  proc.on('exit', (code, signal) => {
-    procMap.delete(requestId);
-    if (sender.isDestroyed()) return;
-    if (signal === 'SIGTERM' || signal === 'SIGKILL') {
-      sender.send(doneChannel, { cancelled: true });
-    } else if (code !== 0) {
-      sender.send(doneChannel, { error: stderrBuf.trim() || `claude exited with code ${code}` });
-    } else {
-      const payload = { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined };
-      if (extraDoneFields) Object.assign(payload, extraDoneFields);
-      sender.send(doneChannel, payload);
-    }
-  });
-
-  // If the renderer goes away while the stream is in flight (window close,
-  // reload, crash), kill the subprocess. Previously the proc would keep
-  // running to natural completion, silently eating Anthropic quota.
-  sender.once('destroyed', () => {
-    if (!proc.killed) { try { proc.kill('SIGTERM'); } catch {} }
-  });
-
-  return proc;
-}
-
-// Tiny helper that produces the cancel handler function for a given proc map.
-// All 7 cancel handlers were identical modulo the map reference.
-function makeClaudeCancelHandler(procMap) {
-  return (_event, { requestId }) => {
-    const proc = procMap.get(requestId);
-    if (!proc) return { ok: false };
-    try { proc.kill('SIGTERM'); } catch {}
-    return { ok: true };
-  };
-}
 
 function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
@@ -2603,8 +2529,6 @@ function normalizeStatus(s) {
 // prompt with PR description + diff + log tail, and streams claude's analysis
 // back to the renderer. Same chunk/done event protocol as Explain so the
 // renderer can reuse the same UX.
-const debugCheckProcs = new Map();
-
 ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
@@ -2680,7 +2604,6 @@ ipcMain.handle('pr-debug-check-cancel', makeClaudeCancelHandler(debugCheckProcs)
 // Kept deliberately strict: the prompt tells claude to emit ONLY the
 // replacement code so the renderer can paste it back verbatim without
 // having to strip markdown fences or preamble.
-const inlineEditProcs = new Map();
 ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instruction, selection, languageId, filePath }) => {
   const prompt =
     'You are editing code inline. Apply this instruction to the code below and return ONLY the replacement code.\n\n' +
@@ -2709,7 +2632,6 @@ ipcMain.handle('inline-edit-cancel', makeClaudeCancelHandler(inlineEditProcs));
 // K6: inline AI completion — predicts what comes at the cursor.
 // Context-before / context-after let claude see both sides of the insertion
 // point so completions respect what already exists on the next line.
-const inlineCompleteProcs = new Map();
 ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, before, after, languageId, filePath }) => {
   const prompt =
     'You are an inline code-completion engine. Predict what belongs at the cursor position.\n\n' +
@@ -2961,8 +2883,6 @@ ipcMain.handle('pr-checkout-locally', async () => {
 // if needed) and spawns claude with the PR_REVIEW_TEMPLATE, streaming
 // stream-json events back to the renderer. Mirrors F6's protocol so the
 // renderer can reuse the same chunk parser.
-const reviewSurfaceAiProcs = new Map();
-
 ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (reviewSurfaceAiProcs.has(requestId)) return { error: 'Already in flight' };
@@ -2991,8 +2911,6 @@ ipcMain.handle('pr-review-ai-cancel', makeClaudeCancelHandler(reviewSurfaceAiPro
 // G7: implement a single finding (or "all findings" via one big prompt) by
 // spawning claude in the PR's worktree with edit tools. Mirrors the AI-review
 // streaming protocol so the renderer can show progress chips + result.
-const implementProcs = new Map();
-
 ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, body }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (implementProcs.has(requestId)) return { error: 'Already in flight' };
@@ -3701,8 +3619,6 @@ ipcMain.handle('explain-diff', async (_event, { worktreePath, file, hunk }) => {
 // user sees tokens as they arrive instead of staring at a 10-second spinner.
 // Callers pass a requestId; chunks arrive on `explain-diff-chunk-<id>` and
 // completion on `explain-diff-done-<id>`.
-const explainStreamProcs = new Map();
-
 ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, file, hunk }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (explainStreamProcs.has(requestId)) return { error: 'Already streaming' };
@@ -3720,7 +3636,6 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
 // is editable before the user actually commits. Pulls the last few commit
 // subjects so claude can match the repo's tone (conventional / prefix / etc.)
 // without us prescribing a style.
-const commitMsgProcs = new Map();
 ipcMain.handle('claude-commit-message-start', async (event, { requestId, worktreePath }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (commitMsgProcs.has(requestId)) return { error: 'Already generating' };
@@ -4154,10 +4069,6 @@ After validation, synthesize the remaining findings:
 ## IMPORTANT: Output
 
 Do NOT write any files. Output the final review directly as your response to this prompt. The user will read it from your stdout.`;
-
-// In-flight AI review processes, keyed by renderer-generated request id
-// so the renderer can cancel them.
-const aiReviewProcs = new Map();
 
 // Legacy config.prReviews cache was retired in favor of the file-per-PR cache
 // in userData/pr-review-cache/. Entries are migrated once on startup via
