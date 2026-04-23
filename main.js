@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notification } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { execSync, execFileSync, execFile } = require('child_process');
+const { execSync, execFileSync, execFile, spawn } = require('child_process');
 const pty = require('node-pty');
 const lspManager = require('./lsp-manager');
 
@@ -18,10 +18,78 @@ const origConsoleLog = console.log;
 const origConsoleError = console.error;
 const origConsoleWarn = console.warn;
 
+// Scrub obviously-sensitive tokens out of log messages so the View Logs
+// viewer + the persisted log file don't expose them.
+// gh error output occasionally echoes URLs of the form
+// `https://oauth2:ghp_xxx@github.com/...` before the app's own scrub runs.
+const LOG_TOKEN_SCRUB_RE = /(oauth2:[^@\s]+@)|(\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9_]{20,})|(\bBearer\s+[A-Za-z0-9._\-]+)/g;
+function scrubLogMsg(s) {
+  try { return String(s).replace(LOG_TOKEN_SCRUB_RE, (m, a) => a ? 'oauth2:***@' : '***'); }
+  catch { return '[unserializable]'; }
+}
+
+// Cap accumulation of a child process's stderr. Every streaming claude handler
+// buffers stderr unboundedly — a `--verbose` run or a lot of warnings could
+// balloon memory per request. We keep the last N bytes so the tail is
+// preserved for error reporting.
+const STDERR_CAP_BYTES = 64 * 1024;
+function appendStderr(buf, chunk) {
+  const s = buf + chunk.toString();
+  if (s.length <= STDERR_CAP_BYTES) return s;
+  return s.slice(s.length - STDERR_CAP_BYTES);
+}
+
+// Persistent log file — ring buffer is in-memory only, which loses context
+// across a crash. Keep a small rotating file in userData so users can attach
+// it to a bug report even after the app restarts.
+const LOG_FILE_MAX_BYTES = 2 * 1024 * 1024;   // rotate at 2MB
+const LOG_FILE_KEEP = 3;                       // keep klaussy.log + .1 + .2
+let _logFilePath = null;
+let _logRotating = false;
+function getLogFilePath() {
+  if (_logFilePath) return _logFilePath;
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    _logFilePath = path.join(dir, 'klaussy.log');
+  } catch {}
+  return _logFilePath;
+}
+function rotateLogFile(file) {
+  if (_logRotating) return;
+  _logRotating = true;
+  try {
+    for (let i = LOG_FILE_KEEP - 1; i >= 1; i--) {
+      const from = i === 1 ? file : `${file}.${i - 1}`;
+      const to = `${file}.${i}`;
+      try { if (fs.existsSync(from)) fs.renameSync(from, to); } catch {}
+    }
+  } finally {
+    _logRotating = false;
+  }
+}
+function appendLogLine(line) {
+  const file = getLogFilePath();
+  if (!file) return;
+  try {
+    fs.appendFileSync(file, line + '\n');
+    const st = fs.statSync(file);
+    if (st.size >= LOG_FILE_MAX_BYTES) rotateLogFile(file);
+  } catch {}
+}
+
 function captureLog(level, args) {
-  const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-  logBuffer.push({ time: new Date().toISOString(), level, msg });
+  let msg;
+  try {
+    msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+  } catch {
+    msg = '[log arg not serializable]';
+  }
+  msg = scrubLogMsg(msg);
+  const ts = new Date().toISOString();
+  logBuffer.push({ time: ts, level, msg });
   if (logBuffer.length > LOG_MAX) logBuffer.shift();
+  appendLogLine(`${ts} ${level.toUpperCase()} ${msg}`);
 }
 
 console.log = function (...args) { captureLog('log', args); origConsoleLog.apply(console, args); };
@@ -52,22 +120,112 @@ function loadConfig() {
   }
 }
 
+// `saveConfig` has ~64 call sites including a 10s auto-save timer, prefs
+// changes, PR-review cache writes, and notify-pref updates. Previously this
+// was read-modify-write into the final path with no locking: two overlapping
+// calls could each read the same prior state, merge their own field, and
+// whoever wrote last would lose the first caller's field. A crash mid-write
+// would also truncate config.json and wipe every saved session / project.
+//
+// Fix: atomic writes via tmp+rename, serialized behind a single in-flight
+// promise so overlapping callers coalesce to sequential write passes. The
+// read inside each pass sees the freshly-written state from the previous
+// pass, so field merges compose correctly.
+let _saveConfigQueue = Promise.resolve();
 function saveConfig(config) {
-  // Merge with current on-disk config to prevent races from wiping fields
-  try {
-    const existing = JSON.parse(fs.readFileSync(getConfigPath(), 'utf-8'));
-    config = Object.assign(existing, config);
-  } catch {}
-  fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2));
+  _saveConfigQueue = _saveConfigQueue.then(() => {
+    try {
+      const configPath = getConfigPath();
+      let merged;
+      try {
+        const existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+        merged = Object.assign(existing, config);
+      } catch {
+        merged = config;
+      }
+      const tmp = configPath + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(merged, null, 2));
+      fs.renameSync(tmp, configPath);
+    } catch (err) {
+      // Surface to the log ring so disk-full / permission issues aren't silent.
+      try { console.error('saveConfig failed:', err.message); } catch {}
+    }
+  });
+  return _saveConfigQueue;
 }
 
 function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
 }
 
+// Collect every filesystem root the renderer is allowed to read/write. Used
+// by read-file/write-file/read-files-bulk — an XSS in the renderer must not
+// be able to hand us ~/.ssh/id_rsa or ~/.config/gh/hosts.yml.
+function getRendererAllowedRoots() {
+  const roots = new Set();
+  try {
+    const config = loadConfig();
+    if (config.repoPath) roots.add(config.repoPath);
+    if (Array.isArray(config.projects)) {
+      for (const p of config.projects) if (p && p.path) roots.add(p.path);
+    }
+  } catch {}
+  for (const inst of instances.values()) {
+    if (inst && inst.worktreePath) roots.add(inst.worktreePath);
+  }
+  // Klaussy-owned directories (pr-checkouts clones, userData for caches).
+  try { roots.add(app.getPath('userData')); } catch {}
+  return Array.from(roots);
+}
+
+// Check if `candidate` resolves under any known renderer-allowed root.
+// Returns the canonical resolved path on success, null on reject.
+function pathUnderAnyRoot(candidate) {
+  for (const root of getRendererAllowedRoots()) {
+    const safe = pathUnder(root, candidate);
+    if (safe) return safe;
+  }
+  return null;
+}
+
+// Resolve `candidate` (absolute or relative to `root`) and confirm the final
+// real path is contained within `root`'s real path. Refuses traversal (`..`)
+// and symlink escapes. Returns the canonical absolute path, or null on reject.
+// Use for every IPC that takes a filesystem path from the renderer.
+function pathUnder(root, candidate) {
+  if (typeof root !== 'string' || typeof candidate !== 'string') return null;
+  try {
+    const rootReal = fs.realpathSync(root);
+    const absCandidate = path.isAbsolute(candidate)
+      ? candidate
+      : path.resolve(rootReal, candidate);
+    // realpath only works if the path exists. For write targets the file may
+    // not exist yet — realpath the parent dir instead and rejoin the basename.
+    let resolved;
+    try {
+      resolved = fs.realpathSync(absCandidate);
+    } catch {
+      const parent = path.dirname(absCandidate);
+      const parentReal = fs.realpathSync(parent);
+      resolved = path.join(parentReal, path.basename(absCandidate));
+    }
+    const rootWithSep = rootReal.endsWith(path.sep) ? rootReal : rootReal + path.sep;
+    if (resolved === rootReal || resolved.startsWith(rootWithSep)) return resolved;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Resolve the correct gh auth token for a given repo directory.
 // Matches the remote owner (e.g. "steph-dove") to a logged-in gh account.
-const ghTokenCache = new Map(); // remote owner -> token
+//
+// Entries have a TTL — previously they lived forever, so after `gh auth switch`
+// or `gh auth refresh` (external or internal), we'd keep sending a stale/revoked
+// token on every outbound gh call. The `gh-switch-account` handler also clears
+// the cache explicitly.
+const GH_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+const ghTokenCache = new Map(); // remote owner -> { token: string|null, at: ms }
 
 function ghEnvForRepo(repoDir) {
   try {
@@ -78,14 +236,16 @@ function ghEnvForRepo(repoDir) {
 
     // Extract owner from SSH or HTTPS remote
     // ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
+    // Accept arbitrary hostnames so GitHub Enterprise (github.corp.example)
+    // works the same way as github.com.
     let owner;
-    const sshMatch = remoteUrl.match(/github\.com[:/]([^/]+)\//);
-    if (sshMatch) owner = sshMatch[1];
+    const m = remoteUrl.match(/[:/]([^/:]+)\/[^/]+?(?:\.git)?$/);
+    if (m) owner = m[1];
     if (!owner) return {};
 
-    if (ghTokenCache.has(owner)) {
-      const cached = ghTokenCache.get(owner);
-      if (cached) return { GH_TOKEN: cached };
+    const cached = ghTokenCache.get(owner);
+    if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
+      if (cached.token) return { GH_TOKEN: cached.token };
       return {};
     }
 
@@ -95,12 +255,12 @@ function ghEnvForRepo(repoDir) {
         stdio: 'pipe', timeout: 5000,
       }).toString().trim();
       if (token) {
-        ghTokenCache.set(owner, token);
+        ghTokenCache.set(owner, { token, at: Date.now() });
         return { GH_TOKEN: token };
       }
     } catch {}
 
-    ghTokenCache.set(owner, null);
+    ghTokenCache.set(owner, { token: null, at: Date.now() });
     return {};
   } catch {
     return {};
@@ -112,6 +272,24 @@ function ghExec(args, opts) {
   return execFileSync('gh', args, {
     ...opts,
     env: { ...process.env, ...env },
+  });
+}
+
+// Harden every BrowserWindow we create:
+//  * deny `window.open` / `target="_blank"` — renderer must go through the
+//    scheme-allowlisted `open-external` IPC for outbound links.
+//  * block navigation away from file:// — otherwise an XSS can set
+//    `window.location = 'https://evil'` and the attacker page inherits the
+//    preload (and thus `window.klaus.*`).
+//  * when the webContents is destroyed (reload, close, crash), kill any
+//    LSP subprocesses it started so they don't leak as zombie processes.
+function hardenWindow(win) {
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (e, url) => {
+    if (!url.startsWith('file://')) e.preventDefault();
+  });
+  win.webContents.on('destroyed', () => {
+    try { lspManager.stopServersForWebContents(win.webContents); } catch {}
   });
 }
 
@@ -129,6 +307,7 @@ function createWindow(opts) {
       nodeIntegration: false,
     },
   });
+  hardenWindow(win);
 
   var url = path.join(__dirname, 'renderer', 'index.html');
   if (opts.secondary) {
@@ -338,7 +517,7 @@ app.whenReady().then(() => {
   // Periodically save sessions in case quit events don't fire
   setInterval(() => {
     if (!isQuitting && instances.size > 0) {
-      try { saveSessions(); } catch {}
+      try { saveSessions(); } catch (err) { console.error('saveSessions failed:', err.message); }
     }
   }, 10000);
 
@@ -349,29 +528,42 @@ app.whenReady().then(() => {
 function shutdownAndSave() {
   if (!isQuitting) {
     isQuitting = true;
-    try { saveSessions(); } catch {}
+    try { saveSessions(); } catch (err) { console.error('saveSessions failed at shutdown:', err.message); }
   }
   for (const [, inst] of instances) {
     try { inst.pty.kill(); } catch {}
   }
+  // saveConfig is now async (queued atomic writes). Return the tail of the
+  // queue so callers can await the flush before quitting.
+  return _saveConfigQueue;
 }
 
 app.on('window-all-closed', () => {
   if (allWindows.size === 0) {
-    shutdownAndSave();
-    app.quit();
+    shutdownAndSave().finally(() => app.quit());
   }
 });
 
-app.on('before-quit', () => {
+let _beforeQuitFlushed = false;
+app.on('before-quit', (event) => {
   // Notify all renderers to save UI state
   for (const win of allWindows) {
     if (!win.isDestroyed()) win.webContents.send('app-before-quit');
   }
-  shutdownAndSave();
+  // Stop LSP servers here (merged from a second before-quit handler that
+  // used to live further down the file).
+  try { lspManager.stopAllServers(); } catch {}
+  if (_beforeQuitFlushed) return;
+  event.preventDefault();
+  shutdownAndSave().finally(() => {
+    _beforeQuitFlushed = true;
+    app.quit();
+  });
 });
 
 app.on('will-quit', () => {
+  // shutdownAndSave already awaited in before-quit; keep idempotent call here
+  // for the window-all-closed path.
   shutdownAndSave();
 });
 
@@ -426,7 +618,9 @@ function saveSessions() {
 }
 
 function listSessionFiles(worktreePath) {
-  const claudeDir = path.join(process.env.HOME, '.claude', 'projects');
+  const home = process.env.HOME || require('os').homedir();
+  if (!home || !worktreePath) return [];
+  const claudeDir = path.join(home, '.claude', 'projects');
   const encodedPath = worktreePath.replace(/\//g, '-');
   const projectDir = path.join(claudeDir, encodedPath);
   try {
@@ -434,12 +628,17 @@ function listSessionFiles(worktreePath) {
     return fs.readdirSync(projectDir)
       .filter(f => f.endsWith('.jsonl'))
       .map(f => {
-        const st = fs.statSync(path.join(projectDir, f));
+        // bigint: true gives `ctimeNs` at nanosecond precision. APFS only
+        // exposes 1s / sub-ms granularity for `ctimeMs`, which meant two
+        // sessions spawned in the same second could tie in a sort and swap
+        // identities on resume. ns-precision is stable across tasks.
+        const st = fs.statSync(path.join(projectDir, f), { bigint: true });
         return {
           name: f,
           sessionId: f.replace('.jsonl', ''),
-          mtime: st.mtimeMs,
-          ctime: st.ctimeMs,
+          mtime: Number(st.mtimeMs),
+          ctime: Number(st.ctimeMs),
+          ctimeNs: st.ctimeNs,  // BigInt
         };
       });
   } catch {
@@ -459,7 +658,13 @@ function detectClaudeSessionId(inst, claimed) {
   const files = listSessionFiles(inst.worktreePath)
     .filter(f => !preSpawn.has(f.sessionId))
     .filter(f => !claimed || !claimed.has(f.sessionId))
-    .sort((a, b) => a.ctime - b.ctime);
+    // Sort on ns-precision ctime. BigInt subtraction returns BigInt — convert
+    // to Number via sign comparison since Array.sort wants a regular number.
+    .sort((a, b) => {
+      if (a.ctimeNs < b.ctimeNs) return -1;
+      if (a.ctimeNs > b.ctimeNs) return 1;
+      return 0;
+    });
   return files.length > 0 ? files[0].sessionId : null;
 }
 
@@ -610,6 +815,23 @@ ipcMain.handle('clear-saved-sessions', () => {
   return { ok: true };
 });
 
+// Remove a single saved session by stable identity (worktreePath + sessionId).
+// Renderer used to splice-by-index in a closure, which silently deleted the
+// wrong row after any prior dismiss shifted the array.
+ipcMain.handle('dismiss-saved-session', (_event, { worktreePath, sessionId }) => {
+  const config = loadConfig();
+  const before = config.savedSessions || [];
+  config.savedSessions = before.filter((s) => {
+    if (!s || s.worktreePath !== worktreePath) return true;
+    // If the dismissed row carries a sessionId, only drop that exact row;
+    // otherwise drop every row for the worktree (shell-only saves).
+    if (sessionId) return s.sessionId !== sessionId;
+    return false;
+  });
+  saveConfig(config);
+  return { ok: true };
+});
+
 ipcMain.handle('select-repo', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Select the git repository to manage',
@@ -653,7 +875,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   }
 
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
-  const branch = `${sanitized}`;
+  const branch = sanitized;
 
   // Match klausify CLI convention: worktree as sibling of repo
   const repoBasename = path.basename(repoPath);
@@ -697,7 +919,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
 
   // Create the worktree (matching klausify CLI: git worktree add ../<repo>-<branch> -b <branch>)
   try {
-    execSync(`git worktree add -b "${branch}" "${worktreePath}" "${baseBranch}"`, {
+    execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, baseBranch], {
       cwd: repoPath,
       stdio: 'pipe',
     });
@@ -930,9 +1152,30 @@ async function runKlausifyInit(worktreePath, baseBranch) {
   }
 }
 
+// Drop any renderer-supplied env var whose name would let an attacker
+// hijack the PTY's dynamic linker or Node's startup (LD_PRELOAD / DYLD_* /
+// NODE_OPTIONS / PATH override / PYTHONPATH / RUBYOPT / PERL5LIB / etc.),
+// or whose name isn't a plausible env-var identifier. Called for every
+// PTY spawn + restart — a compromised renderer (via XSS) or a malicious
+// pasted .env must not be able to inject dylib loads into the shell /
+// claude / gh subprocesses.
+const ENV_NAME_DENYLIST = /^(LD_|DYLD_|NODE_OPTIONS$|PATH$|PYTHONPATH$|RUBYOPT$|PERL5LIB$|RUBYLIB$|PYTHONSTARTUP$)/;
+function sanitizeExtraEnv(extraEnv) {
+  if (!extraEnv || typeof extraEnv !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(extraEnv)) {
+    if (typeof k !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(k)) continue;
+    if (ENV_NAME_DENYLIST.test(k)) continue;
+    if (typeof v !== 'string') continue;
+    out[k] = v;
+  }
+  return out;
+}
+
 function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber) {
   const id = nextId++;
   const userShell = process.env.SHELL || '/bin/zsh';
+  extraEnv = sanitizeExtraEnv(extraEnv);
 
   // 'claude' mode launches claude code, 'shell' mode launches a login shell
   const config = loadConfig();
@@ -985,8 +1228,13 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
 
   ptyProc.onExit(({ exitCode }) => {
     clearIdleTimer(instance);
-    // If this was a Claude session, auto-convert to shell in-place (but not during quit)
-    if (instance.mode === 'claude' && !isQuitting) {
+    // If this was a Claude session, auto-convert to shell in-place — but
+    // only for natural exits. An explicit kill-task sets `killed`, and
+    // restart-task sets `restarting`; neither should spawn a shell we'd
+    // lose track of (kill-task already deleted the instances entry; the
+    // orphan shell would have no Map entry and nothing could kill it).
+    if (instance.mode === 'claude' && !isQuitting
+        && !instance.killed && !instance.restarting) {
       convertInstanceToShell(instance);
       return;
     }
@@ -1124,6 +1372,11 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
+  // Mark BEFORE kill(): pty.kill is async, and the onExit handler checks
+  // this flag to skip the Claude→shell auto-convert branch. Without it,
+  // killing a Claude task would spawn an orphan shell with no instances
+  // entry — nothing could find or stop it after this point.
+  inst.killed = true;
   clearIdleTimer(inst);
   stopCIPolling(id);
   try { inst.pty.kill(); } catch {}
@@ -1143,8 +1396,12 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  // Kill the current shell pty — its exit handler won't auto-convert
-  // because mode will be 'shell' at this point
+  // Mark restarting BEFORE kill(): pty.kill is async and the stale exit
+  // handler would otherwise race with the new-pty assignment below — in
+  // particular if the instance was still in claude mode, the old-pty's
+  // onExit would spawn a convert-shell and overwrite inst.pty right after
+  // we set it on line below.
+  inst.restarting = true;
   try { inst.pty.kill(); } catch {}
 
   // Resume as Claude — prefer this instance's tracked session so multiple
@@ -1172,6 +1429,9 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   inst.alive = true;
   inst.recentOutput = '';
   inst.notifiedIdle = false;
+  // New pty is live; clear the restart guard so this one's natural exit
+  // (or future restarts) behave normally.
+  inst.restarting = false;
 
   ptyProc.onData((data) => {
     processIdleDetection(inst, data);
@@ -1199,9 +1459,19 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   return { ok: true };
 });
 
-// Open URL in default browser
+// Open URL in default browser. Scheme-restricted: a compromised renderer (or
+// xterm's WebLinksAddon auto-detecting a file:// / javascript: / smb: token in
+// the PTY stream) must not be able to hand an arbitrary URI to the OS opener.
+const OPEN_EXTERNAL_ALLOWED_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 ipcMain.handle('open-external', (_event, { url }) => {
-  shell.openExternal(url);
+  if (typeof url !== 'string') return { error: 'url must be a string' };
+  let parsed;
+  try { parsed = new URL(url); } catch { return { error: 'invalid URL' }; }
+  if (!OPEN_EXTERNAL_ALLOWED_SCHEMES.has(parsed.protocol)) {
+    return { error: `blocked scheme: ${parsed.protocol}` };
+  }
+  shell.openExternal(parsed.toString());
+  return { ok: true };
 });
 
 // ---- Idle Notification Toggle ----
@@ -1347,14 +1617,20 @@ ipcMain.handle('list-skills', async () => {
 
 ipcMain.handle('open-skill-file', (_event, { filePath }) => {
   if (!filePath) return { ok: false };
-  shell.openPath(filePath);
+  const claudeHome = path.join(require('os').homedir(), '.claude');
+  const safe = pathUnder(claudeHome, filePath);
+  if (!safe) return { error: 'path outside ~/.claude' };
+  shell.openPath(safe);
   return { ok: true };
 });
 
 ipcMain.handle('read-skill-file', (_event, { filePath }) => {
   if (!filePath) return { error: 'No file path' };
+  const claudeHome = path.join(require('os').homedir(), '.claude');
+  const safe = pathUnder(claudeHome, filePath);
+  if (!safe) return { error: 'path outside ~/.claude' };
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
+    const content = fs.readFileSync(safe, 'utf8');
     return { content };
   } catch (err) {
     return { error: err.message };
@@ -1364,8 +1640,11 @@ ipcMain.handle('read-skill-file', (_event, { filePath }) => {
 ipcMain.handle('write-skill-file', (_event, { filePath, content }) => {
   if (!filePath) return { error: 'No file path' };
   if (typeof content !== 'string') return { error: 'Content must be a string' };
+  const claudeHome = path.join(require('os').homedir(), '.claude');
+  const safe = pathUnder(claudeHome, filePath);
+  if (!safe) return { error: 'path outside ~/.claude' };
   try {
-    fs.writeFileSync(filePath, content, 'utf8');
+    fs.writeFileSync(safe, content, 'utf8');
     return { ok: true };
   } catch (err) {
     return { error: err.message };
@@ -1500,8 +1779,12 @@ ipcMain.handle('list-plugins', () => {
 
 ipcMain.handle('create-memory-file', (_event, { filePath }) => {
   if (!filePath) return { error: 'No file path' };
-  if (fs.existsSync(filePath)) return { error: 'File already exists.' };
-  const dir = path.dirname(filePath);
+  // Memory files live either under ~/.claude or under an active project root.
+  const claudeHome = path.join(require('os').homedir(), '.claude');
+  const safe = pathUnder(claudeHome, filePath) || pathUnderAnyRoot(filePath);
+  if (!safe) return { error: 'path not under ~/.claude or an allowed project root' };
+  if (fs.existsSync(safe)) return { error: 'File already exists.' };
+  const dir = path.dirname(safe);
   try {
     fs.mkdirSync(dir, { recursive: true });
     const starter = '# Project memory\n\n'
@@ -1509,7 +1792,7 @@ ipcMain.handle('create-memory-file', (_event, { filePath }) => {
       + '- Coding conventions to follow.\n'
       + '- Files / folders to ignore.\n'
       + '- Domain terminology that may otherwise be ambiguous.\n';
-    fs.writeFileSync(filePath, starter, 'utf8');
+    fs.writeFileSync(safe, starter, 'utf8');
     return { ok: true };
   } catch (err) {
     return { error: err.message };
@@ -1600,10 +1883,76 @@ ipcMain.handle('gh-switch-account', async (_event, { username }) => {
   if (!username) return { error: 'Missing username' };
   try {
     execFileSync('gh', ['auth', 'switch', '-u', username], { stdio: 'pipe', timeout: 5000 });
+    // Drop cached owner→token entries so next gh call re-reads from the
+    // freshly switched account.
+    ghTokenCache.clear();
     return { ok: true };
   } catch (err) {
     return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
   }
+});
+
+// Probe each logged-in gh account's token against the GitHub REST API for
+// the given PR. Returns the first account that gets a 200 response, or the
+// currently-active account as fallback. Used by the picker to auto-switch
+// when the user pastes a URL their currently-active account can't see.
+//
+// Scoped to github.com only — GHE autodetect is on the deferred list because
+// account<->host binding needs careful handling (a single `gh` install can
+// hold accounts across multiple hosts).
+ipcMain.handle('gh-detect-account-for-repo', async (_event, { owner, repo, prNumber }) => {
+  if (!owner || !repo || !prNumber) return { error: 'missing owner/repo/prNumber' };
+  let accounts = [];
+  let activeUsername = null;
+  try {
+    const out = execFileSync('gh', ['auth', 'status'], { stdio: 'pipe', timeout: 5000 }).toString();
+    let pending = null;
+    for (const raw of out.split('\n')) {
+      const m = raw.match(/account\s+([^\s]+)/);
+      if (m) {
+        if (pending) accounts.push(pending);
+        pending = { username: m[1], active: false };
+        continue;
+      }
+      if (pending && /Active account:\s*true/.test(raw)) pending.active = true;
+    }
+    if (pending) accounts.push(pending);
+  } catch (err) {
+    return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
+  }
+  const active = accounts.find((a) => a.active);
+  activeUsername = active ? active.username : null;
+
+  // Try the active account first so the common case (it works, skip the loop)
+  // only costs one round trip.
+  const ordered = active ? [active, ...accounts.filter((a) => !a.active)] : accounts.slice();
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${encodeURIComponent(prNumber)}`;
+  for (const acc of ordered) {
+    let token;
+    try {
+      token = execFileSync('gh', ['auth', 'token', '--user', acc.username], {
+        stdio: 'pipe', timeout: 5000,
+      }).toString().trim();
+    } catch { continue; }
+    if (!token) continue;
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          'User-Agent': 'klaussy-desktop',
+        },
+      });
+      if (res.status === 200) {
+        return { username: acc.username, active: acc.active === true, activeUsername };
+      }
+    } catch { /* network error — try next account */ }
+  }
+  // Nothing matched: return the active account so the caller can fall back
+  // without switching.
+  return { username: activeUsername, active: true, activeUsername, noMatch: true };
 });
 
 // Pre-launch dep check: probe gh + claude so a first-run dialog can guide
@@ -1672,7 +2021,7 @@ ipcMain.handle('duplicate-task', async (_event, { id }) => {
   const sourceBranch = inst.branch || 'main';
 
   try {
-    execSync(`git worktree add -b "${branch}" "${worktreePath}" "${sourceBranch}"`, {
+    execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, sourceBranch], {
       cwd: repoPath,
       stdio: 'pipe',
     });
@@ -1839,19 +2188,51 @@ ipcMain.handle('git-apply-patch', async (_event, { worktreePath, patch, reverse 
 });
 
 ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
-  try {
-    for (const file of files) {
-      try {
-        execFileSync('git', ['checkout', '--', file], { cwd: worktreePath, stdio: 'pipe' });
-      } catch {
-        // Might be untracked — remove it
-        execFileSync('git', ['clean', '-f', '--', file], { cwd: worktreePath, stdio: 'pipe' });
-      }
+  // Branch per-file on status code. Previously this tried `checkout --` and
+  // on ANY failure fell back to `clean -f` — which destroys staged-new files
+  // (checkout has nothing to revert to for a brand-new add, so it errors, then
+  // clean deletes the file entirely along with its staged content).
+  const perFile = [];
+  for (const file of files) {
+    let status = '';
+    try {
+      status = execFileSync('git', ['status', '--porcelain', '--', file], {
+        cwd: worktreePath, stdio: 'pipe',
+      }).toString();
+    } catch (err) {
+      perFile.push({ file, error: err.stderr ? err.stderr.toString() : err.message });
+      continue;
     }
-    return { ok: true };
-  } catch (err) {
-    return { error: err.stderr ? err.stderr.toString() : err.message };
+    // First two chars are XY — X=staged state, Y=unstaged state.
+    const xy = status.slice(0, 2);
+    try {
+      if (xy === '??') {
+        // Untracked: remove it.
+        execFileSync('git', ['clean', '-f', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+      } else if (xy[0] === 'A') {
+        // Staged new file: unstage, then leave the working-tree file alone
+        // (user may want to keep the content; `discard` on a new file means
+        // "take it back to untracked"). This avoids the prior data-loss case
+        // where the staged content was wiped.
+        execFileSync('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+      } else {
+        // Tracked with unstaged and/or staged changes: reset the index to HEAD
+        // for this path, then checkout to restore working tree to HEAD.
+        try {
+          execFileSync('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+        } catch {}
+        execFileSync('git', ['checkout', '--', file], { cwd: worktreePath, stdio: 'pipe' });
+      }
+      perFile.push({ file, ok: true });
+    } catch (err) {
+      perFile.push({ file, error: err.stderr ? err.stderr.toString() : err.message });
+    }
   }
+  const failures = perFile.filter((r) => r.error);
+  if (failures.length === files.length && files.length > 0) {
+    return { error: failures[0].error, files: perFile };
+  }
+  return { ok: true, files: perFile };
 });
 
 ipcMain.handle('git-commit', async (_event, { worktreePath, message }) => {
@@ -2112,6 +2493,12 @@ ipcMain.handle('get-logs', () => {
 });
 
 // E2: Export session transcript
+//
+// The dialog-selected path is held main-side in `pendingTranscripts` rather
+// than round-tripping through the renderer. Previously the renderer could
+// hand any path back to `write-transcript` (including /etc/hosts) because
+// main had no way to verify the path actually came from a dialog.
+const pendingTranscripts = new Map(); // instanceId -> expected file path
 ipcMain.handle('export-transcript', async (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
@@ -2124,13 +2511,18 @@ ipcMain.handle('export-transcript', async (_event, { id }) => {
 
   if (result.canceled || !result.filePath) return { canceled: true };
 
-  // The transcript will be sent from the renderer (xterm buffer)
-  return { filePath: result.filePath };
+  pendingTranscripts.set(id, result.filePath);
+  // The transcript content will arrive from the renderer (xterm buffer)
+  // via `write-transcript` below — it MUST pass the same id, not the path.
+  return { ok: true };
 });
 
-ipcMain.handle('write-transcript', (_event, { filePath, content }) => {
+ipcMain.handle('write-transcript', (_event, { id, content }) => {
+  const expected = pendingTranscripts.get(id);
+  if (!expected) return { error: 'No pending transcript for this task' };
+  pendingTranscripts.delete(id);
   try {
-    fs.writeFileSync(filePath, content, 'utf-8');
+    fs.writeFileSync(expected, content, 'utf-8');
     return { ok: true };
   } catch (err) {
     return { error: err.message };
@@ -2295,6 +2687,7 @@ ipcMain.handle('pop-out-task', (_event, { id }) => {
       nodeIntegration: false,
     },
   });
+  hardenWindow(popout);
 
   popout.loadFile(path.join(__dirname, 'renderer', 'popout.html'));
 
@@ -2398,9 +2791,10 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
 // and the paste-URL path, since `gh pr view --json url` is always populated.
 function parseBaseFromUrl(url) {
   if (!url) return null;
-  const m = url.match(/github\.com\/([^\/]+)\/([^\/]+)\/pull\/\d+/);
+  // Match any host (github.com, github.corp.example, etc.) so GHE works too.
+  const m = url.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/\d+/);
   if (!m) return null;
-  return { owner: m[1], name: m[2] };
+  return { owner: m[1], name: m[2].replace(/\.git$/, '') };
 }
 
 ipcMain.handle('pr-load', async (_event, { number, url }) => {
@@ -2473,8 +2867,15 @@ ipcMain.handle('pr-recent', () => {
 
 // GraphQL-backed thread fetch. Scoped to the *base* repo (target), not the
 // head repo (fork), because threads live on the target.
+//
+// Epoch guard: overlapping refreshes (user hits refresh twice; merge-handler
+// piggybacks a refresh during the user's manual refresh) can return out of
+// order. We only commit results from the most-recent fetch; stale responses
+// are silently dropped to avoid overwriting newer data with older data.
+let _threadsFetchEpoch = 0;
 async function fetchThreadsForActive() {
   if (!activePrReview) return;
+  const epoch = ++_threadsFetchEpoch;
   // gh api graphql doesn't need to run inside the target repo — owner/repo
   // are passed as query variables. Falling back to homedir means reviewers
   // without an active klausify project still get threads + comments.
@@ -2487,6 +2888,9 @@ async function fetchThreadsForActive() {
   const owner = activePrReview.baseOwner;
   const repo = activePrReview.baseRepo;
   const number = activePrReview.number;
+  const stale = () => epoch !== _threadsFetchEpoch
+    || !activePrReview
+    || activePrReview.number !== number;
 
   // One round trip for threads + issue-comments + reviews. Conversation tab
   // reads from comments + reviews; Files tab reads from reviewThreads. There's
@@ -2529,7 +2933,7 @@ async function fetchThreadsForActive() {
     });
     const parsed = JSON.parse(out);
     if (parsed.errors && parsed.errors.length) {
-      if (!activePrReview || activePrReview.number !== number) return;
+      if (stale()) return;
       activePrReview.threadsError = parsed.errors.map(e => e.message).join('; ');
       broadcastPrReview();
       return;
@@ -2540,14 +2944,14 @@ async function fetchThreadsForActive() {
     const reviews = (pr && pr.reviews && pr.reviews.nodes) || [];
     // User may have navigated away while we were fetching; bail if the review
     // behind us was swapped for a different PR.
-    if (!activePrReview || activePrReview.number !== number) return;
+    if (stale()) return;
     activePrReview.threads = threads;
     activePrReview.issueComments = issueComments;
     activePrReview.reviews = reviews;
     activePrReview.threadsError = null;
     broadcastPrReview();
   } catch (err) {
-    if (!activePrReview || activePrReview.number !== number) return;
+    if (stale()) return;
     // gh api writes error JSON to stdout on non-zero exit
     let msg = (err.stderr || err.message || '').trim();
     if (err.stdout) {
@@ -2612,8 +3016,10 @@ ipcMain.handle('pr-review-checks', async () => {
     } catch (_) {}
   }
 
-  // Both calls failed — surface the first real error so the user sees why.
-  if (checks.length === 0 && (runsRes.err || statusRes.err)) {
+  // Only surface an error if BOTH APIs failed — previously `||` meant that
+  // a legitimate "no checks" response from one endpoint plus a transient
+  // failure on the other was reported as an error, swallowing real data.
+  if (checks.length === 0 && runsRes.err && statusRes.err) {
     const first = runsRes.err || statusRes.err;
     const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
     return { checks: [], error: raw.trim() };
@@ -2728,7 +3134,7 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   const proc = spawn(claudeBin, ['-p', prompt], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -2739,7 +3145,7 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
   proc.stdout.on('data', (chunk) => {
     if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
   });
-  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
   proc.on('error', (err) => {
     debugCheckProcs.delete(requestId);
     if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
@@ -2752,7 +3158,7 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
     } else if (code !== 0) {
       sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
     } else {
-      sender.send(doneChannel, { ok: true });
+      sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
     }
   });
 
@@ -2792,7 +3198,7 @@ ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instructi
   const cwd = worktreePath || currentRepoPath() || require('os').homedir();
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   const proc = spawn(claudeBin, ['-p', prompt], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -2803,7 +3209,7 @@ ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instructi
   proc.stdout.on('data', (chunk) => {
     if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
   });
-  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
   proc.on('error', (err) => {
     inlineEditProcs.delete(requestId);
     if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
@@ -2813,7 +3219,7 @@ ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instructi
     if (sender.isDestroyed()) return;
     if (signal === 'SIGTERM' || signal === 'SIGKILL') sender.send(doneChannel, { cancelled: true });
     else if (code !== 0) sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    else sender.send(doneChannel, { ok: true });
+    else sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
   });
   return { ok: true };
 });
@@ -2851,7 +3257,7 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
   const cwd = worktreePath || currentRepoPath() || require('os').homedir();
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   const proc = spawn(claudeBin, ['-p', prompt], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -2862,7 +3268,7 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
   proc.stdout.on('data', (chunk) => {
     if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
   });
-  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
   proc.on('error', (err) => {
     inlineCompleteProcs.delete(requestId);
     if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
@@ -2872,7 +3278,7 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
     if (sender.isDestroyed()) return;
     if (signal === 'SIGTERM' || signal === 'SIGKILL') sender.send(doneChannel, { cancelled: true });
     else if (code !== 0) sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
-    else sender.send(doneChannel, { ok: true });
+    else sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
   });
   return { ok: true };
 });
@@ -2999,6 +3405,13 @@ async function ensureWorktreeForActivePr() {
   const authedUrl = `https://oauth2:${token}@github.com/${baseOwner}/${baseRepo}.git`;
   const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
 
+  // Token-bearing remote URL: DON'T let git persist this into .git/config.
+  // Instead we pass it only for the single clone/fetch call (via argv), then
+  // immediately rewrite the stored remote URL to the clean form. This way
+  // the token isn't in .git/config forever — and `ps` exposure is bounded
+  // to the lifetime of the single operation.
+  const cleanUrl = `https://github.com/${baseOwner}/${baseRepo}.git`;
+
   if (!cwd) {
     const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
     const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
@@ -3010,6 +3423,10 @@ async function ensureWorktreeForActivePr() {
         const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
         return { error: 'Clone failed: ' + scrub(raw) };
       }
+      // Strip token from persisted origin URL.
+      try {
+        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe' });
+      } catch {}
     }
     cwd = clonePath;
   }
@@ -3115,7 +3532,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   const proc = spawn(claudeBin, [
     '-p', prompt,
     '--output-format', 'stream-json',
@@ -3134,7 +3551,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
   proc.stdout.on('data', (chunk) => {
     if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
   });
-  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
   proc.on('error', (err) => {
     reviewSurfaceAiProcs.delete(requestId);
     if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
@@ -3147,7 +3564,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
     } else if (code !== 0) {
       sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
     } else {
-      sender.send(doneChannel, { ok: true });
+      sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
     }
   });
 
@@ -3190,7 +3607,7 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   const proc = spawn(claudeBin, [
     '-p', prompt,
     '--output-format', 'stream-json',
@@ -3209,7 +3626,7 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   proc.stdout.on('data', (chunk) => {
     if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
   });
-  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
   proc.on('error', (err) => {
     implementProcs.delete(requestId);
     if (!sender.isDestroyed()) sender.send(doneChannel, { error: err.message });
@@ -3289,7 +3706,7 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
 
   const endpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
   const cwd = currentRepoPath() || require('os').homedir();
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
 
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
@@ -3298,7 +3715,7 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
-    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
     proc.on('error', (err) => resolve({ error: err.message }));
     proc.on('exit', (code) => {
       if (code !== 0) {
@@ -3332,14 +3749,14 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
 
   const endpoint = `repos/${baseOwner}/${baseRepo}/issues/comments/${id}`;
   const cwd = currentRepoPath() || require('os').homedir();
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
       cwd, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
-    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
     proc.on('error', (err) => resolve({ error: err.message }));
     proc.on('exit', (code) => {
       if (code !== 0) {
@@ -3369,14 +3786,14 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
 
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/comments/${id}`;
   const cwd = currentRepoPath() || require('os').homedir();
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
       cwd, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
-    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
     proc.on('error', (err) => resolve({ error: err.message }));
     proc.on('exit', (code) => {
       if (code !== 0) {
@@ -3425,7 +3842,7 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
 
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/comments/${parentId}/replies`;
   const cwd = currentRepoPath() || require('os').homedir();
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
 
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
@@ -3434,7 +3851,7 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
-    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
     proc.on('error', (err) => resolve({ error: err.message }));
     proc.on('exit', (code) => {
       if (code !== 0) {
@@ -3482,7 +3899,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
 
   const cwd = currentRepoPath() || require('os').homedir();
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/reviews`;
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
 
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
@@ -3491,7 +3908,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
-    proc.stderr.on('data', (c) => { stderrBuf += c.toString(); });
+    proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
     proc.on('error', (err) => resolve({ error: err.message }));
     proc.on('exit', (code) => {
       if (code !== 0) {
@@ -3543,6 +3960,7 @@ ipcMain.handle('pop-out-pr-review', () => {
       nodeIntegration: false,
     },
   });
+  hardenWindow(popout);
 
   popout.loadFile(path.join(__dirname, 'renderer', 'pr-review.html'));
   activePrReview.popout = popout;
@@ -3615,6 +4033,7 @@ ipcMain.handle('open-preferences', () => {
       nodeIntegration: false,
     },
   });
+  hardenWindow(prefsWindow);
 
   prefsWindow.loadFile(path.join(__dirname, 'renderer', 'preferences.html'));
   prefsWindow.on('closed', () => { prefsWindow = null; });
@@ -3735,9 +4154,7 @@ ipcMain.handle('lsp-install', async (event, { languageId }) => {
   return lspManager.installServer({ languageId, webContents: event.sender });
 });
 
-app.on('before-quit', () => {
-  lspManager.stopAllServers();
-});
+// (LSP shutdown merged into the main before-quit handler earlier in this file.)
 
 // Bulk-read many files in one IPC round-trip. Used by the Monaco file
 // viewer to hydrate sibling TS/JS models for cross-file IntelliSense.
@@ -3747,13 +4164,14 @@ ipcMain.handle('read-files-bulk', async (_event, { worktreePath, relPaths, maxBy
   const cap = maxBytesPerFile || 256 * 1024; // 256KB per file default
   const out = {};
   for (const rel of relPaths) {
-    // Reject path traversal — every entry must stay under the worktree.
-    const abs = path.resolve(worktreePath, rel);
-    if (!abs.startsWith(path.resolve(worktreePath) + path.sep)) continue;
+    // Reject path traversal AND symlink escapes — every entry must resolve
+    // under the real worktree path (a symlink pointing outside is refused).
+    const safe = pathUnder(worktreePath, rel);
+    if (!safe) continue;
     try {
-      const stat = fs.statSync(abs);
+      const stat = fs.lstatSync(safe);
       if (!stat.isFile() || stat.size > cap) continue;
-      out[rel] = fs.readFileSync(abs, 'utf-8');
+      out[rel] = fs.readFileSync(safe, 'utf-8');
     } catch {}
   }
   return { files: out };
@@ -3800,7 +4218,10 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile 
   const cap = '--max-count=' + (typeof maxPerFile === 'number' ? maxPerFile : 5);
   // Try git grep — respects .gitignore and is fast.
   try {
-    const args = ['grep', '-n', '--no-color', '-I', '-r', '-F', cap, query];
+    // `--` is mandatory: without it, a `query` starting with `-` (or a
+    // long flag git-grep recognizes) is parsed as an option rather than
+    // the search pattern. `-F` alone doesn't fully defend against that.
+    const args = ['grep', '-n', '--no-color', '-I', '-r', '-F', cap, '--', query];
     const output = execFileSync('git', args, {
       cwd: worktreePath, stdio: 'pipe', maxBuffer: 5 * 1024 * 1024, timeout: 10000,
     }).toString();
@@ -3843,21 +4264,19 @@ ipcMain.handle('replace-in-files', async (_event, { worktreePath, relPaths, quer
   if (!worktreePath || !Array.isArray(relPaths) || !query) {
     return { error: 'Missing required arguments' };
   }
-  const path = require('path');
-  const fs = require('fs');
-  const wtReal = fs.realpathSync(worktreePath);
   const perFile = [];
   let totalReplacements = 0;
   for (const rel of relPaths) {
-    const abs = path.resolve(wtReal, rel);
-    // Path traversal guard — the relPaths come from our own search results
-    // but keep the defensive check in case of symlinks or crafted input.
-    if (!abs.startsWith(wtReal + path.sep) && abs !== wtReal) {
+    // pathUnder canonicalizes via realpath on both the root and the file,
+    // so a symlink inside the worktree pointing out (e.g. -> /etc/passwd)
+    // is refused — not just the lexical `..` traversal.
+    const safe = pathUnder(worktreePath, rel);
+    if (!safe) {
       perFile.push({ file: rel, error: 'Path escapes worktree' });
       continue;
     }
     try {
-      const content = fs.readFileSync(abs, 'utf8');
+      const content = fs.readFileSync(safe, 'utf8');
       // Fast literal count via split; avoids needing to regex-escape the query.
       const parts = content.split(query);
       const count = parts.length - 1;
@@ -3866,7 +4285,7 @@ ipcMain.handle('replace-in-files', async (_event, { worktreePath, relPaths, quer
         continue;
       }
       const next = parts.join(replacement);
-      fs.writeFileSync(abs, next);
+      fs.writeFileSync(safe, next);
       perFile.push({ file: rel, replaced: count });
       totalReplacements += count;
     } catch (err) {
@@ -3915,7 +4334,7 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
   const cwd = worktreePath || currentRepoPath() || require('os').homedir();
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
 
   const proc = spawn(claudeBin, ['-p', explainPrompt(file, hunk)], {
     cwd,
@@ -3931,7 +4350,7 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
   proc.stdout.on('data', (chunk) => {
     if (!sender.isDestroyed()) sender.send(chunkChannel, chunk.toString());
   });
-  proc.stderr.on('data', (chunk) => { stderrBuf += chunk.toString(); });
+  proc.stderr.on('data', (chunk) => { stderrBuf = appendStderr(stderrBuf, chunk); });
 
   proc.on('error', (err) => {
     explainStreamProcs.delete(requestId);
@@ -3946,7 +4365,7 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
     } else if (code !== 0) {
       sender.send(doneChannel, { error: stderrBuf.trim() || ('claude exited with code ' + code) });
     } else {
-      sender.send(doneChannel, { ok: true });
+      sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
     }
   });
 
@@ -4402,8 +4821,16 @@ ipcMain.handle('pr-fix-in-terminal', (_event, { worktreePath, text }) => {
 
   const BP_START = '\x1b[200~';
   const BP_END = '\x1b[201~';
+  // `text` is PR-comment / AI-finding content from untrusted GitHub. If it
+  // contains \x1b[201~ (the paste end marker), the shell exits paste mode
+  // mid-write and treats the remainder as typed input — which would execute
+  // injected commands. Strip the paste-mode sequences from `text` so they
+  // cannot break out of the bracket we wrap it in.
+  const safeText = typeof text === 'string'
+    ? text.replace(/\x1b\[20[01]~/g, '')
+    : '';
   try {
-    target.pty.write(BP_START + text + BP_END);
+    target.pty.write(BP_START + safeText + BP_END);
     return { ok: true, taskId: target.id, mode: target.mode };
   } catch (err) {
     return { error: err.message };
@@ -4420,7 +4847,7 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  const { spawn } = require('child_process');
+  // `spawn` is imported at the top of the file.
   // stream-json gives us a JSONL event per assistant/tool/result block so we
   // can surface progress in the UI instead of a 15-minute silent spinner.
   const proc = spawn(claudeBin, [
@@ -4443,7 +4870,7 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
     if (!sender.isDestroyed()) sender.send(dataChannel, chunk.toString());
   });
   proc.stderr.on('data', (chunk) => {
-    stderrBuf += chunk.toString();
+    stderrBuf = appendStderr(stderrBuf, chunk);
   });
 
   proc.on('error', (err) => {
@@ -4461,7 +4888,7 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
       if (!sender.isDestroyed()) sender.send(doneChannel, { error: stderrBuf || `claude exited with code ${code}` });
       return;
     }
-    if (!sender.isDestroyed()) sender.send(doneChannel, { ok: true });
+    if (!sender.isDestroyed()) sender.send(doneChannel, { ok: true, stderr: stderrBuf && stderrBuf.trim() ? stderrBuf.trim() : undefined });
   });
 
   return { ok: true };
@@ -4698,20 +5125,6 @@ ipcMain.handle('pr-unresolve-thread', (_event, { worktreePath, threadId }) => {
   return resolveOrUnresolveThread(worktreePath, threadId, false);
 });
 
-ipcMain.handle('pr-review-comments', async (_event, { worktreePath, prNumber }) => {
-  try {
-    // Get inline review comments via gh api
-    const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
-    const repo = JSON.parse(repoResult).nameWithOwner;
-    const comments = ghExec(['api', 'repos/' + repo + '/pulls/' + prNumber + '/comments'], {
-      cwd: worktreePath, stdio: 'pipe', timeout: 15000
-    }).toString();
-    return { comments: JSON.parse(comments) };
-  } catch (err) {
-    return { comments: [], error: err.stderr ? err.stderr.toString() : err.message };
-  }
-});
-
 ipcMain.handle('pr-add-comment', async (_event, { worktreePath, prNumber, body }) => {
   try {
     ghExec(['pr', 'comment', String(prNumber), '--body', body], {
@@ -4737,8 +5150,10 @@ ipcMain.handle('pr-review', async (_event, { worktreePath, prNumber, event, body
 // ---- Merge Conflict Resolution (Feature 1) ----
 
 ipcMain.handle('read-conflict-file', async (_event, { worktreePath, file }) => {
+  const safe = pathUnder(worktreePath, file);
+  if (!safe) return { error: 'file outside worktree' };
   try {
-    const content = fs.readFileSync(path.join(worktreePath, file), 'utf-8');
+    const content = fs.readFileSync(safe, 'utf-8');
     return { content };
   } catch (err) {
     return { error: err.message };
@@ -4746,9 +5161,12 @@ ipcMain.handle('read-conflict-file', async (_event, { worktreePath, file }) => {
 });
 
 ipcMain.handle('write-resolved-file', async (_event, { worktreePath, file, content }) => {
+  const safe = pathUnder(worktreePath, file);
+  if (!safe) return { error: 'file outside worktree' };
   try {
-    fs.writeFileSync(path.join(worktreePath, file), content, 'utf-8');
-    execFileSync('git', ['add', file], { cwd: worktreePath, stdio: 'pipe' });
+    fs.writeFileSync(safe, content, 'utf-8');
+    // Use the original relative `file` arg for `git add` (git wants a repo-relative path).
+    execFileSync('git', ['add', '--', file], { cwd: worktreePath, stdio: 'pipe' });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -5045,17 +5463,21 @@ ipcMain.handle('unwatch-worktree', (event, { worktreePath }) => {
 // ---- Phase 7: File Viewer ----
 
 ipcMain.handle('read-file', async (_event, { filePath }) => {
+  const safe = pathUnderAnyRoot(filePath);
+  if (!safe) return { error: 'path not under an allowed project root' };
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    return { content, ext: path.extname(filePath).slice(1) };
+    const content = fs.readFileSync(safe, 'utf-8');
+    return { content, ext: path.extname(safe).slice(1) };
   } catch (err) {
     return { error: err.message };
   }
 });
 
 ipcMain.handle('write-file', async (_event, { filePath, content }) => {
+  const safe = pathUnderAnyRoot(filePath);
+  if (!safe) return { error: 'path not under an allowed project root' };
   try {
-    fs.writeFileSync(filePath, content, 'utf-8');
+    fs.writeFileSync(safe, content, 'utf-8');
     return { ok: true };
   } catch (err) {
     return { error: err.message };

@@ -37,9 +37,9 @@ patches the bundled Electron's `Info.plist` so the macOS menu bar shows
 ## Build a `.dmg`
 
 ```bash
-npm run dist          # arm64 (Apple Silicon)
-npm run dist:intel    # x64 (Intel Macs)
-npm run dist:universal  # both archs in one bundle
+npm run dist          # arm64 + x64 (two separate .dmgs)
+npm run dist:arm64    # arm64 only
+npm run dist:intel    # x64 only
 ```
 
 Output lands in `dist/Klaussy-<version>-<arch>.dmg`.

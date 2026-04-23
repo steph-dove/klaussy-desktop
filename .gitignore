@@ -14,3 +14,12 @@ npm-debug.log*
 .DS_Store
 .env
 .env.*
+# Unrelated Swift/Xcode project co-located in this repo; has its own .git.
+Klaussy/
+# Claude Code local settings are per-user and must not be committed.
+.claude/settings.local.json
+# Editor scratch
+.vscode/
+.idea/
+*.swp
+*.swo

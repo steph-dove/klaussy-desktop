@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('klaus', {
   listSavedSessions: () => ipcRenderer.invoke('list-saved-sessions'),
   resumeSession: (session) => ipcRenderer.invoke('resume-session', session),
   clearSavedSessions: () => ipcRenderer.invoke('clear-saved-sessions'),
+  dismissSavedSession: (session) => ipcRenderer.invoke('dismiss-saved-session', {
+    worktreePath: session && session.worktreePath,
+    sessionId: session && session.sessionId,
+  }),
   getLatestSession: (worktreePath) => ipcRenderer.invoke('get-latest-session', { worktreePath }),
   saveUIState: (state) => ipcRenderer.invoke('save-ui-state', state),
   getUIState: () => ipcRenderer.invoke('get-ui-state'),
@@ -53,7 +57,7 @@ contextBridge.exposeInMainWorld('klaus', {
   // Phase E: Reliability
   getLogs: () => ipcRenderer.invoke('get-logs'),
   exportTranscript: (id) => ipcRenderer.invoke('export-transcript', { id }),
-  writeTranscript: (filePath, content) => ipcRenderer.invoke('write-transcript', { filePath, content }),
+  writeTranscript: (id, content) => ipcRenderer.invoke('write-transcript', { id, content }),
 
   // Preferences (B1-B4)
   openPreferences: () => ipcRenderer.invoke('open-preferences'),
@@ -179,7 +183,6 @@ contextBridge.exposeInMainWorld('klaus', {
 
   // PR interaction
   prForBranch: (worktreePath) => ipcRenderer.invoke('pr-for-branch', { worktreePath }),
-  prReviewComments: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-comments', { worktreePath, prNumber }),
   prReviewThreads: (worktreePath, prNumber) => ipcRenderer.invoke('pr-review-threads', { worktreePath, prNumber }),
   prResolveThread: (worktreePath, threadId) => ipcRenderer.invoke('pr-resolve-thread', { worktreePath, threadId }),
   prUnresolveThread: (worktreePath, threadId) => ipcRenderer.invoke('pr-unresolve-thread', { worktreePath, threadId }),
@@ -340,6 +343,8 @@ contextBridge.exposeInMainWorld('klaus', {
   // gh account switching (handles users with multiple authed accounts).
   ghListAccounts: () => ipcRenderer.invoke('gh-list-accounts'),
   ghSwitchAccount: (username) => ipcRenderer.invoke('gh-switch-account', { username }),
+  ghDetectAccountForRepo: (owner, repo, prNumber) =>
+    ipcRenderer.invoke('gh-detect-account-for-repo', { owner, repo, prNumber }),
 
   // Skills + slash commands inventory for the Skills dialog.
   listSkills: () => ipcRenderer.invoke('list-skills'),

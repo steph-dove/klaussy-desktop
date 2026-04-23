@@ -813,8 +813,14 @@ window.FileBrowser = (function () {
     }
   }
 
+  // Debounce: rebuilding the entire tree synchronously on every keystroke
+  // is O(files) work per character (up to WALK_FILE_CAP = 10k DOM nodes).
+  var fileTreeFilterDebounce;
   fileTreeFilter.addEventListener('input', function () {
-    renderFileTree(fileTreeFilter.value);
+    clearTimeout(fileTreeFilterDebounce);
+    fileTreeFilterDebounce = setTimeout(function () {
+      renderFileTree(fileTreeFilter.value);
+    }, 120);
   });
 
   // ---- Project Search (C3) ----

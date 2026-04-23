@@ -371,7 +371,10 @@ window.TerminalManager = (function () {
       if (e.type !== 'keydown') return true;
       var meta = e.metaKey;
       if (e.key === 'Enter' && e.shiftKey) {
-        window.klaus.writeTerminal(id, '\x1b[13;2u', subId);
+        // Sub-terminals run a plain shell, not Claude/Ink — a real newline
+        // is the correct translation. The main terminal sends the CSI-u
+        // encoding because Ink wants it; that doesn't apply here.
+        window.klaus.writeTerminal(id, '\n', subId);
         return false;
       }
       if (meta && e.key === 'c') {

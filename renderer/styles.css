@@ -5713,6 +5713,31 @@ body.pr-review-popout #pr-review-root {
   font-size: 13px;
   color: var(--text);
 }
+.pr-picker-account-row {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-dim, var(--text));
+}
+.pr-picker-account-label { opacity: 0.8; }
+.pr-picker-account {
+  background: var(--input-bg, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 4px 6px;
+  outline: none;
+}
+.pr-picker-account:focus { border-color: var(--accent); }
+.pr-picker-account-hint {
+  margin-left: auto;
+  opacity: 0.7;
+  font-size: 11px;
+}
 .pr-picker-url-row {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
