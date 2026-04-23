@@ -211,7 +211,7 @@ Earlier modules have NO dependencies on later modules. Later modules can freely 
 
 Phase 1:
 - [x] main/util/logging.js
-- [ ] main/util/path-gate.js
+- [x] main/util/path-gate.js
 - [ ] main/util/exec.js
 - [ ] main/util/config.js
 
