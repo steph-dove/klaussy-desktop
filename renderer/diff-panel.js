@@ -54,9 +54,12 @@ window.DiffPanel = (function () {
     document.getElementById('btn-push').addEventListener('click', pushChanges);
     document.getElementById('btn-create-pr').addEventListener('click', createPR);
     document.getElementById('btn-do-commit').addEventListener('click', doCommit);
+    document.getElementById('btn-claude-commit-msg').addEventListener('click', generateCommitMessageWithClaude);
 
     commitInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      // Textarea default: Enter inserts a newline (important for multi-line
+      // commit messages with a subject + body). Cmd/Ctrl+Enter submits.
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         doCommit();
       }
@@ -1301,20 +1304,109 @@ window.DiffPanel = (function () {
 
   async function doCommit() {
     var msg = commitInput.value.trim();
-    if (!msg) return;
+    if (!msg) {
+      showDiffStatus('Commit aborted: empty message', 'error');
+      return;
+    }
     var btn = document.getElementById('btn-do-commit');
     btn.disabled = true;
     btn.textContent = 'Committing...';
     var result = await window.klaus.gitCommit(currentWorktreePath, msg);
     btn.disabled = false;
     btn.textContent = 'Commit';
-    if (result.error) {
-      alert('Commit failed: ' + result.error);
+    if (!result || result.error) {
+      var errMsg = (result && result.error) || 'unknown failure';
+      showDiffStatus('Commit failed: ' + errMsg, 'error');
+      alert('Commit failed: ' + errMsg);
       return;
     }
+    // Show the subject line in the banner so the user sees what landed.
+    var subject = msg.split('\n')[0].trim();
+    showDiffStatus('Committed: ' + (subject.length > 80 ? subject.slice(0, 77) + '...' : subject), 'success');
     commitInput.value = '';
     commitAreaEl.style.display = 'none';
     await refresh();
+    try { await updateAheadBehind(); } catch (_) {}
+  }
+
+  // In-flight request id + unsubscribe handles for the sparkle button. When
+  // the button is toggled off mid-stream we cancel the subprocess main-side
+  // AND detach the IPC listeners so a late chunk doesn't keep typing after.
+  let commitMsgRequestId = null;
+  let commitMsgUnsubChunk = null;
+  let commitMsgUnsubDone = null;
+
+  function resetCommitMsgState() {
+    if (commitMsgUnsubChunk) { try { commitMsgUnsubChunk(); } catch (_) {} commitMsgUnsubChunk = null; }
+    if (commitMsgUnsubDone)  { try { commitMsgUnsubDone();  } catch (_) {} commitMsgUnsubDone  = null; }
+    commitMsgRequestId = null;
+  }
+
+  async function generateCommitMessageWithClaude() {
+    var btn = document.getElementById('btn-claude-commit-msg');
+    // Toggle behavior: second click while streaming cancels.
+    if (commitMsgRequestId) {
+      try { await window.klaus.claudeCommitMessageCancel(commitMsgRequestId); } catch (_) {}
+      resetCommitMsgState();
+      btn.textContent = '✨';
+      btn.disabled = false;
+      return;
+    }
+    if (!currentWorktreePath) return;
+    btn.disabled = true;
+    btn.textContent = '…';
+
+    var requestId = 'ccm-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
+    commitMsgRequestId = requestId;
+    // Start fresh — Claude replaces whatever the user had typed. If they'd
+    // entered something they wanted to keep they wouldn't have clicked this.
+    commitInput.value = '';
+
+    commitMsgUnsubChunk = window.klaus.onClaudeCommitMessageChunk(requestId, function (chunk) {
+      if (commitMsgRequestId !== requestId) return;
+      commitInput.value += chunk;
+    });
+    commitMsgUnsubDone = window.klaus.onClaudeCommitMessageDone(requestId, function (msg) {
+      if (commitMsgRequestId !== requestId) return;
+      resetCommitMsgState();
+      btn.textContent = '✨';
+      btn.disabled = false;
+      if (msg && msg.error) {
+        alert('Could not generate commit message: ' + msg.error);
+        return;
+      }
+      // Trim trailing whitespace Claude sometimes adds — and if the prompt
+      // spat out a code fence despite the instruction, strip the outer backticks
+      // so the message commits cleanly.
+      var cleaned = (commitInput.value || '').trim();
+      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
+      commitInput.value = cleaned.trim();
+      commitInput.focus();
+    });
+
+    var start = await window.klaus.claudeCommitMessageStart(requestId, currentWorktreePath);
+    if (start && start.error) {
+      resetCommitMsgState();
+      btn.textContent = '✨';
+      btn.disabled = false;
+      alert(start.error);
+    }
+  }
+
+  // Tiny ephemeral status banner inside the diff panel. Used for operations
+  // (push, commit) where we want the user to see what happened without
+  // hijacking focus with a modal alert. Auto-hides after a few seconds.
+  function showDiffStatus(text, kind) {
+    if (!panelEl) return;
+    var existing = panelEl.querySelector('.diff-status-banner');
+    if (existing) existing.remove();
+    var el = document.createElement('div');
+    el.className = 'diff-status-banner diff-status-' + (kind || 'info');
+    el.textContent = text;
+    panelEl.appendChild(el);
+    setTimeout(function () {
+      if (el && el.parentElement) el.parentElement.removeChild(el);
+    }, 6000);
   }
 
   async function pushChanges() {
@@ -1326,11 +1418,29 @@ window.DiffPanel = (function () {
     if (result.error) {
       btn.textContent = 'Failed';
       setTimeout(function () { btn.textContent = 'Push'; }, 2000);
+      showDiffStatus('Push failed: ' + result.error, 'error');
       alert('Push failed: ' + result.error);
       return;
     }
     btn.textContent = 'Pushed!';
     setTimeout(function () { btn.textContent = 'Push'; }, 2000);
+    // git's push status summary lives on stderr even on success. Pull out the
+    // most informative line (the "To ...refs..." summary is typically last).
+    var lines = (result.output || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+    var summary;
+    if (/everything up-to-date/i.test(result.output || '')) {
+      summary = 'Nothing to push — ' + (result.branch || 'branch') + ' already up to date';
+    } else {
+      summary = 'Pushed ' + (result.branch || 'branch');
+      var toLine = lines.find(function (l) { return l.startsWith('To '); });
+      if (toLine) summary += ' · ' + toLine;
+      var refLine = lines.find(function (l) { return /^\s*[a-f0-9]+\.\.[a-f0-9]+/.test(l) || /->/.test(l); });
+      if (refLine && !toLine) summary += ' · ' + refLine;
+    }
+    showDiffStatus(summary, 'success');
+    btn.title = result.output || '';
+    // Refresh ahead/behind + dirty indicators post-push.
+    try { await updateAheadBehind(); } catch (_) {}
   }
 
   async function createPR() {
