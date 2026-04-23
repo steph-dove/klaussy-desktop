@@ -230,7 +230,7 @@ Phase 3:
 - [x] main/ipc/files.js
 - [x] main/ipc/gh.js
 - [x] main/ipc/git.js
-- [ ] main/ipc/tasks.js
+- [x] main/ipc/tasks.js
 - [ ] main/ipc/repo.js
 - [ ] main/ipc/claude-stream-ipc.js
 - [ ] main/ipc/pr-review.js
