@@ -227,7 +227,7 @@ Phase 3:
 - [x] main/ipc/windows-ipc.js
 - [x] main/ipc/lsp.js
 - [x] main/ipc/skills.js
-- [ ] main/ipc/files.js
+- [x] main/ipc/files.js
 - [ ] main/ipc/gh.js
 - [ ] main/ipc/git.js
 - [ ] main/ipc/tasks.js
