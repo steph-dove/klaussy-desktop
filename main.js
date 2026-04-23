@@ -2,10 +2,6 @@ const { app, BrowserWindow, ipcMain, dialog, shell, Menu, nativeTheme, Notificat
 const path = require('path');
 const fs = require('fs');
 const { execSync, execFileSync, execFile, spawn } = require('child_process');
-// Promisified execFile — every git IPC handler should prefer this over the
-// sync `execFileSync` form. Sync ops on the main thread freeze every window
-// (input, menus, IPC) until git returns; async keeps the event loop breathing.
-const execFileP = require('util').promisify(execFile);
 const pty = require('node-pty');
 const lspManager = require('./lsp-manager');
 // Require early: installs console hooks + uncaught handlers on load so every
@@ -13,6 +9,10 @@ const lspManager = require('./lsp-manager');
 const { getLogBuffer } = require('./main/util/logging');
 const pathGate = require('./main/util/path-gate');
 const { pathUnder, pathUnderAnyRoot, getRendererAllowedRoots } = pathGate;
+const {
+  execFileP, appendStderr, ghEnvForRepo, ghExec, ghExecP,
+  clearGhTokenCache, runWithConcurrency, sanitizeExtraEnv,
+} = require('./main/util/exec');
 
 let mainWindow;
 const allWindows = new Set();
@@ -71,17 +71,6 @@ ipcMain.on('unsubscribe-terminal', (event, channel) => {
   if (typeof channel !== 'string') return;
   unsubscribeTerminalChannel(channel, event.sender);
 });
-
-// Cap accumulation of a child process's stderr. Every streaming claude handler
-// buffers stderr unboundedly — a `--verbose` run or a lot of warnings could
-// balloon memory per request. We keep the last N bytes so the tail is
-// preserved for error reporting.
-const STDERR_CAP_BYTES = 64 * 1024;
-function appendStderr(buf, chunk) {
-  const s = buf + chunk.toString();
-  if (s.length <= STDERR_CAP_BYTES) return s;
-  return s.slice(s.length - STDERR_CAP_BYTES);
-}
 
 // Shared streaming-claude primitive. Before this lived in 7 near-identical
 // handler bodies with subtle drift (stderr sometimes dropped on zero-exit,
@@ -271,92 +260,6 @@ function migratePrReviewCache() {
   }
 }
 migratePrReviewCache();
-
-// Resolve the correct gh auth token for a given repo directory.
-// Matches the remote owner (e.g. "steph-dove") to a logged-in gh account.
-//
-// Entries have a TTL — previously they lived forever, so after `gh auth switch`
-// or `gh auth refresh` (external or internal), we'd keep sending a stale/revoked
-// token on every outbound gh call. The `gh-switch-account` handler also clears
-// the cache explicitly.
-const GH_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
-const ghTokenCache = new Map(); // remote owner -> { token: string|null, at: ms }
-
-function ghEnvForRepo(repoDir) {
-  try {
-    // Get the remote URL
-    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: repoDir, stdio: 'pipe',
-    }).toString().trim();
-
-    // Extract owner from SSH or HTTPS remote
-    // ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
-    // Accept arbitrary hostnames so GitHub Enterprise (github.corp.example)
-    // works the same way as github.com.
-    let owner;
-    const m = remoteUrl.match(/[:/]([^/:]+)\/[^/]+?(?:\.git)?$/);
-    if (m) owner = m[1];
-    if (!owner) return {};
-
-    const cached = ghTokenCache.get(owner);
-    if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
-      if (cached.token) return { GH_TOKEN: cached.token };
-      return {};
-    }
-
-    // Try to get a token for this owner from gh auth
-    try {
-      const token = execFileSync('gh', ['auth', 'token', '--user', owner], {
-        stdio: 'pipe', timeout: 5000,
-      }).toString().trim();
-      if (token) {
-        ghTokenCache.set(owner, { token, at: Date.now() });
-        return { GH_TOKEN: token };
-      }
-    } catch {}
-
-    ghTokenCache.set(owner, { token: null, at: Date.now() });
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-function ghExec(args, opts) {
-  const env = ghEnvForRepo(opts.cwd);
-  return execFileSync('gh', args, {
-    ...opts,
-    env: { ...process.env, ...env },
-  });
-}
-
-// Async variant for background work (timers, polling) — sync ghExec freezes
-// the main thread for the full gh round-trip, which is unacceptable at
-// 30-second cadence across N tasks.
-async function ghExecP(args, opts) {
-  const env = ghEnvForRepo(opts && opts.cwd);
-  return execFileP('gh', args, {
-    ...(opts || {}),
-    env: { ...process.env, ...env },
-  });
-}
-
-// Process `items` in parallel with at most `cap` in flight at once. Used by
-// background timers so a 20-task setup doesn't spawn 20 simultaneous `git
-// fetch` subprocesses — we keep to `cap` workers and let them drain the queue.
-async function runWithConcurrency(items, cap, worker) {
-  const queue = items.slice();
-  const active = [];
-  for (let i = 0; i < Math.min(cap, queue.length); i++) {
-    active.push((async () => {
-      while (queue.length) {
-        const next = queue.shift();
-        try { await worker(next); } catch (_) { /* silent — background */ }
-      }
-    })());
-  }
-  await Promise.all(active);
-}
 
 // Harden every BrowserWindow we create:
 //  * deny `window.open` / `target="_blank"` — renderer must go through the
@@ -1236,26 +1139,6 @@ async function runKlausifyInit(worktreePath, baseBranch) {
   }
 }
 
-// Drop any renderer-supplied env var whose name would let an attacker
-// hijack the PTY's dynamic linker or Node's startup (LD_PRELOAD / DYLD_* /
-// NODE_OPTIONS / PATH override / PYTHONPATH / RUBYOPT / PERL5LIB / etc.),
-// or whose name isn't a plausible env-var identifier. Called for every
-// PTY spawn + restart — a compromised renderer (via XSS) or a malicious
-// pasted .env must not be able to inject dylib loads into the shell /
-// claude / gh subprocesses.
-const ENV_NAME_DENYLIST = /^(LD_|DYLD_|NODE_OPTIONS$|PATH$|PYTHONPATH$|RUBYOPT$|PERL5LIB$|RUBYLIB$|PYTHONSTARTUP$)/;
-function sanitizeExtraEnv(extraEnv) {
-  if (!extraEnv || typeof extraEnv !== 'object') return {};
-  const out = {};
-  for (const [k, v] of Object.entries(extraEnv)) {
-    if (typeof k !== 'string' || !/^[A-Z_][A-Z0-9_]*$/.test(k)) continue;
-    if (ENV_NAME_DENYLIST.test(k)) continue;
-    if (typeof v !== 'string') continue;
-    out[k] = v;
-  }
-  return out;
-}
-
 function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber) {
   const id = nextId++;
   const userShell = process.env.SHELL || '/bin/zsh';
@@ -1939,7 +1822,7 @@ ipcMain.handle('gh-switch-account', async (_event, { username }) => {
     execFileSync('gh', ['auth', 'switch', '-u', username], { stdio: 'pipe', timeout: 5000 });
     // Drop cached owner→token entries so next gh call re-reads from the
     // freshly switched account.
-    ghTokenCache.clear();
+    clearGhTokenCache();
     return { ok: true };
   } catch (err) {
     return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
