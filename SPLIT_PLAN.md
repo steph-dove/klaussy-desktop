@@ -217,7 +217,7 @@ Phase 1:
 
 Phase 2:
 - [x] main/state/windows.js
-- [ ] main/state/instances.js
+- [x] main/state/instances.js
 - [ ] main/state/claude-streaming.js
 - [ ] main/state/watcher.js
 - [ ] main/state/ci-poll.js
