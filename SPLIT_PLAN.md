@@ -213,7 +213,7 @@ Phase 1:
 - [x] main/util/logging.js
 - [x] main/util/path-gate.js
 - [x] main/util/exec.js
-- [ ] main/util/config.js
+- [x] main/util/config.js
 
 Phase 2:
 - [ ] main/state/windows.js
