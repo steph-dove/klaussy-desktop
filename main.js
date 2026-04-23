@@ -15,6 +15,53 @@ const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
 let isQuitting = false;
 
+// Subscription-based PTY broadcast. Previously every onData chunk was sent to
+// EVERY BrowserWindow via allWindows + instance.popoutWindows — a 2 main +
+// 1 popout setup paid 3× the IPC cost even when only one window actually
+// renders that terminal. Now each renderer subscribes to the terminal channels
+// it cares about (auto-wired by the onTerminalData preload binding), and we
+// send only to that set.
+const terminalSubscribers = new Map(); // channel -> Set<webContents>
+
+function subscribeTerminalChannel(channel, webContents) {
+  let subs = terminalSubscribers.get(channel);
+  if (!subs) { subs = new Set(); terminalSubscribers.set(channel, subs); }
+  if (subs.has(webContents)) return;
+  subs.add(webContents);
+  // Auto-cleanup when the renderer goes away so we don't keep sending to
+  // dead senders or leak Set entries. Each subscription adds one destroyed
+  // listener; acceptable because Electron caps listeners generously and
+  // we remove from the Set here too.
+  webContents.once('destroyed', () => {
+    const s = terminalSubscribers.get(channel);
+    if (s) { s.delete(webContents); if (s.size === 0) terminalSubscribers.delete(channel); }
+  });
+}
+
+function unsubscribeTerminalChannel(channel, webContents) {
+  const subs = terminalSubscribers.get(channel);
+  if (!subs) return;
+  subs.delete(webContents);
+  if (subs.size === 0) terminalSubscribers.delete(channel);
+}
+
+function sendToTerminalSubscribers(channel, ...args) {
+  const subs = terminalSubscribers.get(channel);
+  if (!subs || subs.size === 0) return;
+  for (const wc of subs) {
+    if (!wc.isDestroyed()) wc.send(channel, ...args);
+  }
+}
+
+ipcMain.on('subscribe-terminal', (event, channel) => {
+  if (typeof channel !== 'string') return;
+  subscribeTerminalChannel(channel, event.sender);
+});
+ipcMain.on('unsubscribe-terminal', (event, channel) => {
+  if (typeof channel !== 'string') return;
+  unsubscribeTerminalChannel(channel, event.sender);
+});
+
 // E1: Log ring buffer
 const LOG_MAX = 500;
 const logBuffer = [];
@@ -1389,12 +1436,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
 
   ptyProc.onData((data) => {
     processIdleDetection(instance, data);
-    for (const win of allWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${id}`, data);
-    }
-    for (const win of instance.popoutWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${id}`, data);
-    }
+    sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
   ptyProc.onExit(({ exitCode }) => {
@@ -1410,12 +1452,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
       return;
     }
     instance.alive = false;
-    for (const win of allWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${id}`, exitCode);
-    }
-    for (const win of instance.popoutWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${id}`, exitCode);
-    }
+    sendToTerminalSubscribers(`terminal-exit-${id}`, exitCode);
   });
 
   // Start CI polling for this task
@@ -1441,25 +1478,16 @@ function convertInstanceToShell(inst) {
   inst.mode = 'shell';
 
   ptyProc.onData((data) => {
-    for (const win of allWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${id}`, data);
-    }
-    for (const win of inst.popoutWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${id}`, data);
-    }
+    sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
   ptyProc.onExit(() => {
     inst.alive = false;
-    for (const win of allWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${id}`);
-    }
-    for (const win of inst.popoutWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${id}`);
-    }
+    sendToTerminalSubscribers(`terminal-exit-${id}`);
   });
 
-  // Notify all windows that this task is now a shell
+  // task-converted-to-shell is a per-window UI update (buttons re-render) so
+  // it stays a broadcast to allWindows + popouts. Cheap, infrequent.
   for (const win of allWindows) {
     if (!win.isDestroyed()) win.webContents.send('task-converted-to-shell', { id });
   }
@@ -1513,16 +1541,12 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label }) => {
   inst.subTerminals.push(sub);
 
   ptyProc.onData((data) => {
-    for (const win of allWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${taskId}-${subId}`, data);
-    }
+    sendToTerminalSubscribers(`terminal-data-${taskId}-${subId}`, data);
   });
 
   ptyProc.onExit(() => {
     sub.alive = false;
-    for (const win of allWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-exit-${taskId}-${subId}`);
-    }
+    sendToTerminalSubscribers(`terminal-exit-${taskId}-${subId}`);
   });
 
   return { subId, label: sub.label };
@@ -1606,12 +1630,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   ptyProc.onData((data) => {
     processIdleDetection(inst, data);
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(`terminal-data-${id}`, data);
-    }
-    for (const win of inst.popoutWindows) {
-      if (!win.isDestroyed()) win.webContents.send(`terminal-data-${id}`, data);
-    }
+    sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
   // When this Claude exits, auto-convert to shell again
@@ -1621,9 +1640,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
       convertInstanceToShell(inst);
     } else {
       inst.alive = false;
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send(`terminal-exit-${id}`);
-      }
+      sendToTerminalSubscribers(`terminal-exit-${id}`);
     }
   });
 

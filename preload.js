@@ -78,13 +78,24 @@ contextBridge.exposeInMainWorld('klaus', {
     const channel = `terminal-data-${id}`;
     const listener = (_event, data) => callback(data);
     ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
+    // Main uses the subscription set as its authoritative "who should receive"
+    // list. The subscribe message is send() not invoke() — fire-and-forget,
+    // no round trip.
+    ipcRenderer.send('subscribe-terminal', channel);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+      ipcRenderer.send('unsubscribe-terminal', channel);
+    };
   },
   onTerminalExit: (id, callback) => {
     const channel = `terminal-exit-${id}`;
     const listener = (_event, code) => callback(code);
     ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
+    ipcRenderer.send('subscribe-terminal', channel);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+      ipcRenderer.send('unsubscribe-terminal', channel);
+    };
   },
   onMenuCopy: (callback) => {
     const listener = () => callback();
@@ -283,13 +294,21 @@ contextBridge.exposeInMainWorld('klaus', {
     const channel = `terminal-data-${taskId}-${subId}`;
     const listener = (_event, data) => callback(data);
     ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
+    ipcRenderer.send('subscribe-terminal', channel);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+      ipcRenderer.send('unsubscribe-terminal', channel);
+    };
   },
   onSubTerminalExit: (taskId, subId, callback) => {
     const channel = `terminal-exit-${taskId}-${subId}`;
     const listener = () => callback();
     ipcRenderer.on(channel, listener);
-    return () => ipcRenderer.removeListener(channel, listener);
+    ipcRenderer.send('subscribe-terminal', channel);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+      ipcRenderer.send('unsubscribe-terminal', channel);
+    };
   },
 
   // Merge conflict resolution (Feature 1)
