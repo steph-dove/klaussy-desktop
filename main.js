@@ -48,6 +48,7 @@ const {
 // IPC handler registrations — required for side effects (each file
 // registers its ipcMain.handle listeners on load).
 require('./main/ipc/windows-ipc');
+require('./main/ipc/lsp');
 
 let isQuitting = false;
 
@@ -2999,38 +3000,6 @@ function walkDirectory(root) {
   }
   return results;
 }
-
-// ---- LSP (Phase I3) ----
-//
-// The renderer never touches child_process; lsp-manager.js owns server
-// lifecycles and proxies JSON-RPC. Each renderer webContents registers
-// servers tied to it so we can tear them down if the window closes.
-
-ipcMain.handle('lsp-start', async (event, { worktreePath, languageId }) => {
-  return lspManager.startServer({
-    worktreePath,
-    languageId,
-    webContents: event.sender,
-  });
-});
-
-ipcMain.handle('lsp-stop', async (_event, { serverId }) => {
-  return lspManager.stopServer(serverId);
-});
-
-ipcMain.handle('lsp-request', async (_event, { serverId, method, params }) => {
-  return lspManager.request(serverId, method, params);
-});
-
-ipcMain.handle('lsp-notify', async (_event, { serverId, method, params }) => {
-  return lspManager.notify(serverId, method, params);
-});
-
-ipcMain.handle('lsp-install', async (event, { languageId }) => {
-  return lspManager.installServer({ languageId, webContents: event.sender });
-});
-
-// (LSP shutdown merged into the main before-quit handler earlier in this file.)
 
 // Bulk-read many files in one IPC round-trip. Used by the Monaco file
 // viewer to hydrate sibling TS/JS models for cross-file IntelliSense.
