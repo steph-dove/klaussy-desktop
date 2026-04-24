@@ -336,6 +336,49 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
+
+    // Ollama-backed fill-in-middle completion. Runs locally, ~50-200ms TTFT
+    // on Apple Silicon; used for the passive/ghost-text autocomplete path
+    // so every keystroke doesn't roundtrip to the Claude API.
+    ollama: {
+      probe: () => ipcRenderer.invoke('ollama-probe'),
+      probeRefresh: () => ipcRenderer.invoke('ollama-probe-refresh'),
+      warmup: () => ipcRenderer.invoke('ollama-warmup'),
+      completeStart: (opts) => ipcRenderer.invoke('ollama-complete-start', opts),
+      completeCancel: (requestId) => ipcRenderer.invoke('ollama-complete-cancel', { requestId }),
+      onCompleteChunk: (requestId, callback) => {
+        const channel = `ollama-complete-chunk-${requestId}`;
+        const handler = (_e, chunk) => callback(chunk);
+        ipcRenderer.on(channel, handler);
+        return () => ipcRenderer.removeListener(channel, handler);
+      },
+      onCompleteDone: (requestId, callback) => {
+        const channel = `ollama-complete-done-${requestId}`;
+        const handler = (_e, msg) => callback(msg);
+        ipcRenderer.once(channel, handler);
+        return () => ipcRenderer.removeListener(channel, handler);
+      },
+      // Consent / install flow. The setup-start handler streams progress
+      // events on the shared `ollama-setup-progress` channel; subscribe
+      // once and you'll receive every step (install / server / model /
+      // warmup / done).
+      setupStatus: () => ipcRenderer.invoke('ollama-setup-status'),
+      setupStart: () => ipcRenderer.invoke('ollama-setup-start'),
+      setupDecline: () => ipcRenderer.invoke('ollama-setup-decline'),
+      onSetupProgress: (callback) => {
+        const handler = (_e, p) => callback(p);
+        ipcRenderer.on('ollama-setup-progress', handler);
+        return () => ipcRenderer.removeListener('ollama-setup-progress', handler);
+      },
+    },
+  },
+
+  // ---- license: one-time-purchase activation (Paddle-backed) ----
+  license: {
+    status: () => ipcRenderer.invoke('license-status'),
+    activate: (key) => ipcRenderer.invoke('license-activate', { key }),
+    deactivate: () => ipcRenderer.invoke('license-deactivate'),
+    openCheckout: () => ipcRenderer.invoke('license-open-checkout'),
   },
 
   // ---- fs: File IO, bulk read, search, replace-in-files, worktree watcher, env files ----

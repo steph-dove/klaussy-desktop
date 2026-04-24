@@ -304,6 +304,75 @@
     </div>
   </div>
 
+  <!-- License Activation Modal -->
+  <div id="license-overlay" style="display: none;">
+    <div id="license-modal">
+      <h3>Activate Klaussy</h3>
+      <p class="license-lead">Enter the license key you received after purchase. A key unlocks all features on this machine for life (one-time purchase).</p>
+      <label class="license-label">License key
+        <input type="text" id="license-key-input" placeholder="xxxx-xxxx-xxxx-xxxx" autocomplete="off" spellcheck="false" />
+      </label>
+      <div id="license-error"></div>
+      <div id="license-status" class="license-status" style="display: none;"></div>
+      <div id="license-actions">
+        <button id="license-buy" type="button">Buy</button>
+        <div class="license-actions-right">
+          <button id="license-close" type="button">Close</button>
+          <button id="license-activate" type="button" class="primary">Activate</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Ollama Consent + Install Modal -->
+  <div id="ollama-consent-overlay" style="display: none;">
+    <div id="ollama-consent-modal">
+      <!-- Consent pane (initial state) -->
+      <div id="ollama-consent-pane">
+        <h3>Enable inline AI completion</h3>
+        <p class="ollama-consent-lead">Klausify can suggest code as you type, with Tab to accept. This runs locally via <strong>Ollama</strong> — nothing leaves your machine.</p>
+        <ul class="ollama-consent-facts">
+          <li><strong>~2 GB one-time download</strong> (Ollama runtime + <code>qwen2.5-coder:1.5b</code>)</li>
+          <li><strong>~2–5 min</strong> on typical broadband</li>
+          <li><strong>Runs locally</strong>, no network calls per keystroke</li>
+          <li>Uses Homebrew to install Ollama</li>
+        </ul>
+        <div id="ollama-consent-actions">
+          <button id="ollama-consent-decline" type="button">Not now</button>
+          <button id="ollama-consent-enable" type="button" class="primary">Enable</button>
+        </div>
+      </div>
+
+      <!-- Progress pane (during install) -->
+      <div id="ollama-progress-pane" style="display: none;">
+        <h3>Setting up inline AI…</h3>
+        <div id="ollama-progress-steps">
+          <div class="ollama-progress-step" data-step="install"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Install Ollama</span></div>
+          <div class="ollama-progress-step" data-step="server"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Start server</span></div>
+          <div class="ollama-progress-step" data-step="model"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Download model</span></div>
+          <div class="ollama-progress-step" data-step="warmup"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Warm up</span></div>
+        </div>
+        <div id="ollama-progress-bar-wrap">
+          <div id="ollama-progress-bar"></div>
+        </div>
+        <p id="ollama-progress-message">Starting…</p>
+        <div id="ollama-progress-actions">
+          <button id="ollama-progress-hide" type="button">Hide</button>
+        </div>
+      </div>
+
+      <!-- Error pane -->
+      <div id="ollama-error-pane" style="display: none;">
+        <h3>Setup failed</h3>
+        <p id="ollama-error-message"></p>
+        <div id="ollama-error-actions">
+          <button id="ollama-error-close" type="button">Close</button>
+          <button id="ollama-error-retry" type="button" class="primary">Retry</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Theme Picker Modal (Phase 5) -->
   <div id="theme-overlay" style="display: none;">
     <div id="theme-modal">
@@ -382,6 +451,8 @@
   <script src="sidebar-manager.js"></script>
   <script src="terminal-manager.js"></script>
   <script src="plan-modal.js"></script>
+  <script src="ollama-consent.js"></script>
+  <script src="license-activation.js"></script>
   <script src="pr-review.js"></script>
   <script src="app.js"></script>
 </body>
