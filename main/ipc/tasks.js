@@ -278,13 +278,25 @@ ipcMain.on('resize-terminal', (_event, { id, cols, rows, subId }) => {
   }
 });
 
-ipcMain.handle('add-sub-terminal', (_event, { taskId, label }) => {
+ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode }) => {
   const inst = instances.get(taskId);
   if (!inst) return { error: 'Instance not found' };
 
   const subId = inst.nextSubId++;
   const userShell = process.env.SHELL || '/bin/zsh';
-  const ptyProc = pty.spawn(userShell, ['-l'], {
+
+  // 'claude' mode launches Claude Code in a login shell (same recipe as
+  // spawnInWorktree in main/state/instances.js). Default is a plain shell.
+  let args;
+  if (mode === 'claude') {
+    const config = loadConfig();
+    const claudeBin = config.claudePath || 'claude';
+    args = ['-l', '-c', claudeBin];
+  } else {
+    args = ['-l'];
+  }
+
+  const ptyProc = pty.spawn(userShell, args, {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
@@ -292,7 +304,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label }) => {
     env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
   });
 
-  const sub = { subId, label: label || 'Shell', pty: ptyProc, alive: true };
+  const sub = { subId, label: label || (mode === 'claude' ? 'Claude' : 'Shell'), pty: ptyProc, alive: true, mode: mode || 'shell' };
   inst.subTerminals.push(sub);
 
   ptyProc.onData((data) => {
