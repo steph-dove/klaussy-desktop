@@ -132,6 +132,53 @@ ipcMain.handle('pr-refresh-threads', async () => {
   return { ok: true };
 });
 
+// "Pull updates" — re-fetch meta+diff from GitHub, refresh comment threads,
+// and (if the PR has an existing worktree) fast-forward it to the latest
+// commit. Single round-trip the renderer can wire to a button.
+ipcMain.handle('pr-pull-updates', async () => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  const url = prReview.active.meta && prReview.active.meta.url;
+  if (!url) return { error: 'Active PR has no URL' };
+  const cwd = currentRepoPath() || require('os').homedir();
+
+  let metaError = null;
+  try {
+    const [meta, diff] = await Promise.all([
+      ghJson([
+        'pr', 'view', url,
+        '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
+      ], cwd),
+      ghText(['pr', 'diff', url], cwd),
+    ]);
+    // Bail if the active PR changed underneath us mid-fetch.
+    if (!prReview.active || prReview.active.meta.url !== url) {
+      return { error: 'Active PR changed during refresh' };
+    }
+    prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
+    prReview.active.diff = diff;
+    broadcastPrReview();
+  } catch (err) {
+    metaError = (err.stderr || err.message || '').trim();
+  }
+
+  // Threads — fire-and-await so the toast we return reflects post-refresh state.
+  try { await fetchThreadsForActive(); } catch (_) {}
+
+  // Worktree refresh — only if one already exists. We reach into
+  // ensureWorktreeForActivePr's "existing worktree" branch by calling it; it
+  // returns refreshed: 'updated' | 'up-to-date' | 'kept-local' | 'fetch-failed'
+  // when existed=true, undefined when it had to create one.
+  let worktreeRefreshed = 'no-worktree';
+  try {
+    const ensured = await ensureWorktreeForActivePr();
+    if (!ensured.error && ensured.existed && ensured.refreshed) {
+      worktreeRefreshed = ensured.refreshed;
+    }
+  } catch (_) {}
+
+  return { ok: true, metaError, worktreeRefreshed };
+});
+
 // G6: CI checks scoped to the PR review surface. `gh pr checks -R …`
 // mangles the repo name in its GraphQL query on some gh versions. Using
 // `gh pr view -R … --json statusCheckRollup` reads the same rollup through a
@@ -287,7 +334,7 @@ ipcMain.handle('pr-checkout-locally', async () => {
   for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', payload);
   }
-  return { ok: true, task: payload, reused: !!existingTask };
+  return { ok: true, task: payload, reused: !!existingTask, refreshed: ensured.refreshed };
 });
 
 

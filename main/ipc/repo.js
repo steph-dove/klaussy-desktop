@@ -11,7 +11,7 @@ const { getMainWindow, createWindow } = require('../state/windows');
 const { instances } = require('../state/instances');
 
 ipcMain.handle('select-repo', async () => {
-  const result = await dialog.showOpenDialog(getMainWindow(), {
+  const result = await dialog.showOpenDialog({
     title: 'Select the git repository to manage',
     properties: ['openDirectory'],
   });
@@ -121,13 +121,12 @@ ipcMain.handle('list-projects', () => {
   return config.projects || [];
 });
 
-ipcMain.handle('add-project', async () => {
-  const result = await dialog.showOpenDialog(getMainWindow(), {
-    title: 'Select a git repository',
-    properties: ['openDirectory'],
-  });
-  if (result.canceled || result.filePaths.length === 0) return null;
-  const projectPath = result.filePaths[0];
+// Renderer now hands us a path directly (from its paste/drag picker) to
+// avoid dialog.showOpenDialog entirely — the native NSOpenPanel can hang
+// on macOS when the scopedbookmarksagent XPC daemon is unresponsive.
+ipcMain.handle('add-project', async (_event, arg) => {
+  const projectPath = arg && arg.folderPath;
+  if (!projectPath) return null;
 
   let isGitRepo = false;
   try {

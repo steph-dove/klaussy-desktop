@@ -25,6 +25,71 @@
     e.preventDefault();
   });
 
+  // ---- Directory picker dialog (replaces native NSOpenPanel) ----
+  // macOS's scopedbookmarksagent can wedge and freeze the app on Open; this
+  // paste/drag prompt bypasses NSOpenPanel entirely. Returns a Promise that
+  // resolves to the selected path or null on cancel.
+  window.pickDirectoryPopup = (function () {
+    const overlay = document.getElementById('dir-pick-overlay');
+    const drop = document.getElementById('dir-pick-drop');
+    const input = document.getElementById('dir-pick-input');
+    const titleEl = document.getElementById('dir-pick-title');
+    const errEl = document.getElementById('dir-pick-error');
+    const okBtn = document.getElementById('dir-pick-ok');
+    const cancelBtn = document.getElementById('dir-pick-cancel');
+    let resolver = null;
+
+    function close(result) {
+      overlay.style.display = 'none';
+      input.value = '';
+      errEl.textContent = '';
+      drop.classList.remove('drag-over');
+      if (resolver) { const r = resolver; resolver = null; r(result); }
+    }
+
+    okBtn.addEventListener('click', function () {
+      const v = input.value.trim();
+      if (!v) { errEl.textContent = 'Enter a path or drag a folder in.'; return; }
+      close(v);
+    });
+    cancelBtn.addEventListener('click', function () { close(null); });
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(null); });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') okBtn.click();
+      if (e.key === 'Escape') close(null);
+    });
+
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      drop.addEventListener(evt, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        drop.classList.add('drag-over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (evt) {
+      drop.addEventListener(evt, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        drop.classList.remove('drag-over');
+      });
+    });
+    drop.addEventListener('drop', function (e) {
+      const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      const p = window.klaus.fs.getPathForFile(file);
+      if (p) input.value = p;
+    });
+
+    return function pickDirectoryPopup(opts) {
+      opts = opts || {};
+      titleEl.textContent = opts.title || 'Select folder';
+      input.placeholder = opts.placeholder || 'Drag a folder here or paste a path';
+      errEl.textContent = '';
+      input.value = '';
+      overlay.style.display = 'flex';
+      setTimeout(function () { input.focus(); }, 50);
+      return new Promise(function (resolve) { resolver = resolve; });
+    };
+  })();
+
   // ---- Init Theme (Phase 5) ----
   ThemeManager.init();
 
@@ -674,10 +739,10 @@
   const modalError = document.getElementById('modal-error');
   const modalCreate = document.getElementById('modal-create');
   const modalCancel = document.getElementById('modal-cancel');
-  const pathDisplay = document.getElementById('path-display');
-  const btnBrowse = document.getElementById('btn-browse');
-  const basepathDisplay = document.getElementById('basepath-display');
-  const btnBasepath = document.getElementById('btn-basepath');
+  const pathInput = document.getElementById('path-input');
+  const pathPicker = document.getElementById('path-picker');
+  const basepathInput = document.getElementById('basepath-input');
+  const basepathRow = document.getElementById('basepath-row');
   const modalTabs = document.querySelectorAll('.modal-tab');
   const tabContents = document.querySelectorAll('.tab-content');
 
@@ -835,22 +900,70 @@
     setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
   }
 
-  btnBrowse.addEventListener('click', async function () {
-    var dir = await window.klaus.repo.browseDirectory();
-    if (dir) {
-      selectedWorktreePath = dir;
-      pathDisplay.textContent = dir;
-      pathDisplay.classList.add('has-path');
-    }
+  // Typed/pasted path: mirror into selectedWorktreePath on every edit. The
+  // attach-worktree handler in main validates the path is a git repo, so we
+  // don't need client-side checks here.
+  pathInput.addEventListener('input', function () {
+    var v = pathInput.value.trim();
+    selectedWorktreePath = v || null;
+    pathInput.classList.toggle('has-path', !!v);
   });
 
-  btnBasepath.addEventListener('click', async function () {
-    var dir = await window.klaus.repo.browseDirectory();
-    if (dir) {
-      selectedBasePath = dir;
-      basepathDisplay.textContent = dir;
-      basepathDisplay.classList.add('has-path');
-    }
+  // Drag a folder from Finder onto the picker to set the path. We resolve
+  // the OS path via webUtils.getPathForFile (exposed in preload) because
+  // File.path was removed in Electron 32+.
+  ['dragenter', 'dragover'].forEach(function (evt) {
+    pathPicker.addEventListener(evt, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      pathPicker.classList.add('drag-over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (evt) {
+    pathPicker.addEventListener(evt, function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      pathPicker.classList.remove('drag-over');
+    });
+  });
+  pathPicker.addEventListener('drop', function (e) {
+    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    var p = window.klaus.fs.getPathForFile(file);
+    if (!p) return;
+    selectedWorktreePath = p;
+    pathInput.value = p;
+    pathInput.classList.add('has-path');
+  });
+
+  // Typed/pasted basepath: mirror into selectedBasePath on every edit.
+  basepathInput.addEventListener('input', function () {
+    var v = basepathInput.value.trim();
+    selectedBasePath = v || null;
+    basepathInput.classList.toggle('has-path', !!v);
+  });
+
+  // Drag a folder from Finder to override the basepath.
+  ['dragenter', 'dragover'].forEach(function (evt) {
+    basepathRow.addEventListener(evt, function (e) {
+      e.preventDefault(); e.stopPropagation();
+      basepathRow.classList.add('drag-over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (evt) {
+    basepathRow.addEventListener(evt, function (e) {
+      e.preventDefault(); e.stopPropagation();
+      basepathRow.classList.remove('drag-over');
+    });
+  });
+  basepathRow.addEventListener('drop', function (e) {
+    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    var p = window.klaus.fs.getPathForFile(file);
+    if (!p) return;
+    selectedBasePath = p;
+    basepathInput.value = p;
+    basepathInput.classList.add('has-path');
   });
 
   function defaultBasePathDisplay() {
@@ -866,13 +979,12 @@
     modalError.textContent = '';
     modalCreate.disabled = false;
     selectedWorktreePath = null;
-    pathDisplay.textContent = 'No directory selected';
-    pathDisplay.classList.remove('has-path');
+    pathInput.value = '';
+    pathInput.classList.remove('has-path');
     selectedBasePath = null;
-    // Show the actual default location (the repo's parent dir) so the user
-    // can see where the worktree will land without clicking Change.
-    basepathDisplay.textContent = defaultBasePathDisplay();
-    basepathDisplay.classList.remove('has-path');
+    basepathInput.value = '';
+    basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
+    basepathInput.classList.remove('has-path');
     activeTab = 'new';
     selectedMode = AppState.savedPrefs.defaultMode || 'claude';
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
@@ -891,16 +1003,21 @@
         ' <button id="btn-modal-repo-browse" class="modal-repo-browse">Browse</button>';
       repoIndicator.style.display = '';
       document.getElementById('btn-modal-repo-browse').addEventListener('click', async function () {
-        var dir = await window.klaus.repo.browseDirectory();
+        var dir = await window.pickDirectoryPopup({
+          title: 'Select repo',
+          placeholder: 'Drag a git repo folder here or paste a path',
+        });
         if (dir) {
           AppState.repoPath = dir;
           document.getElementById('modal-repo-path').textContent = dir;
           // Switching repos: clear the cached selection then re-fetch +
           // re-populate the branch dropdown for the new project. Update
-          // the location display unless the user already overrode it.
+          // the location placeholder unless the user already overrode it.
           selectedBaseBranch = '';
           populateBaseBranchSelect();
-          if (!selectedBasePath) basepathDisplay.textContent = defaultBasePathDisplay();
+          if (!selectedBasePath) {
+            basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
+          }
         }
       });
     }
@@ -1036,7 +1153,9 @@
   // ---- Command Palette (A3) ----
 
   async function openFolderAsTask(mode) {
-    var dir = await window.klaus.repo.browseDirectory();
+    var dir = await window.pickDirectoryPopup({
+      title: mode === 'shell' ? 'Open Folder in Shell' : 'Open Folder',
+    });
     if (!dir) return;
     var result = await window.klaus.task.openFolder(dir, mode || 'claude');
     if (!result || result.error) {

@@ -217,9 +217,15 @@ ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode }) => {
   return spawnInWorktree(name, worktreePath, branch, mode || 'claude');
 });
 
-// Browse for a directory (used by the existing worktree tab)
+// Browse for a directory (used by the existing worktree tab).
+// NOTE: we intentionally do NOT pass a parent window here. A sheet-attached
+// NSOpenPanel serializes the selected URL via NSRemoteViewMarshal, which
+// requires a round-trip to `com.apple.ScopedBookmarkAgent`. On some machines
+// that daemon hangs and the sheet never dismisses (main thread stuck in
+// mach_msg → force-quit only). A parentless dialog is a free-floating
+// in-process NSOpenPanel and skips that path entirely.
 ipcMain.handle('browse-directory', async () => {
-  const result = await dialog.showOpenDialog(getMainWindow(), {
+  const result = await dialog.showOpenDialog({
     title: 'Select existing worktree directory',
     properties: ['openDirectory'],
   });
@@ -232,7 +238,7 @@ ipcMain.handle('browse-directory', async () => {
 // explicitly skip instances without a branch.
 ipcMain.handle('open-folder', async (_event, { folderPath, mode }) => {
   if (!folderPath) {
-    const result = await dialog.showOpenDialog(getMainWindow(), {
+    const result = await dialog.showOpenDialog({
       title: 'Select folder to open',
       properties: ['openDirectory'],
     });
@@ -494,7 +500,7 @@ ipcMain.handle('export-transcript', async (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  const result = await dialog.showSaveDialog(getMainWindow(), {
+  const result = await dialog.showSaveDialog({
     title: 'Export Session Transcript',
     defaultPath: path.join(app.getPath('documents'), inst.name + '-transcript.txt'),
     filters: [{ name: 'Text', extensions: ['txt'] }, { name: 'Markdown', extensions: ['md'] }],

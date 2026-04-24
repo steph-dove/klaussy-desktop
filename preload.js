@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('klaus', {
     select: () => ipcRenderer.invoke('select-repo'),
     get: () => ipcRenderer.invoke('get-repo'),
     listProjects: () => ipcRenderer.invoke('list-projects'),
-    addProject: () => ipcRenderer.invoke('add-project'),
+    addProject: (folderPath) => ipcRenderer.invoke('add-project', { folderPath }),
     removeProject: (projectPath) => ipcRenderer.invoke('remove-project', { projectPath }),
     switchProject: (projectPath) => ipcRenderer.invoke('switch-project', { projectPath }),
     listWorktrees: () => ipcRenderer.invoke('list-worktrees'),
@@ -196,6 +196,7 @@ contextBridge.exposeInMainWorld('klaus', {
     reviewState: () => ipcRenderer.invoke('pr-review-state'),
     reviewClose: () => ipcRenderer.invoke('pr-review-close'),
     refreshThreads: () => ipcRenderer.invoke('pr-refresh-threads'),
+    pullUpdates: () => ipcRenderer.invoke('pr-pull-updates'),
     submitReview: ({ event, body, comments }) =>
       ipcRenderer.invoke('pr-submit-review', { event, body, comments }),
     addIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),
