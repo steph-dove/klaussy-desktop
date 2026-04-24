@@ -82,7 +82,7 @@ window.ThemeManager = (function () {
   var isSystemMode = false;
 
   function init() {
-    window.klaus.getTheme().then(function (theme) {
+    window.klaus.ui.getTheme().then(function (theme) {
       if (theme && theme.preset === 'system') {
         applySystem();
       } else if (theme && theme.preset && presets[theme.preset]) {
@@ -93,8 +93,8 @@ window.ThemeManager = (function () {
     });
 
     // Listen for system theme changes from main process
-    if (window.klaus.onSystemThemeChanged) {
-      window.klaus.onSystemThemeChanged(function (isDark) {
+    if (window.klaus.ui.onSystemThemeChanged) {
+      window.klaus.ui.onSystemThemeChanged(function (isDark) {
         if (isSystemMode) {
           resolvedSystemPreset = isDark ? 'dark' : 'light';
           applyPresetColors(resolvedSystemPreset);
@@ -106,10 +106,10 @@ window.ThemeManager = (function () {
   function applySystem() {
     isSystemMode = true;
     currentPreset = 'system';
-    window.klaus.setTheme({ preset: 'system' });
+    window.klaus.ui.setTheme({ preset: 'system' });
     // Ask main process for current system theme
-    if (window.klaus.getSystemTheme) {
-      window.klaus.getSystemTheme().then(function (isDark) {
+    if (window.klaus.ui.getSystemTheme) {
+      window.klaus.ui.getSystemTheme().then(function (isDark) {
         resolvedSystemPreset = isDark ? 'dark' : 'light';
         applyPresetColors(resolvedSystemPreset);
       });
@@ -162,7 +162,7 @@ window.ThemeManager = (function () {
     if (!theme) return;
     currentPreset = presetName;
     applyPresetColors(presetName);
-    window.klaus.setTheme({ preset: presetName });
+    window.klaus.ui.setTheme({ preset: presetName });
   }
 
   function getTerminalTheme() {

@@ -40,7 +40,7 @@ window.ConflictPanel = (function () {
     currentWorktreePath = worktreePath;
     overlay.style.display = 'flex';
 
-    var result = await window.klaus.gitConflicts(worktreePath);
+    var result = await window.klaus.git.conflicts(worktreePath);
     if (!result.files || result.files.length === 0) {
       oursBody.innerHTML = '<div class="conflict-empty">No conflicts found</div>';
       theirsBody.innerHTML = '';
@@ -68,7 +68,7 @@ window.ConflictPanel = (function () {
 
   async function loadFile(file) {
     currentFile = file;
-    var result = await window.klaus.readConflictFile(currentWorktreePath, file);
+    var result = await window.klaus.fs.readConflictFile(currentWorktreePath, file);
     if (result.error) {
       oursBody.innerHTML = '<div class="conflict-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
@@ -258,7 +258,7 @@ window.ConflictPanel = (function () {
     btn.disabled = true;
     btn.textContent = 'Saving...';
 
-    var result = await window.klaus.writeResolvedFile(currentWorktreePath, currentFile, content);
+    var result = await window.klaus.fs.writeResolvedFile(currentWorktreePath, currentFile, content);
     btn.disabled = false;
     btn.textContent = 'Mark Resolved';
 

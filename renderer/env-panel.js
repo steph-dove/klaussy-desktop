@@ -34,7 +34,7 @@ window.EnvPanel = (function () {
     var gen = ++loadGeneration;
 
     fileSelectorEl.innerHTML = '';
-    var result = await window.klaus.listEnvFiles(wt);
+    var result = await window.klaus.fs.listEnvFiles(wt);
 
     // Abort if a newer load was triggered while we were awaiting
     if (gen !== loadGeneration) return;
@@ -67,7 +67,7 @@ window.EnvPanel = (function () {
   async function loadFile(filename, wt) {
     currentFilename = filename;
     wt = wt || currentWorktreePath;
-    var result = await window.klaus.readEnvFile(wt, filename);
+    var result = await window.klaus.fs.readEnvFile(wt, filename);
     if (result.error) {
       editorEl.innerHTML = '<div class="env-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
@@ -174,7 +174,7 @@ window.EnvPanel = (function () {
     // Ensure trailing newline
     if (!content.endsWith('\n')) content += '\n';
 
-    var result = await window.klaus.writeEnvFile(currentWorktreePath, currentFilename, content);
+    var result = await window.klaus.fs.writeEnvFile(currentWorktreePath, currentFilename, content);
     saveBtn.disabled = false;
 
     if (result.error) {

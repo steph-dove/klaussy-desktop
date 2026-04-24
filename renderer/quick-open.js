@@ -34,7 +34,7 @@ window.QuickOpen = (function () {
     // on worktree switch.
     if (cachedWorktree !== wt || !cachedFiles) {
       cachedWorktree = wt;
-      var result = await window.klaus.listFiles(wt);
+      var result = await window.klaus.fs.listFiles(wt);
       cachedFiles = (result.files || []).map(function (p) {
         var base = p.split('/').pop();
         return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };

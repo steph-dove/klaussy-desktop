@@ -113,7 +113,7 @@ window.PRPanel = (function () {
     if (!worktreePathAtRequest) return;
     var result;
     try {
-      result = await window.klaus.prForBranch(worktreePathAtRequest);
+      result = await window.klaus.pr.forBranch(worktreePathAtRequest);
     } catch (_) { return; }
     // Drop the response if the user has since switched worktrees or the PR tab
     // has already rendered a fresher result.
@@ -145,7 +145,7 @@ window.PRPanel = (function () {
     var aiEl = document.getElementById('pr-ai-review');
     if (aiEl) aiEl.innerHTML = '';
 
-    var result = await window.klaus.prForBranch(currentWorktreePath);
+    var result = await window.klaus.pr.forBranch(currentWorktreePath);
 
     if (result.error) {
       prInfoEl.innerHTML = '<div class="pr-error">' + escHtml(result.error) + '</div>';
@@ -167,8 +167,8 @@ window.PRPanel = (function () {
     var prNumber = result.pr.number;
     var worktreeAtRequest = currentWorktreePath;
     var [checksResult, threadsResult] = await Promise.all([
-      window.klaus.prChecks(worktreeAtRequest, prNumber),
-      window.klaus.prReviewThreads(worktreeAtRequest, prNumber),
+      window.klaus.pr.checks(worktreeAtRequest, prNumber),
+      window.klaus.pr.reviewThreads(worktreeAtRequest, prNumber),
     ]);
 
     // Drop stale responses if the user switched worktrees/PRs mid-flight.
@@ -275,7 +275,7 @@ window.PRPanel = (function () {
       a.addEventListener('click', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        window.klaus.openExternal(a.dataset.url);
+        window.klaus.gh.openExternal(a.dataset.url);
       });
     });
   }
@@ -330,7 +330,7 @@ window.PRPanel = (function () {
     if (link) {
       link.addEventListener('click', function (e) {
         e.preventDefault();
-        window.klaus.openExternal(link.dataset.url);
+        window.klaus.gh.openExternal(link.dataset.url);
       });
     }
     var aiBtn = prInfoEl.querySelector('.pr-ai-review-btn');
@@ -555,7 +555,7 @@ window.PRPanel = (function () {
     aiEl.style.display = '';
     aiEl.innerHTML = '<div class="pr-ai-loading">Claude is reviewing this comment...</div>';
 
-    var result = await window.klaus.prAiReviewComment({
+    var result = await window.klaus.pr.aiReviewComment({
       worktreePath: currentWorktreePath,
       prTitle: currentPR.title,
       prBody: currentPR.body || '',
@@ -611,10 +611,10 @@ window.PRPanel = (function () {
     var result;
     if (threadable && commentId) {
       // Post as a threaded reply to the inline review comment
-      result = await window.klaus.prReplyToComment(currentWorktreePath, currentPR.number, commentId, body);
+      result = await window.klaus.pr.replyToComment(currentWorktreePath, currentPR.number, commentId, body);
     } else {
       // Post as a general PR comment
-      result = await window.klaus.prAddComment(currentWorktreePath, currentPR.number, body);
+      result = await window.klaus.pr.addComment(currentWorktreePath, currentPR.number, body);
     }
 
     if (result.error) {
@@ -657,7 +657,7 @@ window.PRPanel = (function () {
     btn.disabled = true;
     btn.textContent = '...';
 
-    var fn = wasResolved ? window.klaus.prUnresolveThread : window.klaus.prResolveThread;
+    var fn = wasResolved ? window.klaus.pr.unresolveThread : window.klaus.pr.resolveThread;
     var result = await fn(currentWorktreePath, threadId);
 
     if (result && result.error) {
@@ -718,13 +718,13 @@ window.PRPanel = (function () {
     }, 1000);
 
     closeBtn.addEventListener('click', function () {
-      window.klaus.prAiReviewCancel(requestId);
+      window.klaus.pr.aiReviewCancel(requestId);
       clearInterval(elapsedTimer);
       host.innerHTML = '';
     });
 
     cancelBtn.addEventListener('click', function () {
-      window.klaus.prAiReviewCancel(requestId);
+      window.klaus.pr.aiReviewCancel(requestId);
     });
 
     if (btn) { btn.disabled = true; btn.textContent = 'Reviewing…'; }
@@ -778,7 +778,7 @@ window.PRPanel = (function () {
       wireFixButtons(bodyEl, finalText);
     }
 
-    var unsubscribe = window.klaus.onPrAiReviewData(requestId, function (chunk) {
+    var unsubscribe = window.klaus.pr.onAiReviewData(requestId, function (chunk) {
       buffered += chunk;
       var idx;
       while ((idx = buffered.indexOf('\n')) !== -1) {
@@ -789,7 +789,7 @@ window.PRPanel = (function () {
       }
     });
 
-    window.klaus.onPrAiReviewDone(requestId, function (result) {
+    window.klaus.pr.onAiReviewDone(requestId, function (result) {
       clearInterval(elapsedTimer);
       unsubscribe();
       if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
@@ -813,7 +813,7 @@ window.PRPanel = (function () {
       }
     });
 
-    var startResult = await window.klaus.prAiReviewStart({
+    var startResult = await window.klaus.pr.aiReviewStart({
       worktreePath: currentWorktreePath,
       baseBranch: currentPR.baseRefName || 'main',
       requestId: requestId,
@@ -838,7 +838,7 @@ window.PRPanel = (function () {
     btn.disabled = true;
     btn.textContent = 'Posting...';
 
-    var result = await window.klaus.prAddComment(currentWorktreePath, currentPR.number, body);
+    var result = await window.klaus.pr.addComment(currentWorktreePath, currentPR.number, body);
 
     btn.disabled = false;
     btn.textContent = 'Comment';
@@ -862,7 +862,7 @@ window.PRPanel = (function () {
     btn.disabled = true;
     btn.textContent = 'Submitting...';
 
-    var result = await window.klaus.prReview(currentWorktreePath, currentPR.number, event, body || undefined);
+    var result = await window.klaus.pr.review(currentWorktreePath, currentPR.number, event, body || undefined);
 
     btn.disabled = false;
     btn.textContent = origText;
@@ -1089,7 +1089,7 @@ window.PRPanel = (function () {
     btn.disabled = true;
     btn.textContent = 'Merging...';
 
-    var result = await window.klaus.prMerge(currentWorktreePath, currentPR.number, strategy);
+    var result = await window.klaus.pr.merge(currentWorktreePath, currentPR.number, strategy);
 
     btn.textContent = origText;
 
@@ -1219,7 +1219,7 @@ window.PRPanel = (function () {
     if (!currentWorktreePath) { alert('No worktree active.'); return; }
     var origText = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
-    var result = await window.klaus.prFixInTerminal(currentWorktreePath, prompt);
+    var result = await window.klaus.pr.fixInTerminal(currentWorktreePath, prompt);
     if (btn) { btn.disabled = false; btn.textContent = origText; }
     if (result && result.error) {
       alert('Could not send to terminal: ' + result.error);

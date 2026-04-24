@@ -99,12 +99,12 @@
         var monaco = await window.MonacoReady;
         configureDefaults(monaco);
 
-        var listResult = await window.klaus.listFiles(worktreePath);
+        var listResult = await window.klaus.fs.listFiles(worktreePath);
         if (!listResult || listResult.error) return;
         var tsPaths = filterTsJsPaths(listResult.files || []);
         if (tsPaths.length === 0 || tsPaths.length > MAX_PROJECT_FILES) return;
 
-        var bulk = await window.klaus.readFilesBulk(worktreePath, tsPaths, 256 * 1024);
+        var bulk = await window.klaus.fs.readFilesBulk(worktreePath, tsPaths, 256 * 1024);
         if (!bulk || !bulk.files) return;
 
         for (var rel in bulk.files) {

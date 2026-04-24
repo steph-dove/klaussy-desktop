@@ -40,7 +40,7 @@ window.TerminalManager = (function () {
 
     var WebLinksAddon = window.WebLinksAddon;
     var webLinksAddon = new WebLinksAddon.WebLinksAddon(function (_event, uri) {
-      window.klaus.openExternal(uri);
+      window.klaus.gh.openExternal(uri);
     });
     terminal.loadAddon(webLinksAddon);
 
@@ -173,7 +173,7 @@ window.TerminalManager = (function () {
         // escape (`\<Enter>`), which works on an empty prompt and leaves
         // a trailing `\` on non-empty prompts. We ship that as the best
         // partial behavior — users can always type `\<Enter>` manually.
-        window.klaus.writeTerminal(id, '\\\r');
+        window.klaus.terminal.write(id, '\\\r');
         return false;
       }
       if (meta && e.key === 'c') {
@@ -183,7 +183,7 @@ window.TerminalManager = (function () {
       }
       if (meta && e.key === 'v') {
         navigator.clipboard.readText().then(function (text) {
-          if (text) window.klaus.writeTerminal(id, text);
+          if (text) window.klaus.terminal.write(id, text);
         });
         return false;
       }
@@ -212,16 +212,16 @@ window.TerminalManager = (function () {
       var files = Array.from(e.dataTransfer.files);
       if (files.length > 0) {
         var paths = files.map(function (f) {
-          var p = window.klaus.getPathForFile(f);
+          var p = window.klaus.fs.getPathForFile(f);
           return p.includes(' ') ? '"' + p + '"' : p;
         }).join(' ');
-        window.klaus.writeTerminal(id, paths);
+        window.klaus.terminal.write(id, paths);
       }
     });
 
     // Wire up I/O
     var cleanup = [];
-    var removeDataListener = window.klaus.onTerminalData(id, function (data) {
+    var removeDataListener = window.klaus.terminal.onData(id, function (data) {
       terminal.write(data);
       if (AppState.activeTaskId !== id) {
         Sidebar.showUnreadBadge(id);
@@ -229,7 +229,7 @@ window.TerminalManager = (function () {
     });
     cleanup.push(removeDataListener);
 
-    var removeExitListener = window.klaus.onTerminalExit(id, function () {
+    var removeExitListener = window.klaus.terminal.onExit(id, function () {
       var t = tasks.get(id);
       if (!t) return;
       t.alive = false;
@@ -238,7 +238,7 @@ window.TerminalManager = (function () {
     cleanup.push(removeExitListener);
 
     terminal.onData(function (data) {
-      window.klaus.writeTerminal(id, data);
+      window.klaus.terminal.write(id, data);
     });
 
     // Right-click context menu
@@ -282,12 +282,12 @@ window.TerminalManager = (function () {
     });
 
     subTabBar.querySelector('.sub-tab-add').addEventListener('click', async function () {
-      var result = await window.klaus.addSubTerminal(id, 'Shell');
+      var result = await window.klaus.terminal.addSub(id, 'Shell');
       if (result.error) return;
       addSubTerminalTab(taskEntry, result.subId, result.label);
     });
 
-    window.klaus.getNotifyEnabled(id).then(function (val) {
+    window.klaus.task.getNotifyEnabled(id).then(function (val) {
       taskEntry.notifyEnabled = val;
     });
 
@@ -336,19 +336,19 @@ window.TerminalManager = (function () {
     subTerminal.open(subWrapper);
 
     var subCleanup = [];
-    var removeData = window.klaus.onSubTerminalData(id, subId, function (data) {
+    var removeData = window.klaus.terminal.onSubData(id, subId, function (data) {
       subTerminal.write(data);
     });
     subCleanup.push(removeData);
 
-    var removeExit = window.klaus.onSubTerminalExit(id, subId, function () {
+    var removeExit = window.klaus.terminal.onSubExit(id, subId, function () {
       var sub = taskEntry.subTerminals.find(function (s) { return s.subId === subId; });
       if (sub) sub.alive = false;
     });
     subCleanup.push(removeExit);
 
     subTerminal.onData(function (data) {
-      window.klaus.writeTerminal(id, data, subId);
+      window.klaus.terminal.write(id, data, subId);
     });
 
     subTerminal.attachCustomKeyEventHandler(function (e) {
@@ -358,7 +358,7 @@ window.TerminalManager = (function () {
         // Sub-terminals run a plain shell, not Claude/Ink — a real newline
         // is the correct translation. The main terminal sends the CSI-u
         // encoding because Ink wants it; that doesn't apply here.
-        window.klaus.writeTerminal(id, '\n', subId);
+        window.klaus.terminal.write(id, '\n', subId);
         return false;
       }
       if (meta && e.key === 'c') {
@@ -368,7 +368,7 @@ window.TerminalManager = (function () {
       }
       if (meta && e.key === 'v') {
         navigator.clipboard.readText().then(function (text) {
-          if (text) window.klaus.writeTerminal(id, text, subId);
+          if (text) window.klaus.terminal.write(id, text, subId);
         });
         return false;
       }
@@ -389,7 +389,7 @@ window.TerminalManager = (function () {
 
     tab.querySelector('.sub-tab-close').addEventListener('click', async function (e) {
       e.stopPropagation();
-      await window.klaus.killSubTerminal(id, subId);
+      await window.klaus.terminal.killSub(id, subId);
       subCleanup.forEach(function (fn) { fn(); });
       subTerminal.dispose();
       subWrapper.remove();
@@ -427,13 +427,13 @@ window.TerminalManager = (function () {
       if (subId === null || subId === undefined) {
         taskEntry.fitAddon.fit();
         taskEntry.terminal.focus();
-        window.klaus.resizeTerminal(taskEntry.id, taskEntry.terminal.cols, taskEntry.terminal.rows);
+        window.klaus.terminal.resize(taskEntry.id, taskEntry.terminal.cols, taskEntry.terminal.rows);
       } else {
         var sub = taskEntry.subTerminals.find(function (s) { return s.subId === subId; });
         if (sub) {
           sub.fitAddon.fit();
           sub.terminal.focus();
-          window.klaus.resizeTerminal(taskEntry.id, sub.terminal.cols, sub.terminal.rows, subId);
+          window.klaus.terminal.resize(taskEntry.id, sub.terminal.cols, sub.terminal.rows, subId);
         }
       }
     }, 50);
@@ -459,7 +459,7 @@ window.TerminalManager = (function () {
       existing.terminal.clear();
       subEntry = existing;
     } else {
-      var result = await window.klaus.addSubTerminal(taskId, label);
+      var result = await window.klaus.terminal.addSub(taskId, label);
       if (result.error) return { error: result.error };
       addSubTerminalTab(taskEntry, result.subId, result.label);
       subEntry = taskEntry.subTerminals[taskEntry.subTerminals.length - 1];
@@ -470,7 +470,7 @@ window.TerminalManager = (function () {
 
     setTimeout(function () {
       if (!subEntry.alive) return;
-      window.klaus.writeTerminal(taskId, command + '\r', subEntry.subId);
+      window.klaus.terminal.write(taskId, command + '\r', subEntry.subId);
     }, isNew ? 400 : 50);
 
     return { ok: true };
@@ -485,14 +485,14 @@ window.TerminalManager = (function () {
       task.cleanup.forEach(function (fn) { fn(); });
     }
     task.cleanup = [];
-    var removeDataListener = window.klaus.onTerminalData(id, function (data) {
+    var removeDataListener = window.klaus.terminal.onData(id, function (data) {
       task.terminal.write(data);
       if (AppState.activeTaskId !== id) {
         Sidebar.showUnreadBadge(id);
       }
     });
     task.cleanup.push(removeDataListener);
-    var removeExitListener = window.klaus.onTerminalExit(id, function () {
+    var removeExitListener = window.klaus.terminal.onExit(id, function () {
       var t = tasks.get(id);
       if (!t) return;
       t.alive = false;
@@ -552,12 +552,12 @@ window.TerminalManager = (function () {
           if (sub) {
             sub.fitAddon.fit();
             sub.terminal.focus();
-            window.klaus.resizeTerminal(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
+            window.klaus.terminal.resize(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
           }
         } else {
           task.fitAddon.fit();
           task.terminal.scrollToBottom();
-          window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+          window.klaus.terminal.resize(id, task.terminal.cols, task.terminal.rows);
           task.terminal.focus();
         }
       }, 50);
@@ -602,12 +602,12 @@ window.TerminalManager = (function () {
           var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
           if (sub) {
             sub.fitAddon.fit();
-            window.klaus.resizeTerminal(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
+            window.klaus.terminal.resize(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
           }
         } else {
           task.fitAddon.fit();
           task.terminal.scrollToBottom();
-          window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+          window.klaus.terminal.resize(id, task.terminal.cols, task.terminal.rows);
         }
       });
     }, 50);
@@ -625,7 +625,7 @@ window.TerminalManager = (function () {
       task.terminal.options.fontSize = AppState.currentFontSize;
       task.fitAddon.fit();
       task.terminal.scrollToBottom();
-      window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+      window.klaus.terminal.resize(id, task.terminal.cols, task.terminal.rows);
     });
   }
 
@@ -641,7 +641,7 @@ window.TerminalManager = (function () {
       var task = tasks.get(AppState.activeTaskId);
       if (task) {
         task.fitAddon.fit();
-        window.klaus.resizeTerminal(AppState.activeTaskId, task.terminal.cols, task.terminal.rows);
+        window.klaus.terminal.resize(AppState.activeTaskId, task.terminal.cols, task.terminal.rows);
       }
     }
   });

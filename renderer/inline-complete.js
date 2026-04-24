@@ -99,10 +99,10 @@ window.InlineComplete = (function () {
 
     setStatus('⧗ completing…');
 
-    var disposeChunk = window.klaus.onInlineCompleteChunk(requestId, function (chunk) {
+    var disposeChunk = window.klaus.ai.onInlineCompleteChunk(requestId, function (chunk) {
       buffer += chunk;
     });
-    var disposeDone = window.klaus.onInlineCompleteDone(requestId, function (msg) {
+    var disposeDone = window.klaus.ai.onInlineCompleteDone(requestId, function (msg) {
       if (disposeChunk) disposeChunk();
       if (disposeDone) disposeDone();
       currentRequest = null;
@@ -134,7 +134,7 @@ window.InlineComplete = (function () {
 
     currentRequest = { id: requestId, disposeChunk: disposeChunk, disposeDone: disposeDone };
 
-    window.klaus.inlineCompleteStart({
+    window.klaus.ai.inlineCompleteStart({
       requestId: requestId,
       worktreePath: worktree,
       before: before,
@@ -146,7 +146,7 @@ window.InlineComplete = (function () {
 
   function cancel() {
     if (!currentRequest) return;
-    try { window.klaus.inlineCompleteCancel(currentRequest.id); } catch (_) {}
+    try { window.klaus.ai.inlineCompleteCancel(currentRequest.id); } catch (_) {}
     try { currentRequest.disposeChunk && currentRequest.disposeChunk(); } catch (_) {}
     try { currentRequest.disposeDone && currentRequest.disposeDone(); } catch (_) {}
     currentRequest = null;

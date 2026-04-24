@@ -57,7 +57,7 @@ window.FileBrowser = (function () {
     if (rel.indexOf(currentViewerWorktree + '/') === 0) {
       rel = rel.slice(currentViewerWorktree.length + 1);
     }
-    var result = await window.klaus.gitFileHunks(currentViewerWorktree, rel);
+    var result = await window.klaus.git.fileHunks(currentViewerWorktree, rel);
     var hunks = (result && result.hunks) || [];
     var monaco = await window.MonacoReady;
     var decorations = hunks.map(function (h) {
@@ -506,7 +506,7 @@ window.FileBrowser = (function () {
   // entry. Returns the tab index, or -1 on error. Does NOT activate the tab
   // — caller decides when to switch.
   async function createTab(filePath) {
-    var result = await window.klaus.readFile(filePath);
+    var result = await window.klaus.fs.readFile(filePath);
     if (result.error) {
       var body = fileViewerView.querySelector('.file-viewer-body');
       if (body) body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(result.error) + '</span>';
@@ -660,7 +660,7 @@ window.FileBrowser = (function () {
     var saveBtn = fileViewerView.querySelector('.file-viewer-save-btn');
     if (statusEl) { statusEl.textContent = 'Saving...'; statusEl.className = 'file-editor-status saving'; }
     if (saveBtn) saveBtn.disabled = true;
-    var writeResult = await window.klaus.writeFile(tab.filePath, content);
+    var writeResult = await window.klaus.fs.writeFile(tab.filePath, content);
     if (writeResult.error) {
       if (statusEl) { statusEl.textContent = 'Save failed'; statusEl.className = 'file-editor-status error'; }
       if (saveBtn) saveBtn.disabled = false;
@@ -755,7 +755,7 @@ window.FileBrowser = (function () {
     }
     fileTreeWorktree = wt;
     fileTree.innerHTML = '<div class="file-tree-empty">Loading...</div>';
-    var result = await window.klaus.listFiles(wt);
+    var result = await window.klaus.fs.listFiles(wt);
     if (result.error) {
       fileTree.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
@@ -895,7 +895,7 @@ window.FileBrowser = (function () {
     // user can see everything they're about to change. 100 is a soft cap —
     // enough to cover most practical cases without blowing the UI.
     var maxPerFile = projectReplaceInput.value ? 100 : 5;
-    var result = await window.klaus.searchFiles(wt, query, maxPerFile);
+    var result = await window.klaus.fs.searchFiles(wt, query, maxPerFile);
     if (result.error) {
       projectSearchResults.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
@@ -1017,7 +1017,7 @@ window.FileBrowser = (function () {
     if (!ok) return;
     projectReplaceBtn.disabled = true;
     projectReplaceBtn.textContent = 'Replacing…';
-    var result = await window.klaus.replaceInFiles(wt, files, query, replacement);
+    var result = await window.klaus.fs.replaceInFiles(wt, files, query, replacement);
     if (result.error) {
       alert('Replace failed: ' + result.error);
       updateReplaceButton();
@@ -1105,7 +1105,7 @@ window.FileBrowser = (function () {
       return;
     }
 
-    var result = await window.klaus.gitBlame(task.worktreePath, fileName);
+    var result = await window.klaus.git.blame(task.worktreePath, fileName);
     if (result.error || !result.lines || result.lines.length === 0) return;
 
     // Replace the line-number column with "<hash> <author>" — mirrors the

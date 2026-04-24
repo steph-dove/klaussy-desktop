@@ -13,7 +13,7 @@ window.StashPanel = (function () {
     var wt = task ? task.worktreePath : null;
     if (!wt) return;
     btnStashPush.disabled = true;
-    var result = await window.klaus.gitStashPush(wt, stashMessage.value.trim() || undefined);
+    var result = await window.klaus.git.stashPush(wt, stashMessage.value.trim() || undefined);
     btnStashPush.disabled = false;
     stashMessage.value = '';
     if (result.error) {
@@ -30,9 +30,9 @@ window.StashPanel = (function () {
       stashList.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
     }
-    var statusResult = await window.klaus.gitStatus(wt);
+    var statusResult = await window.klaus.git.status(wt);
     var currentBranch = statusResult.branch || '';
-    var result = await window.klaus.gitStashList(wt);
+    var result = await window.klaus.git.stashList(wt);
     var filtered = result.stashes.filter(function (s) {
       var match = s.message.match(/^(?:WIP )?[Oo]n ([^:]+):/);
       if (!match) return true;
@@ -54,7 +54,7 @@ window.StashPanel = (function () {
         e.stopPropagation();
         var refMatch = s.ref.match(/\{(\d+)\}/);
         var originalIdx = refMatch ? parseInt(refMatch[1], 10) : idx;
-        var res = await window.klaus.gitStashPop(wt, originalIdx);
+        var res = await window.klaus.git.stashPop(wt, originalIdx);
         if (res.error) {
           alert('Stash pop failed: ' + res.error);
         }

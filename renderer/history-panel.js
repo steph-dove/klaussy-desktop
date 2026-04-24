@@ -27,7 +27,7 @@ window.HistoryPanel = (function () {
     }
     historyList.innerHTML = '<div class="file-tree-empty">Loading...</div>';
     historyDiffView.innerHTML = '';
-    var result = await window.klaus.gitLog(wt, 50);
+    var result = await window.klaus.git.log(wt, 50);
     if (result.error) {
       historyList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
@@ -44,7 +44,7 @@ window.HistoryPanel = (function () {
         historyList.querySelectorAll('.history-item').forEach(function (el) { el.classList.remove('selected'); });
         item.classList.add('selected');
         historyDiffView.innerHTML = 'Loading...';
-        var diff = await window.klaus.gitShow(wt, c.hash);
+        var diff = await window.klaus.git.show(wt, c.hash);
         historyDiffView.textContent = diff.diff || diff.error || 'No diff';
       });
       historyList.appendChild(item);
@@ -86,7 +86,7 @@ window.HistoryPanel = (function () {
     var message = tagMessageInput.value.trim() || undefined;
     var commit = tagCommitInput.value.trim() || undefined;
     this.disabled = true;
-    var result = await window.klaus.gitTagCreate(wt, name, message, commit);
+    var result = await window.klaus.git.tagCreate(wt, name, message, commit);
     this.disabled = false;
     if (result.error) {
       tagError.textContent = result.error;
@@ -104,7 +104,7 @@ window.HistoryPanel = (function () {
       return;
     }
     tagsList.innerHTML = '<div class="file-tree-empty">Loading...</div>';
-    var result = await window.klaus.gitTags(wt);
+    var result = await window.klaus.git.tags(wt);
     if (result.error) {
       tagsList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
       return;
@@ -131,7 +131,7 @@ window.HistoryPanel = (function () {
         e.stopPropagation();
         this.disabled = true;
         this.textContent = '...';
-        var res = await window.klaus.gitTagPush(wt, tag.name);
+        var res = await window.klaus.git.tagPush(wt, tag.name);
         this.disabled = false;
         this.textContent = '\u2191';
         if (res.error) alert('Push failed: ' + res.error);
@@ -139,7 +139,7 @@ window.HistoryPanel = (function () {
       item.querySelector('.tag-delete-btn').addEventListener('click', async function (e) {
         e.stopPropagation();
         if (!confirm('Delete tag "' + tag.name + '"?')) return;
-        var res = await window.klaus.gitTagDelete(wt, tag.name);
+        var res = await window.klaus.git.tagDelete(wt, tag.name);
         if (res.error) alert('Delete failed: ' + res.error);
         else loadTags();
       });

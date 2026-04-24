@@ -16,7 +16,7 @@ window.Dialogs = (function () {
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
 
-    window.klaus.getAboutInfo().then(function (info) {
+    window.klaus.ui.getAboutInfo().then(function (info) {
       dialog.innerHTML =
         '<h2>Klaussy</h2>' +
         '<p class="about-tagline">Multi-terminal Claude Code worktree manager + PR reviewer.</p>' +
@@ -140,7 +140,7 @@ window.Dialogs = (function () {
       });
     });
 
-    window.klaus.getLogs().then(function (logs) {
+    window.klaus.ui.getLogs().then(function (logs) {
       var content = viewer.querySelector('.log-viewer-content');
       if (!logs || logs.length === 0) {
         content.textContent = 'No logs yet.';
@@ -166,7 +166,7 @@ window.Dialogs = (function () {
   // verify without restarting the app.
   async function checkAndPromptDeps(opts) {
     var force = opts && opts.force;
-    var deps = await window.klaus.checkDependencies();
+    var deps = await window.klaus.gh.checkDependencies();
     var ghBad = !deps.gh.installed || !deps.gh.authed;
     var claudeBad = !deps.claude.installed;
     if (!ghBad && !claudeBad && !force) return; // all good, stay quiet
@@ -270,7 +270,7 @@ window.Dialogs = (function () {
   // user from chasing version + environment when filing a bug; saves us from
   // asking for it later.
   function openFeedback() {
-    window.klaus.getAboutInfo().then(function (info) {
+    window.klaus.ui.getAboutInfo().then(function (info) {
       var lines = [
         '**Klaussy**: ' + (info.appVersion || ''),
         '**Electron**: ' + (info.electronVersion || ''),
@@ -297,7 +297,7 @@ window.Dialogs = (function () {
         + '?labels=feedback'
         + '&title=' + encodeURIComponent('[feedback] ')
         + '&body=' + encodeURIComponent(lines.join('\n'));
-      window.klaus.openExternal(url);
+      window.klaus.gh.openExternal(url);
     });
   }
 
@@ -333,7 +333,7 @@ window.Dialogs = (function () {
     var previewPane = dialog.querySelector('.skills-preview-pane');
 
     function refreshAndSelect(targetPath) {
-      window.klaus.listSkills().then(function (r) { renderList(r, targetPath); });
+      window.klaus.skills.listSkills().then(function (r) { renderList(r, targetPath); });
     }
 
     dialog.querySelector('.skills-new').addEventListener('click', function () {
@@ -378,7 +378,7 @@ window.Dialogs = (function () {
       if (target) target.click();
     }
 
-    window.klaus.listSkills().then(function (result) { renderList(result); });
+    window.klaus.skills.listSkills().then(function (result) { renderList(result); });
   }
 
   // Helper for selector-safe path attribute lookup. Path may contain dots,
@@ -392,7 +392,7 @@ window.Dialogs = (function () {
   // name; on success refreshes the list and opens the new file for editing.
   function openCreateForm(pane, onCreated) {
     Promise.all([
-      window.klaus.listProjects(),
+      window.klaus.repo.listProjects(),
     ]).then(function (results) {
       var projects = results[0] || [];
       var scopeOpts = '<option value="user">User (~/.claude)</option>';
@@ -453,7 +453,7 @@ window.Dialogs = (function () {
         goBtn.disabled = true;
         goBtn.textContent = 'Creating\u2026';
         errEl.hidden = true;
-        var r = await window.klaus.createSkillFile({ type: selectedType, scope: scopeSel.value, name: name });
+        var r = await window.klaus.skills.createFile({ type: selectedType, scope: scopeSel.value, name: name });
         if (r && r.error) {
           errEl.hidden = false;
           errEl.textContent = r.error;
@@ -474,7 +474,7 @@ window.Dialogs = (function () {
 
   function loadSkillPreview(pane, filePath, name) {
     pane.innerHTML = '<div class="skills-preview-loading">Loading\u2026</div>';
-    window.klaus.readSkillFile(filePath).then(function (result) {
+    window.klaus.skills.readFile(filePath).then(function (result) {
       if (result && result.error) {
         pane.innerHTML = '<div class="skills-preview-empty">Failed to read: ' + escHtml(result.error) + '</div>';
         return;
@@ -512,7 +512,7 @@ window.Dialogs = (function () {
         saveBtn.disabled = true;
         var origText = saveBtn.textContent;
         saveBtn.textContent = 'Saving\u2026';
-        var r = await window.klaus.writeSkillFile(filePath, ta.value);
+        var r = await window.klaus.skills.writeFile(filePath, ta.value);
         if (r && r.error) {
           alert('Save failed: ' + r.error);
           saveBtn.disabled = false;
@@ -570,7 +570,7 @@ window.Dialogs = (function () {
 
     function refresh() {
       body.innerHTML = '<div class="skills-loading">Reading gh auth status\u2026</div>';
-      window.klaus.ghListAccounts().then(function (r) {
+      window.klaus.gh.listAccounts().then(function (r) {
         var accounts = (r && r.accounts) || [];
         if (accounts.length === 0) {
           body.innerHTML = '<div class="skills-empty">'
@@ -592,7 +592,7 @@ window.Dialogs = (function () {
             btn.disabled = true;
             var orig = btn.querySelector('.gh-account-switch');
             if (orig) orig.textContent = 'Switching\u2026';
-            var result = await window.klaus.ghSwitchAccount(btn.dataset.username);
+            var result = await window.klaus.gh.switchAccount(btn.dataset.username);
             if (result && result.error) {
               alert('Switch failed: ' + result.error);
               refresh();
@@ -629,7 +629,7 @@ window.Dialogs = (function () {
     var previewPane = dialog.querySelector('.skills-preview-pane');
 
     function refresh(targetPath) {
-      window.klaus.listMemoryFiles().then(function (r) {
+      window.klaus.skills.listMemory().then(function (r) {
         var entries = (r && r.entries) || [];
         listPane.innerHTML =
           '<div class="skills-section-head">Scopes <span class="skills-section-count">' + entries.length + '</span></div>'
@@ -684,7 +684,7 @@ window.Dialogs = (function () {
     go.addEventListener('click', async function () {
       go.disabled = true;
       go.textContent = 'Creating\u2026';
-      var r = await window.klaus.createMemoryFile(filePath);
+      var r = await window.klaus.skills.createMemory(filePath);
       if (r && r.error) {
         err.hidden = false;
         err.textContent = r.error;
@@ -758,7 +758,7 @@ window.Dialogs = (function () {
     dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
     var pane = dialog.querySelector('.skills-list-pane');
 
-    window.klaus.listMcpServers().then(function (r) {
+    window.klaus.skills.listMcp().then(function (r) {
       var servers = (r && r.servers) || [];
       if (servers.length === 0) {
         pane.innerHTML = '<div class="skills-empty">'
@@ -809,7 +809,7 @@ window.Dialogs = (function () {
     dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
     var pane = dialog.querySelector('.skills-list-pane');
 
-    window.klaus.listPlugins().then(function (r) {
+    window.klaus.skills.listPlugins().then(function (r) {
       var plugins = (r && r.plugins) || [];
       if (plugins.length === 0) {
         pane.innerHTML = '<div class="skills-empty">'
@@ -832,7 +832,7 @@ window.Dialogs = (function () {
           + '</div>';
         }).join('') + '</div>';
       pane.querySelectorAll('.skills-row').forEach(function (row) {
-        row.addEventListener('click', function () { window.klaus.openSkillFile(row.dataset.path); });
+        row.addEventListener('click', function () { window.klaus.skills.openFile(row.dataset.path); });
       });
     });
   }

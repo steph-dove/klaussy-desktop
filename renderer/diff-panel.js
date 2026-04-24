@@ -48,7 +48,7 @@ window.DiffPanel = (function () {
     document.getElementById('btn-fetch').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
-      var result = await window.klaus.gitFetch(currentWorktreePath);
+      var result = await window.klaus.git.fetch(currentWorktreePath);
       this.disabled = false;
       this.textContent = 'Fetch';
       updateAheadBehind();
@@ -57,7 +57,7 @@ window.DiffPanel = (function () {
     document.getElementById('btn-pull').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
-      var result = await window.klaus.gitPull(currentWorktreePath);
+      var result = await window.klaus.git.pull(currentWorktreePath);
       this.disabled = false;
       this.textContent = 'Pull';
       updateAheadBehind();
@@ -268,7 +268,7 @@ window.DiffPanel = (function () {
       if (!body) return;
       postBtn.disabled = true;
       postBtn.textContent = '...';
-      var result = await window.klaus.prAddReviewComment({
+      var result = await window.klaus.pr.addReviewComment({
         worktreePath: currentWorktreePath,
         prNumber: pr.number,
         body: body,
@@ -325,7 +325,7 @@ window.DiffPanel = (function () {
     window.getSelection().removeAllRanges();
 
     var file = selectedFile || 'unknown';
-    var result = await window.klaus.explainDiff(currentWorktreePath, file, text);
+    var result = await window.klaus.ai.explainDiff(currentWorktreePath, file, text);
 
     if (result.error) {
       explanationEl.querySelector('.diff-explanation-body').className = 'diff-explanation-body diff-error';
@@ -342,8 +342,8 @@ window.DiffPanel = (function () {
     stopWatching();
     if (!worktreePath) return;
     watchedWorktreePath = worktreePath;
-    window.klaus.watchWorktree(worktreePath);
-    unsubscribeWatcher = window.klaus.onWorktreeChanged(function (data) {
+    window.klaus.fs.watchWorktree(worktreePath);
+    unsubscribeWatcher = window.klaus.fs.onWorktreeChanged(function (data) {
       if (data.worktreePath !== watchedWorktreePath) return;
       refresh();
       updateAheadBehind();
@@ -354,7 +354,7 @@ window.DiffPanel = (function () {
 
   function stopWatching() {
     if (unsubscribeWatcher) { try { unsubscribeWatcher(); } catch (_) {} unsubscribeWatcher = null; }
-    if (watchedWorktreePath) { window.klaus.unwatchWorktree(watchedWorktreePath); watchedWorktreePath = null; }
+    if (watchedWorktreePath) { window.klaus.fs.unwatchWorktree(watchedWorktreePath); watchedWorktreePath = null; }
     if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
   }
 
@@ -414,7 +414,7 @@ window.DiffPanel = (function () {
       return;
     }
 
-    const result = await window.klaus.gitStatus(currentWorktreePath);
+    const result = await window.klaus.git.status(currentWorktreePath);
     if (result.error) {
       fileListEl.innerHTML = '<div class="diff-error">' + escHtml(result.error) + '</div>';
       return;
@@ -438,7 +438,7 @@ window.DiffPanel = (function () {
       fileListEl.innerHTML = renderModeToggle('') + '<div class="diff-empty">Select a base branch</div>';
       return;
     }
-    var result = await window.klaus.gitBranchFiles(currentWorktreePath, baseBranch);
+    var result = await window.klaus.git.branchFiles(currentWorktreePath, baseBranch);
     if (result.error) {
       fileListEl.innerHTML = renderModeToggle('') + '<div class="diff-error">' + escHtml(result.error) + '</div>';
       return;
@@ -514,7 +514,7 @@ window.DiffPanel = (function () {
 
         // Fetch branches if not cached
         if (branchList.length === 0) {
-          var result = await window.klaus.gitBranches(currentWorktreePath);
+          var result = await window.klaus.git.branches(currentWorktreePath);
           branchList = result.branches || [];
           remoteList = result.remotes || [];
         }
@@ -662,16 +662,16 @@ window.DiffPanel = (function () {
         var file = btn.dataset.file;
         var action = btn.dataset.action;
         if (action === 'stage') {
-          await window.klaus.gitStage(currentWorktreePath, [file]);
+          await window.klaus.git.stage(currentWorktreePath, [file]);
         } else if (action === 'unstage') {
-          await window.klaus.gitUnstage(currentWorktreePath, [file]);
+          await window.klaus.git.unstage(currentWorktreePath, [file]);
         } else if (action === 'discard') {
           // Use a visible confirmation
           btn.textContent = '?';
           btn.title = 'Click again to confirm discard';
           btn.dataset.action = 'discard-confirm';
         } else if (action === 'discard-confirm') {
-          await window.klaus.gitDiscard(currentWorktreePath, [file]);
+          await window.klaus.git.discard(currentWorktreePath, [file]);
         }
         if (action !== 'discard') await refresh();
       });
@@ -707,14 +707,14 @@ window.DiffPanel = (function () {
     currentDiffStaged = !!staged;
     selectedLineKeys = new Set();
     if (diffMode === 'branch' && baseBranch) {
-      result = await window.klaus.gitBranchDiff(currentWorktreePath, baseBranch, file);
+      result = await window.klaus.git.branchDiff(currentWorktreePath, baseBranch, file);
     } else {
-      result = await window.klaus.gitDiff(currentWorktreePath, file, staged);
+      result = await window.klaus.git.diff(currentWorktreePath, file, staged);
     }
     if (result.error || !result.diff) {
       // For untracked files, try to show file content
       if (!result.diff) {
-        var fileResult = await window.klaus.readFile(currentWorktreePath + '/' + file);
+        var fileResult = await window.klaus.fs.readFile(currentWorktreePath + '/' + file);
         if (fileResult.content) {
           var lang = detectLang(file);
           var highlighted = null;
@@ -851,7 +851,7 @@ window.DiffPanel = (function () {
         btn.textContent = 'Thinking...';
 
         var hunkText = hunk.lines.join('\n');
-        var result = await window.klaus.explainDiff(currentWorktreePath, file, hunkText);
+        var result = await window.klaus.ai.explainDiff(currentWorktreePath, file, hunkText);
 
         btn.disabled = false;
         btn.textContent = 'Explain';
@@ -973,7 +973,7 @@ window.DiffPanel = (function () {
       alert('Nothing to ' + (reverse ? 'unstage' : 'stage') + '.');
       return;
     }
-    var result = await window.klaus.gitApplyPatch(currentWorktreePath, patch, reverse);
+    var result = await window.klaus.git.applyPatch(currentWorktreePath, patch, reverse);
     if (result.error) {
       alert((reverse ? 'Unstage' : 'Stage') + ' failed:\n' + result.error);
       return;
@@ -1324,7 +1324,7 @@ window.DiffPanel = (function () {
     var btn = document.getElementById('btn-do-commit');
     btn.disabled = true;
     btn.textContent = 'Committing...';
-    var result = await window.klaus.gitCommit(currentWorktreePath, msg);
+    var result = await window.klaus.git.commit(currentWorktreePath, msg);
     btn.disabled = false;
     btn.textContent = 'Commit';
     if (!result || result.error) {
@@ -1359,7 +1359,7 @@ window.DiffPanel = (function () {
     var btn = document.getElementById('btn-claude-commit-msg');
     // Toggle behavior: second click while streaming cancels.
     if (commitMsgRequestId) {
-      try { await window.klaus.claudeCommitMessageCancel(commitMsgRequestId); } catch (_) {}
+      try { await window.klaus.ai.commitMessageCancel(commitMsgRequestId); } catch (_) {}
       resetCommitMsgState();
       btn.textContent = '✨';
       btn.disabled = false;
@@ -1375,11 +1375,11 @@ window.DiffPanel = (function () {
     // entered something they wanted to keep they wouldn't have clicked this.
     commitInput.value = '';
 
-    commitMsgUnsubChunk = window.klaus.onClaudeCommitMessageChunk(requestId, function (chunk) {
+    commitMsgUnsubChunk = window.klaus.ai.onCommitMessageChunk(requestId, function (chunk) {
       if (commitMsgRequestId !== requestId) return;
       commitInput.value += chunk;
     });
-    commitMsgUnsubDone = window.klaus.onClaudeCommitMessageDone(requestId, function (msg) {
+    commitMsgUnsubDone = window.klaus.ai.onCommitMessageDone(requestId, function (msg) {
       if (commitMsgRequestId !== requestId) return;
       resetCommitMsgState();
       btn.textContent = '✨';
@@ -1397,7 +1397,7 @@ window.DiffPanel = (function () {
       commitInput.focus();
     });
 
-    var start = await window.klaus.claudeCommitMessageStart(requestId, currentWorktreePath);
+    var start = await window.klaus.ai.commitMessageStart(requestId, currentWorktreePath);
     if (start && start.error) {
       resetCommitMsgState();
       btn.textContent = '✨';
@@ -1426,7 +1426,7 @@ window.DiffPanel = (function () {
     var btn = document.getElementById('btn-push');
     btn.disabled = true;
     btn.textContent = 'Pushing...';
-    var result = await window.klaus.gitPush(currentWorktreePath);
+    var result = await window.klaus.git.push(currentWorktreePath);
     btn.disabled = false;
     if (result.error) {
       btn.textContent = 'Failed';
@@ -1463,7 +1463,7 @@ window.DiffPanel = (function () {
     var btn = document.getElementById('btn-create-pr');
     btn.disabled = true;
     btn.textContent = 'Creating...';
-    var result = await window.klaus.createPR(currentWorktreePath, title, body);
+    var result = await window.klaus.git.createPR(currentWorktreePath, title, body);
     btn.disabled = false;
     btn.textContent = 'PR';
     if (result.error) {
@@ -1471,7 +1471,7 @@ window.DiffPanel = (function () {
       return;
     }
     if (result.url) {
-      window.klaus.openExternal(result.url);
+      window.klaus.gh.openExternal(result.url);
     }
     // Refresh PR panel so it picks up the new PR
     if (window.PRPanel) window.PRPanel.loadPR();
@@ -1480,7 +1480,7 @@ window.DiffPanel = (function () {
   async function stageAll() {
     var unstaged = currentFiles.filter(function (f) { return !f.staged; }).map(function (f) { return f.file; });
     if (unstaged.length > 0) {
-      await window.klaus.gitStage(currentWorktreePath, unstaged);
+      await window.klaus.git.stage(currentWorktreePath, unstaged);
       await refresh();
     }
   }
@@ -1488,7 +1488,7 @@ window.DiffPanel = (function () {
   async function unstageAll() {
     var staged = currentFiles.filter(function (f) { return f.staged; }).map(function (f) { return f.file; });
     if (staged.length > 0) {
-      await window.klaus.gitUnstage(currentWorktreePath, staged);
+      await window.klaus.git.unstage(currentWorktreePath, staged);
       await refresh();
     }
   }
@@ -1675,7 +1675,7 @@ window.DiffPanel = (function () {
   async function updateAheadBehind() {
     if (!currentWorktreePath) return;
     var el = document.getElementById('ahead-behind');
-    var result = await window.klaus.gitAheadBehind(currentWorktreePath);
+    var result = await window.klaus.git.aheadBehind(currentWorktreePath);
     var parts = [];
     if (result.ahead > 0) parts.push('\u2191' + result.ahead);
     if (result.behind > 0) parts.push('\u2193' + result.behind);
@@ -1692,7 +1692,7 @@ window.DiffPanel = (function () {
     branchLabel.title = 'Click to switch branch';
     branchLabel.addEventListener('click', async function () {
       if (branchList.length === 0) {
-        var result = await window.klaus.gitBranches(currentWorktreePath);
+        var result = await window.klaus.git.branches(currentWorktreePath);
         branchList = result.branches || [];
         remoteList = result.remotes || [];
       }
@@ -1701,7 +1701,7 @@ window.DiffPanel = (function () {
       var choice = prompt('Switch to branch:\n\n' + allBranches.join('\n'));
       if (!choice || !choice.trim()) return;
 
-      var res = await window.klaus.gitCheckout(currentWorktreePath, choice.trim());
+      var res = await window.klaus.git.checkout(currentWorktreePath, choice.trim());
       if (res.error) {
         alert('Checkout failed: ' + res.error);
       } else {
@@ -1714,7 +1714,7 @@ window.DiffPanel = (function () {
   // D7: Conflict detection
   async function checkConflicts() {
     if (!currentWorktreePath) return;
-    var result = await window.klaus.gitConflicts(currentWorktreePath);
+    var result = await window.klaus.git.conflicts(currentWorktreePath);
     if (result.files && result.files.length > 0) {
       var conflictBanner = fileListEl.querySelector('.conflict-banner');
       if (!conflictBanner) {

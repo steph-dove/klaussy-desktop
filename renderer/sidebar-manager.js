@@ -28,7 +28,7 @@ window.Sidebar = (function () {
       if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')) return;
       if (e.target.classList.contains('ci-status-icon')) {
         var url = e.target.dataset.url;
-        if (url) window.klaus.openExternal(url);
+        if (url) window.klaus.gh.openExternal(url);
         return;
       }
       TerminalManager.switchToTask(task.id);
@@ -42,7 +42,7 @@ window.Sidebar = (function () {
         branch: task.branch || '',
       };
       stopDirtyWatch(task);
-      await window.klaus.killTask(task.id);
+      await window.klaus.task.kill(task.id);
       TerminalManager.removeTaskFromUI(task.id);
       // Plain-folder tasks have no branch — re-attaching requires a git repo,
       // so don't offer the reopen row; the user can re-launch via Open Folder.
@@ -51,7 +51,7 @@ window.Sidebar = (function () {
 
     // Task notes
     var noteBtn = item.querySelector('.task-note-btn');
-    window.klaus.getTaskNote(task.name).then(function (result) {
+    window.klaus.task.getNote(task.name).then(function (result) {
       if (result.note) noteBtn.classList.add('has-note');
     });
     noteBtn.addEventListener('click', function (e) {
@@ -73,17 +73,17 @@ window.Sidebar = (function () {
 
   function startDirtyWatch(task) {
     if (!task || !task.worktreePath) return;
-    window.klaus.watchWorktree(task.worktreePath);
+    window.klaus.fs.watchWorktree(task.worktreePath);
     refreshDirty(task.id);
   }
 
   function stopDirtyWatch(task) {
     if (!task || !task.worktreePath) return;
-    window.klaus.unwatchWorktree(task.worktreePath);
+    window.klaus.fs.unwatchWorktree(task.worktreePath);
   }
 
   async function refreshDirty(taskId) {
-    var state = await window.klaus.getWorktreeState(taskId);
+    var state = await window.klaus.task.getWorktreeState(taskId);
     if (!state) return;
     applyDirtyIndicator(taskId, state);
   }
@@ -115,7 +115,7 @@ window.Sidebar = (function () {
     return null;
   }
 
-  window.klaus.onWorktreeChanged(function (data) {
+  window.klaus.fs.onWorktreeChanged(function (data) {
     var taskId = findTaskIdByWorktree(data.worktreePath);
     if (taskId !== null) refreshDirty(taskId);
   });
@@ -154,14 +154,14 @@ window.Sidebar = (function () {
     document.body.appendChild(popover);
     activeNotePopover = popover;
 
-    window.klaus.getTaskNote(taskName).then(function (result) {
+    window.klaus.task.getNote(taskName).then(function (result) {
       textarea.value = result.note || '';
       textarea.focus();
     });
 
     textarea.addEventListener('blur', function () {
       var note = textarea.value.trim();
-      window.klaus.setTaskNote(taskName, note);
+      window.klaus.task.setNote(taskName, note);
       anchorEl.classList.toggle('has-note', note.length > 0);
       setTimeout(function () {
         if (activeNotePopover === popover) {
@@ -231,9 +231,9 @@ window.Sidebar = (function () {
     }
     btn.addEventListener('click', async function (e) {
       e.stopPropagation();
-      var sessionId = await window.klaus.getLatestSession(task.worktreePath);
+      var sessionId = await window.klaus.session.getLatest(task.worktreePath);
       var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-      window.klaus.writeTerminal(id, cmd + '\n');
+      window.klaus.terminal.write(id, cmd + '\n');
       task.mode = 'claude';
       updateMode(id, 'claude');
       btn.remove();
@@ -283,7 +283,7 @@ window.Sidebar = (function () {
       var newName = input.value.trim() || original;
       nameEl.textContent = newName;
       task.name = newName;
-      window.klaus.renameTask(id, newName);
+      window.klaus.task.rename(id, newName);
       var gridLabel = task.container.querySelector('.grid-label');
       if (gridLabel) {
         var dot = gridLabel.querySelector('.grid-dot');
