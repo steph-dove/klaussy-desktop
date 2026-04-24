@@ -16,8 +16,14 @@
   <key>com.apple.security.network.client</key>
   <true/>
 
-  <!-- Read user-selected files / dirs (project picker, basepath browse). -->
-  <key>com.apple.security.files.user-selected.read-write</key>
-  <true/>
+  <!-- NOTE: com.apple.security.files.user-selected.read-write was removed.
+       It is a sandbox-only entitlement that activates PowerBox + scoped
+       bookmark serialization for NSOpenPanel selections. Klaussy is
+       hardened-runtime but NOT sandboxed, so it already has POSIX
+       filesystem access and doesn't need PowerBox. Leaving it on caused a
+       hang on some machines where com.apple.ScopedBookmarkAgent was
+       unresponsive — NSOpenPanel's dismiss handler blocks in a sync XPC
+       call to that daemon (see sample: syncMessageToScopedBookmarksAgent
+       → mach_msg2_trap). Force-quit was the only recovery. -->
 </dict>
 </plist>

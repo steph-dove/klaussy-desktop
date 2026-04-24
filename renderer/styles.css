@@ -855,44 +855,83 @@ body {
   line-height: 1.4;
 }
 
+/* Directory picker dialog (reusable, replaces NSOpenPanel) */
+#dir-pick-drop {
+  display: flex;
+  align-items: center;
+  background: var(--input-bg);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 14px 12px;
+  margin-top: 6px;
+  transition: border-color 120ms, background 120ms;
+}
+
+#dir-pick-drop.drag-over {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+#dir-pick-input {
+  flex: 1;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  min-width: 0;
+}
+
+#dir-pick-input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+#dir-pick-error {
+  color: var(--error);
+  font-size: 12px;
+  min-height: 16px;
+  margin-top: 8px;
+}
+
 /* Path picker */
 #path-picker {
   display: flex;
   align-items: center;
   gap: 8px;
   background: var(--input-bg);
-  border: 1px solid var(--border);
+  border: 1px dashed var(--border);
   border-radius: 8px;
-  padding: 4px 4px 4px 12px;
+  padding: 14px 12px;
+  transition: border-color 120ms, background 120ms;
 }
 
-#path-display {
+#path-input {
   flex: 1;
   font-size: 13px;
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
   color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  min-width: 0;
 }
 
-#path-display.has-path {
+#path-input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+#path-input.has-path {
   color: var(--text);
 }
 
-#btn-browse {
+#path-picker.drag-over {
+  border-color: var(--accent, #4a9eff);
   background: var(--surface-hover);
-  color: var(--text-muted);
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-#btn-browse:hover {
-  background: var(--border);
 }
 
 /* Branch picker (from branch tab) */
@@ -1063,39 +1102,37 @@ body {
   align-items: center;
   gap: 8px;
   background: var(--input-bg);
-  border: 1px solid var(--border);
+  border: 1px dashed var(--border);
   border-radius: 8px;
-  padding: 4px 4px 4px 12px;
+  padding: 8px 12px;
   min-width: 0;
+  transition: border-color 120ms, background 120ms;
 }
 
-#basepath-display {
+#basepath-row.drag-over {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+#basepath-input {
   flex: 1;
   font-size: 13px;
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
   color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#basepath-display.has-path {
-  color: var(--text);
-}
-
-#btn-basepath {
-  background: var(--surface-hover);
-  color: var(--text-muted);
+  background: transparent;
   border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
+  outline: none;
+  padding: 0;
+  min-width: 0;
 }
 
-#btn-basepath:hover {
-  background: var(--border);
+#basepath-input::placeholder {
+  color: var(--text-dim);
+  opacity: 0.7;
+}
+
+#basepath-input.has-path {
+  color: var(--text);
 }
 
 /* Shell selector */

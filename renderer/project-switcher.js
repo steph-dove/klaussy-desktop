@@ -57,7 +57,12 @@ window.ProjectSwitcher = (function () {
   });
 
   btnAddProject.addEventListener('click', async function () {
-    var result = await window.klaus.repo.addProject();
+    var dir = await window.pickDirectoryPopup({
+      title: 'Add project',
+      placeholder: 'Drag a git repo folder here or paste a path',
+    });
+    if (!dir) return;
+    var result = await window.klaus.repo.addProject(dir);
     if (result) {
       AppState.repoPath = result.path;
       await loadProjects();

@@ -234,8 +234,7 @@
         <div id="basepath-picker">
           <label>Location:</label>
           <div id="basepath-row">
-            <span id="basepath-display">Default</span>
-            <button id="btn-basepath">Change</button>
+            <input id="basepath-input" type="text" spellcheck="false" autocomplete="off" placeholder="Default (repo parent dir) — drag a folder or paste to override">
           </div>
         </div>
       </div>
@@ -244,8 +243,7 @@
       <div id="tab-existing" class="tab-content">
         <p>Select an existing worktree directory to attach Claude Code to.</p>
         <div id="path-picker">
-          <span id="path-display">No directory selected</span>
-          <button id="btn-browse">Browse</button>
+          <input id="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
         </div>
       </div>
 
@@ -268,6 +266,23 @@
       <div id="modal-actions">
         <button id="modal-cancel">Cancel</button>
         <button id="modal-create">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Directory picker dialog: replaces native NSOpenPanel file browser because
+       macOS's scopedbookmarksagent can wedge and freeze the app. Paste a path
+       or drag a folder from Finder. -->
+  <div id="dir-pick-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="dir-pick-modal" class="klaus-modal">
+      <h3 id="dir-pick-title">Select folder</h3>
+      <div id="dir-pick-drop">
+        <input id="dir-pick-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
+      </div>
+      <div id="dir-pick-error"></div>
+      <div class="klaus-modal-actions">
+        <button id="dir-pick-cancel" class="klaus-btn klaus-btn-ghost">Cancel</button>
+        <button id="dir-pick-ok" class="klaus-btn klaus-btn-primary">Select</button>
       </div>
     </div>
   </div>

@@ -173,6 +173,7 @@ window.PrReview = (function () {
         + '</div>'
         + '<div class="pr-review-actions">'
           + '<a href="#" class="pr-review-external" data-url="' + escHtml(meta.url || '') + '">Open on GitHub</a>'
+          + '<button class="pr-review-btn js-pull-updates" title="Re-fetch PR data + advance the local worktree to the PR’s latest commit">Pull updates</button>'
           + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this PR">Review with Claude</button>'
           + '<button class="pr-review-btn js-checkout-local" title="Fetch this PR into a new worktree and spawn a task">Check out locally</button>'
           + renderMergeControl(state)
@@ -657,6 +658,33 @@ window.PrReview = (function () {
     if (popIn) popIn.addEventListener('click', function () { window.klaus.pr.popIn(); });
     var closeBtn = hostEl.querySelector('.js-close');
     if (closeBtn) closeBtn.addEventListener('click', function () { window.klaus.pr.reviewClose(); });
+    var pullBtn = hostEl.querySelector('.js-pull-updates');
+    if (pullBtn) pullBtn.addEventListener('click', async function () {
+      pullBtn.disabled = true;
+      var prev = pullBtn.textContent;
+      pullBtn.textContent = 'Pulling…';
+      try {
+        var r = await window.klaus.pr.pullUpdates();
+        if (r && r.error) {
+          window.toast.error('Pull failed:\n' + r.error);
+          return;
+        }
+        var bits = ['PR data refreshed.'];
+        if (r.worktreeRefreshed === 'updated') bits.push('Worktree updated to latest commit.');
+        else if (r.worktreeRefreshed === 'up-to-date') bits.push('Worktree already at latest commit.');
+        else if (r.worktreeRefreshed === 'kept-local') bits.push('Worktree has local changes — left alone.');
+        else if (r.worktreeRefreshed === 'fetch-failed') bits.push('Worktree fetch failed.');
+        // 'no-worktree' → silent, no need to mention.
+        if (r.worktreeRefreshed === 'kept-local' || r.worktreeRefreshed === 'fetch-failed') {
+          window.toast.warn(bits.join(' '));
+        } else {
+          window.toast.info(bits.join(' '));
+        }
+      } finally {
+        pullBtn.disabled = false;
+        pullBtn.textContent = prev;
+      }
+    });
     var checkoutBtn = hostEl.querySelector('.js-checkout-local');
     if (checkoutBtn) checkoutBtn.addEventListener('click', async function () {
       checkoutBtn.disabled = true;
@@ -667,6 +695,16 @@ window.PrReview = (function () {
         window.toast.error('Check out failed:\n' + result.error);
         checkoutBtn.disabled = false;
         checkoutBtn.textContent = prev;
+      } else if (result && result.reused) {
+        // Reused an existing worktree — surface whether we managed to pull
+        // the PR's latest commits in. 'updated': fast-forwarded successfully.
+        // 'kept-local': user has local changes, worktree left as-is. Other
+        // values are quiet (no toast for already-up-to-date or fetch errors).
+        if (result.refreshed === 'updated') {
+          window.toast.info('Worktree updated to PR’s latest commit.');
+        } else if (result.refreshed === 'kept-local') {
+          window.toast.warn('Worktree has local changes — not updated. Stash or commit, then re-open.');
+        }
       }
       // Success path: main clears state and broadcasts pr-checkout-ready;
       // the main-window listener in app.js takes over from here.

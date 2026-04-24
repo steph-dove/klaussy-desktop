@@ -303,7 +303,48 @@ async function ensureWorktreeForActivePr() {
 
   const existingWorktreePath = findWorktreeForBranch(cwd, localBranch);
   if (existingWorktreePath) {
-    return { worktreePath: existingWorktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true };
+    // Refresh the existing worktree against the PR's latest commit. We fetch
+    // into FETCH_HEAD (not into the branch ref) so this is safe even though
+    // the worktree currently has the branch checked out — git refuses to
+    // force-update a branch that's checked out anywhere. Then we attempt a
+    // fast-forward merge: succeeds when the user has no local commits and a
+    // clean working tree, fails (and we leave the worktree alone) when the
+    // user has local changes we shouldn't destroy.
+    let beforeSha = '';
+    try {
+      beforeSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: existingWorktreePath, stdio: 'pipe',
+      }).toString().trim();
+    } catch (_) {}
+    let refreshed = 'none'; // 'updated' | 'up-to-date' | 'kept-local' | 'fetch-failed'
+    try {
+      execFileSync('git', ['fetch', authedUrl, `pull/${number}/head`], {
+        cwd: existingWorktreePath, stdio: 'pipe',
+      });
+      try {
+        execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], {
+          cwd: existingWorktreePath, stdio: 'pipe',
+        });
+        let afterSha = '';
+        try {
+          afterSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: existingWorktreePath, stdio: 'pipe',
+          }).toString().trim();
+        } catch (_) {}
+        refreshed = (beforeSha && afterSha && beforeSha !== afterSha) ? 'updated' : 'up-to-date';
+      } catch (_) {
+        refreshed = 'kept-local';
+      }
+    } catch (_) {
+      refreshed = 'fetch-failed';
+    }
+    return {
+      worktreePath: existingWorktreePath,
+      branch: localBranch,
+      baseRepoCwd: cwd,
+      existed: true,
+      refreshed,
+    };
   }
 
   try {
