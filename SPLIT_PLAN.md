@@ -233,7 +233,7 @@ Phase 3:
 - [x] main/ipc/tasks.js
 - [x] main/ipc/repo.js
 - [x] main/ipc/claude-stream-ipc.js
-- [ ] main/ipc/pr-review.js
+- [x] main/ipc/pr-review.js
 
 Phase 4:
 - [ ] main/bootstrap/menu.js
