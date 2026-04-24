@@ -115,7 +115,7 @@
     var existing = sessions.get(key);
     if (existing && !existing.failed) return existing;
 
-    var startResult = await window.klaus.lspStart(worktreePath, languageId);
+    var startResult = await window.klaus.lsp.start(worktreePath, languageId);
     // If the binary isn't installed, try to auto-install it with a visible
     // inline banner, then retry the start once. Happens once per language per
     // app run; subsequent opens skip straight through because the binary is
@@ -123,7 +123,7 @@
     if (startResult.error && startResult.missing) {
       var installResult = await runAutoInstall(languageId);
       if (installResult.ok) {
-        startResult = await window.klaus.lspStart(worktreePath, languageId);
+        startResult = await window.klaus.lsp.start(worktreePath, languageId);
       } else {
         showInstallBanner(friendlyName(languageId), {
           message: installResult.error || 'Install failed.',
@@ -151,7 +151,7 @@
     };
     sessions.set(key, session);
 
-    session.disposeMessageHandler = window.klaus.onLspMessage(session.serverId, function (msg) {
+    session.disposeMessageHandler = window.klaus.lsp.onMessage(session.serverId, function (msg) {
       if (!msg) return;
       if (msg.type === 'notification') handleServerNotification(session, msg);
       if (msg.type === 'exit') teardownSession(session, /*serverExited*/true);
@@ -160,7 +160,7 @@
     // LSP initialize handshake. Capabilities advertised are the minimum we
     // actually consume back; declaring more would trigger more inbound
     // traffic we'd then have to ignore.
-    var initResult = await window.klaus.lspRequest(session.serverId, 'initialize', {
+    var initResult = await window.klaus.lsp.request(session.serverId, 'initialize', {
       processId: null,
       rootUri: fileUri(worktreePath),
       rootPath: worktreePath,
@@ -203,7 +203,7 @@
       teardownSession(session);
       return null;
     }
-    await window.klaus.lspNotify(session.serverId, 'initialized', {});
+    await window.klaus.lsp.notify(session.serverId, 'initialized', {});
     session.initialized = true;
     // Push initial settings. Pyright specifically will NOT scan the workspace
     // or publish diagnostics until it sees a workspace/didChangeConfiguration
@@ -211,7 +211,7 @@
     // pull never happens because pyright's internal queue is gated on the
     // push. Without this, didOpen goes silent forever. Confirmed via standalone
     // LSP repro (`scripts/pyright-repro.js`).
-    await window.klaus.lspNotify(session.serverId, 'workspace/didChangeConfiguration', {
+    await window.klaus.lsp.notify(session.serverId, 'workspace/didChangeConfiguration', {
       settings: settingsForLanguage(languageId),
     });
 
@@ -296,7 +296,7 @@
   async function runAutoInstall(languageId) {
     var name = friendlyName(languageId);
     showInstallBanner(name, { message: 'Installing ' + name + '…' });
-    var unsubscribe = window.klaus.onLspInstallProgress(languageId, function (msg) {
+    var unsubscribe = window.klaus.lsp.onInstallProgress(languageId, function (msg) {
       if (!msg) return;
       if (msg.type === 'log') {
         updateInstallBanner({ detail: msg.line });
@@ -304,7 +304,7 @@
         updateInstallBanner({ message: 'Running: ' + msg.command });
       }
     });
-    var result = await window.klaus.lspInstall(languageId);
+    var result = await window.klaus.lsp.install(languageId);
     unsubscribe();
     if (result && result.ok) {
       showInstallBanner(name, { message: name + ' installed.', isSuccess: true });
@@ -376,7 +376,7 @@
       });
     }
     if (!serverExited) {
-      window.klaus.lspStop(session.serverId).catch(function () {});
+      window.klaus.lsp.stop(session.serverId).catch(function () {});
     }
   }
 
@@ -407,7 +407,7 @@
     // Sending didClose on a file pyright has never seen can interfere with
     // pyright's first analysis pass on open.
     if (session.openDocs.has(uri)) {
-      window.klaus.lspNotify(session.serverId, 'textDocument/didClose', {
+      window.klaus.lsp.notify(session.serverId, 'textDocument/didClose', {
         textDocument: { uri: uri },
       });
       session.openDocs.delete(uri);
@@ -426,7 +426,7 @@
       Promise.resolve().then(function () { applyDiagnostics(session, stashed); });
     }
 
-    window.klaus.lspNotify(session.serverId, 'textDocument/didOpen', {
+    window.klaus.lsp.notify(session.serverId, 'textDocument/didOpen', {
       textDocument: {
         uri: uri,
         languageId: languageId,
@@ -445,7 +445,7 @@
       if (changeTimer) { clearTimeout(changeTimer); changeTimer = null; }
       if (model.isDisposed()) return;
       version += 1;
-      window.klaus.lspNotify(session.serverId, 'textDocument/didChange', {
+      window.klaus.lsp.notify(session.serverId, 'textDocument/didChange', {
         textDocument: { uri: uri, version: version },
         contentChanges: [{ text: model.getValue() }],
       });
@@ -466,14 +466,14 @@
       try { disposable.dispose(); } catch (_) {}
       if (session.openDocs.has(uri)) {
         session.openDocs.delete(uri);
-        window.klaus.lspNotify(session.serverId, 'textDocument/didClose', {
+        window.klaus.lsp.notify(session.serverId, 'textDocument/didClose', {
           textDocument: { uri: uri },
         });
         // Nudge pyright to treat the file as "possibly changed on disk" when
         // anyone references it next. Without this, pyright's cached analysis
         // tree can hold the pre-rename view and downstream files (importers)
         // won't see stale-import errors on their next open.
-        window.klaus.lspNotify(session.serverId, 'workspace/didChangeWatchedFiles', {
+        window.klaus.lsp.notify(session.serverId, 'workspace/didChangeWatchedFiles', {
           changes: [{ uri: uri, type: 2 }],
         });
       }
@@ -490,11 +490,11 @@
     if (flush) try { flush(); } catch (_) {}
     sessions.forEach(function (session) {
       if (session && session.openDocs && session.openDocs.has(uri)) {
-        window.klaus.lspNotify(session.serverId, 'textDocument/didSave', {
+        window.klaus.lsp.notify(session.serverId, 'textDocument/didSave', {
           textDocument: { uri: uri },
         });
       }
-      window.klaus.lspNotify(session.serverId, 'workspace/didChangeWatchedFiles', {
+      window.klaus.lsp.notify(session.serverId, 'workspace/didChangeWatchedFiles', {
         changes: [{ uri: uri, type: 2 }],
       });
     });
@@ -559,7 +559,7 @@
         var session = sessionForModel(model);
         if (!session) return { suggestions: [] };
         var uri = model.uri.toString();
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/completion', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/completion', {
           textDocument: { uri: uri },
           position: monacoPositionToLsp(position),
           context: { triggerKind: 1 },
@@ -610,7 +610,7 @@
       provideHover: async function (model, position) {
         var session = sessionForModel(model);
         if (!session) return null;
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/hover', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/hover', {
           textDocument: { uri: model.uri.toString() },
           position: monacoPositionToLsp(position),
         });
@@ -638,7 +638,7 @@
       provideDefinition: async function (model, position) {
         var session = sessionForModel(model);
         if (!session) return null;
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/definition', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/definition', {
           textDocument: { uri: model.uri.toString() },
           position: monacoPositionToLsp(position),
         });
@@ -671,7 +671,7 @@
       provideDocumentFormattingEdits: async function (model) {
         var session = sessionForModel(model);
         if (!session) return null;
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/formatting', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/formatting', {
           textDocument: { uri: model.uri.toString() },
           options: { tabSize: model.getOptions().tabSize || 2, insertSpaces: true },
         });
@@ -686,7 +686,7 @@
       provideDocumentRangeFormattingEdits: async function (model, range) {
         var session = sessionForModel(model);
         if (!session) return null;
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/rangeFormatting', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/rangeFormatting', {
           textDocument: { uri: model.uri.toString() },
           range: {
             start: monacoPositionToLsp({ lineNumber: range.startLineNumber, column: range.startColumn }),
@@ -729,7 +729,7 @@
       provideRenameEdits: async function (model, position, newName) {
         var session = sessionForModel(model);
         if (!session) return null;
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/rename', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/rename', {
           textDocument: { uri: model.uri.toString() },
           position: monacoPositionToLsp(position),
           newName: newName,
@@ -779,7 +779,7 @@
             code: m.code,
           };
         }) : [];
-        var resp = await window.klaus.lspRequest(session.serverId, 'textDocument/codeAction', {
+        var resp = await window.klaus.lsp.request(session.serverId, 'textDocument/codeAction', {
           textDocument: { uri: model.uri.toString() },
           range: {
             start: monacoPositionToLsp({ lineNumber: range.startLineNumber, column: range.startColumn }),

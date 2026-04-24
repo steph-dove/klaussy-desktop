@@ -1,5 +1,5 @@
 (async function () {
-  var prefs = await window.klaus.getPreferences();
+  var prefs = await window.klaus.ui.getPreferences();
 
   // Theme options (mirror theme.js presets)
   var themes = [
@@ -58,7 +58,7 @@
   loadClaudeInfo();
 
   async function loadClaudeInfo() {
-    var info = await window.klaus.getClaudeInfo();
+    var info = await window.klaus.ui.getClaudeInfo();
     if (info.version === 'not found') {
       claudeInfo.innerHTML = 'Status: <span class="not-found">not found</span>';
     } else {
@@ -187,7 +187,7 @@
       autoFetchInterval: fetchSeconds * 1000,
     };
 
-    await window.klaus.setPreferences(updated);
+    await window.klaus.ui.setPreferences(updated);
     showStatus('Saved');
   }
 

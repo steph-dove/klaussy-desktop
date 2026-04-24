@@ -68,7 +68,7 @@ window.PrReview = (function () {
     // pencil shows on a comment. If this fails we simply don't show the
     // pencil anywhere — no error state needed.
     if (!currentUserLogin) {
-      window.klaus.prCurrentUser().then(function (r) {
+      window.klaus.pr.currentUser().then(function (r) {
         if (r && r.login) {
           currentUserLogin = r.login;
           if (lastState) render(lastState);
@@ -76,7 +76,7 @@ window.PrReview = (function () {
       });
     }
 
-    unsubState = window.klaus.onPrReviewState(function (state) {
+    unsubState = window.klaus.pr.onReviewState(function (state) {
       if (!state) {
         // In the pop-out, no state = the review was closed elsewhere, so the
         // window has nothing left to show. In the main window, app.js owns
@@ -87,7 +87,7 @@ window.PrReview = (function () {
       render(state);
     });
 
-    window.klaus.prReviewState().then(function (state) {
+    window.klaus.pr.reviewState().then(function (state) {
       if (!state) {
         renderEmpty();
         return;
@@ -125,10 +125,10 @@ window.PrReview = (function () {
       currentChecks = null;
       // Tear down any in-flight AI work for the previous PR so we don't bleed
       // findings/state across PRs.
-      if (aiReview.requestId) window.klaus.prReviewAiCancel(aiReview.requestId);
-      if (aiReview.implementAllId) window.klaus.prReviewImplementCancel(aiReview.implementAllId);
+      if (aiReview.requestId) window.klaus.pr.reviewAiCancel(aiReview.requestId);
+      if (aiReview.implementAllId) window.klaus.pr.reviewImplementCancel(aiReview.implementAllId);
       aiReview.findings.forEach(function (f) {
-        if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
+        if (f.implementId) window.klaus.pr.reviewImplementCancel(f.implementId);
       });
       aiReview = {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
@@ -234,7 +234,7 @@ window.PrReview = (function () {
       if (!body) return;
       btn.disabled = true;
       btn.textContent = 'Posting\u2026';
-      var result = await window.klaus.prAddIssueComment(body);
+      var result = await window.klaus.pr.addIssueComment(body);
       if (result.error) {
         btn.disabled = false;
         btn.textContent = 'Comment';
@@ -242,7 +242,7 @@ window.PrReview = (function () {
         return;
       }
       ta.value = '';
-      await window.klaus.prRefreshThreads();
+      await window.klaus.pr.refreshThreads();
       // render is re-triggered by the pr-review-state broadcast.
     }
 
@@ -292,7 +292,7 @@ window.PrReview = (function () {
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
         if (errEl) errEl.textContent = '';
-        var fn = kind === 'review' ? window.klaus.prEditReviewComment : window.klaus.prEditIssueComment;
+        var fn = kind === 'review' ? window.klaus.pr.editReviewComment : window.klaus.pr.editIssueComment;
         var result = await fn(dbid, body);
         if (result && result.error) {
           saveBtn.disabled = false;
@@ -305,7 +305,7 @@ window.PrReview = (function () {
         editingCommentKind = null;
         // Ask the main process for fresh threads so our state reflects the
         // canonical server view — the override is there for the brief gap.
-        window.klaus.prRefreshThreads();
+        window.klaus.pr.refreshThreads();
         if (lastState) render(lastState);
       });
     });
@@ -343,7 +343,7 @@ window.PrReview = (function () {
       if (!body) return;
       sendBtn.disabled = true;
       sendBtn.textContent = 'Posting\u2026';
-      var result = await window.klaus.prReplyToReviewComment(parentId, body);
+      var result = await window.klaus.pr.replyToReviewComment(parentId, body);
       if (result.error) {
         sendBtn.disabled = false;
         sendBtn.textContent = 'Reply';
@@ -351,7 +351,7 @@ window.PrReview = (function () {
         return;
       }
       composer.remove();
-      await window.klaus.prRefreshThreads();
+      await window.klaus.pr.refreshThreads();
     }
 
     sendBtn.addEventListener('click', send);
@@ -468,7 +468,7 @@ window.PrReview = (function () {
     var existing = hostEl.querySelector('.diff-explanation');
     if (existing) {
       var prevId = existing.dataset.requestId;
-      if (prevId) window.klaus.explainDiffStreamCancel(prevId);
+      if (prevId) window.klaus.ai.explainDiffStreamCancel(prevId);
       existing.remove();
     }
 
@@ -497,7 +497,7 @@ window.PrReview = (function () {
       bodyEl.textContent = EXPLAIN_STATUS_MESSAGES[statusIdx];
     }, 1800);
 
-    var unsubChunk = window.klaus.onExplainDiffChunk(requestId, function (chunk) {
+    var unsubChunk = window.klaus.ai.onExplainDiffChunk(requestId, function (chunk) {
       if (!accumulated) {
         bodyEl.classList.remove('status-pulse');
         bodyEl.textContent = '';
@@ -508,7 +508,7 @@ window.PrReview = (function () {
       bodyEl.scrollTop = bodyEl.scrollHeight;
     });
 
-    var unsubDone = window.klaus.onExplainDiffDone(requestId, function (result) {
+    var unsubDone = window.klaus.ai.onExplainDiffDone(requestId, function (result) {
       clearInterval(statusTimer);
       if (unsubChunk) unsubChunk();
       if (!bodyEl.isConnected) return;
@@ -524,14 +524,14 @@ window.PrReview = (function () {
 
     explanationEl.querySelector('.diff-explanation-close').addEventListener('click', function () {
       clearInterval(statusTimer);
-      window.klaus.explainDiffStreamCancel(requestId);
+      window.klaus.ai.explainDiffStreamCancel(requestId);
       if (unsubChunk) unsubChunk();
       if (unsubDone) unsubDone();
       explanationEl.remove();
     });
 
     if (sel) sel.removeAllRanges();
-    window.klaus.explainDiffStreamStart(requestId, null, selectedFile || 'unknown', text);
+    window.klaus.ai.explainDiffStreamStart(requestId, null, selectedFile || 'unknown', text);
   }
 
   function renderConversationCount(state) {
@@ -649,20 +649,20 @@ window.PrReview = (function () {
     if (extBtn) extBtn.addEventListener('click', function (e) {
       e.preventDefault();
       var url = extBtn.dataset.url;
-      if (url) window.klaus.openExternal(url);
+      if (url) window.klaus.gh.openExternal(url);
     });
     var popOut = hostEl.querySelector('.js-pop-out');
-    if (popOut) popOut.addEventListener('click', function () { window.klaus.popOutPrReview(); });
+    if (popOut) popOut.addEventListener('click', function () { window.klaus.pr.popOut(); });
     var popIn = hostEl.querySelector('.js-pop-in');
-    if (popIn) popIn.addEventListener('click', function () { window.klaus.popInPrReview(); });
+    if (popIn) popIn.addEventListener('click', function () { window.klaus.pr.popIn(); });
     var closeBtn = hostEl.querySelector('.js-close');
-    if (closeBtn) closeBtn.addEventListener('click', function () { window.klaus.prReviewClose(); });
+    if (closeBtn) closeBtn.addEventListener('click', function () { window.klaus.pr.reviewClose(); });
     var checkoutBtn = hostEl.querySelector('.js-checkout-local');
     if (checkoutBtn) checkoutBtn.addEventListener('click', async function () {
       checkoutBtn.disabled = true;
       var prev = checkoutBtn.textContent;
       checkoutBtn.textContent = 'Fetching\u2026';
-      var result = await window.klaus.prCheckoutLocally();
+      var result = await window.klaus.pr.checkoutLocally();
       if (result && result.error) {
         alert('Check out failed:\n' + result.error);
         checkoutBtn.disabled = false;
@@ -687,7 +687,7 @@ window.PrReview = (function () {
   // ---- G7: AI review cache ----
 
   async function loadAiReviewCache(owner, repo, number) {
-    var result = await window.klaus.prReviewCacheGetByPr(owner, repo, number);
+    var result = await window.klaus.pr.cacheGetByPr(owner, repo, number);
     if (!result || !result.cached) return;
     // Bail if the user navigated to a different PR while we were loading.
     if (!lastState || lastState.number !== number) return;
@@ -734,7 +734,7 @@ window.PrReview = (function () {
         usage: f.usage || null,
       };
     });
-    window.klaus.prReviewCacheSaveByPr(
+    window.klaus.pr.cacheSaveByPr(
       lastState.baseOwner, lastState.baseRepo, lastState.number,
       {
         savedAt: new Date().toISOString(),
@@ -1045,13 +1045,13 @@ window.PrReview = (function () {
 
     var rerunBtn = hostEl.querySelector('.pr-ai-rerun');
     if (rerunBtn) rerunBtn.addEventListener('click', function () {
-      if (aiReview.implementAllId) window.klaus.prReviewImplementCancel(aiReview.implementAllId);
+      if (aiReview.implementAllId) window.klaus.pr.reviewImplementCancel(aiReview.implementAllId);
       aiReview.findings.forEach(function (f) {
-        if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
+        if (f.implementId) window.klaus.pr.reviewImplementCancel(f.implementId);
       });
       // Clear the disk cache so Rerun gives a clean slate.
       if (lastState && lastState.baseOwner && lastState.baseRepo) {
-        window.klaus.prReviewCacheClearByPr(lastState.baseOwner, lastState.baseRepo, lastState.number);
+        window.klaus.pr.cacheClearByPr(lastState.baseOwner, lastState.baseRepo, lastState.number);
       }
       aiReview = {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
@@ -1064,7 +1064,7 @@ window.PrReview = (function () {
 
     var cancelBtn = hostEl.querySelector('.pr-ai-cancel');
     if (cancelBtn) cancelBtn.addEventListener('click', function () {
-      if (aiReview.requestId) window.klaus.prReviewAiCancel(aiReview.requestId);
+      if (aiReview.requestId) window.klaus.pr.reviewAiCancel(aiReview.requestId);
     });
 
     var implementAllBtn = hostEl.querySelector('.pr-ai-implement-all');
@@ -1085,7 +1085,7 @@ window.PrReview = (function () {
       if (implementBtn) implementBtn.addEventListener('click', function () { startImplement(f); });
       if (redoBtn) redoBtn.addEventListener('click', function () { startImplement(f); });
       if (cancelImpl) cancelImpl.addEventListener('click', function () {
-        if (f.implementId) window.klaus.prReviewImplementCancel(f.implementId);
+        if (f.implementId) window.klaus.pr.reviewImplementCancel(f.implementId);
       });
       if (commentBtn) commentBtn.addEventListener('click', function () { postFindingAsComment(f); });
 
@@ -1148,7 +1148,7 @@ window.PrReview = (function () {
     repaintAiReviewTab();
 
     var buffered = '';
-    var unsubData = window.klaus.onPrReviewAiData(requestId, function (chunk) {
+    var unsubData = window.klaus.pr.onReviewAiData(requestId, function (chunk) {
       buffered += chunk;
       var idx;
       while ((idx = buffered.indexOf('\n')) !== -1) {
@@ -1160,7 +1160,7 @@ window.PrReview = (function () {
       reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
       repaintAiReviewTab();
     });
-    window.klaus.onPrReviewAiDone(requestId, function (result) {
+    window.klaus.pr.onReviewAiDone(requestId, function (result) {
       if (unsubData) unsubData();
       if (aiReview.requestId !== requestId) return;
       aiReview.requestId = null;
@@ -1173,7 +1173,7 @@ window.PrReview = (function () {
       if (aiReview.finalText) saveAiReviewCache();
     });
 
-    window.klaus.prReviewAiStart(requestId).then(function (r) {
+    window.klaus.pr.reviewAiStart(requestId).then(function (r) {
       if (r && r.error) {
         if (unsubData) unsubData();
         aiReview.requestId = null;
@@ -1248,7 +1248,7 @@ window.PrReview = (function () {
     repaintAiReviewTab();
 
     var buffered = '';
-    var unsubData = window.klaus.onPrReviewImplementData(requestId, function (chunk) {
+    var unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
       buffered += chunk;
       var idx;
       while ((idx = buffered.indexOf('\n')) !== -1) {
@@ -1269,7 +1269,7 @@ window.PrReview = (function () {
       }
       repaintAiReviewTab();
     });
-    window.klaus.onPrReviewImplementDone(requestId, function (result) {
+    window.klaus.pr.onReviewImplementDone(requestId, function (result) {
       if (unsubData) unsubData();
       if (f.implementId !== requestId) return;
       f.implementId = null;
@@ -1285,7 +1285,7 @@ window.PrReview = (function () {
       saveAiReviewCache();
     });
 
-    window.klaus.prReviewImplementStart(requestId, 'one', f.text).then(function (r) {
+    window.klaus.pr.reviewImplementStart(requestId, 'one', f.text).then(function (r) {
       if (r && r.error) {
         if (unsubData) unsubData();
         f.implementId = null;
@@ -1313,7 +1313,7 @@ window.PrReview = (function () {
     var body = (f.commentBody != null && f.commentBody.trim() !== '')
       ? bodyText
       : '> *AI-generated review finding (via Klaussy):*\n\n' + (bodyText || '');
-    var result = await window.klaus.prAddIssueComment(body);
+    var result = await window.klaus.pr.addIssueComment(body);
     if (result && result.error) {
       f.commentStatus = 'failed';
       f.commentError = result.error;
@@ -1323,7 +1323,7 @@ window.PrReview = (function () {
     repaintAiReviewTab();
     saveAiReviewCache();
     // Pull the newly-posted comment into the Conversation tab.
-    if (f.commentStatus === 'posted') window.klaus.prRefreshThreads();
+    if (f.commentStatus === 'posted') window.klaus.pr.refreshThreads();
   }
 
   function startImplementAll() {
@@ -1349,7 +1349,7 @@ window.PrReview = (function () {
 
     var buffered = '';
     var finalText = '';
-    var unsubData = window.klaus.onPrReviewImplementData(requestId, function (chunk) {
+    var unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
       buffered += chunk;
       var idx;
       while ((idx = buffered.indexOf('\n')) !== -1) {
@@ -1375,7 +1375,7 @@ window.PrReview = (function () {
       }
       repaintAiReviewTab();
     });
-    window.klaus.onPrReviewImplementDone(requestId, function (result) {
+    window.klaus.pr.onReviewImplementDone(requestId, function (result) {
       if (unsubData) unsubData();
       if (aiReview.implementAllId !== requestId) return;
       aiReview.implementAllId = null;
@@ -1392,7 +1392,7 @@ window.PrReview = (function () {
       saveAiReviewCache();
     });
 
-    window.klaus.prReviewImplementStart(requestId, 'all', combined).then(function (r) {
+    window.klaus.pr.reviewImplementStart(requestId, 'all', combined).then(function (r) {
       if (r && r.error) {
         if (unsubData) unsubData();
         aiReview.implementAllId = null;
@@ -1605,7 +1605,7 @@ window.PrReview = (function () {
       }
       sendBtn.disabled = true;
       sendBtn.textContent = 'Submitting\u2026';
-      var result = await window.klaus.prSubmitReview({ event: event, body: body, comments: pendingComments });
+      var result = await window.klaus.pr.submitReview({ event: event, body: body, comments: pendingComments });
       if (result.error) {
         sendBtn.disabled = false;
         sendBtn.textContent = 'Submit review';
@@ -1616,7 +1616,7 @@ window.PrReview = (function () {
       pendingComments = [];
       close();
       // Pull in the newly-posted threads so they replace the drafts inline.
-      await window.klaus.prRefreshThreads();
+      await window.klaus.pr.refreshThreads();
     });
   }
 
@@ -1949,7 +1949,7 @@ window.PrReview = (function () {
   // ---- G6: CI checks + merge ----
 
   async function fetchAndRenderChecks(forNumber) {
-    var result = await window.klaus.prReviewChecks();
+    var result = await window.klaus.pr.reviewChecks();
     // Drop stale results if the user switched PRs mid-flight.
     if (!lastState || lastState.number !== forNumber) return;
     currentChecks = result;
@@ -2035,7 +2035,7 @@ window.PrReview = (function () {
         // Don't open the run URL when the user clicks the inline Debug btn.
         if (e.target.closest('.pr-check-debug-btn')) return;
         var url = row.dataset.link;
-        if (url) window.klaus.openExternal(url);
+        if (url) window.klaus.gh.openExternal(url);
       });
     });
     hostEl.querySelectorAll('.pr-check-debug-btn').forEach(function (btn) {
@@ -2063,7 +2063,7 @@ window.PrReview = (function () {
       ? row.nextElementSibling : null;
     if (existing) {
       var existingId = existing.dataset.requestId;
-      if (existingId) window.klaus.prDebugCheckCancel(existingId);
+      if (existingId) window.klaus.pr.debugCheckCancel(existingId);
       existing.remove();
       return;
     }
@@ -2095,7 +2095,7 @@ window.PrReview = (function () {
     // we don't get a usage envelope here. Show duration instead so the user
     // still gets a sense of cost.
     var startedAt = Date.now();
-    var unsubChunk = window.klaus.onPrDebugCheckChunk(requestId, function (chunk) {
+    var unsubChunk = window.klaus.pr.onDebugCheckChunk(requestId, function (chunk) {
       if (!accumulated) {
         bodyEl.classList.remove('status-pulse');
         bodyEl.textContent = '';
@@ -2104,7 +2104,7 @@ window.PrReview = (function () {
       bodyEl.textContent = accumulated;
       bodyEl.scrollTop = bodyEl.scrollHeight;
     });
-    var unsubDone = window.klaus.onPrDebugCheckDone(requestId, function (result) {
+    var unsubDone = window.klaus.pr.onDebugCheckDone(requestId, function (result) {
       clearInterval(statusTimer);
       if (unsubChunk) unsubChunk();
       if (!bodyEl.isConnected) return;
@@ -2124,7 +2124,7 @@ window.PrReview = (function () {
 
     panel.querySelector('.pr-check-debug-close').addEventListener('click', function () {
       clearInterval(statusTimer);
-      window.klaus.prDebugCheckCancel(requestId);
+      window.klaus.pr.debugCheckCancel(requestId);
       if (unsubChunk) unsubChunk();
       if (unsubDone) unsubDone();
       panel.remove();
@@ -2136,7 +2136,7 @@ window.PrReview = (function () {
     // Re-enable button after start so the user can click it again to cancel.
     setTimeout(function () { btn.disabled = false; btn.textContent = origText; }, 200);
 
-    window.klaus.prDebugCheckStart(requestId, btn.dataset.link, btn.dataset.name).then(function (r) {
+    window.klaus.pr.debugCheckStart(requestId, btn.dataset.link, btn.dataset.name).then(function (r) {
       if (r && r.error) {
         clearInterval(statusTimer);
         bodyEl.classList.remove('status-pulse');
@@ -2219,7 +2219,7 @@ window.PrReview = (function () {
       if (!confirm('Merge with "' + label + '"?')) return;
       btn.disabled = true;
       btn.textContent = 'Merging\u2026';
-      var result = await window.klaus.prReviewMerge(strategy);
+      var result = await window.klaus.pr.reviewMerge(strategy);
       if (result && result.error) {
         alert('Merge failed:\n' + result.error);
         btn.textContent = 'Merge \u25BE';

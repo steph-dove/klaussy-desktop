@@ -132,11 +132,11 @@ window.InlineEdit = (function () {
     // prompt lost the `File:` hint.
     var filePath = (s.model && s.model.uri && s.model.uri.fsPath) || null;
     var languageId = s.model.getLanguageId ? s.model.getLanguageId() : undefined;
-    s.disposeChunk = window.klaus.onInlineEditChunk(s.requestId, function (chunk) {
+    s.disposeChunk = window.klaus.ai.onInlineEditChunk(s.requestId, function (chunk) {
       s.buffer += chunk;
       if (s.streamEl) s.streamEl.textContent = s.buffer;
     });
-    s.disposeDone = window.klaus.onInlineEditDone(s.requestId, function (msg) {
+    s.disposeDone = window.klaus.ai.onInlineEditDone(s.requestId, function (msg) {
       s.stage = 'ready';
       var header = s.panelEl && s.panelEl.querySelector('.inline-edit-stream-header');
       var acceptBtn = s.actionsEl && s.actionsEl.querySelector('.inline-edit-accept');
@@ -163,7 +163,7 @@ window.InlineEdit = (function () {
       }
     });
 
-    window.klaus.inlineEditStart({
+    window.klaus.ai.inlineEditStart({
       requestId: s.requestId,
       worktreePath: worktree,
       instruction: instruction,
@@ -204,7 +204,7 @@ window.InlineEdit = (function () {
     if (!session) return;
     var s = session;
     if (s.requestId && s.stage === 'streaming') {
-      try { window.klaus.inlineEditCancel(s.requestId); } catch (_) {}
+      try { window.klaus.ai.inlineEditCancel(s.requestId); } catch (_) {}
     }
     cleanup();
   }

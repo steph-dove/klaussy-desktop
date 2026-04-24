@@ -4,12 +4,12 @@ window.ProjectSwitcher = (function () {
   var taskList = document.getElementById('task-list');
 
   async function loadProjects() {
-    var projects = await window.klaus.listProjects();
-    var current = await window.klaus.getRepo();
+    var projects = await window.klaus.repo.listProjects();
+    var current = await window.klaus.repo.get();
     projectSelect.innerHTML = '';
 
     if (projects.length === 0 && current) {
-      await window.klaus.switchProject(current);
+      await window.klaus.repo.switchProject(current);
       projects = [{ name: current.split('/').pop(), path: current }];
     }
 
@@ -57,7 +57,7 @@ window.ProjectSwitcher = (function () {
   });
 
   btnAddProject.addEventListener('click', async function () {
-    var result = await window.klaus.addProject();
+    var result = await window.klaus.repo.addProject();
     if (result) {
       AppState.repoPath = result.path;
       await loadProjects();

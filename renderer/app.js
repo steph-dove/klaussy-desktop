@@ -35,12 +35,12 @@
   ConflictPanel.init();
   DiffPanel.setCommentCallback(function (text) {
     if (AppState.activeTaskId) {
-      window.klaus.writeTerminal(AppState.activeTaskId, text + '\n');
+      window.klaus.terminal.write(AppState.activeTaskId, text + '\n');
     }
   });
 
   // ---- Handle Claude → shell conversion ----
-  window.klaus.onTaskConverted(function (data) {
+  window.klaus.task.onConverted(function (data) {
     var t = tasks.get(data.id);
     if (!t) return;
     t.alive = true;
@@ -52,17 +52,17 @@
     setTimeout(function () {
       t.fitAddon.fit();
       t.terminal.scrollToBottom();
-      window.klaus.resizeTerminal(data.id, t.terminal.cols, t.terminal.rows);
+      window.klaus.terminal.resize(data.id, t.terminal.cols, t.terminal.rows);
     }, 100);
   });
 
   // ---- Handle notification click → focus task ----
-  window.klaus.onNotificationClicked(function (data) {
+  window.klaus.task.onNotificationClicked(function (data) {
     switchToTask(data.id);
   });
 
   // ---- CI/CD Status (Feature 3) ----
-  window.klaus.onCIStatusUpdate(function (data) {
+  window.klaus.task.onCIStatusUpdate(function (data) {
     ciStatusMap.set(data.id, data.runs);
     updateCIStatusIcon(data.id, data.runs);
   });
@@ -105,7 +105,7 @@
   }
 
   // ---- Auto-fetch updates (Feature 15) ----
-  window.klaus.onAutoFetchUpdate(function (data) {
+  window.klaus.task.onAutoFetchUpdate(function (data) {
     // If the updated task is active and diff panel is open, refresh ahead/behind
     if (data.id === AppState.activeTaskId && DiffPanel.isVisible()) {
       DiffPanel.updateAheadBehind();
@@ -116,12 +116,12 @@
   // Only the main window owns the persistent UI state — secondary windows
   // and popouts would otherwise clobber each other on their own timer ticks.
   if (!isSecondaryWindow) {
-    window.klaus.onBeforeQuit(function () {
+    window.klaus.session.onBeforeQuit(function () {
       var state = {
         diffPanelOpen: DiffPanel.isVisible(),
         selectedFile: DiffPanel.getSelectedFile(),
       };
-      window.klaus.saveUIState(state);
+      window.klaus.session.saveUIState(state);
     });
 
     // Also save periodically in case of crash
@@ -130,7 +130,7 @@
         diffPanelOpen: DiffPanel.isVisible(),
         selectedFile: DiffPanel.getSelectedFile(),
       };
-      window.klaus.saveUIState(state);
+      window.klaus.session.saveUIState(state);
     }, 10000);
   }
 
@@ -238,17 +238,17 @@
   // ---- New Window ----
   const btnNewWindow = document.getElementById('btn-new-window');
   btnNewWindow.addEventListener('click', function () {
-    window.klaus.newWindow();
+    window.klaus.ui.newWindow();
   });
 
   // ---- Preferences (B1-B4) ----
   const btnPrefs = document.getElementById('btn-prefs');
   btnPrefs.addEventListener('click', function () {
-    window.klaus.openPreferences();
+    window.klaus.ui.openPreferences();
   });
 
   // Apply preference changes broadcast from main process
-  window.klaus.onPreferencesChanged(function (prefs) {
+  window.klaus.ui.onPreferencesChanged(function (prefs) {
     if (prefs.fontSize !== undefined || prefs.fontFamily !== undefined ||
         prefs.lineHeight !== undefined || prefs.cursorStyle !== undefined) {
       tasks.forEach(function (task, id) {
@@ -267,7 +267,7 @@
         }
         task.fitAddon.fit();
         task.terminal.scrollToBottom();
-        window.klaus.resizeTerminal(id, task.terminal.cols, task.terminal.rows);
+        window.klaus.terminal.resize(id, task.terminal.cols, task.terminal.rows);
       });
     }
     if (prefs.theme !== undefined) {
@@ -276,7 +276,7 @@
   });
 
   // Load saved terminal preferences on startup
-  window.klaus.getPreferences().then(function (prefs) {
+  window.klaus.ui.getPreferences().then(function (prefs) {
     AppState.savedPrefs = prefs;
     if (prefs.fontSize && prefs.fontSize !== 13) AppState.currentFontSize = prefs.fontSize;
   });
@@ -356,7 +356,7 @@
         var task = tasks.get(AppState.activeTaskId);
         if (task) {
           task.fitAddon.fit();
-          window.klaus.resizeTerminal(AppState.activeTaskId, task.terminal.cols, task.terminal.rows);
+          window.klaus.terminal.resize(AppState.activeTaskId, task.terminal.cols, task.terminal.rows);
         }
       }
     }, 250);
@@ -421,7 +421,7 @@
   })();
 
   // ---- Init ----
-  AppState.repoPath = await window.klaus.getRepo();
+  AppState.repoPath = await window.klaus.repo.get();
   // Always show the app — the project-switcher's `+` button is the canonical
   // way to add a repo. The old "Select Repository" splash blocked startup
   // for first-runs without a project; the empty task list + project picker
@@ -452,7 +452,7 @@
   }
 
   async function loadExistingTasks() {
-    var existing = await window.klaus.listTasks();
+    var existing = await window.klaus.task.list();
     for (var i = 0; i < existing.length; i++) {
       addTaskToUI(existing[i]);
     }
@@ -461,7 +461,7 @@
     await loadSavedSessions(existing);
 
     // Also load worktrees that don't have active terminals
-    var worktrees = await window.klaus.listWorktrees();
+    var worktrees = await window.klaus.repo.listWorktrees();
     var activePaths = existing.map(function (t) { return t.worktreePath; });
     worktrees.forEach(function (wt) {
       if (activePaths.indexOf(wt.path) === -1) {
@@ -471,7 +471,7 @@
   }
 
   async function loadWorktreeList() {
-    var worktrees = await window.klaus.listWorktrees();
+    var worktrees = await window.klaus.repo.listWorktrees();
     worktrees.forEach(function (wt) {
       addWorktreeToSidebar(wt);
     });
@@ -504,7 +504,7 @@
 
     item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
       e.stopPropagation();
-      var result = await window.klaus.attachWorktree(wt.path, 'claude');
+      var result = await window.klaus.task.attachWorktree(wt.path, 'claude');
       if (result.error) return;
       addTaskToUI(result);
       switchToTask(result.id);
@@ -512,7 +512,7 @@
 
     item.querySelector('.worktree-open-shell').addEventListener('click', async function (e) {
       e.stopPropagation();
-      var result = await window.klaus.attachWorktree(wt.path, 'shell');
+      var result = await window.klaus.task.attachWorktree(wt.path, 'shell');
       if (result.error) return;
       addTaskToUI(result);
       switchToTask(result.id);
@@ -520,7 +520,7 @@
 
     item.querySelector('.worktree-remove').addEventListener('click', async function (e) {
       e.stopPropagation();
-      await window.klaus.hideWorktree(wt.path);
+      await window.klaus.repo.hideWorktree(wt.path);
       item.remove();
     });
 
@@ -534,7 +534,7 @@
   }
 
   async function loadSavedSessions(runningTasks) {
-    var sessions = await window.klaus.listSavedSessions();
+    var sessions = await window.klaus.session.listSaved();
     if (!sessions || sessions.length === 0) return;
 
     // Filter out sessions that have a running task on the same worktree
@@ -579,9 +579,9 @@
         btn.textContent = '...';
         var result;
         if (s.mode === 'shell') {
-          result = await window.klaus.attachWorktree(s.worktreePath, 'shell');
+          result = await window.klaus.task.attachWorktree(s.worktreePath, 'shell');
         } else {
-          result = await window.klaus.resumeSession(s);
+          result = await window.klaus.session.resume(s);
         }
         if (result.error) {
           btn.textContent = 'Err';
@@ -600,7 +600,7 @@
         var btn = e.target;
         btn.disabled = true;
         btn.textContent = '...';
-        var result = await window.klaus.attachWorktree(s.worktreePath, 'claude');
+        var result = await window.klaus.task.attachWorktree(s.worktreePath, 'claude');
         if (result.error) {
           btn.textContent = 'Err';
           setTimeout(function () { btn.textContent = 'New'; btn.disabled = false; }, 2000);
@@ -624,7 +624,7 @@
         // than the captured `idx` — splice-by-idx silently removed the wrong
         // row after any earlier dismiss shifted the array, and the removal
         // was only persisted when ALL rows had been dismissed.
-        window.klaus.dismissSavedSession(s);
+        window.klaus.session.dismissSaved(s);
       });
 
       taskList.appendChild(item);
@@ -632,7 +632,7 @@
   }
 
   async function restoreUIState(task) {
-    var uiState = await window.klaus.getUIState();
+    var uiState = await window.klaus.session.getUIState();
 
     // Scroll terminal to bottom after data loads
     var t = tasks.get(task.id);
@@ -795,12 +795,12 @@
       return;
     }
     await loadBaseBranchData();
-    try { await window.klaus.gitFetch(AppState.repoPath); } catch (_) {}
+    try { await window.klaus.git.fetch(AppState.repoPath); } catch (_) {}
     await loadBaseBranchData();
   }
 
   async function loadBaseBranchData() {
-    var result = await window.klaus.listBranches(AppState.repoPath);
+    var result = await window.klaus.task.listBranches(AppState.repoPath);
     if (result.error || !result.branches) {
       baseBranchData = [];
       baseBranchDefault = '';
@@ -831,7 +831,7 @@
   }
 
   btnBrowse.addEventListener('click', async function () {
-    var dir = await window.klaus.browseDirectory();
+    var dir = await window.klaus.repo.browseDirectory();
     if (dir) {
       selectedWorktreePath = dir;
       pathDisplay.textContent = dir;
@@ -840,7 +840,7 @@
   });
 
   btnBasepath.addEventListener('click', async function () {
-    var dir = await window.klaus.browseDirectory();
+    var dir = await window.klaus.repo.browseDirectory();
     if (dir) {
       selectedBasePath = dir;
       basepathDisplay.textContent = dir;
@@ -886,7 +886,7 @@
         ' <button id="btn-modal-repo-browse" class="modal-repo-browse">Browse</button>';
       repoIndicator.style.display = '';
       document.getElementById('btn-modal-repo-browse').addEventListener('click', async function () {
-        var dir = await window.klaus.browseDirectory();
+        var dir = await window.klaus.repo.browseDirectory();
         if (dir) {
           AppState.repoPath = dir;
           document.getElementById('modal-repo-path').textContent = dir;
@@ -952,7 +952,7 @@
       }},
       { label: 'Paste', shortcut: '\u2318V', action: function () {
         navigator.clipboard.readText().then(function (text) {
-          if (text) window.klaus.writeTerminal(id, text);
+          if (text) window.klaus.terminal.write(id, text);
         });
       }},
       { sep: true },
@@ -969,10 +969,10 @@
         btnDiff.classList.add('active');
       }},
       { label: 'Pop Out', action: async function () {
-        await window.klaus.popOutTask(id);
+        await window.klaus.task.popOut(id);
       }},
       { label: 'Duplicate', action: async function () {
-        var result = await window.klaus.duplicateTask(id);
+        var result = await window.klaus.task.duplicate(id);
         if (result && !result.error) {
           addTaskToUI(result);
           switchToTask(result.id);
@@ -989,10 +989,10 @@
       { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', action: async function () {
         var newVal = task.notifyEnabled === false;
         task.notifyEnabled = newVal;
-        await window.klaus.setNotifyEnabled(id, newVal);
+        await window.klaus.task.setNotifyEnabled(id, newVal);
       }},
       { label: 'Export Transcript', action: async function () {
-        var result = await window.klaus.exportTranscript(id);
+        var result = await window.klaus.task.exportTranscript(id);
         if (result.canceled || result.error) return;
         var buf = task.terminal.buffer.active;
         var lines = [];
@@ -1000,16 +1000,16 @@
           var line = buf.getLine(i);
           if (line) lines.push(line.translateToString(true));
         }
-        await window.klaus.writeTranscript(id, lines.join('\n'));
+        await window.klaus.task.writeTranscript(id, lines.join('\n'));
       }},
     ];
 
     if (!task.alive) {
       items.push({ sep: true });
       items.push({ label: 'Restart Claude', action: async function () {
-        var sessionId = await window.klaus.getLatestSession(task.worktreePath);
+        var sessionId = await window.klaus.session.getLatest(task.worktreePath);
         var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-        window.klaus.writeTerminal(id, cmd + '\n');
+        window.klaus.terminal.write(id, cmd + '\n');
         task.mode = 'claude';
         updateSidebarMode(id, 'claude');
         var resumeBtn = taskList.querySelector('.task-item[data-id="' + id + '"] .sidebar-resume-btn');
@@ -1031,9 +1031,9 @@
   // ---- Command Palette (A3) ----
 
   async function openFolderAsTask(mode) {
-    var dir = await window.klaus.browseDirectory();
+    var dir = await window.klaus.repo.browseDirectory();
     if (!dir) return;
-    var result = await window.klaus.openFolder(dir, mode || 'claude');
+    var result = await window.klaus.task.openFolder(dir, mode || 'claude');
     if (!result || result.error) {
       if (result && result.error) alert(result.error);
       return;
@@ -1049,8 +1049,8 @@
       { label: 'Open Folder in Shell…', action: function () { openFolderAsTask('shell'); } },
       { label: 'Toggle Diff Panel', action: function () { btnDiff.click(); } },
       { label: 'Change Theme', action: function () { showThemePicker(); } },
-      { label: 'Preferences', action: function () { window.klaus.openPreferences(); } },
-      { label: 'New Window', action: function () { window.klaus.newWindow(); } },
+      { label: 'Preferences', action: function () { window.klaus.ui.openPreferences(); } },
+      { label: 'New Window', action: function () { window.klaus.ui.newWindow(); } },
       { label: 'Zoom In', action: zoomIn },
       { label: 'Zoom Out', action: zoomOut },
       { label: 'Reset Zoom', action: zoomReset },
@@ -1062,13 +1062,13 @@
         commands.push({ label: 'Search in Terminal', action: function () { openSearch(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); btnDiff.classList.add('active'); } });
-        commands.push({ label: 'Pop Out', action: function () { window.klaus.popOutTask(AppState.activeTaskId); } });
-        commands.push({ label: 'Kill Task', action: function () { window.klaus.killTask(AppState.activeTaskId).then(function () { removeTaskFromUI(AppState.activeTaskId); }); } });
+        commands.push({ label: 'Pop Out', action: function () { window.klaus.task.popOut(AppState.activeTaskId); } });
+        commands.push({ label: 'Kill Task', action: function () { window.klaus.task.kill(AppState.activeTaskId).then(function () { removeTaskFromUI(AppState.activeTaskId); }); } });
         if (!task.alive) {
           commands.push({ label: 'Restart Claude', action: function () {
-            window.klaus.getLatestSession(task.worktreePath).then(function (sessionId) {
+            window.klaus.session.getLatest(task.worktreePath).then(function (sessionId) {
               var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-              window.klaus.writeTerminal(AppState.activeTaskId, cmd + '\n');
+              window.klaus.terminal.write(AppState.activeTaskId, cmd + '\n');
               task.mode = 'claude';
               updateSidebarMode(AppState.activeTaskId, 'claude');
             });
@@ -1220,7 +1220,7 @@
 
   // G5: when "Check out locally" finishes in main, pick up the new task in
   // the main window (pop-out closes itself via the null state broadcast).
-  window.klaus.onPrCheckoutReady(function (task) {
+  window.klaus.pr.onCheckoutReady(function (task) {
     if (!task || typeof task.id !== 'number') return;
     addTaskToUI(task);
   });
@@ -1228,7 +1228,7 @@
   // Keep the main-window panel visibility in sync with main-process state
   // changes (e.g. the pop-out's "pop back in" button clears popout → we want
   // the main panel mounted again; prReviewClose from anywhere unmounts us).
-  window.klaus.onPrReviewState(function (state) {
+  window.klaus.pr.onReviewState(function (state) {
     if (!state) {
       exitPrReviewMode();
     } else if (!state.popped) {
@@ -1301,10 +1301,10 @@
     async function ensureAccountCanSeeUrl(url) {
       var parsed = parsePrUrl(url);
       if (!parsed) return;
-      var det = await window.klaus.ghDetectAccountForRepo(parsed.owner, parsed.repo, parsed.number);
+      var det = await window.klaus.gh.detectAccountForRepo(parsed.owner, parsed.repo, parsed.number);
       if (!det || det.error || !det.username) return;
       if (det.active) return;
-      var sw = await window.klaus.ghSwitchAccount(det.username);
+      var sw = await window.klaus.gh.switchAccount(det.username);
       if (sw && sw.error) return;
       accountHint.textContent = 'Switched to ' + det.username;
       if (accountSelect) accountSelect.value = det.username;
@@ -1317,7 +1317,7 @@
       urlInput.disabled = true;
       startBtn.disabled = true;
       startBtn.textContent = 'Loading\u2026';
-      var result = await window.klaus.prLoad({ url: url });
+      var result = await window.klaus.pr.load({ url: url });
       if (result.error) {
         urlInput.disabled = false;
         startBtn.textContent = 'Start review';
@@ -1337,7 +1337,7 @@
     // the selected option. Hide the row when there's only one account (or
     // gh isn't authed) so the UI doesn't get cluttered.
     async function populateAccountSelect() {
-      var res = await window.klaus.ghListAccounts();
+      var res = await window.klaus.gh.listAccounts();
       var accounts = (res && res.accounts) || [];
       if (accounts.length === 0) {
         var row = overlay.querySelector('.pr-picker-account-row');
@@ -1358,7 +1358,7 @@
       recentEl.style.display = '';
       listEl.innerHTML = '<div class="pr-picker-loading">Loading open PRs…</div>';
 
-      window.klaus.prRecent().then(function (r) {
+      window.klaus.pr.recent().then(function (r) {
         var items = (r && r.items) || [];
         if (items.length === 0) { recentEl.style.display = 'none'; return; }
         recentEl.innerHTML = '<div class="pr-picker-section-head">Recently reviewed</div>'
@@ -1375,7 +1375,7 @@
           row.addEventListener('click', async function () {
             row.style.opacity = '0.5';
             try { await ensureAccountCanSeeUrl(row.dataset.url); } catch (_) {}
-            var loadResult = await window.klaus.prLoad({ url: row.dataset.url });
+            var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
             if (loadResult.error) {
               alert('Failed to load PR:\n' + loadResult.error);
               row.style.opacity = '1';
@@ -1386,7 +1386,7 @@
         });
       });
 
-      var result = await window.klaus.prList();
+      var result = await window.klaus.pr.list();
       if (result.error) {
         // No active project is the most common case here; treat it as an info
         // hint rather than a hard error so the user can still paste a URL.
@@ -1416,7 +1416,7 @@
       listEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
         row.addEventListener('click', async function () {
           row.style.opacity = '0.5';
-          var loadResult = await window.klaus.prLoad({ number: parseInt(row.dataset.number, 10) });
+          var loadResult = await window.klaus.pr.load({ number: parseInt(row.dataset.number, 10) });
           if (loadResult.error) {
             alert('Failed to load PR:\n' + loadResult.error);
             row.style.opacity = '1';
@@ -1432,7 +1432,7 @@
       if (!target) return;
       accountHint.textContent = 'Switching…';
       accountSelect.disabled = true;
-      var sw = await window.klaus.ghSwitchAccount(target);
+      var sw = await window.klaus.gh.switchAccount(target);
       accountSelect.disabled = false;
       if (sw && sw.error) {
         accountHint.textContent = 'Switch failed: ' + sw.error;
@@ -1456,32 +1456,32 @@
   var showLogViewer = Dialogs.showLog;
 
   // View → How to use Klaussy menu item routes here.
-  if (window.klaus.onShowHowToUse) {
-    window.klaus.onShowHowToUse(function () { Dialogs.showHowToUse(); });
+  if (window.klaus.ui.onShowHowToUse) {
+    window.klaus.ui.onShowHowToUse(function () { Dialogs.showHowToUse(); });
   }
-  if (window.klaus.onShowFeedback) {
-    window.klaus.onShowFeedback(function () { Dialogs.openFeedback(); });
+  if (window.klaus.ui.onShowFeedback) {
+    window.klaus.ui.onShowFeedback(function () { Dialogs.openFeedback(); });
   }
-  if (window.klaus.onShowLogs) {
-    window.klaus.onShowLogs(function () { Dialogs.showLog(); });
+  if (window.klaus.ui.onShowLogs) {
+    window.klaus.ui.onShowLogs(function () { Dialogs.showLog(); });
   }
-  if (window.klaus.onShowSkills) {
-    window.klaus.onShowSkills(function () { Dialogs.showSkills(); });
+  if (window.klaus.ui.onShowSkills) {
+    window.klaus.ui.onShowSkills(function () { Dialogs.showSkills(); });
   }
-  if (window.klaus.onShowMemory) {
-    window.klaus.onShowMemory(function () { Dialogs.showMemory(); });
+  if (window.klaus.ui.onShowMemory) {
+    window.klaus.ui.onShowMemory(function () { Dialogs.showMemory(); });
   }
-  if (window.klaus.onShowMcp) {
-    window.klaus.onShowMcp(function () { Dialogs.showMcpServers(); });
+  if (window.klaus.ui.onShowMcp) {
+    window.klaus.ui.onShowMcp(function () { Dialogs.showMcpServers(); });
   }
-  if (window.klaus.onShowPlugins) {
-    window.klaus.onShowPlugins(function () { Dialogs.showPlugins(); });
+  if (window.klaus.ui.onShowPlugins) {
+    window.klaus.ui.onShowPlugins(function () { Dialogs.showPlugins(); });
   }
-  if (window.klaus.onShowShortcuts) {
-    window.klaus.onShowShortcuts(function () { Dialogs.showShortcuts(); });
+  if (window.klaus.ui.onShowShortcuts) {
+    window.klaus.ui.onShowShortcuts(function () { Dialogs.showShortcuts(); });
   }
-  if (window.klaus.onShowGhAccounts) {
-    window.klaus.onShowGhAccounts(function () { Dialogs.showGhAccounts(); });
+  if (window.klaus.ui.onShowGhAccounts) {
+    window.klaus.ui.onShowGhAccounts(function () { Dialogs.showGhAccounts(); });
   }
 
   // Probe gh + claude on startup (silent if everything's set up). Stays out
@@ -1539,7 +1539,7 @@
       if (name) {
         // Name typed: create a new branch with that name, based on the
         // selected branch (or the default if none picked).
-        result = await window.klaus.createTask(
+        result = await window.klaus.task.create(
           name,
           AppState.repoPath,
           selectedMode,
@@ -1550,7 +1550,7 @@
       } else if (selectedBaseBranch) {
         // No name + branch picked: check that branch out directly so the
         // user can continue work on it in a fresh worktree.
-        result = await window.klaus.checkoutBranch(
+        result = await window.klaus.task.checkoutBranch(
           AppState.repoPath,
           selectedBaseBranch,
           selectedMode,
@@ -1570,7 +1570,7 @@
         modalError.textContent = 'Select a directory first.';
         return;
       }
-      result = await window.klaus.attachWorktree(selectedWorktreePath, selectedMode);
+      result = await window.klaus.task.attachWorktree(selectedWorktreePath, selectedMode);
     }
 
     modalCreate.disabled = false;

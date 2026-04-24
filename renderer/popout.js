@@ -1,6 +1,6 @@
 // Pop-out window — standalone terminal for a single task
 (function () {
-  window.klaus.onPopoutInit(function (task) {
+  window.klaus.task.onPopoutInit(function (task) {
     var id = task.id;
     var name = task.name;
     var branch = task.branch;
@@ -31,7 +31,7 @@
     terminal.loadAddon(fitAddon);
 
     var webLinksAddon = new WebLinksAddon.WebLinksAddon(function (_event, uri) {
-      window.klaus.openExternal(uri);
+      window.klaus.gh.openExternal(uri);
     });
     terminal.loadAddon(webLinksAddon);
 
@@ -40,16 +40,16 @@
 
     setTimeout(function () {
       fitAddon.fit();
-      window.klaus.resizeTerminal(id, terminal.cols, terminal.rows);
+      window.klaus.terminal.resize(id, terminal.cols, terminal.rows);
     }, 50);
 
     // Wire up I/O
-    window.klaus.onTerminalData(id, function (data) {
+    window.klaus.terminal.onData(id, function (data) {
       terminal.write(data);
     });
 
     terminal.onData(function (data) {
-      window.klaus.writeTerminal(id, data);
+      window.klaus.terminal.write(id, data);
     });
 
     // Key shortcuts
@@ -58,7 +58,7 @@
       var meta = e.metaKey;
 
       if (e.key === 'Enter' && e.shiftKey) {
-        window.klaus.writeTerminal(id, '\n');
+        window.klaus.terminal.write(id, '\n');
         return false;
       }
       if (meta && e.key === 'c') {
@@ -68,7 +68,7 @@
       }
       if (meta && e.key === 'v') {
         navigator.clipboard.readText().then(function (text) {
-          if (text) window.klaus.writeTerminal(id, text);
+          if (text) window.klaus.terminal.write(id, text);
         });
         return false;
       }
@@ -81,7 +81,7 @@
 
     window.addEventListener('resize', function () {
       fitAddon.fit();
-      window.klaus.resizeTerminal(id, terminal.cols, terminal.rows);
+      window.klaus.terminal.resize(id, terminal.cols, terminal.rows);
     });
   });
 })();
