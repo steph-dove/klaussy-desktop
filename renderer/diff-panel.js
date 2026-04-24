@@ -217,16 +217,16 @@ window.DiffPanel = (function () {
   function commentOnSelection() {
     var pr = (window.PRPanel && window.PRPanel.getCurrentPR) ? window.PRPanel.getCurrentPR() : null;
     if (!pr || !pr.number || !pr.headRefOid) {
-      alert('No PR loaded for this worktree.');
+      window.toast.error('No PR loaded for this worktree.');
       return;
     }
     var range = computeSelectionCommentRange();
     if (!range) {
-      alert('Select one or more diff lines (add / delete / context) to comment on.');
+      window.toast.error('Select one or more diff lines (add / delete / context) to comment on.');
       return;
     }
     var file = selectedFile;
-    if (!file) { alert('No file selected.'); return; }
+    if (!file) { window.toast.error('No file selected.'); return; }
 
     // Clear selection + dismiss any existing composer
     window.getSelection().removeAllRanges();
@@ -280,7 +280,7 @@ window.DiffPanel = (function () {
         commitId: pr.headRefOid,
       });
       if (result && result.error) {
-        alert('Post failed: ' + result.error);
+        window.toast.error('Post failed: ' + result.error);
         postBtn.disabled = false;
         postBtn.textContent = 'Post';
         return;
@@ -970,12 +970,12 @@ window.DiffPanel = (function () {
   async function applyPartialPatch(file, lineKeys, reverse) {
     var patch = buildPartialPatch(file, lineKeys, reverse);
     if (!patch) {
-      alert('Nothing to ' + (reverse ? 'unstage' : 'stage') + '.');
+      window.toast.error('Nothing to ' + (reverse ? 'unstage' : 'stage') + '.');
       return;
     }
     var result = await window.klaus.git.applyPatch(currentWorktreePath, patch, reverse);
     if (result.error) {
-      alert((reverse ? 'Unstage' : 'Stage') + ' failed:\n' + result.error);
+      window.toast.error((reverse ? 'Unstage' : 'Stage') + ' failed:\n' + result.error);
       return;
     }
     selectedLineKeys = new Set();
@@ -1330,7 +1330,7 @@ window.DiffPanel = (function () {
     if (!result || result.error) {
       var errMsg = (result && result.error) || 'unknown failure';
       showDiffStatus('Commit failed: ' + errMsg, 'error');
-      alert('Commit failed: ' + errMsg);
+      window.toast.error('Commit failed: ' + errMsg);
       return;
     }
     // Show the subject line in the banner so the user sees what landed.
@@ -1385,7 +1385,7 @@ window.DiffPanel = (function () {
       btn.textContent = '✨';
       btn.disabled = false;
       if (msg && msg.error) {
-        alert('Could not generate commit message: ' + msg.error);
+        window.toast.error('Could not generate commit message: ' + msg.error);
         return;
       }
       // Trim trailing whitespace Claude sometimes adds — and if the prompt
@@ -1402,7 +1402,7 @@ window.DiffPanel = (function () {
       resetCommitMsgState();
       btn.textContent = '✨';
       btn.disabled = false;
-      alert(start.error);
+      window.toast.error(start.error);
     }
   }
 
@@ -1432,7 +1432,7 @@ window.DiffPanel = (function () {
       btn.textContent = 'Failed';
       setTimeout(function () { btn.textContent = 'Push'; }, 2000);
       showDiffStatus('Push failed: ' + result.error, 'error');
-      alert('Push failed: ' + result.error);
+      window.toast.error('Push failed: ' + result.error);
       return;
     }
     btn.textContent = 'Pushed!';
@@ -1467,7 +1467,7 @@ window.DiffPanel = (function () {
     btn.disabled = false;
     btn.textContent = 'PR';
     if (result.error) {
-      alert('PR creation failed: ' + result.error);
+      window.toast.error('PR creation failed: ' + result.error);
       return;
     }
     if (result.url) {
@@ -1703,7 +1703,7 @@ window.DiffPanel = (function () {
 
       var res = await window.klaus.git.checkout(currentWorktreePath, choice.trim());
       if (res.error) {
-        alert('Checkout failed: ' + res.error);
+        window.toast.error('Checkout failed: ' + res.error);
       } else {
         refresh();
         updateAheadBehind();

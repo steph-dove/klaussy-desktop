@@ -1019,7 +1019,7 @@ window.FileBrowser = (function () {
     projectReplaceBtn.textContent = 'Replacing…';
     var result = await window.klaus.fs.replaceInFiles(wt, files, query, replacement);
     if (result.error) {
-      alert('Replace failed: ' + result.error);
+      window.toast.error('Replace failed: ' + result.error);
       updateReplaceButton();
       return;
     }

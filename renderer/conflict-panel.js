@@ -239,7 +239,7 @@ window.ConflictPanel = (function () {
     // Check all conflicts are resolved
     var unresolved = currentBlocks.filter(function (b) { return b.type === 'conflict' && !b.resolved; });
     if (unresolved.length > 0) {
-      alert(unresolved.length + ' conflict(s) still unresolved. Please resolve all conflicts before marking as resolved.');
+      window.toast.error(unresolved.length + ' conflict(s) still unresolved. Please resolve all conflicts before marking as resolved.');
       return;
     }
 
@@ -263,7 +263,7 @@ window.ConflictPanel = (function () {
     btn.textContent = 'Mark Resolved';
 
     if (result.error) {
-      alert('Error resolving: ' + result.error);
+      window.toast.error('Error resolving: ' + result.error);
       return;
     }
 

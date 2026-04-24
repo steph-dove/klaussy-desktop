@@ -134,13 +134,13 @@ window.HistoryPanel = (function () {
         var res = await window.klaus.git.tagPush(wt, tag.name);
         this.disabled = false;
         this.textContent = '\u2191';
-        if (res.error) alert('Push failed: ' + res.error);
+        if (res.error) window.toast.error('Push failed: ' + res.error);
       });
       item.querySelector('.tag-delete-btn').addEventListener('click', async function (e) {
         e.stopPropagation();
         if (!confirm('Delete tag "' + tag.name + '"?')) return;
         var res = await window.klaus.git.tagDelete(wt, tag.name);
-        if (res.error) alert('Delete failed: ' + res.error);
+        if (res.error) window.toast.error('Delete failed: ' + res.error);
         else loadTags();
       });
       tagsList.appendChild(item);
