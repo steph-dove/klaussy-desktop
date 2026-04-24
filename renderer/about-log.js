@@ -29,12 +29,93 @@ window.Dialogs = (function () {
         '</div>' +
         '<div class="about-actions">' +
           '<button class="about-howto" type="button">How to use</button>' +
+          '<button class="about-licenses" type="button">Licenses</button>' +
+          '<button class="about-manage-license" type="button">Manage License</button>' +
+          '<button class="about-discord" type="button">Join Discord</button>' +
           '<button class="about-close" type="button">Close</button>' +
         '</div>';
       dialog.querySelector('.about-close').addEventListener('click', function () { overlay.remove(); });
       dialog.querySelector('.about-howto').addEventListener('click', function () {
         overlay.remove();
         showHowToUse();
+      });
+      var licBtn = dialog.querySelector('.about-licenses');
+      if (licBtn) licBtn.addEventListener('click', function () {
+        overlay.remove();
+        showLicenses();
+      });
+      var mgrBtn = dialog.querySelector('.about-manage-license');
+      if (mgrBtn) mgrBtn.addEventListener('click', function () {
+        overlay.remove();
+        if (window.LicenseActivation && typeof window.LicenseActivation.open === 'function') {
+          window.LicenseActivation.open();
+        }
+      });
+      var discBtn = dialog.querySelector('.about-discord');
+      if (discBtn) discBtn.addEventListener('click', function () {
+        // Route through gh.openExternal so the invite opens in the user's
+        // default browser rather than an Electron webview.
+        try { window.klaus.gh.openExternal('https://discord.gg/9bpSdwCx'); } catch {}
+      });
+    });
+  }
+
+  // Open-source attribution shown in About → Licenses. Includes bundled
+  // deps (from package.json), the local Ollama runtime we invoke, and the
+  // qwen2.5-coder model we pull. Update when adding a dep that ships in the
+  // binary or is invoked at runtime — commercial redistribution requires
+  // every license notice be preserved.
+  function showLicenses() {
+    var entries = [
+      { name: 'Electron', license: 'MIT License', copyright: '© GitHub Inc. and Electron contributors', url: 'https://github.com/electron/electron/blob/main/LICENSE' },
+      { name: 'Monaco Editor', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/monaco-editor/blob/main/LICENSE.md' },
+      { name: 'node-pty', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/node-pty/blob/main/LICENSE' },
+      { name: 'xterm.js', license: 'MIT License', copyright: '© The xterm.js authors', url: 'https://github.com/xtermjs/xterm.js/blob/master/LICENSE' },
+      { name: '@xterm addons (fit, search, web-links)', license: 'MIT License', copyright: '© The xterm.js authors', url: 'https://github.com/xtermjs/xterm.js/blob/master/LICENSE' },
+      { name: 'highlight.js', license: 'BSD 3-Clause License', copyright: '© 2006, Ivan Sagalaev', url: 'https://github.com/highlightjs/highlight.js/blob/main/LICENSE' },
+      { name: 'vscode-languageserver-protocol, vscode-jsonrpc', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/vscode-languageserver-node/blob/main/License.txt' },
+      { name: 'Ollama (invoked locally for inline AI)', license: 'MIT License', copyright: '© Ollama Inc.', url: 'https://github.com/ollama/ollama/blob/main/LICENSE' },
+      { name: 'Qwen2.5-Coder-1.5B (model run via Ollama)', license: 'Apache License 2.0', copyright: '© Alibaba Cloud', url: 'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B/blob/main/LICENSE' },
+    ];
+
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    var dialog = document.createElement('div');
+    dialog.className = 'licenses-dialog';
+    dialog.innerHTML =
+      '<div class="licenses-head">'
+        + '<h2>Open Source Licenses</h2>'
+        + '<button class="licenses-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<p class="licenses-preamble">Klaussy is built on the following open-source software. Full license texts are available at the linked sources.</p>'
+      + '<div class="licenses-list">'
+        + entries.map(function (e) {
+          return '<div class="license-row">'
+            + '<div class="license-row-head">'
+              + '<span class="license-name">' + escHtml(e.name) + '</span>'
+              + '<span class="license-kind">' + escHtml(e.license) + '</span>'
+            + '</div>'
+            + '<div class="license-copyright">' + escHtml(e.copyright) + '</div>'
+            + '<a class="license-link" href="' + escHtml(e.url) + '" target="_blank" rel="noopener">View full license</a>'
+          + '</div>';
+        }).join('')
+      + '</div>';
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    dialog.querySelector('.licenses-close').addEventListener('click', function () { overlay.remove(); });
+
+    // External links open in the user's default browser (Electron shell),
+    // not inside our renderer — same pattern as web-links in the terminal.
+    dialog.querySelectorAll('a.license-link').forEach(function (a) {
+      a.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        try { window.klaus.gh.openExternal(a.href); } catch {}
       });
     });
   }
@@ -841,6 +922,7 @@ window.Dialogs = (function () {
     showAbout: showAbout,
     showLog: showLog,
     showHowToUse: showHowToUse,
+    showLicenses: showLicenses,
     checkAndPromptDeps: checkAndPromptDeps,
     openFeedback: openFeedback,
     showSkills: showSkills,

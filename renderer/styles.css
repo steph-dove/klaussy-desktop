@@ -1425,6 +1425,329 @@ body.task-branchless #ahead-behind {
   margin: 8px 0 0 2px;
 }
 
+/* ---- License Activation Modal ---- */
+
+#license-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 220;
+}
+
+#license-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 460px;
+  max-width: 92vw;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+#license-modal h3 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.license-lead {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 0 0 14px 0;
+}
+
+.license-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 14px;
+}
+
+.license-label input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+
+.license-label input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#license-error {
+  font-size: 12px;
+  color: var(--error);
+  min-height: 16px;
+  margin: 4px 0 8px 0;
+  line-height: 1.4;
+}
+
+.license-status {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--input-bg);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 10px 0;
+  line-height: 1.5;
+}
+
+.license-status strong { color: var(--text); }
+
+#license-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.license-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+#license-actions button {
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#license-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+#license-actions button.primary:hover { filter: brightness(1.08); }
+
+#license-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
+
+#license-buy {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: transparent;
+}
+
+#license-buy:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* ---- Ollama Consent + Install Modal ---- */
+
+#ollama-consent-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 210;
+}
+
+#ollama-consent-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 460px;
+  max-width: 92vw;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+#ollama-consent-modal h3 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+.ollama-consent-lead {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.45;
+  margin: 0 0 14px 0;
+}
+
+.ollama-consent-lead code {
+  background: var(--input-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.ollama-consent-facts {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 18px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.ollama-consent-facts li {
+  padding-left: 18px;
+  position: relative;
+}
+
+.ollama-consent-facts li::before {
+  content: '·';
+  position: absolute;
+  left: 6px;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.ollama-consent-facts strong {
+  color: var(--text);
+}
+
+.ollama-consent-facts code {
+  background: var(--input-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10.5px;
+}
+
+#ollama-consent-actions,
+#ollama-progress-actions,
+#ollama-error-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+#ollama-consent-actions button,
+#ollama-progress-actions button,
+#ollama-error-actions button {
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#ollama-consent-actions button.primary,
+#ollama-error-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+#ollama-consent-actions button.primary:hover,
+#ollama-error-actions button.primary:hover {
+  filter: brightness(1.08);
+}
+
+#ollama-consent-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+#ollama-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 14px 0;
+  padding: 12px;
+  background: var(--input-bg);
+  border-radius: 8px;
+}
+
+.ollama-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ollama-progress-step.active {
+  color: var(--text);
+}
+
+.ollama-progress-step.done {
+  color: var(--text-muted);
+  opacity: 0.75;
+}
+
+.ollama-progress-icon {
+  display: inline-block;
+  width: 14px;
+  text-align: center;
+  font-size: 13px;
+}
+
+.ollama-progress-step.active .ollama-progress-icon {
+  color: var(--accent);
+}
+
+.ollama-progress-step.done .ollama-progress-icon {
+  color: var(--accent);
+}
+
+#ollama-progress-bar-wrap {
+  height: 4px;
+  background: var(--input-bg);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 4px 0 10px 0;
+}
+
+#ollama-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.3s;
+}
+
+#ollama-progress-message {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 0 0 12px 0;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  line-height: 1.4;
+  min-height: 16px;
+  word-break: break-word;
+}
+
+#ollama-error-message {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.5;
+  margin: 0 0 16px 0;
+  padding: 10px 12px;
+  background: var(--input-bg);
+  border-left: 3px solid var(--error);
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 11px;
+}
+
 #plan-file-list {
   margin-top: 8px;
   display: flex;
@@ -6499,6 +6822,131 @@ body.pr-review-popout #pr-review-root {
   cursor: pointer;
 }
 .about-howto:hover { background: var(--surface-hover); }
+
+.about-licenses {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.about-licenses:hover { background: var(--surface-hover); }
+
+.about-discord,
+.about-manage-license {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.about-discord:hover,
+.about-manage-license:hover { background: var(--surface-hover); }
+
+/* Open Source Licenses dialog */
+.licenses-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: 640px;
+  max-width: calc(100vw - 60px);
+  max-height: calc(100vh - 120px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  align-self: flex-start;
+}
+
+.licenses-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.licenses-head h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.licenses-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+  padding: 0 4px;
+}
+.licenses-close:hover { color: var(--text); }
+
+.licenses-preamble {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 14px 20px 0 20px;
+  line-height: 1.5;
+}
+
+.licenses-list {
+  overflow-y: auto;
+  padding: 12px 20px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.license-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--input-bg);
+}
+
+.license-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.license-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.license-kind {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  white-space: nowrap;
+}
+
+.license-copyright {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.license-link {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.license-link:hover {
+  text-decoration: underline;
+}
 
 .howto-dialog {
   background: var(--surface);

@@ -469,6 +469,12 @@ window.FileBrowser = (function () {
     if (window.InlineComplete && window.InlineComplete.setWorktreeGetter) {
       window.InlineComplete.setWorktreeGetter(function () { return currentViewerWorktree; });
     }
+    // Passive ghost-text via local Ollama. Silently no-ops if Ollama isn't
+    // running or the model isn't installed — word-complete.js continues to
+    // serve as the always-on fallback in that case.
+    if (window.InlineComplete && typeof window.InlineComplete.attach === 'function') {
+      window.InlineComplete.attach(currentEditor);
+    }
     // Cmd+1 … Cmd+9 switches to the Nth tab (1-indexed, matches VS Code).
     for (var i = 0; i < 9; i++) {
       (function (n) {

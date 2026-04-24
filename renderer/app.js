@@ -449,6 +449,11 @@
     } else {
       loadExistingTasks();
     }
+    // Commercial licence gate — dismissable, shows only on unactivated
+    // packaged builds. Dev (`electron .`) is bypassed by main/state/license.
+    if (window.LicenseActivation && typeof window.LicenseActivation.openIfNeeded === 'function') {
+      window.LicenseActivation.openIfNeeded();
+    }
   }
 
   async function loadExistingTasks() {
