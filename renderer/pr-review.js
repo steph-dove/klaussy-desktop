@@ -705,8 +705,21 @@ window.PrReview = (function () {
         if (saved.implementError) f.implementError = saved.implementError;
         if (saved.commentStatus) f.commentStatus = saved.commentStatus;
         if (saved.commentError) f.commentError = saved.commentError;
-        if (saved.commentBody != null) f.commentBody = saved.commentBody;
+        // Restore user-edited review text. Legacy caches stored an edited
+        // body under `commentBody`; migrate that into `f.text` so old
+        // reviews still show user edits after upgrade.
+        if (saved.text != null) f.text = saved.text;
+        else if (saved.commentBody != null && saved.commentBody.trim() !== '') f.text = saved.commentBody;
+        if (saved.originalText != null) f.originalText = saved.originalText;
+        if (Array.isArray(saved.chatMessages)) f.chatMessages = saved.chatMessages;
         if (saved.usage) f.usage = saved.usage;
+        // Restore previously-verified location so the chip renders
+        // immediately — verifyFindingLocations will re-confirm against the
+        // current worktree but we don't want to flash "?" in the meantime.
+        if (saved.line) f.line = saved.line;
+        if (saved.path) f.path = saved.path;
+        if (saved.locationVerified) f.locationVerified = true;
+        if (saved.postMode) f.postMode = saved.postMode;
       });
     }
     if (cached.implementAllSummary) aiReview.implementAllSummary = cached.implementAllSummary;
@@ -730,8 +743,14 @@ window.PrReview = (function () {
         implementError: f.implementError || null,
         commentStatus: f.commentStatus || 'idle',
         commentError: f.commentError || null,
-        commentBody: f.commentBody != null ? f.commentBody : null,
+        text: f.text || '',
+        originalText: f.originalText != null ? f.originalText : null,
+        chatMessages: Array.isArray(f.chatMessages) ? f.chatMessages : [],
         usage: f.usage || null,
+        path: f.path || null,
+        line: f.line || null,
+        locationVerified: !!f.locationVerified,
+        postMode: f.postMode || null,
       };
     });
     window.klaus.pr.cacheSaveByPr(
@@ -755,12 +774,15 @@ window.PrReview = (function () {
   // a single card containing the whole review.
   function parseReviewFindings(text) {
     if (!text) return { preamble: '', findings: [], postamble: '' };
-    // Split anchor: line start (multiline), optional whitespace, 0–2 leading
-    // asterisks, then `[Severity:`. Allowing 0 asterisks covers the case
-    // where the AI drops the bold wrappers; broader markdown prefixes
-    // (`-`, `#`, `1.`, `>`) caused over-splitting on `---` rules and other
-    // ambient content that referenced "Severity" nearby.
-    var parts = text.split(/(?=^\s*\*{0,2}\[Severity:)/m);
+    // Split anchor: line start, then any combination of common markdown
+    // leaders (ATX header `###`, bullet `-`/`*`/`+`, numbered list `1.`,
+    // blockquote `>`), then 0–2 leading asterisks, then `[Severity:`.
+    //
+    // Claude routinely decorates findings with its own headers ("### **[Severity: ..." —
+    // the template doesn't ask for it, but the model adds them anyway) so we
+    // have to allow header prefixes. False positives on `---` rules aren't a
+    // concern because `[Severity:` followed by `]` is a very specific token.
+    var parts = text.split(/(?=^[\s>]*(?:#{1,6}\s+)?(?:[-*+]\s+)?(?:\d+[.)]\s+)?\*{0,2}\[Severity:)/m);
     if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
     var preamble = parts[0].trim();
     var findings = [];
@@ -808,6 +830,37 @@ window.PrReview = (function () {
     return m ? m[1].trim().toLowerCase() : '';
   }
 
+  // Extract `[Location: path/to/file.ts:42 …]` into structured fields.
+  // Returns { path, line, snippet } or null. Accepts 0–2 bold asterisks
+  // like the severity matcher, and is lenient about trailing "and code…"
+  // text after the line number.
+  function parseLocation(text) {
+    if (!text) return null;
+    var m = text.match(/\*{0,2}\[Location:\s*([^\]]+?)\]\*{0,2}/i);
+    if (!m) return null;
+    var inner = m[1].trim();
+    // Find a `path:line` anchor. Require the path to include a `/` or `.`
+    // so we don't accidentally match English like "line: 42". Line must
+    // come right after a colon.
+    var pm = inner.match(/([^\s,;]*[\/.][^\s,;:]*):(\d+)/);
+    if (!pm) return null;
+    var snippet = '';
+    // Everything after the matched "path:line" is treated as the snippet
+    // hint — the template says "and code_snippet" so strip that prefix.
+    var tail = inner.slice(pm.index + pm[0].length).replace(/^\s*(and\s+)?/i, '').trim();
+    if (tail) snippet = tail;
+    return { path: pm[1], line: parseInt(pm[2], 10), snippet: snippet };
+  }
+
+  // Pull the first fenced-code block out of a finding — a more reliable
+  // snippet for line-verification than the short inline location hint,
+  // because the template tells Claude to quote up to 10 lines of the code.
+  function firstCodeBlock(text) {
+    if (!text) return '';
+    var m = text.match(/```[a-zA-Z0-9_-]*\n([\s\S]*?)```/);
+    return m ? m[1] : '';
+  }
+
   // Reconcile parsed-finding text with our state's findings list. Parsing
   // happens on every chunk during streaming, so we want to preserve any
   // per-card status (ignored, implementing, implemented) when the same
@@ -818,16 +871,33 @@ window.PrReview = (function () {
     aiReview.findings.forEach(function (f) { byKey[f.key] = f; });
     var next = parsedFindings.map(function (text, idx) {
       var key = findingKey(text, idx);
+      var loc = parseLocation(text);
       var prev = byKey[key];
       if (prev) {
-        prev.text = text;
-        prev.severity = severityOf(text);
+        // Preserve user edits across streaming re-parses: once the user has
+        // modified the review block via ✎, don't clobber their text with
+        // fresh AI output.
+        var userEdited = prev.originalText != null && prev.text !== prev.originalText;
+        if (!userEdited) {
+          prev.text = text;
+          prev.severity = severityOf(text);
+          if (loc && !prev.locationVerified) {
+            prev.path = loc.path;
+            prev.line = loc.line;
+            prev.locationRaw = loc;
+          }
+        }
+        if (prev.originalText == null) prev.originalText = text;
         return prev;
       }
       return {
         id: 'f-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).slice(2, 6),
         key: key,
         text: text,
+        // Pristine copy of the AI's output so the ✎ "Reset to AI text" can
+        // restore the original, and so we know whether the user edited.
+        originalText: text,
+        textEditing: false,
         severity: severityOf(text),
         status: 'open',
         implementId: null,
@@ -835,14 +905,32 @@ window.PrReview = (function () {
         implementError: null,
         commentStatus: 'idle', // 'idle' | 'posting' | 'posted' | 'failed'
         commentError: null,
-        // Customized comment body — null means "post the finding text as-is".
-        // Set to a string when the user edits via the inline composer; the
-        // post flow uses `commentBody ?? text` as the body.
-        commentBody: null,
-        commentEditing: false,
+        // Structured location from `[Location: path:line]`. `locationVerified`
+        // is true after we confirmed the snippet actually lives at that line
+        // (or found the real one nearby). RIGHT-side inline comments are the
+        // only mode we support for AI findings — LEFT would only make sense
+        // for comments about deleted code, rare for a review.
+        path: loc ? loc.path : null,
+        line: loc ? loc.line : null,
+        side: 'RIGHT',
+        locationRaw: loc,
+        locationVerified: false,
+        // Post mode: 'inline' if we have a verified file+line (draft review
+        // comment), 'issue' if we fall back to a general issue comment.
+        // Set by verification; drives the Add-to-PR button behavior.
+        postMode: loc ? 'inline' : 'issue',
+        // Ask-Claude chat state. Stateless on the backend: each turn sends
+        // the full conversation. `chatMessages` is [{role, content}].
+        chatOpen: false,
+        chatMessages: [],
+        chatRequestId: null,
+        chatStreaming: '',
+        chatError: null,
       };
     });
     aiReview.findings = next;
+    // Kick off verification asynchronously; it'll repaint when it lands.
+    verifyFindingLocations();
   }
 
   function findingKey(text, idx) {
@@ -850,6 +938,95 @@ window.PrReview = (function () {
     // the index so keys are still stable for unparseable findings.
     var firstLine = (text || '').split('\n').find(function (l) { return l.trim(); }) || '';
     return idx + '|' + firstLine.slice(0, 80);
+  }
+
+  // Normalize a line for fuzzy matching. The snippet in a finding often
+  // differs from the file by whitespace/quoting; collapse spaces and drop
+  // surrounding markers so we match on the meaningful tokens.
+  function normalizeLine(s) {
+    return (s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  // Best line match for a snippet inside file content. Searches around the
+  // hinted line first (±50) then the whole file. Returns { line } if a
+  // confident match is found, null otherwise.
+  function findSnippetLine(fileContent, hintLine, snippet) {
+    var target = normalizeLine(snippet);
+    if (!target || target.length < 4) return null;
+    var lines = fileContent.split('\n');
+    if (hintLine && lines[hintLine - 1] != null) {
+      if (normalizeLine(lines[hintLine - 1]).indexOf(target) !== -1) {
+        return { line: hintLine };
+      }
+    }
+    var near = [];
+    var far = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (normalizeLine(lines[i]).indexOf(target) === -1) continue;
+      var ln = i + 1;
+      if (hintLine && Math.abs(ln - hintLine) <= 50) near.push(ln);
+      else far.push(ln);
+    }
+    if (near.length === 1) return { line: near[0] };
+    if (near.length > 1) {
+      near.sort(function (a, b) { return Math.abs(a - hintLine) - Math.abs(b - hintLine); });
+      return { line: near[0] };
+    }
+    if (far.length === 1) return { line: far[0] };
+    return null;
+  }
+
+  // Verify each finding's line number by reading the file inside the
+  // review's worktree and checking that the snippet lives at the cited
+  // line (or finding the true one nearby). Fire-and-forget: updates the
+  // finding state and repaints on completion.
+  function verifyFindingLocations() {
+    if (!aiReview.worktreePath) return;
+    aiReview.findings.forEach(function (f) {
+      if (!f.path || !f.line || f.locationVerified) return;
+      if (f._verifyInFlight) return;
+      f._verifyInFlight = true;
+      window.klaus.pr.readWorktreeFile(aiReview.worktreePath, f.path).then(function (r) {
+        f._verifyInFlight = false;
+        if (!r || r.error || !r.content) {
+          // File missing / unreadable → we can't verify. Leave postMode
+          // at 'inline' if the AI gave us a location — submitReview will
+          // surface a server-side error if the path is truly bad, which
+          // is more diagnostic than a silent fallback.
+          f.locationVerifyError = r && r.error ? r.error : 'unreadable';
+          repaintAiReviewTab();
+          return;
+        }
+        var snippet = firstCodeBlock(f.text) || (f.locationRaw && f.locationRaw.snippet) || '';
+        // Try each non-empty line of the fenced block — the most specific
+        // one usually wins. Fall back to the location-hint snippet.
+        var candidates = snippet.split('\n').map(function (s) { return s.trim(); }).filter(function (s) {
+          return s && s.length >= 4 && !/^[\/*#\-]+$/.test(s);
+        });
+        if (f.locationRaw && f.locationRaw.snippet) candidates.push(f.locationRaw.snippet);
+        var match = null;
+        for (var i = 0; i < candidates.length && !match; i++) {
+          match = findSnippetLine(r.content, f.line, candidates[i]);
+        }
+        if (match) {
+          f.line = match.line;
+          f.locationVerified = true;
+          f.postMode = 'inline';
+        } else {
+          // No match anywhere in the file — Claude probably hallucinated
+          // the location. Fall back to issue-comment mode so "Add to PR"
+          // still posts *something* useful rather than a broken inline.
+          f.locationVerified = false;
+          f.postMode = 'issue';
+        }
+        repaintAiReviewTab();
+        saveAiReviewCache();
+      }).catch(function (err) {
+        f._verifyInFlight = false;
+        f.locationVerifyError = err && err.message ? err.message : String(err);
+        repaintAiReviewTab();
+      });
+    });
   }
 
   function renderAiReviewTabCount() {
@@ -949,37 +1126,81 @@ window.PrReview = (function () {
     var commentBadge = '';
     var commentBtn = '';
     var editCommentBtn = '';
-    // Customized comment body — null means "post f.text verbatim"; non-null
-    // string is an override entered via the inline composer.
-    var customized = f.commentBody != null && f.commentBody.trim() !== '';
+    // "Edited" = user has modified the review block via the ✎ button. Drives
+    // the badge and whether the PR post gets the "AI-generated" attribution
+    // prefix (skipped once the user has rewritten the content).
+    var customized = f.originalText != null && f.text !== f.originalText;
     var editedBadge = customized
-      ? '<span class="pr-ai-finding-comment-edited" title="Comment will be posted with your edits">✎ edited</span>'
+      ? '<span class="pr-ai-finding-comment-edited" title="You edited this review block">✎ edited</span>'
       : '';
+
+    // Add-to-PR behavior depends on whether we have a verified file+line.
+    //   - verified → push onto pendingComments (G4 draft review list); the
+    //     existing Submit-review UI batches them into a single review.
+    //   - unverified → post as a general issue comment (legacy behavior).
+    var inDraft = f.postMode === 'inline' && f.locationVerified && pendingCommentExistsForFinding(f.id);
+    var addBtnTitle = (f.postMode === 'inline' && f.locationVerified)
+      ? (inDraft
+          ? 'Draft review comment — click to remove from the pending review'
+          : 'Add as draft inline comment at ' + f.path + ':' + f.line)
+      : 'No verified file/line — will post as a general PR comment';
+
     if (f.commentStatus === 'posted') {
       commentBadge = '<span class="pr-ai-finding-comment-status posted" title="Posted to the PR">\u2713 Commented</span>';
     } else if (f.commentStatus === 'posting') {
       commentBadge = '<span class="pr-ai-finding-comment-status posting">Posting\u2026</span>';
     } else if (f.commentStatus === 'failed') {
-      commentBadge = '<span class="pr-ai-finding-comment-status failed" title="' + escHtml(f.commentError || '') + '">! Comment failed</span>';
+      commentBadge = '<span class="pr-ai-finding-comment-status failed">! Failed</span>';
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Try again">Add to PR</button>';
-      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit comment before posting">✎</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
+    } else if (inDraft) {
+      commentBadge = '<span class="pr-ai-finding-comment-status drafted" title="Queued as an inline review comment — submit the review to post it">✎ Drafted</span>';
+      commentBtn = '<button class="pr-ai-finding-comment" type="button" title="' + escHtml(addBtnTitle) + '">Remove draft</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
     } else {
-      commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Post this finding as an issue comment on the PR">Add to PR</button>';
-      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit comment before posting">✎</button>';
+      commentBtn = '<button class="pr-ai-finding-comment" type="button" title="' + escHtml(addBtnTitle) + '">Add to PR</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
     }
+
+    // Location chip — shows where the finding will anchor, and whether we
+    // Copy-as-markdown button. Copies whatever is currently in the review
+    // block — same bytes Add-to-PR would post.
+    var copyBtn = '<button class="pr-ai-finding-copy" type="button" title="Copy this finding as markdown">'
+      + (f.copyStatus === 'copied' ? '✓ Copied' : 'Copy')
+    + '</button>';
+
+    // Ask-Claude button. Toggles the inline chat panel so reviewers can
+    // discuss the finding without leaving the card (e.g., "is this
+    // actually a bug?", "what's the simplest fix?").
+    var discussLabel = (f.chatMessages && f.chatMessages.length)
+      ? 'Chat (' + f.chatMessages.filter(function (m) { return m.role === 'user'; }).length + ')'
+      : 'Ask Claude';
+    var discussBtn = '<button class="pr-ai-finding-discuss' + (f.chatOpen ? ' open' : '') + '" type="button" title="Discuss this finding with Claude">'
+      + escHtml(discussLabel)
+    + '</button>';
+
+    // Inline error block — shown below actions when Add-to-PR failed.
+    // Previously the error lived only in a hover-title on a small badge,
+    // which made failures feel silent. Now it’s visible in the card.
+    var errorBlock = (f.commentStatus === 'failed' && f.commentError)
+      ? '<div class="pr-ai-finding-comment-error">'
+          + '<div class="pr-ai-finding-comment-error-head">Add-to-PR failed</div>'
+          + '<div class="pr-ai-finding-comment-error-body">' + escHtml(f.commentError) + '</div>'
+        + '</div>'
+      : '';
 
     var actions;
     if (f.ignored) {
-      actions = commentBadge + '<button class="pr-ai-finding-undo" type="button">Restore</button>';
+      actions = commentBadge + copyBtn + '<button class="pr-ai-finding-undo" type="button">Restore</button>';
     } else if (f.status === 'implementing') {
-      actions = commentBadge + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
+      actions = commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
-        + commentBadge + editedBadge + editCommentBtn
+        + commentBadge + editedBadge + copyBtn + discussBtn + editCommentBtn
         + commentBtn
         + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
     } else {
-      actions = commentBadge + editedBadge + editCommentBtn
+      actions = commentBadge + editedBadge + copyBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
         + '<button class="pr-ai-finding-implement" type="button">Implement</button>';
@@ -995,27 +1216,66 @@ window.PrReview = (function () {
         + '</div>'
       : '';
 
-    // Inline comment composer. Shown when the user clicks ✎; pre-filled with
-    // whatever would be posted (edited body if any, otherwise the AI's text).
-    var composer = '';
-    if (f.commentEditing) {
-      var initial = f.commentBody != null ? f.commentBody : f.text;
-      composer =
-        '<div class="pr-ai-finding-composer">'
-        + '<textarea class="pr-ai-finding-composer-input" rows="6" placeholder="Comment body (markdown supported)…">' + escHtml(initial) + '</textarea>'
-        + '<div class="pr-ai-finding-composer-actions">'
-          + (customized ? '<button class="pr-ai-finding-composer-reset" type="button" title="Discard edits and post the AI text verbatim">Reset to AI text</button>' : '')
-          + '<button class="pr-ai-finding-composer-cancel" type="button">Cancel</button>'
-          + '<button class="pr-ai-finding-composer-save" type="button">Save</button>'
-        + '</div>'
-      + '</div>';
+    // When editing, the review body *becomes* the textarea — the ✎ button
+    // edits the review block in place rather than opening a separate comment
+    // composer. On save we re-run location verification since moving or
+    // reshaping the quoted snippet can invalidate the matched line.
+    var bodyHtml;
+    if (f.textEditing) {
+      bodyHtml =
+        '<div class="pr-ai-finding-body editing">'
+          + '<textarea class="pr-ai-finding-body-input" rows="8">' + escHtml(f.text) + '</textarea>'
+          + '<div class="pr-ai-finding-body-actions">'
+            + (f.originalText != null && f.text !== f.originalText
+                ? '<button class="pr-ai-finding-body-reset" type="button" title="Restore the original AI text">Reset to AI text</button>'
+                : '')
+            + '<button class="pr-ai-finding-body-cancel" type="button">Cancel</button>'
+            + '<button class="pr-ai-finding-body-save" type="button">Save</button>'
+          + '</div>'
+        + '</div>';
+    } else {
+      bodyHtml = '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>';
     }
 
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
-      + '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>'
-      + composer
+      + bodyHtml
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
+      + errorBlock
+      + renderChatPanel(f)
       + implementOut
+    + '</div>';
+  }
+
+  // Chat panel — rendered below the finding actions when f.chatOpen is true.
+  // Messages are shown as bubbles; streaming assistant output appears as a
+  // growing assistant bubble. Cancel button sits next to Send while a
+  // response is in flight.
+  function renderChatPanel(f) {
+    if (!f.chatOpen) return '';
+    var streaming = !!f.chatRequestId;
+    var msgs = (f.chatMessages || []).map(function (m) {
+      var cls = 'pr-ai-finding-chat-msg ' + (m.role === 'assistant' ? 'assistant' : 'user');
+      return '<div class="' + cls + '">' + renderMarkdown(m.content || '') + '</div>';
+    }).join('');
+    var streamingBubble = (streaming && (f.chatStreaming || '').trim())
+      ? '<div class="pr-ai-finding-chat-msg assistant streaming">' + renderMarkdown(f.chatStreaming) + '</div>'
+      : streaming
+        ? '<div class="pr-ai-finding-chat-msg assistant streaming status-pulse">Thinking…</div>'
+        : '';
+    var errorBar = f.chatError
+      ? '<div class="pr-ai-finding-chat-error">' + escHtml(f.chatError) + '</div>'
+      : '';
+    return '<div class="pr-ai-finding-chat">'
+      + (msgs || streamingBubble
+          ? '<div class="pr-ai-finding-chat-messages">' + msgs + streamingBubble + '</div>'
+          : '<div class="pr-ai-finding-chat-hint">Ask Claude anything about this finding — is it really a bug? what’s the simplest fix? etc.</div>')
+      + errorBar
+      + '<div class="pr-ai-finding-chat-composer">'
+        + '<textarea class="pr-ai-finding-chat-input" rows="2" placeholder="Message Claude (⌘⏎ to send)"' + (streaming ? ' disabled' : '') + '></textarea>'
+        + (streaming
+            ? '<button class="pr-ai-finding-chat-cancel" type="button">Cancel</button>'
+            : '<button class="pr-ai-finding-chat-send" type="button">Send</button>')
+      + '</div>'
     + '</div>';
   }
 
@@ -1089,37 +1349,94 @@ window.PrReview = (function () {
       });
       if (commentBtn) commentBtn.addEventListener('click', function () { postFindingAsComment(f); });
 
-      var editComment = card.querySelector('.pr-ai-finding-edit-comment');
-      if (editComment) editComment.addEventListener('click', function () {
-        f.commentEditing = true;
+      var copyBtnEl = card.querySelector('.pr-ai-finding-copy');
+      if (copyBtnEl) copyBtnEl.addEventListener('click', function () { copyFindingAsMarkdown(f); });
+
+      // "Ask Claude" button toggles the inline chat panel.
+      var discussBtnEl = card.querySelector('.pr-ai-finding-discuss');
+      if (discussBtnEl) discussBtnEl.addEventListener('click', function () {
+        f.chatOpen = !f.chatOpen;
         repaintAiReviewTab();
-        // Focus the composer after repaint so the user can start typing.
-        var ta = hostEl.querySelector('.pr-ai-finding[data-finding-id="' + f.id + '"] .pr-ai-finding-composer-input');
+        if (f.chatOpen) {
+          var ta = hostEl.querySelector('.pr-ai-finding[data-finding-id="' + f.id + '"] .pr-ai-finding-chat-input');
+          if (ta) ta.focus();
+        }
+      });
+
+      var chatSendBtn = card.querySelector('.pr-ai-finding-chat-send');
+      var chatCancelBtn = card.querySelector('.pr-ai-finding-chat-cancel');
+      var chatInputEl = card.querySelector('.pr-ai-finding-chat-input');
+      if (chatSendBtn && chatInputEl) chatSendBtn.addEventListener('click', function () {
+        var val = chatInputEl.value.trim();
+        if (!val) return;
+        startChat(f, val);
+      });
+      if (chatCancelBtn) chatCancelBtn.addEventListener('click', function () {
+        if (f.chatRequestId) window.klaus.pr.reviewChatCancel(f.chatRequestId);
+      });
+      // Cmd/Ctrl-Enter in the textarea sends. Plain Enter keeps the newline
+      // (chat messages often need line breaks for code snippets).
+      if (chatInputEl) chatInputEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          if (chatSendBtn) chatSendBtn.click();
+        }
+      });
+
+      // ✎ now edits the review block itself (f.text), not a separate comment
+      // composer. The body area swaps to a textarea on the next repaint.
+      var editReviewBtn = card.querySelector('.pr-ai-finding-edit-comment');
+      if (editReviewBtn) editReviewBtn.addEventListener('click', function () {
+        f.textEditing = true;
+        repaintAiReviewTab();
+        var ta = hostEl.querySelector('.pr-ai-finding[data-finding-id="' + f.id + '"] .pr-ai-finding-body-input');
         if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
       });
-      var composerSave = card.querySelector('.pr-ai-finding-composer-save');
-      var composerCancel = card.querySelector('.pr-ai-finding-composer-cancel');
-      var composerReset = card.querySelector('.pr-ai-finding-composer-reset');
-      if (composerSave) composerSave.addEventListener('click', function () {
-        var ta = card.querySelector('.pr-ai-finding-composer-input');
+      var bodySave = card.querySelector('.pr-ai-finding-body-save');
+      var bodyCancel = card.querySelector('.pr-ai-finding-body-cancel');
+      var bodyReset = card.querySelector('.pr-ai-finding-body-reset');
+      if (bodySave) bodySave.addEventListener('click', function () {
+        var ta = card.querySelector('.pr-ai-finding-body-input');
         if (!ta) return;
         var val = ta.value;
-        // An empty textarea reverts to the AI text (null) rather than posting
-        // an actually-empty comment.
-        f.commentBody = val.trim() === '' ? null : val;
-        f.commentEditing = false;
+        if (val.trim() === '') return; // refuse to save an empty review
+        f.text = val;
+        f.textEditing = false;
+        // Re-parse severity/location from the edited text — the user may
+        // have changed the snippet or location line — then re-verify the
+        // line against the worktree file.
+        f.severity = severityOf(f.text);
+        var loc = parseLocation(f.text);
+        if (loc) {
+          f.path = loc.path;
+          f.line = loc.line;
+          f.locationRaw = loc;
+        }
+        f.locationVerified = false;
+        f.postMode = (f.path && f.line) ? 'inline' : 'issue';
         repaintAiReviewTab();
         saveAiReviewCache();
+        verifyFindingLocations();
       });
-      if (composerCancel) composerCancel.addEventListener('click', function () {
-        f.commentEditing = false;
+      if (bodyCancel) bodyCancel.addEventListener('click', function () {
+        f.textEditing = false;
         repaintAiReviewTab();
       });
-      if (composerReset) composerReset.addEventListener('click', function () {
-        f.commentBody = null;
-        f.commentEditing = false;
+      if (bodyReset) bodyReset.addEventListener('click', function () {
+        if (f.originalText != null) {
+          f.text = f.originalText;
+          f.severity = severityOf(f.text);
+          var loc = parseLocation(f.text);
+          f.path = loc ? loc.path : null;
+          f.line = loc ? loc.line : null;
+          f.locationRaw = loc;
+          f.locationVerified = false;
+          f.postMode = loc ? 'inline' : 'issue';
+        }
+        f.textEditing = false;
         repaintAiReviewTab();
         saveAiReviewCache();
+        verifyFindingLocations();
       });
     });
   }
@@ -1296,34 +1613,166 @@ window.PrReview = (function () {
     });
   }
 
-  // Post a single AI-review finding as a general PR issue comment. Uses the
-  // existing G4 IPC. Wraps the body with a small attribution header so the
-  // PR author can see it came from the reviewer's AI pass.
+  // Does the pendingComments list already hold a draft sourced from this
+  // finding? Keyed by finding id stored on the pending entry so the
+  // "Added to draft / Remove draft" button can toggle correctly.
+  function pendingCommentExistsForFinding(findingId) {
+    return pendingComments.some(function (c) { return c.fromFindingId === findingId; });
+  }
+
+  // Add a finding to the PR. Two paths:
+  //   - verified inline location → push onto pendingComments so the draft
+  //     appears anchored to the file:line in the diff, and the user can
+  //     batch-submit via the existing Submit-review flow.
+  //   - unverified or no location → post directly as a general PR issue
+  //     comment (legacy behavior, with attribution prefix).
+  // The commentStatus lifecycle (posting/posted/failed) only applies to the
+  // issue-comment path — drafts are purely client-side until submitted.
   async function postFindingAsComment(f) {
+    // Toggle-off when the user clicks the button on an already-drafted
+    // finding: pull the draft back out of pendingComments.
+    if (pendingCommentExistsForFinding(f.id)) {
+      pendingComments = pendingComments.filter(function (c) { return c.fromFindingId !== f.id; });
+      repaintAiReviewTab();
+      if (lastState) render(lastState);
+      return;
+    }
     if (f.commentStatus === 'posting' || f.commentStatus === 'posted') return;
+
+    // Post the review block as-is. Prepend an "AI-generated" attribution
+    // only when the user hasn't edited the text — once they've rewritten it,
+    // the attribution is misleading.
+    var userEdited = f.originalText != null && f.text !== f.originalText;
+    var attributedBody = userEdited
+      ? f.text
+      : '> *AI-generated review finding (via Klaussy):*\n\n' + (f.text || '');
+
+    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
+      pendingComments.push({
+        id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+        fromFindingId: f.id,
+        path: f.path,
+        line: f.line,
+        side: f.side || 'RIGHT',
+        body: attributedBody,
+      });
+      repaintAiReviewTab();
+      saveAiReviewCache();
+      if (lastState) render(lastState);
+      return;
+    }
+
+    // Issue-comment fallback. The await below can reject (not just resolve
+    // with {error}) — historically a missing `spawn` import in main left the
+    // promise rejected and this function threw an unhandled rejection,
+    // stranding the UI at "posting". Wrap in try/catch so the failed badge
+    // and error block always render.
     f.commentStatus = 'posting';
     f.commentError = null;
     repaintAiReviewTab();
-
-    // Prefer the user's edited body if they customized it; otherwise post
-    // the AI's text verbatim. Only prepend the "AI-generated" attribution
-    // header when posting verbatim — a user-edited comment is no longer a
-    // direct AI output and shouldn't be labelled as such.
-    var bodyText = (f.commentBody != null && f.commentBody.trim() !== '') ? f.commentBody : f.text;
-    var body = (f.commentBody != null && f.commentBody.trim() !== '')
-      ? bodyText
-      : '> *AI-generated review finding (via Klaussy):*\n\n' + (bodyText || '');
-    var result = await window.klaus.pr.addIssueComment(body);
-    if (result && result.error) {
+    try {
+      var result = await window.klaus.pr.addIssueComment(attributedBody);
+      if (result && result.error) {
+        f.commentStatus = 'failed';
+        f.commentError = result.error;
+      } else {
+        f.commentStatus = 'posted';
+      }
+    } catch (err) {
+      console.error('addIssueComment IPC failed', err);
       f.commentStatus = 'failed';
-      f.commentError = result.error;
-    } else {
-      f.commentStatus = 'posted';
+      f.commentError = (err && err.message) ? err.message : String(err);
     }
     repaintAiReviewTab();
     saveAiReviewCache();
-    // Pull the newly-posted comment into the Conversation tab.
     if (f.commentStatus === 'posted') window.klaus.pr.refreshThreads();
+  }
+
+  // Copy a finding's markdown body to the clipboard — whatever is currently
+  // in the review block, edits and all. Flips a transient state flag for a
+  // ~1.5s "Copied" label.
+  async function copyFindingAsMarkdown(f) {
+    try {
+      await navigator.clipboard.writeText(f.text || '');
+      f.copyStatus = 'copied';
+      repaintAiReviewTab();
+      setTimeout(function () {
+        f.copyStatus = null;
+        repaintAiReviewTab();
+      }, 1500);
+    } catch (err) {
+      console.error('clipboard write failed', err);
+      f.copyStatus = 'failed';
+      repaintAiReviewTab();
+      setTimeout(function () { f.copyStatus = null; repaintAiReviewTab(); }, 2000);
+    }
+  }
+
+  // Kick off a chat turn. Appends the user's message, spawns Claude with
+  // the finding body + full transcript, streams the response into
+  // f.chatStreaming, then commits it as an assistant message on done.
+  function startChat(f, userMessage) {
+    if (f.chatRequestId) return;
+    var requestId = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    f.chatMessages = (f.chatMessages || []).concat([{ role: 'user', content: userMessage }]);
+    f.chatRequestId = requestId;
+    f.chatStreaming = '';
+    f.chatError = null;
+    repaintAiReviewTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.pr.onReviewChatData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) f.chatStreaming = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            f.chatStreaming = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintAiReviewTab();
+    });
+    window.klaus.pr.onReviewChatDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (f.chatRequestId !== requestId) return;
+      f.chatRequestId = null;
+      if (result && result.error) {
+        f.chatError = result.error;
+      } else if (result && result.cancelled) {
+        // Commit whatever streamed before the cancel so the user keeps the
+        // partial response; Claude doesn't get a second chance at the turn.
+        if (f.chatStreaming) {
+          f.chatMessages.push({ role: 'assistant', content: f.chatStreaming });
+        }
+      } else {
+        f.chatMessages.push({ role: 'assistant', content: f.chatStreaming || '' });
+      }
+      f.chatStreaming = '';
+      repaintAiReviewTab();
+      saveAiReviewCache();
+    });
+
+    // Send the full transcript so Claude has the arc of the conversation.
+    window.klaus.pr.reviewChatStart(requestId, f.text, f.chatMessages).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        f.chatRequestId = null;
+        f.chatError = r.error;
+        // Roll back the user message we optimistically appended — easier
+        // than disabling Send until the IPC resolves.
+        f.chatMessages = f.chatMessages.slice(0, -1);
+        repaintAiReviewTab();
+      }
+    });
   }
 
   function startImplementAll() {

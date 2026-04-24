@@ -10,7 +10,7 @@ const { prReview, ensureWorktreeForActivePr } = require('../state/pr-review');
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
   debugCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
-  implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs,
+  implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
 } = require('../state/claude-streaming');
 
 // Debug a single failing CI check. Pulls the failing job's logs, builds a
@@ -212,6 +212,49 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
 });
 
 ipcMain.handle('pr-review-implement-cancel', makeClaudeCancelHandler(implementProcs));
+
+// Discuss a finding with Claude inline — the renderer's "Ask Claude" chat
+// panel. Stateless: each turn re-sends the conversation history so Claude
+// can respond coherently, and Claude runs read-only (Read/Grep/git OK, no
+// edits) so a discussion doesn't accidentally mutate the worktree.
+ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, messages }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (reviewChatProcs.has(requestId)) return { error: 'Already in flight' };
+  if (!prReview.active) return { error: 'No active PR review' };
+  if (!findingBody || !findingBody.trim()) return { error: 'Missing finding body' };
+  if (!Array.isArray(messages) || messages.length === 0) return { error: 'No messages to send' };
+
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+
+  // Serialize the conversation so Claude sees the full arc. Using explicit
+  // Human/Assistant labels matches how Claude reads multi-turn transcripts
+  // better than a raw concatenation.
+  const transcript = messages.map((m) => {
+    const label = m.role === 'assistant' ? 'Assistant' : 'Human';
+    return `${label}: ${m.content}`;
+  }).join('\n\n');
+
+  const prompt =
+    `You are discussing a pull-request review finding with the reviewer. ` +
+    `Answer concisely. You may read files, grep, and run git commands in the repo to ground your answers — but do NOT edit, create, or delete any files, and do NOT commit or push. ` +
+    `If the reviewer wants the fix applied, tell them to click "Implement" on the finding instead.\n\n` +
+    `The finding:\n\n${findingBody}\n\n` +
+    `Conversation so far:\n\n${transcript}\n\n` +
+    `Respond to the most recent Human message.`;
+
+  spawnClaudeStream({
+    requestId, procMap: reviewChatProcs, channelPrefix: 'pr-review-chat',
+    sender: event.sender,
+    cwd: ensured.worktreePath,
+    prompt,
+    streamJson: true,
+    extraDoneFields: { worktreePath: ensured.worktreePath },
+  });
+  return { ok: true };
+});
+
+ipcMain.handle('pr-review-chat-cancel', makeClaudeCancelHandler(reviewChatProcs));
 
 // ---- Explain Diff ----
 

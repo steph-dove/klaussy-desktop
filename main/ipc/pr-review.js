@@ -6,7 +6,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { execFile } = require('child_process');
+const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { ghExec, ghExecP } = require('../util/exec');
@@ -300,6 +300,33 @@ function reviewCachePathFor(owner, repo, number) {
   const safe = `${owner}-${repo}-${number}`.replace(/[^a-zA-Z0-9_.-]/g, '_');
   return { dir, file: path.join(dir, safe + '.json') };
 }
+
+// Read a file inside the PR review's worktree. Used by the renderer to
+// verify that AI-reported line numbers actually contain the quoted snippet —
+// LLMs routinely get line numbers wrong, and reading the file lets us snap
+// the finding to the real line before posting. Hard-scoped to worktreePath:
+// the resolved absolute path must start with the resolved worktreePath, or
+// we refuse (blocks `..` traversal and symlink games).
+ipcMain.handle('pr-review-read-file', (_event, { worktreePath, relPath }) => {
+  if (!worktreePath || !relPath) return { error: 'Missing worktreePath or relPath' };
+  try {
+    const rootReal = fs.realpathSync(worktreePath);
+    const target = path.resolve(rootReal, relPath);
+    const targetReal = fs.existsSync(target) ? fs.realpathSync(target) : target;
+    if (!targetReal.startsWith(rootReal + path.sep) && targetReal !== rootReal) {
+      return { error: 'Path outside worktree' };
+    }
+    if (!fs.existsSync(targetReal)) return { error: 'File not found' };
+    const stat = fs.statSync(targetReal);
+    // Guard against pathologically large files — line verification only
+    // needs the first ~2MB of text content.
+    if (stat.size > 2 * 1024 * 1024) return { error: 'File too large' };
+    const content = fs.readFileSync(targetReal, 'utf8');
+    return { content };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
 
 ipcMain.handle('pr-review-cache-get-by-pr', (_event, { owner, repo, number }) => {
   if (!owner || !repo || !number) return { cached: null };

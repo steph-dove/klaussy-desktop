@@ -242,6 +242,24 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body }),
     reviewImplementCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-implement-cancel', { requestId }),
+    reviewChatStart: (requestId, findingBody, messages) =>
+      ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages }),
+    reviewChatCancel: (requestId) =>
+      ipcRenderer.invoke('pr-review-chat-cancel', { requestId }),
+    onReviewChatData: (requestId, callback) => {
+      const channel = 'pr-review-chat-data-' + requestId;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onReviewChatDone: (requestId, callback) => {
+      const channel = 'pr-review-chat-done-' + requestId;
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.once(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    readWorktreeFile: (worktreePath, relPath) =>
+      ipcRenderer.invoke('pr-review-read-file', { worktreePath, relPath }),
     cacheGetByPr: (owner, repo, number) =>
       ipcRenderer.invoke('pr-review-cache-get-by-pr', { owner, repo, number }),
     cacheSaveByPr: (owner, repo, number, data) =>
