@@ -7,8 +7,13 @@
   "author": "steph-dove",
   "license": "UNLICENSED",
   "private": true,
-  "engines": { "node": ">=18" },
-  "repository": { "type": "git", "url": "https://github.com/steph-dove/klausify-desktop.git" },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/steph-dove/klausify-desktop.git"
+  },
   "scripts": {
     "start": "electron .",
     "test": "node --test test/util/*.test.js",
@@ -23,6 +28,8 @@
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^5.5.0",
+    "electron-log": "^5.2.0",
+    "electron-updater": "^6.3.9",
     "highlight.js": "^11.11.1",
     "monaco-editor": "^0.45.0",
     "node-pty": "^1.0.0",
@@ -30,9 +37,10 @@
     "vscode-languageserver-protocol": "^3.17.5"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@electron/rebuild": "^4.0.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "^41.3.0",
+    "electron-builder": "^26.8.1"
   },
   "build": {
     "appId": "com.steph-dove.klaussy",
@@ -65,12 +73,19 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64"
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
           ]
         }
       ],
-      "identity": null,
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
       "gatekeeperAssess": false,
       "darkModeSupport": true,
       "entitlements": "build/entitlements.mac.plist",
@@ -81,6 +96,12 @@
       "title": "Klaussy ${version} ${arch}",
       "icon": "icon.icns",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "steph-dove",
+      "repo": "klausify-desktop-feedback",
+      "releaseType": "release"
     }
   }
 }
