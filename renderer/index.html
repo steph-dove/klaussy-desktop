@@ -272,6 +272,38 @@
     </div>
   </div>
 
+  <!-- Plan Modal: opens a new Claude sub-tab and runs /ultraplan on the supplied content -->
+  <div id="plan-modal-overlay" style="display: none;">
+    <div id="plan-modal">
+      <h3 id="plan-modal-title">Plan a task</h3>
+      <p class="plan-modal-sub">Provide task details. A new Claude tab will open on this worktree and run <code>/ultraplan</code>.</p>
+      <div id="plan-modal-tabs">
+        <button class="plan-modal-tab active" data-tab="paste">Paste text</button>
+        <button class="plan-modal-tab" data-tab="upload">Upload file</button>
+      </div>
+
+      <div id="plan-tab-paste" class="plan-tab-content active">
+        <textarea id="plan-modal-text" rows="10" placeholder="Paste task details here..." spellcheck="false"></textarea>
+      </div>
+
+      <div id="plan-tab-upload" class="plan-tab-content">
+        <div id="plan-file-picker">
+          <span id="plan-file-display">No files selected</span>
+          <button id="plan-file-btn" type="button">Choose files</button>
+          <input type="file" id="plan-file-input" accept=".txt,.md,.markdown,.json,.yaml,.yml,.log,text/*" multiple style="display:none" />
+        </div>
+        <div id="plan-file-list"></div>
+        <p class="plan-modal-hint">Plain text / markdown. Each file's contents are inlined into the prompt with a header.</p>
+      </div>
+
+      <div id="plan-modal-error"></div>
+      <div id="plan-modal-actions">
+        <button id="plan-modal-cancel" type="button">Cancel</button>
+        <button id="plan-modal-submit" type="button">Plan</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Theme Picker Modal (Phase 5) -->
   <div id="theme-overlay" style="display: none;">
     <div id="theme-modal">
@@ -349,6 +381,7 @@
   <script src="project-switcher.js"></script>
   <script src="sidebar-manager.js"></script>
   <script src="terminal-manager.js"></script>
+  <script src="plan-modal.js"></script>
   <script src="pr-review.js"></script>
   <script src="app.js"></script>
 </body>

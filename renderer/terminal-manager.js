@@ -51,7 +51,19 @@ window.TerminalManager = (function () {
 
     var label = document.createElement('div');
     label.className = 'grid-label';
-    label.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>' + escHtml(name);
+
+    // The name span carries the drag/click behaviors; the actions span holds
+    // the dropdown. Splitting them avoids the dropdown trigger accidentally
+    // starting a drag or switching tasks as a side-effect of clicking.
+    var nameSpan = document.createElement('span');
+    nameSpan.className = 'grid-label-name';
+    nameSpan.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>' + escHtml(name);
+
+    var actionsSpan = document.createElement('span');
+    actionsSpan.className = 'grid-label-actions';
+
+    label.appendChild(nameSpan);
+    label.appendChild(actionsSpan);
 
     // Branchless (Open Folder) tasks get a persistent warning banner inside
     // their own terminal container so it only covers that pane — never the
@@ -76,7 +88,7 @@ window.TerminalManager = (function () {
       container.appendChild(warning);
     }
 
-    label.addEventListener('click', function () {
+    nameSpan.addEventListener('click', function () {
       if (currentLayout() === 'single') {
         switchToTask(id);
       } else {
@@ -87,14 +99,14 @@ window.TerminalManager = (function () {
     });
 
     // Grid drag-and-drop reordering
-    label.draggable = true;
-    label.addEventListener('dragstart', function (e) {
+    nameSpan.draggable = true;
+    nameSpan.addEventListener('dragstart', function (e) {
       if (currentLayout() === 'single') { e.preventDefault(); return; }
       container.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', id.toString());
     });
-    label.addEventListener('dragend', function () {
+    nameSpan.addEventListener('dragend', function () {
       container.classList.remove('dragging');
       terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {
         el.classList.remove('drag-over');
@@ -131,6 +143,12 @@ window.TerminalManager = (function () {
 
     container.appendChild(label);
     terminalsEl.appendChild(container);
+
+    // Worktree-header actions dropdown. Opens a small menu with Plan/Debug/
+    // Review — each dispatches to a helper that spawns a new Claude sub-tab
+    // on this task's worktree and kicks off the appropriate command.
+    buildActionsDropdown(actionsSpan, id);
+
     terminal.open(container);
 
     // Scroll-to-bottom button
@@ -476,6 +494,84 @@ window.TerminalManager = (function () {
     return { ok: true };
   }
 
+  // ---- openClaudeSubTerminal (Actions dropdown) ----
+
+  // Spawn a new Claude sub-tab on the given task's worktree, then type the
+  // provided command into it once Claude has finished booting. The delay is
+  // generous because Claude Code's TUI takes noticeably longer to render its
+  // input box than a plain login shell — runInSubTerminal's 400ms is enough
+  // for zsh but not for Claude. `label` becomes the tab's visible label.
+  async function openClaudeSubTerminal(taskId, label, command) {
+    var taskEntry = tasks.get(taskId);
+    if (!taskEntry) return { error: 'No active task' };
+
+    var result = await window.klaus.terminal.addSub(taskId, label, 'claude');
+    if (result.error) return { error: result.error };
+    addSubTerminalTab(taskEntry, result.subId, result.label);
+    var subEntry = taskEntry.subTerminals[taskEntry.subTerminals.length - 1];
+    switchSubTerminal(taskEntry, subEntry.subId);
+
+    setTimeout(function () {
+      if (!subEntry.alive) return;
+      window.klaus.terminal.write(taskId, command + '\r', subEntry.subId);
+    }, 2500);
+
+    return { ok: true };
+  }
+
+  // ---- buildActionsDropdown (worktree header) ----
+
+  // Open menus are tracked globally so the outside-click handler can close
+  // whichever is open when you click anywhere else.
+  var openMenuEl = null;
+  document.addEventListener('click', function () {
+    if (openMenuEl) {
+      openMenuEl.style.display = 'none';
+      openMenuEl = null;
+    }
+  });
+
+  function buildActionsDropdown(host, taskId) {
+    var btn = document.createElement('button');
+    btn.className = 'actions-dropdown-btn';
+    btn.title = 'Actions';
+    btn.innerHTML = 'Actions <span class="actions-chevron">&#9662;</span>';
+
+    var menu = document.createElement('div');
+    menu.className = 'actions-dropdown-menu';
+    menu.style.display = 'none';
+    menu.innerHTML =
+      '<button class="actions-dropdown-item" data-action="plan">Plan</button>' +
+      '<button class="actions-dropdown-item" data-action="debug">Debug</button>' +
+      '<button class="actions-dropdown-item" data-action="review">Review</button>';
+
+    host.appendChild(btn);
+    host.appendChild(menu);
+
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var isOpen = menu.style.display !== 'none';
+      if (openMenuEl && openMenuEl !== menu) openMenuEl.style.display = 'none';
+      // Must be 'flex' (not 'block') — the menu's flex-column layout is how
+      // the items stack vertically. Setting 'block' would let buttons flow
+      // inline and sit side-by-side.
+      menu.style.display = isOpen ? 'none' : 'flex';
+      openMenuEl = isOpen ? null : menu;
+    });
+
+    menu.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var target = e.target.closest('.actions-dropdown-item');
+      if (!target) return;
+      var action = target.dataset.action;
+      menu.style.display = 'none';
+      openMenuEl = null;
+      if (window.ActionModal && typeof window.ActionModal.run === 'function') {
+        window.ActionModal.run(taskId, action);
+      }
+    });
+  }
+
   // ---- rewireTerminal ----
 
   function rewireTerminal(id) {
@@ -659,5 +755,6 @@ window.TerminalManager = (function () {
     zoomOut: zoomOut,
     zoomReset: zoomReset,
     runInSubTerminal: runInSubTerminal,
+    openClaudeSubTerminal: openClaudeSubTerminal,
   };
 })();

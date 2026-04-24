@@ -273,7 +273,7 @@ body {
 /* Sidebar footer */
 #sidebar-footer {
   border-top: 1px solid var(--border);
-  padding: 8px;
+  padding: 4px 6px;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -283,8 +283,8 @@ body {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 16px;
-  padding: 6px;
+  font-size: 14px;
+  padding: 4px 6px;
   cursor: pointer;
   border-radius: 6px;
   flex-shrink: 0;
@@ -299,8 +299,8 @@ body {
   background: none;
   border: none;
   color: var(--text-dim);
-  font-size: 16px;
-  padding: 6px;
+  font-size: 14px;
+  padding: 4px 6px;
   cursor: pointer;
   border-radius: 6px;
   flex-shrink: 0;
@@ -315,7 +315,7 @@ body {
   background: none;
   border: none;
   color: var(--text-dim);
-  padding: 6px 8px;
+  padding: 4px 6px;
   border-radius: 6px;
   cursor: pointer;
   font-size: 16px;
@@ -336,7 +336,7 @@ body {
   border: none;
   color: var(--text-dim);
   font-size: 12px;
-  padding: 6px;
+  padding: 4px 6px;
   cursor: pointer;
   border-radius: 6px;
   display: flex;
@@ -1180,13 +1180,24 @@ body.task-branchless #ahead-behind {
 .terminal-container {
   position: absolute;
   inset: 0 0 46px 0;
-  padding: 4px;
+  padding: 0;
   display: none;
   overflow: hidden;
+  flex-direction: column;
 }
 
 .terminal-container.active {
-  display: block;
+  display: flex;
+}
+
+/* The main xterm is a direct child of .terminal-container; it takes the
+   remaining space below the header and sub-tab bars in flex flow. Sub-
+   terminal wrappers (which are not direct children of .xterm) have their
+   own flex:1 rule in the sub-terminal section. */
+.terminal-container > .xterm {
+  flex: 1;
+  min-height: 0;
+  height: auto;
 }
 
 /* Resume button in sidebar task item */
@@ -1239,6 +1250,246 @@ body.task-branchless #ahead-behind {
   border-color: var(--accent);
 }
 
+.terminal-plan-btn {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.terminal-plan-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.terminal-plan-btn:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.terminal-plan-btn .plan-btn-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* Plan modal */
+#plan-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+#plan-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 520px;
+  max-width: 92vw;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+#plan-modal h3 {
+  margin: 0 0 6px 0;
+  font-size: 15px;
+  color: var(--text);
+}
+
+#plan-modal .plan-modal-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 14px 0;
+  line-height: 1.4;
+}
+
+#plan-modal .plan-modal-sub code {
+  background: var(--input-bg);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+#plan-modal-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 14px;
+  background: var(--input-bg);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+.plan-modal-tab {
+  flex: 1;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.plan-modal-tab:hover {
+  color: var(--text);
+}
+
+.plan-modal-tab.active {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.plan-tab-content {
+  display: none;
+}
+
+.plan-tab-content.active {
+  display: block;
+}
+
+#plan-modal-text {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+  resize: vertical;
+  min-height: 140px;
+}
+
+#plan-modal-text:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#plan-file-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 4px 4px 12px;
+}
+
+#plan-file-display {
+  flex: 1;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#plan-file-display.has-file {
+  color: var(--text);
+}
+
+#plan-file-btn {
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#plan-file-btn:hover {
+  background: var(--border);
+}
+
+.plan-modal-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 8px 0 0 2px;
+}
+
+#plan-file-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.plan-file-row {
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  color: var(--text-muted);
+  padding: 3px 8px;
+  background: var(--input-bg);
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#plan-modal-error {
+  color: var(--error);
+  font-size: 12px;
+  min-height: 16px;
+  margin-top: 10px;
+}
+
+#plan-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#plan-modal-actions button {
+  padding: 7px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface-hover);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+#plan-modal-actions button:hover {
+  background: var(--border);
+}
+
+#plan-modal-submit {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #fff !important;
+}
+
+#plan-modal-submit:hover {
+  filter: brightness(1.08);
+}
+
+#plan-modal-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
+
 /* Columns view */
 #terminals.columns-view {
   display: flex;
@@ -1263,7 +1514,7 @@ body.task-branchless #ahead-behind {
 }
 
 #terminals.columns-view .terminal-container .grid-label {
-  display: block;
+  display: flex;
 }
 
 #terminals.columns-view .terminal-container .xterm {
@@ -1294,7 +1545,7 @@ body.task-branchless #ahead-behind {
 }
 
 #terminals.grid-view .terminal-container .grid-label {
-  display: block;
+  display: flex;
 }
 
 #terminals.grid-view .terminal-container .xterm {
@@ -1302,27 +1553,105 @@ body.task-branchless #ahead-behind {
   height: auto;
 }
 
-/* Grid cell label */
+/* Worktree header bar — sized to match the (shortened) sidebar-footer.
+   Hosts the worktree name on the left and the actions dropdown on the
+   right. Drag/click behaviors are bound to the name span so the dropdown
+   stays independent. */
 .grid-label {
-  display: none;
-  padding: 4px 10px;
-  height: 28px;
-  min-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
   flex-shrink: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
   background: var(--sidebar-bg);
   border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: grab;
-  line-height: 20px;
 }
 
-.grid-label:active {
+.grid-label-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: grab;
+  line-height: 1;
+}
+
+.grid-label-name:active {
   cursor: grabbing;
+}
+
+.grid-label-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.actions-dropdown-btn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.actions-dropdown-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.actions-dropdown-btn .actions-chevron {
+  font-size: 9px;
+  line-height: 1;
+  opacity: 0.75;
+}
+
+.actions-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 140px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  padding: 4px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.actions-dropdown-item {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.actions-dropdown-item:hover {
+  background: var(--accent);
+  color: #fff;
 }
 
 .terminal-container.dragging {
