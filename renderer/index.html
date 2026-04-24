@@ -273,8 +273,8 @@
   </div>
 
   <!-- Plan Modal: opens a new Claude sub-tab and runs /ultraplan on the supplied content -->
-  <div id="plan-modal-overlay" style="display: none;">
-    <div id="plan-modal">
+  <div id="plan-modal-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="plan-modal" class="klaus-modal klaus-modal-wide">
       <h3 id="plan-modal-title">Plan a task</h3>
       <p class="plan-modal-sub">Provide task details. A new Claude tab will open on this worktree and run <code>/ultraplan</code>.</p>
       <div id="plan-modal-tabs">
@@ -289,7 +289,7 @@
       <div id="plan-tab-upload" class="plan-tab-content">
         <div id="plan-file-picker">
           <span id="plan-file-display">No files selected</span>
-          <button id="plan-file-btn" type="button">Choose files</button>
+          <button id="plan-file-btn" class="klaus-btn klaus-btn-secondary" type="button">Choose files</button>
           <input type="file" id="plan-file-input" accept=".txt,.md,.markdown,.json,.yaml,.yml,.log,text/*" multiple style="display:none" />
         </div>
         <div id="plan-file-list"></div>
@@ -297,16 +297,16 @@
       </div>
 
       <div id="plan-modal-error"></div>
-      <div id="plan-modal-actions">
-        <button id="plan-modal-cancel" type="button">Cancel</button>
-        <button id="plan-modal-submit" type="button">Plan</button>
+      <div class="klaus-modal-actions">
+        <button id="plan-modal-cancel" class="klaus-btn klaus-btn-secondary" type="button">Cancel</button>
+        <button id="plan-modal-submit" class="klaus-btn klaus-btn-primary" type="button">Plan</button>
       </div>
     </div>
   </div>
 
   <!-- License Activation Modal -->
-  <div id="license-overlay" style="display: none;">
-    <div id="license-modal">
+  <div id="license-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="license-modal" class="klaus-modal">
       <h3>Activate Klaussy</h3>
       <p class="license-lead">Enter the license key you received after purchase. A key unlocks all features on this machine for life (one-time purchase).</p>
       <label class="license-label">License key
@@ -314,19 +314,17 @@
       </label>
       <div id="license-error"></div>
       <div id="license-status" class="license-status" style="display: none;"></div>
-      <div id="license-actions">
-        <button id="license-buy" type="button">Buy</button>
-        <div class="license-actions-right">
-          <button id="license-close" type="button">Close</button>
-          <button id="license-activate" type="button" class="primary">Activate</button>
-        </div>
+      <div class="klaus-modal-actions">
+        <button id="license-buy" class="klaus-btn klaus-btn-ghost klaus-modal-actions-left" type="button">Buy</button>
+        <button id="license-close" class="klaus-btn klaus-btn-secondary" type="button">Close</button>
+        <button id="license-activate" class="klaus-btn klaus-btn-primary" type="button">Activate</button>
       </div>
     </div>
   </div>
 
   <!-- Ollama Consent + Install Modal -->
-  <div id="ollama-consent-overlay" style="display: none;">
-    <div id="ollama-consent-modal">
+  <div id="ollama-consent-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="ollama-consent-modal" class="klaus-modal">
       <!-- Consent pane (initial state) -->
       <div id="ollama-consent-pane">
         <h3>Enable inline AI completion</h3>
@@ -337,9 +335,9 @@
           <li><strong>Runs locally</strong>, no network calls per keystroke</li>
           <li>Uses Homebrew to install Ollama</li>
         </ul>
-        <div id="ollama-consent-actions">
-          <button id="ollama-consent-decline" type="button">Not now</button>
-          <button id="ollama-consent-enable" type="button" class="primary">Enable</button>
+        <div class="klaus-modal-actions">
+          <button id="ollama-consent-decline" class="klaus-btn klaus-btn-secondary" type="button">Not now</button>
+          <button id="ollama-consent-enable" class="klaus-btn klaus-btn-primary" type="button">Enable</button>
         </div>
       </div>
 
@@ -356,8 +354,8 @@
           <div id="ollama-progress-bar"></div>
         </div>
         <p id="ollama-progress-message">Starting…</p>
-        <div id="ollama-progress-actions">
-          <button id="ollama-progress-hide" type="button">Hide</button>
+        <div class="klaus-modal-actions">
+          <button id="ollama-progress-hide" class="klaus-btn klaus-btn-secondary" type="button">Hide</button>
         </div>
       </div>
 
@@ -365,9 +363,9 @@
       <div id="ollama-error-pane" style="display: none;">
         <h3>Setup failed</h3>
         <p id="ollama-error-message"></p>
-        <div id="ollama-error-actions">
-          <button id="ollama-error-close" type="button">Close</button>
-          <button id="ollama-error-retry" type="button" class="primary">Retry</button>
+        <div class="klaus-modal-actions">
+          <button id="ollama-error-close" class="klaus-btn klaus-btn-secondary" type="button">Close</button>
+          <button id="ollama-error-retry" class="klaus-btn klaus-btn-primary" type="button">Retry</button>
         </div>
       </div>
     </div>
