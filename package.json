@@ -1,7 +1,7 @@
 {
   "name": "klaus-desktop",
   "productName": "Klaussy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS",
   "main": "main.js",
   "author": "steph-dove",

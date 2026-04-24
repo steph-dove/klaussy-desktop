@@ -200,6 +200,12 @@ window.TerminalManager = (function () {
         return true;
       }
       if (meta && e.key === 'v') {
+        // preventDefault is critical — returning false from xterm's custom
+        // key handler only stops xterm from processing the keystroke, but
+        // the browser's native paste event still fires on xterm's helper
+        // textarea and xterm pastes a second time. Preventing the default
+        // kills that second path.
+        e.preventDefault();
         navigator.clipboard.readText().then(function (text) {
           if (text) window.klaus.terminal.write(id, text);
         });
@@ -385,6 +391,9 @@ window.TerminalManager = (function () {
         return true;
       }
       if (meta && e.key === 'v') {
+        // See the main-terminal paste handler for why preventDefault is
+        // required in addition to returning false.
+        e.preventDefault();
         navigator.clipboard.readText().then(function (text) {
           if (text) window.klaus.terminal.write(id, text, subId);
         });

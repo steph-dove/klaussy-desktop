@@ -3,8 +3,10 @@
   --bg: #0f0f1a;
   --sidebar-bg: #16162a;
   --border: #2a2a4a;
+  --border-strong: #3a3a5e;
   --accent: #6c5ce7;
   --accent-hover: #7d6ef0;
+  --accent-dim: rgba(108, 92, 231, 0.16);
   --text: #e0e0e0;
   --text-muted: #888;
   --text-dim: #666;
@@ -17,6 +19,148 @@
   --term-fg: #e0e0e0;
   --term-cursor: #6c5ce7;
   --term-selection: #6c5ce744;
+
+  /* Design tokens — use these in new code so modals and dialogs stop
+     drifting from each other. Spacing scale is 2/4/8/12/16/24. Radius
+     scale: sm for small chips/buttons, md for inputs and cards, lg for
+     modal shells. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-modal: 0 24px 56px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border);
+  --modal-overlay-bg: rgba(0, 0, 0, 0.6);
+}
+
+/* ---- Unified primitives ---- */
+
+/* Modal shell. Use on any new dialog — both license-activation and the
+   ollama-consent modal use bespoke copies of this; new code should use
+   the classes directly. */
+.klaus-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--modal-overlay-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 220;
+  backdrop-filter: saturate(140%) blur(4px);
+  -webkit-backdrop-filter: saturate(140%) blur(4px);
+}
+
+.klaus-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 460px;
+  max-width: 92vw;
+  box-shadow: var(--shadow-modal);
+}
+
+.klaus-modal-wide { width: 540px; }
+
+.klaus-modal h3 {
+  margin: 0 0 10px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.005em;
+}
+
+.klaus-modal p {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+/* Button — three variants. Drop `.klaus-btn` on any new button and layer
+   one of the modifiers on top. Old call-sites keep their bespoke rules
+   until they're migrated. */
+.klaus-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  transition: background 0.12s, border-color 0.12s, color 0.12s, filter 0.12s;
+}
+
+.klaus-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.klaus-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+  filter: none !important;
+}
+
+.klaus-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.klaus-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  filter: brightness(1.03);
+}
+
+.klaus-btn-secondary {
+  background: var(--surface-hover);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.klaus-btn-secondary:hover:not(:disabled) {
+  background: var(--border);
+  border-color: var(--border-strong);
+}
+
+.klaus-btn-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
+.klaus-btn-ghost:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.klaus-btn-danger-ghost {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--error);
+}
+
+.klaus-btn-danger-ghost:hover:not(:disabled) {
+  background: rgba(255, 82, 82, 0.08);
+  border-color: var(--error);
+}
+
+/* Action row — use inside klaus-modal to get consistent spacing. */
+.klaus-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.klaus-modal-actions .klaus-modal-actions-left {
+  margin-right: auto;
 }
 
 /* Thin scrollbars */
@@ -1283,37 +1427,10 @@ body.task-branchless #ahead-behind {
 }
 
 /* Plan modal */
-#plan-modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 200;
-}
-
-#plan-modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
-  width: 520px;
-  max-width: 92vw;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-}
-
-#plan-modal h3 {
-  margin: 0 0 6px 0;
-  font-size: 15px;
-  color: var(--text);
-}
-
+/* Plan modal — shell comes from klaus-modal / klaus-modal-wide above;
+   content-specific styles below. */
 #plan-modal .plan-modal-sub {
-  font-size: 12px;
-  color: var(--text-muted);
   margin: 0 0 14px 0;
-  line-height: 1.4;
 }
 
 #plan-modal .plan-modal-sub code {
@@ -1404,59 +1521,17 @@ body.task-branchless #ahead-behind {
   color: var(--text);
 }
 
-#plan-file-btn {
-  background: var(--surface-hover);
-  color: var(--text-muted);
-  border: none;
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-#plan-file-btn:hover {
-  background: var(--border);
-}
-
 .plan-modal-hint {
   font-size: 11px;
   color: var(--text-dim);
   margin: 8px 0 0 2px;
 }
 
-/* ---- License Activation Modal ---- */
-
-#license-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 220;
-}
-
-#license-modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
-  width: 460px;
-  max-width: 92vw;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-}
-
-#license-modal h3 {
-  margin: 0 0 10px 0;
-  font-size: 15px;
-  color: var(--text);
-}
+/* ---- License Activation Modal — content styles only; shell + buttons
+         come from the klaus-modal / klaus-btn primitives in the tokens
+         section above. */
 
 .license-lead {
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.5;
   margin: 0 0 14px 0;
 }
 
@@ -1464,6 +1539,8 @@ body.task-branchless #ahead-behind {
   display: block;
   font-size: 11px;
   color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   margin-bottom: 14px;
 }
 
@@ -1471,15 +1548,16 @@ body.task-branchless #ahead-behind {
   display: block;
   width: 100%;
   box-sizing: border-box;
-  margin-top: 4px;
-  padding: 8px 10px;
-  border-radius: 6px;
+  margin-top: 6px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--text);
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
-  font-size: 12px;
+  font-size: 13px;
   letter-spacing: 0.5px;
+  transition: border-color 0.12s;
 }
 
 .license-label input:focus {
@@ -1496,97 +1574,21 @@ body.task-branchless #ahead-behind {
 }
 
 .license-status {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-muted);
   background: var(--input-bg);
-  border-radius: 6px;
-  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
   margin: 0 0 10px 0;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .license-status strong { color: var(--text); }
 
-#license-actions {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 6px;
-}
-
-.license-actions-right {
-  display: flex;
-  gap: 8px;
-}
-
-#license-actions button {
-  padding: 7px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-hover);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-#license-actions button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-#license-actions button.primary:hover { filter: brightness(1.08); }
-
-#license-actions button:disabled {
-  opacity: 0.55;
-  cursor: default;
-  filter: none;
-}
-
-#license-buy {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: transparent;
-}
-
-#license-buy:hover {
-  background: var(--accent);
-  color: #fff;
-}
-
-/* ---- Ollama Consent + Install Modal ---- */
-
-#ollama-consent-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 210;
-}
-
-#ollama-consent-modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 24px;
-  width: 460px;
-  max-width: 92vw;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
-}
-
-#ollama-consent-modal h3 {
-  margin: 0 0 10px 0;
-  font-size: 15px;
-  color: var(--text);
-}
+/* ---- Ollama Consent + Install Modal — shell comes from klaus-modal /
+         klaus-btn primitives above; content-specific styles below. */
 
 .ollama-consent-lead {
-  font-size: 13px;
-  color: var(--text-muted);
-  line-height: 1.45;
   margin: 0 0 14px 0;
 }
 
@@ -1628,44 +1630,6 @@ body.task-branchless #ahead-behind {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 10.5px;
-}
-
-#ollama-consent-actions,
-#ollama-progress-actions,
-#ollama-error-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-#ollama-consent-actions button,
-#ollama-progress-actions button,
-#ollama-error-actions button {
-  padding: 7px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-hover);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-#ollama-consent-actions button.primary,
-#ollama-error-actions button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-#ollama-consent-actions button.primary:hover,
-#ollama-error-actions button.primary:hover {
-  filter: brightness(1.08);
-}
-
-#ollama-consent-actions button:disabled {
-  opacity: 0.55;
-  cursor: default;
 }
 
 #ollama-progress-steps {
@@ -1776,42 +1740,7 @@ body.task-branchless #ahead-behind {
   margin-top: 10px;
 }
 
-#plan-modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-#plan-modal-actions button {
-  padding: 7px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--surface-hover);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-#plan-modal-actions button:hover {
-  background: var(--border);
-}
-
-#plan-modal-submit {
-  background: var(--accent) !important;
-  border-color: var(--accent) !important;
-  color: #fff !important;
-}
-
-#plan-modal-submit:hover {
-  filter: brightness(1.08);
-}
-
-#plan-modal-submit:disabled {
-  opacity: 0.55;
-  cursor: default;
-  filter: none;
-}
+/* Plan modal action row handled by .klaus-modal-actions / .klaus-btn */
 
 /* Columns view */
 #terminals.columns-view {
