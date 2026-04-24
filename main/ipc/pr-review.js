@@ -627,9 +627,9 @@ ipcMain.handle('pop-in-pr-review', () => {
 
 // ---- Whole-PR AI Review ----
 
-// in userData/pr-review-cache/. Entries are migrated once on startup via
-// migratePrReviewCache(); see the file-per-PR handlers above for the current
-// shape and the *-by-pr IPCs.
+// in userData/pr-review-cache/. Legacy in-config entries are brought forward
+// on startup by the v0→v1 config migration (see util/config.js); the
+// file-per-PR handlers above are the current read/write path.
 
 // Send text to the Claude terminal for a given worktree (via bracketed paste,
 // so multi-line content doesn't submit partial lines). Returns the task id.

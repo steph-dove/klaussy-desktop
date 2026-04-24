@@ -9,7 +9,7 @@ const fs = require('fs');
 const { execSync, execFileSync, execFile } = require('child_process');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const lspManager = require('../../lsp-manager');
-const { loadConfig, saveConfig, flushSaveConfig, migratePrReviewCache } = require('../util/config');
+const { loadConfig, saveConfig, flushSaveConfig, runConfigMigrations } = require('../util/config');
 const {
   allWindows, getMainWindow, createWindow,
 } = require('../state/windows');
@@ -213,7 +213,7 @@ function install() {
     unsubscribeTerminalChannel(channel, event.sender);
   });
 
-  migratePrReviewCache();
+  runConfigMigrations();
   fixSpawnPath();
 
   app.whenReady().then(() => {
