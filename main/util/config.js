@@ -7,10 +7,20 @@
 // serialized behind a single in-flight promise so overlapping callers
 // coalesce to sequential merge+write passes. shutdownAndSave awaits the
 // tail of that queue via flushSaveConfig() before quitting.
+//
+// Schema versioning: `config.schemaVersion` is stamped on the file after
+// every successful migration pass. On startup, runConfigMigrations() walks
+// the `migrations` array and applies each step whose index is at/after the
+// stored version — then stamps the new version. Callers reading individual
+// fields still get best-effort resilience (missing fields fall back to
+// defaults), but breaking-shape changes can now be handled explicitly
+// instead of silently corrupting state.
 
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+
+const CURRENT_SCHEMA_VERSION = 1;
 
 // Persist repo path in a simple JSON file in userData
 function getConfigPath() {
@@ -63,18 +73,25 @@ function saveConfig(config) {
 // (which may still be in-flight when Cmd+Q fires) has a chance to land.
 function flushSaveConfig() { return _saveConfigQueue; }
 
-// One-time migration: the original PR review cache (G-series) stored reviews
-// under `config.prReviews[owner/repo#n] = { review, savedAt }`. The current
-// cache (G7) is file-per-PR at `userData/pr-review-cache/<owner>-<repo>-<n>.json`
-// with a richer shape. We ran both in parallel for a release, which let saves
-// from one path invisibly diverge from the other. Bring the legacy entries
-// forward on startup and drop the config key so there's exactly one cache.
-function migratePrReviewCache() {
-  try {
-    const config = loadConfig();
+// Migrations from version n-1 to version n. Each function mutates the passed
+// config object in place and MUST be idempotent — we only run each migration
+// once, but migrations can fail mid-way and we'd rather re-run cleanly than
+// corrupt state.
+//
+// Index N = migration v{N} → v{N+1} (so migrations[0] bumps v0 to v1).
+// Pre-versioning is v0: any config file without a schemaVersion field.
+const migrations = [
+  // v0 → v1: fold legacy `config.prReviews` (G-series in-config PR review
+  // cache) into the file-per-PR store under userData/pr-review-cache/.
+  // The legacy cache ran in parallel with the new one for a release, which
+  // let saves diverge; this brings the old entries forward so there's
+  // exactly one cache, then drops the config key.
+  function v0_to_v1(config) {
     const legacy = config.prReviews;
-    if (!legacy || typeof legacy !== 'object' || Object.keys(legacy).length === 0) return;
-
+    if (!legacy || typeof legacy !== 'object' || Object.keys(legacy).length === 0) {
+      if ('prReviews' in config) config.prReviews = undefined;
+      return;
+    }
     const dir = path.join(app.getPath('userData'), 'pr-review-cache');
     try { fs.mkdirSync(dir, { recursive: true }); } catch {}
 
@@ -112,12 +129,42 @@ function migratePrReviewCache() {
     // from disk we set it to undefined (copied by Object.assign, dropped by
     // JSON.stringify) rather than deleting the key locally.
     config.prReviews = undefined;
-    saveConfig(config);
     if (migrated > 0) {
       console.log(`pr-review-cache: migrated ${migrated} legacy entries to userData/pr-review-cache/`);
     }
+  },
+];
+
+// Run on every startup. Fresh installs get stamped with CURRENT_SCHEMA_VERSION
+// directly; existing configs get each missing migration applied in order,
+// then the new version is written atomically via saveConfig.
+//
+// On failure at step N, we skip stamping schemaVersion so the next startup
+// retries from the same point. Individual migrations log their own errors.
+function runConfigMigrations() {
+  try {
+    const configPath = getConfigPath();
+    if (!fs.existsSync(configPath)) {
+      // Fresh install — nothing to migrate, just stamp the current version.
+      saveConfig({ schemaVersion: CURRENT_SCHEMA_VERSION });
+      return;
+    }
+    const config = loadConfig();
+    const from = typeof config.schemaVersion === 'number' ? config.schemaVersion : 0;
+    if (from >= CURRENT_SCHEMA_VERSION) return;
+
+    for (let n = from; n < CURRENT_SCHEMA_VERSION; n++) {
+      try {
+        migrations[n](config);
+      } catch (err) {
+        console.error(`config migration v${n}->v${n + 1} failed:`, err && err.message);
+        return; // Don't stamp — let next startup retry.
+      }
+    }
+    config.schemaVersion = CURRENT_SCHEMA_VERSION;
+    saveConfig(config);
   } catch (err) {
-    console.error('pr-review-cache migration failed:', err && err.message);
+    console.error('runConfigMigrations failed:', err && err.message);
   }
 }
 
@@ -126,5 +173,6 @@ module.exports = {
   loadConfig,
   saveConfig,
   flushSaveConfig,
-  migratePrReviewCache,
+  runConfigMigrations,
+  CURRENT_SCHEMA_VERSION,
 };
