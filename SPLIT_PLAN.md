@@ -237,8 +237,8 @@ Phase 3:
 
 Phase 4:
 - [x] main/bootstrap/menu.js
-- [ ] main/bootstrap/app-events.js
-- [ ] Slim main.js to ~200 lines
+- [x] main/bootstrap/app-events.js
+- [x] Slim main.js to ~200 lines
 
 ## 8. Hazards + resolutions
 
