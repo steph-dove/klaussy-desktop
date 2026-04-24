@@ -236,7 +236,7 @@ Phase 3:
 - [x] main/ipc/pr-review.js
 
 Phase 4:
-- [ ] main/bootstrap/menu.js
+- [x] main/bootstrap/menu.js
 - [ ] main/bootstrap/app-events.js
 - [ ] Slim main.js to ~200 lines
 
