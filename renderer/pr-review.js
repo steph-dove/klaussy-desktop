@@ -238,7 +238,7 @@ window.PrReview = (function () {
       if (result.error) {
         btn.disabled = false;
         btn.textContent = 'Comment';
-        alert('Post failed: ' + result.error);
+        window.toast.error('Post failed: ' + result.error);
         return;
       }
       ta.value = '';
@@ -347,7 +347,7 @@ window.PrReview = (function () {
       if (result.error) {
         sendBtn.disabled = false;
         sendBtn.textContent = 'Reply';
-        alert('Reply failed: ' + result.error);
+        window.toast.error('Reply failed: ' + result.error);
         return;
       }
       composer.remove();
@@ -404,7 +404,7 @@ window.PrReview = (function () {
       var range = computeCommentRange();
       selectionFab.style.display = 'none';
       if (!range) {
-        alert('Select one or more diff lines (add / delete / context) to comment on.');
+        window.toast.error('Select one or more diff lines (add / delete / context) to comment on.');
         return;
       }
       openCommentComposer(range);
@@ -664,7 +664,7 @@ window.PrReview = (function () {
       checkoutBtn.textContent = 'Fetching\u2026';
       var result = await window.klaus.pr.checkoutLocally();
       if (result && result.error) {
-        alert('Check out failed:\n' + result.error);
+        window.toast.error('Check out failed:\n' + result.error);
         checkoutBtn.disabled = false;
         checkoutBtn.textContent = prev;
       }
@@ -2221,7 +2221,7 @@ window.PrReview = (function () {
       btn.textContent = 'Merging\u2026';
       var result = await window.klaus.pr.reviewMerge(strategy);
       if (result && result.error) {
-        alert('Merge failed:\n' + result.error);
+        window.toast.error('Merge failed:\n' + result.error);
         btn.textContent = 'Merge \u25BE';
         updateMergeGate(wrap, lastState);
         return;

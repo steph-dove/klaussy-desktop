@@ -620,7 +620,7 @@ window.PRPanel = (function () {
     if (result.error) {
       btn.disabled = false;
       btn.textContent = 'Reply';
-      alert('Failed to post reply: ' + (result.error || 'Unknown error'));
+      window.toast.error('Failed to post reply: ' + (result.error || 'Unknown error'));
       return;
     }
 
@@ -663,7 +663,7 @@ window.PRPanel = (function () {
     if (result && result.error) {
       btn.disabled = false;
       btn.textContent = origText;
-      alert('Failed to ' + (wasResolved ? 'unresolve' : 'resolve') + ' thread: ' + result.error);
+      window.toast.error('Failed to ' + (wasResolved ? 'unresolve' : 'resolve') + ' thread: ' + result.error);
       return;
     }
 
@@ -844,7 +844,7 @@ window.PRPanel = (function () {
     btn.textContent = 'Comment';
 
     if (result.error) {
-      alert('Failed to post comment: ' + result.error);
+      window.toast.error('Failed to post comment: ' + result.error);
       return;
     }
 
@@ -868,7 +868,7 @@ window.PRPanel = (function () {
     btn.textContent = origText;
 
     if (result.error) {
-      alert('Review failed: ' + result.error);
+      window.toast.error('Review failed: ' + result.error);
       return;
     }
 
@@ -1094,7 +1094,7 @@ window.PRPanel = (function () {
     btn.textContent = origText;
 
     if (result.error) {
-      alert('Merge failed: ' + result.error);
+      window.toast.error('Merge failed: ' + result.error);
       updateMergeButton();
       return;
     }
@@ -1216,13 +1216,13 @@ window.PRPanel = (function () {
   }
 
   async function sendFix(prompt, btn) {
-    if (!currentWorktreePath) { alert('No worktree active.'); return; }
+    if (!currentWorktreePath) { window.toast.error('No worktree active.'); return; }
     var origText = btn ? btn.textContent : '';
     if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
     var result = await window.klaus.pr.fixInTerminal(currentWorktreePath, prompt);
     if (btn) { btn.disabled = false; btn.textContent = origText; }
     if (result && result.error) {
-      alert('Could not send to terminal: ' + result.error);
+      window.toast.error('Could not send to terminal: ' + result.error);
       return;
     }
     if (btn) {

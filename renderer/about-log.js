@@ -514,7 +514,7 @@ window.Dialogs = (function () {
         saveBtn.textContent = 'Saving\u2026';
         var r = await window.klaus.skills.writeFile(filePath, ta.value);
         if (r && r.error) {
-          alert('Save failed: ' + r.error);
+          window.toast.error('Save failed: ' + r.error);
           saveBtn.disabled = false;
           saveBtn.textContent = origText;
           return;
@@ -594,7 +594,7 @@ window.Dialogs = (function () {
             if (orig) orig.textContent = 'Switching\u2026';
             var result = await window.klaus.gh.switchAccount(btn.dataset.username);
             if (result && result.error) {
-              alert('Switch failed: ' + result.error);
+              window.toast.error('Switch failed: ' + result.error);
               refresh();
               return;
             }

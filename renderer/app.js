@@ -1035,7 +1035,7 @@
     if (!dir) return;
     var result = await window.klaus.task.openFolder(dir, mode || 'claude');
     if (!result || result.error) {
-      if (result && result.error) alert(result.error);
+      if (result && result.error) window.toast.error(result.error);
       return;
     }
     addTaskToUI(result);
@@ -1322,7 +1322,7 @@
         urlInput.disabled = false;
         startBtn.textContent = 'Start review';
         updateStartEnabled();
-        alert('Failed to load PR:\n' + result.error);
+        window.toast.error('Failed to load PR:\n' + result.error);
         return;
       }
       close();
@@ -1377,7 +1377,7 @@
             try { await ensureAccountCanSeeUrl(row.dataset.url); } catch (_) {}
             var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
             if (loadResult.error) {
-              alert('Failed to load PR:\n' + loadResult.error);
+              window.toast.error('Failed to load PR:\n' + loadResult.error);
               row.style.opacity = '1';
               return;
             }
@@ -1418,7 +1418,7 @@
           row.style.opacity = '0.5';
           var loadResult = await window.klaus.pr.load({ number: parseInt(row.dataset.number, 10) });
           if (loadResult.error) {
-            alert('Failed to load PR:\n' + loadResult.error);
+            window.toast.error('Failed to load PR:\n' + loadResult.error);
             row.style.opacity = '1';
             return;
           }

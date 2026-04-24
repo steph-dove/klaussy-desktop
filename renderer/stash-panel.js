@@ -17,7 +17,7 @@ window.StashPanel = (function () {
     btnStashPush.disabled = false;
     stashMessage.value = '';
     if (result.error) {
-      alert('Stash failed: ' + result.error);
+      window.toast.error('Stash failed: ' + result.error);
     }
     loadStash();
     DiffPanel.refresh();
@@ -56,7 +56,7 @@ window.StashPanel = (function () {
         var originalIdx = refMatch ? parseInt(refMatch[1], 10) : idx;
         var res = await window.klaus.git.stashPop(wt, originalIdx);
         if (res.error) {
-          alert('Stash pop failed: ' + res.error);
+          window.toast.error('Stash pop failed: ' + res.error);
         }
         loadStash();
         DiffPanel.refresh();
