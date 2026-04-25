@@ -259,6 +259,22 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
+    reviewInvestigateStart: (requestId, findingBody) =>
+      ipcRenderer.invoke('pr-review-investigate-start', { requestId, findingBody }),
+    reviewInvestigateCancel: (requestId) =>
+      ipcRenderer.invoke('pr-review-investigate-cancel', { requestId }),
+    onReviewInvestigateData: (requestId, callback) => {
+      const channel = 'pr-review-investigate-data-' + requestId;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onReviewInvestigateDone: (requestId, callback) => {
+      const channel = 'pr-review-investigate-done-' + requestId;
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.once(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
     readWorktreeFile: (worktreePath, relPath) =>
       ipcRenderer.invoke('pr-review-read-file', { worktreePath, relPath }),
     cacheGetByPr: (owner, repo, number) =>

@@ -1,7 +1,7 @@
 {
   "name": "klaus-desktop",
   "productName": "Klaussy",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS",
   "main": "main.js",
   "author": "steph-dove",
@@ -18,9 +18,9 @@
     "start": "electron .",
     "test": "node --test test/util/*.test.js",
     "rebuild": "electron-rebuild",
-    "dist": "electron-builder --mac --arm64 --x64",
-    "dist:arm64": "electron-builder --mac --arm64",
-    "dist:intel": "electron-builder --mac --x64",
+    "dist": "electron-builder --mac --arm64 --x64 && npm run rebuild",
+    "dist:arm64": "electron-builder --mac --arm64 && npm run rebuild",
+    "dist:intel": "electron-builder --mac --x64 && npm run rebuild",
     "postinstall": "cp icon.icns node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns 2>/dev/null || true; plutil -replace CFBundleName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true; plutil -replace CFBundleDisplayName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true"
   },
   "dependencies": {

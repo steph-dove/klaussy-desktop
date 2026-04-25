@@ -25,6 +25,7 @@ const explainStreamProcs = new Map();
 const aiReviewProcs = new Map();
 const commitMsgProcs = new Map();
 const reviewChatProcs = new Map();
+const investigateProcs = new Map();
 
 // Channel naming convention:
 //   `${channelPrefix}-${streamJson ? 'data' : 'chunk'}-${requestId}` for output
@@ -112,4 +113,5 @@ module.exports = {
   aiReviewProcs,
   commitMsgProcs,
   reviewChatProcs,
+  investigateProcs,
 };
