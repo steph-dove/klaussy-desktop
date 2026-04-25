@@ -293,12 +293,17 @@ window.TerminalManager = (function () {
 
     subTabBar.addEventListener('click', function (e) {
       e.stopPropagation();
+      // Only emit when the task actually changed (e.g., user clicked a
+      // sub-tab on a different task in grid layout). Re-emitting on every
+      // tap of an already-active task's tab bar caused subscribers like
+      // closeFileViewerOnTaskSwitch and DiffPanel.refresh to wipe the
+      // file viewer / refetch git state for no reason.
+      var changed = AppState.activeTaskId !== id;
       AppState.focusedTaskId = id;
       AppState.activeTaskId = id;
-      // Subscriber for diff-panel refresh flag is conveyed via a second
-      // event — the sub-tab click is the only caller that wants DiffPanel
-      // to force a refresh (others just update the worktree).
-      Events.emit('task:switched', { task: tasks.get(id) || null, refreshDiff: true });
+      if (changed) {
+        Events.emit('task:switched', { task: tasks.get(id) || null, refreshDiff: true });
+      }
     });
 
     subTabBar.querySelector('.sub-tab[data-sub-id="0"]').addEventListener('click', function () {
@@ -358,6 +363,19 @@ window.TerminalManager = (function () {
     subWrapper.style.display = 'none';
     container.appendChild(subWrapper);
     subTerminal.open(subWrapper);
+
+    // Same focus tracker the primary terminal has (line ~172): clicking
+    // into a sub-terminal in a different task should switch the active
+    // task so the diff/file panels track that worktree. Without this,
+    // grid layout looks like the panels are "stuck" on whichever task's
+    // primary terminal you focused last.
+    subTerminal.textarea.addEventListener('focus', function () {
+      if (AppState.focusedTaskId !== id) {
+        AppState.focusedTaskId = id;
+        AppState.activeTaskId = id;
+        Events.emit('task:switched', { task: tasks.get(id) || null, refreshDiff: true });
+      }
+    });
 
     var subCleanup = [];
     var removeData = window.klaus.terminal.onSubData(id, subId, function (data) {

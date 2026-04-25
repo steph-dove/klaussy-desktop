@@ -574,16 +574,22 @@
 
     item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
       e.stopPropagation();
-      var result = await window.klaus.task.attachWorktree(wt.path, 'claude');
-      if (result.error) return;
+      var result;
+      try { result = await window.klaus.task.attachWorktree(wt.path, 'claude'); }
+      catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
+      if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
+      if (!result) { window.toast.error('Open failed: no response from main process'); return; }
       addTaskToUI(result);
       switchToTask(result.id);
     });
 
     item.querySelector('.worktree-open-shell').addEventListener('click', async function (e) {
       e.stopPropagation();
-      var result = await window.klaus.task.attachWorktree(wt.path, 'shell');
-      if (result.error) return;
+      var result;
+      try { result = await window.klaus.task.attachWorktree(wt.path, 'shell'); }
+      catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
+      if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
+      if (!result) { window.toast.error('Open failed: no response from main process'); return; }
       addTaskToUI(result);
       switchToTask(result.id);
     });
@@ -648,12 +654,20 @@
         btn.disabled = true;
         btn.textContent = '...';
         var result;
-        if (s.mode === 'shell') {
-          result = await window.klaus.task.attachWorktree(s.worktreePath, 'shell');
-        } else {
-          result = await window.klaus.session.resume(s);
+        try {
+          if (s.mode === 'shell') {
+            result = await window.klaus.task.attachWorktree(s.worktreePath, 'shell');
+          } else {
+            result = await window.klaus.session.resume(s);
+          }
+        } catch (err) {
+          window.toast.error('Resume failed: ' + (err && err.message || err));
+          btn.disabled = false;
+          btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume';
+          return;
         }
-        if (result.error) {
+        if (!result || result.error) {
+          window.toast.error('Resume failed: ' + ((result && result.error) || 'no response from main process'));
           btn.textContent = 'Err';
           setTimeout(function () { btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume'; btn.disabled = false; }, 2000);
           return;
@@ -670,8 +684,16 @@
         var btn = e.target;
         btn.disabled = true;
         btn.textContent = '...';
-        var result = await window.klaus.task.attachWorktree(s.worktreePath, 'claude');
-        if (result.error) {
+        var result;
+        try { result = await window.klaus.task.attachWorktree(s.worktreePath, 'claude'); }
+        catch (err) {
+          window.toast.error('Open failed: ' + (err && err.message || err));
+          btn.disabled = false;
+          btn.textContent = 'New';
+          return;
+        }
+        if (!result || result.error) {
+          window.toast.error('Open failed: ' + ((result && result.error) || 'no response from main process'));
           btn.textContent = 'Err';
           setTimeout(function () { btn.textContent = 'New'; btn.disabled = false; }, 2000);
           return;

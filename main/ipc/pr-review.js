@@ -9,7 +9,7 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { ghExec, ghExecP } = require('../util/exec');
+const { ghExec, ghExecP, appendStderr } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
 const {
@@ -591,10 +591,17 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   if (!event) return { error: 'Missing review event (APPROVE / REQUEST_CHANGES / COMMENT)' };
 
+  // Split incoming drafts: inline review comments go in the review payload;
+  // issueComment:true drafts (Claude-implement follow-ups whose location
+  // couldn't be verified) post after the review as general PR comments.
+  const rawComments = comments || [];
+  const inlineComments = rawComments.filter((c) => !c.issueComment);
+  const issueCommentDrafts = rawComments.filter((c) => c.issueComment);
+
   const payload = {
     event,
     body: body || '',
-    comments: (comments || []).map((c) => {
+    comments: inlineComments.map((c) => {
       const out = {
         path: c.path,
         body: c.body,
@@ -614,7 +621,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/reviews`;
   // `spawn` is imported at the top of the file.
 
-  return new Promise((resolve) => {
+  const reviewResult = await new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -641,6 +648,51 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     proc.stdin.write(JSON.stringify(payload));
     proc.stdin.end();
   });
+  if (reviewResult.error) return reviewResult;
+
+  // Post any queued issue-comment drafts sequentially. Failures don't roll
+  // back the review; surface them as a partial-success warning so the user
+  // can retry manually.
+  const issueEndpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
+  const issueCommentFailures = [];
+  for (const draft of issueCommentDrafts) {
+    if (!draft.body || !draft.body.trim()) continue;
+    const res = await new Promise((resolve) => {
+      const proc = spawn('gh', ['api', issueEndpoint, '--method', 'POST', '--input', '-'], {
+        cwd,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdoutBuf = '', stderrBuf = '';
+      proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+      proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
+      proc.on('error', (err) => resolve({ error: err.message }));
+      proc.on('exit', (code) => {
+        if (code !== 0) {
+          let msg = stderrBuf.trim();
+          if (stdoutBuf) {
+            try {
+              const parsed = JSON.parse(stdoutBuf);
+              if (parsed.message) msg = parsed.message;
+            } catch (_) {}
+          }
+          resolve({ error: msg || ('gh exited with code ' + code) });
+          return;
+        }
+        resolve({ ok: true });
+      });
+      proc.stdin.write(JSON.stringify({ body: draft.body }));
+      proc.stdin.end();
+    });
+    if (res.error) issueCommentFailures.push(res.error);
+  }
+
+  if (issueCommentFailures.length) {
+    return {
+      ok: true,
+      warning: `Review posted, but ${issueCommentFailures.length} follow-up comment(s) failed: ${issueCommentFailures.join('; ')}`,
+    };
+  }
+  return { ok: true };
 });
 
 ipcMain.handle('pr-review-state', () => prReview.active ? sanitizePrReview(prReview.active) : null);

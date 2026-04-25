@@ -42,7 +42,12 @@ ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branc
     return { error: 'Worktree no longer exists: ' + worktreePath };
   }
   const resumeMode = mode || 'claude';
-  return spawnInWorktree(name, worktreePath, branch, resumeMode, resumeMode === 'claude' ? sessionId : null);
+  try {
+    return spawnInWorktree(name, worktreePath, branch, resumeMode, resumeMode === 'claude' ? sessionId : null);
+  } catch (err) {
+    console.error('[resume-session] spawnInWorktree failed:', err);
+    return { error: 'Failed to start terminal: ' + (err && err.message || err) };
+  }
 });
 
 ipcMain.handle('save-ui-state', (_event, state) => {
@@ -214,7 +219,12 @@ ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode }) => {
   } catch {}
 
   const name = path.basename(worktreePath);
-  return spawnInWorktree(name, worktreePath, branch, mode || 'claude');
+  try {
+    return spawnInWorktree(name, worktreePath, branch, mode || 'claude');
+  } catch (err) {
+    console.error('[attach-worktree] spawnInWorktree failed:', err);
+    return { error: 'Failed to start terminal: ' + (err && err.message || err) };
+  }
 });
 
 // Browse for a directory (used by the existing worktree tab).

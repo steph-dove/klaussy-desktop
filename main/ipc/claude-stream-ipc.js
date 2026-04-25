@@ -11,6 +11,7 @@ const {
   spawnClaudeStream, makeClaudeCancelHandler,
   debugCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
   implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
+  investigateProcs,
 } = require('../state/claude-streaming');
 
 // Debug a single failing CI check. Pulls the failing job's logs, builds a
@@ -190,15 +191,26 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // Two prompts depending on whether we're implementing one finding or many.
   // Both share guardrails so claude doesn't drift into unrelated cleanup or
   // start running tests/commits.
-  const guardrails =
+  const baseGuardrails =
     `\n\nGuidelines:\n`
     + `- Only change what the finding(s) ask for; do not add unrelated cleanup.\n`
     + `- Do not run tests, install deps, or commit/push.\n`
     + `- After making the changes, summarize each change in one short bullet,\n`
     + `  prefixed with the file path. Be terse.\n`;
+  // Single-finding mode emits a follow-up PR comment draft between literal
+  // markers so the renderer can extract it and present it to the reviewer
+  // for approval. Batch "all" mode skips the marker — one comment for a mixed
+  // batch of findings wouldn't map cleanly to any one finding card.
+  const draftCommentInstruction =
+    `- Then, on a new line, output exactly one block delimited by these literal markers:\n`
+    + `    <DRAFT_PR_COMMENT>\n`
+    + `    One or two sentences written as a reply the reviewer could post under\n`
+    + `    the finding on GitHub — explain what you fixed and how. Do not repeat\n`
+    + `    the finding verbatim. Plain prose, no code fences, no bullets.\n`
+    + `    </DRAFT_PR_COMMENT>\n`;
   const prompt = mode === 'all'
-    ? `Apply the following code-review findings to the codebase:\n\n${body}` + guardrails
-    : `Apply the following code-review finding to the codebase:\n\n${body}` + guardrails;
+    ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
+    : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction;
 
   spawnClaudeStream({
     requestId, procMap: implementProcs, channelPrefix: 'pr-review-implement',
@@ -255,6 +267,41 @@ ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, m
 });
 
 ipcMain.handle('pr-review-chat-cancel', makeClaudeCancelHandler(reviewChatProcs));
+
+// One-shot validation of a single finding. Claude reads code + git in the PR
+// worktree (read-only) and returns a Verdict/Reasoning/Recommendation block.
+// Separate from chat so the renderer can surface a crisp verdict UI without
+// conflating it with multi-turn discussion.
+ipcMain.handle('pr-review-investigate-start', async (event, { requestId, findingBody }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (investigateProcs.has(requestId)) return { error: 'Already in flight' };
+  if (!prReview.active) return { error: 'No active PR review' };
+  if (!findingBody || !findingBody.trim()) return { error: 'Missing finding body' };
+
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+
+  const prompt =
+    `You are validating a PR-review finding. Decide whether the concern is real in the current code. ` +
+    `You may read files, grep, and run git commands in the repo to ground your answer — but do NOT edit, create, or delete any files, and do NOT commit or push.\n\n` +
+    `Answer in this exact shape (Markdown):\n\n` +
+    `**Verdict:** Valid / Partially valid / Invalid\n\n` +
+    `**Reasoning:** 2-4 sentences with file:line references.\n\n` +
+    `**Recommendation:** one line — implement the fix, discuss further, or dismiss.\n\n` +
+    `The finding:\n\n${findingBody}`;
+
+  spawnClaudeStream({
+    requestId, procMap: investigateProcs, channelPrefix: 'pr-review-investigate',
+    sender: event.sender,
+    cwd: ensured.worktreePath,
+    prompt,
+    streamJson: true,
+    extraDoneFields: { worktreePath: ensured.worktreePath },
+  });
+  return { ok: true };
+});
+
+ipcMain.handle('pr-review-investigate-cancel', makeClaudeCancelHandler(investigateProcs));
 
 // ---- Explain Diff ----
 

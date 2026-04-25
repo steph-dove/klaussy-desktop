@@ -37,6 +37,14 @@ window.PrReview = (function () {
   // G4: draft review comments accumulated client-side until the user submits
   // a review. Structure: { id, path, line, side, startLine?, startSide?, body }
   var pendingComments = [];
+  // Per-conversation-comment Claude state, keyed by comment databaseId.
+  // Comments in the Conversation tab get Claude-investigate and
+  // Claude-implement buttons that share the same IPC plumbing as the
+  // Review-tab findings. Stored here (not on the comment itself) because
+  // threads rerender on every refresh and would clobber inline state.
+  // Shape per entry: { investigateId, investigateStreaming, investigateResult, investigateError,
+  //                    implementId, implementOut, implementError, implementDraft, implementDraftStatus }
+  var convClaudeState = {};
   // G6: latest checks result for the active PR. null = not yet fetched.
   var currentChecks = null;
   // G7: in-flight AI review state. requestId is set while streaming; the
@@ -226,31 +234,90 @@ window.PrReview = (function () {
 
   function bindConversationComposer() {
     var composer = hostEl.querySelector('.pr-conv-new-comment');
-    if (!composer) return;
-    var ta = composer.querySelector('.pr-conv-new-body');
-    var btn = composer.querySelector('.pr-conv-new-post');
+    if (composer) {
+      var ta = composer.querySelector('.pr-conv-new-body');
+      var btn = composer.querySelector('.pr-conv-new-post');
 
-    async function post() {
-      var body = ta.value.trim();
-      if (!body) return;
-      btn.disabled = true;
-      btn.textContent = 'Posting\u2026';
-      var result = await window.klaus.pr.addIssueComment(body);
-      if (result.error) {
-        btn.disabled = false;
-        btn.textContent = 'Comment';
-        window.toast.error('Post failed: ' + result.error);
-        return;
+      async function post() {
+        var body = ta.value.trim();
+        if (!body) return;
+        btn.disabled = true;
+        btn.textContent = 'Posting\u2026';
+        var result = await window.klaus.pr.addIssueComment(body);
+        if (result.error) {
+          btn.disabled = false;
+          btn.textContent = 'Comment';
+          window.toast.error('Post failed: ' + result.error);
+          return;
+        }
+        ta.value = '';
+        await window.klaus.pr.refreshThreads();
+        // render is re-triggered by the pr-review-state broadcast.
       }
-      ta.value = '';
-      await window.klaus.pr.refreshThreads();
-      // render is re-triggered by the pr-review-state broadcast.
-    }
 
-    btn.addEventListener('click', post);
-    ta.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); }
+      btn.addEventListener('click', post);
+      ta.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); post(); }
+      });
+    }
+    bindConvClaudeButtons();
+  }
+
+  // Per-comment Claude actions: investigate / implement / draft approve /
+  // dismiss / clear. Wired with explicit per-button listeners on each
+  // repaint \u2014 simple, low-risk, mirrors the rest of this file's style
+  // (most other binders also re-attach on every render).
+  function bindConvClaudeButtons() {
+    hostEl.querySelectorAll('.pr-conv-claude-investigate').forEach(function (b) {
+      b.addEventListener('click', function () { startConvInvestigate(b.dataset.dbid); });
     });
+    hostEl.querySelectorAll('.pr-conv-claude-investigate-cancel').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var s = convClaudeState[b.dataset.dbid];
+        if (s && s.investigateId) window.klaus.pr.reviewInvestigateCancel(s.investigateId);
+      });
+    });
+    hostEl.querySelectorAll('.pr-conv-claude-investigate-clear').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var s = convClaudeState[b.dataset.dbid];
+        if (!s) return;
+        s.investigateResult = '';
+        s.investigateError = null;
+        repaintConversationTab();
+      });
+    });
+    hostEl.querySelectorAll('.pr-conv-claude-implement').forEach(function (b) {
+      b.addEventListener('click', function () { startConvImplement(b.dataset.dbid); });
+    });
+    hostEl.querySelectorAll('.pr-conv-claude-implement-cancel').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var s = convClaudeState[b.dataset.dbid];
+        if (s && s.implementId) window.klaus.pr.reviewImplementCancel(s.implementId);
+      });
+    });
+    hostEl.querySelectorAll('.pr-conv-claude-draft-approve').forEach(function (b) {
+      b.addEventListener('click', function () { approveConvImplementDraft(b.dataset.dbid, b); });
+    });
+    hostEl.querySelectorAll('.pr-conv-claude-draft-dismiss').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var s = convClaudeState[b.dataset.dbid];
+        if (!s) return;
+        s.implementDraftStatus = 'dismissed';
+        repaintConversationTab();
+      });
+    });
+  }
+
+  // Repaint the conversation tab in place. Mirrors repaintAiReviewTab so
+  // streaming chunks don't trigger a full app render.
+  function repaintConversationTab() {
+    if (activeTab !== 'conversation') return;
+    var tab = hostEl.querySelector('.pr-review-conversation');
+    if (!tab || !lastState) return;
+    tab.innerHTML = renderConversation(lastState);
+    bindConversationComposer();
+    bindReplyButtons();
+    bindEditCommentButtons();
   }
 
   function bindReplyButtons() {
@@ -751,6 +818,10 @@ window.PrReview = (function () {
         if (saved.originalText != null) f.originalText = saved.originalText;
         if (Array.isArray(saved.chatMessages)) f.chatMessages = saved.chatMessages;
         if (saved.usage) f.usage = saved.usage;
+        if (saved.investigateResult) f.investigateResult = saved.investigateResult;
+        if (saved.investigateError) f.investigateError = saved.investigateError;
+        if (saved.implementDraftComment) f.implementDraftComment = saved.implementDraftComment;
+        if (saved.implementDraftStatus) f.implementDraftStatus = saved.implementDraftStatus;
         // Restore previously-verified location so the chip renders
         // immediately — verifyFindingLocations will re-confirm against the
         // current worktree but we don't want to flash "?" in the meantime.
@@ -789,6 +860,10 @@ window.PrReview = (function () {
         line: f.line || null,
         locationVerified: !!f.locationVerified,
         postMode: f.postMode || null,
+        investigateResult: f.investigateResult || '',
+        investigateError: f.investigateError || null,
+        implementDraftComment: f.implementDraftComment || '',
+        implementDraftStatus: f.implementDraftStatus || null,
       };
     });
     window.klaus.pr.cacheSaveByPr(
@@ -964,6 +1039,18 @@ window.PrReview = (function () {
         chatRequestId: null,
         chatStreaming: '',
         chatError: null,
+        // Claude-investigate state. One-shot read-only validation of the
+        // finding. `investigateResult` is the final markdown verdict;
+        // `investigateStreaming` holds in-flight text.
+        investigateId: null,
+        investigateStreaming: '',
+        investigateResult: '',
+        investigateError: null,
+        // Draft PR comment produced by Claude implement. Status transitions
+        // null → 'pending' (awaiting approval) → 'approved' (pushed onto
+        // pendingComments) or 'dismissed'. Approve/Dismiss is per-finding.
+        implementDraftComment: '',
+        implementDraftStatus: null,
       };
     });
     aiReview.findings = next;
@@ -1217,6 +1304,15 @@ window.PrReview = (function () {
       + escHtml(discussLabel)
     + '</button>';
 
+    // Claude-investigate button. One-shot read-only validation: claude reads
+    // the relevant files and returns a Verdict/Reasoning/Recommendation block.
+    // While streaming, the button flips to Cancel.
+    var investigateBtn = f.investigateId
+      ? '<button class="pr-ai-finding-investigate-cancel" type="button" title="Cancel investigation">Cancel investigate</button>'
+      : '<button class="pr-ai-finding-investigate" type="button" title="Ask Claude if this finding is actually valid">'
+        + (f.investigateResult ? 'Investigate again' : 'Claude investigate')
+        + '</button>';
+
     // Inline error block — shown below actions when Add-to-PR failed.
     // Previously the error lived only in a hover-title on a small badge,
     // which made failures feel silent. Now it’s visible in the card.
@@ -1234,14 +1330,14 @@ window.PrReview = (function () {
       actions = commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
-        + commentBadge + editedBadge + copyBtn + discussBtn + editCommentBtn
+        + commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
         + commentBtn
-        + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
+        + '<button class="pr-ai-finding-redo" type="button" title="Run Claude implement again">Implement again</button>';
     } else {
-      actions = commentBadge + editedBadge + copyBtn + discussBtn + editCommentBtn
+      actions = commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
-        + '<button class="pr-ai-finding-implement" type="button">Implement</button>';
+        + '<button class="pr-ai-finding-implement" type="button" title="Claude updates the file and drafts a follow-up PR comment for your approval">Claude implement</button>';
     }
 
     var implementOutTxt = f.implementError || f.implementOut || '';
@@ -1279,8 +1375,64 @@ window.PrReview = (function () {
       + bodyHtml
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
       + errorBlock
+      + renderInvestigatePanel(f)
       + renderChatPanel(f)
       + implementOut
+      + renderDraftCommentBlock(f)
+    + '</div>';
+  }
+
+  // Investigate panel — shown when a claude-investigate run is streaming or
+  // has produced a result. Single-shot (no composer); user can re-run via
+  // the Investigate button, which fires startInvestigate again.
+  function renderInvestigatePanel(f) {
+    if (!f.investigateId && !f.investigateResult && !f.investigateError) return '';
+    var body;
+    if (f.investigateId) {
+      var stream = (f.investigateStreaming || '').trim();
+      body = stream
+        ? '<div class="pr-ai-finding-investigate-body streaming">' + renderMarkdown(f.investigateStreaming) + '</div>'
+        : '<div class="pr-ai-finding-investigate-body streaming status-pulse">Investigating…</div>';
+    } else if (f.investigateError) {
+      body = '<div class="pr-ai-finding-investigate-error">' + escHtml(f.investigateError) + '</div>';
+    } else {
+      body = '<div class="pr-ai-finding-investigate-body">' + renderMarkdown(f.investigateResult) + '</div>';
+    }
+    var header = '<div class="pr-ai-finding-investigate-head">'
+      + '<span class="pr-ai-finding-investigate-label">Claude verdict</span>'
+      + (!f.investigateId && (f.investigateResult || f.investigateError)
+          ? '<button class="pr-ai-finding-investigate-clear" type="button" title="Clear this verdict">Clear</button>'
+          : '')
+    + '</div>';
+    return '<div class="pr-ai-finding-investigate-panel">' + header + body + '</div>';
+  }
+
+  // Draft-comment block — shown when Claude implement has produced a
+  // follow-up PR comment awaiting approval. Editable textarea + Approve /
+  // Dismiss buttons. Approved drafts are pushed onto pendingComments and
+  // post with the next Submit review.
+  function renderDraftCommentBlock(f) {
+    if (!f.implementDraftComment) return '';
+    if (f.implementDraftStatus === 'dismissed') return '';
+    if (f.implementDraftStatus === 'approved') {
+      return '<div class="pr-ai-finding-draft-comment approved">'
+        + '<span class="pr-ai-finding-draft-badge">✓ Draft comment added</span>'
+        + '<button class="pr-ai-finding-draft-unapprove" type="button" title="Pull this draft back out of the review">Remove</button>'
+      + '</div>';
+    }
+    var anchorHint = (f.locationVerified && f.path && f.line)
+      ? 'Inline at ' + escHtml(f.path) + ':' + f.line
+      : 'General PR comment (no verified location)';
+    return '<div class="pr-ai-finding-draft-comment pending">'
+      + '<div class="pr-ai-finding-draft-head">'
+        + '<span class="pr-ai-finding-draft-label">Draft PR comment</span>'
+        + '<span class="pr-ai-finding-draft-anchor">' + anchorHint + '</span>'
+      + '</div>'
+      + '<textarea class="pr-ai-finding-draft-input" rows="3">' + escHtml(f.implementDraftComment) + '</textarea>'
+      + '<div class="pr-ai-finding-draft-actions">'
+        + '<button class="pr-ai-finding-draft-dismiss" type="button">Dismiss</button>'
+        + '<button class="pr-ai-finding-draft-approve" type="button">Approve &amp; add to draft</button>'
+      + '</div>'
     + '</div>';
   }
 
@@ -1419,6 +1571,44 @@ window.PrReview = (function () {
           e.preventDefault();
           if (chatSendBtn) chatSendBtn.click();
         }
+      });
+
+      // Claude investigate — single-click read-only validation. Cancel button
+      // appears in the same slot while streaming.
+      var investigateBtnEl = card.querySelector('.pr-ai-finding-investigate');
+      if (investigateBtnEl) investigateBtnEl.addEventListener('click', function () { startInvestigate(f); });
+      var investigateCancelEl = card.querySelector('.pr-ai-finding-investigate-cancel');
+      if (investigateCancelEl) investigateCancelEl.addEventListener('click', function () {
+        if (f.investigateId) window.klaus.pr.reviewInvestigateCancel(f.investigateId);
+      });
+      var investigateClearEl = card.querySelector('.pr-ai-finding-investigate-clear');
+      if (investigateClearEl) investigateClearEl.addEventListener('click', function () {
+        f.investigateResult = '';
+        f.investigateError = null;
+        repaintAiReviewTab();
+        saveAiReviewCache();
+      });
+
+      // Draft-comment block (produced by Claude implement). Approve pushes
+      // the current textarea value onto pendingComments as a follow-up
+      // reply; Dismiss hides the block; Remove pulls the draft back.
+      var draftInputEl = card.querySelector('.pr-ai-finding-draft-input');
+      var draftApproveEl = card.querySelector('.pr-ai-finding-draft-approve');
+      var draftDismissEl = card.querySelector('.pr-ai-finding-draft-dismiss');
+      var draftUnapproveEl = card.querySelector('.pr-ai-finding-draft-unapprove');
+      if (draftApproveEl) draftApproveEl.addEventListener('click', function () {
+        var val = draftInputEl ? draftInputEl.value.trim() : (f.implementDraftComment || '').trim();
+        if (!val) return;
+        f.implementDraftComment = val;
+        approveImplementDraft(f);
+      });
+      if (draftDismissEl) draftDismissEl.addEventListener('click', function () {
+        f.implementDraftStatus = 'dismissed';
+        repaintAiReviewTab();
+        saveAiReviewCache();
+      });
+      if (draftUnapproveEl) draftUnapproveEl.addEventListener('click', function () {
+        removeImplementDraft(f);
       });
 
       // ✎ now edits the review block itself (f.text), not a separate comment
@@ -1600,6 +1790,15 @@ window.PrReview = (function () {
     f.status = 'implementing';
     f.implementOut = '';
     f.implementError = null;
+    // Clear any prior draft (and its queued pendingComments entry) so a
+    // redo doesn't accumulate stale drafts alongside the new one.
+    if (f.implementDraftStatus === 'approved') {
+      pendingComments = pendingComments.filter(function (c) {
+        return !(c.fromImplementDraft && c.fromFindingId === f.id);
+      });
+    }
+    f.implementDraftComment = '';
+    f.implementDraftStatus = null;
     repaintAiReviewTab();
 
     var buffered = '';
@@ -1635,6 +1834,16 @@ window.PrReview = (function () {
         f.status = 'open';
       } else {
         f.status = 'implemented';
+        // Extract the draft PR comment Claude emits between the literal
+        // <DRAFT_PR_COMMENT> markers, strip the block from the summary so
+        // the user doesn't see the raw markers in the implement output.
+        var m = (f.implementOut || '').match(/<DRAFT_PR_COMMENT>([\s\S]*?)<\/DRAFT_PR_COMMENT>/);
+        if (m) {
+          f.implementDraftComment = m[1].trim();
+          f.implementDraftStatus = 'pending';
+          f.implementOut = (f.implementOut.slice(0, m.index)
+            + f.implementOut.slice(m.index + m[0].length)).trim();
+        }
       }
       repaintAiReviewTab();
       saveAiReviewCache();
@@ -1726,6 +1935,49 @@ window.PrReview = (function () {
     if (f.commentStatus === 'posted') window.klaus.pr.refreshThreads();
   }
 
+  // Approve a Claude-implement draft comment: push it onto pendingComments
+  // so it'll post when the user submits the review. Inline when we have a
+  // verified path+line, otherwise queued as an issue-comment variant
+  // (pr-submit-review posts those after the inline review goes up).
+  function approveImplementDraft(f) {
+    if (!f.implementDraftComment) return;
+    // Don't double-queue if already approved.
+    if (pendingComments.some(function (c) { return c.fromImplementDraft && c.fromFindingId === f.id; })) {
+      f.implementDraftStatus = 'approved';
+      repaintAiReviewTab();
+      saveAiReviewCache();
+      return;
+    }
+    var entry = {
+      id: 'pending-impl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      fromFindingId: f.id,
+      fromImplementDraft: true,
+      body: f.implementDraftComment,
+    };
+    if (f.locationVerified && f.path && f.line) {
+      entry.path = f.path;
+      entry.line = f.line;
+      entry.side = f.side || 'RIGHT';
+    } else {
+      entry.issueComment = true;
+    }
+    pendingComments.push(entry);
+    f.implementDraftStatus = 'approved';
+    repaintAiReviewTab();
+    saveAiReviewCache();
+    if (lastState) render(lastState);
+  }
+
+  function removeImplementDraft(f) {
+    pendingComments = pendingComments.filter(function (c) {
+      return !(c.fromImplementDraft && c.fromFindingId === f.id);
+    });
+    f.implementDraftStatus = 'pending';
+    repaintAiReviewTab();
+    saveAiReviewCache();
+    if (lastState) render(lastState);
+  }
+
   // Copy a finding's markdown body to the clipboard — whatever is currently
   // in the review block, edits and all. Flips a transient state flag for a
   // ~1.5s "Copied" label.
@@ -1808,6 +2060,239 @@ window.PrReview = (function () {
         // Roll back the user message we optimistically appended — easier
         // than disabling Send until the IPC resolves.
         f.chatMessages = f.chatMessages.slice(0, -1);
+        repaintAiReviewTab();
+      }
+    });
+  }
+
+  // ---- Conversation-tab Claude actions ----
+
+  // Build the prompt context for a conv-comment Claude run. Includes the
+  // commenter's body and (for review-thread comments) the file/line plus
+  // diff hunk so claude doesn't have to guess where to look.
+  function buildConvPromptBody(s) {
+    var ctx = (s && s.ctx) || {};
+    var parts = [];
+    if (ctx.kind === 'review' && ctx.path) parts.push('Anchored at: ' + ctx.path);
+    if (ctx.hunk && ctx.hunk.trim()) parts.push('Diff hunk:\n```\n' + ctx.hunk + '\n```');
+    parts.push('Reviewer comment:\n\n' + (ctx.body || ''));
+    return parts.join('\n\n');
+  }
+
+  function startConvInvestigate(dbid) {
+    var s = convClaudeState[dbid];
+    if (!s || s.investigateId) return;
+    var requestId = 'cinv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    s.investigateId = requestId;
+    s.investigateStreaming = '';
+    s.investigateResult = '';
+    s.investigateError = null;
+    repaintConversationTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.pr.onReviewInvestigateData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) s.investigateStreaming = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            s.investigateStreaming = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintConversationTab();
+    });
+    window.klaus.pr.onReviewInvestigateDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (s.investigateId !== requestId) return;
+      s.investigateId = null;
+      if (result && result.error) {
+        s.investigateError = result.error;
+      } else if (result && result.cancelled) {
+        if (s.investigateStreaming) s.investigateResult = s.investigateStreaming;
+      } else {
+        s.investigateResult = s.investigateStreaming || '';
+      }
+      s.investigateStreaming = '';
+      repaintConversationTab();
+    });
+
+    window.klaus.pr.reviewInvestigateStart(requestId, buildConvPromptBody(s)).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        s.investigateId = null;
+        s.investigateError = r.error;
+        repaintConversationTab();
+      }
+    });
+  }
+
+  function startConvImplement(dbid) {
+    var s = convClaudeState[dbid];
+    if (!s || s.implementId) return;
+    var requestId = 'cimp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    s.implementId = requestId;
+    s.implementOut = '';
+    s.implementError = null;
+    s.implementDraft = '';
+    s.implementDraftStatus = null;
+    repaintConversationTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) s.implementOut = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            s.implementOut = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintConversationTab();
+    });
+    window.klaus.pr.onReviewImplementDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (s.implementId !== requestId) return;
+      s.implementId = null;
+      if (result && result.error) {
+        s.implementError = result.error;
+      } else if (result && result.cancelled) {
+        // Leave implementOut as whatever streamed; no draft on cancel.
+      } else {
+        var m = (s.implementOut || '').match(/<DRAFT_PR_COMMENT>([\s\S]*?)<\/DRAFT_PR_COMMENT>/);
+        if (m) {
+          s.implementDraft = m[1].trim();
+          s.implementDraftStatus = 'pending';
+          s.implementOut = (s.implementOut.slice(0, m.index)
+            + s.implementOut.slice(m.index + m[0].length)).trim();
+        }
+      }
+      repaintConversationTab();
+    });
+
+    // Single-finding mode triggers the DRAFT_PR_COMMENT prompt (set up in
+    // main/ipc/claude-stream-ipc.js); 'all' mode skips it.
+    window.klaus.pr.reviewImplementStart(requestId, 'one', buildConvPromptBody(s)).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        s.implementId = null;
+        s.implementError = r.error;
+        repaintConversationTab();
+      }
+    });
+  }
+
+  // Approve and post the implement draft. Inline thread comments → reply
+  // via pr-reply-to-review-comment; issue comments → addIssueComment.
+  // Refreshes threads on success so the new comment appears in the feed.
+  async function approveConvImplementDraft(dbid, btn) {
+    var s = convClaudeState[dbid];
+    if (!s || !s.implementDraft) return;
+    if (s.draftPosting) return;
+    var card = btn && btn.closest('.pr-conv-claude-draft');
+    var ta = card && card.querySelector('.pr-conv-claude-draft-input');
+    var body = ta ? ta.value.trim() : s.implementDraft.trim();
+    if (!body) return;
+    s.implementDraft = body;
+    s.draftPosting = true;
+    s.draftError = null;
+    repaintConversationTab();
+
+    var ctx = s.ctx || {};
+    var result;
+    try {
+      if (ctx.kind === 'review' && ctx.replyParentId) {
+        result = await window.klaus.pr.replyToReviewComment(ctx.replyParentId, body);
+      } else {
+        result = await window.klaus.pr.addIssueComment(body);
+      }
+    } catch (err) {
+      result = { error: (err && err.message) ? err.message : String(err) };
+    }
+
+    s.draftPosting = false;
+    if (result && result.error) {
+      s.draftError = result.error;
+      repaintConversationTab();
+      return;
+    }
+    s.implementDraftStatus = 'approved';
+    repaintConversationTab();
+    try { await window.klaus.pr.refreshThreads(); } catch (_) {}
+  }
+
+  // Kick off a Claude-investigate run. Single-shot read-only: claude reads
+  // the code in the worktree and returns a Verdict/Reasoning/Recommendation
+  // block. Stores the result on f.investigateResult for the panel to render.
+  function startInvestigate(f) {
+    if (f.investigateId) return;
+    var requestId = 'inv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    f.investigateId = requestId;
+    f.investigateStreaming = '';
+    f.investigateResult = '';
+    f.investigateError = null;
+    repaintAiReviewTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.pr.onReviewInvestigateData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) f.investigateStreaming = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            f.investigateStreaming = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintAiReviewTab();
+    });
+    window.klaus.pr.onReviewInvestigateDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (f.investigateId !== requestId) return;
+      f.investigateId = null;
+      if (result && result.error) {
+        f.investigateError = result.error;
+      } else if (result && result.cancelled) {
+        // Keep whatever streamed before cancel so the user sees partial progress.
+        if (f.investigateStreaming) f.investigateResult = f.investigateStreaming;
+      } else {
+        f.investigateResult = f.investigateStreaming || '';
+      }
+      f.investigateStreaming = '';
+      repaintAiReviewTab();
+      saveAiReviewCache();
+    });
+
+    window.klaus.pr.reviewInvestigateStart(requestId, f.text).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        f.investigateId = null;
+        f.investigateError = r.error;
         repaintAiReviewTab();
       }
     });
@@ -2215,6 +2700,116 @@ window.PrReview = (function () {
     });
   }
 
+  // ---- Conversation tab: per-comment Claude actions ----
+
+  function getConvClaudeState(dbid) {
+    if (!dbid) return null;
+    if (!convClaudeState[dbid]) convClaudeState[dbid] = {
+      investigateId: null, investigateStreaming: '', investigateResult: '', investigateError: null,
+      implementId: null, implementOut: '', implementError: null,
+      implementDraft: '', implementDraftStatus: null,
+    };
+    return convClaudeState[dbid];
+  }
+
+  // Renders the Claude action row + any in-flight panels for one comment.
+  // `ctx` carries everything the button handlers need: dbid, kind ('issue' |
+  // 'review'), the comment body (prompt context), and for review comments
+  // the thread path/line/replyParentId so an approved draft posts correctly.
+  function renderConvClaudeBlock(ctx) {
+    if (!ctx || !ctx.dbid) return '';
+    var s = getConvClaudeState(ctx.dbid);
+    if (!s) return '';
+    // Stash the latest context so click handlers can build prompts without
+    // scraping the DOM. Refreshed on every render so edits to the underlying
+    // comment body flow through.
+    s.ctx = ctx;
+
+    var investigateBtn = s.investigateId
+      ? '<button class="pr-conv-claude-investigate-cancel" type="button" data-dbid="' + ctx.dbid + '" title="Cancel investigation">Cancel investigate</button>'
+      : '<button class="pr-conv-claude-investigate" type="button" data-dbid="' + ctx.dbid + '" title="Ask Claude if this comment’s concern is valid">'
+        + (s.investigateResult ? 'Investigate again' : 'Claude investigate')
+        + '</button>';
+
+    var implementBtn = s.implementId
+      ? '<button class="pr-conv-claude-implement-cancel" type="button" data-dbid="' + ctx.dbid + '" title="Cancel implement">Cancel implement</button>'
+      : '<button class="pr-conv-claude-implement" type="button" data-dbid="' + ctx.dbid + '" title="Claude updates the file(s) and drafts a reply for your approval">'
+        + (s.implementDraft ? 'Implement again' : 'Claude implement')
+        + '</button>';
+
+    var actions = '<div class="pr-conv-claude-actions">' + investigateBtn + implementBtn + '</div>';
+
+    var investigatePanel = '';
+    if (s.investigateId || s.investigateResult || s.investigateError) {
+      var body;
+      if (s.investigateId) {
+        var stream = (s.investigateStreaming || '').trim();
+        body = stream
+          ? '<div class="pr-conv-claude-investigate-body streaming">' + renderMarkdown(s.investigateStreaming) + '</div>'
+          : '<div class="pr-conv-claude-investigate-body streaming status-pulse">Investigating…</div>';
+      } else if (s.investigateError) {
+        body = '<div class="pr-conv-claude-investigate-error">' + escHtml(s.investigateError) + '</div>';
+      } else {
+        body = '<div class="pr-conv-claude-investigate-body">' + renderMarkdown(s.investigateResult) + '</div>';
+      }
+      var clearBtn = (!s.investigateId && (s.investigateResult || s.investigateError))
+        ? '<button class="pr-conv-claude-investigate-clear" type="button" data-dbid="' + ctx.dbid + '" title="Clear this verdict">Clear</button>'
+        : '';
+      investigatePanel = '<div class="pr-conv-claude-panel">'
+        + '<div class="pr-conv-claude-head"><span class="pr-conv-claude-label">Claude verdict</span>' + clearBtn + '</div>'
+        + body
+      + '</div>';
+    }
+
+    var implementPanel = '';
+    if (s.implementId || s.implementOut || s.implementError) {
+      var iBody;
+      if (s.implementError) {
+        iBody = '<div class="pr-conv-claude-implement-error">' + escHtml(s.implementError) + '</div>';
+      } else {
+        var out = (s.implementOut || '').trim();
+        iBody = '<div class="pr-conv-claude-implement-body' + (s.implementId ? ' streaming' : '') + '">'
+          + (out ? escHtml(out) : (s.implementId ? 'Applying changes…' : ''))
+        + '</div>';
+      }
+      implementPanel = '<div class="pr-conv-claude-panel">'
+        + '<div class="pr-conv-claude-head"><span class="pr-conv-claude-label">Claude implement</span></div>'
+        + iBody
+      + '</div>';
+    }
+
+    var draftPanel = '';
+    if (s.implementDraft && s.implementDraftStatus !== 'dismissed') {
+      if (s.implementDraftStatus === 'approved') {
+        draftPanel = '<div class="pr-conv-claude-draft approved">'
+          + '<span class="pr-conv-claude-draft-badge">✓ Reply posted</span>'
+        + '</div>';
+      } else {
+        var anchor = ctx.kind === 'review'
+          ? 'Will post as a reply in this thread'
+          : 'Will post as a new PR comment';
+        draftPanel = '<div class="pr-conv-claude-draft pending" data-dbid="' + ctx.dbid + '">'
+          + '<div class="pr-conv-claude-draft-head">'
+            + '<span class="pr-conv-claude-draft-label">Draft reply</span>'
+            + '<span class="pr-conv-claude-draft-anchor">' + escHtml(anchor) + '</span>'
+          + '</div>'
+          + '<textarea class="pr-conv-claude-draft-input" rows="3">' + escHtml(s.implementDraft) + '</textarea>'
+          + (s.draftError ? '<div class="pr-conv-claude-draft-error">' + escHtml(s.draftError) + '</div>' : '')
+          + '<div class="pr-conv-claude-draft-actions">'
+            + '<button class="pr-conv-claude-draft-dismiss" type="button" data-dbid="' + ctx.dbid + '">Dismiss</button>'
+            + '<button class="pr-conv-claude-draft-approve" type="button" data-dbid="' + ctx.dbid + '">'
+              + (s.draftPosting ? 'Posting…' : 'Approve &amp; post')
+            + '</button>'
+          + '</div>'
+        + '</div>';
+      }
+    }
+
+    return '<div class="pr-conv-claude" data-dbid="' + ctx.dbid + '" data-kind="' + ctx.kind + '"'
+      + (ctx.replyParentId ? ' data-reply-to="' + ctx.replyParentId + '"' : '')
+    + '>' + actions + investigatePanel + implementPanel + draftPanel + '</div>';
+  }
+
   // ---- Conversation tab (GitHub-style feed) ----
 
   function renderConversation(state) {
@@ -2307,6 +2902,9 @@ window.PrReview = (function () {
       : c.body;
     var mine = currentUserLogin && author === currentUserLogin;
     var isEditing = editingCommentId === dbid && editingCommentKind === 'issue';
+    var claudeBlock = (dbid != null && !isEditing)
+      ? renderConvClaudeBlock({ dbid: dbid, kind: 'issue', body: displayBody || '' })
+      : '';
     return '<div class="pr-conv-item pr-conv-comment">'
       + '<div class="pr-conv-head">'
         + '<span class="pr-conv-author">' + escHtml(author) + '</span>'
@@ -2319,6 +2917,7 @@ window.PrReview = (function () {
       + (isEditing
           ? renderCommentEditor(dbid, 'issue', displayBody)
           : '<div class="pr-conv-body">' + renderCommentBody(displayBody) + '</div>')
+      + claudeBlock
     + '</div>';
   }
 
@@ -2377,6 +2976,8 @@ window.PrReview = (function () {
     var outdatedCls = thread.isOutdated ? ' outdated' : '';
     var replyParentId = comments[comments.length - 1].databaseId;
 
+    var threadPath = path;
+    var threadHunk = first.diffHunk || '';
     var commentsHtml = comments.map(function (c, i) {
       var author = (c.author && c.author.login) || 'unknown';
       var when = c.createdAt ? new Date(c.createdAt).toLocaleString() : '';
@@ -2386,6 +2987,16 @@ window.PrReview = (function () {
         : c.body;
       var mine = currentUserLogin && author === currentUserLogin;
       var isEditing = editingCommentId === dbid && editingCommentKind === 'review';
+      var claudeBlock = (dbid != null && !isEditing)
+        ? renderConvClaudeBlock({
+            dbid: dbid,
+            kind: 'review',
+            body: displayBody || '',
+            path: threadPath,
+            hunk: threadHunk,
+            replyParentId: replyParentId,
+          })
+        : '';
       return '<div class="pr-conv-thread-comment' + (i === 0 ? ' first' : '') + '">'
         + '<div class="pr-conv-thread-comment-head">'
           + '<span class="pr-conv-author">' + escHtml(author) + '</span>'
@@ -2397,6 +3008,7 @@ window.PrReview = (function () {
         + (isEditing
             ? renderCommentEditor(dbid, 'review', displayBody)
             : '<div class="pr-conv-thread-comment-body">' + renderCommentBody(displayBody) + '</div>')
+        + claudeBlock
       + '</div>';
     }).join('');
 
