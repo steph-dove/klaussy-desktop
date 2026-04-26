@@ -75,6 +75,7 @@ window.AgentRouter = (function () {
         else openTaskAndDiff(ctx.worktreePath);
         return;
       case 'pr-ai-review':
+      case 'commit-message':
         openTaskAndDiff(ctx.worktreePath);
         return;
       case 'pr-review-ai':
@@ -85,6 +86,7 @@ window.AgentRouter = (function () {
       case 'pr-debug-check':
       case 'pr-review-implement':
       case 'pr-review-investigate':
+      case 'pr-review-chat':
         openPrReview(ctx.prNumber);
         return;
       default:

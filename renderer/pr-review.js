@@ -296,6 +296,7 @@ window.PrReview = (function () {
       });
       reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
       repaintAiReviewTab();
+      rehydrateChatAgents();
 
       // For a still-running agent, attach to future chunks. Same handlers
       // as startAiReview's so the streaming UX continues seamlessly.
@@ -1111,6 +1112,9 @@ window.PrReview = (function () {
     // Tab badge was set to 0 in the new-PR reset; rerender meta to update it.
     var tabBtn = hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
     if (tabBtn) tabBtn.innerHTML = 'Review' + renderAiReviewTabCount();
+    // After cached findings settle, rebind any chat agents still running
+    // for those findings (user sent a chat message, navigated away, came back).
+    rehydrateChatAgents();
   }
 
   function saveAiReviewCache() {
@@ -2277,7 +2281,7 @@ window.PrReview = (function () {
   // Kick off a chat turn. Appends the user's message, spawns Claude with
   // the finding body + full transcript, streams the response into
   // f.chatStreaming, then commits it as an assistant message on done.
-  function startChat(f, userMessage) {
+  async function startChat(f, userMessage) {
     if (f.chatRequestId) return;
     var requestId = 'chat-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     f.chatMessages = (f.chatMessages || []).concat([{ role: 'user', content: userMessage }]);
@@ -2288,6 +2292,7 @@ window.PrReview = (function () {
 
     var buffered = '';
     var unsubData = window.klaus.pr.onReviewChatData(requestId, function (chunk) {
+      if (f.chatRequestId !== requestId) return;
       buffered += chunk;
       var idx;
       while ((idx = buffered.indexOf('\n')) !== -1) {
@@ -2328,7 +2333,9 @@ window.PrReview = (function () {
     });
 
     // Send the full transcript so Claude has the arc of the conversation.
-    window.klaus.pr.reviewChatStart(requestId, f.text, f.chatMessages).then(function (r) {
+    // findingId is passed so the agent's dedupeKey survives across PR loads
+    // (otherwise rehydration after navigation can't find the running agent).
+    window.klaus.pr.reviewChatStart(requestId, f.text, f.chatMessages, f.id).then(function (r) {
       if (r && r.error) {
         if (unsubData) unsubData();
         f.chatRequestId = null;
@@ -2338,6 +2345,72 @@ window.PrReview = (function () {
         f.chatMessages = f.chatMessages.slice(0, -1);
         repaintAiReviewTab();
       }
+    });
+  }
+
+  // After findings are reconciled, scan the registry for any chat agent
+  // still streaming for this PR. If we find one, rebind it to its finding so
+  // the streaming bubble shows up again on return.
+  function rehydrateChatAgents() {
+    if (!lastState || !lastState.number) return;
+    if (!aiReview.findings || !aiReview.findings.length) return;
+    if (!window.klaus || !window.klaus.agents) return;
+    window.klaus.agents.list().then(function (list) {
+      if (!list || !list.length) return;
+      var prefix = 'pr-review-chat:' + lastState.number + ':';
+      list.forEach(function (agent) {
+        if (agent.kind !== 'pr-review-chat' || agent.status !== 'running') return;
+        if (!agent.dedupeKey || agent.dedupeKey.indexOf(prefix) !== 0) return;
+        var fid = agent.dedupeKey.slice(prefix.length);
+        var f = aiReview.findings.find(function (x) { return x.id === fid; });
+        if (!f || f.chatRequestId === agent.id) return;
+        attachChatAgentToFinding(f, agent);
+      });
+    });
+  }
+
+  function attachChatAgentToFinding(f, agent) {
+    f.chatRequestId = agent.id;
+    f.chatStreaming = '';
+    f.chatError = null;
+    repaintAiReviewTab();
+
+    var buffered = '';
+    var unsubData = window.klaus.pr.onReviewChatData(agent.id, function (chunk) {
+      if (f.chatRequestId !== agent.id) return;
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) f.chatStreaming = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            f.chatStreaming = ev.result;
+          }
+        } catch (_) {}
+      }
+      repaintAiReviewTab();
+    });
+    window.klaus.pr.onReviewChatDone(agent.id, function (result) {
+      if (unsubData) unsubData();
+      if (f.chatRequestId !== agent.id) return;
+      f.chatRequestId = null;
+      if (result && result.error) {
+        f.chatError = result.error;
+      } else if (result && result.cancelled) {
+        if (f.chatStreaming) f.chatMessages.push({ role: 'assistant', content: f.chatStreaming });
+      } else {
+        f.chatMessages.push({ role: 'assistant', content: f.chatStreaming || '' });
+      }
+      f.chatStreaming = '';
+      repaintAiReviewTab();
+      saveAiReviewCache();
     });
   }
 

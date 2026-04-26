@@ -83,6 +83,12 @@ window.AgentsPanel = (function () {
         return (ctx.mode === 'all' ? 'Implement all findings' : 'Implement finding') + ' on PR #' + (ctx.prNumber || '?');
       case 'pr-review-investigate':
         return 'Investigate finding on PR #' + (ctx.prNumber || '?');
+      case 'pr-review-chat':
+        return 'Chat about finding on PR #' + (ctx.prNumber || '?');
+      case 'commit-message':
+        var wt = ctx.worktreePath || '';
+        var leaf = wt.split('/').filter(Boolean).pop() || wt;
+        return 'Commit message — ' + leaf;
       default:
         return agent.kind;
     }
