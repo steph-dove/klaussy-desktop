@@ -309,29 +309,87 @@ window.DiffPanel = (function () {
     while (lineEl && !lineEl.classList.contains('diff-line')) lineEl = lineEl.parentElement;
     var insertAfter = lineEl || diffViewEl.lastElementChild;
 
-    // Show loading
-    var explanationEl = document.createElement('div');
-    explanationEl.className = 'diff-explanation';
-    explanationEl.innerHTML = '<div class="diff-explanation-header"><span>Explanation</span><button class="diff-explanation-close">&times;</button></div>' +
-      '<div class="diff-explanation-body">Thinking...</div>';
-    insertAfter.after(explanationEl);
-
-    explanationEl.querySelector('.diff-explanation-close').addEventListener('click', function () {
-      explanationEl.remove();
-      refreshPaused = false;
+    var file = selectedFile || 'unknown';
+    runExplainStream({
+      file: file,
+      text: text,
+      insertAfter: insertAfter,
+      onClose: function () { refreshPaused = false; },
     });
 
-    // Clear selection but keep refresh paused until explanation is dismissed
+    // Clear selection but keep refresh paused until explanation is dismissed.
     window.getSelection().removeAllRanges();
+  }
 
-    var file = selectedFile || 'unknown';
-    var result = await window.klaus.ai.explainDiff(currentWorktreePath, file, text);
+  // Shared streaming/backgrounded explain — used by selection-FAB and
+  // per-hunk button. Mirrors pr-review.js explainSelection: same dedupeKey
+  // formula, registry lookup for re-attachment, agent survives close.
+  async function runExplainStream(opts) {
+    var file = opts.file;
+    var text = opts.text;
+    var insertAfter = opts.insertAfter;
+    var onClose = opts.onClose;
+    if (!insertAfter) return;
 
-    if (result.error) {
-      explanationEl.querySelector('.diff-explanation-body').className = 'diff-explanation-body diff-error';
-      explanationEl.querySelector('.diff-explanation-body').textContent = result.error;
-    } else {
-      explanationEl.querySelector('.diff-explanation-body').textContent = result.explanation;
+    var dedupeKey = 'explain-diff::' + file + '::' + text;
+    var existingAgent = await window.klaus.agents.findByDedupeKey(dedupeKey);
+    var requestId = (existingAgent && existingAgent.status === 'running')
+      ? existingAgent.id
+      : 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+    var explanationEl = document.createElement('div');
+    explanationEl.className = 'diff-explanation';
+    explanationEl.dataset.requestId = requestId;
+    explanationEl.innerHTML = '<div class="diff-explanation-header">'
+        + '<span>Explanation</span>'
+        + '<button class="diff-explanation-close" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="diff-explanation-body">Sending to Claude…</div>';
+    insertAfter.after(explanationEl);
+
+    var bodyEl = explanationEl.querySelector('.diff-explanation-body');
+    var unsubChunk = null;
+    var unsubDone = null;
+
+    explanationEl.querySelector('.diff-explanation-close').addEventListener('click', function () {
+      // Close the inline UI but keep the agent running in the registry.
+      if (unsubChunk) unsubChunk();
+      if (unsubDone) unsubDone();
+      explanationEl.remove();
+      if (onClose) onClose();
+    });
+
+    // Re-hydrate from a finished agent — paint and bail.
+    if (existingAgent && existingAgent.status !== 'running') {
+      if (existingAgent.status === 'error') {
+        bodyEl.className = 'diff-explanation-body diff-error';
+        bodyEl.textContent = existingAgent.error || 'Explain failed';
+      } else {
+        bodyEl.textContent = existingAgent.text || '(no output)';
+      }
+      return;
+    }
+
+    var accumulated = (existingAgent && existingAgent.text) || '';
+    if (accumulated) bodyEl.textContent = accumulated;
+
+    unsubChunk = window.klaus.ai.onExplainDiffChunk(requestId, function (chunk) {
+      if (!accumulated) bodyEl.textContent = '';
+      accumulated += chunk;
+      bodyEl.textContent = accumulated;
+      bodyEl.scrollTop = bodyEl.scrollHeight;
+    });
+    unsubDone = window.klaus.ai.onExplainDiffDone(requestId, function (result) {
+      if (unsubChunk) { unsubChunk(); unsubChunk = null; }
+      if (!bodyEl.isConnected) return;
+      if (result && result.error) {
+        bodyEl.className = 'diff-explanation-body diff-error';
+        bodyEl.textContent = result.error;
+      }
+    });
+
+    if (!existingAgent || existingAgent.status !== 'running') {
+      window.klaus.ai.explainDiffStreamStart(requestId, currentWorktreePath, file, text, null);
     }
   }
 
@@ -368,6 +426,7 @@ window.DiffPanel = (function () {
     await refresh();
     updateAheadBehind();
     startWatching(worktreePath);
+    rehydrateCommitMessage();
     // Trigger refit after panel appears
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
   }
@@ -388,6 +447,9 @@ window.DiffPanel = (function () {
     if (changed) {
       selectedFile = null;
       diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+      // Detach from any commit-message agent for the previous worktree.
+      resetCommitMsgState();
+      rehydrateCommitMessage();
     }
     // Force refresh even if paused (this is an explicit task switch, not auto-refresh)
     refreshPaused = false;
@@ -836,43 +898,20 @@ window.DiffPanel = (function () {
 
   function bindExplainButtons(file) {
     diffViewEl.querySelectorAll('.diff-explain-btn').forEach(function (btn) {
-      btn.addEventListener('click', async function (e) {
+      btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var hunkIndex = parseInt(btn.dataset.hunkIndex, 10);
         var hunk = currentParsedHunks[hunkIndex];
         if (!hunk) return;
 
-        // Remove any existing explanation
         var existing = diffViewEl.querySelector('.diff-explanation');
         if (existing) existing.remove();
 
-        // Show loading state
-        btn.disabled = true;
-        btn.textContent = 'Thinking...';
-
-        var hunkText = hunk.lines.join('\n');
-        var result = await window.klaus.ai.explainDiff(currentWorktreePath, file, hunkText);
-
-        btn.disabled = false;
-        btn.textContent = 'Explain';
-
-        // Insert explanation below the hunk header
-        var hunkEl = btn.closest('.diff-hunk');
-        var explanationEl = document.createElement('div');
-        explanationEl.className = 'diff-explanation';
-
-        if (result.error) {
-          explanationEl.innerHTML = '<div class="diff-explanation-header"><span>Explanation</span><button class="diff-explanation-close">&times;</button></div>' +
-            '<div class="diff-explanation-body diff-error">' + escHtml(result.error) + '</div>';
-        } else {
-          explanationEl.innerHTML = '<div class="diff-explanation-header"><span>Explanation</span><button class="diff-explanation-close">&times;</button></div>' +
-            '<div class="diff-explanation-body">' + escHtml(result.explanation) + '</div>';
-        }
-
-        hunkEl.after(explanationEl);
-
-        explanationEl.querySelector('.diff-explanation-close').addEventListener('click', function () {
-          explanationEl.remove();
+        runExplainStream({
+          file: file,
+          text: hunk.lines.join('\n'),
+          insertAfter: btn.closest('.diff-hunk'),
+          onClose: function () {},
         });
       });
     });
@@ -1366,6 +1405,15 @@ window.DiffPanel = (function () {
       return;
     }
     if (!currentWorktreePath) return;
+
+    // Check if an agent is already in flight for this worktree (e.g. user
+    // clicked sparkle, navigated to a task to test something, came back).
+    var existing = await window.klaus.agents.findByDedupeKey('commit-message:' + currentWorktreePath);
+    if (existing) {
+      attachToCommitMessageAgent(existing);
+      return;
+    }
+
     btn.disabled = true;
     btn.textContent = '…';
 
@@ -1375,27 +1423,7 @@ window.DiffPanel = (function () {
     // entered something they wanted to keep they wouldn't have clicked this.
     commitInput.value = '';
 
-    commitMsgUnsubChunk = window.klaus.ai.onCommitMessageChunk(requestId, function (chunk) {
-      if (commitMsgRequestId !== requestId) return;
-      commitInput.value += chunk;
-    });
-    commitMsgUnsubDone = window.klaus.ai.onCommitMessageDone(requestId, function (msg) {
-      if (commitMsgRequestId !== requestId) return;
-      resetCommitMsgState();
-      btn.textContent = '✨';
-      btn.disabled = false;
-      if (msg && msg.error) {
-        window.toast.error('Could not generate commit message: ' + msg.error);
-        return;
-      }
-      // Trim trailing whitespace Claude sometimes adds — and if the prompt
-      // spat out a code fence despite the instruction, strip the outer backticks
-      // so the message commits cleanly.
-      var cleaned = (commitInput.value || '').trim();
-      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
-      commitInput.value = cleaned.trim();
-      commitInput.focus();
-    });
+    bindCommitMessageStreaming(requestId, btn);
 
     var start = await window.klaus.ai.commitMessageStart(requestId, currentWorktreePath);
     if (start && start.error) {
@@ -1404,6 +1432,56 @@ window.DiffPanel = (function () {
       btn.disabled = false;
       window.toast.error(start.error);
     }
+  }
+
+  // Subscribe to an in-flight or completed commit-message agent and stream
+  // its output into the commit input. Used by the initial click and by
+  // rehydrateCommitMessage when the user returns to the diff panel.
+  function attachToCommitMessageAgent(agent) {
+    var btn = document.getElementById('btn-claude-commit-msg');
+    commitInput.value = agent.text || '';
+    if (agent.status !== 'running') {
+      // Already finished — just paint the result, normalize fences/whitespace.
+      var cleaned = (commitInput.value || '').trim();
+      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
+      commitInput.value = cleaned.trim();
+      if (agent.status === 'error' && agent.error) {
+        window.toast && window.toast.error('Commit message failed: ' + agent.error);
+      }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    commitMsgRequestId = agent.id;
+    bindCommitMessageStreaming(agent.id, btn);
+  }
+
+  function bindCommitMessageStreaming(requestId, btn) {
+    commitMsgUnsubChunk = window.klaus.ai.onCommitMessageChunk(requestId, function (chunk) {
+      if (commitMsgRequestId !== requestId) return;
+      commitInput.value += chunk;
+    });
+    commitMsgUnsubDone = window.klaus.ai.onCommitMessageDone(requestId, function (msg) {
+      if (commitMsgRequestId !== requestId) return;
+      resetCommitMsgState();
+      if (btn) { btn.textContent = '✨'; btn.disabled = false; }
+      if (msg && msg.error) {
+        window.toast.error('Could not generate commit message: ' + msg.error);
+        return;
+      }
+      var cleaned = (commitInput.value || '').trim();
+      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
+      commitInput.value = cleaned.trim();
+      commitInput.focus();
+    });
+  }
+
+  // On panel mount or worktree switch, rehydrate any in-flight commit-message
+  // agent for this worktree. Lets the user kick off generation, navigate to
+  // verify something, and return to find the message waiting.
+  async function rehydrateCommitMessage() {
+    if (!currentWorktreePath || commitMsgRequestId) return;
+    var existing = await window.klaus.agents.findByDedupeKey('commit-message:' + currentWorktreePath);
+    if (existing) attachToCommitMessageAgent(existing);
   }
 
   // Tiny ephemeral status banner inside the diff panel. Used for operations

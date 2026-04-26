@@ -243,8 +243,8 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body }),
     reviewImplementCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-implement-cancel', { requestId }),
-    reviewChatStart: (requestId, findingBody, messages) =>
-      ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages }),
+    reviewChatStart: (requestId, findingBody, messages, findingId) =>
+      ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages, findingId }),
     reviewChatCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-chat-cancel', { requestId }),
     onReviewChatData: (requestId, callback) => {

@@ -281,7 +281,7 @@ ipcMain.handle('pr-review-implement-cancel', makeClaudeCancelHandler(implementPr
 // panel. Stateless: each turn re-sends the conversation history so Claude
 // can respond coherently, and Claude runs read-only (Read/Grep/git OK, no
 // edits) so a discussion doesn't accidentally mutate the worktree.
-ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, messages }) => {
+ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, messages, findingId }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (reviewChatProcs.has(requestId)) return { error: 'Already in flight' };
   if (!prReview.active) return { error: 'No active PR review' };
@@ -307,6 +307,11 @@ ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, m
     `Conversation so far:\n\n${transcript}\n\n` +
     `Respond to the most recent Human message.`;
 
+  // findingId comes from the renderer (stable per finding). At most one chat
+  // agent per finding at a time — the renderer guards against double-send via
+  // f.chatRequestId, and dedupeKey makes the registry the source of truth.
+  var fid = findingId || shortHash(findingBody);
+
   spawnClaudeStream({
     requestId, procMap: reviewChatProcs, channelPrefix: 'pr-review-chat',
     sender: event.sender,
@@ -314,6 +319,18 @@ ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, m
     prompt,
     streamJson: true,
     extraDoneFields: { worktreePath: ensured.worktreePath },
+    agentMeta: {
+      kind: 'pr-review-chat',
+      dedupeKey: `pr-review-chat:${prReview.active.meta.number}:${fid}`,
+      sourceContext: {
+        kind: 'pr-review-chat',
+        prNumber: prReview.active.meta.number,
+        prTitle: prReview.active.meta.title || '',
+        findingId: fid,
+        findingBodyPreview: findingBody.slice(0, 160),
+        worktreePath: ensured.worktreePath,
+      },
+    },
   });
   return { ok: true };
 });
@@ -479,6 +496,16 @@ ipcMain.handle('claude-commit-message-start', async (event, { requestId, worktre
     sender: event.sender,
     cwd: worktreePath,
     prompt,
+    agentMeta: {
+      kind: 'commit-message',
+      // One commit-message generation per worktree at a time — re-clicking
+      // the sparkle while one is running attaches instead of double-running.
+      dedupeKey: `commit-message:${worktreePath}`,
+      sourceContext: {
+        kind: 'commit-message',
+        worktreePath,
+      },
+    },
   });
   return { ok: true };
 });
