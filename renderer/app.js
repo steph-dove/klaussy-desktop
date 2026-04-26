@@ -1363,6 +1363,9 @@
 
   // Exposed for pr-review.js to call when main clears state.
   window.exitPrReviewMode = exitPrReviewMode;
+  // Exposed for the agents-panel router so "Open" on a PR-related agent can
+  // remount the review surface without re-fetching the picker.
+  window.enterPrReviewMode = enterPrReviewMode;
 
   // G5: when "Check out locally" finishes in main, pick up the new task in
   // the main window (pop-out closes itself via the null state broadcast).

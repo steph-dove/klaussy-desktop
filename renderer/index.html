@@ -24,6 +24,27 @@
         </div>
       </div>
 
+      <!-- Thin agents bar — always visible, sits between the header buttons
+           and the project switcher so it doesn't crowd the main header. -->
+      <div id="agents-bar">
+        <button id="btn-agents" title="Active agents (Cmd+Shift+A)" class="is-empty">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M9.5 1L3 9h4l-1 6 6.5-8h-4l1-6z"/></svg>
+          <span class="agents-bar-label">No active agents</span>
+          <span id="btn-agents-badge"></span>
+        </button>
+      </div>
+
+      <!-- Background-agent panel: hidden until btn-agents toggles it. -->
+      <div id="agents-panel" style="display:none;">
+        <div id="agents-panel-header">
+          <span class="agents-panel-title">Agents</span>
+          <button id="btn-agents-clear" title="Clear completed">Clear</button>
+          <button id="btn-agents-close" title="Close">&times;</button>
+        </div>
+        <div id="agents-panel-list"></div>
+        <div id="agents-panel-empty">No active agents</div>
+      </div>
+
       <!-- Project switcher (Phase 3) -->
       <div id="project-switcher">
         <select id="project-select" title="Switch project"></select>
@@ -461,6 +482,8 @@
   <script src="word-complete.js"></script>
   <script src="about-log.js"></script>
   <script src="project-switcher.js"></script>
+  <script src="agent-router.js"></script>
+  <script src="agents-panel.js"></script>
   <script src="sidebar-manager.js"></script>
   <script src="terminal-manager.js"></script>
   <script src="plan-modal.js"></script>

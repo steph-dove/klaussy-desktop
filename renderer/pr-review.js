@@ -20,6 +20,10 @@ window.PrReview = (function () {
   var lastState = null;
   var selectedFile = null;
   var activeTab = 'files'; // 'files' | 'conversation'
+  // Per-render IPC subscriptions for rehydrated explain agents. render() blows
+  // away hostEl.innerHTML, which orphans these listeners — we clear them each
+  // time so chunks don't pile up onto detached DOM.
+  var rehydrateUnsubs = [];
   // Current gh user login — used to gate the edit pencil on comments. Fetched
   // once per review session; stays null if gh api fails (which just means
   // the edit UI never appears, not an error state).
@@ -131,13 +135,11 @@ window.PrReview = (function () {
     if (isNewPr) {
       selectedFile = null;
       currentChecks = null;
-      // Tear down any in-flight AI work for the previous PR so we don't bleed
-      // findings/state across PRs.
-      if (aiReview.requestId) window.klaus.pr.reviewAiCancel(aiReview.requestId);
-      if (aiReview.implementAllId) window.klaus.pr.reviewImplementCancel(aiReview.implementAllId);
-      aiReview.findings.forEach(function (f) {
-        if (f.implementId) window.klaus.pr.reviewImplementCancel(f.implementId);
-      });
+      // Don't cancel in-flight AI work for the previous PR — those agents
+      // are now backgroundable and the user can monitor / re-attach via the
+      // Agents panel. Just drop the local subscriptions by stashing the old
+      // requestIds (chunk callbacks bail when aiReview.requestId no longer
+      // matches) and reset our own state for the new PR.
       aiReview = {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
         worktreePath: null, findings: [],
@@ -219,6 +221,7 @@ window.PrReview = (function () {
       bindFileList();
       injectInlineThreads(threadsByPath);
       injectPendingComments();
+      rehydrateExplanations();
     } else if (activeTab === 'conversation') {
       bindConversationComposer();
       bindReplyButtons();
@@ -230,6 +233,233 @@ window.PrReview = (function () {
     }
     renderThreadsStatusBadge(state);
     renderPendingReviewBar(state);
+
+    // If a navigation intent is pending for this PR (set by AgentRouter when
+    // the user clicks "Open" on an explain agent), apply it now: switch to
+    // Files, select the right file, re-render, then scroll the explanation
+    // into view once rehydration has injected it.
+    applyPendingNav(state);
+  }
+
+  function applyPendingNav(state) {
+    var nav = window._pendingAgentNav;
+    if (!nav || !state || nav.prNumber !== state.number) return;
+    var targetTab = nav.tab || 'files';
+    var needsRerender = false;
+    if (activeTab !== targetTab) { activeTab = targetTab; needsRerender = true; }
+    if (nav.file && selectedFile !== nav.file) { selectedFile = nav.file; needsRerender = true; }
+    var agentId = nav.agentId;
+    var kind = nav.kind || (targetTab === 'ai-review' ? 'pr-review-ai' : 'explain-diff');
+    window._pendingAgentNav = null;
+
+    if (needsRerender) {
+      render(state);
+    }
+
+    // Tab-specific rehydration — explain agents anchor under their hunk in
+    // the diff; AI review reattaches to the streaming JSONL.
+    if (kind === 'pr-review-ai' && agentId) {
+      rehydrateAiReview(agentId);
+      return;
+    }
+
+    if (agentId) {
+      requestAnimationFrame(function () {
+        var el = hostEl.querySelector('.diff-explanation[data-request-id="' + agentId + '"]');
+        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
+  }
+
+  // Reattach the renderer to a backgrounded AI review: re-parse the JSONL
+  // the agent has already produced, populate aiReview state, then subscribe
+  // to future chunks/done so the live stream continues to land here.
+  function rehydrateAiReview(agentId) {
+    if (!window.klaus || !window.klaus.agents) return;
+    if (aiReview.requestId === agentId) return; // already attached
+    window.klaus.agents.get(agentId).then(function (agent) {
+      if (!agent || agent.kind !== 'pr-review-ai') return;
+      aiReview.requestId = agent.status === 'running' ? agentId : null;
+      aiReview.finalText = '';
+      aiReview.progress = [];
+      aiReview.error = agent.status === 'error' ? agent.error : null;
+      aiReview.cancelled = agent.status === 'cancelled';
+      aiReview.findings = [];
+      aiReview.usage = null;
+      aiReview.worktreePath = (agent.sourceContext && agent.sourceContext.worktreePath) || aiReview.worktreePath;
+
+      // Re-parse the JSONL events the agent has already written.
+      var lines = (agent.text || '').split('\n');
+      lines.forEach(function (line) {
+        if (!line.trim()) return;
+        try { handleAiEvent(JSON.parse(line)); } catch (_) {}
+      });
+      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      repaintAiReviewTab();
+
+      // For a still-running agent, attach to future chunks. Same handlers
+      // as startAiReview's so the streaming UX continues seamlessly.
+      if (agent.status === 'running') {
+        var buffered = '';
+        var unsubData = window.klaus.pr.onReviewAiData(agentId, function (chunk) {
+          if (aiReview.requestId !== agentId) return;
+          buffered += chunk;
+          var idx;
+          while ((idx = buffered.indexOf('\n')) !== -1) {
+            var line = buffered.slice(0, idx);
+            buffered = buffered.slice(idx + 1);
+            if (!line.trim()) continue;
+            try { handleAiEvent(JSON.parse(line)); } catch (_) {}
+          }
+          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          repaintAiReviewTab();
+        });
+        window.klaus.pr.onReviewAiDone(agentId, function (result) {
+          if (unsubData) unsubData();
+          if (aiReview.requestId !== agentId) return;
+          aiReview.requestId = null;
+          if (result && result.error) aiReview.error = result.error;
+          if (result && result.cancelled) aiReview.cancelled = true;
+          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          repaintAiReviewTab();
+          if (aiReview.finalText) saveAiReviewCache();
+        });
+      }
+    });
+  }
+
+  // When the diff comes back into focus (file switch, tab switch, mount),
+  // re-inject any explain-diff agents already in the registry so the user
+  // doesn't lose their results just because the DOM was rebuilt.
+  function rehydrateExplanations() {
+    // Clear any previous rehydrated subscriptions — those listeners point at
+    // detached DOM after the innerHTML swap.
+    rehydrateUnsubs.forEach(function (fn) { try { fn(); } catch (_) {} });
+    rehydrateUnsubs = [];
+
+    var diffPre = hostEl.querySelector('.pr-review-diff-pre');
+    if (!diffPre || !selectedFile) return;
+
+    window.klaus.agents.list().then(function (agents) {
+      if (!agents || !agents.length) return;
+      var matching = agents.filter(function (a) {
+        return a.kind === 'explain-diff'
+            && a.sourceContext
+            && a.sourceContext.file === selectedFile;
+      });
+      // Newest first so the most recent explanation lands closest to the diff.
+      matching.sort(function (a, b) { return b.startedAt - a.startedAt; });
+      matching.forEach(function (agent) { injectRehydratedExplanation(agent, diffPre); });
+    });
+  }
+
+  // Strip the leading diff marker (+/-/space) from a diff-line's textContent
+  // so we can compare against a user selection that grabbed only the code.
+  function stripDiffPrefix(s) {
+    if (!s) return '';
+    var first = s.charAt(0);
+    if (first === '+' || first === '-' || first === ' ') return s.slice(1);
+    return s;
+  }
+
+  // Find a contiguous run of code-bearing .diff-line elements whose content
+  // matches the hunk lines. Returns the LAST element of the matching range
+  // so the explanation can be inserted directly after it.
+  //
+  // Matching is done on the diff-line's content with the leading +/-/space
+  // marker stripped (the user's selection naturally excludes the marker),
+  // then trimmed to absorb whitespace drift. Meta/hunk-header lines are
+  // skipped — they can't match a code selection. Returns null on miss
+  // (caller falls back to bottom render).
+  function findHunkAnchor(diffPre, hunkText) {
+    if (!hunkText) return null;
+    var hunkLines = hunkText.split('\n')
+      .map(function (l) { return l.trim(); })
+      .filter(function (l) { return l.length > 0; });
+    if (!hunkLines.length) return null;
+
+    // Only consider code-bearing lines — skip @@ headers, --- /+++ headers,
+    // and the diff/index/file headers. Selections never span those.
+    var codeLines = Array.from(diffPre.querySelectorAll('.diff-line.diff-add, .diff-line.diff-del, .diff-line.diff-context'));
+    if (codeLines.length < hunkLines.length) return null;
+
+    var normCode = codeLines.map(function (el) { return stripDiffPrefix(el.textContent).trim(); });
+
+    for (var i = 0; i <= normCode.length - hunkLines.length; i++) {
+      var ok = true;
+      for (var j = 0; j < hunkLines.length; j++) {
+        if (normCode[i + j] !== hunkLines[j]) { ok = false; break; }
+      }
+      if (ok) return codeLines[i + hunkLines.length - 1];
+    }
+    return null;
+  }
+
+  function injectRehydratedExplanation(agent, diffPre) {
+    // Skip if the inline-click flow already has an element for this agent
+    // (avoids double-rendering when render() fires shortly after a click).
+    if (hostEl.querySelector('.diff-explanation[data-request-id="' + agent.id + '"]')) return;
+
+    var el = document.createElement('div');
+    el.className = 'diff-explanation diff-explanation-rehydrated';
+    el.dataset.requestId = agent.id;
+    var hunkPreview = (agent.sourceContext && agent.sourceContext.hunkPreview) || '';
+    var headerLabel = hunkPreview
+      ? hunkPreview.replace(/\s+/g, ' ').slice(0, 80)
+      : 'Previous explanation';
+    el.innerHTML =
+      '<div class="diff-explanation-header">'
+        + '<span title="' + escHtml(hunkPreview) + '">' + escHtml(headerLabel) + '</span>'
+        + '<button class="diff-explanation-close" title="Hide">&times;</button>'
+      + '</div>'
+      + '<div class="diff-explanation-body"></div>';
+
+    // Try to anchor under the original hunk; if the diff has drifted, fall
+    // back to appending at the bottom of the diff container.
+    var fullHunk = agent.sourceContext && agent.sourceContext.hunk;
+    var anchor = fullHunk ? findHunkAnchor(diffPre, fullHunk) : null;
+    if (anchor) {
+      anchor.after(el);
+    } else {
+      diffPre.parentElement.appendChild(el);
+    }
+
+    var bodyEl = el.querySelector('.diff-explanation-body');
+    el.querySelector('.diff-explanation-close').addEventListener('click', function () {
+      el.remove();
+    });
+
+    if (agent.status === 'error') {
+      bodyEl.className = 'diff-explanation-body diff-error';
+      bodyEl.textContent = agent.error || 'Explain failed';
+      return;
+    }
+
+    bodyEl.textContent = agent.text || '';
+
+    if (agent.status === 'running') {
+      // Catch up + subscribe to future chunks so the user watches the rest
+      // of the stream land in real time.
+      bodyEl.classList.add('status-pulse');
+      if (!agent.text) bodyEl.textContent = 'Resuming…';
+      var accumulated = agent.text || '';
+      var unsubChunk = window.klaus.ai.onExplainDiffChunk(agent.id, function (chunk) {
+        if (!accumulated) { bodyEl.classList.remove('status-pulse'); bodyEl.textContent = ''; }
+        accumulated += chunk;
+        bodyEl.textContent = accumulated;
+        bodyEl.scrollTop = bodyEl.scrollHeight;
+      });
+      var unsubDone = window.klaus.ai.onExplainDiffDone(agent.id, function (result) {
+        if (unsubChunk) unsubChunk();
+        if (!bodyEl.isConnected) return;
+        bodyEl.classList.remove('status-pulse');
+        if (result.error) {
+          bodyEl.className = 'diff-explanation-body diff-error';
+          bodyEl.textContent = result.error;
+        }
+      });
+      rehydrateUnsubs.push(unsubChunk, unsubDone);
+    }
   }
 
   function bindConversationComposer() {
@@ -520,7 +750,7 @@ window.PrReview = (function () {
     'Drafting explanation\u2026',
   ];
 
-  function explainSelection(text) {
+  async function explainSelection(text) {
     // Anchor the explanation panel to the last diff-line the selection touches
     // so it lands under the selected block rather than at the top of the diff.
     var sel = window.getSelection();
@@ -536,24 +766,61 @@ window.PrReview = (function () {
     var existing = hostEl.querySelector('.diff-explanation');
     if (existing) {
       var prevId = existing.dataset.requestId;
-      if (prevId) window.klaus.ai.explainDiffStreamCancel(prevId);
+      // Don't cancel the proc — the agent may have been started by another
+      // surface (or by us moments ago) and the user might still want it
+      // running in the background. Just unmount the inline UI.
       existing.remove();
     }
 
-    var requestId = 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    // Same key formula as main/ipc/claude-stream-ipc.js explain-diff handler.
+    // If the renderer formula drifts from main's, dedupe silently breaks —
+    // keep these in sync.
+    var fileLabel = selectedFile || 'unknown';
+    var dedupeKey = 'explain-diff::' + fileLabel + '::' + text;
+    var existingAgent = await window.klaus.agents.findByDedupeKey(dedupeKey);
+
+    var requestId = (existingAgent && existingAgent.status === 'running')
+      ? existingAgent.id
+      : 'exp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 
     var explanationEl = document.createElement('div');
     explanationEl.className = 'diff-explanation';
     explanationEl.dataset.requestId = requestId;
     explanationEl.innerHTML = '<div class="diff-explanation-header">'
         + '<span>Explanation</span>'
-        + '<button class="diff-explanation-close" title="Cancel / close">&times;</button>'
+        + '<button class="diff-explanation-close" title="Close">&times;</button>'
       + '</div>'
       + '<div class="diff-explanation-body status-pulse">' + escHtml(EXPLAIN_STATUS_MESSAGES[0]) + '</div>';
     insertAfter.after(explanationEl);
 
     var bodyEl = explanationEl.querySelector('.diff-explanation-body');
-    var accumulated = '';
+    var accumulated = (existingAgent && existingAgent.text) || '';
+
+    // If we re-hydrated from a finished agent, paint the result and bail —
+    // no need to subscribe to a stream that's already over.
+    if (existingAgent && existingAgent.status !== 'running') {
+      bodyEl.classList.remove('status-pulse');
+      if (existingAgent.status === 'error') {
+        bodyEl.className = 'diff-explanation-body diff-error';
+        bodyEl.textContent = existingAgent.error || 'Explain failed';
+      } else {
+        bodyEl.textContent = accumulated || '(no output)';
+      }
+      // Don't auto-mark-read here — let the user keep the badge until they
+      // open the entry from the Agents panel explicitly. Inline rendering
+      // doesn't count as "viewed in the panel".
+      explanationEl.querySelector('.diff-explanation-close').addEventListener('click', function () {
+        explanationEl.remove();
+      });
+      if (sel) sel.removeAllRanges();
+      return;
+    }
+
+    // Catch-up: paint whatever the agent has already streamed.
+    if (accumulated) {
+      bodyEl.classList.remove('status-pulse');
+      bodyEl.textContent = accumulated;
+    }
 
     // Cycle through status labels until the first chunk arrives (or the user
     // cancels). Stops itself as soon as `accumulated` is non-empty.
@@ -588,18 +855,24 @@ window.PrReview = (function () {
         // Leave whatever we managed to stream visible.
       }
       // Success path: stream already populated bodyEl; nothing more to do.
+      // Intentionally not marking read — see note above.
     });
 
     explanationEl.querySelector('.diff-explanation-close').addEventListener('click', function () {
+      // Closing the inline UI no longer cancels the agent — it keeps running
+      // in the background and the user can re-attach via the Agents panel.
       clearInterval(statusTimer);
-      window.klaus.ai.explainDiffStreamCancel(requestId);
       if (unsubChunk) unsubChunk();
       if (unsubDone) unsubDone();
       explanationEl.remove();
     });
 
     if (sel) sel.removeAllRanges();
-    window.klaus.ai.explainDiffStreamStart(requestId, null, selectedFile || 'unknown', text);
+    // Only fire start if we're not attaching to an existing run.
+    if (!existingAgent || existingAgent.status !== 'running') {
+      var prNumber = (lastState && lastState.number) || null;
+      window.klaus.ai.explainDiffStreamStart(requestId, null, fileLabel, text, prNumber);
+    }
   }
 
   function renderConversationCount(state) {
@@ -1694,6 +1967,9 @@ window.PrReview = (function () {
 
     var buffered = '';
     var unsubData = window.klaus.pr.onReviewAiData(requestId, function (chunk) {
+      // Agent kept running after the user navigated to a different PR. Drop
+      // chunks that aren't for the AI review currently being tracked here.
+      if (aiReview.requestId !== requestId) return;
       buffered += chunk;
       var idx;
       while ((idx = buffered.indexOf('\n')) !== -1) {
@@ -3394,5 +3670,10 @@ window.PrReview = (function () {
     }
   }
 
-  return { mount: mount, unmount: unmount };
+  // refresh: re-run render() against the current state. Used by AgentRouter
+  // when a navigation intent lands while the PR is already mounted so
+  // applyPendingNav gets a chance to consume it.
+  function refresh() { if (lastState) render(lastState); }
+
+  return { mount: mount, unmount: unmount, refresh: refresh };
 })();

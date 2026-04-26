@@ -504,8 +504,193 @@ window.FileBrowser = (function () {
       }
     });
 
+    setupViewerExplain(currentEditor, monaco);
+
     viewerInitialized = true;
     return true;
+  }
+
+  // View zones added by setupViewerExplain / rehydrateViewerExplains. Cleared
+  // on tab switch so explanations from one file don't bleed into another.
+  var viewerExplainZones = [];
+
+  function clearViewerExplainZones(editor) {
+    if (!editor || !viewerExplainZones.length) return;
+    editor.changeViewZones(function (accessor) {
+      viewerExplainZones.forEach(function (z) {
+        try { accessor.removeZone(z.zoneId); } catch (_) {}
+        try { z.cleanup && z.cleanup(); } catch (_) {}
+      });
+    });
+    viewerExplainZones = [];
+  }
+
+  // Selection-based Explain in the Monaco file viewer. Mirrors the diff/PR
+  // surfaces' Explain UX:
+  //   * highlight code → small floating FAB appears near the selection
+  //   * click → FAB hides, a Monaco view zone opens below the selection
+  //   * the explain agent streams into the view zone in real time
+  //   * close button removes the view zone (agent keeps running in registry
+  //     so the result is reachable from the Agents panel)
+  function setupViewerExplain(editor, monaco) {
+    var fab = document.getElementById('viewer-explain-fab');
+    if (!fab) {
+      fab = document.createElement('div');
+      fab.id = 'viewer-explain-fab';
+      fab.textContent = 'Explain';
+      document.body.appendChild(fab);
+    }
+    function hideFab() { fab.style.display = 'none'; }
+
+    fab.onmousedown = function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var sel = editor.getSelection();
+      if (!sel || sel.isEmpty()) { hideFab(); return; }
+      var text = editor.getModel().getValueInRange(sel);
+      if (!text.trim()) { hideFab(); return; }
+      hideFab();
+      startViewerExplain(editor, sel, text);
+    };
+
+    editor.onDidChangeCursorSelection(function (e) {
+      var sel = e.selection;
+      if (!sel || sel.isEmpty()) { hideFab(); return; }
+      // Anchor the FAB to the bottom-right of the selection's end position.
+      var coord = editor.getScrolledVisiblePosition({ lineNumber: sel.endLineNumber, column: sel.endColumn });
+      var dom = editor.getDomNode();
+      if (!coord || !dom) { hideFab(); return; }
+      var rect = dom.getBoundingClientRect();
+      fab.style.display = 'block';
+      fab.style.left = Math.min(window.innerWidth - 80, rect.left + coord.left + 6) + 'px';
+      fab.style.top = (rect.top + coord.top + coord.height + 4) + 'px';
+    });
+
+    // Hide the FAB when the editor loses focus, but on a small delay so a
+    // mousedown on the FAB itself fires first.
+    editor.onDidBlurEditorText(function () { setTimeout(hideFab, 150); });
+  }
+
+  function startViewerExplain(editor, selection, text) {
+    var tab = tabs[activeTabIndex];
+    if (!tab) return;
+    var requestId = 'exp-vw-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    openViewerExplainZone(editor, selection.endLineNumber, requestId, null, text);
+    // Pass null for prNumber — file viewer isn't PR-scoped. The agent router
+    // will fall back to openTaskAndDiff(worktreePath) for explain agents
+    // without prNumber.
+    window.klaus.ai.explainDiffStreamStart(
+      requestId,
+      currentViewerWorktree,
+      tab.filePath,
+      text,
+      null
+    );
+  }
+
+  // Build a view zone with the streaming/cached explanation. agent is non-null
+  // for rehydration (paint cached text first, subscribe only if still running).
+  function openViewerExplainZone(editor, afterLineNumber, requestId, agent, hunkText) {
+    var domNode = document.createElement('div');
+    domNode.className = 'viewer-explain-zone';
+    domNode.dataset.requestId = requestId;
+    domNode.innerHTML =
+      '<div class="diff-explanation-header">'
+        + '<span>Explanation</span>'
+        + '<button class="diff-explanation-close" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="diff-explanation-body"></div>';
+    var bodyEl = domNode.querySelector('.diff-explanation-body');
+
+    var zoneId = null;
+    editor.changeViewZones(function (accessor) {
+      zoneId = accessor.addZone({
+        afterLineNumber: afterLineNumber,
+        heightInPx: 200,
+        domNode: domNode,
+      });
+    });
+
+    var unsubChunk = null;
+    var unsubDone = null;
+    function cleanup() {
+      if (unsubChunk) { unsubChunk(); unsubChunk = null; }
+      if (unsubDone) { unsubDone(); unsubDone = null; }
+    }
+    var entry = { zoneId: zoneId, requestId: requestId, cleanup: cleanup };
+    viewerExplainZones.push(entry);
+
+    function removeZone() {
+      cleanup();
+      var idx = viewerExplainZones.indexOf(entry);
+      if (idx >= 0) viewerExplainZones.splice(idx, 1);
+      if (entry.zoneId == null) return;
+      editor.changeViewZones(function (accessor) { accessor.removeZone(entry.zoneId); });
+      entry.zoneId = null;
+    }
+    domNode.querySelector('.diff-explanation-close').addEventListener('click', removeZone);
+
+    // Rehydration: paint cached text first.
+    var accumulated = (agent && agent.text) || '';
+    if (agent && agent.status === 'error') {
+      bodyEl.className = 'diff-explanation-body diff-error';
+      bodyEl.textContent = agent.error || 'Explain failed';
+      return;
+    }
+    if (accumulated) {
+      bodyEl.textContent = accumulated;
+    } else {
+      bodyEl.classList.add('status-pulse');
+      bodyEl.textContent = agent ? 'Resuming…' : 'Sending to Claude…';
+    }
+
+    // For done agents (rehydrated), nothing more to wire up.
+    if (agent && agent.status !== 'running') return;
+
+    unsubChunk = window.klaus.ai.onExplainDiffChunk(requestId, function (chunk) {
+      if (!accumulated) { bodyEl.classList.remove('status-pulse'); bodyEl.textContent = ''; }
+      accumulated += chunk;
+      bodyEl.textContent = accumulated;
+      bodyEl.scrollTop = bodyEl.scrollHeight;
+    });
+    unsubDone = window.klaus.ai.onExplainDiffDone(requestId, function (result) {
+      if (unsubChunk) { unsubChunk(); unsubChunk = null; }
+      if (!domNode.isConnected) return;
+      bodyEl.classList.remove('status-pulse');
+      if (result && result.error) {
+        bodyEl.className = 'diff-explanation-body diff-error';
+        bodyEl.textContent = result.error;
+      }
+    });
+  }
+
+  // On tab switch / file load, scan the agent registry for explain-diff
+  // agents whose stored hunk still appears in this file's content, and
+  // re-inject them as view zones at the matching position.
+  function rehydrateViewerExplains(editor, filePath, model) {
+    if (!editor || !filePath || !model || !window.klaus || !window.klaus.agents) return;
+    window.klaus.agents.list().then(function (list) {
+      if (!list || !list.length) return;
+      var matching = list.filter(function (a) {
+        return a.kind === 'explain-diff'
+            && a.sourceContext
+            && a.sourceContext.file === filePath
+            && a.sourceContext.hunk;
+      });
+      // Newest first so the most recent explanation lands closest to user
+      // attention if multiple zones stack at the same line.
+      matching.sort(function (a, b) { return b.startedAt - a.startedAt; });
+      var content = model.getValue();
+      matching.forEach(function (agent) {
+        var hunk = agent.sourceContext.hunk;
+        var idx = content.indexOf(hunk);
+        if (idx < 0) return; // file drifted; skip silently
+        // End line = number of newlines in content[0..idx+hunk.length], 1-indexed.
+        var prefix = content.slice(0, idx + hunk.length);
+        var endLine = (prefix.match(/\n/g) || []).length + 1;
+        openViewerExplainZone(editor, endLine, agent.id, agent, hunk);
+      });
+    });
   }
 
   // Reads the file, attaches the model to the LSP layer, and pushes a tab
@@ -552,6 +737,10 @@ window.FileBrowser = (function () {
 
   async function activateTab(index, line) {
     if (index < 0 || index >= tabs.length) return;
+    // Drop view zones from the previous tab — Monaco anchors them by line
+    // number on the editor, not the model, so they'd land on wrong content
+    // after setModel.
+    clearViewerExplainZones(currentEditor);
     activeTabIndex = index;
     var tab = tabs[index];
     currentModel = tab.model;
@@ -561,6 +750,7 @@ window.FileBrowser = (function () {
     var monaco = await window.MonacoReady;
 
     if (currentEditor) currentEditor.setModel(tab.model);
+    rehydrateViewerExplains(currentEditor, tab.filePath, tab.model);
 
     if (line) {
       var lineCount = tab.model.getLineCount();

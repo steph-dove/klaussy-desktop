@@ -5,14 +5,24 @@
 // proc map.
 
 const { ipcMain } = require('electron');
+const crypto = require('crypto');
+const { execFile, execFileSync } = require('child_process');
 const { instances } = require('../state/instances');
-const { prReview, ensureWorktreeForActivePr } = require('../state/pr-review');
+const { prReview, ensureWorktreeForActivePr, currentRepoPath } = require('../state/pr-review');
+const { execFileP } = require('../util/exec');
+const { loadConfig } = require('../util/config');
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
   debugCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
   implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
   investigateProcs,
 } = require('../state/claude-streaming');
+
+// Stable, bounded ID for dedupeKey suffixes. Inputs (hunks, finding bodies,
+// staged diffs) can be many KB; sha1 keeps keys short and comparable.
+function shortHash(s) {
+  return crypto.createHash('sha1').update(String(s || '')).digest('hex').slice(0, 12);
+}
 
 // Debug a single failing CI check. Pulls the failing job's logs, builds a
 // prompt with PR description + diff + log tail, and streams claude's analysis
@@ -83,6 +93,21 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
   spawnClaudeStream({
     requestId, procMap: debugCheckProcs, channelPrefix: 'pr-debug-check',
     sender, cwd, prompt,
+    agentMeta: {
+      kind: 'pr-debug-check',
+      // Same PR + same failing job link = same agent. Re-clicking "Debug"
+      // on the same check finds the running/completed agent instead of
+      // burning another `gh run view` + claude spawn.
+      dedupeKey: `pr-debug-check:${meta.number}:${checkLink}`,
+      sourceContext: {
+        kind: 'pr-debug-check',
+        prNumber: meta.number,
+        prTitle: meta.title || '',
+        baseOwner, baseRepo,
+        checkLink,
+        checkName: checkName || '',
+      },
+    },
   });
   return { ok: true };
 });
@@ -170,6 +195,22 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
     cwd: ensured.worktreePath,
     prompt,
     streamJson: true,
+    agentMeta: {
+      kind: 'pr-review-ai',
+      // Only one full AI review per PR makes sense — re-clicking "Run AI
+      // Review" while one is running attaches to it instead of spawning a
+      // duplicate.
+      dedupeKey: `pr-review-ai:${prReview.active.meta.number}`,
+      sourceContext: {
+        kind: 'pr-review-ai',
+        prNumber: prReview.active.meta.number,
+        prTitle: prReview.active.meta.title || '',
+        baseBranch,
+        // Needed by the renderer's rehydration path so post-review actions
+        // (Implement / Investigate) know which worktree to operate in.
+        worktreePath: ensured.worktreePath,
+      },
+    },
   });
   return { ok: true, worktreePath: ensured.worktreePath };
 });
@@ -219,6 +260,17 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     prompt,
     streamJson: true,
     extraDoneFields: { worktreePath: ensured.worktreePath },
+    agentMeta: {
+      kind: 'pr-review-implement',
+      dedupeKey: `pr-review-implement:${prReview.active.meta.number}:${mode}:${shortHash(body)}`,
+      sourceContext: {
+        kind: 'pr-review-implement',
+        prNumber: prReview.active.meta.number,
+        prTitle: prReview.active.meta.title || '',
+        mode,
+        bodyPreview: body.slice(0, 160),
+      },
+    },
   });
   return { ok: true, worktreePath: ensured.worktreePath };
 });
@@ -297,6 +349,16 @@ ipcMain.handle('pr-review-investigate-start', async (event, { requestId, finding
     prompt,
     streamJson: true,
     extraDoneFields: { worktreePath: ensured.worktreePath },
+    agentMeta: {
+      kind: 'pr-review-investigate',
+      dedupeKey: `pr-review-investigate:${prReview.active.meta.number}:${shortHash(findingBody)}`,
+      sourceContext: {
+        kind: 'pr-review-investigate',
+        prNumber: prReview.active.meta.number,
+        prTitle: prReview.active.meta.title || '',
+        bodyPreview: findingBody.slice(0, 160),
+      },
+    },
   });
   return { ok: true };
 });
@@ -333,7 +395,7 @@ ipcMain.handle('explain-diff', async (_event, { worktreePath, file, hunk }) => {
 // user sees tokens as they arrive instead of staring at a 10-second spinner.
 // Callers pass a requestId; chunks arrive on `explain-diff-chunk-<id>` and
 // completion on `explain-diff-done-<id>`.
-ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, file, hunk }) => {
+ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, file, hunk, prNumber }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (explainStreamProcs.has(requestId)) return { error: 'Already streaming' };
   spawnClaudeStream({
@@ -341,6 +403,26 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
     sender: event.sender,
     cwd: worktreePath || currentRepoPath() || require('os').homedir(),
     prompt: explainPrompt(file, hunk),
+    agentMeta: {
+      kind: 'explain-diff',
+      // Lookup-friendly key (no hashing): the renderer computes the same
+      // string before starting an explain so it can find an existing
+      // agent and attach instead of spawning a duplicate. Long hunks make
+      // this string big, but Map keys handle that fine.
+      dedupeKey: `explain-diff::${file}::${hunk}`,
+      sourceContext: {
+        kind: 'explain-diff',
+        worktreePath: worktreePath || null,
+        // prNumber is set when the explain originated from a PR review surface
+        // (no worktree). Lets the agent router open the right PR on "Open".
+        prNumber: prNumber || null,
+        file,
+        // Full hunk so the renderer can find the matching diff-line range on
+        // re-mount and re-anchor the explanation to its original position.
+        hunk: hunk || '',
+        hunkPreview: (hunk || '').split('\n').slice(0, 3).join('\n').slice(0, 200),
+      },
+    },
   });
   return { ok: true };
 });
@@ -800,6 +882,17 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
     cwd: worktreePath,
     prompt,
     streamJson: true,
+    agentMeta: {
+      kind: 'pr-ai-review',
+      // One AI review per (worktree, base) — re-running while it's still
+      // in flight attaches to the existing run.
+      dedupeKey: `pr-ai-review:${worktreePath}:${baseBranch || 'main'}`,
+      sourceContext: {
+        kind: 'pr-ai-review',
+        worktreePath,
+        baseBranch: baseBranch || 'main',
+      },
+    },
   });
   return { ok: true };
 });

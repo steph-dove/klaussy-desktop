@@ -340,8 +340,8 @@ contextBridge.exposeInMainWorld('klaus', {
       return () => ipcRenderer.removeListener(channel, handler);
     },
     explainDiff: (worktreePath, file, hunk) => ipcRenderer.invoke('explain-diff', { worktreePath, file, hunk }),
-    explainDiffStreamStart: (requestId, worktreePath, file, hunk) =>
-      ipcRenderer.invoke('explain-diff-stream-start', { requestId, worktreePath, file, hunk }),
+    explainDiffStreamStart: (requestId, worktreePath, file, hunk, prNumber) =>
+      ipcRenderer.invoke('explain-diff-stream-start', { requestId, worktreePath, file, hunk, prNumber }),
     explainDiffStreamCancel: (requestId) => ipcRenderer.invoke('explain-diff-stream-cancel', { requestId }),
     onExplainDiffChunk: (requestId, callback) => {
       const channel = 'explain-diff-chunk-' + requestId;
@@ -405,6 +405,40 @@ contextBridge.exposeInMainWorld('klaus', {
         ipcRenderer.on('ollama-setup-progress', handler);
         return () => ipcRenderer.removeListener('ollama-setup-progress', handler);
       },
+    },
+  },
+
+  // ---- agents: global background-agent registry (Agents panel) ----
+  agents: {
+    list: () => ipcRenderer.invoke('agents-list'),
+    get: (id) => ipcRenderer.invoke('agents-get', { id }),
+    findByDedupeKey: (key) => ipcRenderer.invoke('agents-find-by-dedupe-key', { key }),
+    cancel: (id) => ipcRenderer.invoke('agents-cancel', { id }),
+    markRead: (id) => ipcRenderer.invoke('agents-mark-read', { id }),
+    markAllRead: () => ipcRenderer.invoke('agents-mark-all-read'),
+    clearCompleted: () => ipcRenderer.invoke('agents-clear-completed'),
+    // Fired on every registry mutation (register / done / error / cancel /
+    // read). Subscribers re-render with the snapshot.
+    onChanged: (callback) => {
+      const handler = (_e, list) => callback(list);
+      ipcRenderer.on('agents-changed', handler);
+      return () => ipcRenderer.removeListener('agents-changed', handler);
+    },
+    // Generic chunk subscription for an in-flight backgrounded agent. The
+    // channel matches whatever channelPrefix the agent was registered with
+    // (`<prefix>-chunk-<id>` for plain text, `<prefix>-data-<id>` for
+    // stream-json). Lets a re-mounting consumer attach to live output.
+    onChunk: (channelPrefix, id, isStreamJson, callback) => {
+      const channel = `${channelPrefix}-${isStreamJson ? 'data' : 'chunk'}-${id}`;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onDone: (channelPrefix, id, callback) => {
+      const channel = `${channelPrefix}-done-${id}`;
+      const handler = (_e, payload) => callback(payload);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
     },
   },
 
