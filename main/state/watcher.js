@@ -22,17 +22,24 @@ function startWorktreeWatcher(worktreePath) {
   state = { watcher: null, subscribers: new Map(), debounceTimer: null };
 
   try {
+    // Coalesce filenames over the debounce window so listeners can scope
+    // their reactions (e.g. external-mod detection only rechecks open files
+    // that are actually in the changed set).
+    state.changed = new Set();
     state.watcher = fs.watch(worktreePath, { recursive: true }, (_eventType, filename) => {
       if (!filename) return;
       // Normalize separators — on macOS we get forward slashes already, but be safe.
       const rel = filename.replace(/\\/g, '/');
       if (WATCH_IGNORE_RE.test(rel)) return;
+      state.changed.add(rel);
 
       if (state.debounceTimer) clearTimeout(state.debounceTimer);
       state.debounceTimer = setTimeout(() => {
         state.debounceTimer = null;
+        const changedFiles = Array.from(state.changed);
+        state.changed.clear();
         for (const wc of state.subscribers.keys()) {
-          if (!wc.isDestroyed()) wc.send('worktree-changed', { worktreePath });
+          if (!wc.isDestroyed()) wc.send('worktree-changed', { worktreePath, changedFiles });
         }
       }, 200);
     });

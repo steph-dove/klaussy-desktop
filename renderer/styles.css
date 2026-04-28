@@ -8467,6 +8467,42 @@ body.pr-review-popout #pr-review-root {
 
 #btn-tree-collapse:hover { background: var(--surface-hover); color: var(--text); }
 
+#btn-tree-new-file,
+#btn-tree-new-folder,
+#btn-tree-refresh {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+#btn-tree-new-file:hover,
+#btn-tree-new-folder:hover,
+#btn-tree-refresh:hover { background: var(--surface-hover); color: var(--text); }
+
+/* Drag-and-drop visual: highlight a directory label when a draggable hovers over it. */
+.file-tree-label.drag-over,
+#file-tree.drag-over { background: var(--surface-hover); outline: 2px dashed var(--accent); outline-offset: -2px; }
+
+/* Inline rename input replaces the tree row text. */
+.file-tree-rename-input {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font: inherit;
+  outline: none;
+}
+
 /* When collapsed, hide the tree + filter bar; editor fills the space. */
 #files-tab-content.tree-collapsed #file-tree,
 #files-tab-content.tree-collapsed #file-tree-filter-bar { display: none; }
