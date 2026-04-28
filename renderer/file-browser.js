@@ -731,7 +731,13 @@ window.FileBrowser = (function () {
       window.LspClient.attachModel(model, filePath, fileViewerWorktree);
     }
 
-    tabs.push({ filePath: filePath, model: model, isProjectModel: isProjectModel, savedContent: result.content });
+    tabs.push({
+      filePath: filePath,
+      model: model,
+      isProjectModel: isProjectModel,
+      savedContent: result.content,
+      diskMtimeMs: result.mtimeMs || null,
+    });
     return tabs.length - 1;
   }
 
@@ -863,6 +869,7 @@ window.FileBrowser = (function () {
       return;
     }
     tab.savedContent = content;
+    if (writeResult.mtimeMs) tab.diskMtimeMs = writeResult.mtimeMs;
     if (statusEl) { statusEl.textContent = 'Saved'; statusEl.className = 'file-editor-status saved'; }
     setTimeout(function () {
       if (statusEl && statusEl.textContent === 'Saved') {
@@ -910,6 +917,403 @@ window.FileBrowser = (function () {
     if (newIndex < 0) return;
     await activateTab(newIndex, lineNumber);
   };
+
+  // ---- File Tree mutations: create / rename / delete / move (I9) ----
+  //
+  // Right-click and drag-and-drop fan out to the fs.* IPC, then refresh the
+  // tree on success and reconcile any tabs that pointed at the affected
+  // path. Renames recreate the Monaco model under the new URI (URIs are
+  // immutable in Monaco), preserving cursor/scroll across the swap.
+
+  function cssEscape(s) {
+    if (window.CSS && window.CSS.escape) return window.CSS.escape(s);
+    return String(s).replace(/(["\\])/g, '\\$1');
+  }
+
+  function refreshFileTree() {
+    // Drop the cache key so loadFileTree re-fetches instead of short-circuiting.
+    fileTreeWorktree = null;
+    return loadFileTree();
+  }
+
+  // Tab indices whose filePath equals abs OR descends from it. Used by both
+  // delete (close hits) and rename (rewrite hits).
+  function tabsAffectedBy(abs) {
+    var hits = [];
+    var prefix = abs + '/';
+    for (var i = 0; i < tabs.length; i++) {
+      var p = tabs[i].filePath;
+      if (p === abs || p.indexOf(prefix) === 0) hits.push(i);
+    }
+    return hits;
+  }
+
+  function dirtyAmong(indices) {
+    return indices.some(function (i) {
+      var t = tabs[i];
+      return t && t.model && !t.model.isDisposed() && t.model.getValue() !== t.savedContent;
+    });
+  }
+
+  function closeTabsAt(indices) {
+    // Descending order — splice in closeTab shifts indices.
+    indices.slice().sort(function (a, b) { return b - a; }).forEach(closeTab);
+  }
+
+  // Swap each affected tab's model for one bound to the new URI. Preserves
+  // cursor/scroll on the active tab so a rename feels in-place.
+  async function reloadTabsAfterRename(oldAbs, newAbs) {
+    var prefix = oldAbs + '/';
+    var monaco = await window.MonacoReady;
+    var savedPos = currentEditor && currentEditor.getPosition();
+    var savedScroll = currentEditor && currentEditor.getScrollTop();
+    for (var i = 0; i < tabs.length; i++) {
+      var tab = tabs[i];
+      var p = tab.filePath;
+      var newP;
+      if (p === oldAbs) newP = newAbs;
+      else if (p.indexOf(prefix) === 0) newP = newAbs + p.slice(oldAbs.length);
+      else continue;
+      try { if (!tab.isProjectModel) tab.model.dispose(); } catch (_) {}
+      var read = await window.klaus.fs.readFile(newP);
+      if (read.error) {
+        // Renamed file isn't readable — close the tab and move on.
+        tabs.splice(i, 1);
+        if (i <= activeTabIndex) activeTabIndex -= 1;
+        i -= 1;
+        continue;
+      }
+      var uri = monaco.Uri.file(newP);
+      var existing = monaco.editor.getModel(uri);
+      if (existing) { try { existing.dispose(); } catch (_) {} }
+      tab.filePath = newP;
+      tab.model = monaco.editor.createModel(read.content, undefined, uri);
+      tab.savedContent = read.content;
+      tab.isProjectModel = false;
+      tab.diskMtimeMs = read.mtimeMs || null;
+      if (window.LspClient && fileViewerWorktree) {
+        window.LspClient.attachModel(tab.model, newP, fileViewerWorktree);
+      }
+    }
+    if (activeTabIndex >= 0 && tabs[activeTabIndex] && currentEditor) {
+      currentEditor.setModel(tabs[activeTabIndex].model);
+      currentFilePath = tabs[activeTabIndex].filePath;
+      if (savedPos) currentEditor.setPosition(savedPos);
+      if (savedScroll != null) currentEditor.setScrollTop(savedScroll);
+      renderBreadcrumbs(currentFilePath);
+    }
+    renderTabs();
+    if (activeTabIndex >= 0) refreshDirtyState();
+  }
+
+  // Inject a transient input row under the named directory (or at root if
+  // parentDirRel is falsy). Enter creates, Escape cancels.
+  async function inlineCreate(parentDirRel, kind) {
+    if (!fileTreeWorktree) return;
+    var container, depth;
+    if (!parentDirRel) {
+      container = fileTree;
+      depth = 0;
+    } else {
+      var label = fileTree.querySelector('.file-tree-label[data-path="' + cssEscape(parentDirRel) + '"]');
+      if (!label) {
+        container = fileTree;
+        depth = 0;
+      } else {
+        var dirEl = label.parentNode;
+        var children = dirEl.querySelector('.file-tree-children');
+        if (children.style.display === 'none') label.click(); // expand to reveal new entry
+        container = children;
+        depth = (parseInt(label.style.paddingLeft, 10) - 8) / 16 + 1;
+      }
+    }
+    var row = document.createElement('div');
+    row.className = 'file-tree-file';
+    row.style.paddingLeft = (depth * 16 + 8) + 'px';
+    row.style.display = 'flex';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'file-tree-rename-input';
+    input.placeholder = kind === 'dir' ? 'folder name' : 'file name';
+    row.appendChild(input);
+    container.insertBefore(row, container.firstChild);
+    var done = false;
+    function cancel() { if (!done) { done = true; row.remove(); } }
+    input.addEventListener('keydown', async function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (done) return;
+        var name = input.value.trim();
+        if (!name) { cancel(); return; }
+        if (name.indexOf('/') >= 0) {
+          window.toast.error('Name cannot contain slashes');
+          return;
+        }
+        done = true;
+        input.disabled = true;
+        var rel = parentDirRel ? parentDirRel + '/' + name : name;
+        var result = kind === 'dir'
+          ? await window.klaus.fs.createDir(fileTreeWorktree, rel)
+          : await window.klaus.fs.createFile(fileTreeWorktree, rel);
+        row.remove();
+        if (result.error) {
+          window.toast.error((kind === 'dir' ? 'Create folder' : 'Create file') + ' failed: ' + result.error);
+          return;
+        }
+        await refreshFileTree();
+        if (kind === 'file') {
+          window.openFileViewer(fileTreeWorktree + '/' + rel, name);
+        }
+      }
+    });
+    input.addEventListener('blur', function () {
+      // Defer so a sibling click doesn't race with our own cancel.
+      setTimeout(cancel, 100);
+    });
+    requestAnimationFrame(function () { input.focus(); });
+  }
+
+  // Replace a row's text with an input. Enter renames, Escape restores.
+  function inlineRename(rowEl, oldRel, kind) {
+    if (!fileTreeWorktree) return;
+    var oldName = oldRel.split('/').pop();
+    var oldHTML = rowEl.innerHTML;
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'file-tree-rename-input';
+    input.value = oldName;
+    rowEl.innerHTML = '';
+    if (kind === 'dir') {
+      var arrow = document.createElement('span');
+      arrow.className = 'file-tree-arrow';
+      arrow.innerHTML = '&#9654;';
+      rowEl.appendChild(arrow);
+      rowEl.appendChild(document.createTextNode(' '));
+    }
+    rowEl.appendChild(input);
+    var done = false;
+    function restore() { if (!done) { done = true; rowEl.innerHTML = oldHTML; } }
+    input.addEventListener('keydown', async function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); restore(); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (done) return;
+        var newName = input.value.trim();
+        if (!newName || newName === oldName) { restore(); return; }
+        if (newName.indexOf('/') >= 0) {
+          window.toast.error('Name cannot contain slashes');
+          return;
+        }
+        var parent = oldRel.indexOf('/') >= 0 ? oldRel.slice(0, oldRel.lastIndexOf('/')) : '';
+        var newRel = parent ? parent + '/' + newName : newName;
+        var oldAbs = fileTreeWorktree + '/' + oldRel;
+        var newAbs = fileTreeWorktree + '/' + newRel;
+        var hits = tabsAffectedBy(oldAbs);
+        if (hits.length && dirtyAmong(hits)) {
+          window.toast.error('Cannot rename: an affected tab has unsaved changes');
+          restore();
+          return;
+        }
+        done = true;
+        input.disabled = true;
+        var result = await window.klaus.fs.renamePath(fileTreeWorktree, oldRel, newRel);
+        if (result.error) {
+          window.toast.error('Rename failed: ' + result.error);
+          done = false;
+          restore();
+          return;
+        }
+        await reloadTabsAfterRename(oldAbs, newAbs);
+        await refreshFileTree();
+      }
+    });
+    input.addEventListener('blur', function () { setTimeout(restore, 100); });
+    requestAnimationFrame(function () {
+      input.focus();
+      var dot = oldName.lastIndexOf('.');
+      if (kind === 'file' && dot > 0) input.setSelectionRange(0, dot);
+      else input.select();
+    });
+  }
+
+  async function deleteWithConfirm(rel, kind) {
+    if (!fileTreeWorktree) return;
+    var abs = fileTreeWorktree + '/' + rel;
+    var hits = tabsAffectedBy(abs);
+    if (hits.length && dirtyAmong(hits)) {
+      var force = window.confirm(
+        'A tab has unsaved changes for this ' + kind + '. Delete anyway?\n\n' + rel
+      );
+      if (!force) return;
+    } else {
+      var ok = window.confirm('Move "' + rel + '" to Trash?');
+      if (!ok) return;
+    }
+    closeTabsAt(hits);
+    var result = await window.klaus.fs.deletePath(fileTreeWorktree, rel, false);
+    if (result.error) {
+      window.toast.error('Delete failed: ' + result.error);
+      return;
+    }
+    await refreshFileTree();
+  }
+
+  function showTreeContextMenu(e, rel, kind) {
+    // For file targets, "New File" creates a sibling — its parent dir.
+    var dirContextRel = kind === 'dir' ? rel : (rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : '');
+    var abs = fileTreeWorktree + '/' + rel;
+    var rowEl = e.currentTarget;
+    var items = [
+      { label: 'New File', action: function () { inlineCreate(dirContextRel, 'file'); } },
+      { label: 'New Folder', action: function () { inlineCreate(dirContextRel, 'dir'); } },
+      { sep: true },
+      { label: 'Rename', action: function () { inlineRename(rowEl, rel, kind); } },
+      { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
+      { sep: true },
+      { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
+      { label: 'Copy Path', action: function () {
+          window.klaus.fs.copyToClipboard(abs);
+          window.toast.info('Copied path');
+      } },
+      { label: 'Copy Relative Path', action: function () {
+          window.klaus.fs.copyToClipboard(rel);
+          window.toast.info('Copied relative path');
+      } },
+    ];
+    window.ContextMenu.show(e.clientX, e.clientY, items);
+  }
+
+  function wireDragSource(el, rel, _kind) {
+    el.addEventListener('dragstart', function (e) {
+      e.stopPropagation();
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('application/x-klaussy-tree-path', rel);
+      e.dataTransfer.setData('text/plain', rel);
+    });
+  }
+
+  function wireDropTarget(el, dirRel) {
+    el.addEventListener('dragover', function (e) {
+      // Accept only our internal drag mime — Finder drops are out of scope here.
+      var types = e.dataTransfer && e.dataTransfer.types;
+      var ok = false;
+      if (types) {
+        for (var i = 0; i < types.length; i++) {
+          if (types[i] === 'application/x-klaussy-tree-path') { ok = true; break; }
+        }
+      }
+      if (!ok) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', function () { el.classList.remove('drag-over'); });
+    el.addEventListener('drop', async function (e) {
+      el.classList.remove('drag-over');
+      var fromRel = e.dataTransfer.getData('application/x-klaussy-tree-path');
+      if (!fromRel || !fileTreeWorktree) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Refuse self-drop and into-own-descendant.
+      if (fromRel === dirRel) return;
+      if (dirRel && dirRel.indexOf(fromRel + '/') === 0) {
+        window.toast.error('Cannot move a folder into itself');
+        return;
+      }
+      var fromParent = fromRel.indexOf('/') >= 0 ? fromRel.slice(0, fromRel.lastIndexOf('/')) : '';
+      if (fromParent === dirRel) return; // already there
+      var name = fromRel.split('/').pop();
+      var toRel = dirRel ? dirRel + '/' + name : name;
+      var oldAbs = fileTreeWorktree + '/' + fromRel;
+      var newAbs = fileTreeWorktree + '/' + toRel;
+      var hits = tabsAffectedBy(oldAbs);
+      if (hits.length && dirtyAmong(hits)) {
+        window.toast.error('Cannot move: an affected tab has unsaved changes');
+        return;
+      }
+      var result = await window.klaus.fs.renamePath(fileTreeWorktree, fromRel, toRel);
+      if (result.error) {
+        window.toast.error('Move failed: ' + result.error);
+        return;
+      }
+      await reloadTabsAfterRename(oldAbs, newAbs);
+      await refreshFileTree();
+    });
+  }
+
+  // ---- External-modification detection (I9) ----
+  //
+  // The H3 watcher fires `worktree-changed` with the changed file list. For
+  // every open tab whose file is in that list we re-stat: if mtime drifted
+  // from our last-known disk mtime, the file was modified outside our save
+  // path. Clean buffers reload silently; dirty buffers warn and let the
+  // user pick reload-or-keep. Suppression: every save updates diskMtimeMs,
+  // and we ignore events whose stat matches the stamp.
+
+  async function reloadTabFromDisk(tabIndex) {
+    var tab = tabs[tabIndex];
+    if (!tab) return;
+    var read = await window.klaus.fs.readFile(tab.filePath);
+    if (read.error) return;
+    var monaco = await window.MonacoReady;
+    var savedPos = (tabIndex === activeTabIndex && currentEditor) ? currentEditor.getPosition() : null;
+    var savedScroll = (tabIndex === activeTabIndex && currentEditor) ? currentEditor.getScrollTop() : null;
+    if (tab.model && !tab.model.isDisposed()) {
+      // setValue preserves the URI so LSP/TS-worker bindings keep working.
+      tab.model.setValue(read.content);
+    }
+    tab.savedContent = read.content;
+    tab.diskMtimeMs = read.mtimeMs || null;
+    if (savedPos && currentEditor) currentEditor.setPosition(savedPos);
+    if (savedScroll != null && currentEditor) currentEditor.setScrollTop(savedScroll);
+    refreshDirtyState();
+  }
+
+  async function checkExternalMod(changedFiles) {
+    if (!tabs.length || !fileViewerWorktree) return;
+    // changedFiles is worktree-relative. Convert each open tab to its rel
+    // form and intersect — avoids stat-ing tabs that didn't move.
+    var wtPrefix = fileViewerWorktree + '/';
+    var relSet = changedFiles ? new Set(changedFiles) : null;
+    for (var i = 0; i < tabs.length; i++) {
+      var tab = tabs[i];
+      if (tab.filePath.indexOf(wtPrefix) !== 0) continue;
+      var rel = tab.filePath.slice(wtPrefix.length);
+      if (relSet && !relSet.has(rel)) continue;
+      var st = await window.klaus.fs.statFile(tab.filePath);
+      if (st.error) {
+        // File was deleted externally — close the tab if clean, warn if dirty.
+        var dirty = tab.model && !tab.model.isDisposed() && tab.model.getValue() !== tab.savedContent;
+        if (dirty) {
+          window.toast.warn('File deleted externally but tab has unsaved changes: ' + rel);
+        } else {
+          closeTab(i);
+          i -= 1;
+        }
+        continue;
+      }
+      if (!st.mtimeMs) continue;
+      // Stamp-match: this is our own write (or a no-op touch we already saw).
+      if (tab.diskMtimeMs && Math.abs(st.mtimeMs - tab.diskMtimeMs) < 1) continue;
+      var isDirty = tab.model && !tab.model.isDisposed() && tab.model.getValue() !== tab.savedContent;
+      if (!isDirty) {
+        // Silent reload for clean buffers — VS Code-style.
+        await reloadTabFromDisk(i);
+      } else {
+        // Track the new disk mtime so we don't re-warn for the same change.
+        tab.diskMtimeMs = st.mtimeMs;
+        var basename = rel.split('/').pop();
+        var keep = window.confirm(
+          basename + ' changed on disk but you have unsaved changes.\n\n' +
+          'OK = reload from disk (your edits will be lost)\n' +
+          'Cancel = keep your version (next save will overwrite the on-disk change)'
+        );
+        if (keep) await reloadTabFromDisk(i);
+      }
+    }
+  }
 
   // ---- File Tree (C2) ----
 
@@ -996,7 +1400,9 @@ window.FileBrowser = (function () {
   function buildChildren(node, container, depth, opts) {
     var dirs = Object.keys(node).filter(function (k) { return k !== '_files'; }).sort();
     dirs.forEach(function (dir) {
-      renderDir(dir, node[dir], container, depth, opts);
+      var parentRel = (opts && opts.parentRel) || '';
+      var dirRel = parentRel ? parentRel + '/' + dir : dir;
+      renderDir(dir, dirRel, node[dir], container, depth, opts);
     });
     if (node._files) {
       node._files.sort(function (a, b) { return a.name.localeCompare(b.name); });
@@ -1006,15 +1412,24 @@ window.FileBrowser = (function () {
         fileEl.style.paddingLeft = (depth * 16 + 8) + 'px';
         fileEl.textContent = file.name;
         fileEl.title = file.path;
+        fileEl.dataset.path = file.path;
+        fileEl.dataset.kind = 'file';
+        fileEl.draggable = true;
         fileEl.addEventListener('click', function () {
           window.openFileViewer(fileTreeWorktree + '/' + file.path, file.path);
         });
+        fileEl.addEventListener('contextmenu', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          showTreeContextMenu(e, file.path, 'file');
+        });
+        wireDragSource(fileEl, file.path, 'file');
         container.appendChild(fileEl);
       });
     }
   }
 
-  function renderDir(name, node, container, depth, opts) {
+  function renderDir(name, dirRel, node, container, depth, opts) {
     var autoExpand = opts && opts.autoExpand;
     var dirEl = document.createElement('div');
     dirEl.className = 'file-tree-dir';
@@ -1022,6 +1437,9 @@ window.FileBrowser = (function () {
     label.className = 'file-tree-label';
     label.style.paddingLeft = (depth * 16 + 8) + 'px';
     label.innerHTML = '<span class="file-tree-arrow">&#9654;</span> ' + escHtml(name);
+    label.dataset.path = dirRel;
+    label.dataset.kind = 'dir';
+    label.draggable = true;
     var children = document.createElement('div');
     children.className = 'file-tree-children';
     children.style.display = 'none';
@@ -1034,7 +1452,8 @@ window.FileBrowser = (function () {
     var built = false;
     function openDir() {
       if (!built) {
-        buildChildren(node, children, depth + 1, opts);
+        var childOpts = Object.assign({}, opts || {}, { parentRel: dirRel });
+        buildChildren(node, children, depth + 1, childOpts);
         built = true;
       }
       children.style.display = '';
@@ -1047,6 +1466,13 @@ window.FileBrowser = (function () {
     label.addEventListener('click', function () {
       if (children.style.display === 'none') openDir(); else closeDir();
     });
+    label.addEventListener('contextmenu', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      showTreeContextMenu(e, dirRel, 'dir');
+    });
+    wireDragSource(label, dirRel, 'dir');
+    wireDropTarget(label, dirRel);
 
     dirEl.appendChild(label);
     dirEl.appendChild(children);
@@ -1229,8 +1655,21 @@ window.FileBrowser = (function () {
   // Event listeners for tab switching
   window.addEventListener('load-file-tree', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
   window.addEventListener('reload-tab-files', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
-  // H3's watcher: file changed outside our save path — refresh the gutter.
-  window.addEventListener('worktree-changed', function () { refreshGitGutter(); });
+  // H3's watcher: file changed outside our save path — refresh the gutter
+  // and (I9) reconcile open buffers + tree against the on-disk state.
+  // The previous code listened to a `window` 'worktree-changed' event that
+  // was never dispatched; subscribe through the IPC bridge like diff-panel
+  // and sidebar-manager do.
+  window.klaus.fs.onWorktreeChanged(function (data) {
+    if (!data || data.worktreePath !== fileViewerWorktree) return;
+    refreshGitGutter();
+    checkExternalMod(data.changedFiles);
+    // Skip tree refresh while the user is mid-rename/create (transient
+    // input row exists) — tearing it down underneath them would be jarring.
+    if (!fileTree.querySelector('.file-tree-rename-input')) {
+      refreshFileTree();
+    }
+  });
   // Switching projects invalidates any open file — the path may not even
   // exist in the new project. Always close.
   window.addEventListener('klaussy:project-changed', function () {
@@ -1280,6 +1719,31 @@ window.FileBrowser = (function () {
     });
   }
   if (projectReplaceBtn) projectReplaceBtn.addEventListener('click', doProjectReplace);
+
+  // ---- Tree header + root-level mutation surface ----
+
+  var btnNewFile = document.getElementById('btn-tree-new-file');
+  var btnNewFolder = document.getElementById('btn-tree-new-folder');
+  var btnRefresh = document.getElementById('btn-tree-refresh');
+  if (btnNewFile) btnNewFile.addEventListener('click', function () { inlineCreate('', 'file'); });
+  if (btnNewFolder) btnNewFolder.addEventListener('click', function () { inlineCreate('', 'dir'); });
+  if (btnRefresh) btnRefresh.addEventListener('click', function () { refreshFileTree(); });
+
+  // Right-clicking blank space in the tree gives root-scope create / paste-style options.
+  fileTree.addEventListener('contextmenu', function (e) {
+    if (e.target.closest('.file-tree-file, .file-tree-label')) return; // row handled it
+    e.preventDefault();
+    var items = [
+      { label: 'New File', action: function () { inlineCreate('', 'file'); } },
+      { label: 'New Folder', action: function () { inlineCreate('', 'dir'); } },
+      { sep: true },
+      { label: 'Refresh', action: function () { refreshFileTree(); } },
+    ];
+    window.ContextMenu.show(e.clientX, e.clientY, items);
+  });
+
+  // The tree container itself is the drop target for "move to root".
+  wireDropTarget(fileTree, '');
 
   // ---- Blame toggle (D5) ----
 

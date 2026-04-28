@@ -7,7 +7,7 @@
 
 const path = require('path');
 const fs = require('fs');
-const { ipcMain } = require('electron');
+const { ipcMain, shell, clipboard } = require('electron');
 const { execFileP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
 const { worktreeWatchers, startWorktreeWatcher, stopWorktreeWatcher } = require('../state/watcher');
@@ -290,7 +290,11 @@ ipcMain.handle('read-file', async (_event, { filePath }) => {
   if (!safe) return { error: 'path not under an allowed project root' };
   try {
     const content = fs.readFileSync(safe, 'utf-8');
-    return { content, ext: path.extname(safe).slice(1) };
+    // mtimeMs lets the renderer stamp the buffer for external-mod detection
+    // without a follow-up stat call.
+    let mtimeMs = null;
+    try { mtimeMs = fs.statSync(safe).mtimeMs; } catch {}
+    return { content, ext: path.extname(safe).slice(1), mtimeMs };
   } catch (err) {
     return { error: err.message };
   }
@@ -301,6 +305,130 @@ ipcMain.handle('write-file', async (_event, { filePath, content }) => {
   if (!safe) return { error: 'path not under an allowed project root' };
   try {
     fs.writeFileSync(safe, content, 'utf-8');
+    let mtimeMs = null;
+    try { mtimeMs = fs.statSync(safe).mtimeMs; } catch {}
+    return { ok: true, mtimeMs };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// ---- File tree mutations: create / rename / delete / stat / reveal / copy ----
+//
+// Every mutating handler resolves the target through pathUnder so the renderer
+// can't escape the worktree. Create/rename also gate the *destination* parent
+// dir, so a malicious payload can't pass `..` segments to land outside the
+// worktree even if the basename looks innocent.
+
+// Stat is read-only but deliberately separate from read-file because the
+// caller (external-mod detection) only needs mtime + size, not the content.
+ipcMain.handle('stat-file', async (_event, { filePath }) => {
+  const safe = pathUnderAnyRoot(filePath);
+  if (!safe) return { error: 'path not under an allowed project root' };
+  try {
+    const st = fs.statSync(safe);
+    return { ok: true, mtimeMs: st.mtimeMs, size: st.size, isFile: st.isFile(), isDirectory: st.isDirectory() };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Create a new empty file. Refuses to overwrite. The renderer is expected to
+// handle "name already exists" by re-prompting; we don't want a silent clobber.
+ipcMain.handle('create-file', async (_event, { worktreePath, relPath }) => {
+  if (!worktreePath || !relPath) return { error: 'missing args' };
+  const safe = pathUnder(worktreePath, relPath);
+  if (!safe) return { error: 'path escapes worktree' };
+  try {
+    if (fs.existsSync(safe)) return { error: 'a file or folder with that name already exists' };
+    fs.mkdirSync(path.dirname(safe), { recursive: true });
+    fs.writeFileSync(safe, '', { flag: 'wx' });
+    return { ok: true, path: safe };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('create-dir', async (_event, { worktreePath, relPath }) => {
+  if (!worktreePath || !relPath) return { error: 'missing args' };
+  const safe = pathUnder(worktreePath, relPath);
+  if (!safe) return { error: 'path escapes worktree' };
+  try {
+    if (fs.existsSync(safe)) return { error: 'a file or folder with that name already exists' };
+    fs.mkdirSync(safe, { recursive: false });
+    return { ok: true, path: safe };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Rename / move within a worktree. fromRel and toRel are both worktree-relative.
+// Used by both the rename action and drag-and-drop move (move is just a rename
+// with a different parent dir).
+ipcMain.handle('rename-path', async (_event, { worktreePath, fromRel, toRel }) => {
+  if (!worktreePath || !fromRel || !toRel) return { error: 'missing args' };
+  const fromSafe = pathUnder(worktreePath, fromRel);
+  const toSafe = pathUnder(worktreePath, toRel);
+  if (!fromSafe || !toSafe) return { error: 'path escapes worktree' };
+  if (fromSafe === toSafe) return { ok: true, path: toSafe };
+  try {
+    if (!fs.existsSync(fromSafe)) return { error: 'source does not exist' };
+    if (fs.existsSync(toSafe)) return { error: 'destination already exists' };
+    fs.mkdirSync(path.dirname(toSafe), { recursive: true });
+    fs.renameSync(fromSafe, toSafe);
+    return { ok: true, path: toSafe };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Delete file or directory. Routes through shell.trashItem so the user can
+// recover from Finder's Trash — `rm -rf` from a UI button is unforgiving.
+// Falls back to fs.rmSync only if trashItem fails (e.g. on a volume Finder
+// can't trash to), and only after explicit caller opt-in via `permanent: true`.
+ipcMain.handle('delete-path', async (_event, { worktreePath, relPath, permanent }) => {
+  if (!worktreePath || !relPath) return { error: 'missing args' };
+  const safe = pathUnder(worktreePath, relPath);
+  if (!safe) return { error: 'path escapes worktree' };
+  // Refuse to delete the worktree root itself — almost certainly a bug, and
+  // the consequences (blowing away the user's repo) are catastrophic.
+  try {
+    const rootReal = fs.realpathSync(worktreePath);
+    if (safe === rootReal) return { error: 'refusing to delete worktree root' };
+  } catch {}
+  try {
+    if (!fs.existsSync(safe)) return { error: 'path does not exist' };
+    if (permanent) {
+      fs.rmSync(safe, { recursive: true, force: true });
+    } else {
+      await shell.trashItem(safe);
+    }
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Reveal in Finder. shell.showItemInFolder selects the item in its containing
+// folder window — matches macOS users' expectations for "Reveal in Finder".
+ipcMain.handle('reveal-in-folder', async (_event, { filePath }) => {
+  const safe = pathUnderAnyRoot(filePath);
+  if (!safe) return { error: 'path not under an allowed project root' };
+  try {
+    shell.showItemInFolder(safe);
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Copy text to the system clipboard from main. The renderer has
+// navigator.clipboard for ad-hoc cases, but routing path copies through main
+// keeps the tree's right-click menu uniform with the rest of the IPC surface
+// and avoids any focus-related clipboard quirks in nested DOM events.
+ipcMain.handle('clipboard-write-text', async (_event, { text }) => {
+  try {
+    clipboard.writeText(String(text == null ? '' : text));
     return { ok: true };
   } catch (err) {
     return { error: err.message };

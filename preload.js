@@ -454,6 +454,13 @@ contextBridge.exposeInMainWorld('klaus', {
   fs: {
     readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
     writeFile: (filePath, content) => ipcRenderer.invoke('write-file', { filePath, content }),
+    statFile: (filePath) => ipcRenderer.invoke('stat-file', { filePath }),
+    createFile: (worktreePath, relPath) => ipcRenderer.invoke('create-file', { worktreePath, relPath }),
+    createDir: (worktreePath, relPath) => ipcRenderer.invoke('create-dir', { worktreePath, relPath }),
+    renamePath: (worktreePath, fromRel, toRel) => ipcRenderer.invoke('rename-path', { worktreePath, fromRel, toRel }),
+    deletePath: (worktreePath, relPath, permanent) => ipcRenderer.invoke('delete-path', { worktreePath, relPath, permanent }),
+    revealInFolder: (filePath) => ipcRenderer.invoke('reveal-in-folder', { filePath }),
+    copyToClipboard: (text) => ipcRenderer.invoke('clipboard-write-text', { text }),
     listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
     readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
       ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),
