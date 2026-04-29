@@ -51,6 +51,15 @@ window.PrReview = (function () {
   var convClaudeState = {};
   // G6: latest checks result for the active PR. null = not yet fetched.
   var currentChecks = null;
+  // Local-changes panel state (Review tab). Refreshed on tab show and after
+  // each implement/commit/push. Stays null until the first fetch completes.
+  // Shape: { worktreePath, branch, files:[{status,file}], diff, unpushed:[{hash,short,subject}], headRefOid }
+  // or { error } when the lookup itself failed (rare — usually just empty).
+  var localChanges = null;
+  var localCommitMsg = 'Apply review feedback';
+  var localBusy = null; // 'committing' | 'pushing' | null
+  var localBanner = null; // { kind: 'ok'|'error', text }
+
   // G7: in-flight AI review state. requestId is set while streaming; the
   // panel persists across re-renders until the user closes it.
   var aiReview = {
@@ -146,6 +155,12 @@ window.PrReview = (function () {
         implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
         implementAllUsage: null, usage: null,
       };
+      // Drop the previous PR's local-changes snapshot so the panel doesn't
+      // briefly show stale file names while the new PR's state is fetched.
+      localChanges = null;
+      localCommitMsg = 'Apply review feedback';
+      localBusy = null;
+      localBanner = null;
       // Fire-and-forget. Pass the PR number explicitly — lastState isn't
       // assigned until below, and the async handler would otherwise compare
       // against a null on first load and drop its own result.
@@ -230,6 +245,9 @@ window.PrReview = (function () {
       bindChecksTab();
     } else if (activeTab === 'ai-review') {
       bindAiReviewTab();
+      // Pull worktree state once per tab activation so a returning user sees
+      // any uncommitted edits or unpushed commits without clicking refresh.
+      refreshLocalChanges();
     }
     renderThreadsStatusBadge(state);
     renderPendingReviewBar(state);
@@ -1439,11 +1457,13 @@ window.PrReview = (function () {
   }
 
   function renderAiReviewTab() {
+    var localBlock = renderLocalChanges();
     if (!aiReview.requestId && !aiReview.finalText && !aiReview.error && !aiReview.cancelled) {
-      return '<div class="pr-ai-empty">'
-        + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
-        + '<div class="pr-ai-empty-hint">Spawns Claude in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
-      + '</div>';
+      return localBlock
+        + '<div class="pr-ai-empty">'
+          + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
+          + '<div class="pr-ai-empty-hint">Spawns Claude in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
+        + '</div>';
     }
 
     var status = aiReview.requestId ? 'streaming' : aiReview.error ? 'error' : aiReview.cancelled ? 'cancelled' : 'done';
@@ -1510,8 +1530,220 @@ window.PrReview = (function () {
     }
 
     return '<div class="pr-ai-tab pr-ai-' + status + '">'
-      + head + progress + implementAllSummary + implementAllError + body
+      + localBlock + head + progress + implementAllSummary + implementAllError + body
     + '</div>';
+  }
+
+  // Local-changes block: shows uncommitted edits + unpushed commits in the
+  // PR's worktree, with controls to commit (stage all + commit) and push to
+  // the PR's head fork branch. Hidden when nothing is local.
+  //
+  // Renders empty string in three cases:
+  //   - localChanges hasn't been fetched yet (no flicker on first render)
+  //   - no worktree exists for this PR (user hasn't checked out / implemented)
+  //   - worktree exists but is clean and in sync with the PR head SHA
+  function renderLocalChanges() {
+    var files = (localChanges && localChanges.files) || [];
+    var unpushed = (localChanges && localChanges.unpushed) || [];
+    var diverged = !!(localChanges && localChanges.diverged);
+    var hasWt = !!(localChanges && localChanges.worktreePath);
+    var ipcMissing = !(window.klaus && window.klaus.pr && window.klaus.pr.localState);
+
+    // Always render at least a one-line stub so a silent empty render isn't
+    // indistinguishable from "feature is broken". The stub also tells the
+    // user when the IPC bridge is stale (preload didn't reload) or when no
+    // worktree exists yet.
+    if (ipcMissing) {
+      return '<div class="pr-local-changes pr-local-empty">'
+        + '<span class="pr-local-title">Local changes</span>'
+        + '<span class="pr-local-counts"> — IPC unavailable. Restart the app (preload didn’t reload).</span>'
+      + '</div>';
+    }
+    if (!localChanges) {
+      return '<div class="pr-local-changes pr-local-empty">'
+        + '<span class="pr-local-title">Local changes</span>'
+        + '<span class="pr-local-counts"> — loading…</span>'
+      + '</div>';
+    }
+    if (localChanges.error) {
+      return '<div class="pr-local-changes pr-local-empty">'
+        + '<span class="pr-local-title">Local changes</span>'
+        + '<span class="pr-local-counts"> — ' + escHtml(localChanges.error) + '</span>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+      + '</div>';
+    }
+    if (!hasWt) {
+      return '<div class="pr-local-changes pr-local-empty">'
+        + '<span class="pr-local-title">Local changes</span>'
+        + '<span class="pr-local-counts"> — no worktree found for this PR. Click Implement on a finding (or Check out locally) to set one up.</span>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+      + '</div>';
+    }
+    // Worktree exists but nothing's local: show a "clean" stub so the user
+    // sees the panel is wired up but quiet.
+    if (files.length === 0 && unpushed.length === 0 && !diverged && !localBanner) {
+      return '<div class="pr-local-changes pr-local-empty">'
+        + '<span class="pr-local-title">Local changes</span>'
+        + '<span class="pr-local-counts"> — none. Worktree in sync with PR head.</span>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+      + '</div>';
+    }
+
+    var bannerHtml = '';
+    if (localBanner) {
+      bannerHtml = '<div class="pr-local-banner ' + localBanner.kind + '">'
+        + escHtml(localBanner.text)
+      + '</div>';
+    }
+
+    var fileListHtml = files.length
+      ? '<ul class="pr-local-file-list">'
+          + files.map(function (f) {
+              return '<li><code class="pr-local-file-status">' + escHtml(f.status) + '</code> '
+                + escHtml(f.file) + '</li>';
+            }).join('')
+        + '</ul>'
+      : '';
+
+    var diffHtml = (files.length && localChanges.diff)
+      ? '<details class="pr-local-diff"><summary>View diff</summary>'
+          + '<pre class="pr-local-diff-body">' + escHtml(localChanges.diff) + '</pre>'
+        + '</details>'
+      : '';
+
+    var commitHtml = files.length
+      ? '<div class="pr-local-commit">'
+          + '<input type="text" class="pr-local-commit-msg" placeholder="Commit message"'
+            + ' value="' + escHtml(localCommitMsg || '') + '"'
+            + (localBusy ? ' disabled' : '') + '>'
+          + '<button class="pr-review-btn pr-local-commit-btn" type="button"'
+            + (localBusy ? ' disabled' : '') + '>'
+            + (localBusy === 'committing' ? 'Committing…' : 'Commit')
+          + '</button>'
+        + '</div>'
+      : '';
+
+    var unpushedHtml = unpushed.length
+      ? '<div class="pr-local-unpushed">'
+          + '<div class="pr-local-unpushed-head">Unpushed commits ('
+            + unpushed.length + ')</div>'
+          + '<ul class="pr-local-commit-list">'
+            + unpushed.map(function (c) {
+                return '<li><code>' + escHtml(c.short) + '</code> ' + escHtml(c.subject || '') + '</li>';
+              }).join('')
+          + '</ul>'
+        + '</div>'
+      : (diverged
+          ? '<div class="pr-local-unpushed">'
+              + '<div class="pr-local-unpushed-head">Local commits diverge from the PR head — push will attempt fast-forward.</div>'
+            + '</div>'
+          : '');
+
+    var pushBtnHtml = (unpushed.length || diverged)
+      ? '<button class="pr-review-btn pr-local-push-btn" type="button"'
+          + (localBusy ? ' disabled' : '') + '>'
+          + (localBusy === 'pushing' ? 'Pushing…' : 'Push to PR branch')
+        + '</button>'
+      : '';
+
+    return '<div class="pr-local-changes">'
+      + '<div class="pr-local-head">'
+        + '<span class="pr-local-title">Local changes</span>'
+        + '<span class="pr-local-counts">'
+          + (files.length ? files.length + ' uncommitted file' + (files.length === 1 ? '' : 's') : '')
+          + (files.length && (unpushed.length || diverged) ? ' · ' : '')
+          + (unpushed.length
+              ? unpushed.length + ' unpushed commit' + (unpushed.length === 1 ? '' : 's')
+              : (diverged ? 'diverged from PR' : ''))
+        + '</span>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+      + '</div>'
+      + bannerHtml
+      + fileListHtml + diffHtml + commitHtml
+      + unpushedHtml + pushBtnHtml
+    + '</div>';
+  }
+
+  function bindLocalChanges() {
+    var section = hostEl.querySelector('.pr-local-changes');
+    if (!section) return;
+
+    var msgInput = section.querySelector('.pr-local-commit-msg');
+    if (msgInput) {
+      msgInput.addEventListener('input', function () {
+        // Capture the typed value so a repaint (triggered by an unrelated
+        // implement-done callback, etc.) doesn't blow it away.
+        localCommitMsg = msgInput.value;
+      });
+    }
+
+    var refreshBtn = section.querySelector('.pr-local-refresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', function () {
+      localBanner = null;
+      refreshLocalChanges();
+    });
+
+    var commitBtn = section.querySelector('.pr-local-commit-btn');
+    if (commitBtn) commitBtn.addEventListener('click', function () {
+      var msg = msgInput ? msgInput.value.trim() : (localCommitMsg || '').trim();
+      if (!msg) {
+        localBanner = { kind: 'error', text: 'Commit message required.' };
+        repaintAiReviewTab();
+        return;
+      }
+      localCommitMsg = msg;
+      localBusy = 'committing';
+      localBanner = null;
+      repaintAiReviewTab();
+      window.klaus.pr.commitLocal(msg, aiReview.worktreePath || null).then(function (r) {
+        localBusy = null;
+        if (r && r.error) {
+          localBanner = { kind: 'error', text: r.error };
+          repaintAiReviewTab();
+        } else {
+          localBanner = { kind: 'ok', text: 'Committed.' };
+          // Clear the message field on success so the next commit starts
+          // with the default again.
+          localCommitMsg = 'Apply review feedback';
+          refreshLocalChanges();
+        }
+      });
+    });
+
+    var pushBtn = section.querySelector('.pr-local-push-btn');
+    if (pushBtn) pushBtn.addEventListener('click', function () {
+      localBusy = 'pushing';
+      localBanner = null;
+      repaintAiReviewTab();
+      window.klaus.pr.pushLocal(aiReview.worktreePath || null).then(function (r) {
+        localBusy = null;
+        if (r && r.error) {
+          localBanner = { kind: 'error', text: r.error };
+          repaintAiReviewTab();
+        } else {
+          localBanner = { kind: 'ok', text: 'Pushed to ' + (r && r.target ? r.target : 'PR branch') + '.' };
+          refreshLocalChanges();
+        }
+      });
+    });
+  }
+
+  // Fetch the worktree's local-state and repaint. Safe to call repeatedly —
+  // the IPC is cheap (a few git commands) and refresh is the right tool both
+  // after Claude implements something and after manual commit/push.
+  //
+  // Pass aiReview.worktreePath as a hint when we have it: the cross-clone
+  // lookup in main can miss when the user's local clone has its origin set
+  // to the head fork (a self-PR), since that doesn't match the PR's base
+  // repo. The hint short-circuits that lookup.
+  function refreshLocalChanges() {
+    if (!window.klaus || !window.klaus.pr || !window.klaus.pr.localState) return;
+    window.klaus.pr.localState(aiReview.worktreePath || null).then(function (r) {
+      localChanges = r || null;
+      repaintAiReviewTab();
+    }).catch(function () {
+      // IPC threw — leave localChanges as-is rather than wiping the panel.
+    });
   }
 
   function renderFindingCard(f) {
@@ -1767,6 +1999,8 @@ window.PrReview = (function () {
   }
 
   function bindAiReviewTab() {
+    bindLocalChanges();
+
     var runBtn = hostEl.querySelector('.pr-ai-run');
     if (runBtn) runBtn.addEventListener('click', function () { startAiReview(); });
 
@@ -2127,6 +2361,7 @@ window.PrReview = (function () {
       }
       repaintAiReviewTab();
       saveAiReviewCache();
+      refreshLocalChanges();
     });
 
     window.klaus.pr.reviewImplementStart(requestId, 'one', f.text).then(function (r) {
@@ -2136,6 +2371,11 @@ window.PrReview = (function () {
         f.status = 'failed';
         f.implementError = r.error;
         repaintAiReviewTab();
+      } else if (r && r.worktreePath) {
+        // Capture the resolved worktree so the local-changes panel can fall
+        // back to it when the cross-clone lookup misses (fork-origin clones,
+        // unusual remote setups, etc.).
+        aiReview.worktreePath = r.worktreePath;
       }
     });
   }
@@ -2534,6 +2774,7 @@ window.PrReview = (function () {
         }
       }
       repaintConversationTab();
+      refreshLocalChanges();
     });
 
     // Single-finding mode triggers the DRAFT_PR_COMMENT prompt (set up in
@@ -2711,6 +2952,7 @@ window.PrReview = (function () {
       }
       repaintAiReviewTab();
       saveAiReviewCache();
+      refreshLocalChanges();
     });
 
     window.klaus.pr.reviewImplementStart(requestId, 'all', combined).then(function (r) {
@@ -2720,6 +2962,8 @@ window.PrReview = (function () {
         aiReview.implementAllError = r.error;
         pending.forEach(function (f) { f.status = 'failed'; f.implementError = r.error; });
         repaintAiReviewTab();
+      } else if (r && r.worktreePath) {
+        aiReview.worktreePath = r.worktreePath;
       }
     });
   }

@@ -9,15 +9,17 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { ghExec, ghExecP, appendStderr } = require('../util/exec');
+const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
 const {
   prReview,
   broadcastPrReview, sanitizePrReview, currentRepoPath, parseBaseFromUrl,
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
-  findProjectForRepo, findWorktreeForBranch, ensureWorktreeForActivePr,
+  findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
+  ensureWorktreeForActivePr,
 } = require('../state/pr-review');
+const { execFileSync } = require('child_process');
 
 function ghJson(args, cwd) {
   return new Promise((resolve, reject) => {
@@ -1001,5 +1003,202 @@ ipcMain.handle('pr-review', async (_event, { worktreePath, prNumber, event, body
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+});
+
+// ---- Local-changes panel: view/commit/push edits made by Claude implements ----
+//
+// After the user clicks "Implement" on a finding, Claude edits files in the
+// PR's worktree but does not commit or push. These three handlers surface
+// the resulting working-tree diff and let the user commit + push back to the
+// PR's head branch (the contributor's fork's branch — possibly the user's
+// own fork, since most reviewers using this on their own PRs).
+//
+// Lookup-only worktree resolution: ensureWorktreeForActivePr would create a
+// worktree as a side effect of opening this panel, which is wrong. We use
+// findWorktreeForBranchAcrossClones (introduced for the duplicate-worktree
+// fix) and return null when no worktree exists yet.
+
+// Resolve the worktree associated with the active PR. Hint comes from the
+// renderer (which captured ensure-worktree's response from a prior implement
+// call). The hint is authoritative when it points at a real directory: it
+// avoids a cross-clone scan and works when the user's only matching clone
+// has its origin set to the head fork (self-PR case), which the
+// origin-matches-base lookup misses.
+function activePrWorktree(worktreeHint) {
+  if (!prReview.active) return null;
+  const { number, meta, baseOwner, baseRepo } = prReview.active;
+  const branch = (meta && meta.headRefName) || `pr-${number}`;
+  if (worktreeHint && fs.existsSync(worktreeHint)) {
+    return { worktreePath: worktreeHint, branch };
+  }
+  if (!baseOwner || !baseRepo) return null;
+  const found = findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch);
+  return found ? { worktreePath: found.worktreePath, branch } : null;
+}
+
+ipcMain.handle('pr-review-local-state', async (_event, args) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  const hint = args && args.worktreeHint;
+  const wt = activePrWorktree(hint);
+  if (!wt) return { worktreePath: null };
+  const { meta } = prReview.active;
+  const headRefOid = meta && meta.headRefOid;
+
+  let files = [];
+  let diff = '';
+  let unpushed = [];
+  let unpushedKnown = true;
+  let localHead = '';
+  let localBranch = wt.branch;
+
+  try {
+    const { stdout } = await execFileP('git', ['status', '--porcelain'], {
+      cwd: wt.worktreePath, maxBuffer: 5 * 1024 * 1024,
+    });
+    files = stdout.split('\n').filter(Boolean).map((line) => ({
+      status: line.substring(0, 2),
+      file: line.substring(3),
+    }));
+  } catch (err) {
+    return { error: 'git status failed: ' + (err.stderr || err.message) };
+  }
+
+  if (files.length > 0) {
+    try {
+      // Combine staged + unstaged so the user sees everything Claude touched.
+      const { stdout } = await execFileP('git', ['diff', 'HEAD', '--'], {
+        cwd: wt.worktreePath, maxBuffer: 10 * 1024 * 1024,
+      });
+      diff = stdout;
+      // Untracked files (status starts with "??") aren't in `git diff HEAD`.
+      // Append a synthetic "new file" diff for each so they're visible too.
+      const untracked = files.filter((f) => f.status === '??').map((f) => f.file);
+      for (const u of untracked) {
+        try {
+          const { stdout: nd } = await execFileP('git', ['diff', '--no-index', '/dev/null', u], {
+            cwd: wt.worktreePath, maxBuffer: 5 * 1024 * 1024,
+          });
+          diff += nd;
+        } catch (err) {
+          // git diff --no-index returns exit 1 when files differ — that's
+          // expected, the diff is on stdout.
+          if (err.stdout) diff += err.stdout;
+        }
+      }
+    } catch (err) {
+      return { error: 'git diff failed: ' + (err.stderr || err.message) };
+    }
+  }
+
+  try {
+    const { stdout } = await execFileP('git', ['rev-parse', 'HEAD'], { cwd: wt.worktreePath });
+    localHead = stdout.trim();
+  } catch (_) {}
+
+  if (headRefOid) {
+    try {
+      const { stdout } = await execFileP(
+        'git', ['log', '--format=%H\t%h\t%s', `${headRefOid}..HEAD`],
+        { cwd: wt.worktreePath },
+      );
+      unpushed = stdout.split('\n').filter(Boolean).map((line) => {
+        const [hash, short, ...subjectParts] = line.split('\t');
+        return { hash, short, subject: subjectParts.join('\t') };
+      });
+    } catch (_) {
+      // Missing the headRefOid commit locally (e.g., user hasn't fetched
+      // since the PR was force-pushed) — we can't enumerate the diverging
+      // commits, but if HEAD differs from headRefOid we still know the
+      // worktree has work the PR hasn't seen. Mark it unknown-but-diverged
+      // so the renderer can offer a push button without a commit list.
+      unpushedKnown = false;
+    }
+  }
+
+  // When we couldn't enumerate but the SHAs differ, surface that so the
+  // user can still push. (No SHA → no enumeration possible at all → leave
+  // unpushed empty and unpushedKnown true.)
+  const diverged = !!(headRefOid && localHead && localHead !== headRefOid);
+
+  return {
+    worktreePath: wt.worktreePath,
+    branch: localBranch,
+    files,
+    diff,
+    unpushed,
+    unpushedKnown,
+    diverged,
+    localHead,
+    headRefOid: headRefOid || null,
+  };
+});
+
+ipcMain.handle('pr-review-commit-local', async (_event, { message, worktreeHint }) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  if (!message || !message.trim()) return { error: 'Commit message required' };
+  const wt = activePrWorktree(worktreeHint);
+  if (!wt) return { error: 'No worktree for this PR yet' };
+
+  try {
+    await execFileP('git', ['add', '-A'], { cwd: wt.worktreePath });
+  } catch (err) {
+    return { error: 'git add failed: ' + (err.stderr || err.message) };
+  }
+  try {
+    // --allow-empty=false is the default; if there's nothing to commit, fail
+    // loudly rather than silently producing a no-op commit message.
+    const { stdout } = await execFileP('git', ['commit', '-m', message], {
+      cwd: wt.worktreePath,
+    });
+    return { ok: true, output: (stdout || '').trim() };
+  } catch (err) {
+    return { error: 'git commit failed: ' + (err.stderr || err.message) };
+  }
+});
+
+ipcMain.handle('pr-review-push-local', async (_event, args) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { meta } = prReview.active;
+  const wt = activePrWorktree(args && args.worktreeHint);
+  if (!wt) return { error: 'No worktree for this PR yet' };
+
+  // Push target = the PR's head repo + branch. For self-PRs that's the user's
+  // fork; for contributor PRs with "Allow edits from maintainers" enabled,
+  // it's the contributor's fork. We push by URL+refspec rather than mucking
+  // with named remotes so we don't pollute the worktree's remote config.
+  const headOwner = meta && meta.headRepositoryOwner && meta.headRepositoryOwner.login;
+  const headRepoName = meta && meta.headRepository && meta.headRepository.name;
+  const headBranch = meta && meta.headRefName;
+  if (!headOwner || !headRepoName || !headBranch) {
+    return { error: 'PR head repository/branch missing from metadata — cannot determine push target.' };
+  }
+
+  let token = '';
+  try {
+    token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
+  } catch (_) {
+    return { error: 'Could not read gh auth token — run `gh auth login` first.' };
+  }
+  const authedUrl = `https://oauth2:${token}@github.com/${headOwner}/${headRepoName}.git`;
+  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
+
+  try {
+    // HEAD:refs/heads/<branch> — pushes the worktree's current commit to the
+    // PR branch on the head fork. Non-force: GitHub will reject if the PR
+    // has been advanced upstream (force-pushed by the author). The user can
+    // re-fetch via the existing "Pull updates" button to recover.
+    const { stderr } = await execFileP(
+      'git', ['push', authedUrl, `HEAD:refs/heads/${headBranch}`],
+      { cwd: wt.worktreePath, timeout: 60000 },
+    );
+    return {
+      ok: true,
+      target: `${headOwner}/${headRepoName}:${headBranch}`,
+      output: scrub((stderr || '').trim()),
+    };
+  } catch (err) {
+    const raw = err.stderr ? err.stderr.toString() : err.message;
+    return { error: scrub(raw) };
   }
 });
