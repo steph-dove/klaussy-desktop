@@ -8,6 +8,7 @@
 
 const { app, BrowserWindow, Menu } = require('electron');
 const { createWindow } = require('../state/windows');
+const { checkNow: checkForUpdatesNow } = require('./auto-updater');
 
 function installAppMenu() {
   // Custom menu without Edit menu paste (we handle it ourselves in the renderer)
@@ -16,6 +17,10 @@ function installAppMenu() {
       label: app.name,
       submenu: [
         { role: 'about' },
+        {
+          label: 'Check for Updates…',
+          click: () => { checkForUpdatesNow(); },
+        },
         { type: 'separator' },
         { role: 'hide' },
         { role: 'hideOthers' },
