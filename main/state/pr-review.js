@@ -237,31 +237,76 @@ function findWorktreeForBranch(cwd, branch) {
   return null;
 }
 
+// Does `cwd`'s `origin` remote point at the given owner/repo on github?
+function originMatchesRepo(cwd, owner, repo) {
+  try {
+    const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
+      cwd, stdio: 'pipe',
+    }).toString().trim();
+    const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
+    return !!(m && `${m[1]}/${m[2]}` === `${owner}/${repo}`);
+  } catch (_) { return false; }
+}
+
+// Like findWorktreeForBranch, but searches every clone of <owner>/<repo> the
+// app knows about — the active project, every configured project with a
+// matching origin, and the auto-clone path under userData/pr-checkouts.
+//
+// Why: `git worktree list` only enumerates worktrees attached to the same
+// .git common dir as `cwd`. If the user runs `git worktree add` from a
+// different clone of the same repo, the single-cwd lookup misses it and we
+// end up creating a parallel worktree. Deduping by --git-common-dir avoids
+// scanning the same repo twice when configured projects are themselves
+// worktrees of each other.
+function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
+  const cwds = [];
+  const active = currentRepoPath();
+  if (active && originMatchesRepo(active, baseOwner, baseRepo)) cwds.push(active);
+  const config = loadConfig();
+  for (const p of (config.projects || [])) {
+    if (!p || !p.path || p.path === active) continue;
+    if (originMatchesRepo(p.path, baseOwner, baseRepo)) cwds.push(p.path);
+  }
+  try {
+    const clonePath = path.join(app.getPath('userData'), 'pr-checkouts', `${baseOwner}-${baseRepo}`);
+    if (fs.existsSync(clonePath) && !cwds.includes(clonePath)) cwds.push(clonePath);
+  } catch (_) {}
+
+  const seenGitDirs = new Set();
+  for (const cwd of cwds) {
+    let gitDir = '';
+    try {
+      gitDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+        cwd, stdio: 'pipe',
+      }).toString().trim();
+      if (!path.isAbsolute(gitDir)) gitDir = path.resolve(cwd, gitDir);
+      gitDir = fs.realpathSync(gitDir);
+    } catch (_) { continue; }
+    if (seenGitDirs.has(gitDir)) continue;
+    seenGitDirs.add(gitDir);
+
+    const wt = findWorktreeForBranch(cwd, branch);
+    if (wt) return { worktreePath: wt, baseRepoCwd: cwd };
+  }
+  return null;
+}
+
 // Shared helper: ensure a worktree exists for prReview.active's PR head and
 // return its path. Used by G5 (which then spawns a task) and G7 (which runs
-// the AI review there). Resolves cwd in this order:
-//   1. active project's origin matches the PR base repo
-//   2. another klausify project's origin matches
-//   3. auto-clone into userData/pr-checkouts (partial clone)
-// Reuses an existing worktree on the branch instead of fighting git when
-// the user has it checked out already.
+// the AI review there).
+//
+// Reuse-first: if any clone of the repo already has a worktree checked out
+// on the PR's head branch, use it — even if it lives under a different clone
+// than the active project. Only when no existing worktree is found do we
+// resolve a cwd (active → matching configured project → auto-clone) and
+// create one.
 async function ensureWorktreeForActivePr() {
   if (!prReview.active) return { error: 'No active PR review' };
   const { number, meta, baseOwner, baseRepo } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo from PR metadata' };
 
-  const active = currentRepoPath();
-  let cwd = null;
-  if (active) {
-    try {
-      const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
-        cwd: active, stdio: 'pipe',
-      }).toString().trim();
-      const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
-      if (m && `${m[1]}/${m[2]}` === `${baseOwner}/${baseRepo}`) cwd = active;
-    } catch (_) {}
-  }
-  if (!cwd) cwd = findProjectForRepo(baseOwner, baseRepo);
+  const localBranch = (meta && meta.headRefName) || `pr-${number}`;
+  const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
 
   let token = '';
   try {
@@ -279,30 +324,14 @@ async function ensureWorktreeForActivePr() {
   // to the lifetime of the single operation.
   const cleanUrl = `https://github.com/${baseOwner}/${baseRepo}.git`;
 
-  if (!cwd) {
-    const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
-    const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
-    if (!fs.existsSync(clonePath)) {
-      try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
-      try {
-        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe' });
-      } catch (err) {
-        const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-        return { error: 'Clone failed: ' + scrub(raw) };
-      }
-      // Strip token from persisted origin URL.
-      try {
-        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe' });
-      } catch {}
-    }
-    cwd = clonePath;
-  }
-
-  const localBranch = (meta && meta.headRefName) || `pr-${number}`;
-  const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
-
-  const existingWorktreePath = findWorktreeForBranch(cwd, localBranch);
-  if (existingWorktreePath) {
+  // Step 1: reuse any existing worktree on this branch across every clone
+  // we know about. This must come BEFORE cwd resolution — if the user's
+  // worktree is registered to a clone other than the active project,
+  // single-cwd lookup misses it and we'd create a duplicate.
+  const existingMatch = findWorktreeForBranchAcrossClones(baseOwner, baseRepo, localBranch);
+  if (existingMatch) {
+    const existingWorktreePath = existingMatch.worktreePath;
+    const cwd = existingMatch.baseRepoCwd;
     // Refresh the existing worktree against the PR's latest commit. We fetch
     // into FETCH_HEAD (not into the branch ref) so this is safe even though
     // the worktree currently has the branch checked out — git refuses to
@@ -347,6 +376,33 @@ async function ensureWorktreeForActivePr() {
     };
   }
 
+  // Step 2: no existing worktree on this branch — resolve a base clone to
+  // create one in. Order: active project → first matching configured project
+  // → auto-clone under userData/pr-checkouts.
+  let cwd = null;
+  const active = currentRepoPath();
+  if (active && originMatchesRepo(active, baseOwner, baseRepo)) cwd = active;
+  if (!cwd) cwd = findProjectForRepo(baseOwner, baseRepo);
+
+  if (!cwd) {
+    const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
+    const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
+    if (!fs.existsSync(clonePath)) {
+      try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
+      try {
+        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe' });
+      } catch (err) {
+        const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
+        return { error: 'Clone failed: ' + scrub(raw) };
+      }
+      // Strip token from persisted origin URL.
+      try {
+        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe' });
+      } catch {}
+    }
+    cwd = clonePath;
+  }
+
   try {
     execFileSync('git', ['fetch', authedUrl, `+refs/pull/${number}/head:refs/heads/${localBranch}`], {
       cwd, stdio: 'pipe',
@@ -388,5 +444,6 @@ module.exports = {
   reloadActivePrReviewMeta,
   findProjectForRepo,
   findWorktreeForBranch,
+  findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr,
 };

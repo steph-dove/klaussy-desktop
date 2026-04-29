@@ -5520,6 +5520,136 @@ body.pr-review-popout #pr-review-root {
   white-space: pre-wrap;
 }
 
+/* Local-changes panel: uncommitted edits + unpushed commits in the PR's
+   worktree, shown above findings on the Review tab. */
+.pr-local-changes {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.pr-local-changes.pr-local-empty {
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  color: var(--text-dim);
+}
+.pr-local-changes.pr-local-empty .pr-local-title { font-weight: 500; color: var(--text-dim); }
+.pr-local-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.pr-local-title { font-weight: 600; color: var(--text); }
+.pr-local-counts { color: var(--text-dim); flex: 1; font-size: 11px; }
+.pr-local-refresh {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+.pr-local-refresh:hover { color: var(--text); background: var(--surface-hover); }
+
+.pr-local-banner {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.pr-local-banner.ok { background: rgba(124, 226, 124, 0.15); color: var(--diff-add-fg, #7ce27c); }
+.pr-local-banner.error { background: rgba(226, 124, 124, 0.15); color: var(--diff-del-fg, #e27c7c); }
+
+.pr-local-file-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.pr-local-file-list li {
+  padding: 1px 0;
+  color: var(--text);
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+}
+.pr-local-file-status {
+  display: inline-block;
+  width: 22px;
+  color: var(--text-dim);
+}
+.pr-local-diff { margin: 4px 0 8px; }
+.pr-local-diff summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 11px;
+  padding: 2px 0;
+}
+.pr-local-diff summary:hover { color: var(--text); }
+.pr-local-diff-body {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  max-height: 280px;
+  overflow: auto;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  white-space: pre;
+  color: var(--text);
+}
+
+.pr-local-commit {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.pr-local-commit-msg {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+}
+.pr-local-commit-msg:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+.pr-local-commit-btn, .pr-local-push-btn { white-space: nowrap; }
+.pr-local-commit-btn:disabled, .pr-local-push-btn:disabled,
+.pr-local-commit-msg:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.pr-local-unpushed { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--border); }
+.pr-local-unpushed-head { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; }
+.pr-local-commit-list {
+  list-style: none;
+  margin: 0 0 6px;
+  padding: 0;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.pr-local-commit-list li {
+  padding: 1px 0;
+  color: var(--text);
+  font-size: 11px;
+}
+.pr-local-commit-list code {
+  font-family: 'SF Mono', Menlo, monospace;
+  color: var(--text-dim);
+  margin-right: 6px;
+}
+
 .pr-ai-findings {
   display: flex;
   flex-direction: column;
