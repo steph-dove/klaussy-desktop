@@ -5,9 +5,9 @@
 const { ipcMain, shell } = require('electron');
 const license = require('../state/license');
 
-// Checkout URL for the Buy button. Drop your actual Paddle checkout link
-// here (or inject at build time via an env var) once the product is set up.
-const BUY_URL = process.env.PADDLE_CHECKOUT_URL || 'https://example.com/buy-klaussy';
+// Checkout URL for the Buy button. Set LEMONSQUEEZY_CHECKOUT_URL at build
+// time to your storefront's pricing page (e.g. https://klaussy.lemonsqueezy.com).
+const BUY_URL = process.env.LEMONSQUEEZY_CHECKOUT_URL || 'https://klaussy.lemonsqueezy.com';
 
 ipcMain.handle('license-status', () => license.status());
 
