@@ -15,6 +15,7 @@ const pty = require('node-pty');
 const { Notification } = require('electron');
 const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
+const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const { allWindows, getMainWindow } = require('./windows');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
@@ -230,7 +231,7 @@ function clearIdleTimer(inst) {
 
 function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber) {
   const id = nextId++;
-  const userShell = process.env.SHELL || '/bin/zsh';
+  const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
 
   // 'claude' mode launches claude code, 'shell' mode launches a login shell
@@ -245,7 +246,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     claudeCmd = claudeBin;
   }
 
-  const args = claudeCmd ? ['-l', '-c', claudeCmd] : ['-l'];
+  const args = claudeCmd ? shellRunCmdArgs(userShell, claudeCmd) : shellLoginArgs(userShell);
   const ptyProc = pty.spawn(userShell, args, {
     name: 'xterm-256color',
     cols: 120,
@@ -303,8 +304,8 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
 function convertInstanceToShell(inst) {
   sendIdleNotification(inst, 'Claude has exited');
   const id = inst.id;
-  const userShell = process.env.SHELL || '/bin/zsh';
-  const ptyProc = pty.spawn(userShell, ['-l'], {
+  const userShell = defaultShell();
+  const ptyProc = pty.spawn(userShell, shellLoginArgs(userShell), {
     name: 'xterm-256color',
     cols: inst.pty.cols || 120,
     rows: inst.pty.rows || 30,
