@@ -67,9 +67,20 @@ ipcMain.handle('read-files-bulk', async (_event, { worktreePath, relPaths, maxBy
 });
 
 ipcMain.handle('list-files', async (_event, { worktreePath }) => {
-  // Try git first — for a checked-out repo, ls-files respects .gitignore.
+  // Surface gitignored files (.env, pr-review.md, *.local, …) so users can
+  // edit them from the file tree — matches what every editor does. Heavy
+  // generated/dependency dirs are filtered at the git layer via pathspec
+  // exclusions instead of `--exclude-standard`, so we don't enumerate
+  // node_modules/ just to throw it away. Same WALK_IGNORE set the non-git
+  // walker uses below, so the two code paths agree on what's hidden.
+  const excludePathspecs = [];
+  for (const dir of WALK_IGNORE) {
+    excludePathspecs.push(`:(exclude,glob)**/${dir}`);
+    excludePathspecs.push(`:(exclude,glob)**/${dir}/**`);
+  }
   try {
-    const { stdout } = await execFileP('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    const args = ['ls-files', '--cached', '--others', '.', ...excludePathspecs];
+    const { stdout } = await execFileP('git', args, {
       cwd: worktreePath, maxBuffer: 5 * 1024 * 1024,
     });
     return { files: stdout.split('\n').filter(Boolean) };
