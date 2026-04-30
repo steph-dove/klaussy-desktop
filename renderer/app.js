@@ -820,16 +820,30 @@
     baseBranchInput.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') { baseBranchList.hidden = true; baseBranchInput.blur(); }
       else if (e.key === 'Enter') {
+        e.preventDefault();
         var first = baseBranchList.querySelector('.basebranch-option');
-        if (first) { e.preventDefault(); pickBaseBranch(first.dataset.branch); }
+        if (first) { pickBaseBranch(first.dataset.branch); return; }
+        // Free-text fallback: no list match, accept whatever the user typed.
+        // Main process validates the ref at submit time and falls back to
+        // creating a tracking branch from origin/<name> if it only exists there.
+        var typed = baseBranchInput.value.trim();
+        if (typed) pickBaseBranch(typed);
       }
     });
     document.addEventListener('mousedown', function (e) {
       if (!document.getElementById('basebranch-combobox').contains(e.target)) {
         baseBranchList.hidden = true;
-        // Restore the picked value if the user typed nothing then dismissed.
-        if (selectedBaseBranch && baseBranchInput.value.trim() === '') {
-          setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
+        var typed = baseBranchInput.value.trim();
+        if (!typed) {
+          // Empty input: restore the previously-picked value.
+          if (selectedBaseBranch) {
+            setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
+          }
+        } else if (typed !== selectedBaseBranch
+                   && typed !== selectedBaseBranch + ' (default)') {
+          // User typed something custom and dismissed without pressing Enter —
+          // commit it so submit reads the typed value, not the prior selection.
+          pickBaseBranch(typed);
         }
       }
     });
@@ -915,8 +929,10 @@
     });
     baseBranchData = sorted;
 
-    // Initial selection = default. Preserve user's prior pick across re-renders.
-    if (!selectedBaseBranch || localNames.indexOf(selectedBaseBranch) === -1) {
+    // Initial selection = default. Preserve user's prior pick across re-renders,
+    // including custom (free-text) names that aren't in localNames — those are
+    // resolved at submit time by the main process.
+    if (!selectedBaseBranch) {
       selectedBaseBranch = baseBranchDefault;
     }
     setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
