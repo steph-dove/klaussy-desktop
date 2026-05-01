@@ -111,6 +111,10 @@ async function promptKlausifyInstall() {
 }
 
 async function runKlausifyInit(worktreePath, baseBranch) {
+  // Skip entirely in e2e: a missing-klausify install prompt would hang
+  // the test, and a present-klausify run adds 5+ seconds of noise to
+  // every create-task spec for behavior the tests aren't asserting.
+  if (process.env.KLAUSSY_E2E) return;
   if (!checkKlausifyInstalled()) {
     const installed = await promptKlausifyInstall();
     if (!installed) return;
