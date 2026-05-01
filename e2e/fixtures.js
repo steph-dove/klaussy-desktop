@@ -14,8 +14,13 @@ const { test: base, expect, _electron: electron } = require('@playwright/test');
 const repoRoot = path.resolve(__dirname, '..');
 
 const test = base.extend({
-  electronApp: async ({}, use) => {
-    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-'));
+  userDataDir: async ({}, use) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-'));
+    await use(dir);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  },
+
+  electronApp: async ({ userDataDir }, use) => {
     const app = await electron.launch({
       args: [path.join(repoRoot, 'main.js'), `--user-data-dir=${userDataDir}`],
       cwd: repoRoot,
@@ -27,7 +32,6 @@ const test = base.extend({
     });
     await use(app);
     await app.close();
-    try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch {}
   },
 
   mainWindow: async ({ electronApp }, use) => {
