@@ -130,7 +130,11 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile 
     const msg = err.stderr ? err.stderr.toString() : err.message;
     if (/not a git repository/i.test(msg)) {
       // fall through to plain-grep fallback
-    } else if (err.status === 1) {
+    } else if (err.code === 1) {
+      // git grep exits 1 when nothing matched — same convention as plain grep.
+      // util.promisify(execFile) exposes the exit code on err.code (not
+      // err.status); the previous check never matched, so empty results
+      // surfaced as a misleading error to the search panel.
       return { results: [] };
     } else {
       return { results: [], error: msg };
