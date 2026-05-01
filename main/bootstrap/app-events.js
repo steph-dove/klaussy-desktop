@@ -235,7 +235,7 @@ function install() {
 
     installAppMenu();
     createWindow();
-    checkExternalCLIs();
+    if (!process.env.KLAUSSY_E2E) checkExternalCLIs();
 
     // Periodically save sessions in case quit events don't fire
     setInterval(() => {
