@@ -24,8 +24,9 @@ test('open-folder spawns a shell that echoes input via terminal-data', async ({ 
     taskId = inst.id;
 
     // Subscribe in the renderer, write a marker through write-terminal,
-    // resolve when the marker comes back via terminal-data. The shell
-    // echoes the typed command line + the printf output.
+    // resolve when the marker comes back via terminal-data. `echo` works
+    // in bash/zsh/cmd/PowerShell so this stays portable when the Windows
+    // port lands and the app's default shell is no longer just /bin/zsh.
     const output = await mainWindow.evaluate((id) => new Promise((resolve) => {
       let buf = '';
       const unsub = window.klaus.terminal.onData(id, (data) => {
@@ -37,7 +38,7 @@ test('open-folder spawns a shell that echoes input via terminal-data', async ({ 
       });
       // Tiny delay so the shell prompt is up before we type into it.
       setTimeout(() => {
-        window.klaus.terminal.write(id, 'printf hi-from-e2e\\n\n');
+        window.klaus.terminal.write(id, 'echo hi-from-e2e\n');
       }, 250);
       // Safety timeout — fail loud rather than hang the test runner.
       setTimeout(() => { unsub(); resolve(buf); }, 8000);
