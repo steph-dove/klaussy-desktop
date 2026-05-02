@@ -2,7 +2,7 @@
   "name": "klaus-desktop",
   "productName": "Klaussy",
   "version": "0.1.8",
-  "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS",
+  "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS and Windows",
   "main": "main.js",
   "author": "steph-dove",
   "license": "UNLICENSED",
@@ -21,7 +21,8 @@
     "dist": "electron-builder --mac --arm64 --x64 && npm run rebuild",
     "dist:arm64": "electron-builder --mac --arm64 && npm run rebuild",
     "dist:intel": "electron-builder --mac --x64 && npm run rebuild",
-    "postinstall": "cp icon.icns node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns 2>/dev/null || true; plutil -replace CFBundleName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true; plutil -replace CFBundleDisplayName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true"
+    "dist:win": "electron-builder --win --x64 && npm run rebuild",
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -96,6 +97,21 @@
       "title": "Klaussy ${version} ${arch}",
       "icon": "icon.icns",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "icon.png",
+      "artifactName": "${productName}-${version}-${arch}-${ext}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Klaussy"
     },
     "publish": {
       "provider": "github",
