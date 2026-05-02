@@ -12,6 +12,19 @@
 const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const rpc = require('vscode-jsonrpc/node');
+const { whichBinSync } = require('./main/util/platform');
+
+const IS_WIN = process.platform === 'win32';
+
+// Pick the right install hint per platform. Many LSPs have only a macOS
+// recipe (brew); for those we want a Windows alternative (scoop/winget/
+// download URL) without throwing away the existing text. installHint can
+// be either a string (platform-agnostic) or a { darwin?, win32?, default? }
+// map — resolveInstallHint flattens it.
+function resolveInstallHint(hint) {
+  if (typeof hint === 'string' || hint == null) return hint || '';
+  return hint[process.platform] || hint.default || '';
+}
 
 const servers = new Map(); // serverId -> { proc, connection, languageId, worktreePath, webContents }
 let nextServerId = 1;
@@ -93,10 +106,18 @@ const LAUNCHERS = {
     installers: [
       { cmd: 'brew', args: ['install', 'jdtls'] },
     ],
-    installHint:
-      'Install jdtls with:\n' +
-      '  brew install jdtls\n\n' +
-      'Needs a JDK (Homebrew pulls one in as a dependency). On non-macOS, download from https://download.eclipse.org/jdtls/snapshots/',
+    installHint: {
+      darwin:
+        'Install jdtls with:\n' +
+        '  brew install jdtls\n\n' +
+        'Needs a JDK (Homebrew pulls one in as a dependency).',
+      win32:
+        'Install jdtls on Windows by downloading the latest milestone from\n' +
+        '  https://download.eclipse.org/jdtls/milestones/\n\n' +
+        'Extract somewhere on PATH, then `winget install Microsoft.OpenJDK.21` if you don\'t already have a JDK.',
+      default:
+        'Download jdtls from https://download.eclipse.org/jdtls/milestones/ and put its bin/ on PATH. Needs a JDK.',
+    },
   },
   cpp: {
     // clangd covers both C and C++ from one binary — routed to either from
@@ -107,10 +128,19 @@ const LAUNCHERS = {
     installers: [
       { cmd: 'brew', args: ['install', 'llvm'] },
     ],
-    installHint:
-      'Install clangd with:\n' +
-      '  brew install llvm\n\n' +
-      "llvm's bin dir is keg-only on Homebrew — follow brew's post-install instructions to add it to PATH, or symlink /opt/homebrew/opt/llvm/bin/clangd into /usr/local/bin.",
+    installHint: {
+      darwin:
+        'Install clangd with:\n' +
+        '  brew install llvm\n\n' +
+        "llvm's bin dir is keg-only on Homebrew — follow brew's post-install instructions to add it to PATH, or symlink /opt/homebrew/opt/llvm/bin/clangd into /usr/local/bin.",
+      win32:
+        'Install clangd on Windows with one of:\n' +
+        '  winget install LLVM.LLVM\n' +
+        '  scoop install llvm\n\n' +
+        'Both put clangd.exe on PATH automatically.',
+      default:
+        'Install clangd via your distro\'s package manager (apt install clangd, dnf install clang-tools-extra, etc.) or download from https://releases.llvm.org/.',
+    },
   },
   php: {
     candidates: ['intelephense'],
@@ -131,10 +161,20 @@ const LAUNCHERS = {
     installers: [
       { cmd: 'dotnet', args: ['tool', 'install', '-g', 'csharp-ls'] },
     ],
-    installHint:
-      'Install csharp-ls with:\n' +
-      '  dotnet tool install -g csharp-ls\n\n' +
-      'Needs the .NET SDK (`brew install --cask dotnet-sdk`). Adds to ~/.dotnet/tools — ensure that path is on PATH.',
+    installHint: {
+      darwin:
+        'Install csharp-ls with:\n' +
+        '  dotnet tool install -g csharp-ls\n\n' +
+        'Needs the .NET SDK (`brew install --cask dotnet-sdk`). Adds to ~/.dotnet/tools — ensure that path is on PATH.',
+      win32:
+        'Install csharp-ls with:\n' +
+        '  dotnet tool install -g csharp-ls\n\n' +
+        'Needs the .NET SDK (`winget install Microsoft.DotNet.SDK.8`). Adds to %USERPROFILE%\\.dotnet\\tools — that path is on PATH by default.',
+      default:
+        'Install csharp-ls with:\n' +
+        '  dotnet tool install -g csharp-ls\n\n' +
+        'Needs the .NET SDK. Adds to ~/.dotnet/tools — ensure that path is on PATH.',
+    },
   },
   swift: {
     // sourcekit-lsp ships with the Swift toolchain — there's no standalone
@@ -144,10 +184,18 @@ const LAUNCHERS = {
     args: [],
     friendly: 'sourcekit-lsp',
     installers: [],
-    installHint:
-      'sourcekit-lsp ships with Xcode / the Swift toolchain — there is no standalone installer.\n\n' +
-      'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
-      '  xcode-select --install',
+    installHint: {
+      darwin:
+        'sourcekit-lsp ships with Xcode / the Swift toolchain — there is no standalone installer.\n\n' +
+        'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
+        '  xcode-select --install',
+      win32:
+        'Swift on Windows is supported but ships separately. Download the Swift toolchain from\n' +
+        '  https://www.swift.org/download/\n\n' +
+        'sourcekit-lsp.exe lands in the toolchain\'s usr\\bin — add that to PATH.',
+      default:
+        'Install the Swift toolchain from https://www.swift.org/download/ — sourcekit-lsp lands in usr/bin.',
+    },
   },
   'objective-c': {
     // Same sourcekit-lsp binary as Swift — it handles Swift and C-family
@@ -157,10 +205,14 @@ const LAUNCHERS = {
     args: [],
     friendly: 'sourcekit-lsp (Objective-C)',
     installers: [],
-    installHint:
-      'Objective-C intel comes from sourcekit-lsp (the Swift toolchain).\n\n' +
-      'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
-      '  xcode-select --install',
+    installHint: {
+      darwin:
+        'Objective-C intel comes from sourcekit-lsp (the Swift toolchain).\n\n' +
+        'Install Xcode from the Mac App Store, or download the Swift toolchain from https://www.swift.org/download/ and run:\n' +
+        '  xcode-select --install',
+      default:
+        'Objective-C intel comes from sourcekit-lsp. Install the Swift toolchain from https://www.swift.org/download/ — Objective-C support is mainly useful on Apple platforms.',
+    },
   },
   kotlin: {
     candidates: ['kotlin-language-server'],
@@ -169,10 +221,18 @@ const LAUNCHERS = {
     installers: [
       { cmd: 'brew', args: ['install', 'kotlin-language-server'] },
     ],
-    installHint:
-      'Install kotlin-language-server with:\n' +
-      '  brew install kotlin-language-server\n\n' +
-      'Needs a JDK (brew pulls one in).',
+    installHint: {
+      darwin:
+        'Install kotlin-language-server with:\n' +
+        '  brew install kotlin-language-server\n\n' +
+        'Needs a JDK (brew pulls one in).',
+      win32:
+        'Install kotlin-language-server on Windows by downloading from\n' +
+        '  https://github.com/fwcd/kotlin-language-server/releases\n\n' +
+        'Extract and add the bin/ directory to PATH. Needs a JDK (`winget install Microsoft.OpenJDK.21`).',
+      default:
+        'Download kotlin-language-server from https://github.com/fwcd/kotlin-language-server/releases. Needs a JDK.',
+    },
   },
   vue: {
     // Volar's @vue/language-server — the replacement for the old `vls` from
@@ -240,10 +300,18 @@ const LAUNCHERS = {
     installers: [
       { cmd: 'brew', args: ['install', 'marksman'] },
     ],
-    installHint:
-      'Install marksman (Markdown LSP) with:\n' +
-      '  brew install marksman\n\n' +
-      'Provides wikilink resolution + cross-file references across docs folders.',
+    installHint: {
+      darwin:
+        'Install marksman (Markdown LSP) with:\n' +
+        '  brew install marksman\n\n' +
+        'Provides wikilink resolution + cross-file references across docs folders.',
+      win32:
+        'Install marksman with:\n' +
+        '  scoop install marksman\n' +
+        'or download marksman.exe from https://github.com/artempyanykh/marksman/releases and put it on PATH.',
+      default:
+        'Download marksman from https://github.com/artempyanykh/marksman/releases and put it on PATH.',
+    },
   },
   lua: {
     candidates: ['lua-language-server'],
@@ -252,22 +320,31 @@ const LAUNCHERS = {
     installers: [
       { cmd: 'brew', args: ['install', 'lua-language-server'] },
     ],
-    installHint:
-      'Install lua-language-server with:\n' +
-      '  brew install lua-language-server',
+    installHint: {
+      darwin:
+        'Install lua-language-server with:\n' +
+        '  brew install lua-language-server',
+      win32:
+        'Install lua-language-server with:\n' +
+        '  scoop install lua-language-server\n' +
+        'or download from https://github.com/LuaLS/lua-language-server/releases.',
+      default:
+        'Download lua-language-server from https://github.com/LuaLS/lua-language-server/releases.',
+    },
   },
 };
 
 function resolveExecutable(candidates) {
   // `spawn` will search PATH by default when the name has no separator; we
   // only need to check that one of the candidate names resolves to something
-  // runnable. Use `which` via the shell to probe without committing to run.
-  const { execFileSync } = require('child_process');
+  // runnable. whichBinSync handles `which` on POSIX vs `where.exe` on Windows;
+  // we also try a `.exe` variant on Windows since many LSP binaries ship with
+  // that suffix and `where` matches by exact name.
   for (const name of candidates) {
-    try {
-      execFileSync('which', [name], { stdio: 'pipe' });
-      return name;
-    } catch {}
+    if (whichBinSync(name)) return name;
+    if (IS_WIN && !name.endsWith('.exe') && whichBinSync(name + '.exe')) {
+      return name + '.exe';
+    }
   }
   return null;
 }
@@ -281,7 +358,7 @@ function startServer({ languageId, worktreePath, webContents }) {
   if (!exe) {
     return {
       error: `${launcher.friendly} is not installed or not on PATH.`,
-      installHint: launcher.installHint,
+      installHint: resolveInstallHint(launcher.installHint),
       missing: true,
     };
   }
@@ -454,7 +531,7 @@ function installServer({ languageId, webContents }) {
         'No install method available. ' +
         (launcher.installers || []).map((i) => i.cmd).join(' or ') +
         ' not found on PATH.',
-      installHint: launcher.installHint,
+      installHint: resolveInstallHint(launcher.installHint),
     });
   }
 
@@ -486,7 +563,7 @@ function installServer({ languageId, webContents }) {
       installInFlight.delete(languageId);
       if (code !== 0) {
         send({ type: 'done', ok: false });
-        resolve({ error: `${installer.cmd} exited with code ${code}`, installHint: launcher.installHint });
+        resolve({ error: `${installer.cmd} exited with code ${code}`, installHint: resolveInstallHint(launcher.installHint) });
         return;
       }
       // Verify the binary is now on PATH — pipx and npm install paths
@@ -496,7 +573,7 @@ function installServer({ languageId, webContents }) {
         send({ type: 'done', ok: false });
         resolve({
           error: `${launcher.friendly} installed but the binary is still not on PATH. Restart your shell or Klaussy.`,
-          installHint: launcher.installHint,
+          installHint: resolveInstallHint(launcher.installHint),
         });
         return;
       }
