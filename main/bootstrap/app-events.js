@@ -96,6 +96,33 @@ function checkKlausifyInstalled() {
 async function promptKlausifyInstall() {
   const mw = getMainWindow();
   if (!mw || mw.isDestroyed()) return false;
+  const { whichBinSync } = require('../util/platform');
+  const isWin = process.platform === 'win32';
+
+  // pipx works on both platforms — but on Windows it's often missing because
+  // people install Python without it. Surface a platform-appropriate install
+  // hint when pipx isn't on PATH so the user isn't left guessing how to get
+  // unstuck.
+  if (!whichBinSync('pipx')) {
+    const detail = isWin
+      ? 'klausify needs the pipx CLI. Install pipx first:\n\n' +
+        '  python -m pip install --user pipx\n' +
+        '  python -m pipx ensurepath\n\n' +
+        'Restart Klaussy after pipx is on PATH, or install klausify directly with `pip install klausify`.'
+      : 'klausify needs the pipx CLI. Install pipx first:\n\n' +
+        '  brew install pipx\n' +
+        '  pipx ensurepath\n\n' +
+        'Restart Klaussy after pipx is on PATH.';
+    await dialog.showMessageBox(mw, {
+      type: 'info',
+      buttons: ['OK'],
+      title: 'pipx not found',
+      message: 'klausify CLI is not installed, and pipx is also missing.',
+      detail,
+    });
+    return false;
+  }
+
   const { response } = await dialog.showMessageBox(mw, {
     type: 'question',
     buttons: ['Install with pipx', 'Skip'],
@@ -111,7 +138,11 @@ async function promptKlausifyInstall() {
     klausifyAvailable = true;
     return true;
   } catch (err) {
-    dialog.showErrorBox('Installation failed', 'Could not install klausify:\n' + (err.stderr ? err.stderr.toString() : err.message) + '\n\nTry manually: pipx install klausify');
+    dialog.showErrorBox(
+      'Installation failed',
+      'Could not install klausify:\n' + (err.stderr ? err.stderr.toString() : err.message) +
+        '\n\nTry manually: pipx install klausify',
+    );
     return false;
   }
 }
