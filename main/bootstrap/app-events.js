@@ -31,7 +31,13 @@ let isQuitting = false;
 // dirs where gh + claude usually live. Spawning them then errors with
 // ENOENT. Prepend the well-known locations so the installed .app can find
 // them regardless of how it was launched.
+//
+// On Windows the system PATH is composed from the registry (HKLM + HKCU
+// "Path" values) and is comprehensive enough that GUI launches see the
+// same PATH as a fresh shell — no fix-up needed. We no-op there to avoid
+// pasting POSIX paths onto a `;`-separated PATH string.
 function fixSpawnPath() {
+  if (process.platform === 'win32') return;
   const homedir = require('os').homedir();
   const candidates = [
     '/opt/homebrew/bin',          // Apple Silicon brew
