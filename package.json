@@ -58,6 +58,7 @@
       "renderer/**/*",
       "node_modules/**/*",
       "icon.icns",
+      "icon.ico",
       "icon.png",
       "!**/.DS_Store",
       "!**/test/**",
@@ -103,7 +104,7 @@
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
-      "icon": "icon.png",
+      "icon": "icon.ico",
       "artifactName": "${productName}-${version}-${arch}-${ext}.${ext}"
     },
     "nsis": {
@@ -111,7 +112,9 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "Klaussy"
+      "shortcutName": "Klaussy",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico"
     },
     "publish": {
       "provider": "github",

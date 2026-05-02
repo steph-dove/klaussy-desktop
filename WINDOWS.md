@@ -98,9 +98,11 @@ Run in dev mode (`npm start`) for everything except §6 (build).
   NSIS installer until a real Authenticode cert is wired via `CSC_LINK`
   + `CSC_KEY_PASSWORD`. Both are read by electron-builder automatically
   once they're in env.
-- **No multi-resolution `.ico`** — electron-builder converts `icon.png`
-  to a single-size .ico. Looks acceptable in the taskbar but a native
-  .ico with 16/32/48/256 sizes would render sharper in the Start menu.
+- **`.ico` is rebuilt from `icon.png`** via `node scripts/generate-icon-ico.js`
+  whenever the source icon changes. Bundles 16/32/48/256. The 256 entry
+  is BMP-encoded (~270K of the 285K total) instead of PNG-embedded —
+  bloated but valid; if installer size becomes a concern, swap the
+  generator for one that PNG-embeds the 256.
 - **Auto-updater on Windows** is wired (electron-updater works on both
   platforms), but signed installers are needed for the update flow to
   not flag SmartScreen on every release.
