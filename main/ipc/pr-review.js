@@ -1073,10 +1073,13 @@ ipcMain.handle('pr-review-local-state', async (_event, args) => {
       diff = stdout;
       // Untracked files (status starts with "??") aren't in `git diff HEAD`.
       // Append a synthetic "new file" diff for each so they're visible too.
+      // os.devNull is `/dev/null` on POSIX and `\\.\nul` on Windows — git for
+      // Windows accepts the latter natively, so the diff works on both.
+      const devNull = require('os').devNull;
       const untracked = files.filter((f) => f.status === '??').map((f) => f.file);
       for (const u of untracked) {
         try {
-          const { stdout: nd } = await execFileP('git', ['diff', '--no-index', '/dev/null', u], {
+          const { stdout: nd } = await execFileP('git', ['diff', '--no-index', devNull, u], {
             cwd: wt.worktreePath, maxBuffer: 5 * 1024 * 1024,
           });
           diff += nd;

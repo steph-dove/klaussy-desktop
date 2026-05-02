@@ -88,6 +88,12 @@ Run in dev mode (`npm start`) for everything except §6 (build).
 
 ## Known gaps (deferred from this slice)
 
+- **Project search in non-git folders** falls back to `grep -rnF`. Plain
+  Windows doesn't ship grep, but Git for Windows does — and we already
+  require Git for Windows for everything else, so its bin dir on PATH
+  carries grep along. Confirm during smoke that searching inside a
+  *non-git* folder (open-folder flow) still returns hits. If it doesn't,
+  the fix is replacing the grep fallback with an in-process JS walker.
 - **No code signing** yet. SmartScreen will warn on first launch of the
   NSIS installer until a real Authenticode cert is wired via `CSC_LINK`
   + `CSC_KEY_PASSWORD`. Both are read by electron-builder automatically
