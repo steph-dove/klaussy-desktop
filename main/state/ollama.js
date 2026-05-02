@@ -15,6 +15,9 @@
 const { execFile, spawn } = require('child_process');
 const { app } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
+const { whichBinSync } = require('../util/platform');
+
+const IS_WIN = process.platform === 'win32';
 
 const DEFAULT_URL = 'http://127.0.0.1:11434';
 const DEFAULT_MODEL = 'qwen2.5-coder:1.5b';
@@ -188,12 +191,10 @@ async function warmup() {
 let _serverChild = null;
 
 function which(bin) {
-  return new Promise((resolve) => {
-    execFile('/usr/bin/which', [bin], { timeout: 2000 }, (err, stdout) => {
-      if (err || !stdout) return resolve(null);
-      resolve(stdout.trim() || null);
-    });
-  });
+  // Thin wrapper around whichBinSync (which / where.exe). The wrapper used
+  // to shell out to /usr/bin/which directly, which broke on Windows; routing
+  // through platform.js fixes that and keeps the call-site async-shaped.
+  return Promise.resolve(whichBinSync(bin));
 }
 
 // The detection cascade the consent/install flow consumes. Returns one of:
@@ -255,39 +256,68 @@ async function ensureServerRunning({ onProgress } = {}) {
   return { error: 'ollama serve did not become ready within 15s' };
 }
 
-// Installs Ollama via Homebrew. Brew is the most reliable zero-admin path on
-// macOS for getting a working binary + updating PATH. If brew is missing we
-// surface that to the renderer so it can link to the install page.
-async function installOllamaViaBrew({ onProgress } = {}) {
+// Spawns a package-manager install command with progress streamed through
+// onProgress. Shared between the brew (macOS) and winget (Windows) paths;
+// the bookkeeping is identical, only the binary + args differ. Returns
+// { ok } on exit 0, { error } otherwise.
+function spawnInstall({ cmd, args, label, onProgress }) {
+  onProgress && onProgress({ step: 'install', message: `Installing Ollama via ${label}…` });
+  return new Promise((resolve) => {
+    let proc;
+    try {
+      proc = spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    } catch (err) {
+      resolve({ error: `${label} install failed to start: ${err.message}` });
+      return;
+    }
+    let stderrBuf = '';
+    const stream = (chunk) => {
+      const s = chunk.toString();
+      stderrBuf += s;
+      // Trim to last non-empty line — brew/winget print progress with \r.
+      const lastLine = s.split(/[\r\n]+/).filter(Boolean).pop();
+      if (lastLine && onProgress) onProgress({ step: 'install', message: lastLine.slice(0, 200) });
+    };
+    proc.stderr.on('data', stream);
+    // winget writes its progress to stdout; brew writes to stderr. Tail both.
+    proc.stdout.on('data', stream);
+    proc.on('error', (err) => resolve({ error: `${label} install failed to start: ${err.message}` }));
+    proc.on('exit', (code) => {
+      if (code === 0) resolve({ ok: true });
+      else resolve({
+        error: `${label} install exited with code ${code}` + (stderrBuf ? ': ' + stderrBuf.trim().slice(-300) : ''),
+      });
+    });
+  });
+}
+
+// Installs Ollama via the platform-native package manager. macOS: brew.
+// Windows: winget. If neither is present we point the user at the official
+// download page so they can install manually and re-run setup.
+async function installOllama({ onProgress } = {}) {
+  if (IS_WIN) {
+    const winget = await which('winget');
+    if (!winget) {
+      return {
+        error:
+          'winget not found. Install Ollama from https://ollama.com/download/windows and re-run setup.',
+      };
+    }
+    return spawnInstall({
+      cmd: winget,
+      // --accept-* flags suppress the interactive Y/N prompts that would
+      // otherwise hang a non-TTY child. -e + --id picks the canonical
+      // package and rejects partial-name fuzzy matches.
+      args: ['install', '-e', '--id', 'Ollama.Ollama', '--accept-source-agreements', '--accept-package-agreements'],
+      label: 'winget',
+      onProgress,
+    });
+  }
   const brew = await which('brew');
   if (!brew) {
     return { error: 'Homebrew not found. Install from https://brew.sh and try again.' };
   }
-  onProgress && onProgress({ step: 'install', message: 'Installing Ollama via Homebrew…' });
-
-  return new Promise((resolve) => {
-    // `brew install ollama` writes verbose status to stderr. We forward it
-    // verbatim so the modal can show what brew's up to (Downloading…,
-    // Pouring…) without our own parser.
-    const proc = spawn(brew, ['install', 'ollama'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: process.env,
-    });
-    let stderrBuf = '';
-    proc.stderr.on('data', (chunk) => {
-      const s = chunk.toString();
-      stderrBuf += s;
-      // Trim to last non-empty line — brew prints progress bars with \r.
-      const lastLine = s.split(/[\r\n]+/).filter(Boolean).pop();
-      if (lastLine && onProgress) onProgress({ step: 'install', message: lastLine.slice(0, 200) });
-    });
-    proc.stdout.on('data', () => {});
-    proc.on('error', (err) => resolve({ error: 'brew install failed to start: ' + err.message }));
-    proc.on('exit', (code) => {
-      if (code === 0) resolve({ ok: true });
-      else resolve({ error: 'brew install exited with code ' + code + (stderrBuf ? ': ' + stderrBuf.trim().slice(-300) : '') });
-    });
-  });
+  return spawnInstall({ cmd: brew, args: ['install', 'ollama'], label: 'brew', onProgress });
 }
 
 // Pulls the configured model via /api/pull. Streams digest + bytes progress
@@ -357,7 +387,7 @@ async function runSetup({ onProgress } = {}) {
   const state = await getSetupState();
 
   if (state === 'needs-install') {
-    const r = await installOllamaViaBrew({ onProgress });
+    const r = await installOllama({ onProgress });
     if (r.error) return r;
   }
   if (state === 'needs-install' || state === 'needs-server') {
