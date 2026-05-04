@@ -2,7 +2,7 @@
   "name": "klaus-desktop",
   "productName": "Klaussy",
   "version": "0.1.8",
-  "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS and Windows",
+  "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
   "author": "steph-dove",
   "license": "UNLICENSED",
@@ -22,6 +22,7 @@
     "dist:arm64": "electron-builder --mac --arm64 && npm run rebuild",
     "dist:intel": "electron-builder --mac --x64 && npm run rebuild",
     "dist:win": "electron-builder --win --x64 && npm run rebuild",
+    "dist:linux": "electron-builder --linux --x64 && npm run rebuild",
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
@@ -115,6 +116,19 @@
       "shortcutName": "Klaussy",
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "icon": "icon.png",
+      "category": "Development",
+      "synopsis": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": ["libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils", "libatspi2.0-0", "libuuid1", "libsecret-1-0"]
     },
     "publish": {
       "provider": "github",
