@@ -18,6 +18,8 @@ const { loadConfig, saveConfig } = require('../util/config');
 const { whichBinSync } = require('../util/platform');
 
 const IS_WIN = process.platform === 'win32';
+const IS_MAC = process.platform === 'darwin';
+const IS_LINUX = process.platform === 'linux';
 
 const DEFAULT_URL = 'http://127.0.0.1:11434';
 const DEFAULT_MODEL = 'qwen2.5-coder:1.5b';
@@ -291,9 +293,16 @@ function spawnInstall({ cmd, args, label, onProgress }) {
   });
 }
 
-// Installs Ollama via the platform-native package manager. macOS: brew.
-// Windows: winget. If neither is present we point the user at the official
-// download page so they can install manually and re-run setup.
+// Installs Ollama via the platform-native package manager.
+//   macOS:   brew
+//   Windows: winget
+//   Linux:   snap if available, else point at the install URL — we
+//            deliberately don't curl-pipe-sh the install script
+//            without consent (running arbitrary shell from a GUI is
+//            a footgun).
+// If the chosen manager isn't present we surface a user-friendly
+// message pointing at the official download page so the user can
+// install manually and re-run setup.
 async function installOllama({ onProgress } = {}) {
   if (IS_WIN) {
     const winget = await which('winget');
@@ -313,6 +322,27 @@ async function installOllama({ onProgress } = {}) {
       onProgress,
     });
   }
+  if (IS_LINUX) {
+    const snap = await which('snap');
+    if (snap) {
+      // The classic snap is the upstream-recommended way on Ubuntu and
+      // most snap-enabled distros. --classic is required because Ollama
+      // needs broader filesystem access than strict confinement allows.
+      return spawnInstall({
+        cmd: snap,
+        args: ['install', 'ollama', '--classic'],
+        label: 'snap',
+        onProgress,
+      });
+    }
+    return {
+      error:
+        'snap not found. Install Ollama with the official script:\n\n' +
+        '  curl -fsSL https://ollama.com/install.sh | sh\n\n' +
+        'Then re-run setup.',
+    };
+  }
+  // macOS
   const brew = await which('brew');
   if (!brew) {
     return { error: 'Homebrew not found. Install from https://brew.sh and try again.' };
