@@ -31,13 +31,22 @@ let isQuitting = false;
 // dirs where gh + claude usually live. Spawning them then errors with
 // ENOENT. Prepend the well-known locations so the installed .app can find
 // them regardless of how it was launched.
+//
+// On Windows the system PATH is composed from the registry (HKLM + HKCU
+// "Path" values) and is comprehensive enough that GUI launches see the
+// same PATH as a fresh shell — no fix-up needed. We no-op there to avoid
+// pasting POSIX paths onto a `;`-separated PATH string.
 function fixSpawnPath() {
+  if (process.platform === 'win32') return;
   const homedir = require('os').homedir();
+  // Mac and Linux candidates intermixed — adding paths that don't exist on
+  // a given platform is a harmless no-op. Avoiding two near-identical lists.
   const candidates = [
-    '/opt/homebrew/bin',          // Apple Silicon brew
+    '/opt/homebrew/bin',          // Apple Silicon brew (mac)
     '/opt/homebrew/sbin',
-    '/usr/local/bin',             // Intel brew + manual installs
+    '/usr/local/bin',             // Intel brew + manual installs (mac/linux)
     '/usr/local/sbin',
+    '/snap/bin',                  // snap-installed CLIs (Ubuntu/snap distros)
     path.join(homedir, '.local/bin'),
     path.join(homedir, 'bin'),
     path.join(homedir, '.cargo/bin'),
@@ -90,6 +99,45 @@ function checkKlausifyInstalled() {
 async function promptKlausifyInstall() {
   const mw = getMainWindow();
   if (!mw || mw.isDestroyed()) return false;
+  const { whichBinSync } = require('../util/platform');
+
+  // pipx works on every platform — but on Windows and minimal Linux installs
+  // it's often missing because Python ships without it. Surface a platform-
+  // appropriate install hint when pipx isn't on PATH so the user isn't left
+  // guessing how to get unstuck.
+  if (!whichBinSync('pipx')) {
+    let detail;
+    if (process.platform === 'win32') {
+      detail =
+        'klausify needs the pipx CLI. Install pipx first:\n\n' +
+        '  python -m pip install --user pipx\n' +
+        '  python -m pipx ensurepath\n\n' +
+        'Restart Klaussy after pipx is on PATH, or install klausify directly with `pip install klausify`.';
+    } else if (process.platform === 'darwin') {
+      detail =
+        'klausify needs the pipx CLI. Install pipx first:\n\n' +
+        '  brew install pipx\n' +
+        '  pipx ensurepath\n\n' +
+        'Restart Klaussy after pipx is on PATH.';
+    } else {
+      // Linux + anything else POSIX. apt-installed pipx on Ubuntu 23.04+ works
+      // out of the box; older Ubuntus need the python -m fallback.
+      detail =
+        'klausify needs the pipx CLI. Install pipx first:\n\n' +
+        '  sudo apt install pipx   # Ubuntu 23.04+\n' +
+        '  python3 -m pip install --user pipx && python3 -m pipx ensurepath\n\n' +
+        'Restart Klaussy after pipx is on PATH.';
+    }
+    await dialog.showMessageBox(mw, {
+      type: 'info',
+      buttons: ['OK'],
+      title: 'pipx not found',
+      message: 'klausify CLI is not installed, and pipx is also missing.',
+      detail,
+    });
+    return false;
+  }
+
   const { response } = await dialog.showMessageBox(mw, {
     type: 'question',
     buttons: ['Install with pipx', 'Skip'],
@@ -105,7 +153,11 @@ async function promptKlausifyInstall() {
     klausifyAvailable = true;
     return true;
   } catch (err) {
-    dialog.showErrorBox('Installation failed', 'Could not install klausify:\n' + (err.stderr ? err.stderr.toString() : err.message) + '\n\nTry manually: pipx install klausify');
+    dialog.showErrorBox(
+      'Installation failed',
+      'Could not install klausify:\n' + (err.stderr ? err.stderr.toString() : err.message) +
+        '\n\nTry manually: pipx install klausify',
+    );
     return false;
   }
 }
