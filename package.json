@@ -4,7 +4,10 @@
   "version": "0.2.0",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
-  "author": "steph-dove",
+  "author": {
+    "name": "steph-dove",
+    "email": "doverstephaniem@gmail.com"
+  },
   "license": "UNLICENSED",
   "private": true,
   "engines": {
@@ -19,11 +22,11 @@
     "test": "node --test test/util/*.test.js",
     "test:e2e": "playwright test",
     "rebuild": "electron-rebuild",
-    "dist": "electron-builder --mac --arm64 --x64 && npm run rebuild",
-    "dist:arm64": "electron-builder --mac --arm64 && npm run rebuild",
-    "dist:intel": "electron-builder --mac --x64 && npm run rebuild",
-    "dist:win": "electron-builder --win --x64 && npm run rebuild",
-    "dist:linux": "electron-builder --linux --x64 && npm run rebuild",
+    "dist": "electron-builder --mac --arm64 --x64 --publish never && npm run rebuild",
+    "dist:arm64": "electron-builder --mac --arm64 --publish never && npm run rebuild",
+    "dist:intel": "electron-builder --mac --x64 --publish never && npm run rebuild",
+    "dist:win": "electron-builder --win --x64 --publish never && npm run rebuild",
+    "dist:linux": "electron-builder --linux --x64 --publish never && npm run rebuild",
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
