@@ -24,3 +24,7 @@ Klaussy/
 *.swp
 *.swo
 .claude/
+# Playwright e2e artifacts
+playwright-report/
+test-results/
+.playwright/

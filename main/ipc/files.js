@@ -67,9 +67,20 @@ ipcMain.handle('read-files-bulk', async (_event, { worktreePath, relPaths, maxBy
 });
 
 ipcMain.handle('list-files', async (_event, { worktreePath }) => {
-  // Try git first — for a checked-out repo, ls-files respects .gitignore.
+  // Surface gitignored files (.env, pr-review.md, *.local, …) so users can
+  // edit them from the file tree — matches what every editor does. Heavy
+  // generated/dependency dirs are filtered at the git layer via pathspec
+  // exclusions instead of `--exclude-standard`, so we don't enumerate
+  // node_modules/ just to throw it away. Same WALK_IGNORE set the non-git
+  // walker uses below, so the two code paths agree on what's hidden.
+  const excludePathspecs = [];
+  for (const dir of WALK_IGNORE) {
+    excludePathspecs.push(`:(exclude,glob)**/${dir}`);
+    excludePathspecs.push(`:(exclude,glob)**/${dir}/**`);
+  }
   try {
-    const { stdout } = await execFileP('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
+    const args = ['ls-files', '--cached', '--others', '.', ...excludePathspecs];
+    const { stdout } = await execFileP('git', args, {
       cwd: worktreePath, maxBuffer: 5 * 1024 * 1024,
     });
     return { files: stdout.split('\n').filter(Boolean) };
@@ -119,7 +130,11 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile 
     const msg = err.stderr ? err.stderr.toString() : err.message;
     if (/not a git repository/i.test(msg)) {
       // fall through to plain-grep fallback
-    } else if (err.status === 1) {
+    } else if (err.code === 1) {
+      // git grep exits 1 when nothing matched — same convention as plain grep.
+      // util.promisify(execFile) exposes the exit code on err.code (not
+      // err.status); the previous check never matched, so empty results
+      // surfaced as a misleading error to the search panel.
       return { results: [] };
     } else {
       return { results: [], error: msg };
