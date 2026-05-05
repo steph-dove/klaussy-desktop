@@ -115,7 +115,7 @@
         { "target": "portable", "arch": ["x64"] }
       ],
       "icon": "icon.ico",
-      "artifactName": "${productName}-${version}-${arch}-${ext}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}-${target}.${ext}"
     },
     "nsis": {
       "oneClick": false,
