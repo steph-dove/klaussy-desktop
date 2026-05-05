@@ -81,8 +81,12 @@ ipcMain.handle('list-branches', async (_event, { repoPath }) => {
         localName = ref.replace('origin/', '');
         isRemote = true;
       }
-      if (worktreeBranches.has(localName)) continue;
-      branches.push({ ref, localName, hash, date, isRemote });
+      // Don't filter out branches checked out in worktrees — they're still
+      // valid as a *base* (git worktree add -b new /path base works regardless
+      // of whether base is currently checked out somewhere). Surface the state
+      // via inWorktree so callers can decorate or filter as needed.
+      const inWorktree = worktreeBranches.has(localName);
+      branches.push({ ref, localName, hash, date, isRemote, inWorktree });
     }
   } catch (err) {
     return { error: 'Failed to list branches: ' + (err.stderr ? err.stderr.toString() : err.message) };

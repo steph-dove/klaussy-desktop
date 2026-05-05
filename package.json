@@ -1,10 +1,13 @@
 {
   "name": "klaus-desktop",
   "productName": "Klaussy",
-  "version": "0.1.9",
-  "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS",
+  "version": "0.2.0",
+  "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
-  "author": "steph-dove",
+  "author": {
+    "name": "steph-dove",
+    "email": "doverstephaniem@gmail.com"
+  },
   "license": "UNLICENSED",
   "private": true,
   "engines": {
@@ -19,10 +22,12 @@
     "test": "node --test test/util/*.test.js",
     "test:e2e": "playwright test",
     "rebuild": "electron-rebuild",
-    "dist": "electron-builder --mac --arm64 --x64 && npm run rebuild",
-    "dist:arm64": "electron-builder --mac --arm64 && npm run rebuild",
-    "dist:intel": "electron-builder --mac --x64 && npm run rebuild",
-    "postinstall": "cp icon.icns node_modules/electron/dist/Electron.app/Contents/Resources/electron.icns 2>/dev/null || true; plutil -replace CFBundleName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true; plutil -replace CFBundleDisplayName -string Klaussy node_modules/electron/dist/Electron.app/Contents/Info.plist 2>/dev/null || true"
+    "dist": "electron-builder --mac --arm64 --x64 --publish never && npm run rebuild",
+    "dist:arm64": "electron-builder --mac --arm64 --publish never && npm run rebuild",
+    "dist:intel": "electron-builder --mac --x64 --publish never && npm run rebuild",
+    "dist:win": "electron-builder --win --x64 --publish never && npm run rebuild",
+    "dist:linux": "electron-builder --linux --x64 --publish never && npm run rebuild",
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -59,6 +64,7 @@
       "renderer/**/*",
       "node_modules/**/*",
       "icon.icns",
+      "icon.ico",
       "icon.png",
       "!**/.DS_Store",
       "!**/test/**",
@@ -102,6 +108,36 @@
       "title": "Klaussy ${version} ${arch}",
       "icon": "icon.icns",
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ],
+      "icon": "icon.ico",
+      "artifactName": "${productName}-${version}-${arch}-${ext}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "shortcutName": "Klaussy",
+      "installerIcon": "icon.ico",
+      "uninstallerIcon": "icon.ico"
+    },
+    "linux": {
+      "target": [
+        { "target": "AppImage", "arch": ["x64"] },
+        { "target": "deb", "arch": ["x64"] }
+      ],
+      "icon": "icon.png",
+      "category": "Development",
+      "synopsis": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "deb": {
+      "depends": ["libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils", "libatspi2.0-0", "libuuid1", "libsecret-1-0"]
     },
     "publish": {
       "provider": "github",

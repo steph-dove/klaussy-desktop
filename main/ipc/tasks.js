@@ -11,6 +11,7 @@ const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
+const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
   processIdleDetection, clearIdleTimer, convertInstanceToShell,
@@ -299,7 +300,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode }) => {
   if (!inst) return { error: 'Instance not found' };
 
   const subId = inst.nextSubId++;
-  const userShell = process.env.SHELL || '/bin/zsh';
+  const userShell = defaultShell();
 
   // 'claude' mode launches Claude Code in a login shell (same recipe as
   // spawnInWorktree in main/state/instances.js). Default is a plain shell.
@@ -307,9 +308,9 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode }) => {
   if (mode === 'claude') {
     const config = loadConfig();
     const claudeBin = config.claudePath || 'claude';
-    args = ['-l', '-c', claudeBin];
+    args = shellRunCmdArgs(userShell, claudeBin);
   } else {
-    args = ['-l'];
+    args = shellLoginArgs(userShell);
   }
 
   const ptyProc = pty.spawn(userShell, args, {
@@ -384,7 +385,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   // Resume as Claude — prefer this instance's tracked session so multiple
   // terminals on the same worktree don't collide on the "latest" .jsonl.
-  const userShell = process.env.SHELL || '/bin/zsh';
+  const userShell = defaultShell();
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
   const resumeId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath);
@@ -394,7 +395,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   inst.preSpawnSessionIds = snapshotSessionIds(inst.worktreePath);
   inst.claudeSessionId = resumeId || null;
 
-  const args = ['-l', '-c', claudeCmd];
+  const args = shellRunCmdArgs(userShell, claudeCmd);
   const ptyProc = pty.spawn(userShell, args, {
     name: 'xterm-256color',
     cols: cols || 120,

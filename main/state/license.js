@@ -1,45 +1,52 @@
-// License activation — one-time-purchase verification against Paddle.
+// License activation — one-time-purchase verification against Lemon Squeezy,
+// with a 30-day trial that auto-starts on first launch.
 //
 // Flow:
-//   1. User buys via the website; Paddle emails them a license key.
-//   2. User enters the key in our Activation dialog.
-//   3. We POST to Paddle's /licenses/activate with the key + this device's
-//      fingerprint. Paddle returns activation status + expiry (or lifetime).
-//   4. We persist { key, email, activatedAt, lastVerified } locally.
-//   5. On every launch, we load the local activation. If the last-verified
-//      timestamp is > 7 days old, we re-verify in the background. Offline
-//      launches still work — revocation kicks in on the next successful
-//      re-verify.
+//   1. First packaged launch with no license: trialStartedAt is stamped now.
+//      isActivated() returns true while trialDaysLeft() > 0.
+//   2. User buys via the website; LS emails them a license key.
+//   3. User enters the key in our Activation dialog. We POST to
+//      /v1/licenses/activate with the key + a human-readable instance_name.
+//      LS returns an instance_id, which we persist alongside the key.
+//   4. On every launch, isActivated() returns true if the license is on file.
+//      If lastVerified is > 7 days old, maybeReVerify() pings LS in the
+//      background using /v1/licenses/validate (with instance_id). Offline
+//      launches keep working; revocation kicks in on the next successful
+//      validate that comes back not-valid.
 //
-// Paddle-specific plumbing lives in `verifyWithPaddle()`. Everything else
-// is generic and doesn't care which license provider is used.
+// LS license endpoints are authenticated by the license key itself — no
+// store API key needs to be embedded in the app.
 //
 // Dev bypass: when app.isPackaged is false, isActivated() returns true so
-// we don't gate the dev workflow behind a fake key.
+// we don't gate the dev workflow. Set KLAUSSY_FORCE_LICENSE_GATE=1 to
+// exercise the gate locally without packaging.
+//
+// Tampering: a determined user can edit userData/config.json to extend the
+// trial. We don't try to defend against that — most users won't bother and
+// honest customers shouldn't pay the cost of obfuscation.
 
 const { app } = require('electron');
 const os = require('os');
-const crypto = require('crypto');
 const { loadConfig, saveConfig } = require('../util/config');
 const buildConfig = require('../util/build-config');
 const log = require('electron-log');
 
-// Set at build time. For now a placeholder — flip this to your Paddle
-// product ID before shipping. The client-side API token is ALSO required
-// but exposing it in the client is fine for Paddle License Keys (it's
-// scoped to activations only, can't read private data).
-const PADDLE_PRODUCT_ID = process.env.PADDLE_PRODUCT_ID || null;
-const PADDLE_API_KEY    = process.env.PADDLE_API_KEY || null;
-const PADDLE_ENDPOINT   = 'https://api.paddle.com/licenses/activate';
-const RE_VERIFY_DAYS    = 7;
+const LS_ACTIVATE   = 'https://api.lemonsqueezy.com/v1/licenses/activate';
+const LS_VALIDATE   = 'https://api.lemonsqueezy.com/v1/licenses/validate';
+const LS_DEACTIVATE = 'https://api.lemonsqueezy.com/v1/licenses/deactivate';
 
-// Stable per-device identifier — Paddle binds activations to this so one
-// license can't be spread across an unbounded number of machines. Pulled
-// from the OS machine UUID (falls back to hostname+user) and hashed so we
-// don't leak anything personal.
-function deviceFingerprint() {
-  const parts = [os.hostname(), os.userInfo().username, os.platform(), os.arch()];
-  return crypto.createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32);
+const TRIAL_DAYS     = 30;
+const RE_VERIFY_DAYS = 7;
+const DAY_MS         = 24 * 60 * 60 * 1000;
+
+const DEV_FORCE_GATE = process.env.KLAUSSY_FORCE_LICENSE_GATE === '1';
+
+// Human-readable per-machine label shown to the customer in their LS account
+// alongside the activation. Helps them identify "which laptop is that?" if
+// they ever hit the activation limit and need to deactivate one.
+function instanceName() {
+  const user = (() => { try { return os.userInfo().username; } catch { return 'user'; } })();
+  return `${os.hostname()} (${user}, ${os.platform()}-${os.arch()})`;
 }
 
 function loadLicense() {
@@ -55,110 +62,181 @@ function clearLicense() {
   saveConfig({ license: null });
 }
 
-// The gate every caller cares about. Cached per process; re-verify happens
-// out-of-band in maybeReVerify().
-function isActivated() {
-  if (!buildConfig.licenseRequired) return true; // flag off in this build
-  if (!app.isPackaged) return true;               // dev bypass
-  const lic = loadLicense();
+function gateBypassed() {
+  if (!buildConfig.licenseRequired) return true;
+  if (!app.isPackaged && !DEV_FORCE_GATE) return true;
+  return false;
+}
+
+// Auto-start the trial the first time the gate is checked on a fresh install.
+// Stored on the same `license` blob so existing config-merge plumbing handles
+// it, and re-runs are no-ops once trialStartedAt is set.
+function ensureTrialStarted() {
+  const lic = loadLicense() || {};
+  if (lic.trialStartedAt || lic.key) return lic;
+  const next = Object.assign({}, lic, { trialStartedAt: Date.now() });
+  storeLicense(next);
+  log.info('[license] trial started');
+  return next;
+}
+
+function trialDaysLeft(lic) {
+  if (!lic || !lic.trialStartedAt) return 0;
+  const elapsed = Date.now() - lic.trialStartedAt;
+  return Math.max(0, Math.ceil((TRIAL_DAYS * DAY_MS - elapsed) / DAY_MS));
+}
+
+function inTrial(lic) {
+  return trialDaysLeft(lic) > 0;
+}
+
+function isLicensed(lic) {
   return !!(lic && lic.key && lic.activatedAt);
 }
 
-// Replace the body of this with your actual Paddle API call once you have
-// the product set up. The function must return:
-//   { ok: true, email, expiresAt }       on success
-//   { ok: false, error: 'reason' }        on failure
-//
-// For Paddle Billing with License Keys, the shape is roughly:
-//   POST https://api.paddle.com/licenses/activate
-//   Authorization: Bearer <API_KEY>
-//   { "license_key": "...", "device_id": "<fingerprint>" }
-// → { "data": { "email": "...", "expires_at": "..." } }
-//
-// Paddle Classic has a different endpoint (vendors.paddle.com/api/2.0/...)
-// and a different response shape. Swap once you know which you're on.
-async function verifyWithPaddle(licenseKey) {
-  if (!PADDLE_PRODUCT_ID || !PADDLE_API_KEY) {
-    return { ok: false, error: 'Paddle credentials not configured' };
+// The gate every caller cares about.
+function isActivated() {
+  if (gateBypassed()) return true;
+  const lic = ensureTrialStarted();
+  return isLicensed(lic) || inTrial(lic);
+}
+
+async function lsPost(url, params) {
+  const body = new URLSearchParams(params);
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Accept': 'application/json' },
+    body,
+  });
+  let data = null;
+  try { data = await res.json(); } catch { /* non-JSON error body */ }
+  if (!res.ok) {
+    const msg = (data && data.error) || `LS HTTP ${res.status}`;
+    return { ok: false, error: msg };
   }
+  return { ok: true, data };
+}
+
+async function activateWithLS(licenseKey) {
   try {
-    const res = await fetch(PADDLE_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${PADDLE_API_KEY}`,
-      },
-      body: JSON.stringify({
-        product_id: PADDLE_PRODUCT_ID,
-        license_key: licenseKey,
-        device_id: deviceFingerprint(),
-      }),
+    const r = await lsPost(LS_ACTIVATE, {
+      license_key: licenseKey,
+      instance_name: instanceName(),
     });
-    if (!res.ok) return { ok: false, error: 'Paddle returned HTTP ' + res.status };
-    const body = await res.json();
-    // Shape depends on which Paddle product you're using; adjust.
-    const data = body && (body.data || body);
+    if (!r.ok) return r;
+    const d = r.data;
+    if (!d.activated) {
+      return { ok: false, error: d.error || 'Activation refused (limit reached or key invalid)' };
+    }
     return {
       ok: true,
-      email: data.email || null,
-      expiresAt: data.expires_at || null,
+      instanceId: d.instance && d.instance.id,
+      email:      d.meta    && d.meta.customer_email,
+      customerName: d.meta  && d.meta.customer_name,
+      variantName:  d.meta  && d.meta.variant_name,
+      expiresAt:  d.license_key && d.license_key.expires_at,
     };
   } catch (err) {
     return { ok: false, error: (err && err.message) || String(err) };
   }
 }
 
+async function validateWithLS(licenseKey, instanceId) {
+  try {
+    const params = { license_key: licenseKey };
+    if (instanceId) params.instance_id = instanceId;
+    const r = await lsPost(LS_VALIDATE, params);
+    if (!r.ok) return r;
+    return { ok: true, valid: !!r.data.valid, raw: r.data };
+  } catch (err) {
+    return { ok: false, error: (err && err.message) || String(err) };
+  }
+}
+
+async function deactivateWithLS(licenseKey, instanceId) {
+  if (!licenseKey || !instanceId) return { ok: true };
+  try {
+    const r = await lsPost(LS_DEACTIVATE, {
+      license_key: licenseKey,
+      instance_id: instanceId,
+    });
+    return r.ok ? { ok: true } : r;
+  } catch (err) {
+    return { ok: false, error: (err && err.message) || String(err) };
+  }
+}
+
 async function activate(licenseKey) {
-  if (!licenseKey || !licenseKey.trim()) return { ok: false, error: 'Enter a license key' };
-  const result = await verifyWithPaddle(licenseKey.trim());
+  const key = (licenseKey || '').trim();
+  if (!key) return { ok: false, error: 'Enter a license key' };
+  const result = await activateWithLS(key);
   if (!result.ok) return result;
+  const existing = loadLicense() || {};
   storeLicense({
-    key: licenseKey.trim(),
-    email: result.email || null,
-    expiresAt: result.expiresAt || null,
-    activatedAt: Date.now(),
+    key,
+    instanceId:   result.instanceId,
+    email:        result.email,
+    customerName: result.customerName,
+    variantName:  result.variantName,
+    expiresAt:    result.expiresAt || null,
+    activatedAt:  Date.now(),
     lastVerified: Date.now(),
+    // Preserve trialStartedAt so customers who buy mid-trial don't lose history.
+    trialStartedAt: existing.trialStartedAt || null,
   });
-  log.info('[license] activated for', result.email || '(unknown email)');
-  return { ok: true, email: result.email };
+  log.info('[license] activated', result.variantName || '', 'for', result.email || '(unknown)');
+  return { ok: true, email: result.email, variantName: result.variantName };
 }
 
 async function deactivate() {
+  const lic = loadLicense();
+  if (lic && lic.key && lic.instanceId) {
+    await deactivateWithLS(lic.key, lic.instanceId);
+  }
   clearLicense();
   log.info('[license] deactivated');
   return { ok: true };
 }
 
-// Fires on startup if the last verify is > RE_VERIFY_DAYS old. Silent: if
-// the network's down we just keep the existing activation until next try.
-// A successful re-verify that comes back "invalid" clears the license.
+// Background re-verify on startup. Silent: network errors keep the existing
+// activation. A successful validate that returns valid=false revokes locally.
 async function maybeReVerify() {
-  if (!app.isPackaged) return;
+  if (gateBypassed()) return;
   const lic = loadLicense();
-  if (!lic || !lic.key) return;
+  if (!isLicensed(lic)) return;
   const ageMs = Date.now() - (lic.lastVerified || 0);
-  if (ageMs < RE_VERIFY_DAYS * 24 * 60 * 60 * 1000) return;
+  if (ageMs < RE_VERIFY_DAYS * DAY_MS) return;
 
-  const result = await verifyWithPaddle(lic.key);
+  const result = await validateWithLS(lic.key, lic.instanceId);
   if (!result.ok) {
-    log.info('[license] re-verify failed (network?), keeping existing activation');
+    log.info('[license] re-verify network failure, keeping activation');
     return;
   }
-  // Explicit server-side revocation is rare; handle if/when Paddle signals it.
+  if (!result.valid) {
+    log.warn('[license] re-verify says invalid — clearing activation');
+    clearLicense();
+    return;
+  }
   storeLicense(Object.assign({}, lic, { lastVerified: Date.now() }));
 }
 
 function status() {
-  const lic = loadLicense();
+  const bypass = gateBypassed();
+  // Don't auto-start the trial in dev or with the gate off — keeps a clean
+  // dev config and avoids stamping trialStartedAt on every dev run.
+  const lic = bypass ? (loadLicense() || {}) : ensureTrialStarted();
   return {
-    activated: isActivated(),
-    // devBypass drives the renderer's decision to skip the activation modal
-    // on launch — true when the gate is off for any reason (dev or flag off).
-    devBypass: !app.isPackaged || !buildConfig.licenseRequired,
+    activated:      isActivated(),
+    licensed:       isLicensed(lic),
+    inTrial:        !isLicensed(lic) && inTrial(lic),
+    trialDaysLeft:  trialDaysLeft(lic),
+    trialDaysTotal: TRIAL_DAYS,
+    devBypass:      bypass,
     licenseRequired: buildConfig.licenseRequired,
-    email: lic && lic.email || null,
-    expiresAt: lic && lic.expiresAt || null,
-    activatedAt: lic && lic.activatedAt || null,
+    email:          lic.email || null,
+    variantName:    lic.variantName || null,
+    expiresAt:      lic.expiresAt || null,
+    activatedAt:    lic.activatedAt || null,
   };
 }
 
