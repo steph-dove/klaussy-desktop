@@ -1,0 +1,68 @@
+name: Build platform artifacts
+
+# Builds Linux + Windows artifacts on each native runner (cross-compile from
+# Mac is blocked by node-gyp's no-cross-compile-source rule for node-pty).
+# Mac is built locally where the signing/notarization creds live, so this
+# workflow deliberately doesn't run on macos-latest.
+#
+# Triggered manually via `gh workflow run build-platforms.yml` or the GitHub
+# UI — keeps the runner-minute cost out of the every-PR CI loop.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            script: dist:linux
+            artifact_glob: |
+              dist/Klaussy-*.AppImage
+              dist/Klaussy-*.deb
+              dist/latest-linux.yml
+          - os: windows-latest
+            script: dist:win
+            artifact_glob: |
+              dist/Klaussy-*.exe
+              dist/latest.yml
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm fakeroot
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild native modules for Electron
+        run: npm run rebuild
+
+      - name: Build
+        run: npm run ${{ matrix.script }}
+        env:
+          # Skip code signing when no cert is configured. Both Linux (no
+          # convention) and Windows (cert not yet wired) ship unsigned for
+          # now; users get SmartScreen / equivalent warning on first launch.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-${{ github.sha }}
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+          retention-days: 14
