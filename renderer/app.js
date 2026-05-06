@@ -37,13 +37,24 @@
     const errEl = document.getElementById('dir-pick-error');
     const okBtn = document.getElementById('dir-pick-ok');
     const cancelBtn = document.getElementById('dir-pick-cancel');
+    const browseBtn = document.getElementById('dir-pick-browse');
+    const recentsBtn = document.getElementById('dir-pick-recents-btn');
+    const recentsList = document.getElementById('dir-pick-recents-list');
     let resolver = null;
+    let activeRecentsKind = null; // populated per-open via opts.recentsKind
+
+    function closeRecents() {
+      recentsList.hidden = true;
+      recentsBtn.setAttribute('aria-expanded', 'false');
+    }
 
     function close(result) {
       overlay.style.display = 'none';
       input.value = '';
       errEl.textContent = '';
       drop.classList.remove('drag-over');
+      closeRecents();
+      activeRecentsKind = null;
       if (resolver) { const r = resolver; resolver = null; r(result); }
     }
 
@@ -78,12 +89,72 @@
       if (p) input.value = p;
     });
 
+    // Native Finder Browse — uses the parentless browse-directory IPC so
+    // it can't get wedged by the scopedbookmarksagent issue. Drag/paste
+    // remain as fallbacks if it ever does hang.
+    browseBtn.addEventListener('click', async function () {
+      const dir = await window.klaus.repo.browseDirectory();
+      if (dir) input.value = dir;
+    });
+
+    // Recents dropdown — only shown when the caller passes opts.recentsKind.
+    // Lists paths from config.recentPaths[kind], picking fills the input,
+    // × removes the entry from the cache.
+    function escForAttr(s) {
+      return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+    function openRecents() {
+      if (!activeRecentsKind) return;
+      window.klaus.repo.recentPathsGet().then(function (r) {
+        const items = (r && r[activeRecentsKind]) || [];
+        if (!items.length) {
+          recentsList.innerHTML = '<div class="modal-recents-empty">No recent paths yet</div>';
+        } else {
+          recentsList.innerHTML = items.map(function (p) {
+            return '<div class="modal-recents-item" data-path="' + escForAttr(p) + '">'
+              + '<span class="modal-recents-pick">' + escForAttr(p) + '</span>'
+              + '<button type="button" class="modal-recents-remove" title="Remove from recents" data-path="' + escForAttr(p) + '">×</button>'
+            + '</div>';
+          }).join('');
+        }
+        recentsList.hidden = false;
+        recentsBtn.setAttribute('aria-expanded', 'true');
+      });
+    }
+    recentsBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (recentsList.hidden) openRecents(); else closeRecents();
+    });
+    recentsList.addEventListener('click', function (e) {
+      const rm = e.target.closest('.modal-recents-remove');
+      if (rm) {
+        e.stopPropagation();
+        const p = rm.getAttribute('data-path');
+        window.klaus.repo.recentPathsRemove(activeRecentsKind, p).then(openRecents);
+        return;
+      }
+      const pick = e.target.closest('.modal-recents-item');
+      if (pick) {
+        e.stopPropagation();
+        input.value = pick.getAttribute('data-path');
+        closeRecents();
+      }
+    });
+    document.addEventListener('click', function (e) {
+      if (recentsList.hidden) return;
+      if (recentsBtn.contains(e.target) || recentsList.contains(e.target)) return;
+      closeRecents();
+    });
+
     return function pickDirectoryPopup(opts) {
       opts = opts || {};
       titleEl.textContent = opts.title || 'Select folder';
       input.placeholder = opts.placeholder || 'Drag a folder here or paste a path';
       errEl.textContent = '';
       input.value = '';
+      activeRecentsKind = opts.recentsKind || null;
+      recentsBtn.hidden = !activeRecentsKind;
+      closeRecents();
       overlay.style.display = 'flex';
       setTimeout(function () { input.focus(); }, 50);
       return new Promise(function (resolve) { resolver = resolve; });
@@ -1351,6 +1422,7 @@
   async function openFolderAsTask(mode) {
     var dir = await window.pickDirectoryPopup({
       title: mode === 'shell' ? 'Open Folder in Shell' : 'Open Folder',
+      recentsKind: 'folders',
     });
     if (!dir) return;
     var result = await window.klaus.task.openFolder(dir, mode || 'claude');
@@ -1358,6 +1430,8 @@
       if (result && result.error) window.toast.error(result.error);
       return;
     }
+    // Record on successful open so abandoned typing doesn't pollute the list.
+    window.klaus.repo.recentPathsAdd('folders', dir);
     addTaskToUI(result);
     switchToTask(result.id);
   }

@@ -247,7 +247,7 @@ ipcMain.handle('list-worktrees', async () => {
 // (worktrees, basepaths) cover the other two inputs. MRU order, capped at
 // 10. Source-repo recents reuse list-projects / remove-project / switch-
 // project — no new IPC for that case.
-const RECENT_KINDS = new Set(['worktrees', 'basepaths']);
+const RECENT_KINDS = new Set(['worktrees', 'basepaths', 'folders']);
 const RECENT_CAP = 10;
 
 ipcMain.handle('recent-paths-get', () => {

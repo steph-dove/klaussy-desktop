@@ -1112,8 +1112,10 @@ body {
 
 /* Directory picker dialog (reusable, replaces NSOpenPanel) */
 #dir-pick-drop {
+  position: relative;
   display: flex;
   align-items: center;
+  gap: 8px;
   background: var(--input-bg);
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -1620,7 +1622,7 @@ body.task-branchless #ahead-behind {
 
 .terminal-container {
   position: absolute;
-  inset: 0 0 46px 0;
+  inset: 0;
   padding: 0;
   display: none;
   overflow: hidden;
