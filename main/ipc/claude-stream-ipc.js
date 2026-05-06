@@ -926,6 +926,52 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
 
 ipcMain.handle('pr-ai-review-cancel', makeClaudeCancelHandler(aiReviewProcs));
 
+// Humanizer prompt — based on blader/humanizer (signs of AI writing) but
+// tuned for PR review tone: terse, technical, conversational. The original
+// finding's severity/location header must survive untouched so the parser
+// and the verified-line chip still work.
+const PR_HUMANIZE_TEMPLATE = `Rewrite the following AI-generated PR review comment so it reads like a human reviewer wrote it. Output the rewritten comment ONLY — no preamble, no explanation, no quotes around it.
+
+Hard requirements:
+- Preserve any leading **[Severity: ...]** and **[Location: ...]** lines verbatim. Only rewrite the prose under "**Comment:**".
+- Preserve every code reference, file path, line number, identifier, and code fence exactly.
+- Preserve markdown structure (lists, code blocks, links). Don't add headers that weren't there.
+- Don't change the technical claim. If the AI was wrong, the rewrite is wrong too — that's fine.
+
+Tone targets:
+- Direct, conversational, slightly informal — like a senior engineer leaving a quick GitHub comment.
+- Short sentences. Cut filler ("it's worth noting", "it's important to", "I've identified", "this could potentially").
+- First person where natural ("I'd lift this out", "looks like X is unhandled here").
+- Drop AI vocabulary: delve, leverage, navigate, robust, comprehensive, seamless, meticulous, underscore, tapestry, realm, ensure that, in order to.
+- No em dashes (— or –). Use periods, commas, or parens instead.
+- No "rule of three" lists or parallel triplets unless the original had them.
+- No persuasive scaffolding ("First, ... Second, ... Finally, ...") or "not just X, it's Y" framing.
+- Avoid passive voice when active is shorter.
+- Don't end with a summary sentence that restates what you just said.
+
+Comment to rewrite:
+{{COMMENT}}`;
+
+ipcMain.handle('pr-humanize-review', async (_event, { worktreePath, commentText }) => {
+  if (!commentText || !commentText.trim()) return { error: 'Empty comment' };
+  const prompt = PR_HUMANIZE_TEMPLATE.replace('{{COMMENT}}', commentText);
+  const config = loadConfig();
+  const claudeBin = config.claudePath || 'claude';
+  return new Promise((resolve) => {
+    execFile(claudeBin, ['-p', prompt], {
+      cwd: worktreePath || process.cwd(),
+      timeout: 60000,
+      maxBuffer: 1024 * 1024,
+    }, (err, stdout, stderr) => {
+      if (err) {
+        resolve({ error: stderr || err.message });
+      } else {
+        resolve({ humanized: stdout.trim() });
+      }
+    });
+  });
+});
+
 ipcMain.handle('pr-ai-review-comment', async (_event, { worktreePath, prTitle, prBody, commentAuthor, commentBody, filePath, diffHunk }) => {
   let context = `PR Title: ${prTitle}\n`;
   if (prBody) context += `PR Description: ${prBody}\n`;
