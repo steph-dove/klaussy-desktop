@@ -1108,6 +1108,8 @@ window.PrReview = (function () {
         if (saved.text != null) f.text = saved.text;
         else if (saved.commentBody != null && saved.commentBody.trim() !== '') f.text = saved.commentBody;
         if (saved.originalText != null) f.originalText = saved.originalText;
+        if (saved.humanizedText) f.humanizedText = saved.humanizedText;
+        if (saved.showHumanized) f.showHumanized = true;
         if (Array.isArray(saved.chatMessages)) f.chatMessages = saved.chatMessages;
         if (saved.usage) f.usage = saved.usage;
         if (saved.investigateResult) f.investigateResult = saved.investigateResult;
@@ -1149,6 +1151,8 @@ window.PrReview = (function () {
         commentError: f.commentError || null,
         text: f.text || '',
         originalText: f.originalText != null ? f.originalText : null,
+        humanizedText: f.humanizedText || null,
+        showHumanized: !!f.showHumanized,
         chatMessages: Array.isArray(f.chatMessages) ? f.chatMessages : [],
         usage: f.usage || null,
         path: f.path || null,
@@ -1803,6 +1807,31 @@ window.PrReview = (function () {
       + (f.copyStatus === 'copied' ? '✓ Copied' : 'Copy')
     + '</button>';
 
+    // Humanize button. Rewrites the AI-flavored review text into something
+    // that reads like a human reviewer wrote it. First click runs the AI
+    // call; subsequent clicks toggle between original and humanized.
+    var humanizeLabel, humanizeTitle, humanizeDisabled = '';
+    if (f.humanizing) {
+      humanizeLabel = 'Humanizing…';
+      humanizeTitle = 'Asking Claude to rewrite this comment';
+      humanizeDisabled = ' disabled';
+    } else if (!f.humanizedText) {
+      humanizeLabel = 'Humanize';
+      humanizeTitle = 'Rewrite this AI comment to sound more human';
+    } else if (f.showHumanized) {
+      humanizeLabel = 'Show original';
+      humanizeTitle = 'Switch back to the original AI-written comment';
+    } else {
+      humanizeLabel = 'Show humanized';
+      humanizeTitle = 'Switch to the humanized rewrite';
+    }
+    var humanizeBtn = '<button class="pr-ai-finding-humanize' + (f.showHumanized ? ' on' : '') + '" type="button" title="' + escHtml(humanizeTitle) + '"' + humanizeDisabled + '>'
+      + escHtml(humanizeLabel)
+    + '</button>';
+    var humanizedBadge = (f.showHumanized && f.humanizedText)
+      ? '<span class="pr-ai-finding-humanized-badge" title="Showing the humanized rewrite — toggle the Humanize button to see the original">humanized</span>'
+      : '';
+
     // Ask-Claude button. Toggles the inline chat panel so reviewers can
     // discuss the finding without leaving the card (e.g., "is this
     // actually a bug?", "what's the simplest fix?").
@@ -1839,11 +1868,11 @@ window.PrReview = (function () {
       actions = commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
-        + commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
+        + commentBadge + editedBadge + humanizedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
         + commentBtn
         + '<button class="pr-ai-finding-redo" type="button" title="Run Claude implement again">Implement again</button>';
     } else {
-      actions = commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
+      actions = commentBadge + editedBadge + humanizedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
         + '<button class="pr-ai-finding-implement" type="button" title="Claude updates the file and drafts a follow-up PR comment for your approval">Claude implement</button>';
@@ -1877,7 +1906,8 @@ window.PrReview = (function () {
           + '</div>'
         + '</div>';
     } else {
-      bodyHtml = '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>';
+      var bodyText = (f.showHumanized && f.humanizedText) ? f.humanizedText : f.text;
+      bodyHtml = '<div class="pr-ai-finding-body' + (f.showHumanized && f.humanizedText ? ' humanized' : '') + '">' + renderMarkdown(bodyText) + '</div>';
     }
 
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
@@ -2053,6 +2083,9 @@ window.PrReview = (function () {
       var copyBtnEl = card.querySelector('.pr-ai-finding-copy');
       if (copyBtnEl) copyBtnEl.addEventListener('click', function () { copyFindingAsMarkdown(f); });
 
+      var humanizeBtnEl = card.querySelector('.pr-ai-finding-humanize');
+      if (humanizeBtnEl) humanizeBtnEl.addEventListener('click', function () { humanizeFinding(f); });
+
       // "Ask Claude" button toggles the inline chat panel.
       var discussBtnEl = card.querySelector('.pr-ai-finding-discuss');
       if (discussBtnEl) discussBtnEl.addEventListener('click', function () {
@@ -2141,6 +2174,9 @@ window.PrReview = (function () {
         if (val.trim() === '') return; // refuse to save an empty review
         f.text = val;
         f.textEditing = false;
+        // Stale: humanized version was rewritten from a different f.text.
+        f.humanizedText = null;
+        f.showHumanized = false;
         // Re-parse severity/location from the edited text — the user may
         // have changed the snippet or location line — then re-verify the
         // line against the worktree file.
@@ -2164,6 +2200,8 @@ window.PrReview = (function () {
       if (bodyReset) bodyReset.addEventListener('click', function () {
         if (f.originalText != null) {
           f.text = f.originalText;
+          f.humanizedText = null;
+          f.showHumanized = false;
           f.severity = severityOf(f.text);
           var loc = parseLocation(f.text);
           f.path = loc ? loc.path : null;
@@ -2503,7 +2541,8 @@ window.PrReview = (function () {
   // ~1.5s "Copied" label.
   async function copyFindingAsMarkdown(f) {
     try {
-      await navigator.clipboard.writeText(f.text || '');
+      var copyText = (f.showHumanized && f.humanizedText) ? f.humanizedText : (f.text || '');
+      await navigator.clipboard.writeText(copyText);
       f.copyStatus = 'copied';
       repaintAiReviewTab();
       setTimeout(function () {
@@ -2515,6 +2554,46 @@ window.PrReview = (function () {
       f.copyStatus = 'failed';
       repaintAiReviewTab();
       setTimeout(function () { f.copyStatus = null; repaintAiReviewTab(); }, 2000);
+    }
+  }
+
+  // Humanize the AI review text. First click: call Claude with the humanizer
+  // prompt against the current f.text and cache the result. Subsequent clicks
+  // just toggle f.showHumanized between cached and original. Edits to f.text
+  // (via the ✎ button or Reset) clear humanizedText so the next click rebuilds.
+  async function humanizeFinding(f) {
+    if (f.humanizing) return;
+    if (f.humanizedText) {
+      f.showHumanized = !f.showHumanized;
+      repaintAiReviewTab();
+      saveAiReviewCache();
+      return;
+    }
+    f.humanizing = true;
+    repaintAiReviewTab();
+    try {
+      var result = await window.klaus.pr.humanizeReview(aiReview.worktreePath, f.text || '');
+      f.humanizing = false;
+      if (result && result.error) {
+        window.toast.error('Humanize failed: ' + result.error);
+        repaintAiReviewTab();
+        return;
+      }
+      var humanized = result && result.humanized ? result.humanized.trim() : '';
+      if (!humanized) {
+        window.toast.error('Humanize returned empty output');
+        repaintAiReviewTab();
+        return;
+      }
+      f.humanizedText = humanized;
+      f.showHumanized = true;
+      repaintAiReviewTab();
+      saveAiReviewCache();
+    } catch (err) {
+      f.humanizing = false;
+      console.error('humanize failed', err);
+      window.toast.error('Humanize failed: ' + (err && err.message ? err.message : String(err)));
+      repaintAiReviewTab();
     }
   }
 
