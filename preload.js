@@ -178,7 +178,6 @@ contextBridge.exposeInMainWorld('klaus', {
     fixInTerminal: (worktreePath, text) => ipcRenderer.invoke('pr-fix-in-terminal', { worktreePath, text }),
     aiReviewStart: (opts) => ipcRenderer.invoke('pr-ai-review-start', opts),
     aiReviewCancel: (requestId) => ipcRenderer.invoke('pr-ai-review-cancel', { requestId }),
-    humanizeReview: (worktreePath, commentText) => ipcRenderer.invoke('pr-humanize-review', { worktreePath, commentText }),
     onAiReviewData: (requestId, cb) => {
       const ch = 'pr-ai-review-data-' + requestId;
       const handler = (_e, chunk) => cb(chunk);

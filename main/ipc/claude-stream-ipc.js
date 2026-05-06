@@ -205,6 +205,11 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
         kind: 'pr-review-ai',
         prNumber: prReview.active.meta.number,
         prTitle: prReview.active.meta.title || '',
+        // baseOwner/baseRepo are required for matching — PR numbers are
+        // repo-scoped, so a user with two accounts can have collisions
+        // (account1/repo-A#123 and account2/repo-B#123).
+        baseOwner: prReview.active.baseOwner,
+        baseRepo: prReview.active.baseRepo,
         baseBranch,
         // Needed by the renderer's rehydration path so post-review actions
         // (Implement / Investigate) know which worktree to operate in.
@@ -583,6 +588,45 @@ You are a senior/principal-level engineer reviewing a pull request. Treat this a
 - If something would fail under load or future change, flag it.
 - Avoid praise unless it highlights a deliberate, non-obvious good decision.
 
+### Voice & style (applies to the comment body, NOT the headers):
+
+**Hard rule on em dashes (strictest tell):** Do not use em dashes (—) or en dashes (–) anywhere in the comment body. Use periods, commas, or parentheses instead. Before emitting any finding, scan its body for \`—\` and \`–\` and rewrite those phrases without them. This is the single most reliable AI tell and the most common reason a humanized review still reads as AI-written.
+
+
+Write each finding's prose like a senior engineer leaving it on GitHub — direct, opinionated, terse. The **[Severity]** and **[Location]** lines are formatted output and must stay in the exact bracketed format above; the rules below apply only to the comment body underneath.
+
+- Short. PR comments are 1-4 sentences, not paragraphs. Cut filler instead of rewording it.
+- First person where natural ("I'd lift this out", "looks like X is never awaited"). No anecdotes, no hedge essays.
+- Real opinions. "This is wrong" is fine; "This is suboptimal" is not.
+- No closing summary that restates what you just said.
+- No "Great catch!" / "I hope this helps" / "Let me know if..." chatbot scaffolding.
+
+Avoid these AI tells:
+- **AI vocabulary**: delve, leverage, navigate (figurative), robust, comprehensive, seamless, meticulous, intricate, underscore, highlight (verb), pivotal, crucial, key (adjective), vital, ensure that, in order to, additionally, furthermore, moreover, notably, valuable, vibrant, foster, garner, align with, tapestry, landscape (figurative), realm.
+- **Em dashes** (— or –). Use periods, commas, or parentheses.
+- **Filler**: "it's important to note", "it's worth mentioning", "I noticed that", "I've identified that".
+- **Excessive hedging**: "could potentially possibly", "may potentially". State it or don't.
+- **Rule of three**: don't force findings into triplets to sound thorough.
+- **Negative parallelism**: "not just X, it's Y", "It's not merely X, it's Y".
+- **Copula avoidance**: prefer "is/are/has" over "serves as", "stands as", "functions as", "represents".
+- **Persuasive authority**: "the real question is", "at its core", "fundamentally", "what really matters".
+- **Signposting**: "Let me explain", "Here's what's happening", "First, ... Second, ... Finally, ...".
+- **Vague attributions**: "best practices suggest", "it's generally recommended". Name the concrete reason or drop the appeal to authority.
+- **Inline-header bullets**: don't structure short comments as "**Bold:** sentence" lists; just write the sentence.
+- **Passive voice** when active is shorter and the actor is known.
+- **Superficial -ing analyses**: "highlighting that...", "ensuring that...", "reflecting...". Cut or rewrite as a real clause.
+
+Examples:
+
+Before: "Additionally, this function leverages the cache to ensure robust handling of concurrent requests, highlighting the importance of proper synchronization."
+After: "This reuses the cache to handle concurrent requests safely."
+
+Before: "It's worth noting that this could potentially leak a connection if the request times out — best practices suggest using a defer block."
+After: "Leaks a connection if the request times out. Wrap the close in a defer."
+
+Before: "The mutex serves as the gatekeeper, ensuring that only one writer can proceed at a time, reflecting good lock hygiene."
+After: "The mutex blocks concurrent writers. Fine."
+
 ### Validate findings:
 
 Before writing the final output, validate every finding you produced. For each one:
@@ -858,7 +902,8 @@ After validation, synthesize the remaining findings:
 1. **Deduplicate**: If multiple agents flagged the same issue, keep the most detailed comment and use the highest severity assigned.
 2. **Sort by severity**: Blocker > High > Medium > Low > Warn > Nit.
 3. **Cross-cutting check**: Look for issues that span multiple agents' domains (e.g., a correctness bug that is also a security vulnerability). Add a combined comment if the individual agents missed the intersection.
-4. **Assess overall quality**: Consider the findings holistically.
+4. **Rewrite voice**: The sub-agents tend to produce AI-flavored prose. Before emitting each finding, rewrite the comment body to match the **Voice & style** rules below. Preserve the technical claim exactly — don't soften "leaks a connection" into "might leak", and don't strengthen "may race" into "races". Code references, identifiers, and the bracketed headers stay verbatim.
+5. **Assess overall quality**: Consider the findings holistically.
 
 ### Comment format (for each finding):
 
@@ -869,6 +914,42 @@ After validation, synthesize the remaining findings:
 
 - What is wrong or questionable, why this is a problem
 - What should be changed (specific suggestion or alternative)
+
+### Voice & style (applies to the comment body, NOT the headers):
+
+**Hard rule on em dashes (strictest tell):** Do not use em dashes (—) or en dashes (–) anywhere in the comment body. Use periods, commas, or parentheses instead. Before emitting any finding, scan its body for \`—\` and \`–\` and rewrite those phrases without them. This is the single most reliable AI tell and the most common reason a humanized review still reads as AI-written.
+
+
+Each finding's prose should read like a senior engineer leaving it on GitHub — direct, opinionated, terse. The bracketed header lines above must stay verbatim; the rules below apply to the body underneath **Comment:**.
+
+- Short. PR comments are 1-4 sentences, not paragraphs. Cut filler instead of rewording it.
+- First person where natural ("I'd lift this out", "looks like X is never awaited"). No anecdotes.
+- Real opinions. "This is wrong" is fine; "This is suboptimal" is not.
+- No closing summary that restates what you just said.
+- No "Great catch!" / "I hope this helps" / "Let me know if..." chatbot scaffolding.
+
+Avoid these AI tells:
+- **AI vocabulary**: delve, leverage, navigate (figurative), robust, comprehensive, seamless, meticulous, intricate, underscore, highlight (verb), pivotal, crucial, key (adjective), vital, ensure that, in order to, additionally, furthermore, moreover, notably, valuable, vibrant, foster, garner, align with, tapestry, landscape (figurative), realm.
+- **Em dashes** (— or –). Use periods, commas, or parentheses.
+- **Filler**: "it's important to note", "it's worth mentioning", "I noticed that", "I've identified that".
+- **Excessive hedging**: "could potentially possibly", "may potentially". State it or don't.
+- **Rule of three**: don't force findings into triplets to sound thorough.
+- **Negative parallelism**: "not just X, it's Y".
+- **Copula avoidance**: prefer "is/are/has" over "serves as", "stands as", "functions as", "represents".
+- **Persuasive authority**: "the real question is", "at its core", "fundamentally", "what really matters".
+- **Signposting**: "Let me explain", "First, ... Second, ... Finally, ...".
+- **Vague attributions**: "best practices suggest", "it's generally recommended". Name the concrete reason or drop it.
+- **Inline-header bullets**: don't structure short comments as "**Bold:** sentence" lists; just write the sentence.
+- **Passive voice** when active is shorter and the actor is known.
+- **Superficial -ing analyses**: "highlighting that...", "ensuring that...", "reflecting...". Cut or rewrite as a real clause.
+
+Examples:
+
+Before: "Additionally, this function leverages the cache to ensure robust handling of concurrent requests, highlighting the importance of proper synchronization."
+After: "This reuses the cache to handle concurrent requests safely."
+
+Before: "It's worth noting that this could potentially leak a connection if the request times out — best practices suggest using a defer block."
+After: "Leaks a connection if the request times out. Wrap the close in a defer."
 
 ### Final PR summary:
 
@@ -925,52 +1006,6 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
 });
 
 ipcMain.handle('pr-ai-review-cancel', makeClaudeCancelHandler(aiReviewProcs));
-
-// Humanizer prompt — based on blader/humanizer (signs of AI writing) but
-// tuned for PR review tone: terse, technical, conversational. The original
-// finding's severity/location header must survive untouched so the parser
-// and the verified-line chip still work.
-const PR_HUMANIZE_TEMPLATE = `Rewrite the following AI-generated PR review comment so it reads like a human reviewer wrote it. Output the rewritten comment ONLY — no preamble, no explanation, no quotes around it.
-
-Hard requirements:
-- Preserve any leading **[Severity: ...]** and **[Location: ...]** lines verbatim. Only rewrite the prose under "**Comment:**".
-- Preserve every code reference, file path, line number, identifier, and code fence exactly.
-- Preserve markdown structure (lists, code blocks, links). Don't add headers that weren't there.
-- Don't change the technical claim. If the AI was wrong, the rewrite is wrong too — that's fine.
-
-Tone targets:
-- Direct, conversational, slightly informal — like a senior engineer leaving a quick GitHub comment.
-- Short sentences. Cut filler ("it's worth noting", "it's important to", "I've identified", "this could potentially").
-- First person where natural ("I'd lift this out", "looks like X is unhandled here").
-- Drop AI vocabulary: delve, leverage, navigate, robust, comprehensive, seamless, meticulous, underscore, tapestry, realm, ensure that, in order to.
-- No em dashes (— or –). Use periods, commas, or parens instead.
-- No "rule of three" lists or parallel triplets unless the original had them.
-- No persuasive scaffolding ("First, ... Second, ... Finally, ...") or "not just X, it's Y" framing.
-- Avoid passive voice when active is shorter.
-- Don't end with a summary sentence that restates what you just said.
-
-Comment to rewrite:
-{{COMMENT}}`;
-
-ipcMain.handle('pr-humanize-review', async (_event, { worktreePath, commentText }) => {
-  if (!commentText || !commentText.trim()) return { error: 'Empty comment' };
-  const prompt = PR_HUMANIZE_TEMPLATE.replace('{{COMMENT}}', commentText);
-  const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  return new Promise((resolve) => {
-    execFile(claudeBin, ['-p', prompt], {
-      cwd: worktreePath || process.cwd(),
-      timeout: 60000,
-      maxBuffer: 1024 * 1024,
-    }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ error: stderr || err.message });
-      } else {
-        resolve({ humanized: stdout.trim() });
-      }
-    });
-  });
-});
 
 ipcMain.handle('pr-ai-review-comment', async (_event, { worktreePath, prTitle, prBody, commentAuthor, commentBody, filePath, diffHunk }) => {
   let context = `PR Title: ${prTitle}\n`;
