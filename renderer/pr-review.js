@@ -168,7 +168,16 @@ window.PrReview = (function () {
       // Restore cached AI review (text + per-finding ignore/implement state)
       // for this PR if we have one. Async; the tab repaints when it lands.
       if (state.baseOwner && state.baseRepo) {
-        loadAiReviewCache(state.baseOwner, state.baseRepo, state.number);
+        // After the cache settles, check the agent registry for a backgrounded
+        // pr-review-ai run for this PR. The cache only updates from the
+        // renderer's done handler, so an agent that completed while the
+        // renderer was unmounted leaves the cache stale — adopt from the
+        // agent record so the review tab auto-loads the fresh result.
+        var baseOwner = state.baseOwner;
+        var baseRepo = state.baseRepo;
+        var prNumber = state.number;
+        loadAiReviewCache(baseOwner, baseRepo, prNumber)
+          .then(function () { adoptBackgroundedReviewAgent(baseOwner, baseRepo, prNumber); });
       }
     }
     lastState = state;
@@ -344,6 +353,84 @@ window.PrReview = (function () {
           if (aiReview.finalText) saveAiReviewCache();
         });
       }
+    });
+  }
+
+  // On PR open / re-mount, see if there's a backgrounded pr-review-ai
+  // agent for this PR whose result the renderer missed (because the cache
+  // is only written by the renderer's done handler — an agent that
+  // completed while we were unmounted leaves the cache stale). Unlike
+  // rehydrateAiReview (which wipes findings to [] before reconciling),
+  // this preserves per-finding state already loaded from cache because
+  // reconcileFindings merges by key.
+  function adoptBackgroundedReviewAgent(baseOwner, baseRepo, prNumber) {
+    if (!window.klaus || !window.klaus.agents) return;
+    if (aiReview.requestId) return; // already attached to a live stream
+    window.klaus.agents.list().then(function (agents) {
+      if (!agents || !agents.length) return;
+      // Match all three: PR numbers are repo-scoped, so the user could
+      // have running review agents for the same number under different
+      // accounts/repos. Older agents (pre-disambiguation) lack baseOwner/
+      // baseRepo in sourceContext and are skipped — safer than a wrong
+      // adoption across accounts.
+      var matching = agents.filter(function (a) {
+        return a.kind === 'pr-review-ai'
+            && a.sourceContext
+            && a.sourceContext.prNumber === prNumber
+            && a.sourceContext.baseOwner === baseOwner
+            && a.sourceContext.baseRepo === baseRepo;
+      });
+      if (!matching.length) return;
+      // Newest first — pick the most recent run for this PR.
+      matching.sort(function (a, b) { return (b.startedAt || 0) - (a.startedAt || 0); });
+      var agent = matching[0];
+      if (!agent || !agent.text) return;
+      // Bail if we navigated away while listing agents.
+      if (!lastState || lastState.number !== prNumber || lastState.baseOwner !== baseOwner || lastState.baseRepo !== baseRepo) return;
+
+      // Re-parse the JSONL events the agent has written. handleAiEvent
+      // updates aiReview.finalText / progress / usage in-place.
+      var lines = agent.text.split('\n');
+      lines.forEach(function (line) {
+        if (!line.trim()) return;
+        try { handleAiEvent(JSON.parse(line)); } catch (_) {}
+      });
+      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      aiReview.worktreePath = (agent.sourceContext && agent.sourceContext.worktreePath) || aiReview.worktreePath;
+
+      if (agent.status === 'running') {
+        // Still streaming — attach to live updates so chunks land here.
+        aiReview.requestId = agent.id;
+        var buffered = '';
+        var unsubData = window.klaus.pr.onReviewAiData(agent.id, function (chunk) {
+          if (aiReview.requestId !== agent.id) return;
+          buffered += chunk;
+          var idx;
+          while ((idx = buffered.indexOf('\n')) !== -1) {
+            var line = buffered.slice(0, idx);
+            buffered = buffered.slice(idx + 1);
+            if (!line.trim()) continue;
+            try { handleAiEvent(JSON.parse(line)); } catch (_) {}
+          }
+          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          repaintAiReviewTab();
+        });
+        window.klaus.pr.onReviewAiDone(agent.id, function (result) {
+          if (unsubData) unsubData();
+          if (aiReview.requestId !== agent.id) return;
+          aiReview.requestId = null;
+          if (result && result.error) aiReview.error = result.error;
+          if (result && result.cancelled) aiReview.cancelled = true;
+          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          repaintAiReviewTab();
+          if (aiReview.finalText) saveAiReviewCache();
+        });
+      } else if (aiReview.finalText) {
+        // Completed — persist what we just adopted so future loads hit
+        // the cache without re-scanning the agent registry.
+        saveAiReviewCache();
+      }
+      repaintAiReviewTab();
     });
   }
 
@@ -1108,8 +1195,6 @@ window.PrReview = (function () {
         if (saved.text != null) f.text = saved.text;
         else if (saved.commentBody != null && saved.commentBody.trim() !== '') f.text = saved.commentBody;
         if (saved.originalText != null) f.originalText = saved.originalText;
-        if (saved.humanizedText) f.humanizedText = saved.humanizedText;
-        if (saved.showHumanized) f.showHumanized = true;
         if (Array.isArray(saved.chatMessages)) f.chatMessages = saved.chatMessages;
         if (saved.usage) f.usage = saved.usage;
         if (saved.investigateResult) f.investigateResult = saved.investigateResult;
@@ -1151,8 +1236,6 @@ window.PrReview = (function () {
         commentError: f.commentError || null,
         text: f.text || '',
         originalText: f.originalText != null ? f.originalText : null,
-        humanizedText: f.humanizedText || null,
-        showHumanized: !!f.showHumanized,
         chatMessages: Array.isArray(f.chatMessages) ? f.chatMessages : [],
         usage: f.usage || null,
         path: f.path || null,
@@ -1180,12 +1263,32 @@ window.PrReview = (function () {
 
   // ---- G7: AI review tab ----
 
+  // Strip em/en dashes outside of fenced and inline code. Em dash is the
+  // single strongest AI tell and the prompt rule alone is unreliable;
+  // this is the belt to the prompt's suspenders. Idempotent — safe to
+  // call on every parse during streaming.
+  function sanitizeAiTone(text) {
+    if (!text) return text;
+    var fenceParts = text.split(/(```[\s\S]*?```)/g);
+    for (var i = 0; i < fenceParts.length; i += 2) {
+      var inlineParts = fenceParts[i].split(/(`[^`\n]*`)/g);
+      for (var j = 0; j < inlineParts.length; j += 2) {
+        inlineParts[j] = inlineParts[j]
+          .replace(/\s*—\s*/g, ', ')
+          .replace(/\s*–\s*/g, ' - ');
+      }
+      fenceParts[i] = inlineParts.join('');
+    }
+    return fenceParts.join('');
+  }
+
   // F6's review template emits findings prefixed with `**[Severity: ...]**`;
   // split the streaming text into preamble + findings + postamble. If the
   // parser doesn't match (memory says it can be unreliable) we fall back to
   // a single card containing the whole review.
   function parseReviewFindings(text) {
     if (!text) return { preamble: '', findings: [], postamble: '' };
+    text = sanitizeAiTone(text);
     // Split anchor: line start, then any combination of common markdown
     // leaders (ATX header `###`, bullet `-`/`*`/`+`, numbered list `1.`,
     // blockquote `>`), then 0–2 leading asterisks, then `[Severity:`.
@@ -1525,7 +1628,7 @@ window.PrReview = (function () {
       // user still sees the review even when the structured shape is off.
       body = '<div class="pr-ai-fallback-card">'
         + '<div class="pr-ai-fallback-head">Review (unparsed)</div>'
-        + '<pre class="pr-ai-fallback-body">' + escHtml(aiReview.finalText || '') + '</pre>'
+        + '<pre class="pr-ai-fallback-body">' + escHtml(sanitizeAiTone(aiReview.finalText || '')) + '</pre>'
       + '</div>';
     } else {
       body = '<div class="pr-ai-findings">'
@@ -1807,31 +1910,6 @@ window.PrReview = (function () {
       + (f.copyStatus === 'copied' ? '✓ Copied' : 'Copy')
     + '</button>';
 
-    // Humanize button. Rewrites the AI-flavored review text into something
-    // that reads like a human reviewer wrote it. First click runs the AI
-    // call; subsequent clicks toggle between original and humanized.
-    var humanizeLabel, humanizeTitle, humanizeDisabled = '';
-    if (f.humanizing) {
-      humanizeLabel = 'Humanizing…';
-      humanizeTitle = 'Asking Claude to rewrite this comment';
-      humanizeDisabled = ' disabled';
-    } else if (!f.humanizedText) {
-      humanizeLabel = 'Humanize';
-      humanizeTitle = 'Rewrite this AI comment to sound more human';
-    } else if (f.showHumanized) {
-      humanizeLabel = 'Show original';
-      humanizeTitle = 'Switch back to the original AI-written comment';
-    } else {
-      humanizeLabel = 'Show humanized';
-      humanizeTitle = 'Switch to the humanized rewrite';
-    }
-    var humanizeBtn = '<button class="pr-ai-finding-humanize' + (f.showHumanized ? ' on' : '') + '" type="button" title="' + escHtml(humanizeTitle) + '"' + humanizeDisabled + '>'
-      + escHtml(humanizeLabel)
-    + '</button>';
-    var humanizedBadge = (f.showHumanized && f.humanizedText)
-      ? '<span class="pr-ai-finding-humanized-badge" title="Showing the humanized rewrite — toggle the Humanize button to see the original">humanized</span>'
-      : '';
-
     // Ask-Claude button. Toggles the inline chat panel so reviewers can
     // discuss the finding without leaving the card (e.g., "is this
     // actually a bug?", "what's the simplest fix?").
@@ -1868,11 +1946,11 @@ window.PrReview = (function () {
       actions = commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
-        + commentBadge + editedBadge + humanizedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
+        + commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
         + commentBtn
         + '<button class="pr-ai-finding-redo" type="button" title="Run Claude implement again">Implement again</button>';
     } else {
-      actions = commentBadge + editedBadge + humanizedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
+      actions = commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
         + '<button class="pr-ai-finding-implement" type="button" title="Claude updates the file and drafts a follow-up PR comment for your approval">Claude implement</button>';
@@ -1906,8 +1984,7 @@ window.PrReview = (function () {
           + '</div>'
         + '</div>';
     } else {
-      var bodyText = (f.showHumanized && f.humanizedText) ? f.humanizedText : f.text;
-      bodyHtml = '<div class="pr-ai-finding-body' + (f.showHumanized && f.humanizedText ? ' humanized' : '') + '">' + renderMarkdown(bodyText) + '</div>';
+      bodyHtml = '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>';
     }
 
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
@@ -2083,9 +2160,6 @@ window.PrReview = (function () {
       var copyBtnEl = card.querySelector('.pr-ai-finding-copy');
       if (copyBtnEl) copyBtnEl.addEventListener('click', function () { copyFindingAsMarkdown(f); });
 
-      var humanizeBtnEl = card.querySelector('.pr-ai-finding-humanize');
-      if (humanizeBtnEl) humanizeBtnEl.addEventListener('click', function () { humanizeFinding(f); });
-
       // "Ask Claude" button toggles the inline chat panel.
       var discussBtnEl = card.querySelector('.pr-ai-finding-discuss');
       if (discussBtnEl) discussBtnEl.addEventListener('click', function () {
@@ -2174,9 +2248,6 @@ window.PrReview = (function () {
         if (val.trim() === '') return; // refuse to save an empty review
         f.text = val;
         f.textEditing = false;
-        // Stale: humanized version was rewritten from a different f.text.
-        f.humanizedText = null;
-        f.showHumanized = false;
         // Re-parse severity/location from the edited text — the user may
         // have changed the snippet or location line — then re-verify the
         // line against the worktree file.
@@ -2200,8 +2271,6 @@ window.PrReview = (function () {
       if (bodyReset) bodyReset.addEventListener('click', function () {
         if (f.originalText != null) {
           f.text = f.originalText;
-          f.humanizedText = null;
-          f.showHumanized = false;
           f.severity = severityOf(f.text);
           var loc = parseLocation(f.text);
           f.path = loc ? loc.path : null;
@@ -2541,8 +2610,7 @@ window.PrReview = (function () {
   // ~1.5s "Copied" label.
   async function copyFindingAsMarkdown(f) {
     try {
-      var copyText = (f.showHumanized && f.humanizedText) ? f.humanizedText : (f.text || '');
-      await navigator.clipboard.writeText(copyText);
+      await navigator.clipboard.writeText(f.text || '');
       f.copyStatus = 'copied';
       repaintAiReviewTab();
       setTimeout(function () {
@@ -2554,46 +2622,6 @@ window.PrReview = (function () {
       f.copyStatus = 'failed';
       repaintAiReviewTab();
       setTimeout(function () { f.copyStatus = null; repaintAiReviewTab(); }, 2000);
-    }
-  }
-
-  // Humanize the AI review text. First click: call Claude with the humanizer
-  // prompt against the current f.text and cache the result. Subsequent clicks
-  // just toggle f.showHumanized between cached and original. Edits to f.text
-  // (via the ✎ button or Reset) clear humanizedText so the next click rebuilds.
-  async function humanizeFinding(f) {
-    if (f.humanizing) return;
-    if (f.humanizedText) {
-      f.showHumanized = !f.showHumanized;
-      repaintAiReviewTab();
-      saveAiReviewCache();
-      return;
-    }
-    f.humanizing = true;
-    repaintAiReviewTab();
-    try {
-      var result = await window.klaus.pr.humanizeReview(aiReview.worktreePath, f.text || '');
-      f.humanizing = false;
-      if (result && result.error) {
-        window.toast.error('Humanize failed: ' + result.error);
-        repaintAiReviewTab();
-        return;
-      }
-      var humanized = result && result.humanized ? result.humanized.trim() : '';
-      if (!humanized) {
-        window.toast.error('Humanize returned empty output');
-        repaintAiReviewTab();
-        return;
-      }
-      f.humanizedText = humanized;
-      f.showHumanized = true;
-      repaintAiReviewTab();
-      saveAiReviewCache();
-    } catch (err) {
-      f.humanizing = false;
-      console.error('humanize failed', err);
-      window.toast.error('Humanize failed: ' + (err && err.message ? err.message : String(err)));
-      repaintAiReviewTab();
     }
   }
 
