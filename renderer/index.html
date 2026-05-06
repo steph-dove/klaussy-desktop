@@ -316,6 +316,9 @@
       <h3 id="dir-pick-title">Select folder</h3>
       <div id="dir-pick-drop">
         <input id="dir-pick-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
+        <button id="dir-pick-browse" type="button" class="modal-input-btn" title="Browse for a folder">Browse</button>
+        <button id="dir-pick-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Recent folders" aria-haspopup="listbox" aria-expanded="false" hidden>▾</button>
+        <div id="dir-pick-recents-list" class="modal-recents-list" hidden role="listbox"></div>
       </div>
       <div id="dir-pick-error"></div>
       <div class="klaus-modal-actions">
