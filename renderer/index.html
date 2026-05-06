@@ -74,8 +74,8 @@
           </div>
           <div id="empty-state-no-project" style="display:none;">
             <p><strong>Welcome to Klaussy.</strong></p>
-            <p class="sub">Add a git project to get started — click the <strong>+</strong> next to the project switcher above.</p>
-            <button id="empty-state-add-project" class="empty-state-cta" type="button">Add a project</button>
+            <p class="sub">Create or attach a git worktree to get started — pick a repo, name a branch, and Klaussy spawns a Claude Code session in it.</p>
+            <button id="empty-state-add-project" class="empty-state-cta" type="button">Add a worktree</button>
             <p class="sub" style="margin-top:18px;">Or <a href="#" id="empty-state-open-folder-np" class="empty-state-link">open any folder</a> to run Claude without git.</p>
             <p class="sub" style="margin-top:18px;">Or paste a GitHub PR URL into <strong>PR</strong> in the sidebar to review one without a local clone.</p>
           </div>
@@ -245,11 +245,19 @@
 
       <!-- New worktree tab -->
       <div id="tab-new" class="tab-content active">
-        <div id="modal-repo-indicator" class="modal-repo-indicator"></div>
+        <div id="modal-repo-picker">
+          <label>Source repo:</label>
+          <div id="modal-repo-row">
+            <span id="modal-repo-path" class="modal-repo-path">No repo selected</span>
+            <button id="btn-modal-repo-browse" type="button" class="modal-input-btn" title="Browse for a git repo">Browse</button>
+            <button id="btn-modal-repo-recents" type="button" class="modal-input-btn modal-recents-btn" title="Recent repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
+            <div id="modal-repo-recents-list" class="modal-recents-list" hidden role="listbox"></div>
+          </div>
+        </div>
         <p>Enter a name (creates a new branch off the default), or pick an existing branch to continue working on it in a worktree.</p>
         <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
         <div id="basebranch-picker">
-          <label>Branch:</label>
+          <label>Base branch:</label>
           <div id="basebranch-combobox">
             <input id="modal-base-branch-input" type="text" placeholder="Search branches..." autocomplete="off" spellcheck="false" />
             <div id="modal-base-branch-list" hidden></div>
@@ -259,6 +267,9 @@
           <label>Location:</label>
           <div id="basepath-row">
             <input id="basepath-input" type="text" spellcheck="false" autocomplete="off" placeholder="Default (repo parent dir) — drag a folder or paste to override">
+            <button id="basepath-browse" type="button" class="modal-input-btn" title="Browse for a folder">Browse</button>
+            <button id="basepath-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Recent base paths" aria-haspopup="listbox" aria-expanded="false">▾</button>
+            <div id="basepath-recents-list" class="modal-recents-list" hidden role="listbox"></div>
           </div>
         </div>
       </div>
@@ -268,6 +279,9 @@
         <p>Select an existing worktree directory to attach Claude Code to.</p>
         <div id="path-picker">
           <input id="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
+          <button id="path-browse" type="button" class="modal-input-btn" title="Browse for a worktree folder">Browse</button>
+          <button id="path-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Recent worktrees" aria-haspopup="listbox" aria-expanded="false">▾</button>
+          <div id="path-recents-list" class="modal-recents-list" hidden role="listbox"></div>
         </div>
       </div>
 

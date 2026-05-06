@@ -242,6 +242,43 @@ ipcMain.handle('list-worktrees', async () => {
   }
 });
 
+// Recently-used paths for the worktree modal's basepath + existing-worktree
+// inputs. Source repos already live in config.projects; these two lists
+// (worktrees, basepaths) cover the other two inputs. MRU order, capped at
+// 10. Source-repo recents reuse list-projects / remove-project / switch-
+// project — no new IPC for that case.
+const RECENT_KINDS = new Set(['worktrees', 'basepaths']);
+const RECENT_CAP = 10;
+
+ipcMain.handle('recent-paths-get', () => {
+  const config = loadConfig();
+  const r = config.recentPaths || {};
+  return { worktrees: r.worktrees || [], basepaths: r.basepaths || [] };
+});
+
+ipcMain.handle('recent-paths-add', (_event, { kind, path: p }) => {
+  if (!RECENT_KINDS.has(kind) || !p || typeof p !== 'string') return { ok: false };
+  const config = loadConfig();
+  if (!config.recentPaths) config.recentPaths = {};
+  const existing = config.recentPaths[kind] || [];
+  // MRU: drop any prior occurrence, prepend, cap.
+  const next = [p, ...existing.filter(x => x !== p)].slice(0, RECENT_CAP);
+  config.recentPaths[kind] = next;
+  saveConfig(config);
+  return { ok: true, list: next };
+});
+
+ipcMain.handle('recent-paths-remove', (_event, { kind, path: p }) => {
+  if (!RECENT_KINDS.has(kind) || !p) return { ok: false };
+  const config = loadConfig();
+  if (!config.recentPaths) config.recentPaths = {};
+  const existing = config.recentPaths[kind] || [];
+  const next = existing.filter(x => x !== p);
+  config.recentPaths[kind] = next;
+  saveConfig(config);
+  return { ok: true, list: next };
+});
+
 ipcMain.handle('hide-worktree', (_event, { worktreePath }) => {
   const config = loadConfig();
   if (!config.hiddenWorktrees) config.hiddenWorktrees = [];

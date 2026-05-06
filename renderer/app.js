@@ -763,8 +763,19 @@
   const modalCancel = document.getElementById('modal-cancel');
   const pathInput = document.getElementById('path-input');
   const pathPicker = document.getElementById('path-picker');
+  const pathBrowseBtn = document.getElementById('path-browse');
+  const pathRecentsBtn = document.getElementById('path-recents-btn');
+  const pathRecentsList = document.getElementById('path-recents-list');
   const basepathInput = document.getElementById('basepath-input');
   const basepathRow = document.getElementById('basepath-row');
+  const basepathBrowseBtn = document.getElementById('basepath-browse');
+  const basepathRecentsBtn = document.getElementById('basepath-recents-btn');
+  const basepathRecentsList = document.getElementById('basepath-recents-list');
+  const modalRepoRow = document.getElementById('modal-repo-row');
+  const modalRepoPathEl = document.getElementById('modal-repo-path');
+  const modalRepoBrowseBtn = document.getElementById('btn-modal-repo-browse');
+  const modalRepoRecentsBtn = document.getElementById('btn-modal-repo-recents');
+  const modalRepoRecentsList = document.getElementById('modal-repo-recents-list');
   const modalTabs = document.querySelectorAll('.modal-tab');
   const tabContents = document.querySelectorAll('.tab-content');
 
@@ -1004,6 +1015,177 @@
     basepathInput.classList.add('has-path');
   });
 
+  // Worktree-path / basepath Browse: native Finder via the parentless
+  // browse-directory IPC (sidesteps the scopedbookmarksagent hang that
+  // affects sheet-attached NSOpenPanels on this Mac). The inputs still
+  // accept drag/paste as a fallback path.
+  pathBrowseBtn.addEventListener('click', async function () {
+    var dir = await window.klaus.repo.browseDirectory();
+    if (!dir) return;
+    selectedWorktreePath = dir;
+    pathInput.value = dir;
+    pathInput.classList.add('has-path');
+  });
+  basepathBrowseBtn.addEventListener('click', async function () {
+    var dir = await window.klaus.repo.browseDirectory();
+    if (!dir) return;
+    selectedBasePath = dir;
+    basepathInput.value = dir;
+    basepathInput.classList.add('has-path');
+  });
+
+  // Recents dropdown helper. items = [{ label, path }]. Wires the ▾ button
+  // to toggle a list of paths next to its input. Each item has a × that
+  // calls onRemove and re-opens the list with the updated set.
+  function bindRecentsDropdown(button, list, opts) {
+    function close() {
+      list.hidden = true;
+      button.setAttribute('aria-expanded', 'false');
+    }
+    function open() {
+      Promise.resolve(opts.loadItems()).then(function (items) {
+        if (!items || !items.length) {
+          list.innerHTML = '<div class="modal-recents-empty">' + escHtml(opts.emptyText || 'No recent paths') + '</div>';
+        } else {
+          list.innerHTML = items.map(function (it) {
+            var p = it.path;
+            var label = it.label && it.label !== p ? it.label : '';
+            var sub = label ? '<span class="modal-recents-sub">' + escHtml(p) + '</span>' : '';
+            var main = label ? escHtml(label) : escHtml(p);
+            return '<div class="modal-recents-item" data-path="' + escHtml(p) + '">'
+              + '<span class="modal-recents-pick">' + main + sub + '</span>'
+              + '<button type="button" class="modal-recents-remove" title="Remove from recents" data-path="' + escHtml(p) + '">×</button>'
+            + '</div>';
+          }).join('');
+        }
+        list.hidden = false;
+        button.setAttribute('aria-expanded', 'true');
+      });
+    }
+    button.addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (list.hidden) open(); else close();
+    });
+    list.addEventListener('click', function (e) {
+      var rm = e.target.closest('.modal-recents-remove');
+      if (rm) {
+        e.stopPropagation();
+        var p = rm.getAttribute('data-path');
+        Promise.resolve(opts.onRemove(p)).then(open);
+        return;
+      }
+      var pick = e.target.closest('.modal-recents-item');
+      if (pick) {
+        e.stopPropagation();
+        var p = pick.getAttribute('data-path');
+        opts.onPick(p);
+        close();
+      }
+    });
+    document.addEventListener('click', function (e) {
+      if (list.hidden) return;
+      if (button.contains(e.target) || list.contains(e.target)) return;
+      close();
+    });
+  }
+
+  bindRecentsDropdown(pathRecentsBtn, pathRecentsList, {
+    loadItems: function () {
+      return window.klaus.repo.recentPathsGet().then(function (r) {
+        return (r.worktrees || []).map(function (p) { return { path: p }; });
+      });
+    },
+    onPick: function (p) {
+      selectedWorktreePath = p;
+      pathInput.value = p;
+      pathInput.classList.add('has-path');
+    },
+    onRemove: function (p) { return window.klaus.repo.recentPathsRemove('worktrees', p); },
+    emptyText: 'No recent worktrees yet',
+  });
+  // Switch the active repo (used by the source-repo Browse button, the
+  // recents dropdown, and the drag-and-drop handler). Re-syncs the path
+  // display, branch dropdown, and the basepath placeholder.
+  function applyRepoSwitch(dir) {
+    AppState.repoPath = dir;
+    if (modalRepoPathEl) modalRepoPathEl.textContent = dir;
+    selectedBaseBranch = '';
+    populateBaseBranchSelect();
+    if (!selectedBasePath) {
+      basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
+    }
+  }
+
+  // Source-repo Browse: native Finder via browse-directory IPC. addProject
+  // validates the picked folder is a git repo (offers git init if not)
+  // and persists it into config.projects so it shows in the recents list
+  // next time.
+  modalRepoBrowseBtn.addEventListener('click', async function () {
+    var dir = await window.klaus.repo.browseDirectory();
+    if (!dir) return;
+    var added = await window.klaus.repo.addProject(dir);
+    if (!added) return;
+    applyRepoSwitch(added.path);
+  });
+
+  // Source-repo recents dropdown: lists config.projects, picks via
+  // switchProject, ✕ removes via removeProject.
+  bindRecentsDropdown(modalRepoRecentsBtn, modalRepoRecentsList, {
+    loadItems: function () {
+      return window.klaus.repo.listProjects().then(function (projects) {
+        return (projects || []).map(function (p) {
+          return { label: p.name, path: p.path };
+        });
+      });
+    },
+    onPick: function (p) {
+      window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
+    },
+    onRemove: function (p) { return window.klaus.repo.removeProject(p); },
+    emptyText: 'No recent repos yet',
+  });
+
+  // Source-repo drag-and-drop fallback. Drop a folder onto the row to
+  // switch the active repo — same path as the Browse button.
+  if (modalRepoRow) {
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      modalRepoRow.addEventListener(evt, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        modalRepoRow.classList.add('drag-over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (evt) {
+      modalRepoRow.addEventListener(evt, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        modalRepoRow.classList.remove('drag-over');
+      });
+    });
+    modalRepoRow.addEventListener('drop', async function (e) {
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      var p = window.klaus.fs.getPathForFile(file);
+      if (!p) return;
+      var added = await window.klaus.repo.addProject(p);
+      if (!added) return;
+      applyRepoSwitch(added.path);
+    });
+  }
+
+  bindRecentsDropdown(basepathRecentsBtn, basepathRecentsList, {
+    loadItems: function () {
+      return window.klaus.repo.recentPathsGet().then(function (r) {
+        return (r.basepaths || []).map(function (p) { return { path: p }; });
+      });
+    },
+    onPick: function (p) {
+      selectedBasePath = p;
+      basepathInput.value = p;
+      basepathInput.classList.add('has-path');
+    },
+    onRemove: function (p) { return window.klaus.repo.recentPathsRemove('basepaths', p); },
+    emptyText: 'No recent base paths yet',
+  });
+
   function defaultBasePathDisplay() {
     if (!AppState.repoPath) return 'Default';
     var p = AppState.repoPath;
@@ -1032,33 +1214,9 @@
     populateBaseBranchSelect();
     var envField = document.getElementById('modal-env-vars');
     if (envField) envField.value = '';
-    // Show repo picker so user explicitly selects which repo to create worktree from
-    var repoIndicator = document.getElementById('modal-repo-indicator');
-    if (repoIndicator) {
-      repoIndicator.innerHTML =
-        '<strong>Repo:</strong> ' +
-        '<span id="modal-repo-path" class="modal-repo-path">' + escHtml(AppState.repoPath || 'No repo selected') + '</span>' +
-        ' <button id="btn-modal-repo-browse" class="modal-repo-browse">Browse</button>';
-      repoIndicator.style.display = '';
-      document.getElementById('btn-modal-repo-browse').addEventListener('click', async function () {
-        var dir = await window.pickDirectoryPopup({
-          title: 'Select repo',
-          placeholder: 'Drag a git repo folder here or paste a path',
-        });
-        if (dir) {
-          AppState.repoPath = dir;
-          document.getElementById('modal-repo-path').textContent = dir;
-          // Switching repos: clear the cached selection then re-fetch +
-          // re-populate the branch dropdown for the new project. Update
-          // the location placeholder unless the user already overrode it.
-          selectedBaseBranch = '';
-          populateBaseBranchSelect();
-          if (!selectedBasePath) {
-            basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
-          }
-        }
-      });
-    }
+    // Sync the source-repo display to whatever AppState says — buttons
+    // and drag handlers were wired once at IIFE init.
+    if (modalRepoPathEl) modalRepoPathEl.textContent = AppState.repoPath || 'No repo selected';
     setTimeout(function () { modalInput.focus(); }, 50);
   }
 
@@ -1654,13 +1812,14 @@
   // the dialog. Manual invocation also available via the command palette.
   setTimeout(function () { Dialogs.checkAndPromptDeps(); }, 800);
 
-  // Empty-state CTA: "Add a project" delegates to the same flow as the
-  // project switcher's `+` button.
+  // Empty-state CTA: "Add a worktree" opens the same modal as the
+  // sidebar's `+` New Task button. The modal's source-repo Browse/drag/
+  // recents flow lets the user pick a repo from inside the modal even
+  // before any project has been added.
   var emptyAddProj = document.getElementById('empty-state-add-project');
   if (emptyAddProj) {
     emptyAddProj.addEventListener('click', function () {
-      var btn = document.getElementById('btn-add-project');
-      if (btn) btn.click();
+      btnNewTask.click();
     });
   }
   ['empty-state-open-folder', 'empty-state-open-folder-np'].forEach(function (linkId) {
@@ -1744,6 +1903,15 @@
     if (result.error) {
       modalError.textContent = result.error;
       return;
+    }
+
+    // Record the paths we just used so they show in the recents dropdowns
+    // next time. Only record on a successful create/attach so abandoned
+    // typing doesn't pollute the list.
+    if (activeTab === 'new' && selectedBasePath) {
+      window.klaus.repo.recentPathsAdd('basepaths', selectedBasePath);
+    } else if (activeTab === 'existing' && selectedWorktreePath) {
+      window.klaus.repo.recentPathsAdd('worktrees', selectedWorktreePath);
     }
 
     hideModal();
