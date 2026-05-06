@@ -39,6 +39,9 @@ contextBridge.exposeInMainWorld('klaus', {
     listWorktrees: () => ipcRenderer.invoke('list-worktrees'),
     hideWorktree: (worktreePath) => ipcRenderer.invoke('hide-worktree', { worktreePath }),
     browseDirectory: () => ipcRenderer.invoke('browse-directory'),
+    recentPathsGet: () => ipcRenderer.invoke('recent-paths-get'),
+    recentPathsAdd: (kind, path) => ipcRenderer.invoke('recent-paths-add', { kind, path }),
+    recentPathsRemove: (kind, path) => ipcRenderer.invoke('recent-paths-remove', { kind, path }),
   },
 
   // ---- task: Task lifecycle, notify, notes, transcripts, dirty-worktree aggregator ----
