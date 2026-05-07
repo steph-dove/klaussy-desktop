@@ -211,28 +211,45 @@ ipcMain.handle('pr-review-checks', async () => {
   ]);
 
   const checks = [];
+  const parseErrors = [];
   if (!runsRes.err) {
     try {
       const parsed = JSON.parse(runsRes.stdout);
       const runs = parsed.check_runs || [];
       runs.forEach((r) => checks.push(normalizeCheckRun(r)));
-    } catch (_) {}
+    } catch (e) {
+      parseErrors.push('check-runs parse: ' + (e.message || String(e)));
+      console.error('[pr-review-checks] check-runs parse error:', e.message,
+        '— first 200 chars of stdout:', String(runsRes.stdout || '').slice(0, 200));
+    }
   }
   if (!statusRes.err) {
     try {
       const parsed = JSON.parse(statusRes.stdout);
       const statuses = parsed.statuses || [];
       statuses.forEach((s) => checks.push(normalizeStatus(s)));
-    } catch (_) {}
+    } catch (e) {
+      parseErrors.push('status parse: ' + (e.message || String(e)));
+      console.error('[pr-review-checks] status parse error:', e.message,
+        '— first 200 chars of stdout:', String(statusRes.stdout || '').slice(0, 200));
+    }
   }
 
   // Only surface an error if BOTH APIs failed — previously `||` meant that
   // a legitimate "no checks" response from one endpoint plus a transient
   // failure on the other was reported as an error, swallowing real data.
-  if (checks.length === 0 && runsRes.err && statusRes.err) {
-    const first = runsRes.err || statusRes.err;
-    const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
-    return { checks: [], error: raw.trim() };
+  // Also surface JSON parse failures: an HTML auth-redirect coming back as
+  // 200 would otherwise look identical to "no checks reported" and silently
+  // green-light the required-checks gate.
+  if (checks.length === 0) {
+    if (runsRes.err && statusRes.err) {
+      const first = runsRes.err || statusRes.err;
+      const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
+      return { checks: [], error: raw.trim() };
+    }
+    if (parseErrors.length > 0) {
+      return { checks: [], error: 'Could not parse GitHub check responses: ' + parseErrors.join('; ') };
+    }
   }
   return { checks };
 });
@@ -259,8 +276,14 @@ async function fetchRequiredContexts(cwd, baseOwner, baseRepo, baseBranch) {
         try {
           const parsed = JSON.parse(stdout);
           resolve({ required: parsed.contexts || [] });
-        } catch (_) {
-          resolve({ required: [] });
+        } catch (e) {
+          // Garbage from gh would otherwise be indistinguishable from a 404
+          // (no protection) — and the renderer would falsely say "no required
+          // checks" + green-light merges. Surface as an error so it can be
+          // shown in the gate UI as "unknown" rather than "none".
+          console.error('[fetchRequiredContexts] JSON parse error:', e.message,
+            '— first 200 chars of stdout:', String(stdout || '').slice(0, 200));
+          resolve({ required: [], error: 'Could not parse required-checks response: ' + e.message });
         }
       },
     );
@@ -379,6 +402,14 @@ ipcMain.handle('pr-review-run-log-watch-start', async (event, { requestId, runId
   let lastLen = 0;
   let stopped = false;
   let timer = null;
+  // Track consecutive failures across both subcalls so a sustained problem
+  // (auth error, 403 rate limit, wrong runId, gh missing) ends the watcher
+  // with a real error instead of spinning forever showing no output. A run
+  // that hasn't started its first job will return errors transiently — the
+  // counter resets on any healthy tick.
+  const MAX_CONSECUTIVE_FAILURES = 3;
+  let consecutiveFailures = 0;
+  let lastFailureMsg = '';
 
   function stop() {
     stopped = true;
@@ -386,8 +417,18 @@ ipcMain.handle('pr-review-run-log-watch-start', async (event, { requestId, runId
     watchedRunLogs.delete(requestId);
   }
 
+  function fail(reason) {
+    if (!sender.isDestroyed()) {
+      sender.send(`pr-review-run-log-done-${requestId}`, {
+        error: 'Log tail failed: ' + (reason || 'unknown error'),
+      });
+    }
+    stop();
+  }
+
   async function tick() {
     if (stopped) return;
+    let tickHadFailure = false;
     try {
       const { stdout } = await execFileP(
         'gh', ['run', 'view', String(runId), '-R', `${baseOwner}/${baseRepo}`, '--log'],
@@ -410,7 +451,11 @@ ipcMain.handle('pr-review-run-log-watch-start', async (event, { requestId, runId
           sender.send(`pr-review-run-log-chunk-${requestId}`, delta);
         }
       }
-    } catch (_) { /* not started or transient — retry next tick */ }
+    } catch (err) {
+      tickHadFailure = true;
+      lastFailureMsg = ((err && (err.stderr || err.message)) || String(err)).toString().trim();
+      console.error('[pr-review-run-log-watch] log fetch failed:', lastFailureMsg);
+    }
 
     if (stopped) return;
     // Poll status separately so a still-fetching log doesn't keep the watcher
@@ -431,9 +476,25 @@ ipcMain.handle('pr-review-run-log-watch-start', async (event, { requestId, runId
         stop();
         return;
       }
-    } catch (_) {}
+      // Status poll worked. If log fetch also worked this tick the run is
+      // healthy — reset the counter. If only the log fetch failed, the run
+      // is live and the log endpoint is just flaky; don't burn the budget
+      // on that.
+      if (!tickHadFailure) consecutiveFailures = 0;
+    } catch (err) {
+      tickHadFailure = true;
+      lastFailureMsg = ((err && (err.stderr || err.message)) || String(err)).toString().trim();
+      console.error('[pr-review-run-log-watch] status poll failed:', lastFailureMsg);
+    }
 
     if (stopped) return;
+    if (tickHadFailure) {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        fail(lastFailureMsg);
+        return;
+      }
+    }
     timer = setTimeout(tick, 3000);
   }
 
@@ -1203,23 +1264,40 @@ ipcMain.handle('pr-checks', async (_event, { worktreePath, prNumber }) => {
     ]);
 
     const checks = [];
+    const parseErrors = [];
     if (!runsRes.err) {
       try {
         const parsed = JSON.parse(runsRes.stdout);
         (parsed.check_runs || []).forEach((r) => checks.push(normalizeCheckRun(r)));
-      } catch (_) {}
+      } catch (e) {
+        parseErrors.push('check-runs parse: ' + (e.message || String(e)));
+        console.error('[pr-checks] check-runs parse error:', e.message,
+          '— first 200 chars of stdout:', String(runsRes.stdout || '').slice(0, 200));
+      }
     }
     if (!statusRes.err) {
       try {
         const parsed = JSON.parse(statusRes.stdout);
         (parsed.statuses || []).forEach((s) => checks.push(normalizeStatus(s)));
-      } catch (_) {}
+      } catch (e) {
+        parseErrors.push('status parse: ' + (e.message || String(e)));
+        console.error('[pr-checks] status parse error:', e.message,
+          '— first 200 chars of stdout:', String(statusRes.stdout || '').slice(0, 200));
+      }
     }
-    if (checks.length === 0 && runsRes.err && statusRes.err) {
-      const first = runsRes.err || statusRes.err;
-      const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
-      if (/no checks reported/i.test(raw)) return { checks: [] };
-      return { checks: [], error: raw.trim() };
+    // Distinguish "no checks reported" from "we couldn't read what GitHub returned".
+    // The latter must surface as an error so the renderer doesn't falsely show
+    // "No checks reported" + falsely green-light merges via the required-checks gate.
+    if (checks.length === 0) {
+      if (runsRes.err && statusRes.err) {
+        const first = runsRes.err || statusRes.err;
+        const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
+        if (/no checks reported/i.test(raw)) return { checks: [] };
+        return { checks: [], error: raw.trim() };
+      }
+      if (parseErrors.length > 0) {
+        return { checks: [], error: 'Could not parse GitHub check responses: ' + parseErrors.join('; ') };
+      }
     }
     return { checks };
   } catch (err) {
