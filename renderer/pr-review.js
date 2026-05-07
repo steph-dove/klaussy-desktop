@@ -52,8 +52,14 @@ window.PrReview = (function () {
   // G6: latest checks result for the active PR. null = not yet fetched.
   var currentChecks = null;
   // Required-status-checks for the PR's base branch (from branch protection).
-  // Loaded lazily alongside currentChecks. Empty array = no protection rules.
+  // Loaded lazily alongside currentChecks.
+  //   []                  → no protection rules (or branch not protected)
+  //   ['name', 'name', …] → required contexts
+  // currentRequiredChecksError carries a string when the fetch parsed garbage
+  // or hit auth issues — the gate must render as "unknown" in that case so we
+  // don't falsely green-light merges.
   var currentRequiredChecks = [];
+  var currentRequiredChecksError = '';
   // Local-changes panel state (Review tab). Refreshed on tab show and after
   // each implement/commit/push. Stays null until the first fetch completes.
   // Shape: { worktreePath, branch, files:[{status,file}], diff, unpushed:[{hash,short,subject}], headRefOid }
@@ -3761,8 +3767,17 @@ window.PrReview = (function () {
       var req = await window.klaus.pr.reviewRequiredChecks();
       if (lastState && lastState.number === forNumber) {
         currentRequiredChecks = (req && req.required) || [];
+        currentRequiredChecksError = (req && req.error) || '';
       }
-    } catch (_) { /* required-checks failure shouldn't blank the tab */ }
+    } catch (err) {
+      // The gate must not silently green-light merges if the fetch itself
+      // crashes (the IPC handler is supposed to catch and return an error,
+      // but renderer crashes happen too). Surface as "unknown" in the gate.
+      if (lastState && lastState.number === forNumber) {
+        currentRequiredChecks = [];
+        currentRequiredChecksError = (err && err.message) || 'unknown error';
+      }
+    }
     renderChecksIntoSlot();
     // Merge gate depends on checks, so repaint the merge control too.
     var mergeWrap = hostEl.querySelector('.pr-merge-wrap');
@@ -3811,8 +3826,18 @@ window.PrReview = (function () {
     // Required-checks gate: shows X/Y required passing + a chip list. Required
     // names that have no matching check today are rendered as "missing" chips —
     // those still gate merge per branch protection rules.
+    //
+    // If the fetch errored (e.g. gh returned garbage, auth scope missing),
+    // render an "unknown" gate explicitly. Silently rendering as "no required
+    // checks" would falsely green-light merges.
     var requiredGate = '';
-    if (currentRequiredChecks && currentRequiredChecks.length > 0) {
+    if (currentRequiredChecksError) {
+      requiredGate = '<div class="pr-required-gate pr-required-unknown" title="' + escHtml(currentRequiredChecksError) + '">'
+        + '<div class="pr-required-summary">'
+          + 'Required checks: <strong>unknown</strong> — could not load branch protection rules. Verify on GitHub before merging.'
+        + '</div>'
+      + '</div>';
+    } else if (currentRequiredChecks && currentRequiredChecks.length > 0) {
       var passingRequired = 0;
       var chipHtml = currentRequiredChecks.map(function (name) {
         var match = checks.find(function (c) { return (c.name || '') === name; });

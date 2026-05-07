@@ -205,8 +205,23 @@ ipcMain.handle('pr-debug-check-open-task', async (_event, { analysis, checkName,
   // write too early the bracketed-paste markers land in the splash screen and
   // claude treats them as garbage. 1500ms matches the cadence of other
   // first-prompt writes elsewhere in the app.
+  //
+  // The handler returns ok:true before this fires, so a silent write failure
+  // would leave the user with a blank task and no signal. Log + emit a paste-
+  // failed event so the renderer can flip the button state and the failure
+  // is recoverable from main.log.
   setTimeout(() => {
-    try { target.pty.write(BP_START + text + BP_END); } catch (_) {}
+    try {
+      target.pty.write(BP_START + text + BP_END);
+    } catch (err) {
+      const msg = (err && err.message) || String(err);
+      console.error('[pr-debug-check-open-task] pty.write failed:', msg);
+      if (event.sender && !event.sender.isDestroyed()) {
+        event.sender.send('pr-debug-check-open-task-paste-failed', {
+          taskId: target.id, error: msg,
+        });
+      }
+    }
   }, 1500);
 
   return { ok: true, taskId: target.id };
