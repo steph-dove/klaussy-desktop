@@ -97,7 +97,13 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
         annotationsBlock = `\n## Annotations (file:line hints from the check run)\n${top}\n`
           + (annos.length > 10 ? `\n[... ${annos.length - 10} more not shown ...]\n` : '');
       }
-    } catch (_) { /* annotations are best-effort; absence is normal */ }
+    } catch (err) {
+      // Best-effort enrichment — don't fail the whole debug call. But log so
+      // a sustained issue (token missing checks:read scope, persistent 5xx)
+      // is recoverable from main.log without a debugger.
+      console.error('[pr-debug-check-start] annotations fetch failed:',
+        ((err && (err.stderr || err.message)) || String(err)).toString().trim());
+    }
   }
 
   // Workflow YAML: read the matching workflow file from .github/workflows in
@@ -129,7 +135,12 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
         workflowBlock = `\n## Workflow definition (\`.github/workflows/${best.file}\`)\n\`\`\`yaml\n${truncated}\n${best.text.split('\n').length > 200 ? '\n[... truncated ...]\n' : ''}\`\`\`\n`;
       }
     }
-  } catch (_) { /* best-effort */ }
+  } catch (err) {
+    // Best-effort enrichment — fs read or YAML match failed. Log so a
+    // permission issue on .github/workflows surfaces in main.log.
+    console.error('[pr-debug-check-start] workflow YAML lookup failed:',
+      ((err && err.message) || String(err)).toString().trim());
+  }
 
   const prompt =
     `A pull request has a failing CI check. Help diagnose it.\n\n`
