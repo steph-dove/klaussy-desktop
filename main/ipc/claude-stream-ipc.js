@@ -7,7 +7,7 @@
 const { ipcMain } = require('electron');
 const crypto = require('crypto');
 const { execFile, execFileSync } = require('child_process');
-const { instances } = require('../state/instances');
+const { instances, spawnInWorktree } = require('../state/instances');
 const { prReview, ensureWorktreeForActivePr, currentRepoPath } = require('../state/pr-review');
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
@@ -28,7 +28,7 @@ function shortHash(s) {
 // prompt with PR description + diff + log tail, and streams claude's analysis
 // back to the renderer. Same chunk/done event protocol as Explain so the
 // renderer can reuse the same UX.
-ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName }) => {
+ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName, checkRunId }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
   if (!prReview.active) return { error: 'No active PR review' };
@@ -46,22 +46,21 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
   const cwd = currentRepoPath() || require('os').homedir();
   const sender = event.sender;
 
-  // Fetch logs. gh run view follows the 302-to-download redirect properly,
-  // unlike the bare `gh api .../jobs/{id}/logs` call which often surfaces
-  // as HTTP 404. Fall back to the api endpoint if `gh run view` fails (e.g.
-  // wrong repo, expired retention).
+  // Fetch logs. Prefer job-specific endpoint (tighter context = better diagnosis)
+  // and fall back to run-wide --log-failed only if the job endpoint fails.
+  // Both paths cap at 50 MB.
   let logs = '';
   try {
     logs = execFileSync('gh', [
-      'run', 'view', String(runId),
-      '-R', `${baseOwner}/${baseRepo}`,
-      '--log-failed',
-    ], { cwd, stdio: 'pipe', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }).toString();
+      'api', `/repos/${baseOwner}/${baseRepo}/actions/jobs/${jobId}/logs`,
+    ], { cwd, stdio: 'pipe', timeout: 20000, maxBuffer: 50 * 1024 * 1024 }).toString();
   } catch (errA) {
     try {
       logs = execFileSync('gh', [
-        'api', `/repos/${baseOwner}/${baseRepo}/actions/jobs/${jobId}/logs`,
-      ], { cwd, stdio: 'pipe', timeout: 20000, maxBuffer: 50 * 1024 * 1024 }).toString();
+        'run', 'view', String(runId),
+        '-R', `${baseOwner}/${baseRepo}`,
+        '--log-failed',
+      ], { cwd, stdio: 'pipe', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }).toString();
     } catch (errB) {
       const msg = (errA.stderr ? errA.stderr.toString().trim() : errA.message)
         || (errB.stderr ? errB.stderr.toString().trim() : errB.message);
@@ -77,11 +76,68 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
   const diffSnippet = (diff || '').split('\n').slice(0, 600).join('\n')
     + ((diff || '').split('\n').length > 600 ? '\n\n[... diff truncated ...]\n' : '');
 
+  // Annotations: pre-localized fix hints from the check-run. When provided,
+  // these are dramatically better than scanning the log tail. We cap at 10
+  // entries so a noisy check (e.g. eslint with 200 errors) doesn't dominate.
+  let annotationsBlock = '';
+  if (checkRunId) {
+    try {
+      const annoRaw = execFileSync('gh', [
+        'api', `/repos/${baseOwner}/${baseRepo}/check-runs/${checkRunId}/annotations`,
+        '--paginate',
+      ], { cwd, stdio: 'pipe', timeout: 10000, maxBuffer: 4 * 1024 * 1024 }).toString();
+      const annos = JSON.parse(annoRaw);
+      if (Array.isArray(annos) && annos.length > 0) {
+        const top = annos.slice(0, 10).map((a) => {
+          const loc = (a.path ? a.path : '?')
+            + (a.start_line ? `:${a.start_line}` : '')
+            + (a.end_line && a.end_line !== a.start_line ? `-${a.end_line}` : '');
+          return `- [${a.annotation_level || 'notice'}] ${loc} — ${(a.title ? `**${a.title}** ` : '') + (a.message || '')}`.replace(/\n+/g, ' ');
+        }).join('\n');
+        annotationsBlock = `\n## Annotations (file:line hints from the check run)\n${top}\n`
+          + (annos.length > 10 ? `\n[... ${annos.length - 10} more not shown ...]\n` : '');
+      }
+    } catch (_) { /* annotations are best-effort; absence is normal */ }
+  }
+
+  // Workflow YAML: read the matching workflow file from .github/workflows in
+  // the local worktree. Match by `name:` field. Local copy may differ from
+  // the PR head's copy, but it's almost always close enough to explain what
+  // the failing step was supposed to do. Skip silently if no match.
+  let workflowBlock = '';
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const wfDir = path.join(cwd, '.github', 'workflows');
+    if (fs.existsSync(wfDir)) {
+      const files = fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/i.test(f));
+      // Match by workflow name (read from --name in the source) against the
+      // failing check's app name + check name. Heuristic: read the file's
+      // `name:` line and compare against checkName.
+      const targetTokens = (checkName || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      let best = null;
+      for (const f of files) {
+        const full = path.join(wfDir, f);
+        const text = fs.readFileSync(full, 'utf8');
+        const nameMatch = text.match(/^name\s*:\s*(.+)$/m);
+        const wfName = nameMatch ? nameMatch[1].replace(/['"]/g, '').trim().toLowerCase() : f.toLowerCase();
+        const score = targetTokens.reduce((acc, t) => acc + (wfName.includes(t) ? 1 : 0), 0);
+        if (!best || score > best.score) best = { score, file: f, text };
+      }
+      if (best && best.score > 0) {
+        const truncated = best.text.split('\n').slice(0, 200).join('\n');
+        workflowBlock = `\n## Workflow definition (\`.github/workflows/${best.file}\`)\n\`\`\`yaml\n${truncated}\n${best.text.split('\n').length > 200 ? '\n[... truncated ...]\n' : ''}\`\`\`\n`;
+      }
+    }
+  } catch (_) { /* best-effort */ }
+
   const prompt =
     `A pull request has a failing CI check. Help diagnose it.\n\n`
     + `## PR\n#${meta.number}: ${meta.title || ''}\n`
     + (meta.body ? `\n${meta.body.slice(0, 2000)}\n` : '')
     + `\n## Failing check\nName: ${checkName || '(unnamed)'}\nLink: ${checkLink}\n`
+    + annotationsBlock
+    + workflowBlock
     + `\n## Last lines of the failing job log\n\`\`\`\n${logTail}\n\`\`\`\n`
     + `\n## PR diff (truncated to 600 lines)\n\`\`\`\n${diffSnippet}\n\`\`\`\n`
     + `\nAnswer in this structure:\n`
@@ -113,6 +169,48 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
 });
 
 ipcMain.handle('pr-debug-check-cancel', makeClaudeCancelHandler(debugCheckProcs));
+
+// Turn a finished debug analysis into a Claude task on the PR's worktree.
+// Materializes the worktree if needed, spawns a fresh claude instance, then
+// pastes the analysis as the first prompt so the user can ask "apply this fix"
+// without re-typing context.
+ipcMain.handle('pr-debug-check-open-task', async (_event, { analysis, checkName, prNumber }) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+  const { worktreePath, branch } = ensured;
+  const taskName = ('Fix CI: ' + (checkName || 'check')).slice(0, 60);
+
+  // Try to reuse an existing alive Claude task on this worktree before spawning
+  // a new one — saves an extra terminal in the sidebar and matches what
+  // pr-fix-in-terminal already does.
+  let target = null;
+  for (const [, inst] of instances) {
+    if (inst.worktreePath === worktreePath && inst.alive && inst.mode === 'claude') { target = inst; break; }
+  }
+  if (!target) {
+    const result = spawnInWorktree(taskName, worktreePath, branch, 'claude', null, null, prNumber);
+    if (result && result.error) return { error: result.error };
+    target = instances.get(result.id);
+  }
+  if (!target || !target.pty) return { error: 'Failed to spawn task on worktree' };
+
+  const BP_START = '\x1b[200~';
+  const BP_END = '\x1b[201~';
+  const safeAnalysis = String(analysis || '').replace(/\x1b\[20[01]~/g, '');
+  const text = 'Help me fix this failing CI check. Below is an analysis produced from the failing job\'s annotations + log + the PR diff. Please propose and apply the fix in this worktree.\n\n'
+    + '---\n\n' + safeAnalysis + '\n\n---\n';
+
+  // Write after a short delay so claude has time to render its prompt; if we
+  // write too early the bracketed-paste markers land in the splash screen and
+  // claude treats them as garbage. 1500ms matches the cadence of other
+  // first-prompt writes elsewhere in the app.
+  setTimeout(() => {
+    try { target.pty.write(BP_START + text + BP_END); } catch (_) {}
+  }, 1500);
+
+  return { ok: true, taskId: target.id };
+});
 
 // K3: inline AI edit — streams a claude -p replacement for a selection.
 // Kept deliberately strict: the prompt tells claude to emit ONLY the
