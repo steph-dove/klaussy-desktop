@@ -13,22 +13,83 @@ window.ActionModal = (function () {
   var tabs = overlay ? overlay.querySelectorAll('.plan-modal-tab') : [];
   var contents = overlay ? overlay.querySelectorAll('.plan-tab-content') : [];
 
-  // Per-action config — title shown at the top of the modal, the slash
-  // command typed into the new Claude tab, and a human label for the tab
-  // itself. Review runs a fixed multi-phase prompt and skips the modal
-  // entirely, so it has no entry here.
+  // Plan flow runs locally (no cloud round-trip), so it gets the full prompt
+  // inlined the same way Review does. The earlier `/ultraplan` slash command
+  // launched a remote session which has no access to the user's chat context
+  // (or any uncommitted code) — for a worktree-scoped tab that's the wrong
+  // shape. Debug stays as a local slash command since `/debug` ships with
+  // Claude Code itself.
+  var PLAN_PROMPT = [
+    'You are helping plan and implement a task. Follow these phases in order — do NOT skip Phase 2.',
+    '',
+    '## Phase 1 — Understand',
+    '',
+    'Explore the codebase to identify existing patterns, similar features, and the surface this task would touch. Launch 2–3 explore subagents in parallel if scope is uncertain. Return:',
+    '- The 5–10 most important files for this task.',
+    '- One paragraph summarizing the relevant surface area and existing conventions.',
+    '',
+    '## Phase 2 — Clarifying questions (CRITICAL — do not skip)',
+    '',
+    'List the ambiguities, edge cases, scope boundaries, error-handling preferences, and integration points the task description did not specify. Present a clear, numbered list to the user and wait for answers before designing.',
+    '',
+    'If the user replies "your call" or "no preference," commit to a recommendation and explicitly confirm it.',
+    '',
+    '## Phase 3 — Design',
+    '',
+    'Propose 1–3 implementation approaches with trade-offs (e.g. minimal-change vs. clean-architecture vs. pragmatic balance). Recommend one with reasoning. Identify the files that would change and how.',
+    '',
+    '## Phase 4 — Approval gate',
+    '',
+    'Enter plan mode, write the plan to the plan file, and call ExitPlanMode to request approval. Do NOT edit any files until the user approves.',
+    '',
+    '## Phase 5 — Implementation',
+    '',
+    'Work in small, independently-shippable batches. After each batch:',
+    '- Verify the code parses / compiles / lints (`node -c`, `tsc --noEmit`, `cargo check`, etc., as the language requires).',
+    '- Briefly state what changed (1–2 sentences).',
+    '- Pause if the next batch touches a different surface area or needs a separate user decision.',
+    '',
+    'For UI work, do not report a feature as complete without manually exercising it — or, if you cannot (no fixture data, no running services, etc.), flag the verification gap explicitly.',
+    '',
+    '## Anti-patterns to avoid',
+    '',
+    '- Skipping Phase 2 because the task "seems clear." Most clear-looking tasks have hidden ambiguities. Ask anyway.',
+    '- Adding features, abstractions, or refactors beyond what the task requires. YAGNI.',
+    '- New abstractions for code with only one or two callsites. Three similar lines is fine.',
+    '- Backwards-compatibility shims for code that has no other callers.',
+    '- Comments that explain "what" the code does. Only "why," and only when it is non-obvious.',
+    '- Changing an IPC return shape without grepping callers first.',
+    '- Silent error swallowing in catch blocks that masks real failures from the user.',
+    '',
+    '---',
+    '',
+    '## Task',
+    '',
+    '{{TASK}}',
+  ].join('\n');
+
+  // Per-action config — title shown at the top of the modal, the submission
+  // builder for the new Claude tab, and a human label for the tab itself.
+  // Review runs a fixed multi-phase prompt and skips the modal entirely, so
+  // it has no entry here.
   var ACTIONS = {
     plan: {
       label: 'Plan',
       title: 'Plan a task',
       submitLabel: 'Plan',
-      command: '/ultraplan',
+      hint: 'Provide details. A new Claude tab will open on this worktree and run a guided plan flow (explore → clarify → design → approve → implement) — all local, no cloud round-trip.',
+      buildSubmission: function (content) {
+        return PLAN_PROMPT.replace('{{TASK}}', content);
+      },
     },
     debug: {
       label: 'Debug',
       title: 'Debug an issue',
       submitLabel: 'Debug',
-      command: '/debug',
+      hint: 'Provide details. A new Claude tab will open on this worktree and run <code>/debug</code>.',
+      buildSubmission: function (content) {
+        return '/debug ' + content;
+      },
     },
   };
 
@@ -452,7 +513,7 @@ window.ActionModal = (function () {
     var task = AppState.tasks.get(taskId);
     titleEl.textContent = task && task.name ? (cfg.title + ' — ' + task.name) : cfg.title;
     if (subHint) {
-      subHint.innerHTML = 'Provide details. A new Claude tab will open on this worktree and run <code>' + cfg.command + '</code>.';
+      subHint.innerHTML = cfg.hint;
     }
     overlay.style.display = 'flex';
     setTimeout(function () { textarea.focus(); }, 0);
@@ -484,7 +545,7 @@ window.ActionModal = (function () {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Starting…';
     try {
-      var command = cfg.command + ' ' + content;
+      var command = cfg.buildSubmission(content);
       var result = await TerminalManager.openClaudeSubTerminal(currentTaskId, cfg.label, command);
       if (result && result.error) {
         errorEl.textContent = result.error;
