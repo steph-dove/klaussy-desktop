@@ -175,7 +175,11 @@ window.PRPanel = (function () {
     if (worktreeAtRequest !== currentWorktreePath || !currentPR || currentPR.number !== prNumber) return;
 
     currentChecks = checksResult;
-    renderPRChecks(checksResult);
+    // Required-checks list is fetched in parallel below; we render once with both.
+    var requiredResult = { required: [] };
+    try { requiredResult = await window.klaus.pr.requiredChecks(worktreeAtRequest, prNumber); } catch (_) {}
+    if (worktreeAtRequest !== currentWorktreePath || !currentPR || currentPR.number !== prNumber) return;
+    renderPRChecks(checksResult, requiredResult);
     updateMergeButton();
 
     if (threadsResult.error) {
@@ -200,7 +204,7 @@ window.PRPanel = (function () {
     renderCompletedReview(cacheResult.cached.review, cacheResult.cached.savedAt);
   }
 
-  function renderPRChecks(result) {
+  function renderPRChecks(result, requiredResult) {
     var host = document.getElementById('pr-checks');
     if (!host) return;
     host.innerHTML = '';
@@ -214,6 +218,7 @@ window.PRPanel = (function () {
       host.innerHTML = '<div class="pr-checks-empty">No checks reported.</div>';
       return;
     }
+    var requiredNames = (requiredResult && requiredResult.required) || [];
 
     // gh emits normalized buckets: pass, fail, pending, skipping, cancel.
     // Fall back to `state` when a check row has no bucket.
@@ -240,6 +245,17 @@ window.PRPanel = (function () {
     if (counts.cancel) summaryBits.push('<span class="pr-check-pill cancel">&#8854; ' + counts.cancel + ' cancelled</span>');
     if (counts.skipping) summaryBits.push('<span class="pr-check-pill skipping">&#8211; ' + counts.skipping + ' skipped</span>');
 
+    if (requiredNames.length > 0) {
+      var passingRequired = 0;
+      requiredNames.forEach(function (name) {
+        var match = checks.find(function (c) { return (c.name || '') === name; });
+        if (match && bucketOf(match) === 'pass') passingRequired += 1;
+      });
+      var allPass = passingRequired === requiredNames.length;
+      summaryBits.push('<span class="pr-check-pill required ' + (allPass ? 'pass' : 'gate') + '">'
+        + passingRequired + '/' + requiredNames.length + ' required</span>');
+    }
+
     var hasFail = counts.fail > 0;
     var expanded = hasFail; // auto-expand when anything is failing
 
@@ -249,12 +265,22 @@ window.PRPanel = (function () {
     html += '<span class="pr-checks-caret">&#9662;</span>';
     html += '</button>';
     html += '<div class="pr-checks-list">';
+    function formatDur(startedAt, completedAt) {
+      if (!startedAt) return '';
+      var end = completedAt ? new Date(completedAt) : new Date();
+      var ms = end - new Date(startedAt);
+      if (!isFinite(ms) || ms < 0) return '';
+      if (ms < 60000) return Math.max(1, Math.round(ms / 1000)) + 's';
+      return Math.round(ms / 60000) + 'm';
+    }
     checks.forEach(function (c) {
       var b = bucketOf(c);
       var label = c.workflow ? (c.workflow + ' / ' + (c.name || '')) : (c.name || '(unnamed)');
+      var dur = formatDur(c.startedAt, c.completedAt);
       html += '<div class="pr-check-row">';
       html += '<span class="pr-check-bucket pr-check-bucket-' + b + '">' + bucketGlyph(b) + '</span>';
       html += '<span class="pr-check-name">' + escHtml(label) + '</span>';
+      if (dur) html += '<span class="pr-check-dur">' + dur + '</span>';
       html += '<span class="pr-check-conclusion">' + escHtml(c.state || '') + '</span>';
       if (c.link) {
         html += '<a href="#" class="pr-check-link" data-url="' + escAttr(c.link) + '" title="Open in browser">&#8599;</a>';

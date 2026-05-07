@@ -64,7 +64,7 @@ contextBridge.exposeInMainWorld('klaus', {
     onPopoutInit: (callback) => {
       ipcRenderer.on('popout-init', (_event, data) => callback(data));
     },
-    setNotifyEnabled: (id, enabled) => ipcRenderer.invoke('set-notify-enabled', { id, enabled }),
+    setNotifyEnabled: (id, enabled, kind) => ipcRenderer.invoke('set-notify-enabled', { id, enabled, kind: kind || 'idle' }),
     getNotifyEnabled: (id) => ipcRenderer.invoke('get-notify-enabled', { id }),
     onNotificationClicked: (callback) => {
       ipcRenderer.on('notification-clicked', (_event, data) => callback(data));
@@ -173,6 +173,30 @@ contextBridge.exposeInMainWorld('klaus', {
     resolveThread: (worktreePath, threadId) => ipcRenderer.invoke('pr-resolve-thread', { worktreePath, threadId }),
     unresolveThread: (worktreePath, threadId) => ipcRenderer.invoke('pr-unresolve-thread', { worktreePath, threadId }),
     checks: (worktreePath, prNumber) => ipcRenderer.invoke('pr-checks', { worktreePath, prNumber }),
+    requiredChecks: (worktreePath, prNumber) => ipcRenderer.invoke('pr-required-checks', { worktreePath, prNumber }),
+    reviewRequiredChecks: () => ipcRenderer.invoke('pr-review-required-checks'),
+    reviewCheckAnnotations: (checkRunId) => ipcRenderer.invoke('pr-review-check-annotations', { checkRunId }),
+    reviewRunRerunFailed: (runId) => ipcRenderer.invoke('pr-review-run-rerun-failed', { runId }),
+    reviewRunCancel: (runId) => ipcRenderer.invoke('pr-review-run-cancel', { runId }),
+    reviewWorkflowsList: () => ipcRenderer.invoke('pr-review-workflows-list'),
+    reviewWorkflowDispatch: (workflowId, ref, inputs) =>
+      ipcRenderer.invoke('pr-review-workflow-dispatch', { workflowId, ref, inputs }),
+    reviewRunLogWatchStart: (requestId, runId) =>
+      ipcRenderer.invoke('pr-review-run-log-watch-start', { requestId, runId }),
+    reviewRunLogWatchStop: (requestId) =>
+      ipcRenderer.invoke('pr-review-run-log-watch-stop', { requestId }),
+    onRunLogChunk: (requestId, callback) => {
+      const channel = 'pr-review-run-log-chunk-' + requestId;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onRunLogDone: (requestId, callback) => {
+      const channel = 'pr-review-run-log-done-' + requestId;
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.once(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
     merge: (worktreePath, prNumber, strategy) => ipcRenderer.invoke('pr-merge', { worktreePath, prNumber, strategy }),
     addReviewComment: (opts) => ipcRenderer.invoke('pr-add-review-comment', opts),
     addComment: (worktreePath, prNumber, body) => ipcRenderer.invoke('pr-add-comment', { worktreePath, prNumber, body }),
@@ -212,9 +236,11 @@ contextBridge.exposeInMainWorld('klaus', {
     currentUser: () => ipcRenderer.invoke('pr-current-user'),
     reviewChecks: () => ipcRenderer.invoke('pr-review-checks'),
     reviewMerge: (strategy) => ipcRenderer.invoke('pr-review-merge', { strategy }),
-    debugCheckStart: (requestId, checkLink, checkName) =>
-      ipcRenderer.invoke('pr-debug-check-start', { requestId, checkLink, checkName }),
+    debugCheckStart: (requestId, checkLink, checkName, checkRunId) =>
+      ipcRenderer.invoke('pr-debug-check-start', { requestId, checkLink, checkName, checkRunId }),
     debugCheckCancel: (requestId) => ipcRenderer.invoke('pr-debug-check-cancel', { requestId }),
+    debugCheckOpenAsTask: (analysis, checkName, prNumber) =>
+      ipcRenderer.invoke('pr-debug-check-open-task', { analysis, checkName, prNumber }),
     onDebugCheckChunk: (requestId, callback) => {
       const channel = 'pr-debug-check-chunk-' + requestId;
       const handler = (_e, chunk) => callback(chunk);

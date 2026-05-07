@@ -431,21 +431,31 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   return { ok: true };
 });
 
-ipcMain.handle('set-notify-enabled', (_event, { id, enabled }) => {
+ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
-  inst.notifyEnabled = enabled;
+  // `kind` lets the renderer toggle idle vs CI independently. Default 'idle'
+  // matches the legacy single-flag callers.
+  const which = kind === 'ci' ? 'ci' : 'idle';
+  if (which === 'ci') inst.notifyCIEnabled = enabled;
+  else inst.notifyEnabled = enabled;
   const config = loadConfig();
   if (!config.notifyPrefs) config.notifyPrefs = {};
-  config.notifyPrefs[inst.name] = enabled;
+  // Migrate legacy boolean entries to the {idle, ci} shape on first write.
+  let pref = config.notifyPrefs[inst.name];
+  if (typeof pref !== 'object' || pref === null) {
+    pref = { idle: pref !== false, ci: true };
+  }
+  pref[which] = enabled;
+  config.notifyPrefs[inst.name] = pref;
   saveConfig(config);
   return { ok: true };
 });
 
 ipcMain.handle('get-notify-enabled', (_event, { id }) => {
   const inst = instances.get(id);
-  if (!inst) return true;
-  return inst.notifyEnabled !== false;
+  if (!inst) return { idle: true, ci: true };
+  return { idle: inst.notifyEnabled !== false, ci: inst.notifyCIEnabled !== false };
 });
 
 ipcMain.handle('rename-task', (_event, { id, newName }) => {
