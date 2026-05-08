@@ -270,9 +270,17 @@ window.Dialogs = (function () {
       problem: !deps.gh.installed ? 'Not installed.'
               : !deps.gh.authed ? 'Installed, but not authenticated.'
               : null,
+      // gh installed but unauthed → drive sign-in from inside the app
+      // instead of asking the user to swap to a terminal. Falls back to
+      // the install commands when gh itself is missing (since we can't
+      // run gh until brew finishes).
       fixes: !deps.gh.installed
-        ? ['brew install gh', 'gh auth login']
-        : !deps.gh.authed ? ['gh auth login'] : [],
+        ? ['brew install gh']
+        : [],
+      action: (deps.gh.installed && !deps.gh.authed) ? {
+        label: 'Sign in to GitHub',
+        kind: 'gh-signin',
+      } : null,
     });
 
     var claudeRow = depRow({
@@ -325,6 +333,17 @@ window.Dialogs = (function () {
         });
       });
     });
+    var ghSigninBtn = dialog.querySelector('[data-action="gh-signin"]');
+    if (ghSigninBtn) {
+      ghSigninBtn.addEventListener('click', function () {
+        showGhLogin({
+          onSuccess: function () {
+            overlay.remove();
+            checkAndPromptDeps({ force: true });
+          },
+        });
+      });
+    }
   }
 
   function depRow(d) {
@@ -336,6 +355,9 @@ window.Dialogs = (function () {
         + '<button class="deps-copy" type="button" data-copy="' + escHtml(cmd) + '">Copy</button>'
       + '</div>';
     }).join('');
+    var actionBtn = d.action
+      ? '<button class="deps-action" type="button" data-action="' + escHtml(d.action.kind) + '">' + escHtml(d.action.label) + '</button>'
+      : '';
     return '<div class="deps-row deps-row-' + iconCls + '">'
       + '<div class="deps-row-head">'
         + '<span class="deps-icon ' + iconCls + '">' + icon + '</span>'
@@ -344,6 +366,7 @@ window.Dialogs = (function () {
       + '</div>'
       + (d.problem ? '<div class="deps-problem">' + escHtml(d.problem) + '</div>' : '')
       + (fixes ? '<div class="deps-fixes">' + fixes + '</div>' : '')
+      + (actionBtn ? '<div class="deps-action-row">' + actionBtn + '</div>' : '')
     + '</div>';
   }
 
@@ -631,6 +654,132 @@ window.Dialogs = (function () {
     + '</div>';
   }
 
+  // ---- GitHub login (device flow via gh CLI) ----
+  // Spawns gh auth login --web in main, surfaces the one-time code, and
+  // resolves once gh exits 0. We don't run the OAuth flow ourselves —
+  // letting gh do the keyring write keeps every other code path that calls
+  // `gh` from getting confused about where the token lives.
+  function showGhLogin(opts) {
+    var hostname = (opts && opts.hostname) || 'github.com';
+    var onSuccess = (opts && opts.onSuccess) || function () {};
+    var onCancel = (opts && opts.onCancel) || function () {};
+    var settled = false;
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'gh-login-dialog deps-dialog';
+    dialog.innerHTML =
+      '<div class="deps-head">'
+        + '<h2>Sign in to GitHub</h2>'
+        + '<button class="deps-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="gh-login-body"><div class="skills-loading">Starting sign-in…</div></div>';
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    var body = dialog.querySelector('.gh-login-body');
+
+    var unsubscribe = null;
+    var closed = false;
+    function cleanup() {
+      if (closed) return;
+      closed = true;
+      if (unsubscribe) { try { unsubscribe(); } catch (_) {} unsubscribe = null; }
+      window.klaus.gh.loginCancel();
+      overlay.remove();
+      // Notify caller only on user-cancel, not after a successful sign-in
+      // (the success handler sets settled=true before tearing down).
+      if (!settled) { try { onCancel(); } catch (_) {} }
+    }
+
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) cleanup(); });
+    dialog.querySelector('.deps-close').addEventListener('click', cleanup);
+
+    function renderCode(code, verificationUrl) {
+      body.innerHTML =
+        '<p class="gh-login-step">'
+          + '<span class="gh-login-num">1</span>'
+          + 'Copy this one-time code:'
+        + '</p>'
+        + '<div class="gh-login-code-row">'
+          + '<code class="gh-login-code">' + escHtml(code) + '</code>'
+          + '<button class="deps-copy gh-login-copy" type="button" data-copy="' + escHtml(code) + '">Copy</button>'
+        + '</div>'
+        + '<p class="gh-login-step">'
+          + '<span class="gh-login-num">2</span>'
+          + 'Paste it at <code>' + escHtml(verificationUrl) + '</code> (a browser tab should have opened automatically).'
+        + '</p>'
+        + '<div class="deps-actions">'
+          + '<button class="gh-login-open" type="button">Open browser</button>'
+          + '<button class="deps-skip gh-login-cancel" type="button">Cancel</button>'
+        + '</div>'
+        + '<p class="gh-login-wait">Waiting for you to authorize…</p>';
+      body.querySelector('.gh-login-copy').addEventListener('click', function (e) {
+        var btn = e.currentTarget;
+        navigator.clipboard.writeText(btn.dataset.copy || '').then(function () {
+          var orig = btn.textContent;
+          btn.textContent = 'Copied';
+          setTimeout(function () { btn.textContent = orig; }, 900);
+        });
+      });
+      body.querySelector('.gh-login-open').addEventListener('click', function () {
+        window.klaus.gh.openExternal(verificationUrl);
+      });
+      body.querySelector('.gh-login-cancel').addEventListener('click', cleanup);
+    }
+
+    function renderError(message) {
+      body.innerHTML =
+        '<div class="gh-login-error">'
+          + '<p><strong>Sign-in failed.</strong></p>'
+          + '<pre>' + escHtml(message || 'Unknown error') + '</pre>'
+        + '</div>'
+        + '<div class="deps-actions">'
+          + '<button class="gh-login-retry" type="button">Retry</button>'
+          + '<button class="deps-skip gh-login-close" type="button">Close</button>'
+        + '</div>';
+      body.querySelector('.gh-login-retry').addEventListener('click', function () {
+        cleanup();
+        showGhLogin({ hostname: hostname, onSuccess: onSuccess });
+      });
+      body.querySelector('.gh-login-close').addEventListener('click', cleanup);
+    }
+
+    unsubscribe = window.klaus.gh.onLoginEvent(function (evt) {
+      if (closed) return;
+      if (evt.type === 'code') {
+        renderCode(evt.code, evt.verificationUrl);
+      } else if (evt.type === 'success') {
+        settled = true;
+        body.innerHTML = '<div class="gh-login-success">'
+          + '<p>✓ Signed in.</p>'
+        + '</div>';
+        if (window.toast && window.toast.success) window.toast.success('GitHub sign-in complete');
+        var accounts = evt.accounts || [];
+        setTimeout(function () {
+          // closed=true means user already cancelled; skip both cleanup
+          // (avoids double-cancel IPC) and the onSuccess callback.
+          if (closed) return;
+          closed = true;
+          if (unsubscribe) { try { unsubscribe(); } catch (_) {} unsubscribe = null; }
+          overlay.remove();
+          try { onSuccess({ accounts: accounts }); } catch (_) {}
+        }, 600);
+      } else if (evt.type === 'error') {
+        renderError(evt.message);
+      } else if (evt.type === 'cancelled') {
+        cleanup();
+      }
+    });
+
+    window.klaus.gh.loginStart(hostname).then(function (r) {
+      if (r && r.error && !closed) renderError(r.error);
+    }, function (err) {
+      // Rejected IPC (handler threw, channel torn down). Without this the
+      // modal would sit on "Starting sign-in…" forever.
+      if (!closed) renderError((err && err.message) || 'IPC failed to start sign-in.');
+    });
+  }
+
   // ---- GitHub accounts ----
   function showGhAccounts() {
     var overlay = document.createElement('div');
@@ -656,24 +805,66 @@ window.Dialogs = (function () {
         if (accounts.length === 0) {
           body.innerHTML = '<div class="skills-empty">'
             + '<p>No gh accounts found.</p>'
-            + '<p class="skills-empty-hint">Run <code>gh auth login</code> in a terminal, then reopen this dialog.</p>'
+            + '<button class="gh-account-add" type="button">Sign in to GitHub</button>'
           + '</div>';
+          body.querySelector('.gh-account-add').addEventListener('click', function () {
+            showGhLogin({ onSuccess: refresh });
+          });
           return;
         }
+        // Each row gets one of three actions:
+        //   - active + valid \u2192 disabled "active" badge
+        //   - inactive + valid \u2192 "Switch" (calls gh-switch-account)
+        //   - any + invalid   \u2192 "Re-auth" (re-runs the login flow for that user)
+        // Mixing valid/invalid in one list (instead of dropping invalids)
+        // is the whole point of the parser fix \u2014 one bad token shouldn't
+        // hide the rest of the user's accounts.
         body.innerHTML = '<p class="gh-accounts-intro">Klaussy uses whichever gh account is active. Click another to switch.</p>'
           + accounts.map(function (a) {
-            return '<button class="gh-account-row' + (a.active ? ' active' : '') + '" type="button" data-username="' + escHtml(a.username) + '"' + (a.active ? ' disabled' : '') + '>'
+            var classes = 'gh-account-row';
+            if (a.active) classes += ' active';
+            if (!a.valid) classes += ' invalid';
+            var status;
+            if (!a.valid) status = '<span class="gh-account-status invalid" title="' + escHtml(a.reason || 'Token invalid') + '">' + escHtml(a.reason || 'Token invalid') + '</span><span class="gh-account-action">Re-auth</span>';
+            else if (a.active) status = '<span class="gh-account-badge">active</span>';
+            else status = '<span class="gh-account-action">Switch</span>';
+            var disabledAttr = (a.active && a.valid) ? ' disabled' : '';
+            var actionAttr = !a.valid ? 'reauth' : 'switch';
+            return '<button class="' + classes + '" type="button"'
+              + ' data-username="' + escHtml(a.username) + '"'
+              + ' data-action="' + actionAttr + '"' + disabledAttr + '>'
               + '<span class="gh-account-name">' + escHtml(a.username) + '</span>'
-              + (a.active ? '<span class="gh-account-badge">active</span>' : '<span class="gh-account-switch">Switch</span>')
+              + status
             + '</button>';
-          }).join('');
+          }).join('')
+          + '<div class="gh-accounts-foot">'
+            + '<button class="gh-account-add" type="button">+ Add another account</button>'
+          + '</div>';
+
+        body.querySelector('.gh-account-add').addEventListener('click', function () {
+          showGhLogin({ onSuccess: refresh });
+        });
+
         body.querySelectorAll('.gh-account-row[data-username]').forEach(function (btn) {
           btn.addEventListener('click', async function () {
             if (btn.disabled) return;
+            var username = btn.dataset.username;
+            var action = btn.dataset.action;
+            if (action === 'reauth') {
+              showGhLogin({ onSuccess: refresh });
+              return;
+            }
             btn.disabled = true;
-            var orig = btn.querySelector('.gh-account-switch');
+            var orig = btn.querySelector('.gh-account-action');
             if (orig) orig.textContent = 'Switching\u2026';
-            var result = await window.klaus.gh.switchAccount(btn.dataset.username);
+            var result = await window.klaus.gh.switchAccount(username);
+            // The switch handler in main returns needsLogin when the
+            // target's token is stale \u2014 route to the login modal instead
+            // of toasting a confusing error.
+            if (result && result.needsLogin) {
+              showGhLogin({ onSuccess: refresh });
+              return;
+            }
             if (result && result.error) {
               window.toast.error('Switch failed: ' + result.error);
               refresh();
@@ -931,5 +1122,6 @@ window.Dialogs = (function () {
     showMcpServers: showMcpServers,
     showPlugins: showPlugins,
     showGhAccounts: showGhAccounts,
+    showGhLogin: showGhLogin,
   };
 })();

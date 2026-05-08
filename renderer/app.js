@@ -1748,8 +1748,10 @@
       }
       accountSelect.innerHTML = accounts.map(function (a) {
         var sel = a.active ? ' selected' : '';
-        return '<option value="' + AppUtils.escAttr(a.username) + '"' + sel + '>'
-          + AppUtils.escHtml(a.username) + (a.active ? ' (active)' : '')
+        var suffix = a.active ? ' (active)' : '';
+        if (a.valid === false) suffix = ' (needs sign-in)';
+        return '<option value="' + AppUtils.escAttr(a.username) + '"' + sel + ' data-valid="' + (a.valid === false ? 'false' : 'true') + '">'
+          + AppUtils.escHtml(a.username) + suffix
           + '</option>';
       }).join('');
     }
@@ -1836,6 +1838,27 @@
       accountSelect.disabled = true;
       var sw = await window.klaus.gh.switchAccount(target);
       accountSelect.disabled = false;
+      // needsLogin = main saw the target's token was already invalid and
+      // refused to switch into it. Drive the in-app login flow instead of
+      // surfacing a confusing error.
+      if (sw && sw.needsLogin) {
+        accountHint.textContent = 'Re-authenticating ' + target + '…';
+        Dialogs.showGhLogin({
+          onSuccess: async function () {
+            accountHint.textContent = 'Signed in';
+            await populateAccountSelect();
+            await refreshLists();
+          },
+          // Reset the dropdown + hint if the user dismisses the login modal
+          // — otherwise the hint lies about an in-progress operation that
+          // never completes.
+          onCancel: async function () {
+            accountHint.textContent = '';
+            await populateAccountSelect();
+          },
+        });
+        return;
+      }
       if (sw && sw.error) {
         accountHint.textContent = 'Switch failed: ' + sw.error;
         await populateAccountSelect();
