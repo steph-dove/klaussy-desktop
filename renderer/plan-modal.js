@@ -10,23 +10,8 @@ window.ActionModal = (function () {
   var cancelBtn = document.getElementById('plan-modal-cancel');
   var submitBtn = document.getElementById('plan-modal-submit');
   var subHint = overlay ? overlay.querySelector('.plan-modal-sub') : null;
-  var onboardBanner = document.getElementById('plan-onboard-banner');
-  var onboardDismiss = document.getElementById('plan-onboard-dismiss');
   var tabs = overlay ? overlay.querySelectorAll('.plan-modal-tab') : [];
   var contents = overlay ? overlay.querySelectorAll('.plan-tab-content') : [];
-
-  // One-time nudge to install the optional Claude Code plugins that the new
-  // multi-agent Plan flow benefits from. Shown the first time the user opens
-  // the Plan modal; auto-dismissed on first submit so even ignored, it does
-  // not return.
-  var ONBOARD_KEY = 'planOnboardSeen';
-  function planOnboardSeen() {
-    try { return localStorage.getItem(ONBOARD_KEY) === '1'; } catch (_) { return true; }
-  }
-  function markPlanOnboardSeen() {
-    try { localStorage.setItem(ONBOARD_KEY, '1'); } catch (_) {}
-    if (onboardBanner) onboardBanner.hidden = true;
-  }
 
   // Plan flow runs locally (no cloud round-trip), so it gets the full prompt
   // inlined the same way Review does. The earlier `/ultraplan` slash command
@@ -37,14 +22,18 @@ window.ActionModal = (function () {
   //
   // The prompt itself is intentionally project-agnostic: Klaussy users invoke
   // it from their own repos, not from this one, so anything Klaussy-specific
-  // would be wrong advice in the spawned tab. Shape borrowed from the official
-  // `feature-dev` skill (parallel exploration, multi-architect compare,
-  // post-implementation review) plus universal craft rules (YAGNI, grep
-  // callers before changing public shapes, no silent error swallowing, manual
-  // UI verification). The prompt instructs Claude to read the target repo's
-  // CLAUDE.md / README / CONTRIBUTING for project-specific rules. References
-  // specialized subagents by name when available; falls back to
-  // `general-purpose` otherwise.
+  // would be wrong advice in the spawned tab.
+  //
+  // Self-contained — no Claude Code plugin install required. Shape borrowed
+  // from the official `feature-dev` skill (parallel exploration, multi-
+  // architect compare, post-implementation review) but the specialized agent
+  // bodies (the analysis approach, architect process, reviewer process) are
+  // inlined here so every spawned tab has them whether or not the user has
+  // any plugins installed. All sub-Agent calls use `subagent_type: general-
+  // purpose`, which ships with Claude Code by default. Anti-patterns kept as
+  // universal craft rules; the prompt instructs Claude to read the target
+  // repo's CLAUDE.md / README / CONTRIBUTING for project-specific rules and
+  // append them to its working list.
   var PLAN_PROMPT = [
     'You are helping plan and implement a task. Follow these phases in order — do NOT skip Phase 3 (clarifying questions).',
     '',
@@ -60,7 +49,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 2 — Understand (parallel exploration)',
     '',
-    'Launch 2–3 explore subagents IN PARALLEL via the Agent tool. Use specialized subagents when available (`subagent_type: code-explorer`); fall back to `general-purpose`. Mark this phase\'s todo in_progress when the agents are dispatched.',
+    'Launch 2–3 explore subagents IN PARALLEL via the Agent tool with `subagent_type: general-purpose`. Pass each agent BOTH the analysis approach AND the angle below in its prompt — they need that context inline because they don\'t see this master prompt. Mark this phase\'s todo in_progress when the agents are dispatched.',
     '',
     '### Analysis approach (every explore agent uses this)',
     '',
@@ -92,7 +81,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 4 — Design (parallel architectures)',
     '',
-    'Launch 2–3 architect subagents IN PARALLEL with different priorities (`subagent_type: code-architect` if available; otherwise `general-purpose`). Pass each agent the user\'s task, the answers from Phase 3, and the file list and findings from Phase 2.',
+    'Launch 2–3 architect subagents IN PARALLEL via the Agent tool with `subagent_type: general-purpose`. Pass each agent the architect process below + their priority + the user\'s task + the answers from Phase 3 + the file list and findings from Phase 2 — they need all of that inline.',
     '',
     '### Architect process (every architect uses this)',
     '',
@@ -127,7 +116,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 7 — Quality review (parallel)',
     '',
-    'After implementation, launch 3 reviewer subagents IN PARALLEL over the diff.',
+    'After implementation, launch 3 reviewer subagents IN PARALLEL via the Agent tool with `subagent_type: general-purpose`. Pass each agent the reviewer process below + their focus + the diff (`git diff main...HEAD` or equivalent) + any context files they\'ll need.',
     '',
     '### Reviewer process (every reviewer uses this)',
     '',
@@ -138,8 +127,14 @@ window.ActionModal = (function () {
     '',
     '### Per-reviewer focuses',
     '',
-    '- Reviewer A — *Simplicity / DRY / readability* (`subagent_type: code-reviewer` if available): Is the code as simple as it can be? Are there abstractions that should be inlined or duplications that should be extracted? Is naming clear? Are comments explaining "why" not "what"?',
-    '- Reviewer B — *Bugs / silent failures / inadequate error handling* (`subagent_type: silent-failure-hunter` if available): Empty `catch` blocks on user-initiated actions, broad catches that hide unrelated errors, missing logging, fallbacks that mask real problems, JSON parse errors swallowed into "no data," edge cases.',
+    '- Reviewer A — *Simplicity / DRY / readability*: Is the code as simple as it can be? Are there abstractions that should be inlined or duplications that should be extracted? Is naming clear? Are comments explaining "why" not "what"? Flag dead code and unreachable branches.',
+    '- Reviewer B — *Bugs, silent failures, inadequate error handling*. Apply these rules:',
+    '    - Empty `catch` blocks (e.g. `catch (_) {}`) are forbidden on user-initiated actions — the user clicked a button, they need feedback if it failed. They are also suspect on background work; even a 30s background poll should at least `console.error` the first failure of each tick.',
+    '    - Broad catches (`catch (Exception)`, `catch (e: any)`) hide unrelated errors. List every error type that could be silently swallowed.',
+    '    - Fallbacks must be explicit and justified. A fallback that returns `[]`, `null`, or "no data" on a parse error is indistinguishable from "no data was there" — surface a real error instead.',
+    '    - Error messages must be actionable. Generic strings ("Something went wrong") are defects.',
+    '    - Optional chaining (`?.`) and null coalescing (`??`) on critical operations can mask failures the same way an empty catch can — flag where they hide errors.',
+    '    - For each finding give: file:line, severity (CRITICAL silent failure / HIGH poor error message / MEDIUM could be more specific), what could be hidden, user impact, and a concrete fix.',
     '- Reviewer C — *Project conventions and the anti-patterns below*: Did we hit any of the universal anti-patterns? Did we follow this project\'s docs (CLAUDE.md / README / CONTRIBUTING / equivalent)? Are public API shapes consistent? Are the project-specific invariants this codebase relies on still intact?',
     '',
     'Consolidate findings, present high-severity issues to the user, and ask whether to fix now, defer to a follow-up, or proceed as-is.',
@@ -615,11 +610,6 @@ window.ActionModal = (function () {
     if (subHint) {
       subHint.innerHTML = cfg.hint;
     }
-    // Show the plugin-install nudge only on the Plan action, only the first
-    // time. Debug stays on /debug (no plugin help needed) so it never shows.
-    if (onboardBanner) {
-      onboardBanner.hidden = !(action === 'plan' && !planOnboardSeen());
-    }
     overlay.style.display = 'flex';
     setTimeout(function () { textarea.focus(); }, 0);
   }
@@ -658,10 +648,6 @@ window.ActionModal = (function () {
         submitBtn.textContent = cfg.submitLabel;
         return;
       }
-      // Successful Plan submission counts as the user having seen the
-      // onboarding nudge — even if they ignored the banner, they have now
-      // used the flow and don't need it next time.
-      if (currentAction === 'plan') markPlanOnboardSeen();
       close();
     } catch (err) {
       errorEl.textContent = (err && err.message) || String(err);
@@ -727,10 +713,6 @@ window.ActionModal = (function () {
 
     cancelBtn.addEventListener('click', close);
     submitBtn.addEventListener('click', submit);
-
-    if (onboardDismiss) {
-      onboardDismiss.addEventListener('click', markPlanOnboardSeen);
-    }
 
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) close();
