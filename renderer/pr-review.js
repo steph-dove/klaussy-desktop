@@ -51,6 +51,20 @@ window.PrReview = (function () {
   var convClaudeState = {};
   // G6: latest checks result for the active PR. null = not yet fetched.
   var currentChecks = null;
+  // Required-status-checks for the PR's base branch (from branch protection).
+  // Loaded lazily alongside currentChecks.
+  //   []                  → no protection rules (or branch not protected)
+  //   ['name', 'name', …] → required contexts
+  // currentRequiredChecksError carries a string when the fetch parsed garbage
+  // or hit auth issues — the gate must render as "unknown" in that case so we
+  // don't falsely green-light merges.
+  var currentRequiredChecks = [];
+  var currentRequiredChecksError = '';
+  // Periodic refresh while the Checks tab is the active tab. Cleared on tab
+  // switch and on PR change. 15s cadence is the same ballpark as the per-task
+  // CI poll (30s) but more responsive when the user is actively watching.
+  var checksPollTimer = null;
+  var checksFetchInFlight = false;
   // Local-changes panel state (Review tab). Refreshed on tab show and after
   // each implement/commit/push. Stays null until the first fetch completes.
   // Shape: { worktreePath, branch, files:[{status,file}], diff, unpushed:[{hash,short,subject}], headRefOid }
@@ -144,6 +158,9 @@ window.PrReview = (function () {
     if (isNewPr) {
       selectedFile = null;
       currentChecks = null;
+      // Stop any in-flight checks polling so it doesn't repaint with the
+      // previous PR's data after the new PR's render lands.
+      clearChecksPolling();
       // Don't cancel in-flight AI work for the previous PR — those agents
       // are now backgroundable and the user can monitor / re-attach via the
       // Agents panel. Just drop the local subscriptions by stashing the old
@@ -993,6 +1010,9 @@ window.PrReview = (function () {
       btn.addEventListener('click', function () {
         var tab = btn.dataset.tab;
         if (activeTab === tab) return;
+        // Leaving the Checks tab: stop the periodic poll. Re-entering it
+        // re-binds and bindChecksTab() restarts the poll.
+        if (activeTab === 'checks' && tab !== 'checks') clearChecksPolling();
         activeTab = tab;
         if (lastState) render(lastState);
       });
@@ -3752,6 +3772,23 @@ window.PrReview = (function () {
     // Drop stale results if the user switched PRs mid-flight.
     if (!lastState || lastState.number !== forNumber) return;
     currentChecks = result;
+    // Required-checks list is independent of the per-commit checks data; fetch
+    // in parallel-ish (after main checks so the user sees something fast).
+    try {
+      var req = await window.klaus.pr.reviewRequiredChecks();
+      if (lastState && lastState.number === forNumber) {
+        currentRequiredChecks = (req && req.required) || [];
+        currentRequiredChecksError = (req && req.error) || '';
+      }
+    } catch (err) {
+      // The gate must not silently green-light merges if the fetch itself
+      // crashes (the IPC handler is supposed to catch and return an error,
+      // but renderer crashes happen too). Surface as "unknown" in the gate.
+      if (lastState && lastState.number === forNumber) {
+        currentRequiredChecks = [];
+        currentRequiredChecksError = (err && err.message) || 'unknown error';
+      }
+    }
     renderChecksIntoSlot();
     // Merge gate depends on checks, so repaint the merge control too.
     var mergeWrap = hostEl.querySelector('.pr-merge-wrap');
@@ -3792,29 +3829,141 @@ window.PrReview = (function () {
     });
     var header = '<div class="pr-checks-tab-head">'
       + '<span>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + '</span>'
-      + '<button type="button" class="pr-review-btn pr-checks-refresh">Refresh</button>'
+      + '<div class="pr-checks-tab-actions">'
+        + '<button type="button" class="pr-review-btn pr-checks-dispatch">Dispatch workflow…</button>'
+        + '<button type="button" class="pr-review-btn pr-checks-refresh">Refresh</button>'
+      + '</div>'
     + '</div>';
-    return header + '<div class="pr-checks-list">'
-      + sorted.map(function (c) {
-        var b = bucketOf(c);
-        var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
-        var linkAttr = c.link ? ' data-link="' + escHtml(c.link) + '"' : '';
-        var debugBtn = (b === 'fail' && c.link)
-          ? '<button class="pr-check-debug-btn" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" title="Use Claude to diagnose this failure">Debug</button>'
-          : '';
-        return '<div class="pr-check-row pr-check-' + b + '"' + linkAttr + '>'
-          + '<span class="pr-check-icon">' + icon + '</span>'
-          + '<div class="pr-check-labels">'
-            + '<div class="pr-check-name">' + escHtml(c.name || '(unnamed)') + '</div>'
-            + (c.workflow ? '<div class="pr-check-workflow">' + escHtml(c.workflow) + '</div>' : '')
-            + (c.description ? '<div class="pr-check-desc">' + escHtml(c.description) + '</div>' : '')
-          + '</div>'
-          + '<span class="pr-check-state">' + escHtml((c.state || b).toLowerCase()) + '</span>'
-          + debugBtn
-          + (c.link ? '<span class="pr-check-arrow">\u2197</span>' : '')
-        + '</div>';
-      }).join('')
+    // Required-checks gate: shows X/Y required passing + a chip list. Required
+    // names that have no matching check today are rendered as "missing" chips —
+    // those still gate merge per branch protection rules.
+    //
+    // If the fetch errored (e.g. gh returned garbage, auth scope missing),
+    // render an "unknown" gate explicitly. Silently rendering as "no required
+    // checks" would falsely green-light merges.
+    var requiredGate = '';
+    if (currentRequiredChecksError) {
+      requiredGate = '<div class="pr-required-gate pr-required-unknown" title="' + escHtml(currentRequiredChecksError) + '">'
+        + '<div class="pr-required-summary">'
+          + 'Required checks: <strong>unknown</strong> — could not load branch protection rules. Verify on GitHub before merging.'
+        + '</div>'
       + '</div>';
+    } else if (currentRequiredChecks && currentRequiredChecks.length > 0) {
+      var passingRequired = 0;
+      var chipHtml = currentRequiredChecks.map(function (name) {
+        var match = checks.find(function (c) { return (c.name || '') === name; });
+        var b = match ? bucketOf(match) : 'missing';
+        if (b === 'pass') passingRequired += 1;
+        return '<span class="pr-required-chip pr-required-' + b + '" title="' + escHtml(b) + '">' + escHtml(name) + '</span>';
+      }).join('');
+      var allPass = passingRequired === currentRequiredChecks.length;
+      requiredGate = '<div class="pr-required-gate ' + (allPass ? 'pr-required-all-pass' : 'pr-required-blocking') + '">'
+        + '<div class="pr-required-summary">'
+          + '<strong>' + passingRequired + '/' + currentRequiredChecks.length + '</strong> required check' + (currentRequiredChecks.length === 1 ? '' : 's') + ' passing'
+        + '</div>'
+        + '<div class="pr-required-chips">' + chipHtml + '</div>'
+      + '</div>';
+    }
+    function formatDur(startedAt, completedAt) {
+      if (!startedAt) return '';
+      var end = completedAt ? new Date(completedAt) : new Date();
+      var ms = end - new Date(startedAt);
+      if (!isFinite(ms) || ms < 0) return '';
+      if (ms < 60000) return Math.max(1, Math.round(ms / 1000)) + 's';
+      return Math.round(ms / 60000) + 'm';
+    }
+
+    function renderRowHtml(c) {
+      var b = bucketOf(c);
+      var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
+      var linkAttr = c.link ? ' data-link="' + escHtml(c.link) + '"' : '';
+      var debugBtn = (b === 'fail' && c.link)
+        ? '<button class="pr-check-debug-btn" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(c.id ? String(c.id) : '') + '" title="Use Claude to diagnose this failure">Debug</button>'
+        : '';
+      var annotationsBtn = (b === 'fail' && c.id)
+        ? '<button class="pr-check-annotations-btn" type="button" data-check-id="' + escHtml(String(c.id)) + '" data-name="' + escHtml(c.name || '') + '" title="Show file:line annotations">Annotations</button>'
+        : '';
+      var rerunBtn = (b === 'fail' && c.runId)
+        ? '<button class="pr-check-action-btn pr-check-action-rerun" type="button" data-run-id="' + escHtml(String(c.runId)) + '" data-name="' + escHtml(c.name || '') + '" title="Rerun failed jobs in this workflow run">Rerun</button>'
+        : '';
+      var cancelBtn = (b === 'pending' && c.runId)
+        ? '<button class="pr-check-action-btn pr-check-action-cancel" type="button" data-run-id="' + escHtml(String(c.runId)) + '" data-name="' + escHtml(c.name || '') + '" title="Cancel this workflow run">Cancel</button>'
+        : '';
+      var watchBtn = (b === 'pending' && c.runId)
+        ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + escHtml(String(c.runId)) + '" data-name="' + escHtml(c.name || '') + '" title="Stream the workflow log live">Watch log</button>'
+        : '';
+      var dur = formatDur(c.startedAt, c.completedAt);
+      var durHtml = dur ? '<span class="pr-check-dur">' + dur + '</span>' : '';
+      return '<div class="pr-check-row pr-check-' + b + '"' + linkAttr + '>'
+        + '<span class="pr-check-icon">' + icon + '</span>'
+        + '<div class="pr-check-labels">'
+          + '<div class="pr-check-name">' + escHtml(c.name || '(unnamed)') + '</div>'
+          + (c.workflow ? '<div class="pr-check-workflow">' + escHtml(c.workflow) + '</div>' : '')
+          + (c.description ? '<div class="pr-check-desc">' + escHtml(c.description) + '</div>' : '')
+        + '</div>'
+        + durHtml
+        + '<span class="pr-check-state">' + escHtml((c.state || b).toLowerCase()) + '</span>'
+        + watchBtn
+        + rerunBtn
+        + cancelBtn
+        + annotationsBtn
+        + debugBtn
+        + (c.link ? '<span class="pr-check-arrow">\u2197</span>' : '')
+      + '</div>';
+    }
+
+    // Group checks by runId so the user can see which jobs belong to the same
+    // workflow run. Singletons and runId-less checks render flat.
+    var groups = {};
+    var loose = [];
+    sorted.forEach(function (c) {
+      if (c.runId) {
+        if (!groups[c.runId]) groups[c.runId] = [];
+        groups[c.runId].push(c);
+      } else {
+        loose.push(c);
+      }
+    });
+
+    function aggregateBucket(items) {
+      var buckets = items.map(bucketOf);
+      if (buckets.indexOf('fail') >= 0) return 'fail';
+      if (buckets.indexOf('pending') >= 0) return 'pending';
+      if (buckets.indexOf('cancel') >= 0) return 'cancel';
+      if (buckets.indexOf('skipping') >= 0 && buckets.every(function (b) { return b === 'skipping'; })) return 'skipping';
+      return 'pass';
+    }
+    function aggregateDur(items) {
+      var starts = items.map(function (c) { return c.startedAt; }).filter(Boolean);
+      var ends = items.map(function (c) { return c.completedAt; }).filter(Boolean);
+      if (!starts.length) return '';
+      var earliest = starts.reduce(function (a, b) { return new Date(a) < new Date(b) ? a : b; });
+      var latest = ends.length === items.length ? ends.reduce(function (a, b) { return new Date(a) > new Date(b) ? a : b; }) : null;
+      return formatDur(earliest, latest);
+    }
+
+    var groupHtml = Object.keys(groups).map(function (runId) {
+      var items = groups[runId];
+      // Single-check groups don't need a header \u2014 render flat.
+      if (items.length < 2) {
+        loose = loose.concat(items);
+        return '';
+      }
+      var b = aggregateBucket(items);
+      var dur = aggregateDur(items);
+      var workflowName = (items.find(function (c) { return c.workflow; }) || {}).workflow || '';
+      return '<div class="pr-check-group pr-check-group-' + b + '">'
+        + '<div class="pr-check-group-head">'
+          + '<span class="pr-check-group-label">' + escHtml(workflowName || ('Run #' + runId)) + '</span>'
+          + '<span class="pr-check-group-meta">' + items.length + ' job' + (items.length === 1 ? '' : 's') + (dur ? ' \u00B7 ' + dur : '') + '</span>'
+        + '</div>'
+        + '<div class="pr-check-group-rows">' + items.map(renderRowHtml).join('') + '</div>'
+      + '</div>';
+    }).join('');
+
+    var looseHtml = loose.length ? '<div class="pr-checks-list">' + loose.map(renderRowHtml).join('') + '</div>' : '';
+
+    return header + requiredGate + groupHtml + looseHtml;
   }
 
   function bindChecksTab() {
@@ -3823,16 +3972,24 @@ window.PrReview = (function () {
       refresh.addEventListener('click', function () {
         refresh.disabled = true;
         refresh.textContent = 'Refreshing\u2026';
-        fetchAndRenderChecks(lastState && lastState.number).then(function () {
-          // Re-render the tab to pick up new data.
-          if (lastState) render(lastState);
-        });
+        fetchAndRenderChecks(lastState && lastState.number).then(repaintChecksTab);
       });
+    }
+    // Auto-refresh: pull fresh data on every tab activation, then poll while
+    // the tab stays active. Without this, an in-progress run kicked off
+    // moments ago wouldn't show up until the user manually clicked Refresh
+    // (the per-task CI poll updates the sidebar icon but not this surface).
+    startChecksPolling();
+    var dispatchBtn = hostEl.querySelector('.pr-checks-dispatch');
+    if (dispatchBtn) {
+      dispatchBtn.addEventListener('click', function () { openWorkflowDispatchModal(); });
     }
     hostEl.querySelectorAll('.pr-check-row[data-link]').forEach(function (row) {
       row.addEventListener('click', function (e) {
-        // Don't open the run URL when the user clicks the inline Debug btn.
+        // Don't open the run URL when the user clicks an inline action btn.
         if (e.target.closest('.pr-check-debug-btn')) return;
+        if (e.target.closest('.pr-check-annotations-btn')) return;
+        if (e.target.closest('.pr-check-action-btn')) return;
         var url = row.dataset.link;
         if (url) window.klaus.gh.openExternal(url);
       });
@@ -3842,6 +3999,324 @@ window.PrReview = (function () {
         e.stopPropagation();
         startDebugCheck(btn);
       });
+    });
+    hostEl.querySelectorAll('.pr-check-annotations-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleAnnotations(btn);
+      });
+    });
+    hostEl.querySelectorAll('.pr-check-action-rerun').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        runQuickAction(btn, 'rerun');
+      });
+    });
+    hostEl.querySelectorAll('.pr-check-action-cancel').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        runQuickAction(btn, 'cancel');
+      });
+    });
+    hostEl.querySelectorAll('.pr-check-action-watch').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        toggleLogWatch(btn);
+      });
+    });
+  }
+
+  // Live log tail for an in-progress run. Click again to stop. Renders into a
+  // panel below the row with auto-scroll to bottom unless the user has
+  // scrolled up (basic stick-to-bottom behavior).
+  function toggleLogWatch(btn) {
+    var row = btn.closest('.pr-check-row');
+    if (!row) return;
+    var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-log-watch-panel')
+      ? row.nextElementSibling : null;
+    if (existing) {
+      var existingId = existing.dataset.requestId;
+      if (existingId) window.klaus.pr.reviewRunLogWatchStop(existingId);
+      existing.remove();
+      btn.textContent = 'Watch log';
+      return;
+    }
+    var runId = btn.dataset.runId;
+    if (!runId) return;
+    var requestId = 'log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+    var panel = document.createElement('div');
+    panel.className = 'pr-check-log-watch-panel';
+    panel.dataset.requestId = requestId;
+    panel.innerHTML = '<div class="pr-check-log-watch-head">'
+        + '<span>Tailing run #' + escHtml(runId) + '</span>'
+        + '<button type="button" class="pr-check-log-watch-stop">Stop</button>'
+      + '</div>'
+      + '<pre class="pr-check-log-watch-body">Waiting for log…</pre>';
+    row.insertAdjacentElement('afterend', panel);
+    btn.textContent = 'Stop watching';
+
+    var bodyEl = panel.querySelector('.pr-check-log-watch-body');
+    var firstChunk = true;
+    var stickBottom = true;
+    bodyEl.addEventListener('scroll', function () {
+      // Within 12px of the bottom counts as "stuck" for resume-after-render.
+      stickBottom = (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 12;
+    });
+
+    var unsubChunk = window.klaus.pr.onRunLogChunk(requestId, function (chunk) {
+      if (firstChunk) { bodyEl.textContent = ''; firstChunk = false; }
+      bodyEl.appendChild(document.createTextNode(chunk));
+      if (stickBottom) bodyEl.scrollTop = bodyEl.scrollHeight;
+    });
+    var unsubDone = window.klaus.pr.onRunLogDone(requestId, function (info) {
+      var head = panel.querySelector('.pr-check-log-watch-head span');
+      if (head) {
+        if (info && info.truncated) head.textContent = 'Log too large — stopped tailing';
+        else if (info && info.conclusion) head.textContent = 'Run completed: ' + info.conclusion;
+        else head.textContent = 'Run completed';
+      }
+      btn.textContent = 'Watch log';
+    });
+
+    panel.querySelector('.pr-check-log-watch-stop').addEventListener('click', function () {
+      window.klaus.pr.reviewRunLogWatchStop(requestId);
+      if (unsubChunk) unsubChunk();
+      if (unsubDone) unsubDone();
+      panel.remove();
+      btn.textContent = 'Watch log';
+    });
+
+    window.klaus.pr.reviewRunLogWatchStart(requestId, runId).then(function (res) {
+      if (res && res.error) {
+        bodyEl.classList.add('diff-error');
+        bodyEl.textContent = res.error;
+        btn.textContent = 'Watch log';
+      }
+    });
+  }
+
+  // Shared rerun/cancel handler. Button label flips to a transient state, then
+  // the Checks tab is refreshed once gh returns. Errors surface on the button
+  // itself rather than a toast — keeps the row in scope for the user.
+  function runQuickAction(btn, kind) {
+    var runId = btn.dataset.runId;
+    if (!runId) return;
+    var name = btn.dataset.name || ('run #' + runId);
+    var verb = kind === 'rerun' ? 'Rerun failed jobs' : 'Cancel run';
+    if (!confirm(verb + ' for "' + name + '"?')) return;
+
+    var originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = kind === 'rerun' ? 'Rerunning…' : 'Cancelling…';
+
+    var p = kind === 'rerun'
+      ? window.klaus.pr.reviewRunRerunFailed(runId)
+      : window.klaus.pr.reviewRunCancel(runId);
+
+    p.then(function (res) {
+      if (res && res.error) {
+        btn.disabled = false;
+        btn.textContent = 'Failed';
+        btn.title = res.error;
+        setTimeout(function () { btn.textContent = originalText; btn.title = ''; }, 4000);
+        return;
+      }
+      // Successful kick — refresh checks so the row's state reflects the new
+      // run. Repaint just the Checks-tab slot rather than re-rendering the
+      // whole PR view; the latter caused the entire section to flash empty
+      // for the duration of the rebuild.
+      fetchAndRenderChecks(lastState && lastState.number).then(repaintChecksTab);
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = 'Failed';
+      btn.title = (err && err.message) || 'unknown error';
+    });
+  }
+
+  // Swap only the .pr-review-checks-tab innerHTML and rebind. Leaves the
+  // rest of the PR-review surface untouched so action-driven refreshes
+  // (rerun, cancel, periodic poll) don't flash the whole tab.
+  function repaintChecksTab() {
+    var slot = hostEl.querySelector('.pr-review-checks-tab');
+    if (!slot) return;
+    slot.innerHTML = renderChecksTab();
+    bindChecksTab();
+  }
+
+  // Periodic refresh while Checks is the active tab. Idempotent — calling
+  // start while already running just resets the interval. Stops on tab
+  // switch (bindTabs hook) and on PR change (clearChecksPolling at the top
+  // of render() when isNewPr).
+  function startChecksPolling() {
+    clearChecksPolling();
+    // Kick off an immediate refresh on tab activation so the user sees fresh
+    // data without clicking Refresh. Skip if the PR isn't loaded yet.
+    if (lastState && lastState.number && !checksFetchInFlight) {
+      checksFetchInFlight = true;
+      fetchAndRenderChecks(lastState.number).then(function () {
+        checksFetchInFlight = false;
+        repaintChecksTab();
+      }, function () { checksFetchInFlight = false; });
+    }
+    checksPollTimer = setInterval(function () {
+      if (!lastState || !lastState.number) { clearChecksPolling(); return; }
+      // Skip if the previous poll hasn't returned yet — avoids fetch storms
+      // when the user's network is slow.
+      if (checksFetchInFlight) return;
+      checksFetchInFlight = true;
+      fetchAndRenderChecks(lastState.number).then(function () {
+        checksFetchInFlight = false;
+        repaintChecksTab();
+      }, function () { checksFetchInFlight = false; });
+    }, 15000);
+  }
+
+  function clearChecksPolling() {
+    if (checksPollTimer) { clearInterval(checksPollTimer); checksPollTimer = null; }
+  }
+
+  // Hand-built modal for manually dispatching a workflow. Inputs are accepted
+  // as a raw JSON object since parsing the workflow YAML's `on.workflow_dispatch.inputs`
+  // would require pulling in a YAML lib for a niche feature. Most workflows
+  // either have no inputs or simple key/value inputs the user already knows.
+  function openWorkflowDispatchModal() {
+    var existing = document.querySelector('.pr-workflow-dispatch-modal-backdrop');
+    if (existing) { existing.remove(); return; }
+
+    var defaultRef = (lastState && lastState.headRefName) || '';
+    var backdrop = document.createElement('div');
+    backdrop.className = 'pr-workflow-dispatch-modal-backdrop';
+    backdrop.innerHTML = '<div class="pr-workflow-dispatch-modal">'
+        + '<div class="pr-workflow-dispatch-head">Dispatch workflow</div>'
+        + '<div class="pr-workflow-dispatch-body">'
+          + '<label>Workflow</label>'
+          + '<select class="pr-workflow-select"><option value="">Loading…</option></select>'
+          + '<label>Ref (branch or tag)</label>'
+          + '<input class="pr-workflow-ref" type="text" value="' + escHtml(defaultRef) + '" />'
+          + '<label>Inputs (JSON object, optional)</label>'
+          + '<textarea class="pr-workflow-inputs" placeholder=\'{"environment": "staging"}\'></textarea>'
+          + '<div class="pr-workflow-dispatch-error" hidden></div>'
+        + '</div>'
+        + '<div class="pr-workflow-dispatch-actions">'
+          + '<button type="button" class="pr-workflow-dispatch-cancel">Cancel</button>'
+          + '<button type="button" class="pr-workflow-dispatch-go">Dispatch</button>'
+        + '</div>'
+      + '</div>';
+    document.body.appendChild(backdrop);
+
+    var selectEl = backdrop.querySelector('.pr-workflow-select');
+    var refEl = backdrop.querySelector('.pr-workflow-ref');
+    var inputsEl = backdrop.querySelector('.pr-workflow-inputs');
+    var errorEl = backdrop.querySelector('.pr-workflow-dispatch-error');
+    var goBtn = backdrop.querySelector('.pr-workflow-dispatch-go');
+
+    function close() { backdrop.remove(); }
+    backdrop.querySelector('.pr-workflow-dispatch-cancel').addEventListener('click', close);
+    backdrop.addEventListener('click', function (e) { if (e.target === backdrop) close(); });
+
+    window.klaus.pr.reviewWorkflowsList().then(function (res) {
+      if (res && res.error) {
+        selectEl.innerHTML = '<option value="">— failed to load —</option>';
+        errorEl.textContent = res.error;
+        errorEl.hidden = false;
+        return;
+      }
+      var ws = (res && res.workflows) || [];
+      if (ws.length === 0) {
+        selectEl.innerHTML = '<option value="">— no active workflows —</option>';
+        return;
+      }
+      selectEl.innerHTML = ws.map(function (w) {
+        return '<option value="' + escHtml(String(w.id)) + '">' + escHtml(w.name) + ' (' + escHtml(w.path) + ')</option>';
+      }).join('');
+    });
+
+    goBtn.addEventListener('click', function () {
+      var workflowId = selectEl.value;
+      if (!workflowId) { errorEl.textContent = 'Choose a workflow.'; errorEl.hidden = false; return; }
+      var ref = refEl.value.trim();
+      if (!ref) { errorEl.textContent = 'Ref is required.'; errorEl.hidden = false; return; }
+      var inputs = {};
+      var raw = inputsEl.value.trim();
+      if (raw) {
+        try { inputs = JSON.parse(raw); }
+        catch (err) { errorEl.textContent = 'Inputs must be valid JSON: ' + err.message; errorEl.hidden = false; return; }
+        if (typeof inputs !== 'object' || Array.isArray(inputs) || inputs === null) {
+          errorEl.textContent = 'Inputs must be a JSON object.';
+          errorEl.hidden = false;
+          return;
+        }
+      }
+      goBtn.disabled = true;
+      goBtn.textContent = 'Dispatching…';
+      errorEl.hidden = true;
+      window.klaus.pr.reviewWorkflowDispatch(workflowId, ref, inputs).then(function (res) {
+        if (res && res.error) {
+          goBtn.disabled = false;
+          goBtn.textContent = 'Dispatch';
+          errorEl.textContent = res.error;
+          errorEl.hidden = false;
+          return;
+        }
+        // Successful dispatch. Refresh checks so the new run shows up promptly.
+        close();
+        if (lastState) {
+          fetchAndRenderChecks(lastState.number).then(function () { render(lastState); });
+        }
+      });
+    });
+  }
+
+  // Lazily fetch + render annotations beneath a failing check row. Click
+  // again to collapse. Cached on the panel element so a re-render of the
+  // tab doesn't lose the user's expand state.
+  function toggleAnnotations(btn) {
+    var row = btn.closest('.pr-check-row');
+    if (!row) return;
+    var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-annotations-panel')
+      ? row.nextElementSibling : null;
+    if (existing) { existing.remove(); return; }
+    var checkId = btn.dataset.checkId;
+    if (!checkId) return;
+
+    var panel = document.createElement('div');
+    panel.className = 'pr-check-annotations-panel';
+    panel.innerHTML = '<div class="pr-check-annotations-body">Loading annotations…</div>';
+    row.insertAdjacentElement('afterend', panel);
+
+    window.klaus.pr.reviewCheckAnnotations(checkId).then(function (res) {
+      if (!panel.isConnected) return;
+      var body = panel.querySelector('.pr-check-annotations-body');
+      if (res && res.error) {
+        body.classList.add('diff-error');
+        body.textContent = 'Failed to load annotations: ' + res.error;
+        return;
+      }
+      var ann = (res && res.annotations) || [];
+      if (ann.length === 0) {
+        body.textContent = 'No annotations from this check.';
+        body.classList.add('pr-check-annotations-empty');
+        return;
+      }
+      body.innerHTML = ann.map(function (a) {
+        var levelClass = 'pr-annotation-' + (a.level || 'notice').replace(/[^a-z]/gi, '');
+        var loc = a.path ? escHtml(a.path) + (a.startLine ? ':' + a.startLine : '') : '';
+        return '<div class="pr-annotation ' + levelClass + '">'
+          + '<div class="pr-annotation-head">'
+            + '<span class="pr-annotation-level">' + escHtml(a.level || 'notice') + '</span>'
+            + (loc ? '<span class="pr-annotation-loc">' + loc + '</span>' : '')
+            + (a.title ? '<span class="pr-annotation-title">' + escHtml(a.title) + '</span>' : '')
+          + '</div>'
+          + '<div class="pr-annotation-msg">' + escHtml(a.message || '') + '</div>'
+          + (a.rawDetails ? '<pre class="pr-annotation-raw">' + escHtml(a.rawDetails) + '</pre>' : '')
+        + '</div>';
+      }).join('');
+    }).catch(function (err) {
+      if (!panel.isConnected) return;
+      var body = panel.querySelector('.pr-check-annotations-body');
+      body.classList.add('diff-error');
+      body.textContent = 'Failed to load annotations: ' + (err && err.message ? err.message : 'unknown error');
     });
   }
 
@@ -3919,6 +4394,36 @@ window.PrReview = (function () {
       footer.className = 'pr-check-debug-usage';
       footer.textContent = 'Ran in ' + seconds + 's on your Anthropic account';
       panel.appendChild(footer);
+
+      // Open as task: spawn a fresh Claude task in the PR worktree, pre-typed
+      // with the analysis. Uses ensureWorktreeForActivePr in main, so the
+      // user doesn't have to checkout the PR first.
+      var openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'pr-check-debug-open-task';
+      openBtn.textContent = 'Open as task';
+      openBtn.title = 'Spawn a Claude task on the PR worktree, seeded with this analysis';
+      openBtn.addEventListener('click', function () {
+        openBtn.disabled = true;
+        var originalLabel = openBtn.textContent;
+        openBtn.textContent = 'Opening…';
+        var prNumber = lastState && lastState.number;
+        window.klaus.pr.debugCheckOpenAsTask(accumulated, btn.dataset.name || '', prNumber).then(function (res) {
+          if (res && res.error) {
+            openBtn.disabled = false;
+            openBtn.textContent = 'Failed';
+            openBtn.title = res.error;
+            setTimeout(function () { openBtn.textContent = originalLabel; openBtn.title = ''; }, 4000);
+            return;
+          }
+          openBtn.textContent = 'Opened ✓';
+        }).catch(function (err) {
+          openBtn.disabled = false;
+          openBtn.textContent = 'Failed';
+          openBtn.title = (err && err.message) || 'unknown error';
+        });
+      });
+      panel.appendChild(openBtn);
     });
 
     panel.querySelector('.pr-check-debug-close').addEventListener('click', function () {
@@ -3935,7 +4440,7 @@ window.PrReview = (function () {
     // Re-enable button after start so the user can click it again to cancel.
     setTimeout(function () { btn.disabled = false; btn.textContent = origText; }, 200);
 
-    window.klaus.pr.debugCheckStart(requestId, btn.dataset.link, btn.dataset.name).then(function (r) {
+    window.klaus.pr.debugCheckStart(requestId, btn.dataset.link, btn.dataset.name, btn.dataset.checkId || null).then(function (r) {
       if (r && r.error) {
         clearInterval(statusTimer);
         bodyEl.classList.remove('status-pulse');

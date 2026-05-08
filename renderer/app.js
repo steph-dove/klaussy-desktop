@@ -1378,7 +1378,12 @@
       { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', action: async function () {
         var newVal = task.notifyEnabled === false;
         task.notifyEnabled = newVal;
-        await window.klaus.task.setNotifyEnabled(id, newVal);
+        await window.klaus.task.setNotifyEnabled(id, newVal, 'idle');
+      }},
+      { label: (task.notifyCIEnabled !== false ? '\u2713 ' : '  ') + 'Notify on CI Pass/Fail', action: async function () {
+        var newVal = task.notifyCIEnabled === false;
+        task.notifyCIEnabled = newVal;
+        await window.klaus.task.setNotifyEnabled(id, newVal, 'ci');
       }},
       { label: 'Export Transcript', action: async function () {
         var result = await window.klaus.task.exportTranscript(id);

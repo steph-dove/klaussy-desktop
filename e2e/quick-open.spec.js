@@ -38,7 +38,11 @@ test('quick-open palette opens, filters, and closes on Escape', async ({ mainWin
 
     await mainWindow.evaluate(() => window.QuickOpen.show());
 
-    const overlay = mainWindow.locator('.palette-overlay');
+    // Target the QuickOpen overlay specifically — `.palette-overlay` is the
+    // shared backdrop class used by Setup-check / About / etc., and on first
+    // launch in CI the Setup-check dialog appears asynchronously and would
+    // otherwise pollute the count assertions below.
+    const overlay = mainWindow.locator('.quick-open-overlay');
     const input = overlay.locator('.palette-input');
     const items = overlay.locator('.quick-open-item');
 

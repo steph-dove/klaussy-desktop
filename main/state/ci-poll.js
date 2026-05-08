@@ -9,11 +9,28 @@
 const { execFileP, ghExecP, runWithConcurrency } = require('../util/exec');
 const { loadConfig } = require('../util/config');
 const { allWindows } = require('./windows');
-const { instances } = require('./instances');
+const { instances, sendCIFlipNotification } = require('./instances');
 
 // ---- CI/CD Status (Feature 3) ----
 
 const ciPollingIntervals = new Map(); // taskId -> intervalId
+// Per-task aggregate-bucket memory so we can fire a notification only on the
+// transition from pending → pass/fail (not on every successful poll).
+// Shape: Map<taskId, { bucket, headRunUrl }>.
+const lastBucketByTask = new Map();
+
+function bucketFromRun(run) {
+  const status = (run && run.status || '').toLowerCase();
+  const conclusion = (run && run.conclusion || '').toLowerCase();
+  if (status === 'in_progress' || status === 'queued' || status === 'requested' || status === 'waiting' || status === 'pending' || status === '') {
+    return 'pending';
+  }
+  if (conclusion === 'success' || conclusion === 'neutral') return 'pass';
+  if (conclusion === 'failure' || conclusion === 'timed_out' || conclusion === 'action_required') return 'fail';
+  if (conclusion === 'cancelled') return 'cancel';
+  if (conclusion === 'skipped') return 'pending';
+  return 'pending';
+}
 
 function startCIPolling(id, worktreePath, branch) {
   stopCIPolling(id);
@@ -33,6 +50,22 @@ function startCIPolling(id, worktreePath, branch) {
         if (!win.isDestroyed()) {
           win.webContents.send('ci-status-update', { id, runs });
         }
+      }
+
+      // Detect bucket flips on the latest run. Only fire when transitioning
+      // *out of* pending — this avoids notifications on the first poll (which
+      // would otherwise spam every time a task is created).
+      if (Array.isArray(runs) && runs.length > 0) {
+        const latest = runs.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0];
+        const newBucket = bucketFromRun(latest);
+        const prev = lastBucketByTask.get(id);
+        const inst = instances.get(id);
+        if (inst && prev && prev.bucket === 'pending' && (newBucket === 'pass' || newBucket === 'fail')) {
+          sendCIFlipNotification(inst, latest, newBucket);
+        }
+        // Always update — including on the first poll, so we have a baseline
+        // for next time.
+        lastBucketByTask.set(id, { bucket: newBucket, headRunUrl: latest.url || null });
       }
     } catch (_) { /* silent — background poll */ }
   };
@@ -57,6 +90,7 @@ function stopCIPolling(id) {
     clearInterval(timers);
   }
   ciPollingIntervals.delete(id);
+  lastBucketByTask.delete(id);
 }
 
 // ---- Auto-fetch (Feature 15) ----
