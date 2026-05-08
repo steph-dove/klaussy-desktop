@@ -685,7 +685,8 @@ You are a senior/principal-level engineer reviewing a pull request. Treat this a
 
 - Be skeptical and precise.
 - Assume the code will be read and modified by others.
-- Repeat the code to help pinpoint the issue. No more than 10 lines.
+- Quote the **original code being reviewed** in a fenced code block — verbatim from the file, no edits or ellipses, no more than 10 lines. This is what the comment IS ABOUT, not what to do about it.
+- Do NOT include a "fix" or "suggested change" in that same code block. If you have a concrete fix to propose, put it in a separate fenced block prefixed with \`Suggested change:\` on its own line above the block. Mixing the two confuses readers about which is which.
 - If something relies on an unstated assumption, call it out.
 - If behavior is unclear, treat that as a problem.
 - Prefer concrete fixes over vague advice.
@@ -829,7 +830,7 @@ Read every changed file in full for surrounding context.
 
 Rules:
 - Be skeptical and precise.
-- Repeat the relevant code (up to 10 lines) to pinpoint the issue.
+- Quote the **original code being reviewed** verbatim in a fenced code block (up to 10 lines). This is what the comment IS ABOUT — not your fix. Do NOT include a suggested change in this block; if you propose a fix, put it in a separate block prefixed with \`Suggested change:\` on its own line.
 - If something relies on an unstated assumption, call it out.
 - Prefer concrete fixes over vague advice.
 - Return ONLY your findings. Do not write any files.
@@ -888,7 +889,7 @@ Read every changed file in full for surrounding context.
 
 Rules:
 - Be skeptical and precise.
-- Repeat the relevant code (up to 10 lines) to pinpoint the issue.
+- Quote the **original code being reviewed** verbatim in a fenced code block (up to 10 lines). This is what the comment IS ABOUT — not your fix. Do NOT include a suggested change in this block; if you propose a fix, put it in a separate block prefixed with \`Suggested change:\` on its own line.
 - Think about how changes behave at scale and over time.
 - Prefer concrete fixes over vague advice.
 - Return ONLY your findings. Do not write any files.
@@ -946,7 +947,7 @@ Read every changed file in full for surrounding context.
 
 Rules:
 - Be skeptical and precise.
-- Repeat the relevant code (up to 10 lines) to pinpoint the issue.
+- Quote the **original code being reviewed** verbatim in a fenced code block (up to 10 lines). This is what the comment IS ABOUT — not your fix. Do NOT include a suggested change in this block; if you propose a fix, put it in a separate block prefixed with \`Suggested change:\` on its own line.
 - For security issues, describe the attack vector concretely.
 - Prefer concrete fixes over vague advice.
 - Return ONLY your findings. Do not write any files.
