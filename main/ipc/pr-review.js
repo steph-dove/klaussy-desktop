@@ -536,12 +536,14 @@ ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => 
     return { annotations: [], error: 'Missing repo or check id' };
   }
   const cwd = currentRepoPath() || require('os').homedir();
+  // Drop --paginate: the annotations endpoint returns a single JSON array
+  // (no Link header on the typical first-page-and-only-page response), and
+  // some gh versions exit non-zero when there's nothing to paginate.
+  const args = ['api', `repos/${baseOwner}/${baseRepo}/check-runs/${checkRunId}/annotations`];
   try {
-    const { stdout } = await execFileP(
-      'gh',
-      ['api', `repos/${baseOwner}/${baseRepo}/check-runs/${checkRunId}/annotations`, '--paginate'],
-      { cwd, maxBuffer: 4 * 1024 * 1024, timeout: 10000 },
-    );
+    const { stdout } = await execFileP('gh', args, {
+      cwd, maxBuffer: 4 * 1024 * 1024, timeout: 10000,
+    });
     const arr = JSON.parse(stdout);
     return {
       annotations: (Array.isArray(arr) ? arr : []).map((a) => ({
@@ -555,8 +557,30 @@ ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => 
       })),
     };
   } catch (err) {
-    const raw = err.stderr ? err.stderr.toString() : err.message;
-    return { annotations: [], error: (raw || '').trim() };
+    // gh exits non-zero on 403 (token scope), 404 (no annotations / wrong id),
+    // and on plain network failures. Surface the *useful* part of stderr —
+    // err.stderr usually has the actual gh message; err.message tends to be
+    // "Command failed: gh api … — exit code 1" which tells the user nothing.
+    const stderr = err.stderr ? err.stderr.toString().trim() : '';
+    const message = err.message || '';
+    console.error('[pr-review-check-annotations] gh failed:',
+      'cmd=', 'gh ' + args.join(' '),
+      'stderr=', stderr || '(empty)',
+      'message=', message);
+    let userMsg = stderr || message || 'Annotations fetch failed';
+    if (/HTTP 404|Not Found/i.test(userMsg)) {
+      // 404 on this endpoint means "no annotations on this check-run."
+      // Treat as empty rather than an error — common, not a problem.
+      return { annotations: [] };
+    }
+    if (/HTTP 403/i.test(userMsg)) {
+      userMsg = 'Permission denied — token may need the `checks:read` scope. ('
+        + userMsg.replace(/\s+/g, ' ').slice(0, 200) + ')';
+    } else if (/exit (status |code )?1/i.test(userMsg) && !stderr) {
+      userMsg = 'gh exited with code 1 (no stderr). Try running this manually:\n'
+        + '  gh ' + args.join(' ');
+    }
+    return { annotations: [], error: userMsg };
   }
 });
 
