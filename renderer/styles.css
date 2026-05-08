@@ -6738,6 +6738,37 @@ body.pr-review-popout #pr-review-root {
   line-height: 1.45;
 }
 
+/* Verbatim file content at the verified [Location] line range. Distinct
+   styling from .pr-ai-code so users can tell at a glance "this is the
+   real code" vs Claude's pasted snippet (which often illustrates a fix). */
+.pr-ai-finding-original {
+  margin: 10px 0 4px 0;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 5px;
+  background: rgba(99, 102, 241, 0.05);
+  overflow: hidden;
+}
+.pr-ai-finding-original-head {
+  padding: 5px 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+  background: rgba(99, 102, 241, 0.08);
+  border-bottom: 1px solid rgba(99, 102, 241, 0.25);
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.pr-ai-finding-original-code {
+  margin: 0;
+  padding: 8px 12px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: pre;
+}
+
 .pr-review-tabs {
   display: flex;
   background: var(--surface);

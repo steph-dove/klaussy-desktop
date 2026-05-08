@@ -1376,15 +1376,18 @@ window.PrReview = (function () {
     var inner = m[1].trim();
     // Find a `path:line` anchor. Require the path to include a `/` or `.`
     // so we don't accidentally match English like "line: 42". Line must
-    // come right after a colon.
-    var pm = inner.match(/([^\s,;]*[\/.][^\s,;:]*):(\d+)/);
+    // come right after a colon. Optional `-N` after captures a range end
+    // (e.g. `reframe.html:1041-1085`).
+    var pm = inner.match(/([^\s,;]*[\/.][^\s,;:]*):(\d+)(?:-(\d+))?/);
     if (!pm) return null;
     var snippet = '';
-    // Everything after the matched "path:line" is treated as the snippet
-    // hint — the template says "and code_snippet" so strip that prefix.
+    // Everything after the matched "path:line[-end]" is treated as the
+    // snippet hint — the template says "and code_snippet" so strip that
+    // prefix.
     var tail = inner.slice(pm.index + pm[0].length).replace(/^\s*(and\s+)?/i, '').trim();
     if (tail) snippet = tail;
-    return { path: pm[1], line: parseInt(pm[2], 10), snippet: snippet };
+    var endLine = pm[3] ? parseInt(pm[3], 10) : null;
+    return { path: pm[1], line: parseInt(pm[2], 10), endLine: endLine, snippet: snippet };
   }
 
   // Pull the first fenced-code block out of a finding — a more reliable
@@ -1577,12 +1580,34 @@ window.PrReview = (function () {
           f.line = match.line;
           f.locationVerified = true;
           f.postMode = 'inline';
+          // Capture a small window of the actual file content around the
+          // verified line so the card can render "this is the code being
+          // reviewed" verbatim — independent of whatever snippet Claude
+          // chose to paste in its prose, which is often a fix illustration
+          // rather than the original code. End line preference: locationRaw
+          // had a range like 1041-1085 → keep some of that context; otherwise
+          // a small symmetric window around the matched line.
+          var endLine = (f.locationRaw && f.locationRaw.endLine) || (match.line + 4);
+          var startLine = Math.max(1, match.line - 2);
+          // Cap span at ~12 lines to keep the card compact regardless of how
+          // wide the [Location] range was. The user can always click out to
+          // GitHub for the full hunk.
+          if (endLine - startLine > 11) endLine = startLine + 11;
+          var allLines = r.content.split('\n');
+          var snippetLines = allLines.slice(startLine - 1, endLine);
+          f.verifiedSnippet = {
+            path: f.path,
+            startLine: startLine,
+            endLine: startLine + snippetLines.length - 1,
+            text: snippetLines.join('\n'),
+          };
         } else {
           // No match anywhere in the file — Claude probably hallucinated
           // the location. Fall back to issue-comment mode so "Add to PR"
           // still posts *something* useful rather than a broken inline.
           f.locationVerified = false;
           f.postMode = 'issue';
+          f.verifiedSnippet = null;
         }
         repaintAiReviewTab();
         saveAiReviewCache();
@@ -2025,8 +2050,27 @@ window.PrReview = (function () {
       bodyHtml = '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>';
     }
 
+    // Original code at the verified location, rendered verbatim from the
+    // file — independent of whatever snippet Claude pasted in its prose
+    // (which is often a fix illustration, not the original). Without this
+    // the user has no ground-truth view of the code being reviewed; the
+    // GitHub PR view shows it via the diff anchor, but the in-app card
+    // wouldn't.
+    var originalSnippetHtml = '';
+    if (f.verifiedSnippet && f.verifiedSnippet.text) {
+      var vs = f.verifiedSnippet;
+      var label = escHtml(vs.path)
+        + ':' + vs.startLine
+        + (vs.endLine && vs.endLine !== vs.startLine ? '-' + vs.endLine : '');
+      originalSnippetHtml = '<div class="pr-ai-finding-original">'
+        + '<div class="pr-ai-finding-original-head">Original code at ' + label + '</div>'
+        + '<pre class="pr-ai-finding-original-code"><code>' + escHtml(vs.text) + '</code></pre>'
+      + '</div>';
+    }
+
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
       + bodyHtml
+      + originalSnippetHtml
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
       + errorBlock
       + renderInvestigatePanel(f)
