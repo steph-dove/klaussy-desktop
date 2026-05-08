@@ -1494,33 +1494,52 @@ window.PrReview = (function () {
     return (s || '').replace(/\s+/g, ' ').trim();
   }
 
-  // Best line match for a snippet inside file content. Searches around the
-  // hinted line first (±50) then the whole file. Returns { line } if a
-  // confident match is found, null otherwise.
-  function findSnippetLine(fileContent, hintLine, snippet) {
-    var target = normalizeLine(snippet);
-    if (!target || target.length < 4) return null;
+  // Best line match across ALL candidate snippets. Searches around the hinted
+  // line first (±50). When the [Location] hint is given (which it always is
+  // in the AI-review flow), we never accept a "far" match: a confident match
+  // must be near the hint OR exactly at the hint line. Otherwise the picker
+  // can snap to a tangentially-related snippet that Claude pasted alongside
+  // the real code (e.g. a finding about lines 1041-1085 that pastes a call
+  // site at line 747 — without this constraint, a unique match at 747 would
+  // override the hint and post the comment on the wrong line).
+  //
+  // Returns { line } if a confident match is found, null otherwise.
+  function findSnippetLineAcrossCandidates(fileContent, hintLine, candidates) {
     var lines = fileContent.split('\n');
+    var validCandidates = candidates
+      .map(function (s) { return normalizeLine(s); })
+      .filter(function (s) { return s && s.length >= 4; });
+    if (validCandidates.length === 0) return null;
+
+    // Direct hit: any candidate's text appears on the hint line itself.
     if (hintLine && lines[hintLine - 1] != null) {
-      if (normalizeLine(lines[hintLine - 1]).indexOf(target) !== -1) {
-        return { line: hintLine };
+      var hintLineContent = normalizeLine(lines[hintLine - 1]);
+      for (var c = 0; c < validCandidates.length; c++) {
+        if (hintLineContent.indexOf(validCandidates[c]) !== -1) {
+          return { line: hintLine };
+        }
       }
     }
+
+    // Collect every near match (±50 of hint) across every candidate, then
+    // pick the closest. We intentionally do NOT collect far matches when a
+    // hint is given — a far match means Claude's [Location] is wrong AND
+    // we can recover, but the recovery is too easy to fool when a finding
+    // pastes context from multiple parts of the file.
     var near = [];
-    var far = [];
-    for (var i = 0; i < lines.length; i++) {
-      if (normalizeLine(lines[i]).indexOf(target) === -1) continue;
-      var ln = i + 1;
-      if (hintLine && Math.abs(ln - hintLine) <= 50) near.push(ln);
-      else far.push(ln);
+    for (var ci = 0; ci < validCandidates.length; ci++) {
+      var t = validCandidates[ci];
+      for (var i = 0; i < lines.length; i++) {
+        if (normalizeLine(lines[i]).indexOf(t) === -1) continue;
+        var ln = i + 1;
+        if (!hintLine) { near.push(ln); continue; }
+        if (Math.abs(ln - hintLine) <= 50) near.push(ln);
+      }
     }
-    if (near.length === 1) return { line: near[0] };
-    if (near.length > 1) {
-      near.sort(function (a, b) { return Math.abs(a - hintLine) - Math.abs(b - hintLine); });
-      return { line: near[0] };
-    }
-    if (far.length === 1) return { line: far[0] };
-    return null;
+    if (near.length === 0) return null;
+    if (!hintLine) return { line: near[0] };
+    near.sort(function (a, b) { return Math.abs(a - hintLine) - Math.abs(b - hintLine); });
+    return { line: near[0] };
   }
 
   // Verify each finding's line number by reading the file inside the
@@ -1545,16 +1564,15 @@ window.PrReview = (function () {
           return;
         }
         var snippet = firstCodeBlock(f.text) || (f.locationRaw && f.locationRaw.snippet) || '';
-        // Try each non-empty line of the fenced block — the most specific
-        // one usually wins. Fall back to the location-hint snippet.
+        // Build candidate list from the fenced code block lines + the
+        // location-hint snippet. Considered together (not in priority order)
+        // so a tangential first-line match doesn't pre-empt a more relevant
+        // later candidate that would have matched near the hint.
         var candidates = snippet.split('\n').map(function (s) { return s.trim(); }).filter(function (s) {
           return s && s.length >= 4 && !/^[\/*#\-]+$/.test(s);
         });
         if (f.locationRaw && f.locationRaw.snippet) candidates.push(f.locationRaw.snippet);
-        var match = null;
-        for (var i = 0; i < candidates.length && !match; i++) {
-          match = findSnippetLine(r.content, f.line, candidates[i]);
-        }
+        var match = findSnippetLineAcrossCandidates(r.content, f.line, candidates);
         if (match) {
           f.line = match.line;
           f.locationVerified = true;
