@@ -10,8 +10,8 @@ Klaussy is a desktop application. It does not host a backend service of its own.
 Information you interact with from within Klaussy goes to third parties whose
 policies govern what they collect:
 
-- **Claude Code / Anthropic API.** When you use the terminal, `/ultraplan`,
-  `/debug`, `/review`, "Explain diff", inline AI edit, or AI commit-message
+- **Claude Code / Anthropic API.** When you use the terminal, the Plan / Debug
+  / Review actions, "Explain diff", inline AI edit, or AI commit-message
   generation, Claude reads the prompt and repository context you provide.
   See Anthropic's privacy policy.
 - **GitHub.** When you view / comment on / merge PRs or run CI checks through
