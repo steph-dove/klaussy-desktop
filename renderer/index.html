@@ -328,11 +328,11 @@
     </div>
   </div>
 
-  <!-- Plan Modal: opens a new Claude sub-tab and runs /ultraplan on the supplied content -->
+  <!-- Plan Modal: opens a new Claude sub-tab and runs the local plan flow (or /debug) on the supplied content -->
   <div id="plan-modal-overlay" class="klaus-modal-overlay" style="display: none;">
     <div id="plan-modal" class="klaus-modal klaus-modal-wide">
       <h3 id="plan-modal-title">Plan a task</h3>
-      <p class="plan-modal-sub">Provide task details. A new Claude tab will open on this worktree and run <code>/ultraplan</code>.</p>
+      <p class="plan-modal-sub">Provide task details. A new Claude tab will open on this worktree and run a guided plan flow.</p>
       <div id="plan-modal-tabs">
         <button class="plan-modal-tab active" data-tab="paste">Paste text</button>
         <button class="plan-modal-tab" data-tab="upload">Upload file</button>
