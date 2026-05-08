@@ -20,12 +20,16 @@ window.ActionModal = (function () {
   // shape. Debug stays as a local slash command since `/debug` ships with
   // Claude Code itself.
   //
-  // Shape borrowed from the official `feature-dev` skill (parallel exploration,
-  // multi-architect compare, post-implementation review) plus klausify-desktop-
-  // specific guardrails (YAGNI, IPC-shape grep, silent-failure rule, manual UI
-  // verification) we hit real bugs from. References specialized subagents by
-  // name when available — they ship with the user-installed feature-dev and
-  // pr-review-toolkit plugins; falls back to general-purpose otherwise.
+  // The prompt itself is intentionally project-agnostic: Klaussy users invoke
+  // it from their own repos, not from this one, so anything Klaussy-specific
+  // would be wrong advice in the spawned tab. Shape borrowed from the official
+  // `feature-dev` skill (parallel exploration, multi-architect compare,
+  // post-implementation review) plus universal craft rules (YAGNI, grep
+  // callers before changing public shapes, no silent error swallowing, manual
+  // UI verification). The prompt instructs Claude to read the target repo's
+  // CLAUDE.md / README / CONTRIBUTING for project-specific rules. References
+  // specialized subagents by name when available; falls back to
+  // `general-purpose` otherwise.
   var PLAN_PROMPT = [
     'You are helping plan and implement a task. Follow these phases in order — do NOT skip Phase 3 (clarifying questions).',
     '',
@@ -47,7 +51,7 @@ window.ActionModal = (function () {
     '',
     '- **Feature Discovery**: Find entry points (UI components, IPC handlers, CLI commands). Locate core implementation files. Map feature boundaries and configuration.',
     '- **Code Flow Tracing**: Follow call chains from entry to output. Trace data transformations at each step. Identify dependencies and integrations. Document state changes and side effects.',
-    '- **Architecture Analysis**: Map abstraction layers (e.g. renderer → preload → IPC → main state → util in this project). Identify design patterns and architectural decisions. Document interfaces between components. Note cross-cutting concerns (auth, logging, caching).',
+    '- **Architecture Analysis**: Map abstraction layers (presentation → business logic → data, or this project\'s equivalent — name them in terms of the codebase you actually find). Identify design patterns and architectural decisions. Document interfaces between components. Note cross-cutting concerns (auth, logging, caching).',
     '- **Implementation Details**: Key algorithms and data structures. Error handling and edge cases. Performance considerations. Technical debt or improvement areas.',
     '',
     '### Required output (every explore agent)',
@@ -60,7 +64,7 @@ window.ActionModal = (function () {
     '### Per-agent angles',
     '',
     '- Agent A — *Similar features*: "Find features in this codebase that already do something analogous to the user\'s task. Pick the closest match and trace its implementation comprehensively using the analysis approach above. Identify what we can reuse vs. what would need to change."',
-    '- Agent B — *Architecture & conventions*: "Map the architecture for the area this task touches using the analysis approach above. Identify existing patterns, naming conventions, and any CLAUDE.md guidelines that constrain or shape the solution."',
+    '- Agent B — *Architecture & conventions*: "Map the architecture for the area this task touches using the analysis approach above. Identify existing patterns, naming conventions, and any project-doc guidelines (CLAUDE.md, README, CONTRIBUTING, AGENTS.md, etc.) that constrain or shape the solution."',
     '- Agent C — *(when relevant)* UI / testing patterns: "Identify UI patterns, testing approaches, or extension points relevant to this task."',
     '',
     'When the agents return, READ the key files they identified before designing. Agent summaries describe intent, not implementation — you will miss subtleties otherwise.',
@@ -121,7 +125,7 @@ window.ActionModal = (function () {
     '',
     '- Reviewer A — *Simplicity / DRY / readability* (`subagent_type: code-reviewer` if available): Is the code as simple as it can be? Are there abstractions that should be inlined or duplications that should be extracted? Is naming clear? Are comments explaining "why" not "what"?',
     '- Reviewer B — *Bugs / silent failures / inadequate error handling* (`subagent_type: silent-failure-hunter` if available): Empty `catch` blocks on user-initiated actions, broad catches that hide unrelated errors, missing logging, fallbacks that mask real problems, JSON parse errors swallowed into "no data," edge cases.',
-    '- Reviewer C — *Project conventions and the anti-patterns below*: Did we hit any of the anti-patterns? Did we follow CLAUDE.md guidelines? Are IPC return shapes consistent? Are renderer DOM updates safe?',
+    '- Reviewer C — *Project conventions and the anti-patterns below*: Did we hit any of the universal anti-patterns? Did we follow this project\'s docs (CLAUDE.md / README / CONTRIBUTING / equivalent)? Are public API shapes consistent? Are the project-specific invariants this codebase relies on still intact?',
     '',
     'Consolidate findings, present high-severity issues to the user, and ask whether to fix now, defer to a follow-up, or proceed as-is.',
     '',
@@ -129,14 +133,16 @@ window.ActionModal = (function () {
     '',
     'Write a 3–5 line summary: what was built, key decisions, files modified, suggested next steps. Mark all TodoWrite tasks complete.',
     '',
-    '## Anti-patterns to avoid (project guardrails)',
+    '## Anti-patterns to avoid (universal craft rules)',
+    '',
+    'These apply regardless of the project. ALSO read this codebase\'s CLAUDE.md / README / CONTRIBUTING (or equivalent) early in Phase 2 to pick up project-specific rules and add them to your working list — local conventions usually beat generic advice when they conflict.',
     '',
     '- Skipping Phase 3 because the task "seems clear." Most clear-looking tasks have hidden ambiguities. Ask anyway.',
     '- Adding features, abstractions, or refactors beyond what the task requires. YAGNI.',
     '- New abstractions for code with only one or two callsites. Three similar lines is fine.',
     '- Backwards-compatibility shims for code that has no other callers.',
     '- Comments that explain "what" the code does. Only "why," and only when it is non-obvious.',
-    '- Changing an IPC return shape without grepping callers across `renderer/` and `preload.js` first.',
+    '- Changing a public function, API, or return-shape without grepping all callers first.',
     '- Silent error swallowing in catch blocks that masks real failures from the user.',
     '- Reporting UI work as complete without manually testing it (or explicitly flagging that you could not).',
     '',
