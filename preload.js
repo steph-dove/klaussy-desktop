@@ -603,6 +603,13 @@ contextBridge.exposeInMainWorld('klaus', {
     ciStatus: (worktreePath, branch) => ipcRenderer.invoke('ci-status', { worktreePath, branch }),
     ciRunLogs: (worktreePath, runId) => ipcRenderer.invoke('ci-run-logs', { worktreePath, runId }),
     checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+    loginStart: (hostname) => ipcRenderer.invoke('gh-login-start', { hostname }),
+    loginCancel: () => ipcRenderer.invoke('gh-login-cancel'),
+    onLoginEvent: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('gh-login-event', listener);
+      return () => ipcRenderer.removeListener('gh-login-event', listener);
+    },
   },
 
   // ---- skills: Claude skills / commands / memory / MCP / plugins inventory ----

@@ -8498,13 +8498,120 @@ body.pr-review-popout #pr-review-root {
   letter-spacing: 0.4px;
   font-weight: 600;
 }
-.gh-account-switch {
+.gh-account-switch,
+.gh-account-action {
   font-size: 11px;
   color: var(--text-dim);
   padding: 2px 10px;
   border: 1px solid var(--border);
   border-radius: 4px;
 }
+.gh-account-row.invalid {
+  border-color: var(--diff-del-fg, #e27c7c);
+}
+.gh-account-row.invalid .gh-account-action {
+  color: var(--diff-del-fg, #e27c7c);
+  border-color: var(--diff-del-fg, #e27c7c);
+}
+.gh-account-status.invalid {
+  font-size: 10px;
+  color: var(--diff-del-fg, #e27c7c);
+  margin-left: auto;
+  margin-right: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+}
+.gh-accounts-foot {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.gh-account-add {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gh-account-add:hover { background: var(--bg-hover, rgba(255,255,255,0.05)); }
+
+/* In-app GitHub login (device flow) modal */
+.gh-login-dialog .gh-login-body { padding: 4px 0; }
+.gh-login-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 6px;
+  font-size: 13px;
+  color: var(--text);
+}
+.gh-login-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.06);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.gh-login-code-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  margin: 4px 0 8px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.gh-login-code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 22px;
+  letter-spacing: 0.15em;
+  color: var(--accent, #79b8ff);
+  font-weight: 600;
+}
+.gh-login-copy { margin-left: auto; }
+.gh-login-wait {
+  margin-top: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+.gh-login-error {
+  padding: 10px;
+  border: 1px solid var(--diff-del-fg, #e27c7c);
+  border-radius: 4px;
+  background: rgba(226, 124, 124, 0.08);
+}
+.gh-login-error pre {
+  white-space: pre-wrap;
+  font-size: 11px;
+  margin: 6px 0 0;
+}
+.gh-login-success p {
+  font-size: 14px;
+  color: var(--diff-add-fg, #7ce27c);
+  font-weight: 600;
+}
+.deps-action-row { margin-top: 8px; }
+.deps-action {
+  background: var(--accent, #79b8ff);
+  color: #0d1117;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.deps-action:hover { filter: brightness(1.08); }
 .skills-close {
   background: transparent;
   border: none;
