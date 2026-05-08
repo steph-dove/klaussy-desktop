@@ -3,7 +3,7 @@
 //   ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_TOTP_SECRET, ESIGNER_CREDENTIAL_ID
 // Plus CODESIGNTOOL_PATH pointing at the unzipped CodeSignTool root.
 
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -38,7 +38,10 @@ exports.default = async function sign(configuration) {
   fs.mkdirSync(outputDir, { recursive: true });
 
   console.log(`[win-sign] signing ${path.basename(filePath)} via SSL.com eSigner…`);
-  execFileSync(tool, [
+  // Node 18+ blocks spawning .bat/.cmd directly (CVE-2024-27980). Route through
+  // cmd.exe with verbatim arguments so cmd parses the .bat invocation but our
+  // arg values pass through without further shell mangling.
+  const args = [
     'sign',
     `-username=${ESIGNER_USERNAME}`,
     `-password=${ESIGNER_PASSWORD}`,
@@ -46,7 +49,18 @@ exports.default = async function sign(configuration) {
     `-credential_id=${ESIGNER_CREDENTIAL_ID}`,
     `-input_file_path=${filePath}`,
     `-output_dir_path=${outputDir}`,
-  ], { stdio: 'inherit', cwd: CODESIGNTOOL_PATH });
+  ];
+  const result = process.platform === 'win32'
+    ? spawnSync('cmd.exe', ['/c', tool, ...args], {
+        stdio: 'inherit',
+        cwd: CODESIGNTOOL_PATH,
+        windowsVerbatimArguments: true,
+      })
+    : spawnSync(tool, args, { stdio: 'inherit', cwd: CODESIGNTOOL_PATH });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`[win-sign] CodeSignTool exited with status ${result.status}`);
+  }
 
   // CodeSignTool writes a signed copy with the same basename into outputDir.
   // Move it back over the original so electron-builder's downstream steps
