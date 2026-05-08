@@ -3,9 +3,26 @@
 //   ESIGNER_USERNAME, ESIGNER_PASSWORD, ESIGNER_TOTP_SECRET, ESIGNER_CREDENTIAL_ID
 // Plus CODESIGNTOOL_PATH pointing at the unzipped CodeSignTool root.
 
-const { execFileSync, spawnSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+
+// CodeSignTool ships a `code_sign_tool-*.jar` next to the .bat/.sh wrapper.
+// Calling java -jar directly bypasses cmd.exe entirely — no .bat dispatch, no
+// shell metachar escaping needed for secrets containing & | < > ^ etc.
+function findJar(toolDir) {
+  const candidates = [
+    path.join(toolDir, 'jar'),
+    toolDir,
+    path.join(toolDir, 'lib'),
+  ];
+  for (const dir of candidates) {
+    if (!fs.existsSync(dir)) continue;
+    const jar = fs.readdirSync(dir).find((f) => /^code_sign_tool.*\.jar$/i.test(f));
+    if (jar) return path.join(dir, jar);
+  }
+  throw new Error(`[win-sign] code_sign_tool jar not found under ${toolDir}`);
+}
 
 exports.default = async function sign(configuration) {
   const filePath = configuration.path;
@@ -26,22 +43,14 @@ exports.default = async function sign(configuration) {
     return;
   }
 
-  const tool = process.platform === 'win32'
-    ? path.join(CODESIGNTOOL_PATH, 'CodeSignTool.bat')
-    : path.join(CODESIGNTOOL_PATH, 'CodeSignTool.sh');
-  if (!fs.existsSync(tool)) {
-    throw new Error(`[win-sign] CodeSignTool not found at ${tool}`);
-  }
-
+  const jar = findJar(CODESIGNTOOL_PATH);
   const inputDir = path.dirname(filePath);
   const outputDir = path.join(inputDir, 'signed');
   fs.mkdirSync(outputDir, { recursive: true });
 
   console.log(`[win-sign] signing ${path.basename(filePath)} via SSL.com eSigner…`);
-  // Node 18+ blocks spawning .bat/.cmd directly (CVE-2024-27980). Route through
-  // cmd.exe with verbatim arguments so cmd parses the .bat invocation but our
-  // arg values pass through without further shell mangling.
-  const args = [
+  const result = spawnSync('java', [
+    '-jar', jar,
     'sign',
     `-username=${ESIGNER_USERNAME}`,
     `-password=${ESIGNER_PASSWORD}`,
@@ -49,22 +58,20 @@ exports.default = async function sign(configuration) {
     `-credential_id=${ESIGNER_CREDENTIAL_ID}`,
     `-input_file_path=${filePath}`,
     `-output_dir_path=${outputDir}`,
-  ];
-  const result = process.platform === 'win32'
-    ? spawnSync('cmd.exe', ['/c', tool, ...args], {
-        stdio: 'inherit',
-        cwd: CODESIGNTOOL_PATH,
-        windowsVerbatimArguments: true,
-      })
-    : spawnSync(tool, args, { stdio: 'inherit', cwd: CODESIGNTOOL_PATH });
+  ], { cwd: CODESIGNTOOL_PATH, encoding: 'utf8' });
+
   if (result.error) throw result.error;
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
   if (result.status !== 0) {
     throw new Error(`[win-sign] CodeSignTool exited with status ${result.status}`);
   }
+  // CodeSignTool returns 0 even on auth failures and prints "Error:" to stdout.
+  // Treat any "Error:" line as fatal so we don't ship an unsigned binary.
+  if (/^Error:/m.test(result.stdout || '')) {
+    throw new Error('[win-sign] CodeSignTool reported an error in stdout (see above)');
+  }
 
-  // CodeSignTool writes a signed copy with the same basename into outputDir.
-  // Move it back over the original so electron-builder's downstream steps
-  // (latest.yml hashing, NSIS bundling) see the signed binary.
   const signed = path.join(outputDir, path.basename(filePath));
   if (!fs.existsSync(signed)) {
     throw new Error(`[win-sign] expected signed output at ${signed} not found`);
