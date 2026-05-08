@@ -1552,11 +1552,7 @@ window.PrReview = (function () {
   function verifyFindingLocations() {
     if (!aiReview.worktreePath) return;
     aiReview.findings.forEach(function (f) {
-      if (!f.path || !f.line) return;
-      // Re-run if the finding is verified but missing the file snippet —
-      // happens for findings cached from a previous Klaussy version that
-      // didn't capture the verified file content.
-      if (f.locationVerified && f.verifiedSnippet) return;
+      if (!f.path || !f.line || f.locationVerified) return;
       if (f._verifyInFlight) return;
       f._verifyInFlight = true;
       window.klaus.pr.readWorktreeFile(aiReview.worktreePath, f.path).then(function (r) {
@@ -1584,34 +1580,12 @@ window.PrReview = (function () {
           f.line = match.line;
           f.locationVerified = true;
           f.postMode = 'inline';
-          // Capture a small window of the actual file content around the
-          // verified line so the card can render "this is the code being
-          // reviewed" verbatim — independent of whatever snippet Claude
-          // chose to paste in its prose, which is often a fix illustration
-          // rather than the original code. End line preference: locationRaw
-          // had a range like 1041-1085 → keep some of that context; otherwise
-          // a small symmetric window around the matched line.
-          var endLine = (f.locationRaw && f.locationRaw.endLine) || (match.line + 4);
-          var startLine = Math.max(1, match.line - 2);
-          // Cap span at ~12 lines to keep the card compact regardless of how
-          // wide the [Location] range was. The user can always click out to
-          // GitHub for the full hunk.
-          if (endLine - startLine > 11) endLine = startLine + 11;
-          var allLines = r.content.split('\n');
-          var snippetLines = allLines.slice(startLine - 1, endLine);
-          f.verifiedSnippet = {
-            path: f.path,
-            startLine: startLine,
-            endLine: startLine + snippetLines.length - 1,
-            text: snippetLines.join('\n'),
-          };
         } else {
           // No match anywhere in the file — Claude probably hallucinated
           // the location. Fall back to issue-comment mode so "Add to PR"
           // still posts *something* useful rather than a broken inline.
           f.locationVerified = false;
           f.postMode = 'issue';
-          f.verifiedSnippet = null;
         }
         repaintAiReviewTab();
         saveAiReviewCache();
@@ -2054,26 +2028,7 @@ window.PrReview = (function () {
       bodyHtml = '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>';
     }
 
-    // Original code at the verified location, rendered verbatim from the
-    // file — independent of whatever snippet Claude pasted in its prose
-    // (which is often a fix illustration, not the original). Without this
-    // the user has no ground-truth view of the code being reviewed; the
-    // GitHub PR view shows it via the diff anchor, but the in-app card
-    // wouldn't.
-    var originalSnippetHtml = '';
-    if (f.verifiedSnippet && f.verifiedSnippet.text) {
-      var vs = f.verifiedSnippet;
-      var label = escHtml(vs.path)
-        + ':' + vs.startLine
-        + (vs.endLine && vs.endLine !== vs.startLine ? '-' + vs.endLine : '');
-      originalSnippetHtml = '<div class="pr-ai-finding-original">'
-        + '<div class="pr-ai-finding-original-head">Original code at ' + label + '</div>'
-        + '<pre class="pr-ai-finding-original-code"><code>' + escHtml(vs.text) + '</code></pre>'
-      + '</div>';
-    }
-
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
-      + originalSnippetHtml
       + bodyHtml
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
       + errorBlock
