@@ -82,14 +82,20 @@ exports.default = async function sign(configuration) {
   const outputDir = path.join(inputDir, 'signed');
   fs.mkdirSync(outputDir, { recursive: true });
 
+  // Log the locally-computed OTP and the time slot so the user can verify
+  // against Authy/oathtool what the OTP "should" be at this exact moment.
+  // Each TOTP is valid for ~30s and rotates, so logging it has minimal
+  // security risk — this is purely diagnostic.
+  const nowSec = Math.floor(Date.now() / 1000);
   const otp = generateTotp(ESIGNER_TOTP_SECRET);
-  console.log(`[win-sign] signing ${path.basename(filePath)} via SSL.com eSigner (otp generated locally)…`);
+  console.log(`[win-sign] local OTP for slot ${Math.floor(nowSec / 30)} (unix=${nowSec}): ${otp}`);
+  console.log(`[win-sign] signing ${path.basename(filePath)} via SSL.com eSigner…`);
   const result = spawnSync('java', [
     '-jar', jar,
     'sign',
     `-username=${ESIGNER_USERNAME}`,
     `-password=${ESIGNER_PASSWORD}`,
-    `-otp=${otp}`,
+    `-totp_secret=${ESIGNER_TOTP_SECRET}`,
     `-credential_id=${ESIGNER_CREDENTIAL_ID}`,
     `-input_file_path=${filePath}`,
     `-output_dir_path=${outputDir}`,
