@@ -115,8 +115,10 @@
         { "target": "portable", "arch": ["x64"] }
       ],
       "icon": "icon.ico",
-      "sign": "build/win-sign.js",
-      "signingHashAlgorithms": ["sha256"]
+      "signtoolOptions": {
+        "sign": "build/win-sign.js",
+        "signingHashAlgorithms": ["sha256"]
+      }
     },
     "nsis": {
       "oneClick": false,
