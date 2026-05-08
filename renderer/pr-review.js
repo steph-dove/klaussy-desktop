@@ -60,6 +60,11 @@ window.PrReview = (function () {
   // don't falsely green-light merges.
   var currentRequiredChecks = [];
   var currentRequiredChecksError = '';
+  // Periodic refresh while the Checks tab is the active tab. Cleared on tab
+  // switch and on PR change. 15s cadence is the same ballpark as the per-task
+  // CI poll (30s) but more responsive when the user is actively watching.
+  var checksPollTimer = null;
+  var checksFetchInFlight = false;
   // Local-changes panel state (Review tab). Refreshed on tab show and after
   // each implement/commit/push. Stays null until the first fetch completes.
   // Shape: { worktreePath, branch, files:[{status,file}], diff, unpushed:[{hash,short,subject}], headRefOid }
@@ -153,6 +158,9 @@ window.PrReview = (function () {
     if (isNewPr) {
       selectedFile = null;
       currentChecks = null;
+      // Stop any in-flight checks polling so it doesn't repaint with the
+      // previous PR's data after the new PR's render lands.
+      clearChecksPolling();
       // Don't cancel in-flight AI work for the previous PR — those agents
       // are now backgroundable and the user can monitor / re-attach via the
       // Agents panel. Just drop the local subscriptions by stashing the old
@@ -1002,6 +1010,9 @@ window.PrReview = (function () {
       btn.addEventListener('click', function () {
         var tab = btn.dataset.tab;
         if (activeTab === tab) return;
+        // Leaving the Checks tab: stop the periodic poll. Re-entering it
+        // re-binds and bindChecksTab() restarts the poll.
+        if (activeTab === 'checks' && tab !== 'checks') clearChecksPolling();
         activeTab = tab;
         if (lastState) render(lastState);
       });
@@ -3961,12 +3972,14 @@ window.PrReview = (function () {
       refresh.addEventListener('click', function () {
         refresh.disabled = true;
         refresh.textContent = 'Refreshing\u2026';
-        fetchAndRenderChecks(lastState && lastState.number).then(function () {
-          // Re-render the tab to pick up new data.
-          if (lastState) render(lastState);
-        });
+        fetchAndRenderChecks(lastState && lastState.number).then(repaintChecksTab);
       });
     }
+    // Auto-refresh: pull fresh data on every tab activation, then poll while
+    // the tab stays active. Without this, an in-progress run kicked off
+    // moments ago wouldn't show up until the user manually clicked Refresh
+    // (the per-task CI poll updates the sidebar icon but not this surface).
+    startChecksPolling();
     var dispatchBtn = hostEl.querySelector('.pr-checks-dispatch');
     if (dispatchBtn) {
       dispatchBtn.addEventListener('click', function () { openWorkflowDispatchModal(); });
@@ -4109,15 +4122,58 @@ window.PrReview = (function () {
         setTimeout(function () { btn.textContent = originalText; btn.title = ''; }, 4000);
         return;
       }
-      // Successful kick — refresh checks so the row's state reflects the new run.
-      fetchAndRenderChecks(lastState && lastState.number).then(function () {
-        if (lastState) render(lastState);
-      });
+      // Successful kick — refresh checks so the row's state reflects the new
+      // run. Repaint just the Checks-tab slot rather than re-rendering the
+      // whole PR view; the latter caused the entire section to flash empty
+      // for the duration of the rebuild.
+      fetchAndRenderChecks(lastState && lastState.number).then(repaintChecksTab);
     }).catch(function (err) {
       btn.disabled = false;
       btn.textContent = 'Failed';
       btn.title = (err && err.message) || 'unknown error';
     });
+  }
+
+  // Swap only the .pr-review-checks-tab innerHTML and rebind. Leaves the
+  // rest of the PR-review surface untouched so action-driven refreshes
+  // (rerun, cancel, periodic poll) don't flash the whole tab.
+  function repaintChecksTab() {
+    var slot = hostEl.querySelector('.pr-review-checks-tab');
+    if (!slot) return;
+    slot.innerHTML = renderChecksTab();
+    bindChecksTab();
+  }
+
+  // Periodic refresh while Checks is the active tab. Idempotent — calling
+  // start while already running just resets the interval. Stops on tab
+  // switch (bindTabs hook) and on PR change (clearChecksPolling at the top
+  // of render() when isNewPr).
+  function startChecksPolling() {
+    clearChecksPolling();
+    // Kick off an immediate refresh on tab activation so the user sees fresh
+    // data without clicking Refresh. Skip if the PR isn't loaded yet.
+    if (lastState && lastState.number && !checksFetchInFlight) {
+      checksFetchInFlight = true;
+      fetchAndRenderChecks(lastState.number).then(function () {
+        checksFetchInFlight = false;
+        repaintChecksTab();
+      }, function () { checksFetchInFlight = false; });
+    }
+    checksPollTimer = setInterval(function () {
+      if (!lastState || !lastState.number) { clearChecksPolling(); return; }
+      // Skip if the previous poll hasn't returned yet — avoids fetch storms
+      // when the user's network is slow.
+      if (checksFetchInFlight) return;
+      checksFetchInFlight = true;
+      fetchAndRenderChecks(lastState.number).then(function () {
+        checksFetchInFlight = false;
+        repaintChecksTab();
+      }, function () { checksFetchInFlight = false; });
+    }, 15000);
+  }
+
+  function clearChecksPolling() {
+    if (checksPollTimer) { clearInterval(checksPollTimer); checksPollTimer = null; }
   }
 
   // Hand-built modal for manually dispatching a workflow. Inputs are accepted
