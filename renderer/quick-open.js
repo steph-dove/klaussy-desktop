@@ -42,7 +42,13 @@ window.QuickOpen = (function () {
     }
 
     overlay = document.createElement('div');
-    overlay.className = 'palette-overlay';
+    // `.palette-overlay` is the shared backdrop styling used by every
+    // dialog in the app (Setup-check, About, license, etc.). Add a
+    // `.quick-open-overlay` discriminator so e2e tests can target THIS
+    // overlay specifically — without it, an unrelated dialog opening
+    // mid-test (Setup-check on first launch in CI) makes selectors that
+    // match `.palette-overlay` non-unique and the count assertions race.
+    overlay.className = 'palette-overlay quick-open-overlay';
 
     var palette = document.createElement('div');
     palette.className = 'palette';
