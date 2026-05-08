@@ -114,7 +114,9 @@
         { "target": "nsis", "arch": ["x64"] },
         { "target": "portable", "arch": ["x64"] }
       ],
-      "icon": "icon.ico"
+      "icon": "icon.ico",
+      "sign": "build/win-sign.js",
+      "signingHashAlgorithms": ["sha256"]
     },
     "nsis": {
       "oneClick": false,

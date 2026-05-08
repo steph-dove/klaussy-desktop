@@ -8,6 +8,7 @@ out/
 build/*
 !build/entitlements.mac.plist
 !build/notarize.js
+!build/win-sign.js
 icon.iconset/
 *.log
 npm-debug.log*
