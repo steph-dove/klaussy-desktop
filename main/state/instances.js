@@ -181,6 +181,34 @@ function sendIdleNotification(inst, reason) {
   inst.lastNotifyTime = Date.now();
 }
 
+// CI flip notification — fires when a watched task's latest run flips from
+// pending to success/failure. Suppressed if the user is looking at any window
+// (they can already see the change in real time). Independent of the idle
+// notification's NOTIFY_COOLDOWN_MS — CI events are rarer and we don't want
+// to swallow a fail notification because an idle one fired 30s ago.
+function sendCIFlipNotification(inst, run, bucket) {
+  if (!inst.notifyCIEnabled) return;
+  if (isAnyWindowFocused()) return;
+
+  const verb = bucket === 'pass' ? 'passed' : bucket === 'fail' ? 'failed' : bucket;
+  const notification = new Notification({
+    title: `Klaussy — CI ${verb}`,
+    body: `${inst.name}${run && run.name ? ' · ' + run.name : ''}`,
+    silent: false,
+  });
+
+  notification.on('click', () => {
+    const mw = getMainWindow();
+    if (mw && !mw.isDestroyed()) {
+      mw.show();
+      mw.focus();
+      mw.webContents.send('notification-clicked', { id: inst.id, view: 'pr-review' });
+    }
+  });
+
+  notification.show();
+}
+
 function processIdleDetection(inst, data) {
   if (inst.mode !== 'claude') return;
 
@@ -212,7 +240,16 @@ function processIdleDetection(inst, data) {
 
 function initIdleDetectionFields(inst) {
   const config = loadConfig();
-  inst.notifyEnabled = config.notifyPrefs?.[inst.name] !== false;
+  // notifyPrefs is either a boolean (legacy: idle-only) or {idle, ci} (new).
+  // Treat missing as both-enabled to preserve previous behavior.
+  const pref = config.notifyPrefs?.[inst.name];
+  if (typeof pref === 'object' && pref !== null) {
+    inst.notifyEnabled = pref.idle !== false;
+    inst.notifyCIEnabled = pref.ci !== false;
+  } else {
+    inst.notifyEnabled = pref !== false;
+    inst.notifyCIEnabled = true;
+  }
   inst.lastDataTime = 0;
   inst.quietTimer = null;
   inst.notifiedIdle = false;
@@ -346,5 +383,7 @@ module.exports = {
   clearIdleTimer,
   spawnInWorktree,
   convertInstanceToShell,
+  sendCIFlipNotification,
+  isAnyWindowFocused,
   setDeps,
 };

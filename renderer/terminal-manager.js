@@ -317,7 +317,11 @@ window.TerminalManager = (function () {
     });
 
     window.klaus.task.getNotifyEnabled(id).then(function (val) {
-      taskEntry.notifyEnabled = val;
+      // Returns {idle, ci}; keep notifyEnabled mirroring idle for legacy callers.
+      var idle = (val && typeof val === 'object') ? val.idle : val;
+      var ci = (val && typeof val === 'object') ? val.ci : true;
+      taskEntry.notifyEnabled = idle !== false;
+      taskEntry.notifyCIEnabled = ci !== false;
     });
 
     Sidebar.renderItem(taskEntry);
