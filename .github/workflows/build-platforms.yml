@@ -56,7 +56,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $url = 'https://www.ssl.com/download/codesigntool-for-windows/'
+          # Pull from GitHub releases — SSL.com's download page mirrors an older
+          # version that lacks the -otp flag we use in build/win-sign.js.
+          $url = 'https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2-windows.zip'
           $zip = "$env:RUNNER_TEMP\CodeSignTool.zip"
           $dest = "$env:RUNNER_TEMP\CodeSignTool"
           Invoke-WebRequest -Uri $url -OutFile $zip
