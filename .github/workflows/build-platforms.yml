@@ -10,6 +10,11 @@ name: Build platform artifacts
 
 on:
   workflow_dispatch:
+    inputs:
+      sign:
+        description: 'Sign Windows build via SSL.com eSigner (set false to produce an unsigned .exe for local signing)'
+        type: boolean
+        default: true
 
 jobs:
   build:
@@ -80,10 +85,10 @@ jobs:
           # against SSL.com eSigner — disable electron-builder's auto-discovery so
           # it doesn't try a local .pfx.
           CSC_IDENTITY_AUTO_DISCOVERY: false
-          ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
-          ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
-          ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
-          ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
+          ESIGNER_USERNAME: ${{ inputs.sign && secrets.ESIGNER_USERNAME || '' }}
+          ESIGNER_PASSWORD: ${{ inputs.sign && secrets.ESIGNER_PASSWORD || '' }}
+          ESIGNER_TOTP_SECRET: ${{ inputs.sign && secrets.ESIGNER_TOTP_SECRET || '' }}
+          ESIGNER_CREDENTIAL_ID: ${{ inputs.sign && secrets.ESIGNER_CREDENTIAL_ID || '' }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
