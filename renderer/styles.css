@@ -1732,6 +1732,38 @@ body.task-branchless #ahead-behind {
   margin: 0 0 14px 0;
 }
 
+/* One-time onboarding nudge shown the first time the user clicks Plan. */
+#plan-modal .plan-onboard-banner {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  margin: 0 0 14px 0;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+#plan-modal .plan-onboard-banner[hidden] { display: none; }
+#plan-modal .plan-onboard-text { flex: 1; line-height: 1.45; }
+#plan-modal .plan-onboard-cmd {
+  margin: 6px 0;
+  padding: 6px 8px;
+  background: var(--input-bg);
+  border-radius: 4px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+#plan-modal .plan-onboard-banner button {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
 #plan-modal .plan-modal-sub code {
   background: var(--input-bg);
   padding: 1px 5px;
