@@ -4,24 +4,52 @@
 // Plus CODESIGNTOOL_PATH pointing at the unzipped CodeSignTool root.
 
 const { spawnSync } = require('child_process');
+const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
 
-// CodeSignTool ships a `code_sign_tool-*.jar` next to the .bat/.sh wrapper.
 // Calling java -jar directly bypasses cmd.exe entirely — no .bat dispatch, no
 // shell metachar escaping needed for secrets containing & | < > ^ etc.
 function findJar(toolDir) {
-  const candidates = [
-    path.join(toolDir, 'jar'),
-    toolDir,
-    path.join(toolDir, 'lib'),
-  ];
+  const candidates = [path.join(toolDir, 'jar'), toolDir, path.join(toolDir, 'lib')];
   for (const dir of candidates) {
     if (!fs.existsSync(dir)) continue;
     const jar = fs.readdirSync(dir).find((f) => /^code_sign_tool.*\.jar$/i.test(f));
     if (jar) return path.join(dir, jar);
   }
   throw new Error(`[win-sign] code_sign_tool jar not found under ${toolDir}`);
+}
+
+// Standard RFC 6238 TOTP — SHA1, 6 digits, 30s period. Matches Authy/oathtool;
+// using this instead of CodeSignTool's -totp_secret= flag because their Java
+// impl rejected codes that Authy + oathtool agree on.
+function base32Decode(input) {
+  const alpha = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const cleaned = input.toUpperCase().replace(/=+$/, '').replace(/\s+/g, '');
+  let bits = '';
+  for (const c of cleaned) {
+    const v = alpha.indexOf(c);
+    if (v < 0) throw new Error(`invalid base32 char: ${c}`);
+    bits += v.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.substr(i, 8), 2));
+  }
+  return Buffer.from(bytes);
+}
+
+function generateTotp(secret, when = Date.now()) {
+  const counter = Math.floor(when / 1000 / 30);
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64BE(BigInt(counter));
+  const hmac = crypto.createHmac('sha1', base32Decode(secret)).update(buf).digest();
+  const off = hmac[hmac.length - 1] & 0xf;
+  const code = ((hmac[off] & 0x7f) << 24)
+    | ((hmac[off + 1] & 0xff) << 16)
+    | ((hmac[off + 2] & 0xff) << 8)
+    | (hmac[off + 3] & 0xff);
+  return String(code % 1000000).padStart(6, '0');
 }
 
 exports.default = async function sign(configuration) {
@@ -43,18 +71,25 @@ exports.default = async function sign(configuration) {
     return;
   }
 
+  // Diagnostic info — none of these reveal the secret. Helps pinpoint
+  // whether the issue is clock skew, wrong seed length, or seed corruption.
+  const seedHash = crypto.createHash('sha256').update(ESIGNER_TOTP_SECRET).digest('hex').slice(0, 12);
+  console.log(`[win-sign] runner UTC: ${new Date().toISOString()}`);
+  console.log(`[win-sign] seed length: ${ESIGNER_TOTP_SECRET.length}, sha256[:12]: ${seedHash}`);
+
   const jar = findJar(CODESIGNTOOL_PATH);
   const inputDir = path.dirname(filePath);
   const outputDir = path.join(inputDir, 'signed');
   fs.mkdirSync(outputDir, { recursive: true });
 
-  console.log(`[win-sign] signing ${path.basename(filePath)} via SSL.com eSigner…`);
+  const otp = generateTotp(ESIGNER_TOTP_SECRET);
+  console.log(`[win-sign] signing ${path.basename(filePath)} via SSL.com eSigner (otp generated locally)…`);
   const result = spawnSync('java', [
     '-jar', jar,
     'sign',
     `-username=${ESIGNER_USERNAME}`,
     `-password=${ESIGNER_PASSWORD}`,
-    `-totp_secret=${ESIGNER_TOTP_SECRET}`,
+    `-otp=${otp}`,
     `-credential_id=${ESIGNER_CREDENTIAL_ID}`,
     `-input_file_path=${filePath}`,
     `-output_dir_path=${outputDir}`,
@@ -66,8 +101,6 @@ exports.default = async function sign(configuration) {
   if (result.status !== 0) {
     throw new Error(`[win-sign] CodeSignTool exited with status ${result.status}`);
   }
-  // CodeSignTool returns 0 even on auth failures and prints "Error:" to stdout.
-  // Treat any "Error:" line as fatal so we don't ship an unsigned binary.
   if (/^Error:/m.test(result.stdout || '')) {
     throw new Error('[win-sign] CodeSignTool reported an error in stdout (see above)');
   }
