@@ -1552,7 +1552,11 @@ window.PrReview = (function () {
   function verifyFindingLocations() {
     if (!aiReview.worktreePath) return;
     aiReview.findings.forEach(function (f) {
-      if (!f.path || !f.line || f.locationVerified) return;
+      if (!f.path || !f.line) return;
+      // Re-verify cached findings missing the file snippet — happens for
+      // findings cached from a Klaussy version that didn't capture the file
+      // content. Skip only when fully verified.
+      if (f.locationVerified && f.verifiedSnippet) return;
       if (f._verifyInFlight) return;
       f._verifyInFlight = true;
       window.klaus.pr.readWorktreeFile(aiReview.worktreePath, f.path).then(function (r) {
@@ -1580,12 +1584,30 @@ window.PrReview = (function () {
           f.line = match.line;
           f.locationVerified = true;
           f.postMode = 'inline';
+          // Capture file content at the verified location so the card can
+          // render the original code in a fixed position (between headers
+          // and Comment). End-line preference: locationRaw range like
+          // 1041-1085 → keep some of that context; otherwise a small
+          // window around the matched line. Capped at ~12 lines so the
+          // card stays compact.
+          var endLine = (f.locationRaw && f.locationRaw.endLine) || (match.line + 4);
+          var startLine = Math.max(1, match.line - 2);
+          if (endLine - startLine > 11) endLine = startLine + 11;
+          var allLines = r.content.split('\n');
+          var snippetLines = allLines.slice(startLine - 1, endLine);
+          f.verifiedSnippet = {
+            path: f.path,
+            startLine: startLine,
+            endLine: startLine + snippetLines.length - 1,
+            text: snippetLines.join('\n'),
+          };
         } else {
           // No match anywhere in the file — Claude probably hallucinated
           // the location. Fall back to issue-comment mode so "Add to PR"
           // still posts *something* useful rather than a broken inline.
           f.locationVerified = false;
           f.postMode = 'issue';
+          f.verifiedSnippet = null;
         }
         repaintAiReviewTab();
         saveAiReviewCache();
@@ -2025,7 +2047,51 @@ window.PrReview = (function () {
           + '</div>'
         + '</div>';
     } else {
-      bodyHtml = '<div class="pr-ai-finding-body">' + renderMarkdown(f.text) + '</div>';
+      // Render in three parts so the original-code block lands at a fixed
+      // position regardless of what Claude wrote:
+      //   [Severity / Location / Category]
+      //   <verified original code from the file>
+      //   [Comment + prose + Suggested change]
+      // Splits f.text on the first "Comment:" marker (case-insensitive,
+      // tolerant of 0-2 leading asterisks like `**Comment:**`). When
+      // verifiedSnippet is set, also strip any fenced code block from the
+      // pre-Comment chunk so we don't duplicate Claude's pasted original
+      // code with our own. The full f.text (including the pasted block) is
+      // still posted to GitHub when the user submits — this stripping only
+      // affects the in-card render.
+      var displayText = f.text || '';
+      var commentMatch = displayText.match(/^\s*\*{0,2}Comment\*{0,2}\s*:/im);
+      var preText, postText;
+      if (commentMatch) {
+        preText = displayText.slice(0, commentMatch.index).trim();
+        postText = displayText.slice(commentMatch.index);
+      } else {
+        preText = '';
+        postText = displayText;
+      }
+
+      var originalSnippetHtml = '';
+      if (f.verifiedSnippet && f.verifiedSnippet.text) {
+        var vs = f.verifiedSnippet;
+        var label = escHtml(vs.path)
+          + ':' + vs.startLine
+          + (vs.endLine && vs.endLine !== vs.startLine ? '-' + vs.endLine : '');
+        originalSnippetHtml = '<div class="pr-ai-finding-original">'
+          + '<div class="pr-ai-finding-original-head">Original code at ' + label + '</div>'
+          + '<pre class="pr-ai-finding-original-code"><code>' + escHtml(vs.text) + '</code></pre>'
+        + '</div>';
+        // Drop redundant fenced code block(s) from pre-Comment text — those
+        // are Claude's pasted "original code" which we now show verbatim
+        // from the file. Don't touch postText: a Suggested change block
+        // there is intentional.
+        preText = preText.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
+      }
+
+      bodyHtml = '<div class="pr-ai-finding-body">'
+        + (preText ? renderMarkdown(preText) : '')
+        + originalSnippetHtml
+        + (postText ? renderMarkdown(postText) : '')
+      + '</div>';
     }
 
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
