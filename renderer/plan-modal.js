@@ -10,8 +10,23 @@ window.ActionModal = (function () {
   var cancelBtn = document.getElementById('plan-modal-cancel');
   var submitBtn = document.getElementById('plan-modal-submit');
   var subHint = overlay ? overlay.querySelector('.plan-modal-sub') : null;
+  var onboardBanner = document.getElementById('plan-onboard-banner');
+  var onboardDismiss = document.getElementById('plan-onboard-dismiss');
   var tabs = overlay ? overlay.querySelectorAll('.plan-modal-tab') : [];
   var contents = overlay ? overlay.querySelectorAll('.plan-tab-content') : [];
+
+  // One-time nudge to install the optional Claude Code plugins that the new
+  // multi-agent Plan flow benefits from. Shown the first time the user opens
+  // the Plan modal; auto-dismissed on first submit so even ignored, it does
+  // not return.
+  var ONBOARD_KEY = 'planOnboardSeen';
+  function planOnboardSeen() {
+    try { return localStorage.getItem(ONBOARD_KEY) === '1'; } catch (_) { return true; }
+  }
+  function markPlanOnboardSeen() {
+    try { localStorage.setItem(ONBOARD_KEY, '1'); } catch (_) {}
+    if (onboardBanner) onboardBanner.hidden = true;
+  }
 
   // Plan flow runs locally (no cloud round-trip), so it gets the full prompt
   // inlined the same way Review does. The earlier `/ultraplan` slash command
@@ -600,6 +615,11 @@ window.ActionModal = (function () {
     if (subHint) {
       subHint.innerHTML = cfg.hint;
     }
+    // Show the plugin-install nudge only on the Plan action, only the first
+    // time. Debug stays on /debug (no plugin help needed) so it never shows.
+    if (onboardBanner) {
+      onboardBanner.hidden = !(action === 'plan' && !planOnboardSeen());
+    }
     overlay.style.display = 'flex';
     setTimeout(function () { textarea.focus(); }, 0);
   }
@@ -638,6 +658,10 @@ window.ActionModal = (function () {
         submitBtn.textContent = cfg.submitLabel;
         return;
       }
+      // Successful Plan submission counts as the user having seen the
+      // onboarding nudge — even if they ignored the banner, they have now
+      // used the flow and don't need it next time.
+      if (currentAction === 'plan') markPlanOnboardSeen();
       close();
     } catch (err) {
       errorEl.textContent = (err && err.message) || String(err);
@@ -703,6 +727,10 @@ window.ActionModal = (function () {
 
     cancelBtn.addEventListener('click', close);
     submitBtn.addEventListener('click', submit);
+
+    if (onboardDismiss) {
+      onboardDismiss.addEventListener('click', markPlanOnboardSeen);
+    }
 
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) close();
