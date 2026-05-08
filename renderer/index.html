@@ -332,15 +332,6 @@
   <div id="plan-modal-overlay" class="klaus-modal-overlay" style="display: none;">
     <div id="plan-modal" class="klaus-modal klaus-modal-wide">
       <h3 id="plan-modal-title">Plan a task</h3>
-      <div id="plan-onboard-banner" class="plan-onboard-banner" hidden>
-        <div class="plan-onboard-text">
-          <strong>Tip:</strong> the Plan flow runs better with two optional Claude Code plugins installed — they unlock specialized exploration, architecture, and review subagents. Without them, it falls back to general-purpose agents (still works, just less specialized).
-          <pre class="plan-onboard-cmd">/plugin install feature-dev@claude-plugins-official
-/plugin install pr-review-toolkit@claude-plugins-official</pre>
-          Run those once in any Claude tab, then <code>/reload-plugins</code>.
-        </div>
-        <button id="plan-onboard-dismiss" class="klaus-btn klaus-btn-secondary" type="button">Got it</button>
-      </div>
       <p class="plan-modal-sub">Provide task details. A new Claude tab will open on this worktree and run a guided plan flow.</p>
       <div id="plan-modal-tabs">
         <button class="plan-modal-tab active" data-tab="paste">Paste text</button>
