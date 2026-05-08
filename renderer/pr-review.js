@@ -1552,7 +1552,11 @@ window.PrReview = (function () {
   function verifyFindingLocations() {
     if (!aiReview.worktreePath) return;
     aiReview.findings.forEach(function (f) {
-      if (!f.path || !f.line || f.locationVerified) return;
+      if (!f.path || !f.line) return;
+      // Re-run if the finding is verified but missing the file snippet —
+      // happens for findings cached from a previous Klaussy version that
+      // didn't capture the verified file content.
+      if (f.locationVerified && f.verifiedSnippet) return;
       if (f._verifyInFlight) return;
       f._verifyInFlight = true;
       window.klaus.pr.readWorktreeFile(aiReview.worktreePath, f.path).then(function (r) {
@@ -2069,8 +2073,8 @@ window.PrReview = (function () {
     }
 
     return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
-      + bodyHtml
       + originalSnippetHtml
+      + bodyHtml
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
       + errorBlock
       + renderInvestigatePanel(f)
