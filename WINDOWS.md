@@ -78,14 +78,6 @@ Run in dev mode (`npm start`) for everything except §6 (build).
       `%APPDATA%\Klaussy\` (config.json, sessions) is preserved
       (deleteAppDataOnUninstall: false).
 
-### Polish — klausify prompt
-
-- [ ] With pipx not installed: New Worktree → klausify prompt shows the
-      Windows variant ("python -m pip install --user pipx") instead of
-      the brew variant.
-- [ ] With pipx installed but klausify missing: clicking "Install with
-      pipx" runs successfully.
-
 ## Known gaps (deferred from this slice)
 
 - **Project search in non-git folders** falls back to `grep -rnF`. Plain

@@ -13,8 +13,8 @@
 //      handlers on load.
 //   4. bootstrap/app-events.install() — attaches app.whenReady +
 //      window-all-closed + before-quit + will-quit, injects remaining state
-//      deps (isQuitting / startCIPolling / runKlausifyInit), and kicks off
-//      the migrate-on-startup + PATH-fix.
+//      deps (isQuitting / startCIPolling), and kicks off the
+//      migrate-on-startup + PATH-fix.
 //
 // See SPLIT_PLAN.md for the full module layout and shared-state contract.
 

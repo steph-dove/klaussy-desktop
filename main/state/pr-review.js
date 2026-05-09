@@ -6,10 +6,9 @@
 // exported `prReview` holder because a naked `let activePrReview` couldn't
 // be shared mutably across module boundaries via CommonJS destructuring.
 //
-// Two deps live in main.js and haven't been factored yet:
+// One dep lives in main.js and hasn't been factored yet:
 //   - ghJson (moves to ipc/pr-review.js in Phase 3)
-//   - runKlausifyInit (moves to bootstrap/app-events.js in Phase 4)
-// Both injected via setDeps.
+// Injected via setDeps.
 
 const path = require('path');
 const fs = require('fs');
@@ -23,11 +22,9 @@ const prReview = {
 };
 
 let _ghJson = async () => { throw new Error('ghJson not injected'); };
-let _runKlausifyInit = async () => {};
 
-function setDeps({ ghJson, runKlausifyInit } = {}) {
+function setDeps({ ghJson } = {}) {
   if (ghJson) _ghJson = ghJson;
-  if (runKlausifyInit) _runKlausifyInit = runKlausifyInit;
 }
 
 function broadcastPrReview() {
@@ -428,7 +425,6 @@ async function ensureWorktreeForActivePr() {
     return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
 
-  try { await _runKlausifyInit(worktreePath); } catch (_) {}
   return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: false };
 }
 

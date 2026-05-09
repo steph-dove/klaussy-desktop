@@ -1,7 +1,7 @@
 {
   "name": "klaus-desktop",
   "productName": "Klaussy",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
   "author": {
@@ -111,13 +111,25 @@
     },
     "win": {
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "icon.ico",
       "signtoolOptions": {
         "sign": "build/win-sign.js",
-        "signingHashAlgorithms": ["sha256"]
+        "signingHashAlgorithms": [
+          "sha256"
+        ]
       }
     },
     "nsis": {
@@ -135,8 +147,18 @@
     },
     "linux": {
       "target": [
-        { "target": "AppImage", "arch": ["x64"] },
-        { "target": "deb", "arch": ["x64"] }
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "icon": "icon.png",
       "category": "Development",
@@ -144,7 +166,16 @@
       "artifactName": "${productName}-${version}-${arch}.${ext}"
     },
     "deb": {
-      "depends": ["libnotify4", "libnss3", "libxss1", "libxtst6", "xdg-utils", "libatspi2.0-0", "libuuid1", "libsecret-1-0"]
+      "depends": [
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0"
+      ]
     },
     "publish": {
       "provider": "github",

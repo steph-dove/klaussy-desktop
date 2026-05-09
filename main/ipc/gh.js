@@ -285,6 +285,16 @@ ipcMain.handle('gh-detect-account-for-repo', async (_event, { owner, repo, prNum
 // the user through setup instead of letting them hit cryptic IPC errors
 // downstream when these CLIs are missing or unauthed.
 ipcMain.handle('check-dependencies', async () => {
+  // Refresh PATH first — when the user clicks Re-check after running the
+  // installer, freshly-installed binaries are in $PATH on disk but not yet
+  // in our process.env. Lazy-required to avoid an import cycle
+  // (app-events → ipc/tasks → ipc/gh).
+  try {
+    const { refreshSpawnPath } = require('../bootstrap/app-events');
+    refreshSpawnPath();
+  } catch { /* during early init the bootstrap module may not be ready */ }
+  clearGhTokenCache();
+
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
 
@@ -339,6 +349,7 @@ ipcMain.handle('check-dependencies', async () => {
 const INSTALL_SCRIPT_MAC = `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
+echo "(Node, GitHub CLI, Claude Code, Ollama — ~2 GB total, mostly Ollama)"
 echo
 
 if ! command -v brew >/dev/null 2>&1; then
@@ -351,9 +362,19 @@ if ! command -v brew >/dev/null 2>&1; then
   fi
 fi
 
-command -v node >/dev/null 2>&1 || { echo "Installing Node.js…"; brew install node; }
-command -v gh   >/dev/null 2>&1 || { echo "Installing GitHub CLI…"; brew install gh; }
-command -v claude >/dev/null 2>&1 || { echo "Installing Claude Code CLI…"; npm install -g @anthropic-ai/claude-code; }
+# brew install is idempotent — safe to call on already-installed formulas.
+echo "→ brew install node gh ollama"
+brew install node gh ollama
+
+# Make brew's bins reachable in this shell before invoking npm/claude —
+# fresh installs add to PATH via shell rc files this subshell hasn't sourced.
+export PATH="$(brew --prefix 2>/dev/null)/bin:$PATH"
+hash -r
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "→ npm install -g @anthropic-ai/claude-code"
+  npm install -g @anthropic-ai/claude-code
+fi
 
 echo
 echo "✓ All requirements installed."
@@ -367,26 +388,29 @@ read -p "Press Enter to close this window…"
 
 const INSTALL_SCRIPT_WIN = `$ErrorActionPreference = 'Stop'
 Write-Host 'Installing Klaussy requirements…'
+Write-Host '(Node, GitHub CLI, Claude Code, Ollama — ~2 GB total, mostly Ollama)'
 Write-Host ''
 
 function Test-Cmd($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
 
-if (-not (Test-Cmd node)) {
-  Write-Host 'Installing Node.js…'
-  winget install --id OpenJS.NodeJS -e --accept-source-agreements --accept-package-agreements
+# Refresh PATH from registry so Test-Cmd sees anything added by prior installs
+# (winget edits machine env, the session doesn't pick that up otherwise).
+function Sync-Path {
+  $machine = [Environment]::GetEnvironmentVariable('Path','Machine')
+  $user    = [Environment]::GetEnvironmentVariable('Path','User')
+  $env:Path = "$machine;$user"
 }
+Sync-Path
 
-if (-not (Test-Cmd gh)) {
-  Write-Host 'Installing GitHub CLI…'
-  winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements
-}
+Write-Host '→ winget install Node, GitHub CLI, Ollama'
+winget install --id OpenJS.NodeJS  -e --accept-source-agreements --accept-package-agreements
+winget install --id GitHub.cli     -e --accept-source-agreements --accept-package-agreements
+winget install --id Ollama.Ollama  -e --accept-source-agreements --accept-package-agreements
 
-# winget edits the machine PATH but the current session won't see it until
-# we manually refresh — otherwise the npm step below can't find Node.
-$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+Sync-Path
 
 if (-not (Test-Cmd claude)) {
-  Write-Host 'Installing Claude Code CLI…'
+  Write-Host '→ npm install -g @anthropic-ai/claude-code'
   npm install -g @anthropic-ai/claude-code
 }
 
@@ -403,22 +427,22 @@ Read-Host 'Press Enter to close this window'
 const INSTALL_SCRIPT_LINUX = `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
+echo "(Node, GitHub CLI, Claude Code, Ollama — ~2 GB total, mostly Ollama)"
+echo "(sudo password may be required)"
 echo
 
-if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
-  echo "Installing Node.js + npm (sudo password may be required)…"
-  sudo apt update
-  sudo apt install -y nodejs npm
-fi
+echo "→ apt install nodejs, npm, gh"
+sudo apt update
+sudo apt install -y nodejs npm gh
+hash -r
 
-if ! command -v gh >/dev/null 2>&1; then
-  echo "Installing GitHub CLI…"
-  sudo apt install -y gh
-fi
+echo "→ npm install -g @anthropic-ai/claude-code"
+sudo npm install -g @anthropic-ai/claude-code
+hash -r
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "Installing Claude Code CLI…"
-  sudo npm install -g @anthropic-ai/claude-code
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "→ curl … | sh   (official Ollama installer; sudo for the daemon)"
+  curl -fsSL https://ollama.com/install.sh | sh
 fi
 
 echo

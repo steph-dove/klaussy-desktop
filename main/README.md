@@ -25,12 +25,11 @@ entry point — it requires everything here and hands off to
 
 - **bootstrap/** — app lifecycle.
   - `menu.js` — macOS menu template (`installAppMenu()`).
-  - `app-events.js` — PATH fix, whenReady, before-quit, saveSessions, klausify init. `install()` attaches everything.
+  - `app-events.js` — PATH fix + refresh, whenReady, before-quit, saveSessions. `install()` attaches everything.
 
 ## Injection
 
 A few dependencies cross layers without a direct require (to avoid cycles):
 path-gate gets `loadConfig + instances` from `main.js`;
 `instances.js` gets `isQuitting + startCIPolling` from `bootstrap/app-events.js`;
-`state/pr-review.js` gets `ghJson` from `ipc/pr-review.js` on that module's load;
-`state/pr-review.js` + `ipc/tasks.js` get `runKlausifyInit` from `bootstrap/app-events.js`.
+`state/pr-review.js` gets `ghJson` from `ipc/pr-review.js` on that module's load.

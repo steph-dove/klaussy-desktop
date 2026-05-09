@@ -2,9 +2,6 @@
 // creates a real git worktree on the requested base branch, creates a
 // new branch with the sanitized task name, and spawns an instance the
 // terminal-data pipeline can talk to.
-//
-// klausify init is gated off in e2e (see runKlausifyInit), so this
-// exercises the worktree + spawn path only.
 
 const fs = require('fs');
 const path = require('path');
