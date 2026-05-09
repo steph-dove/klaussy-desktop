@@ -15,6 +15,10 @@ on:
         description: 'Sign Windows build via SSL.com eSigner (set false to produce an unsigned .exe for local signing)'
         type: boolean
         default: true
+      release_tag:
+        description: 'If set (e.g. v0.2.7), upload the built artifacts to that release on klausify-desktop-feedback. Requires the FEEDBACK_REPO_TOKEN secret. Leave blank to only upload to GitHub Actions artifacts.'
+        type: string
+        default: ''
 
 jobs:
   build:
@@ -97,3 +101,32 @@ jobs:
           path: ${{ matrix.artifact_glob }}
           if-no-files-found: error
           retention-days: 14
+
+      # When release_tag is set, attach the built artifacts directly to the
+      # release on klausify-desktop-feedback so the auto-updater (which polls
+      # that repo, not this one) and end users get a download link without a
+      # manual "trigger CI → grab artifacts → re-upload" step.
+      #
+      # Auth: GITHUB_TOKEN can't write to a different repo. A fine-scoped PAT
+      # stored as FEEDBACK_REPO_TOKEN (contents:write on klausify-desktop-feedback,
+      # nothing else) is required. Without it the step is skipped.
+      - name: Upload artifacts to feedback release
+        if: ${{ inputs.release_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.FEEDBACK_REPO_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::release_tag was provided but FEEDBACK_REPO_TOKEN is not set; skipping release upload."
+            exit 0
+          fi
+          # `gh release upload --clobber` so re-running the workflow on the same
+          # tag overwrites prior artifacts instead of failing.
+          mapfile -t files < <(ls dist/Klaussy-*.exe dist/Klaussy-*.AppImage dist/Klaussy-*.deb dist/latest.yml dist/latest-linux.yml 2>/dev/null || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::warning::No platform artifacts found in dist/; nothing to upload."
+            exit 0
+          fi
+          gh release upload "${{ inputs.release_tag }}" "${files[@]}" \
+            --repo steph-dove/klausify-desktop-feedback \
+            --clobber
