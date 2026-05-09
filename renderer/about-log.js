@@ -270,13 +270,11 @@ window.Dialogs = (function () {
       problem: !deps.gh.installed ? 'Not installed.'
               : !deps.gh.authed ? 'Installed, but not authenticated.'
               : null,
-      // gh installed but unauthed → drive sign-in from inside the app
-      // instead of asking the user to swap to a terminal. Falls back to
-      // the install commands when gh itself is missing (since we can't
-      // run gh until brew finishes).
-      fixes: !deps.gh.installed
-        ? ['brew install gh']
-        : [],
+      fixes: [],
+      // Per-row Sign-in button (handled inline by the in-app login modal).
+      // Missing-binary installs are handled by the global "Install
+      // requirements" button at the bottom of the dialog so the user
+      // doesn't have to click two install buttons in sequence.
       action: (deps.gh.installed && !deps.gh.authed) ? {
         label: 'Sign in to GitHub',
         kind: 'gh-signin',
@@ -291,10 +289,23 @@ window.Dialogs = (function () {
       problem: !deps.claude.installed
         ? 'Not installed (looking for: ' + (deps.claude.path || 'claude') + ').'
         : null,
-      fixes: !deps.claude.installed
-        ? ['npm install -g @anthropic-ai/claude-code']
-        : [],
+      fixes: [],
     });
+
+    // Anything missing → offer one-click install. The script handles all
+    // missing pieces in a single Terminal/cmd window so the user doesn't
+    // have to chase down brew/winget/apt commands per platform.
+    var anyMissing = !deps.gh.installed || !deps.claude.installed;
+    var platformLabel = deps.platform === 'darwin' ? 'macOS'
+      : deps.platform === 'win32' ? 'Windows'
+      : deps.platform === 'linux' ? 'Linux'
+      : 'this system';
+    var installSection = anyMissing
+      ? '<div class="deps-install-section">'
+        + '<button class="deps-install-btn" type="button">Install requirements</button>'
+        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and runs the installer for the missing pieces. You’ll still complete <code>gh auth login</code> and <code>claude</code> sign-in once it finishes.</p>'
+      + '</div>'
+      : '';
 
     var allOkBanner = (!ghBad && !claudeBad)
       ? '<div class="deps-all-ok">All dependencies look good.</div>'
@@ -308,6 +319,7 @@ window.Dialogs = (function () {
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
       + '<div class="deps-rows">' + ghRow + claudeRow + '</div>'
+      + installSection
       + '<div class="deps-actions">'
         + '<button class="deps-recheck" type="button">Re-check</button>'
         + '<button class="deps-skip" type="button">Continue anyway</button>'
@@ -342,6 +354,29 @@ window.Dialogs = (function () {
             checkAndPromptDeps({ force: true });
           },
         });
+      });
+    }
+    var installBtn = dialog.querySelector('.deps-install-btn');
+    if (installBtn) {
+      installBtn.addEventListener('click', async function () {
+        var orig = installBtn.textContent;
+        installBtn.disabled = true;
+        installBtn.textContent = 'Opening terminal…';
+        var result = await window.klaus.gh.installRequirements();
+        installBtn.disabled = false;
+        if (result && result.error) {
+          installBtn.textContent = orig;
+          if (window.toast && window.toast.error) {
+            window.toast.error('Could not start installer: ' + result.error);
+          }
+          return;
+        }
+        // The install runs in an external terminal — we can't watch it
+        // finish, so prompt the user to re-check once they're done.
+        installBtn.textContent = 'Installing in terminal…';
+        if (window.toast && window.toast.info) {
+          window.toast.info('Installer running in your terminal. Click Re-check when it finishes.');
+        }
       });
     }
   }

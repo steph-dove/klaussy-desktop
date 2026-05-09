@@ -1,6 +1,9 @@
 // GitHub CLI surface: account list/switch/detect, CI status and logs,
 // dependency probe, and the scheme-restricted external URL opener.
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { ipcMain, shell, BrowserWindow } = require('electron');
 const { loadConfig } = require('../util/config');
@@ -304,6 +307,11 @@ ipcMain.handle('check-dependencies', async () => {
   const claudeVersion = probe(claudeBin, ['--version']);
 
   return {
+    // The renderer uses `platform` to pick OS-appropriate install commands
+    // (brew vs winget vs apt). We resolve it here rather than have the
+    // renderer sniff navigator.platform — cleaner and matches what the rest
+    // of the app uses for cross-platform branching.
+    platform: process.platform,
     gh: {
       installed: ghVersion.ok,
       authed,
@@ -317,6 +325,172 @@ ipcMain.handle('check-dependencies', async () => {
       path: claudeBin,
     },
   };
+});
+
+// One-click "install missing requirements" — writes a per-OS script to a
+// temp file and opens the user's system terminal to run it. We deliberately
+// run *outside* Klaussy: brew/winget/apt all expect TTY-attached prompts
+// (sudo password, OAuth callbacks, license confirms) and the user is used
+// to seeing those in their normal terminal.
+//
+// Each script is idempotent — guarded with `command -v` (or `Get-Command`)
+// so re-running it after a partial install just fills in the missing pieces.
+
+const INSTALL_SCRIPT_MAC = `#!/bin/bash
+set -e
+echo "Installing Klaussy requirements…"
+echo
+
+if ! command -v brew >/dev/null 2>&1; then
+  echo "Homebrew not found. Installing…"
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+  if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+fi
+
+command -v node >/dev/null 2>&1 || { echo "Installing Node.js…"; brew install node; }
+command -v gh   >/dev/null 2>&1 || { echo "Installing GitHub CLI…"; brew install gh; }
+command -v claude >/dev/null 2>&1 || { echo "Installing Claude Code CLI…"; npm install -g @anthropic-ai/claude-code; }
+
+echo
+echo "✓ All requirements installed."
+echo
+echo "Next steps:"
+echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
+echo "  2. Run 'claude' once to log in to Claude"
+echo
+read -p "Press Enter to close this window…"
+`;
+
+const INSTALL_SCRIPT_WIN = `$ErrorActionPreference = 'Stop'
+Write-Host 'Installing Klaussy requirements…'
+Write-Host ''
+
+function Test-Cmd($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
+
+if (-not (Test-Cmd node)) {
+  Write-Host 'Installing Node.js…'
+  winget install --id OpenJS.NodeJS -e --accept-source-agreements --accept-package-agreements
+}
+
+if (-not (Test-Cmd gh)) {
+  Write-Host 'Installing GitHub CLI…'
+  winget install --id GitHub.cli -e --accept-source-agreements --accept-package-agreements
+}
+
+# winget edits the machine PATH but the current session won't see it until
+# we manually refresh — otherwise the npm step below can't find Node.
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+
+if (-not (Test-Cmd claude)) {
+  Write-Host 'Installing Claude Code CLI…'
+  npm install -g @anthropic-ai/claude-code
+}
+
+Write-Host ''
+Write-Host '✓ All requirements installed.' -ForegroundColor Green
+Write-Host ''
+Write-Host 'Next steps:'
+Write-Host '  1. Run ''gh auth login'' to authenticate GitHub (or use Klaussy''s Sign in button)'
+Write-Host '  2. Run ''claude'' once to log in to Claude'
+Write-Host ''
+Read-Host 'Press Enter to close this window'
+`;
+
+const INSTALL_SCRIPT_LINUX = `#!/bin/bash
+set -e
+echo "Installing Klaussy requirements…"
+echo
+
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "Installing Node.js + npm (sudo password may be required)…"
+  sudo apt update
+  sudo apt install -y nodejs npm
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "Installing GitHub CLI…"
+  sudo apt install -y gh
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "Installing Claude Code CLI…"
+  sudo npm install -g @anthropic-ai/claude-code
+fi
+
+echo
+echo "✓ All requirements installed."
+echo
+echo "Next steps:"
+echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
+echo "  2. Run 'claude' once to log in to Claude"
+echo
+read -p "Press Enter to close this window…"
+`;
+
+// Pick the first terminal emulator that exists on the user's PATH. Linux
+// has no canonical "open a terminal" command — distros ship different
+// emulators — so we probe a known list and fall back to xterm.
+function findLinuxTerminal() {
+  const candidates = ['x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
+  for (const term of candidates) {
+    try {
+      execFileSync('which', [term], { stdio: 'pipe' });
+      return term;
+    } catch { /* not found, try next */ }
+  }
+  return null;
+}
+
+ipcMain.handle('install-requirements', async () => {
+  const platform = process.platform;
+  const tmpDir = os.tmpdir();
+  const stamp = Date.now();
+
+  try {
+    if (platform === 'darwin') {
+      const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
+      fs.writeFileSync(scriptPath, INSTALL_SCRIPT_MAC, { mode: 0o755 });
+      // osascript opens Terminal.app and runs the script in a new tab; the
+      // script's trailing `read` keeps the window open for output review.
+      spawn('osascript', [
+        '-e', `tell application "Terminal" to do script "${scriptPath}"`,
+        '-e', 'tell application "Terminal" to activate',
+      ], { detached: true, stdio: 'ignore' }).unref();
+      return { ok: true };
+    }
+
+    if (platform === 'win32') {
+      const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.ps1`);
+      fs.writeFileSync(scriptPath, INSTALL_SCRIPT_WIN);
+      // -NoExit so the window stays open after the script finishes; the
+      // empty title argument is required by `start` when the next arg is
+      // quoted-looking.
+      spawn('cmd', [
+        '/c', 'start', '""',
+        'powershell', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
+      ], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+      return { ok: true };
+    }
+
+    // Linux
+    const term = findLinuxTerminal();
+    if (!term) {
+      return { error: 'No terminal emulator found. Install one of: gnome-terminal, konsole, xterm.' };
+    }
+    const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
+    fs.writeFileSync(scriptPath, INSTALL_SCRIPT_LINUX, { mode: 0o755 });
+    // gnome-terminal uses `--`, the rest use `-e`. xterm/konsole/xfce4 all
+    // accept `-e <command>`; gnome-terminal needs `-- bash <script>`.
+    const args = term === 'gnome-terminal' ? ['--', 'bash', scriptPath] : ['-e', `bash ${scriptPath}`];
+    spawn(term, args, { detached: true, stdio: 'ignore' }).unref();
+    return { ok: true };
+  } catch (err) {
+    return { error: err.message };
+  }
 });
 
 // ---- CI/CD Status (Feature 3) ----
