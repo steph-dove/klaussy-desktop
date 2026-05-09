@@ -603,6 +603,7 @@ contextBridge.exposeInMainWorld('klaus', {
     ciStatus: (worktreePath, branch) => ipcRenderer.invoke('ci-status', { worktreePath, branch }),
     ciRunLogs: (worktreePath, runId) => ipcRenderer.invoke('ci-run-logs', { worktreePath, runId }),
     checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
+    installRequirements: () => ipcRenderer.invoke('install-requirements'),
     loginStart: (hostname) => ipcRenderer.invoke('gh-login-start', { hostname }),
     loginCancel: () => ipcRenderer.invoke('gh-login-cancel'),
     onLoginEvent: (callback) => {

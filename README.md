@@ -1,25 +1,47 @@
 # Klaussy
 
-Multi-terminal Claude Code worktree manager + PR reviewer for macOS.
+Multi-terminal Claude Code worktree manager + PR reviewer for macOS, Windows, and Linux.
 
 Klaussy spawns one git worktree + Claude Code instance per task so you can run
 several agents in parallel without juggling branches in your main clone, and
 turns reviewing someone else's PR into a tabbed surface (files / conversation /
 checks / AI review) without needing the PR checked out locally.
 
-> Status: pre-release. macOS only. Sharing with a small group of devs to gather
-> feedback before broader distribution.
+> Status: pre-release. Sharing with a small group of devs to gather feedback
+> before broader distribution.
 
 ## Prerequisites
 
-- **macOS** (Apple Silicon or Intel)
-- **Node.js 18+** — `brew install node`
-- **GitHub CLI**, authenticated — `brew install gh && gh auth login`
-- **Claude Code CLI**, authenticated — `npm install -g @anthropic-ai/claude-code`
-  then run `claude` once to log in
+Klaussy runs on **macOS 12+** (Apple Silicon or Intel), **Windows 10/11**, or
+**Ubuntu 22.04+**. You'll also need **Node.js 18+**, the **GitHub CLI**, and
+the **Claude Code CLI**, all authenticated. Klaussy auto-checks the CLIs on
+startup and surfaces a setup dialog with copy-pasteable install commands if
+anything's missing.
 
-Klaussy auto-checks both CLIs on startup and surfaces a setup dialog with
-copy-pasteable install commands if anything's missing.
+### macOS
+
+```bash
+brew install node gh
+gh auth login
+npm install -g @anthropic-ai/claude-code && claude
+```
+
+### Windows
+
+```powershell
+winget install OpenJS.NodeJS GitHub.cli
+gh auth login
+npm install -g @anthropic-ai/claude-code
+claude
+```
+
+### Linux (Ubuntu/Debian)
+
+```bash
+sudo apt install nodejs npm gh
+gh auth login
+npm install -g @anthropic-ai/claude-code && claude
+```
 
 ## Install (dev mode)
 
@@ -34,15 +56,20 @@ The first `npm install` rebuilds `node-pty` for your Electron version and
 patches the bundled Electron's `Info.plist` so the macOS menu bar shows
 "Klaussy" instead of "Electron".
 
-## Build a `.dmg`
+## Build a packaged binary
 
 ```bash
-npm run dist          # arm64 + x64 (two separate .dmgs)
-npm run dist:arm64    # arm64 only
-npm run dist:intel    # x64 only
+npm run dist:arm64    # macOS arm64 .dmg + .zip
+npm run dist:intel    # macOS x64 .dmg + .zip
+npm run dist:win      # Windows .exe (run on a Windows host)
+npm run dist:linux    # Linux .AppImage + .deb (run on a Linux host)
 ```
 
-Output lands in `dist/Klaussy-<version>-<arch>.dmg`.
+Output lands in `dist/`. Cross-compiling Win/Linux from macOS is blocked by
+node-gyp's no-cross-compile rule for `node-pty`, so the
+`.github/workflows/build-platforms.yml` workflow runs those on native runners
+— `gh workflow run build-platforms.yml -f release_tag=v<x.y.z>` to publish
+straight to the feedback repo's release.
 
 ### Installing an unsigned build
 
@@ -111,7 +138,7 @@ In-app: **View → Send feedback…** opens a pre-filled issue with version info
 When reporting:
 
 - Klaussy version (Cmd+K → About Klaussy)
-- macOS version
+- OS and version (macOS / Windows / Linux distro)
 - What you did + what you expected vs. what happened
 - Logs from **Cmd+K → View Logs** if relevant
 
