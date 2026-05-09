@@ -67,14 +67,6 @@ Run in dev mode (`npm start`) for everything except §6 (build).
       surfaces the `curl … install.sh | sh` recipe so the user can run
       it themselves.
 
-### klausify install prompt
-
-- [ ] With pipx not installed: New Worktree → klausify prompt shows the
-      Linux-friendly variant (`brew install pipx` falls through to the
-      else branch which says `python -m pip install --user pipx` style).
-- [ ] With pipx installed but klausify missing: clicking "Install with
-      pipx" runs successfully.
-
 ### Build
 
 - [ ] `npm run dist:linux` produces:

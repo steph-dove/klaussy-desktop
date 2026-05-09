@@ -300,10 +300,27 @@ window.Dialogs = (function () {
       : deps.platform === 'win32' ? 'Windows'
       : deps.platform === 'linux' ? 'Linux'
       : 'this system';
+    // Spell out exactly what gets installed and why so the user knows what
+    // they're agreeing to before a 2 GB download starts. The script in main
+    // is idempotent — already-installed pieces are skipped — but this list
+    // is the *full* set so the user can audit it once.
+    var requirements = [
+      { name: 'Node.js + npm',  why: 'Runtime for the Claude Code CLI and other npm-installed tools.' },
+      { name: 'GitHub CLI (gh)', why: 'PR review, CI status, and GitHub auth (the Sign-in button uses gh under the hood).' },
+      { name: 'Claude Code CLI', why: 'The AI assistant Klaussy orchestrates across worktrees.' },
+      { name: 'Ollama',           why: 'Local model server for inline tab-autocomplete. Runs on your machine — no code leaves your laptop. ~2 GB.' },
+    ];
+    var requirementList = requirements.map(function (r) {
+      return '<li><strong>' + escHtml(r.name) + '</strong> — ' + escHtml(r.why) + '</li>';
+    }).join('');
     var installSection = anyMissing
       ? '<div class="deps-install-section">'
+        + '<details class="deps-install-details">'
+          + '<summary>What gets installed?</summary>'
+          + '<ul class="deps-install-list">' + requirementList + '</ul>'
+        + '</details>'
         + '<button class="deps-install-btn" type="button">Install requirements</button>'
-        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and runs the installer for the missing pieces. You’ll still complete <code>gh auth login</code> and <code>claude</code> sign-in once it finishes.</p>'
+        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and installs the bundle (~2 GB total — Ollama is the bulk of it). You’ll still complete <code>gh auth login</code> and <code>claude</code> sign-in once it finishes.</p>'
       + '</div>'
       : '';
 

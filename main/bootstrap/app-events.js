@@ -1,7 +1,7 @@
 // Application lifecycle: PATH-fixing for Finder launches, external-CLI probe,
 // whenReady (menu + window + auto-fetch + periodic save), window-all-closed /
-// before-quit / will-quit, and the saveSessions + klausify-init helpers that
-// the save path depends on. Owns `isQuitting` and dependency-injects it into
+// before-quit / will-quit, and the saveSessions helper that the save path
+// depends on. Owns `isQuitting` and dependency-injects it into
 // state/instances.js (so spawnInWorktree's orphan-shell guard can read it).
 
 const path = require('path');
@@ -21,7 +21,7 @@ const {
 } = instancesModule;
 const { startAutoFetch, startCIPolling } = require('../state/ci-poll');
 const prReviewModule = require('../state/pr-review');
-const tasksModule = require('../ipc/tasks');
+require('../ipc/tasks');
 const { installAppMenu } = require('./menu');
 
 let isQuitting = false;
@@ -59,6 +59,51 @@ function fixSpawnPath() {
   }
 }
 
+// Refresh process.env.PATH from the OS's authoritative source — used after
+// the in-app installer runs so newly-installed binaries are reachable
+// without a Klaussy restart. fixSpawnPath() only adds *known* dirs; this
+// also picks up whatever brew/winget/apt or pipx ensurepath touched.
+//
+//   macOS / Linux: spawn a login+interactive shell which sources the user's
+//                  rc/profile files, then read its $PATH.
+//   Windows:       re-read HKLM + HKCU "Path" from the registry (which is
+//                  what GUI launches start from anyway).
+function refreshSpawnPath() {
+  fixSpawnPath();
+  try {
+    if (process.platform === 'win32') {
+      const out1 = execSync('reg query "HKCU\\Environment" /v Path', { stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000 }).toString();
+      const out2 = execSync('reg query "HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment" /v Path', { stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000 }).toString();
+      const extract = (txt) => {
+        const m = txt.match(/Path\s+REG_(?:EXPAND_)?SZ\s+(.+?)\r?\n/);
+        return m ? m[1].trim() : '';
+      };
+      const fresh = [extract(out2), extract(out1)].filter(Boolean).join(';').split(';').filter(Boolean);
+      if (fresh.length) {
+        const have = (process.env.PATH || '').split(';').filter(Boolean);
+        const merged = [];
+        for (const p of fresh) if (!merged.includes(p)) merged.push(p);
+        for (const p of have)  if (!merged.includes(p)) merged.push(p);
+        process.env.PATH = merged.join(';');
+      }
+      return;
+    }
+    // POSIX: -l (login) sources profile files, -i (interactive) sources rc.
+    // Both together mimic a fresh login shell. Output goes to stdout; any
+    // rc-file noise goes to stderr which we discard.
+    const shell = process.env.SHELL || '/bin/bash';
+    const out = execSync(`${shell} -lic 'echo "$PATH"' 2>/dev/null`, { stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).toString().trim();
+    if (out) {
+      const fresh = out.split(':').filter(Boolean);
+      const have = (process.env.PATH || '').split(':').filter(Boolean);
+      const merged = [];
+      for (const p of have)  if (!merged.includes(p)) merged.push(p);
+      for (const p of fresh) if (!merged.includes(p)) merged.push(p);
+      process.env.PATH = merged.join(':');
+    }
+  } catch { /* shell or registry read failed; keep current PATH */ }
+}
+
 function checkExternalCLIs() {
   const deps = [
     { bin: 'gh', name: 'GitHub CLI', uses: 'PR review and GitHub features' },
@@ -81,104 +126,6 @@ function checkExternalCLIs() {
       }
     });
   });
-}
-
-let klausifyAvailable = null; // null = unchecked, true/false after first check
-
-function checkKlausifyInstalled() {
-  if (klausifyAvailable !== null) return klausifyAvailable;
-  try {
-    execFileSync('klausify', ['--version'], { stdio: 'pipe', timeout: 5000 });
-    klausifyAvailable = true;
-  } catch {
-    klausifyAvailable = false;
-  }
-  return klausifyAvailable;
-}
-
-async function promptKlausifyInstall() {
-  const mw = getMainWindow();
-  if (!mw || mw.isDestroyed()) return false;
-  const { whichBinSync } = require('../util/platform');
-
-  // pipx works on every platform — but on Windows and minimal Linux installs
-  // it's often missing because Python ships without it. Surface a platform-
-  // appropriate install hint when pipx isn't on PATH so the user isn't left
-  // guessing how to get unstuck.
-  if (!whichBinSync('pipx')) {
-    let detail;
-    if (process.platform === 'win32') {
-      detail =
-        'klausify needs the pipx CLI. Install pipx first:\n\n' +
-        '  python -m pip install --user pipx\n' +
-        '  python -m pipx ensurepath\n\n' +
-        'Restart Klaussy after pipx is on PATH, or install klausify directly with `pip install klausify`.';
-    } else if (process.platform === 'darwin') {
-      detail =
-        'klausify needs the pipx CLI. Install pipx first:\n\n' +
-        '  brew install pipx\n' +
-        '  pipx ensurepath\n\n' +
-        'Restart Klaussy after pipx is on PATH.';
-    } else {
-      // Linux + anything else POSIX. apt-installed pipx on Ubuntu 23.04+ works
-      // out of the box; older Ubuntus need the python -m fallback.
-      detail =
-        'klausify needs the pipx CLI. Install pipx first:\n\n' +
-        '  sudo apt install pipx   # Ubuntu 23.04+\n' +
-        '  python3 -m pip install --user pipx && python3 -m pipx ensurepath\n\n' +
-        'Restart Klaussy after pipx is on PATH.';
-    }
-    await dialog.showMessageBox(mw, {
-      type: 'info',
-      buttons: ['OK'],
-      title: 'pipx not found',
-      message: 'klausify CLI is not installed, and pipx is also missing.',
-      detail,
-    });
-    return false;
-  }
-
-  const { response } = await dialog.showMessageBox(mw, {
-    type: 'question',
-    buttons: ['Install with pipx', 'Skip'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'klausify not found',
-    message: 'klausify CLI is not installed.',
-    detail: 'klausify sets up Claude Code boilerplate (CLAUDE.md, etc.) for each new worktree.\n\nInstall it now with pipx?',
-  });
-  if (response !== 0) return false;
-  try {
-    execSync('pipx install klausify', { stdio: 'pipe', timeout: 60000 });
-    klausifyAvailable = true;
-    return true;
-  } catch (err) {
-    dialog.showErrorBox(
-      'Installation failed',
-      'Could not install klausify:\n' + (err.stderr ? err.stderr.toString() : err.message) +
-        '\n\nTry manually: pipx install klausify',
-    );
-    return false;
-  }
-}
-
-async function runKlausifyInit(worktreePath, baseBranch) {
-  // Skip entirely in e2e: a missing-klausify install prompt would hang
-  // the test, and a present-klausify run adds 5+ seconds of noise to
-  // every create-task spec for behavior the tests aren't asserting.
-  if (process.env.KLAUSSY_E2E) return;
-  if (!checkKlausifyInstalled()) {
-    const installed = await promptKlausifyInstall();
-    if (!installed) return;
-  }
-  try {
-    const args = ['init', '--repo', worktreePath, '--skip-enrich'];
-    if (baseBranch) args.push('--base-branch', baseBranch);
-    execFileSync('klausify', args, { stdio: 'pipe', timeout: 30000 });
-    console.log('klausify init completed for', worktreePath);
-  } catch (err) {
-    console.warn('klausify init failed (non-fatal):', err.message);
-  }
 }
 
 function saveSessions() {
@@ -251,13 +198,10 @@ function install() {
   //   - instances.spawnInWorktree reads isQuitting (local to this module)
   //     and calls startCIPolling (state/ci-poll — importable directly, but
   //     state modules don't import each other; injection avoids the cycle).
-  //   - pr-review + tasks call runKlausifyInit, which lives here.
   instancesModule.setDeps({
     isQuitting: () => isQuitting,
     startCIPolling,
   });
-  prReviewModule.setDeps({ runKlausifyInit });
-  tasksModule.setDeps({ runKlausifyInit });
 
   // Terminal subscribe/unsubscribe — tiny IPC relay into state/instances.
   ipcMain.on('subscribe-terminal', (event, channel) => {
@@ -334,4 +278,4 @@ function install() {
   });
 }
 
-module.exports = { install };
+module.exports = { install, refreshSpawnPath };

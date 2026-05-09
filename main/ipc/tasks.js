@@ -1,9 +1,6 @@
 // All task-lifecycle IPC: saved sessions, create/checkout/open, list-tasks,
 // terminal write/resize, sub-terminals, kill/restart/rename/duplicate,
 // notify toggle, dirty-worktree aggregator, transcripts, pop-out, task notes.
-//
-// runKlausifyInit lives in main.js (moves with bootstrap/app-events.js in
-// Phase 4) and is injected via setDeps.
 
 const path = require('path');
 const fs = require('fs');
@@ -21,15 +18,10 @@ const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 
-// create-task / duplicate-task put worktrees as a sibling of the main repo —
-// matches the klausify CLI convention.
+// create-task / duplicate-task put worktrees as a sibling of the main repo
+// in a `klaus-worktrees/` directory.
 function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
-}
-
-let _runKlausifyInit = async () => {};
-function setDeps({ runKlausifyInit } = {}) {
-  if (runKlausifyInit) _runKlausifyInit = runKlausifyInit;
 }
 
 ipcMain.handle('list-saved-sessions', () => {
@@ -160,7 +152,6 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
   } catch {}
 
-  await _runKlausifyInit(worktreePath, baseBranch);
   return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
 });
 
@@ -196,7 +187,6 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
     return { error: 'Failed to create worktree: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
 
-  await _runKlausifyInit(worktreePath);
   const name = sanitized;
   return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
 });
@@ -495,7 +485,6 @@ ipcMain.handle('duplicate-task', async (_event, { id }) => {
     return { error: `Failed to create worktree: ${err.message}` };
   }
 
-  await _runKlausifyInit(worktreePath, sourceBranch);
   const mode = config.defaultMode || 'claude';
   return spawnInWorktree(baseName, worktreePath, branch, mode);
 });
@@ -595,4 +584,4 @@ ipcMain.handle('set-task-note', async (_event, { taskName, note }) => {
   saveConfig(config);
   return { ok: true };
 });
-module.exports = { setDeps };
+module.exports = {};
