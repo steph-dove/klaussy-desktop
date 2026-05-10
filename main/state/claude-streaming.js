@@ -27,6 +27,7 @@ const { appendStderr } = require('../util/exec');
 const agentRegistry = require('./agent-registry');
 
 const debugCheckProcs = new Map();
+const fixCheckProcs = new Map();
 const inlineEditProcs = new Map();
 const inlineCompleteProcs = new Map();
 const reviewSurfaceAiProcs = new Map();
@@ -167,6 +168,7 @@ module.exports = {
   spawnClaudeStream,
   makeClaudeCancelHandler,
   debugCheckProcs,
+  fixCheckProcs,
   inlineEditProcs,
   inlineCompleteProcs,
   reviewSurfaceAiProcs,
