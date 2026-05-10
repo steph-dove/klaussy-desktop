@@ -253,6 +253,21 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
+    fixCheckStart: (requestId, checkLink, checkName, checkRunId) =>
+      ipcRenderer.invoke('pr-fix-check-start', { requestId, checkLink, checkName, checkRunId }),
+    fixCheckCancel: (requestId) => ipcRenderer.invoke('pr-fix-check-cancel', { requestId }),
+    onFixCheckData: (requestId, callback) => {
+      const channel = 'pr-fix-check-data-' + requestId;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onFixCheckDone: (requestId, callback) => {
+      const channel = 'pr-fix-check-done-' + requestId;
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.once(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
     checkoutLocally: () => ipcRenderer.invoke('pr-checkout-locally'),
     reviewAiStart: (requestId) => ipcRenderer.invoke('pr-review-ai-start', { requestId }),
     reviewAiCancel: (requestId) => ipcRenderer.invoke('pr-review-ai-cancel', { requestId }),

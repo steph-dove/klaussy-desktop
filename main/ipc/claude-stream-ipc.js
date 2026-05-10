@@ -13,7 +13,7 @@ const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
-  debugCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
+  debugCheckProcs, fixCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
   implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
   investigateProcs,
 } = require('../state/claude-streaming');
@@ -24,31 +24,17 @@ function shortHash(s) {
   return crypto.createHash('sha1').update(String(s || '')).digest('hex').slice(0, 12);
 }
 
-// Debug a single failing CI check. Pulls the failing job's logs, builds a
-// prompt with PR description + diff + log tail, and streams claude's analysis
-// back to the renderer. Same chunk/done event protocol as Explain so the
-// renderer can reuse the same UX.
-ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName, checkRunId }) => {
-  if (!requestId) return { error: 'Missing requestId' };
-  if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
-  if (!prReview.active) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo, diff } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+// Build the shared "failing CI check" context block — log tail, annotations,
+// matching workflow YAML, truncated PR diff. Used by both pr-debug-check-start
+// (read-only analysis) and pr-fix-check-start (autonomous edit run). Returns
+// either the assembled blocks or { error } for the caller to surface.
+function buildFailingCheckContext({ checkLink, checkName, checkRunId, cwd, baseOwner, baseRepo, diff }) {
   if (!checkLink) return { error: 'Check has no run link to fetch logs from' };
-
-  // GitHub job links look like:
-  //   https://github.com/<owner>/<repo>/actions/runs/<runId>/job/<jobId>
   const m = checkLink.match(/\/actions\/runs\/(\d+)\/job\/(\d+)/);
   const runId = m ? m[1] : null;
   const jobId = m ? m[2] : null;
   if (!runId || !jobId) return { error: 'Could not parse run/job id from link: ' + checkLink };
 
-  const cwd = currentRepoPath() || require('os').homedir();
-  const sender = event.sender;
-
-  // Fetch logs. Prefer job-specific endpoint (tighter context = better diagnosis)
-  // and fall back to run-wide --log-failed only if the job endpoint fails.
-  // Both paths cap at 50 MB.
   let logs = '';
   try {
     logs = execFileSync('gh', [
@@ -67,18 +53,12 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
       return { error: 'Could not fetch logs: ' + msg };
     }
   }
-  const logLines = logs.split('\n');
-  const logTail = logLines.slice(-400).join('\n');
+  const logTail = logs.split('\n').slice(-400).join('\n');
 
-  // Truncate diff too — long PRs can easily exceed the prompt budget. The
-  // file list + first ~600 lines is usually enough to let claude judge
-  // whether the PR caused the failure; full diff is rarely needed.
-  const diffSnippet = (diff || '').split('\n').slice(0, 600).join('\n')
-    + ((diff || '').split('\n').length > 600 ? '\n\n[... diff truncated ...]\n' : '');
+  const diffLines = (diff || '').split('\n');
+  const diffSnippet = diffLines.slice(0, 600).join('\n')
+    + (diffLines.length > 600 ? '\n\n[... diff truncated ...]\n' : '');
 
-  // Annotations: pre-localized fix hints from the check-run. When provided,
-  // these are dramatically better than scanning the log tail. We cap at 10
-  // entries so a noisy check (e.g. eslint with 200 errors) doesn't dominate.
   let annotationsBlock = '';
   if (checkRunId) {
     try {
@@ -98,18 +78,11 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
           + (annos.length > 10 ? `\n[... ${annos.length - 10} more not shown ...]\n` : '');
       }
     } catch (err) {
-      // Best-effort enrichment — don't fail the whole debug call. But log so
-      // a sustained issue (token missing checks:read scope, persistent 5xx)
-      // is recoverable from main.log without a debugger.
-      console.error('[pr-debug-check-start] annotations fetch failed:',
+      console.error('[failing-check-context] annotations fetch failed:',
         ((err && (err.stderr || err.message)) || String(err)).toString().trim());
     }
   }
 
-  // Workflow YAML: read the matching workflow file from .github/workflows in
-  // the local worktree. Match by `name:` field. Local copy may differ from
-  // the PR head's copy, but it's almost always close enough to explain what
-  // the failing step was supposed to do. Skip silently if no match.
   let workflowBlock = '';
   try {
     const fs = require('fs');
@@ -117,9 +90,6 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
     const wfDir = path.join(cwd, '.github', 'workflows');
     if (fs.existsSync(wfDir)) {
       const files = fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/i.test(f));
-      // Match by workflow name (read from --name in the source) against the
-      // failing check's app name + check name. Heuristic: read the file's
-      // `name:` line and compare against checkName.
       const targetTokens = (checkName || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
       let best = null;
       for (const f of files) {
@@ -136,21 +106,37 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
       }
     }
   } catch (err) {
-    // Best-effort enrichment — fs read or YAML match failed. Log so a
-    // permission issue on .github/workflows surfaces in main.log.
-    console.error('[pr-debug-check-start] workflow YAML lookup failed:',
+    console.error('[failing-check-context] workflow YAML lookup failed:',
       ((err && err.message) || String(err)).toString().trim());
   }
+
+  return { logTail, diffSnippet, annotationsBlock, workflowBlock };
+}
+
+// Debug a single failing CI check. Pulls the failing job's logs, builds a
+// prompt with PR description + diff + log tail, and streams claude's analysis
+// back to the renderer. Same chunk/done event protocol as Explain so the
+// renderer can reuse the same UX.
+ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName, checkRunId }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { meta, baseOwner, baseRepo, diff } = prReview.active;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+
+  const cwd = currentRepoPath() || require('os').homedir();
+  const ctx = buildFailingCheckContext({ checkLink, checkName, checkRunId, cwd, baseOwner, baseRepo, diff });
+  if (ctx.error) return { error: ctx.error };
 
   const prompt =
     `A pull request has a failing CI check. Help diagnose it.\n\n`
     + `## PR\n#${meta.number}: ${meta.title || ''}\n`
     + (meta.body ? `\n${meta.body.slice(0, 2000)}\n` : '')
     + `\n## Failing check\nName: ${checkName || '(unnamed)'}\nLink: ${checkLink}\n`
-    + annotationsBlock
-    + workflowBlock
-    + `\n## Last lines of the failing job log\n\`\`\`\n${logTail}\n\`\`\`\n`
-    + `\n## PR diff (truncated to 600 lines)\n\`\`\`\n${diffSnippet}\n\`\`\`\n`
+    + ctx.annotationsBlock
+    + ctx.workflowBlock
+    + `\n## Last lines of the failing job log\n\`\`\`\n${ctx.logTail}\n\`\`\`\n`
+    + `\n## PR diff (truncated to 600 lines)\n\`\`\`\n${ctx.diffSnippet}\n\`\`\`\n`
     + `\nAnswer in this structure:\n`
     + `1. **What broke** — one or two sentences naming the actual failure.\n`
     + `2. **Caused by this PR?** — yes / no / likely, with the specific evidence from the diff vs log.\n`
@@ -159,7 +145,7 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
 
   spawnClaudeStream({
     requestId, procMap: debugCheckProcs, channelPrefix: 'pr-debug-check',
-    sender, cwd, prompt,
+    sender: event.sender, cwd, prompt,
     agentMeta: {
       kind: 'pr-debug-check',
       // Same PR + same failing job link = same agent. Re-clicking "Debug"
@@ -180,6 +166,75 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
 });
 
 ipcMain.handle('pr-debug-check-cancel', makeClaudeCancelHandler(debugCheckProcs));
+
+// Autonomous fix for a failing CI check. Same context as Debug, but spawned
+// in the PR's worktree with edit tools and stream-json output so the renderer
+// can show tool-use progress (which files Claude touched). Claude is told NOT
+// to commit or push — that step is gated on the user reviewing the diff and
+// clicking Push in the panel (commit-local + push-local IPCs handle it).
+ipcMain.handle('pr-fix-check-start', async (event, { requestId, checkLink, checkName, checkRunId }) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (fixCheckProcs.has(requestId)) return { error: 'Already fixing' };
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { meta, baseOwner, baseRepo, diff } = prReview.active;
+  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+
+  // Materialize the worktree first — the prompt instructs Claude to edit
+  // files, so we need a writable checkout of the PR branch. Reuses the same
+  // helper as pr-review-implement / pr-debug-check-open-task.
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+
+  // Context-gathering uses the worktree cwd so .github/workflows lookup hits
+  // the PR's copy of the YAML, not main's. (Logs/annotations come from gh
+  // and are repo-scoped, so cwd doesn't affect them.)
+  const ctx = buildFailingCheckContext({
+    checkLink, checkName, checkRunId,
+    cwd: ensured.worktreePath, baseOwner, baseRepo, diff,
+  });
+  if (ctx.error) return { error: ctx.error };
+
+  const prompt =
+    `A pull request has a failing CI check. Apply a focused fix in this worktree.\n\n`
+    + `## PR\n#${meta.number}: ${meta.title || ''}\n`
+    + (meta.body ? `\n${meta.body.slice(0, 2000)}\n` : '')
+    + `\n## Failing check\nName: ${checkName || '(unnamed)'}\nLink: ${checkLink}\n`
+    + ctx.annotationsBlock
+    + ctx.workflowBlock
+    + `\n## Last lines of the failing job log\n\`\`\`\n${ctx.logTail}\n\`\`\`\n`
+    + `\n## PR diff so far (truncated to 600 lines)\n\`\`\`\n${ctx.diffSnippet}\n\`\`\`\n`
+    + `\nGuidelines:\n`
+    + `- Make the smallest focused change that resolves this specific failure.\n`
+    + `- Do NOT do unrelated cleanup, refactors, or formatting churn.\n`
+    + `- Do NOT run tests, install deps, or run \`git commit\` / \`git push\` — the user will review the diff and push from the UI.\n`
+    + `- If the failure isn't fixable from the codebase (e.g. flaky infra, missing secret), say so plainly and stop without editing.\n`
+    + `\nAfter editing, output a short summary in this exact structure:\n`
+    + `1. **Root cause** — one sentence.\n`
+    + `2. **Files changed** — bullet list of \`path\` — what changed.\n`
+    + `3. **Why this fixes it** — one or two sentences tying the change back to the failure.\n`;
+
+  spawnClaudeStream({
+    requestId, procMap: fixCheckProcs, channelPrefix: 'pr-fix-check',
+    sender: event.sender, cwd: ensured.worktreePath, prompt,
+    streamJson: true,
+    extraDoneFields: { worktreePath: ensured.worktreePath },
+    agentMeta: {
+      kind: 'pr-fix-check',
+      dedupeKey: `pr-fix-check:${meta.number}:${checkLink}`,
+      sourceContext: {
+        kind: 'pr-fix-check',
+        prNumber: meta.number,
+        prTitle: meta.title || '',
+        baseOwner, baseRepo,
+        checkLink,
+        checkName: checkName || '',
+      },
+    },
+  });
+  return { ok: true, worktreePath: ensured.worktreePath };
+});
+
+ipcMain.handle('pr-fix-check-cancel', makeClaudeCancelHandler(fixCheckProcs));
 
 // Turn a finished debug analysis into a Claude task on the PR's worktree.
 // Materializes the worktree if needed, spawns a fresh claude instance, then

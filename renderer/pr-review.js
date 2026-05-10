@@ -65,6 +65,34 @@ window.PrReview = (function () {
   // CI poll (30s) but more responsive when the user is actively watching.
   var checksPollTimer = null;
   var checksFetchInFlight = false;
+  // Signature of the last data we painted into the Checks tab. Lets the 15s
+  // poll skip the DOM rebuild when nothing changed — keeps any open
+  // annotations panels stable and avoids unnecessary reflow. Reset on PR
+  // change so a freshly-loaded PR always paints.
+  var lastChecksSignature = '';
+  // Annotations-panel open state, keyed by checkId. Survives repaintChecksTab
+  // AND full render() rebuilds so the user's expanded panels persist. Value:
+  //   { data: Array|null, error: string|null }
+  // data === null means "fetch in flight"; on repaint we re-render synchronously
+  // from the cached value so there's no flash and no refetch.
+  var openAnnotations = Object.create(null);
+  // Debug-panel state, keyed by checkId. Same idea as openAnnotations: survives
+  // any DOM rebuild so the 30-90s analysis the user just paid for doesn't get
+  // lost on the next poll/rerender. Value shape:
+  //   {
+  //     requestId, checkName, checkLink, startedAt,
+  //     accumulated: string,                 // streaming text so far
+  //     state: 'running'|'done'|'error'|'cancelled',
+  //     error: string|null,
+  //     durationSec: number|null,
+  //     statusTimer: intervalId|null,        // for the rotating "Fetching..." pulse
+  //     openTaskState: 'idle'|'opening'|'opened'|'failed',
+  //     openTaskError: string|null,
+  //   }
+  // Subscriptions write into this map and then call paintDebugPanel(checkId)
+  // which finds whichever DOM panel is currently mounted (if any) and updates
+  // it in place — letting the same stream survive across panel remounts.
+  var openDebugChecks = Object.create(null);
   // Local-changes panel state (Review tab). Refreshed on tab show and after
   // each implement/commit/push. Stays null until the first fetch completes.
   // Shape: { worktreePath, branch, files:[{status,file}], diff, unpushed:[{hash,short,subject}], headRefOid }
@@ -158,6 +186,19 @@ window.PrReview = (function () {
     if (isNewPr) {
       selectedFile = null;
       currentChecks = null;
+      // Cancel any in-flight debug streams from the previous PR so they don't
+      // keep filling the cache after we drop it. Annotations are read-only so
+      // we just clear the map.
+      Object.keys(openDebugChecks).forEach(function (k) {
+        var e = openDebugChecks[k];
+        if (e && e.state === 'running' && e.requestId) {
+          try { window.klaus.pr.debugCheckCancel(e.requestId); } catch (_) {}
+        }
+        if (e && e.statusTimer) clearInterval(e.statusTimer);
+      });
+      openDebugChecks = Object.create(null);
+      openAnnotations = Object.create(null);
+      lastChecksSignature = '';
       // Stop any in-flight checks polling so it doesn't repaint with the
       // previous PR's data after the new PR's render lands.
       clearChecksPolling();
@@ -3967,6 +4008,13 @@ window.PrReview = (function () {
       var debugBtn = (b === 'fail' && c.link)
         ? '<button class="pr-check-debug-btn" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(c.id ? String(c.id) : '') + '" title="Use Claude to diagnose this failure">Debug</button>'
         : '';
+      // Primary action for failing checks: spawn Claude in the PR worktree
+      // with edit tools, then surface the resulting diff for the user to
+      // review and push. Debug stays as the read-only inspector for cases
+      // where you want analysis without auto-edit.
+      var fixBtn = (b === 'fail' && c.link && c.id)
+        ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(String(c.id)) + '" title="Have Claude edit, commit, and push a fix">Fix</button>'
+        : '';
       var annotationsBtn = (b === 'fail' && c.id)
         ? '<button class="pr-check-annotations-btn" type="button" data-check-id="' + escHtml(String(c.id)) + '" data-name="' + escHtml(c.name || '') + '" title="Show file:line annotations">Annotations</button>'
         : '';
@@ -3995,6 +4043,7 @@ window.PrReview = (function () {
         + cancelBtn
         + annotationsBtn
         + debugBtn
+        + fixBtn
         + (c.link ? '<span class="pr-check-arrow">\u2197</span>' : '')
       + '</div>';
     }
@@ -4059,7 +4108,11 @@ window.PrReview = (function () {
       refresh.addEventListener('click', function () {
         refresh.disabled = true;
         refresh.textContent = 'Refreshing\u2026';
-        fetchAndRenderChecks(lastState && lastState.number).then(repaintChecksTab);
+        // Force the repaint even if the data hasn't changed \u2014 the button
+        // text/disabled state needs to reset, and the user explicitly asked
+        // for a refresh so they expect a visible response.
+        fetchAndRenderChecks(lastState && lastState.number)
+          .then(function () { repaintChecksTab({ force: true }); });
       });
     }
     // Auto-refresh: pull fresh data on every tab activation, then poll while
@@ -4075,6 +4128,7 @@ window.PrReview = (function () {
       row.addEventListener('click', function (e) {
         // Don't open the run URL when the user clicks an inline action btn.
         if (e.target.closest('.pr-check-debug-btn')) return;
+        if (e.target.closest('.pr-check-fix-btn')) return;
         if (e.target.closest('.pr-check-annotations-btn')) return;
         if (e.target.closest('.pr-check-action-btn')) return;
         var url = row.dataset.link;
@@ -4085,6 +4139,12 @@ window.PrReview = (function () {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         startDebugCheck(btn);
+      });
+    });
+    hostEl.querySelectorAll('.pr-check-fix-btn').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        startFixCheck(btn);
       });
     });
     hostEl.querySelectorAll('.pr-check-annotations-btn').forEach(function (btn) {
@@ -4111,6 +4171,11 @@ window.PrReview = (function () {
         toggleLogWatch(btn);
       });
     });
+    // Restore any panels the user had open before this re-render. Survives
+    // both polling repaints and full render() rebuilds (which call
+    // bindChecksTab via the tab-activation path).
+    restoreOpenAnnotations();
+    restoreOpenDebugChecks();
   }
 
   // Live log tail for an in-progress run. Click again to stop. Renders into a
@@ -4212,8 +4277,11 @@ window.PrReview = (function () {
       // Successful kick — refresh checks so the row's state reflects the new
       // run. Repaint just the Checks-tab slot rather than re-rendering the
       // whole PR view; the latter caused the entire section to flash empty
-      // for the duration of the rebuild.
-      fetchAndRenderChecks(lastState && lastState.number).then(repaintChecksTab);
+      // for the duration of the rebuild. Force the repaint so the user
+      // sees the action's result immediately even if GH hasn't propagated
+      // the state flip into the API response yet.
+      fetchAndRenderChecks(lastState && lastState.number)
+        .then(function () { repaintChecksTab({ force: true }); });
     }).catch(function (err) {
       btn.disabled = false;
       btn.textContent = 'Failed';
@@ -4224,11 +4292,58 @@ window.PrReview = (function () {
   // Swap only the .pr-review-checks-tab innerHTML and rebind. Leaves the
   // rest of the PR-review surface untouched so action-driven refreshes
   // (rerun, cancel, periodic poll) don't flash the whole tab.
-  function repaintChecksTab() {
+  // Build a stable signature of the data that drives renderChecksTab(). Used
+  // by repaintChecksTab to skip no-op repaints. Excludes derived-from-clock
+  // bits (in-progress duration ticks) — those will catch up the next time
+  // the underlying state actually changes, which is fine for a value rounded
+  // to the minute.
+  function checksSignature() {
+    var parts = [];
+    if (currentChecks && currentChecks.error) parts.push('ERR:' + currentChecks.error);
+    var checks = (currentChecks && currentChecks.checks) || [];
+    checks.forEach(function (c) {
+      parts.push([
+        c.id, c.name, c.workflow, c.description,
+        c.state, c.conclusion, c.startedAt, c.completedAt,
+        c.runId, c.link
+      ].join('|'));
+    });
+    parts.push('REQ:' + (currentRequiredChecks || []).join(','));
+    parts.push('REQERR:' + (currentRequiredChecksError || ''));
+    return parts.join('\n');
+  }
+
+  function repaintChecksTab(opts) {
     var slot = hostEl.querySelector('.pr-review-checks-tab');
     if (!slot) return;
+    var force = opts && opts.force;
+    var sig = checksSignature();
+    // No-op when polling lands the same data we already painted. Without
+    // this, the 15s tick would tear down and rebuild the tab even when
+    // nothing's changed.
+    if (!force && sig === lastChecksSignature && slot.firstChild) return;
+    lastChecksSignature = sig;
+
+    // Detach any live Fix panels so we can re-attach them after the wipe.
+    // Detached DOM keeps its event listeners and IPC subscriptions alive,
+    // so the stream keeps flowing into the same panel without restart.
+    var liveFixPanels = [];
+    slot.querySelectorAll('.pr-check-fix-panel').forEach(function (p) {
+      if (p.dataset.checkId) {
+        p.parentNode.removeChild(p);
+        liveFixPanels.push(p);
+      }
+    });
+
     slot.innerHTML = renderChecksTab();
-    bindChecksTab();
+    bindChecksTab(); // bindChecksTab now also restores annotations + debug panels
+
+    liveFixPanels.forEach(function (p) {
+      var btn = slot.querySelector('.pr-check-fix-btn[data-check-id="' + p.dataset.checkId + '"]');
+      if (!btn) return; // row no longer in the rendered set (check passed/disappeared)
+      var row = btn.closest('.pr-check-row');
+      if (row) row.insertAdjacentElement('afterend', p);
+    });
   }
 
   // Periodic refresh while Checks is the active tab. Idempotent — calling
@@ -4355,56 +4470,92 @@ window.PrReview = (function () {
     });
   }
 
-  // Lazily fetch + render annotations beneath a failing check row. Click
-  // again to collapse. Cached on the panel element so a re-render of the
-  // tab doesn't lose the user's expand state.
+  function annotationsPanelHtml(state) {
+    if (!state || (state.data == null && !state.error)) {
+      return '<div class="pr-check-annotations-body">Loading annotations…</div>';
+    }
+    if (state.error) {
+      return '<div class="pr-check-annotations-body diff-error">Failed to load annotations: '
+        + escHtml(state.error) + '</div>';
+    }
+    var ann = state.data || [];
+    if (ann.length === 0) {
+      return '<div class="pr-check-annotations-body pr-check-annotations-empty">No annotations from this check.</div>';
+    }
+    return '<div class="pr-check-annotations-body">' + ann.map(function (a) {
+      var levelClass = 'pr-annotation-' + (a.level || 'notice').replace(/[^a-z]/gi, '');
+      var loc = a.path ? escHtml(a.path) + (a.startLine ? ':' + a.startLine : '') : '';
+      return '<div class="pr-annotation ' + levelClass + '">'
+        + '<div class="pr-annotation-head">'
+          + '<span class="pr-annotation-level">' + escHtml(a.level || 'notice') + '</span>'
+          + (loc ? '<span class="pr-annotation-loc">' + loc + '</span>' : '')
+          + (a.title ? '<span class="pr-annotation-title">' + escHtml(a.title) + '</span>' : '')
+        + '</div>'
+        + '<div class="pr-annotation-msg">' + escHtml(a.message || '') + '</div>'
+        + (a.rawDetails ? '<pre class="pr-annotation-raw">' + escHtml(a.rawDetails) + '</pre>' : '')
+      + '</div>';
+    }).join('') + '</div>';
+  }
+
+  // Insert (or replace) the annotations panel for this checkId. Looks up
+  // existing panels by data-check-id rather than row.nextElementSibling so
+  // multiple action panels under the same row (Debug + Annotations) don't
+  // confuse the duplicate-detection and end up stacking.
+  function mountAnnotationsPanel(row, checkId) {
+    var existing = hostEl.querySelector('.pr-check-annotations-panel[data-check-id="' + checkId + '"]');
+    var panel = existing || document.createElement('div');
+    panel.className = 'pr-check-annotations-panel';
+    panel.dataset.checkId = checkId;
+    panel.innerHTML = annotationsPanelHtml(openAnnotations[checkId]);
+    if (!existing) row.insertAdjacentElement('afterend', panel);
+    return panel;
+  }
+
+  function fetchAnnotations(checkId) {
+    window.klaus.pr.reviewCheckAnnotations(checkId).then(function (res) {
+      if (!openAnnotations[checkId]) return; // user collapsed before fetch returned
+      if (res && res.error) {
+        openAnnotations[checkId] = { data: null, error: res.error };
+      } else {
+        openAnnotations[checkId] = { data: (res && res.annotations) || [], error: null };
+      }
+      restoreOpenAnnotations();
+    }).catch(function (err) {
+      if (!openAnnotations[checkId]) return;
+      openAnnotations[checkId] = { data: null, error: (err && err.message) || 'unknown error' };
+      restoreOpenAnnotations();
+    });
+  }
+
+  // Re-mount any annotations panels the user had expanded. Called after
+  // repaintChecksTab() blows away the tab DOM.
+  function restoreOpenAnnotations() {
+    Object.keys(openAnnotations).forEach(function (checkId) {
+      var btn = hostEl.querySelector('.pr-check-annotations-btn[data-check-id="' + checkId + '"]');
+      if (!btn) return; // row no longer in the rendered set (e.g., check passed after rerun)
+      var row = btn.closest('.pr-check-row');
+      if (row) mountAnnotationsPanel(row, checkId);
+    });
+  }
+
+  // Click handler: toggle the panel for this row. Fetches lazily on first
+  // expand; subsequent expands reuse the cached annotations so polling
+  // repaints don't refetch. Lookup is by data-check-id, not nextElementSibling,
+  // so an in-the-way Debug panel doesn't confuse the close path.
   function toggleAnnotations(btn) {
     var row = btn.closest('.pr-check-row');
     if (!row) return;
-    var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-annotations-panel')
-      ? row.nextElementSibling : null;
-    if (existing) { existing.remove(); return; }
     var checkId = btn.dataset.checkId;
     if (!checkId) return;
-
-    var panel = document.createElement('div');
-    panel.className = 'pr-check-annotations-panel';
-    panel.innerHTML = '<div class="pr-check-annotations-body">Loading annotations…</div>';
-    row.insertAdjacentElement('afterend', panel);
-
-    window.klaus.pr.reviewCheckAnnotations(checkId).then(function (res) {
-      if (!panel.isConnected) return;
-      var body = panel.querySelector('.pr-check-annotations-body');
-      if (res && res.error) {
-        body.classList.add('diff-error');
-        body.textContent = 'Failed to load annotations: ' + res.error;
-        return;
-      }
-      var ann = (res && res.annotations) || [];
-      if (ann.length === 0) {
-        body.textContent = 'No annotations from this check.';
-        body.classList.add('pr-check-annotations-empty');
-        return;
-      }
-      body.innerHTML = ann.map(function (a) {
-        var levelClass = 'pr-annotation-' + (a.level || 'notice').replace(/[^a-z]/gi, '');
-        var loc = a.path ? escHtml(a.path) + (a.startLine ? ':' + a.startLine : '') : '';
-        return '<div class="pr-annotation ' + levelClass + '">'
-          + '<div class="pr-annotation-head">'
-            + '<span class="pr-annotation-level">' + escHtml(a.level || 'notice') + '</span>'
-            + (loc ? '<span class="pr-annotation-loc">' + loc + '</span>' : '')
-            + (a.title ? '<span class="pr-annotation-title">' + escHtml(a.title) + '</span>' : '')
-          + '</div>'
-          + '<div class="pr-annotation-msg">' + escHtml(a.message || '') + '</div>'
-          + (a.rawDetails ? '<pre class="pr-annotation-raw">' + escHtml(a.rawDetails) + '</pre>' : '')
-        + '</div>';
-      }).join('');
-    }).catch(function (err) {
-      if (!panel.isConnected) return;
-      var body = panel.querySelector('.pr-check-annotations-body');
-      body.classList.add('diff-error');
-      body.textContent = 'Failed to load annotations: ' + (err && err.message ? err.message : 'unknown error');
-    });
+    if (openAnnotations[checkId]) {
+      delete openAnnotations[checkId];
+      var existing = hostEl.querySelector('.pr-check-annotations-panel[data-check-id="' + checkId + '"]');
+      if (existing) existing.remove();
+      return;
+    }
+    openAnnotations[checkId] = { data: null, error: null };
+    mountAnnotationsPanel(row, checkId);
+    fetchAnnotations(checkId);
   }
 
   var DEBUG_STATUS_MESSAGES = [
@@ -4415,126 +4566,626 @@ window.PrReview = (function () {
     'Drafting analysis\u2026',
   ];
 
+  // Re-paint whichever panel DOM is currently mounted for this checkId from
+  // the cached entry. Streaming subscriptions call this on every chunk/done
+  // — so the same stream keeps updating the panel even if it gets remounted
+  // (full re-render, polling repaint) underneath.
+  function paintDebugPanel(checkId) {
+    var entry = openDebugChecks[checkId];
+    if (!entry) return;
+    var panel = hostEl.querySelector('.pr-check-debug-panel[data-check-id="' + checkId + '"]');
+    if (!panel) return;
+    var bodyEl = panel.querySelector('.pr-check-debug-body');
+    if (!bodyEl) return;
+
+    if (entry.state === 'error') {
+      bodyEl.classList.remove('status-pulse');
+      bodyEl.classList.add('diff-error');
+      bodyEl.textContent = entry.error || 'Failed';
+    } else if (entry.state === 'cancelled') {
+      bodyEl.classList.remove('status-pulse');
+      bodyEl.textContent = entry.accumulated || 'Cancelled.';
+    } else if (entry.accumulated) {
+      bodyEl.classList.remove('status-pulse');
+      bodyEl.textContent = entry.accumulated;
+      bodyEl.scrollTop = bodyEl.scrollHeight;
+    }
+
+    // Chat affordance — only meaningful once the analysis is done. Lives
+    // between the analysis body and the action footer. The log is rebuilt
+    // every paint (cheap, includes the in-flight assistant bubble); the
+    // composer is built once per mount so the textarea keeps its focus and
+    // mid-typed value while the assistant streams.
+    if (entry.state === 'done') {
+      var chatEl = panel.querySelector('.pr-check-debug-chat');
+      if (!chatEl) {
+        chatEl = document.createElement('div');
+        chatEl.className = 'pr-check-debug-chat';
+        chatEl.innerHTML =
+          '<div class="pr-check-debug-chat-log"></div>'
+          + '<form class="pr-check-debug-chat-composer">'
+            + '<textarea class="pr-check-debug-chat-input" rows="2" placeholder="Ask Claude about this analysis…"></textarea>'
+            + '<button class="pr-check-debug-chat-send" type="submit">Send</button>'
+          + '</form>';
+        // Insert before the footer if it exists, otherwise at the end.
+        var existingFooter = panel.querySelector('.pr-check-debug-footer');
+        if (existingFooter) panel.insertBefore(chatEl, existingFooter);
+        else panel.appendChild(chatEl);
+
+        var formEl = chatEl.querySelector('.pr-check-debug-chat-composer');
+        var inputEl = chatEl.querySelector('.pr-check-debug-chat-input');
+        formEl.addEventListener('submit', function (e) {
+          e.preventDefault();
+          var text = (inputEl.value || '').trim();
+          if (!text) return;
+          inputEl.value = '';
+          sendDebugChatTurn(checkId, text);
+        });
+        // Cmd/Ctrl+Enter to send; bare Enter inserts a newline (matches the
+        // AI Review chat composer).
+        inputEl.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault();
+            formEl.requestSubmit();
+          }
+        });
+      }
+
+      var logEl = chatEl.querySelector('.pr-check-debug-chat-log');
+      var turns = (entry.chatMessages || []).map(function (m) {
+        var cls = m.role === 'assistant' ? 'pr-check-debug-chat-assistant' : 'pr-check-debug-chat-user';
+        return '<div class="' + cls + '">' + escHtml(m.content) + '</div>';
+      });
+      if (entry.chatStreaming) {
+        turns.push('<div class="pr-check-debug-chat-assistant pr-check-debug-chat-streaming">' + escHtml(entry.chatStreaming) + '</div>');
+      } else if (entry.chatRequestId) {
+        turns.push('<div class="pr-check-debug-chat-assistant pr-check-debug-chat-streaming">…</div>');
+      }
+      if (entry.chatError) {
+        turns.push('<div class="pr-check-debug-chat-error">' + escHtml(entry.chatError) + '</div>');
+      }
+      logEl.innerHTML = turns.join('');
+      logEl.scrollTop = logEl.scrollHeight;
+
+      var sendBtn = chatEl.querySelector('.pr-check-debug-chat-send');
+      var inputBtn = chatEl.querySelector('.pr-check-debug-chat-input');
+      var streaming = !!entry.chatRequestId;
+      sendBtn.disabled = streaming;
+      sendBtn.textContent = streaming ? 'Sending…' : 'Send';
+      inputBtn.disabled = streaming;
+    }
+
+    var footerEl = panel.querySelector('.pr-check-debug-footer');
+    if (entry.state === 'done') {
+      if (!footerEl) {
+        footerEl = document.createElement('div');
+        footerEl.className = 'pr-check-debug-footer';
+        panel.appendChild(footerEl);
+      }
+      var openLabel = entry.openTaskState === 'opened' ? 'Opened ✓'
+        : entry.openTaskState === 'opening' ? 'Opening…'
+        : entry.openTaskState === 'failed' ? 'Failed'
+        : 'Open as task';
+      footerEl.innerHTML =
+        '<div class="pr-check-debug-usage">Ran in ' + escHtml(String(entry.durationSec || 0)) + 's on your Anthropic account</div>'
+        + '<div class="pr-check-debug-actions">'
+          + '<button class="pr-check-debug-fix pr-check-action-primary" type="button" title="Apply this analysis as a code fix in the PR worktree">Fix this</button>'
+          + '<button class="pr-check-debug-open-task" type="button"' + (entry.openTaskState === 'opening' ? ' disabled' : '') + ' title="Spawn an interactive Claude task seeded with this analysis">' + escHtml(openLabel) + '</button>'
+        + '</div>';
+
+      footerEl.querySelector('.pr-check-debug-fix').addEventListener('click', function () {
+        var fixBtn = hostEl.querySelector('.pr-check-fix-btn[data-check-id="' + checkId + '"]');
+        if (fixBtn) startFixCheck(fixBtn);
+      });
+
+      footerEl.querySelector('.pr-check-debug-open-task').addEventListener('click', function () {
+        var e = openDebugChecks[checkId];
+        if (!e || e.openTaskState === 'opening') return;
+        e.openTaskState = 'opening';
+        paintDebugPanel(checkId);
+        var prNumber = lastState && lastState.number;
+        window.klaus.pr.debugCheckOpenAsTask(e.accumulated, e.checkName || '', prNumber).then(function (res) {
+          if (!openDebugChecks[checkId]) return;
+          if (res && res.error) {
+            openDebugChecks[checkId].openTaskState = 'failed';
+            openDebugChecks[checkId].openTaskError = res.error;
+            paintDebugPanel(checkId);
+            setTimeout(function () {
+              if (openDebugChecks[checkId] && openDebugChecks[checkId].openTaskState === 'failed') {
+                openDebugChecks[checkId].openTaskState = 'idle';
+                paintDebugPanel(checkId);
+              }
+            }, 4000);
+            return;
+          }
+          openDebugChecks[checkId].openTaskState = 'opened';
+          paintDebugPanel(checkId);
+        }).catch(function (err) {
+          if (!openDebugChecks[checkId]) return;
+          openDebugChecks[checkId].openTaskState = 'failed';
+          openDebugChecks[checkId].openTaskError = (err && err.message) || 'unknown error';
+          paintDebugPanel(checkId);
+        });
+      });
+    }
+  }
+
+  // Send one turn in the debug-panel chat. Reuses the existing pr-review-chat
+  // IPC (read-only: Claude can grep/read, can't edit) since "discuss this
+  // analysis" is shape-identical to "discuss this finding".
+  function sendDebugChatTurn(checkId, text) {
+    var entry = openDebugChecks[checkId];
+    if (!entry || entry.state !== 'done' || entry.chatRequestId) return;
+
+    entry.chatMessages.push({ role: 'user', content: text });
+    entry.chatError = null;
+    entry.chatStreaming = '';
+    var requestId = 'dbgchat-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    entry.chatRequestId = requestId;
+    paintDebugPanel(checkId);
+
+    var buffered = '';
+    var unsubData = window.klaus.pr.onReviewChatData(requestId, function (chunk) {
+      var e = openDebugChecks[checkId];
+      if (!e || e.chatRequestId !== requestId) return;
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) e.chatStreaming = block.text;
+            });
+          } else if (ev.type === 'result' && ev.result) {
+            e.chatStreaming = ev.result;
+          }
+        } catch (_) {}
+      }
+      paintDebugPanel(checkId);
+    });
+    window.klaus.pr.onReviewChatDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      var e = openDebugChecks[checkId];
+      if (!e || e.chatRequestId !== requestId) return;
+      e.chatRequestId = null;
+      if (result && result.error) {
+        e.chatError = result.error;
+      } else if (result && result.cancelled) {
+        // Commit any partial reply so the user keeps the streamed context.
+        if (e.chatStreaming) e.chatMessages.push({ role: 'assistant', content: e.chatStreaming });
+      } else {
+        e.chatMessages.push({ role: 'assistant', content: e.chatStreaming || '' });
+      }
+      e.chatStreaming = '';
+      paintDebugPanel(checkId);
+    });
+
+    // findingId-style dedupe key — stable per check so an in-flight chat
+    // agent survives render/PR-load round-trips. The findingBody we send is
+    // the analysis text itself, scoped with a small header so Claude knows
+    // what kind of context this is.
+    var findingBody =
+      'Failing CI check: ' + (entry.checkName || '(unnamed)') + '\n'
+      + 'Run link: ' + (entry.checkLink || '') + '\n\n'
+      + '## Prior analysis\n' + (entry.accumulated || '');
+    var findingId = 'debug-chat:' + checkId;
+    window.klaus.pr.reviewChatStart(requestId, findingBody, entry.chatMessages, findingId).then(function (r) {
+      if (r && r.error) {
+        if (unsubData) unsubData();
+        var e = openDebugChecks[checkId];
+        if (!e || e.chatRequestId !== requestId) return;
+        e.chatRequestId = null;
+        e.chatError = r.error;
+        // Roll back the optimistic user message so the user can retry without
+        // duplicating it.
+        if (e.chatMessages.length && e.chatMessages[e.chatMessages.length - 1].role === 'user'
+            && e.chatMessages[e.chatMessages.length - 1].content === text) {
+          e.chatMessages.pop();
+        }
+        paintDebugPanel(checkId);
+      }
+    });
+  }
+
+  function mountDebugPanel(row, checkId) {
+    var entry = openDebugChecks[checkId];
+    if (!entry) return null;
+    // Look up existing panel by checkId rather than nextElementSibling — when
+    // both Annotations and Debug are open, panels stack under the row and
+    // sibling-based lookup misses, causing duplicates on each remount.
+    var existing = hostEl.querySelector('.pr-check-debug-panel[data-check-id="' + checkId + '"]');
+    if (existing) return existing;
+
+    var panel = document.createElement('div');
+    panel.className = 'pr-check-debug-panel';
+    panel.dataset.checkId = checkId;
+    panel.dataset.requestId = entry.requestId;
+    panel.innerHTML =
+      '<div class="pr-check-debug-head">'
+        + '<span>' + (entry.state === 'running' ? 'Debugging' : 'Debug') + ' — ' + escHtml(entry.checkName || '') + '</span>'
+        + '<button class="pr-check-debug-close" type="button" title="Cancel / close">&times;</button>'
+      + '</div>'
+      + '<div class="pr-check-debug-body' + (entry.state === 'running' && !entry.accumulated ? ' status-pulse' : '') + '">'
+        + (entry.state === 'running' && !entry.accumulated ? escHtml(DEBUG_STATUS_MESSAGES[0]) : '')
+      + '</div>';
+    row.insertAdjacentElement('afterend', panel);
+
+    panel.querySelector('.pr-check-debug-close').addEventListener('click', function () {
+      var e = openDebugChecks[checkId];
+      if (e && e.state === 'running' && e.requestId) {
+        try { window.klaus.pr.debugCheckCancel(e.requestId); } catch (_) {}
+      }
+      if (e && e.statusTimer) clearInterval(e.statusTimer);
+      delete openDebugChecks[checkId];
+      panel.remove();
+    });
+
+    paintDebugPanel(checkId);
+    return panel;
+  }
+
+  function restoreOpenDebugChecks() {
+    Object.keys(openDebugChecks).forEach(function (checkId) {
+      var btn = hostEl.querySelector('.pr-check-debug-btn[data-check-id="' + checkId + '"]');
+      if (!btn) return;
+      var row = btn.closest('.pr-check-row');
+      if (!row) return;
+      mountDebugPanel(row, checkId);
+    });
+  }
+
   function startDebugCheck(btn) {
     var row = btn.closest('.pr-check-row');
     if (!row) return;
+    var checkId = btn.dataset.checkId;
+    if (!checkId) return;
 
-    // One panel per row at a time — clicking again cancels the in-flight one.
-    var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-debug-panel')
-      ? row.nextElementSibling : null;
-    if (existing) {
-      var existingId = existing.dataset.requestId;
-      if (existingId) window.klaus.pr.debugCheckCancel(existingId);
-      existing.remove();
+    // Toggle: re-clicking on an existing entry closes it (and cancels if
+    // still running). Single source of truth is the cache, not the DOM.
+    if (openDebugChecks[checkId]) {
+      var prev = openDebugChecks[checkId];
+      if (prev.state === 'running' && prev.requestId) {
+        try { window.klaus.pr.debugCheckCancel(prev.requestId); } catch (_) {}
+      }
+      if (prev.statusTimer) clearInterval(prev.statusTimer);
+      delete openDebugChecks[checkId];
+      var existingPanel = hostEl.querySelector('.pr-check-debug-panel[data-check-id="' + checkId + '"]');
+      if (existingPanel) existingPanel.remove();
       return;
     }
 
     var requestId = 'dbg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    var panel = document.createElement('div');
-    panel.className = 'pr-check-debug-panel';
-    panel.dataset.requestId = requestId;
-    panel.innerHTML =
-      '<div class="pr-check-debug-head">'
-        + '<span>Debugging \u2014 ' + escHtml(btn.dataset.name || '') + '</span>'
-        + '<button class="pr-check-debug-close" type="button" title="Cancel / close">&times;</button>'
-      + '</div>'
-      + '<div class="pr-check-debug-body status-pulse">' + escHtml(DEBUG_STATUS_MESSAGES[0]) + '</div>';
-    row.insertAdjacentElement('afterend', panel);
+    openDebugChecks[checkId] = {
+      requestId: requestId,
+      checkName: btn.dataset.name || '',
+      checkLink: btn.dataset.link || '',
+      startedAt: Date.now(),
+      accumulated: '',
+      state: 'running',
+      error: null,
+      durationSec: null,
+      statusTimer: null,
+      openTaskState: 'idle',
+      openTaskError: null,
+      // Follow-up chat about the analysis. Conversation is preserved across
+      // renders since it lives in this cache. Reuses the read-only chat IPC
+      // (pr-review-chat-start) so Claude can grep/read but won't edit files.
+      chatMessages: [],
+      chatStreaming: '',     // assistant response in-flight (string)
+      chatRequestId: null,   // set while a turn is streaming
+      chatError: null,
+    };
 
-    var bodyEl = panel.querySelector('.pr-check-debug-body');
-    var accumulated = '';
+    mountDebugPanel(row, checkId);
 
+    // Rotating "Fetching..." pulse until the first chunk lands. Reads bodyEl
+    // fresh each tick so a remount-during-warmup keeps the pulse animated.
     var statusIdx = 0;
-    var statusTimer = setInterval(function () {
-      if (!bodyEl.isConnected) { clearInterval(statusTimer); return; }
-      if (accumulated) { clearInterval(statusTimer); return; }
+    openDebugChecks[checkId].statusTimer = setInterval(function () {
+      var entry = openDebugChecks[checkId];
+      if (!entry) return;
+      if (entry.accumulated || entry.state !== 'running') {
+        if (entry.statusTimer) { clearInterval(entry.statusTimer); entry.statusTimer = null; }
+        return;
+      }
+      var bodyEl = hostEl.querySelector('.pr-check-debug-panel[data-check-id="' + checkId + '"] .pr-check-debug-body');
+      if (!bodyEl) return;
       statusIdx = (statusIdx + 1) % DEBUG_STATUS_MESSAGES.length;
       bodyEl.textContent = DEBUG_STATUS_MESSAGES[statusIdx];
     }, 1800);
 
-    // Debug uses plain `claude -p` (text streaming, not stream-json) — so
-    // we don't get a usage envelope here. Show duration instead so the user
-    // still gets a sense of cost.
-    var startedAt = Date.now();
+    // Subscriptions write into the cache; paintDebugPanel updates whichever
+    // panel DOM is currently mounted (or none, if the panel was closed but
+    // the entry kept). Cleanup happens via the close button or PR change,
+    // which deletes the cache entry.
     var unsubChunk = window.klaus.pr.onDebugCheckChunk(requestId, function (chunk) {
-      if (!accumulated) {
-        bodyEl.classList.remove('status-pulse');
-        bodyEl.textContent = '';
-      }
-      accumulated += chunk;
-      bodyEl.textContent = accumulated;
-      bodyEl.scrollTop = bodyEl.scrollHeight;
+      var entry = openDebugChecks[checkId];
+      if (!entry || entry.requestId !== requestId) return;
+      entry.accumulated += chunk;
+      paintDebugPanel(checkId);
     });
-    var unsubDone = window.klaus.pr.onDebugCheckDone(requestId, function (result) {
-      clearInterval(statusTimer);
+    window.klaus.pr.onDebugCheckDone(requestId, function (result) {
       if (unsubChunk) unsubChunk();
-      if (!bodyEl.isConnected) return;
+      var entry = openDebugChecks[checkId];
+      if (!entry || entry.requestId !== requestId) return;
+      if (entry.statusTimer) { clearInterval(entry.statusTimer); entry.statusTimer = null; }
       if (result && result.error) {
-        bodyEl.classList.remove('status-pulse');
-        bodyEl.classList.add('diff-error');
-        bodyEl.textContent = result.error;
+        entry.state = 'error';
+        entry.error = result.error;
+      } else if (result && result.cancelled) {
+        entry.state = 'cancelled';
+      } else {
+        entry.state = 'done';
+        entry.durationSec = +((Date.now() - entry.startedAt) / 1000).toFixed(1);
+      }
+      paintDebugPanel(checkId);
+    });
+
+    btn.disabled = true;
+    var origText = btn.textContent;
+    btn.textContent = 'Debugging…';
+    setTimeout(function () { btn.disabled = false; btn.textContent = origText; }, 200);
+
+    window.klaus.pr.debugCheckStart(requestId, btn.dataset.link, btn.dataset.name, checkId).then(function (r) {
+      if (r && r.error) {
+        var entry = openDebugChecks[checkId];
+        if (!entry || entry.requestId !== requestId) return;
+        if (entry.statusTimer) { clearInterval(entry.statusTimer); entry.statusTimer = null; }
+        entry.state = 'error';
+        entry.error = r.error;
+        paintDebugPanel(checkId);
+      }
+    });
+  }
+
+  // Legacy stub head — body deleted just below.
+  // Autonomous-fix flow: spawn Claude in the PR worktree with edit tools,
+  // stream tool-use progress, and on done show the resulting diff with a
+  // "Push" button that commits + pushes to the PR branch. Confirm-before-push
+  // is deliberate — see AskUserQuestion in commit history; the alternative
+  // (full auto) would push bad fixes before the user ever sees them.
+  function startFixCheck(btn) {
+    var row = btn.closest('.pr-check-row');
+    if (!row) return;
+
+    // One panel per checkId. Lookup is by data-check-id so a stacked Debug
+    // or Annotations panel under the same row doesn't break the toggle.
+    var checkIdForToggle = btn.dataset.checkId || '';
+    var existing = checkIdForToggle
+      ? hostEl.querySelector('.pr-check-fix-panel[data-check-id="' + checkIdForToggle + '"]')
+      : null;
+    if (existing) {
+      var existingId = existing.dataset.requestId;
+      if (existingId && existing.dataset.state === 'running') {
+        window.klaus.pr.fixCheckCancel(existingId);
+      }
+      existing.remove();
+      return;
+    }
+
+    var requestId = 'fix-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    var checkName = btn.dataset.name || '';
+    var panel = document.createElement('div');
+    panel.className = 'pr-check-fix-panel';
+    panel.dataset.requestId = requestId;
+    panel.dataset.state = 'running';
+    // Stash checkId so repaintChecksTab can match this panel back to the
+    // freshly-rendered row after a forced refresh.
+    panel.dataset.checkId = btn.dataset.checkId || '';
+    panel.innerHTML =
+      '<div class="pr-check-fix-head">'
+        + '<span>Fixing — ' + escHtml(checkName) + '</span>'
+        + '<button class="pr-check-fix-close" type="button" title="Cancel / close">&times;</button>'
+      + '</div>'
+      + '<div class="pr-check-fix-progress"><div class="pr-check-fix-progress-list"></div></div>'
+      + '<div class="pr-check-fix-summary"></div>'
+      + '<div class="pr-check-fix-diff"></div>'
+      + '<div class="pr-check-fix-footer"></div>';
+    row.insertAdjacentElement('afterend', panel);
+
+    var progressEl = panel.querySelector('.pr-check-fix-progress-list');
+    var summaryEl = panel.querySelector('.pr-check-fix-summary');
+    var footerEl = panel.querySelector('.pr-check-fix-footer');
+    var progressItems = [{ kind: 'system', label: 'Materializing worktree…' }];
+    function paintProgress() {
+      progressEl.innerHTML = progressItems.slice(-12).map(function (p) {
+        var cls = p.kind === 'tool' ? 'pr-check-fix-progress-tool'
+          : p.kind === 'error' ? 'pr-check-fix-progress-error'
+          : 'pr-check-fix-progress-system';
+        return '<div class="' + cls + '">' + escHtml(p.label) + '</div>';
+      }).join('');
+      progressEl.scrollTop = progressEl.scrollHeight;
+    }
+    paintProgress();
+
+    var buffered = '';
+    var finalText = '';
+    var worktreePath = null;
+    var startedAt = Date.now();
+
+    var unsubData = window.klaus.pr.onFixCheckData(requestId, function (chunk) {
+      buffered += chunk;
+      var idx;
+      while ((idx = buffered.indexOf('\n')) !== -1) {
+        var line = buffered.slice(0, idx);
+        buffered = buffered.slice(idx + 1);
+        if (!line.trim()) continue;
+        try {
+          var ev = JSON.parse(line);
+          if (ev.type === 'assistant' && ev.message && ev.message.content) {
+            ev.message.content.forEach(function (block) {
+              if (block.type === 'text' && block.text) finalText = block.text;
+              else if (block.type === 'tool_use' && block.name) {
+                var hint = (block.input && (block.input.file_path || block.input.command || block.input.pattern)) || '';
+                if (typeof hint === 'string') hint = hint.split('/').pop().slice(0, 50);
+                progressItems.push({ kind: 'tool', label: block.name + (hint ? ': ' + hint : '') });
+              }
+            });
+            paintProgress();
+          } else if (ev.type === 'result') {
+            if (ev.result) finalText = ev.result;
+          }
+        } catch (_) { /* incomplete json line — wait for more */ }
+      }
+    });
+
+    window.klaus.pr.onFixCheckDone(requestId, function (result) {
+      if (unsubData) unsubData();
+      if (!panel.isConnected) return;
+      panel.dataset.state = 'done';
+
+      if (result && result.error) {
+        progressItems.push({ kind: 'error', label: 'Failed: ' + result.error });
+        paintProgress();
         return;
       }
-      // Append a small footer so the user sees roughly how long the call ran.
-      var seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-      var footer = document.createElement('div');
-      footer.className = 'pr-check-debug-usage';
-      footer.textContent = 'Ran in ' + seconds + 's on your Anthropic account';
-      panel.appendChild(footer);
+      if (result && result.cancelled) {
+        progressItems.push({ kind: 'system', label: 'Cancelled.' });
+        paintProgress();
+        return;
+      }
 
-      // Open as task: spawn a fresh Claude task in the PR worktree, pre-typed
-      // with the analysis. Uses ensureWorktreeForActivePr in main, so the
-      // user doesn't have to checkout the PR first.
-      var openBtn = document.createElement('button');
-      openBtn.type = 'button';
-      openBtn.className = 'pr-check-debug-open-task';
-      openBtn.textContent = 'Open as task';
-      openBtn.title = 'Spawn a Claude task on the PR worktree, seeded with this analysis';
-      openBtn.addEventListener('click', function () {
-        openBtn.disabled = true;
-        var originalLabel = openBtn.textContent;
-        openBtn.textContent = 'Opening…';
-        var prNumber = lastState && lastState.number;
-        window.klaus.pr.debugCheckOpenAsTask(accumulated, btn.dataset.name || '', prNumber).then(function (res) {
-          if (res && res.error) {
-            openBtn.disabled = false;
-            openBtn.textContent = 'Failed';
-            openBtn.title = res.error;
-            setTimeout(function () { openBtn.textContent = originalLabel; openBtn.title = ''; }, 4000);
-            return;
-          }
-          openBtn.textContent = 'Opened ✓';
-        }).catch(function (err) {
-          openBtn.disabled = false;
-          openBtn.textContent = 'Failed';
-          openBtn.title = (err && err.message) || 'unknown error';
-        });
+      worktreePath = (result && result.worktreePath) || worktreePath;
+      var seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
+      progressItems.push({ kind: 'system', label: 'Claude finished in ' + seconds + 's. Loading diff…' });
+      paintProgress();
+
+      if (finalText) {
+        summaryEl.innerHTML = '<div class="pr-check-fix-summary-body">' + renderMarkdownLite(finalText) + '</div>';
+      }
+
+      // Pull the worktree's diff so the user can review what Claude actually
+      // changed before consenting to the push.
+      window.klaus.pr.localState(worktreePath).then(function (state) {
+        if (!panel.isConnected) return;
+        renderFixDiffAndActions(panel, state, checkName, worktreePath);
+      }).catch(function (err) {
+        progressItems.push({ kind: 'error', label: 'Failed to load diff: ' + ((err && err.message) || 'unknown error') });
+        paintProgress();
       });
-      panel.appendChild(openBtn);
     });
 
-    panel.querySelector('.pr-check-debug-close').addEventListener('click', function () {
-      clearInterval(statusTimer);
-      window.klaus.pr.debugCheckCancel(requestId);
-      if (unsubChunk) unsubChunk();
-      if (unsubDone) unsubDone();
+    panel.querySelector('.pr-check-fix-close').addEventListener('click', function () {
+      if (panel.dataset.state === 'running') window.klaus.pr.fixCheckCancel(requestId);
+      if (unsubData) unsubData();
       panel.remove();
     });
 
     btn.disabled = true;
     var origText = btn.textContent;
-    btn.textContent = 'Debugging\u2026';
-    // Re-enable button after start so the user can click it again to cancel.
+    btn.textContent = 'Fixing…';
     setTimeout(function () { btn.disabled = false; btn.textContent = origText; }, 200);
 
-    window.klaus.pr.debugCheckStart(requestId, btn.dataset.link, btn.dataset.name, btn.dataset.checkId || null).then(function (r) {
+    window.klaus.pr.fixCheckStart(requestId, btn.dataset.link, btn.dataset.name, btn.dataset.checkId || null).then(function (r) {
       if (r && r.error) {
-        clearInterval(statusTimer);
-        bodyEl.classList.remove('status-pulse');
-        bodyEl.classList.add('diff-error');
-        bodyEl.textContent = r.error;
+        progressItems.push({ kind: 'error', label: r.error });
+        paintProgress();
+        panel.dataset.state = 'done';
+        return;
       }
+      if (r && r.worktreePath) worktreePath = r.worktreePath;
     });
+  }
+
+  // Render the diff + Push/Discard footer once Claude is done. Diff is shown
+  // raw (monospace block); a syntax-highlighted view would be nicer but adds
+  // a chunk of code for a confirmation surface — keep simple.
+  function renderFixDiffAndActions(panel, state, checkName, worktreePath) {
+    var summaryEl = panel.querySelector('.pr-check-fix-summary');
+    var diffEl = panel.querySelector('.pr-check-fix-diff');
+    var footerEl = panel.querySelector('.pr-check-fix-footer');
+    var progressEl = panel.querySelector('.pr-check-fix-progress-list');
+
+    if (state && state.error) {
+      diffEl.innerHTML = '<div class="diff-error">Could not read worktree state: ' + escHtml(state.error) + '</div>';
+      return;
+    }
+    var files = (state && state.files) || [];
+    if (files.length === 0) {
+      diffEl.innerHTML = '<div class="pr-check-fix-empty">Claude didn’t make any file changes. Read the summary above for context.</div>';
+      return;
+    }
+
+    diffEl.innerHTML =
+      '<div class="pr-check-fix-files-head">'
+        + escHtml(String(files.length)) + ' file' + (files.length === 1 ? '' : 's') + ' changed'
+      + '</div>'
+      + '<pre class="pr-check-fix-diff-pre">' + escHtml(state.diff || '(no diff content)') + '</pre>';
+
+    var commitMsg = 'Fix CI: ' + (checkName || 'failing check');
+    footerEl.innerHTML =
+      '<label class="pr-check-fix-msg-label">Commit message'
+        + '<input class="pr-check-fix-msg" type="text" value="' + escHtml(commitMsg) + '" />'
+      + '</label>'
+      + '<div class="pr-check-fix-actions">'
+        + '<button class="pr-check-fix-discard" type="button">Discard</button>'
+        + '<button class="pr-check-fix-push pr-check-action-primary" type="button">Commit &amp; push</button>'
+      + '</div>'
+      + '<div class="pr-check-fix-status"></div>';
+
+    var pushBtn = footerEl.querySelector('.pr-check-fix-push');
+    var discardBtn = footerEl.querySelector('.pr-check-fix-discard');
+    var msgInput = footerEl.querySelector('.pr-check-fix-msg');
+    var statusEl = footerEl.querySelector('.pr-check-fix-status');
+
+    pushBtn.addEventListener('click', function () {
+      var message = (msgInput.value || '').trim() || commitMsg;
+      pushBtn.disabled = true;
+      discardBtn.disabled = true;
+      statusEl.textContent = 'Committing…';
+      window.klaus.pr.commitLocal(message, worktreePath).then(function (r) {
+        if (r && r.error) {
+          statusEl.textContent = 'Commit failed: ' + r.error;
+          statusEl.classList.add('diff-error');
+          pushBtn.disabled = false;
+          discardBtn.disabled = false;
+          return;
+        }
+        statusEl.textContent = 'Pushing…';
+        return window.klaus.pr.pushLocal(worktreePath).then(function (pr) {
+          if (pr && pr.error) {
+            statusEl.textContent = 'Push failed: ' + pr.error
+              + ' (commit is staged locally — fix the conflict and run Push again from the Review tab)';
+            statusEl.classList.add('diff-error');
+            pushBtn.disabled = false;
+            discardBtn.disabled = false;
+            return;
+          }
+          statusEl.classList.remove('diff-error');
+          statusEl.classList.add('pr-check-fix-status-ok');
+          statusEl.textContent = 'Pushed to ' + (pr && pr.target ? pr.target : 'PR branch') + '. CI will rerun shortly.';
+          // Force a refresh so the new run shows up as pending.
+          fetchAndRenderChecks(lastState && lastState.number)
+            .then(function () { repaintChecksTab({ force: true }); });
+        });
+      }).catch(function (err) {
+        statusEl.textContent = 'Failed: ' + ((err && err.message) || 'unknown error');
+        statusEl.classList.add('diff-error');
+        pushBtn.disabled = false;
+        discardBtn.disabled = false;
+      });
+    });
+
+    discardBtn.addEventListener('click', function () {
+      panel.remove();
+    });
+  }
+
+  // Tiny markdown -> HTML for the fix summary. Just enough for headings,
+  // bold, code spans, and lists — anything more is overkill for the 3-bullet
+  // structure we ask Claude to emit.
+  function renderMarkdownLite(text) {
+    var safe = escHtml(text);
+    return safe
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\n/g, '<br/>');
   }
 
   function renderChecksIntoSlot() {
