@@ -477,11 +477,18 @@
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <!-- markdown-it and DOMPurify are UMD bundles that prefer AMD when `define`
+       is present. Monaco's loader.js installs an AMD `define`, so these must
+       load BEFORE it to register as window globals (window.markdownit /
+       window.DOMPurify) instead of being swallowed as anonymous AMD modules. -->
+  <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
+  <script src="../node_modules/dompurify/dist/purify.min.js"></script>
   <script src="../node_modules/monaco-editor/min/vs/loader.js"></script>
   <script src="monaco-init.js"></script>
   <script src="monaco-typescript.js"></script>
   <script src="lsp-client.js"></script>
   <script src="hljs-bundle.js"></script>
+  <script src="markdown-preview.js"></script>
   <script src="app-state.js"></script>
   <script src="utils.js"></script>
   <script src="toast.js"></script>

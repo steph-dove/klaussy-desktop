@@ -11021,3 +11021,135 @@ body.task-branchless .file-viewer-blame-btn {
 .conflict-resolve-btn:hover {
   background: var(--accent-hover);
 }
+
+/* ---- Markdown Preview (file viewer "pretty" mode) ---- */
+
+.file-viewer-preview-btn {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.file-viewer-preview-btn:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.file-viewer-preview-btn.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.file-md-preview {
+  display: none;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 32px 48px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  background: var(--bg);
+}
+
+.file-viewer-body.preview-mode .file-editor-monaco { display: none; }
+.file-viewer-body.preview-mode .file-md-preview { display: block; }
+
+/* In the Changes diff panel, the preview pane always shows when mounted —
+   there's no preview-mode toggle on the parent. */
+.diff-md-preview.file-md-preview {
+  display: block;
+  padding: 16px 20px 32px;
+}
+
+.file-md-preview h1,
+.file-md-preview h2,
+.file-md-preview h3,
+.file-md-preview h4,
+.file-md-preview h5,
+.file-md-preview h6 {
+  margin: 1.4em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+}
+.file-md-preview h1 { font-size: 1.9em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+.file-md-preview h2 { font-size: 1.5em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+.file-md-preview h3 { font-size: 1.25em; }
+.file-md-preview h4 { font-size: 1.05em; }
+.file-md-preview h5,
+.file-md-preview h6 { font-size: 0.95em; color: var(--text-muted); }
+
+.file-md-preview p { margin: 0.6em 0; }
+.file-md-preview a { color: var(--accent); text-decoration: none; }
+.file-md-preview a:hover { text-decoration: underline; }
+.file-md-preview strong { font-weight: 600; }
+.file-md-preview em { font-style: italic; }
+
+.file-md-preview ul,
+.file-md-preview ol { padding-left: 1.6em; margin: 0.4em 0; }
+.file-md-preview li { margin: 0.15em 0; }
+.file-md-preview li > input[type="checkbox"] { margin-right: 0.4em; }
+
+.file-md-preview blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0.8em 0;
+  padding: 0.2em 0 0.2em 1em;
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.file-md-preview hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1.6em 0;
+}
+
+.file-md-preview code {
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 0.88em;
+  background: var(--surface);
+  padding: 0.12em 0.4em;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+.file-md-preview pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  overflow: auto;
+  margin: 0.8em 0;
+  line-height: 1.5;
+}
+
+.file-md-preview pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: 0.9em;
+}
+
+.file-md-preview table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.95em;
+}
+.file-md-preview th,
+.file-md-preview td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.file-md-preview th { background: var(--surface); font-weight: 600; }
+
+.file-md-preview img { max-width: 100%; height: auto; }

@@ -177,6 +177,53 @@ window.FileBrowser = (function () {
     return /\.(t|j)sx?$|\.d\.ts$/i.test(filePath);
   }
 
+  // ---- Markdown "pretty" preview ----
+  //
+  // Per-tab `previewMode` flag flips `.file-viewer-body.preview-mode` so the
+  // Monaco container hides and `.file-md-preview` shows. Rendering goes
+  // through window.MarkdownPreview (markdown-it + hljs + DOMPurify) — shared
+  // with the diff/Changes panel so both surfaces match.
+
+  function isMarkdownPath(filePath) {
+    return window.MarkdownPreview && window.MarkdownPreview.isMarkdownPath(filePath);
+  }
+
+  function renderMarkdownForTab(tab) {
+    var preview = fileViewerView && fileViewerView.querySelector('.file-md-preview');
+    if (!preview || !tab || !tab.model || tab.model.isDisposed()) return;
+    var src = tab.model.getValue();
+    preview.innerHTML = window.MarkdownPreview
+      ? window.MarkdownPreview.render(src)
+      : '<pre>' + escHtml(src) + '</pre>';
+    preview.scrollTop = 0;
+  }
+
+  function updatePreviewButton(tab) {
+    var btn = fileViewerView && fileViewerView.querySelector('.file-viewer-preview-btn');
+    if (!btn) return;
+    var show = tab && isMarkdownPath(tab.filePath);
+    btn.hidden = !show;
+    btn.classList.toggle('active', !!(tab && tab.previewMode));
+    btn.textContent = tab && tab.previewMode ? 'Edit' : 'Preview';
+  }
+
+  function applyPreviewMode(tab) {
+    var body = fileViewerView && fileViewerView.querySelector('.file-viewer-body');
+    if (!body) return;
+    var on = !!(tab && tab.previewMode);
+    body.classList.toggle('preview-mode', on);
+    if (on) renderMarkdownForTab(tab);
+  }
+
+  function togglePreviewMode() {
+    var tab = tabs[activeTabIndex];
+    if (!tab || !isMarkdownPath(tab.filePath)) return;
+    tab.previewMode = !tab.previewMode;
+    applyPreviewMode(tab);
+    updatePreviewButton(tab);
+    if (!tab.previewMode && currentEditor) currentEditor.focus();
+  }
+
   // Map file extensions to their run commands. Only the small set of languages
   // where per-file `cmd path` execution is idiomatic — things like Rust or Go
   // that need project-level build/run are handled by the Run App button instead.
@@ -358,10 +405,14 @@ window.FileBrowser = (function () {
         '<span class="file-editor-status"></span>' +
         '<span class="file-viewer-problems-badge" hidden></span>' +
         '<button class="file-viewer-run-btn" title="Run" hidden>▶</button>' +
+        '<button class="file-viewer-preview-btn" title="Toggle Markdown preview" hidden>Preview</button>' +
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
         '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
       '</div>' +
-      '<div class="file-viewer-body"><div class="file-editor-monaco"></div></div>' +
+      '<div class="file-viewer-body">' +
+        '<div class="file-editor-monaco"></div>' +
+        '<div class="file-md-preview" tabindex="0"></div>' +
+      '</div>' +
       '<div class="file-viewer-statusbar">' +
         '<span class="statusbar-left">' +
           '<span class="statusbar-item statusbar-position">Ln 1, Col 1</span>' +
@@ -385,6 +436,10 @@ window.FileBrowser = (function () {
     });
     fileViewerView.querySelector('.file-viewer-save-btn').addEventListener('click', saveFile);
     fileViewerView.querySelector('.file-viewer-run-btn').addEventListener('click', runCurrentFile);
+    fileViewerView.querySelector('.file-viewer-preview-btn').addEventListener('click', togglePreviewMode);
+    if (window.MarkdownPreview) {
+      window.MarkdownPreview.attachLinkInterceptor(fileViewerView.querySelector('.file-md-preview'));
+    }
 
     // Tab bar: click switches, close X closes, middle-click closes.
     var tabBar = fileViewerView.querySelector('.file-viewer-tabs');
@@ -771,6 +826,8 @@ window.FileBrowser = (function () {
     renderTabs();
     renderBreadcrumbs(tab.filePath);
     updateRunButtonForTab(tab.filePath);
+    updatePreviewButton(tab);
+    applyPreviewMode(tab);
     refreshDirtyState();
     updateProblemsBadge(monaco, tab.model);
     updateStatusDiagnostics(monaco, tab.model);

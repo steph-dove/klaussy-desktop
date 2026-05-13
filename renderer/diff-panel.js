@@ -818,15 +818,58 @@ window.DiffPanel = (function () {
   function renderViewFullFileLink(file) {
     var unifiedActive = diffViewMode === 'unified' ? ' active' : '';
     var splitActive = diffViewMode === 'split' ? ' active' : '';
+    var isMd = window.MarkdownPreview && window.MarkdownPreview.isMarkdownPath(file);
+    var previewLink = isMd
+      ? '<a href="#" class="js-preview-md" title="Render markdown">Preview</a>'
+      : '';
     return '<div class="diff-view-full-file">'
       + '<a href="#" class="js-view-full-file">View full file</a>'
       + '<a href="#" class="js-edit-full-file">Edit</a>'
+      + previewLink
       + ' <span class="diff-view-full-path">' + escHtml(file) + '</span>'
       + '<div class="diff-view-mode-toggle" role="group" aria-label="Diff view mode">'
         + '<button type="button" class="diff-view-mode-btn js-view-mode-unified' + unifiedActive + '" title="Unified view">Unified</button>'
         + '<button type="button" class="diff-view-mode-btn js-view-mode-split' + splitActive + '" title="Side-by-side view">Split</button>'
       + '</div>'
       + '</div>';
+  }
+
+  // Replace the diff view body with the rendered markdown for `file`. The
+  // header stays put — its Preview link flips to "Show diff" so the user
+  // can return to the diff. Reads the current working-tree file (matches
+  // what Edit / View full file would show).
+  async function showMarkdownPreview(file) {
+    if (!window.MarkdownPreview) return;
+    var fullPath = currentWorktreePath + '/' + file;
+    var fileResult = await window.klaus.fs.readFile(fullPath);
+    var src = (fileResult && fileResult.content) || '';
+    diffViewEl.innerHTML =
+      renderViewFullFileLinkInPreviewMode(file) +
+      '<div class="diff-md-preview file-md-preview"></div>';
+    var previewEl = diffViewEl.querySelector('.diff-md-preview');
+    previewEl.innerHTML = window.MarkdownPreview.render(src);
+    window.MarkdownPreview.attachLinkInterceptor(previewEl);
+    bindPreviewHeader(file);
+  }
+
+  function renderViewFullFileLinkInPreviewMode(file) {
+    return '<div class="diff-view-full-file">'
+      + '<a href="#" class="js-view-full-file">View full file</a>'
+      + '<a href="#" class="js-edit-full-file">Edit</a>'
+      + '<a href="#" class="js-show-diff" title="Back to diff">Show diff</a>'
+      + ' <span class="diff-view-full-path">' + escHtml(file) + '</span>'
+      + '</div>';
+  }
+
+  function bindPreviewHeader(file) {
+    bindViewFullFileLink(file);
+    var back = diffViewEl.querySelector('.js-show-diff');
+    if (back) {
+      back.addEventListener('click', function (e) {
+        e.preventDefault();
+        showFileDiff(file, currentDiffStaged);
+      });
+    }
   }
 
   function bindViewModeToggle(file) {
@@ -862,6 +905,13 @@ window.DiffPanel = (function () {
         if (typeof window.openFileViewer === 'function') {
           window.openFileViewer(fullPath, file);
         }
+      });
+    }
+    var previewLink = diffViewEl.querySelector('.js-preview-md');
+    if (previewLink) {
+      previewLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        showMarkdownPreview(file);
       });
     }
   }
