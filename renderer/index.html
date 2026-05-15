@@ -12,6 +12,36 @@
   <!-- Main app -->
   <div id="app" style="display: none;">
     <div id="sidebar">
+      <!-- Token-spend leaderboard: today's running total + a daily chart
+           with selectable range. Lives at the top of the sidebar above the
+           main header row. Rendered by renderer/token-tile.js. -->
+      <div id="token-tile">
+        <div class="token-tile-row">
+          <div class="token-tile-today">
+            <div class="token-tile-label">Today</div>
+            <div class="token-tile-value" id="token-tile-today-value">—</div>
+          </div>
+          <select id="token-tile-range" title="Chart range">
+            <option value="7d">7d</option>
+            <option value="14d">14d</option>
+            <option value="30d" selected>30d</option>
+            <option value="6m">6m</option>
+            <option value="1y">1y</option>
+            <option value="all">All</option>
+            <option value="custom">Custom…</option>
+          </select>
+        </div>
+        <div id="token-tile-custom" style="display:none;">
+          <input type="date" id="token-tile-from" />
+          <input type="date" id="token-tile-to" />
+        </div>
+        <svg id="token-tile-chart" viewBox="0 0 200 60" preserveAspectRatio="none"></svg>
+        <div class="token-tile-foot">
+          <span id="token-tile-total">—</span>
+          <span id="token-tile-range-label"></span>
+        </div>
+      </div>
+
       <div id="sidebar-header">
         <h1>Klaussy</h1>
         <div class="header-buttons">
@@ -513,6 +543,7 @@
   <script src="agent-router.js"></script>
   <script src="agents-panel.js"></script>
   <script src="sidebar-manager.js"></script>
+  <script src="token-tile.js"></script>
   <script src="terminal-manager.js"></script>
   <script src="plan-modal.js"></script>
   <script src="ollama-consent.js"></script>

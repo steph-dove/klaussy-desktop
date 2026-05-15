@@ -497,6 +497,18 @@ contextBridge.exposeInMainWorld('klaus', {
     openCheckout: () => ipcRenderer.invoke('license-open-checkout'),
   },
 
+  // ---- tokenUsage: sidebar leaderboard data ----
+  tokenUsage: {
+    // spec = { kind: 'preset', preset: '7d'|'14d'|'30d'|'6m'|'1y'|'all' }
+    //      | { kind: 'custom', from: 'YYYY-MM-DD', to: 'YYYY-MM-DD' }
+    range: (spec) => ipcRenderer.invoke('token-usage:range', spec),
+    onUpdate: (callback) => {
+      const handler = (_event, data) => callback(data);
+      ipcRenderer.on('token-usage-updated', handler);
+      return () => ipcRenderer.removeListener('token-usage-updated', handler);
+    },
+  },
+
   // ---- fs: File IO, bulk read, search, replace-in-files, worktree watcher, env files ----
   fs: {
     readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
