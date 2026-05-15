@@ -49,6 +49,7 @@ require('./main/ipc/agents');
 require('./main/ipc/pr-review');
 require('./main/ipc/ollama');
 require('./main/ipc/license');
+require('./main/ipc/token-usage');
 
 require('./main/bootstrap/error-reporter').install();
 require('./main/bootstrap/app-events').install();
