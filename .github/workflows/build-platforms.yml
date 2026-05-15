@@ -94,8 +94,12 @@ jobs:
           ESIGNER_TOTP_SECRET: ${{ inputs.sign && secrets.ESIGNER_TOTP_SECRET || '' }}
           ESIGNER_CREDENTIAL_ID: ${{ inputs.sign && secrets.ESIGNER_CREDENTIAL_ID || '' }}
 
+      # Best-effort upload to GH Actions artifact cache (14-day retention for
+      # ad-hoc debugging). The canonical destination is the feedback release
+      # below, so don't fail the run if this step hits storage quota.
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: ${{ matrix.os }}-${{ github.sha }}
           path: ${{ matrix.artifact_glob }}
@@ -111,7 +115,7 @@ jobs:
       # stored as FEEDBACK_REPO_TOKEN (contents:write on klausify-desktop-feedback,
       # nothing else) is required. Without it the step is skipped.
       - name: Upload artifacts to feedback release
-        if: ${{ inputs.release_tag != '' }}
+        if: ${{ always() && inputs.release_tag != '' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.FEEDBACK_REPO_TOKEN }}
