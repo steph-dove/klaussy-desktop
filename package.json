@@ -1,7 +1,7 @@
 {
   "name": "klaus-desktop",
   "productName": "Klaussy",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
   "author": {
@@ -103,13 +103,14 @@
       "gatekeeperAssess": false,
       "darkModeSupport": true,
       "entitlements": "build/entitlements.mac.plist",
-      "entitlementsInherit": "build/entitlements.mac.plist"
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
     },
     "afterSign": "build/notarize.js",
     "dmg": {
       "title": "Klaussy ${version} ${arch}",
       "icon": "icon.icns",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -142,10 +143,10 @@
       "shortcutName": "Klaussy",
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico",
-      "artifactName": "${productName}-${version}-${arch}-setup.${ext}"
+      "artifactName": "${productName}-${version}-Windows-Setup.${ext}"
     },
     "portable": {
-      "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
+      "artifactName": "${productName}-${version}-Windows-Portable.${ext}"
     },
     "linux": {
       "target": [
@@ -165,9 +166,10 @@
       "icon": "icon.png",
       "category": "Development",
       "synopsis": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer",
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-Linux.${ext}"
     },
     "deb": {
+      "artifactName": "${productName}-${version}-Linux-Debian-Ubuntu.${ext}",
       "depends": [
         "libnotify4",
         "libnss3",
