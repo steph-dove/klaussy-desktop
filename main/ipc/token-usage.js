@@ -5,15 +5,17 @@
 // pair. The handler always triggers a rescan first so live sessions appear
 // without waiting for the periodic broadcast tick.
 //
-// The 60s broadcast loop runs a rescan and pushes `token-usage-updated` to
+// The 5s broadcast loop runs a rescan and pushes `token-usage-updated` to
 // every window so the today total stays current while the user is in the
-// app.
+// app. The rescan is incremental — unchanged files cost one statSync each,
+// and saveCache only writes when something actually changed — so a tight
+// interval is fine even with hundreds of project JSONLs.
 
 const { ipcMain } = require('electron');
 const tokenUsage = require('../state/token-usage');
 const { allWindows } = require('../state/windows');
 
-const BROADCAST_INTERVAL_MS = 60_000;
+const BROADCAST_INTERVAL_MS = 5_000;
 
 // Build a list of YYYY-MM-DD strings from `start` (inclusive) up to and
 // including `end`, in local time. Both args are Date objects.
@@ -62,7 +64,7 @@ function buildSeries(days, from, to) {
 // Return the cached snapshot synchronously and let the rescan finish in the
 // background — the broadcast loop will push the updated total when it's
 // done. Renderers always get a fast response; freshness is bounded by the
-// 60s broadcast cadence and any new range request.
+// broadcast cadence (see BROADCAST_INTERVAL_MS) and any new range request.
 ipcMain.handle('token-usage:range', async (_event, spec) => {
   const snap = tokenUsage.snapshot();
   tokenUsage.rescan().catch((err) => {
