@@ -14,9 +14,16 @@ const { loadConfig } = require('../util/config');
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
   debugCheckProcs, fixCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
-  implementProcs, explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
+  explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
   investigateProcs,
 } = require('../state/claude-streaming');
+const {
+  startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
+  implementPtySessions,
+} = require('../state/pr-implement-pty');
+const {
+  getOrAskRepoConsent, applyWorktreePermissions,
+} = require('../util/worktree-permissions');
 
 // Stable, bounded ID for dedupeKey suffixes. Inputs (hunks, finding bodies,
 // staged diffs) can be many KB; sha1 keeps keys short and comparable.
@@ -401,12 +408,21 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
 
 ipcMain.handle('pr-review-ai-cancel', makeClaudeCancelHandler(reviewSurfaceAiProcs));
 
-// G7: implement a single finding (or "all findings" via one big prompt) by
-// spawning claude in the PR's worktree with edit tools. Mirrors the AI-review
-// streaming protocol so the renderer can show progress chips + result.
+// Implement a single finding (or "all findings" via one big prompt) by
+// running an interactive `claude` inside a node-pty in the PR's worktree.
+// The renderer mounts an xterm.js for the user to answer any prompts
+// (Bash, MCP, etc.); Edit/Write/MultiEdit on the worktree path are
+// pre-allowed via a per-worktree settings.local.json so the common
+// case doesn't drown the user in Y/N prompts.
+//
+// Previously this spawned `claude -p` headless, which (a) billed extra
+// against the user's Anthropic account and (b) silently dropped permission
+// prompts since there was no TTY — so Edit calls reported "haven't granted
+// it yet" and the run hung. See feedback memories on `claude -p` and
+// the no-permission-bypass rule.
 ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, body }) => {
   if (!requestId) return { error: 'Missing requestId' };
-  if (implementProcs.has(requestId)) return { error: 'Already in flight' };
+  if (implementPtySessions.has(requestId)) return { error: 'Already in flight' };
   if (!prReview.active) return { error: 'No active PR review' };
   if (!body || !body.trim()) return { error: 'Empty implement body' };
 
@@ -437,29 +453,61 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
     : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction;
 
-  spawnClaudeStream({
-    requestId, procMap: implementProcs, channelPrefix: 'pr-review-implement',
-    sender: event.sender,
-    cwd: ensured.worktreePath,
+  // Permission consent: first time per repo, ask the user if Klaussy may
+  // pre-allow file edits scoped to this worktree (and deny secret files).
+  // If they Skip, we still launch the PTY but without writing
+  // settings.local.json — the user will answer Y/N per edit in the xterm.
+  const consent = await getOrAskRepoConsent(ensured.worktreePath);
+  if (consent === 'allow') {
+    const applyResult = applyWorktreePermissions(ensured.worktreePath);
+    if (!applyResult.applied) {
+      return { error: `Failed to apply permissions: ${applyResult.reason}` };
+    }
+  }
+
+  const sender = event.sender;
+  const dataChannel = `pr-review-implement-pty-data-${requestId}`;
+  const eventChannel = `pr-review-implement-pty-event-${requestId}`;
+  const exitChannel = `pr-review-implement-pty-exit-${requestId}`;
+
+  const result = startImplementPty({
+    requestId,
+    worktreePath: ensured.worktreePath,
     prompt,
-    streamJson: true,
-    extraDoneFields: { worktreePath: ensured.worktreePath },
-    agentMeta: {
-      kind: 'pr-review-implement',
-      dedupeKey: `pr-review-implement:${prReview.active.meta.number}:${mode}:${shortHash(body)}`,
-      sourceContext: {
-        kind: 'pr-review-implement',
-        prNumber: prReview.active.meta.number,
-        prTitle: prReview.active.meta.title || '',
-        mode,
-        bodyPreview: body.slice(0, 160),
-      },
+    onData: (data) => { if (!sender.isDestroyed()) sender.send(dataChannel, data); },
+    onEvent: (ev) => { if (!sender.isDestroyed()) sender.send(eventChannel, ev); },
+    onExit: ({ exitCode, signal }) => {
+      if (!sender.isDestroyed()) sender.send(exitChannel, { exitCode, signal });
     },
   });
+  if (result.error) return { error: result.error };
+
+  // If the renderer that started the run goes away, terminate the PTY —
+  // there's no UI left to answer prompts and the user can't see output.
+  // This mirrors spawnClaudeStream's foreground behavior.
+  sender.once('destroyed', () => {
+    if (implementPtySessions.has(requestId)) {
+      try { cancelImplementPty(requestId); } catch {}
+    }
+  });
+
   return { ok: true, worktreePath: ensured.worktreePath };
 });
 
-ipcMain.handle('pr-review-implement-cancel', makeClaudeCancelHandler(implementProcs));
+ipcMain.handle('pr-review-implement-input', (_event, { requestId, data }) => {
+  if (!requestId || typeof data !== 'string') return { error: 'Bad args' };
+  return writeImplementPty(requestId, data);
+});
+
+ipcMain.handle('pr-review-implement-resize', (_event, { requestId, cols, rows }) => {
+  if (!requestId) return { error: 'Bad args' };
+  return resizeImplementPty(requestId, cols, rows);
+});
+
+ipcMain.handle('pr-review-implement-cancel', (_event, { requestId }) => {
+  if (!requestId) return { ok: false };
+  return cancelImplementPty(requestId);
+});
 
 // Discuss a finding with Claude inline — the renderer's "Ask Claude" chat
 // panel. Stateless: each turn re-sends the conversation history so Claude

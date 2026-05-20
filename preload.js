@@ -283,8 +283,16 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
+    // Implement runs inside an interactive node-pty (see
+    // main/state/pr-implement-pty.js). Renderer mounts xterm.js,
+    // streams raw bytes via onReviewImplementPtyData, and parses
+    // structured progress via onReviewImplementPtyEvent.
     reviewImplementStart: (requestId, mode, body) =>
       ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body }),
+    reviewImplementInput: (requestId, data) =>
+      ipcRenderer.invoke('pr-review-implement-input', { requestId, data }),
+    reviewImplementResize: (requestId, cols, rows) =>
+      ipcRenderer.invoke('pr-review-implement-resize', { requestId, cols, rows }),
     reviewImplementCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-implement-cancel', { requestId }),
     reviewChatStart: (requestId, findingBody, messages, findingId) =>
@@ -330,14 +338,24 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('pr-review-cache-save-by-pr', { owner, repo, number, data }),
     cacheClearByPr: (owner, repo, number) =>
       ipcRenderer.invoke('pr-review-cache-clear-by-pr', { owner, repo, number }),
+    // Raw PTY bytes for the inline xterm. on (not once) — every chunk
+    // streams while the run is in flight.
     onReviewImplementData: (requestId, callback) => {
-      const channel = 'pr-review-implement-data-' + requestId;
+      const channel = 'pr-review-implement-pty-data-' + requestId;
       const handler = (_e, chunk) => callback(chunk);
       ipcRenderer.on(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
+    // Structured JSONL events (tool/text/usage/end_turn) for progress
+    // chips, draft-comment extraction, and the "done" transition.
+    onReviewImplementEvent: (requestId, callback) => {
+      const channel = 'pr-review-implement-pty-event-' + requestId;
+      const handler = (_e, ev) => callback(ev);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
     onReviewImplementDone: (requestId, callback) => {
-      const channel = 'pr-review-implement-done-' + requestId;
+      const channel = 'pr-review-implement-pty-exit-' + requestId;
       const handler = (_e, data) => callback(data);
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
