@@ -71,29 +71,13 @@ node-gyp's no-cross-compile rule for `node-pty`, so the
 — `gh workflow run build-platforms.yml -f release_tag=v<x.y.z>` to publish
 straight to the feedback repo's release.
 
-### Installing an unsigned build
+### Installing
 
-The build is currently **unsigned**, so macOS Gatekeeper blocks it on first
-launch. Pick one:
-
-**Option A — right-click open (recommended for first launch)**
-
-1. Open the `.dmg` and drag `Klaussy.app` into `/Applications`.
-2. In `/Applications`, **right-click** Klaussy → **Open** → confirm "Open".
-3. From then on, double-click works normally.
-
-**Option B — strip the quarantine flag**
-
-```bash
-xattr -d com.apple.quarantine /Applications/Klaussy.app
-```
-
-Run once after dragging the app into Applications. Then double-click works
-without any prompt.
-
-> Apple Developer ID signing + notarization is on the roadmap; once enabled,
-> recipients will be able to install with no friction. See the commented-out
-> `mac.identity` block in `package.json` for the pre-staged config.
+Builds are signed and notarized — macOS uses an Apple Developer ID
+certificate + `@electron/notarize` (via the `afterSign` hook in
+`package.json`), and Windows is signed with an SSL.com EV certificate via
+SSL.com eSigner / CodeSignTool in CI. Drag `Klaussy.app` into `/Applications`
+and double-click; no quarantine workaround needed.
 
 ## Quick tour
 
