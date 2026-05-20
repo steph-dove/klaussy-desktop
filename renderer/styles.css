@@ -6048,6 +6048,86 @@ body.pr-review-popout #pr-review-root {
   white-space: pre-wrap;
 }
 
+/* Terminal tab: full-body xterm for an in-flight implement run. The tab
+   itself is sized by .pr-review-body.one-col > * (absolute, inset: 0);
+   the terminal flex-fills that. */
+.pr-review-terminal-tab {
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  overflow: hidden;
+}
+.pr-implement-terminal {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: #000;
+}
+.pr-implement-terminal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2, #1a1a1a);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--muted);
+  flex: 0 0 auto;
+}
+.pr-implement-terminal-head .pr-implement-status {
+  flex: 1;
+}
+.pr-implement-terminal-head .pr-implement-status.done { color: #56d364; }
+.pr-implement-terminal-head .pr-implement-status.error { color: var(--diff-del-fg, #e27c7c); }
+.pr-implement-terminal-head .pr-review-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+.pr-implement-terminal-body {
+  flex: 1;
+  min-height: 0;
+  padding: 6px 8px;
+  background: #000;
+  overflow: hidden;
+}
+.pr-implement-terminal-body .xterm,
+.pr-implement-terminal-body .xterm-viewport,
+.pr-implement-terminal-body .xterm-screen {
+  height: 100% !important;
+  width: 100% !important;
+}
+
+/* Empty state shown in the Terminal tab when no implement run is active. */
+.pr-terminal-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 24px;
+  color: var(--muted);
+  text-align: center;
+  background: var(--surface, #0d0d0d);
+}
+.pr-terminal-empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.pr-terminal-empty-hint {
+  font-size: 12px;
+  max-width: 420px;
+  line-height: 1.5;
+}
+
+/* Tiny status badge on the Terminal tab label. */
+.pr-tab-count-running { color: #56d364; }
+.pr-tab-count-done { color: #56d364; }
+.pr-tab-count-error { color: var(--diff-del-fg, #e27c7c); }
+.pr-tab-count-cancelled { color: var(--muted); }
+
 /* Local-changes panel: uncommitted edits + unpushed commits in the PR's
    worktree, shown above findings on the Review tab. */
 .pr-local-changes {

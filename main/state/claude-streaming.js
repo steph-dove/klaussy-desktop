@@ -1,7 +1,8 @@
 // Shared primitive for every `claude -p` streaming request the main process
 // fires on behalf of a renderer: Cmd+K inline edit, inline completion,
-// pr-debug-check, pr-review-ai, pr-review-implement, explain-diff, pr-ai-review,
-// and claude-commit-message.
+// pr-debug-check, pr-review-ai, explain-diff, pr-ai-review, and
+// claude-commit-message. (pr-review-implement runs in an interactive PTY
+// instead — see main/state/pr-implement-pty.js.)
 //
 // Before this lived as 7 near-identical handler bodies with subtle drift
 // (stderr sometimes dropped on zero-exit, some handlers didn't kill the
@@ -31,7 +32,6 @@ const fixCheckProcs = new Map();
 const inlineEditProcs = new Map();
 const inlineCompleteProcs = new Map();
 const reviewSurfaceAiProcs = new Map();
-const implementProcs = new Map();
 const explainStreamProcs = new Map();
 const aiReviewProcs = new Map();
 const commitMsgProcs = new Map();
@@ -172,7 +172,6 @@ module.exports = {
   inlineEditProcs,
   inlineCompleteProcs,
   reviewSurfaceAiProcs,
-  implementProcs,
   explainStreamProcs,
   aiReviewProcs,
   commitMsgProcs,

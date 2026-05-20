@@ -19,7 +19,7 @@ window.PrReview = (function () {
   var unsubState = null;
   var lastState = null;
   var selectedFile = null;
-  var activeTab = 'files'; // 'files' | 'conversation'
+  var activeTab = 'files'; // 'files' | 'conversation' | 'checks' | 'ai-review' | 'terminal'
   // Per-render IPC subscriptions for rehydrated explain agents. render() blows
   // away hostEl.innerHTML, which orphans these listeners — we clear them each
   // time so chunks don't pile up onto detached DOM.
@@ -120,6 +120,24 @@ window.PrReview = (function () {
     usage: null,                // { cost, inputTokens, outputTokens, durationMs }
   };
 
+  // PTY-backed Implement flow. Only one run can be in flight at a time
+  // (matches the existing implementAllId guard). The xterm lives in
+  // reviewTerminal (below), separate from implRun, so multiple successive
+  // runs append to the same scrollback instead of disposing/recreating.
+  //
+  // Shape when active: see startImplementRun.
+  var implRun = null;
+
+  // The Terminal-tab xterm. Persists across implement runs so a "Rerun"
+  // (or a fresh Implement after a previous run finished) appends a new
+  // banner + output to the same scrollback. Disposed only on explicit
+  // user dismissal (Hide terminal), PR navigation, or unmount.
+  //
+  // Shape when present: { terminal, fitAddon, hasContent }
+  //   - hasContent flips true once the first byte has been written, so we
+  //     can suppress the leading separator on the first-ever run.
+  var reviewTerminal = null;
+
   function mount(options) {
     hostEl = options.host;
     isPopout = !!options.isPopout;
@@ -162,6 +180,17 @@ window.PrReview = (function () {
   function unmount() {
     if (unsubState) { try { unsubState(); } catch (_) {} unsubState = null; }
     teardownSelectionExplain();
+    // Tear down any in-flight implement PTY — the embedded xterm is
+    // about to be dropped from the DOM and the user has no way to
+    // answer prompts. Cancel sends Ctrl+C; the main process SIGTERMs
+    // 2s later if needed.
+    if (implRun) {
+      try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
+      if (implRun.unsubData) implRun.unsubData();
+      if (implRun.unsubEvent) implRun.unsubEvent();
+      implRun = null;
+    }
+    disposeReviewTerminal();
     if (hostEl) {
       hostEl.innerHTML = '';
       hostEl.classList.remove('pr-review-host');
@@ -202,6 +231,18 @@ window.PrReview = (function () {
       // Stop any in-flight checks polling so it doesn't repaint with the
       // previous PR's data after the new PR's render lands.
       clearChecksPolling();
+      // Cancel any in-flight implement PTY — the Terminal-tab xterm is
+      // tied to the *previous* PR, and the user can't answer prompts
+      // after navigating away. PTY-based implements are not backgroundable
+      // like the stream-json agents (no agent registry entry, no
+      // re-attach path), so we tear down here.
+      if (implRun) {
+        try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
+        if (implRun.unsubData) implRun.unsubData();
+        if (implRun.unsubEvent) implRun.unsubEvent();
+        implRun = null;
+      }
+      disposeReviewTerminal();
       // Don't cancel in-flight AI work for the previous PR — those agents
       // are now backgroundable and the user can monitor / re-attach via the
       // Agents panel. Just drop the local subscriptions by stashing the old
@@ -282,6 +323,7 @@ window.PrReview = (function () {
         + '<button class="pr-review-tab' + (activeTab === 'conversation' ? ' active' : '') + '" data-tab="conversation">Conversation' + renderConversationCount(state) + '</button>'
         + '<button class="pr-review-tab' + (activeTab === 'checks' ? ' active' : '') + '" data-tab="checks">Checks' + renderChecksTabCount() + '</button>'
         + '<button class="pr-review-tab' + (activeTab === 'ai-review' ? ' active' : '') + '" data-tab="ai-review">Review' + renderAiReviewTabCount() + '</button>'
+        + '<button class="pr-review-tab' + (activeTab === 'terminal' ? ' active' : '') + '" data-tab="terminal">Terminal' + renderTerminalTabBadge() + '</button>'
       + '</div>'
       + '<div class="pr-review-body' + (activeTab !== 'files' ? ' one-col' : '') + '">'
         + (activeTab === 'files'
@@ -291,7 +333,9 @@ window.PrReview = (function () {
               ? '<div class="pr-review-conversation">' + renderConversation(state) + '</div>'
               : activeTab === 'checks'
                 ? '<div class="pr-review-checks-tab">' + renderChecksTab() + '</div>'
-                : '<div class="pr-review-ai-tab">' + renderAiReviewTab() + '</div>'
+                : activeTab === 'terminal'
+                  ? '<div class="pr-review-terminal-tab">' + renderTerminalTab() + '</div>'
+                  : '<div class="pr-review-ai-tab">' + renderAiReviewTab() + '</div>'
           )
       + '</div>';
 
@@ -315,6 +359,9 @@ window.PrReview = (function () {
       // Pull worktree state once per tab activation so a returning user sees
       // any uncommitted edits or unpushed commits without clicking refresh.
       refreshLocalChanges();
+    } else if (activeTab === 'terminal') {
+      bindTerminalTab();
+      mountImplementTerminalIfActive();
     }
     renderThreadsStatusBadge(state);
     renderPendingReviewBar(state);
@@ -686,7 +733,12 @@ window.PrReview = (function () {
     hostEl.querySelectorAll('.pr-conv-claude-implement-cancel').forEach(function (b) {
       b.addEventListener('click', function () {
         var s = convClaudeState[b.dataset.dbid];
-        if (s && s.implementId) window.klaus.pr.reviewImplementCancel(s.implementId);
+        if (!s || !s.implementId) return;
+        if (implRun && implRun.requestId === s.implementId) {
+          cancelImplementRun();
+        } else {
+          window.klaus.pr.reviewImplementCancel(s.implementId);
+        }
       });
     });
     hostEl.querySelectorAll('.pr-conv-claude-draft-approve').forEach(function (b) {
@@ -1745,6 +1797,63 @@ window.PrReview = (function () {
     + '</div>';
   }
 
+  function renderImplementTerminalChrome() {
+    var statusLabel;
+    var statusClass = '';
+    if (!implRun) { statusLabel = 'Idle — no run in progress'; statusClass = ''; }
+    else if (implRun.status === 'done') { statusLabel = 'Done'; statusClass = 'done'; }
+    else if (implRun.status === 'error') { statusLabel = 'Error'; statusClass = 'error'; }
+    else if (implRun.status === 'cancelled') { statusLabel = 'Cancelled'; statusClass = ''; }
+    else { statusLabel = 'Running…'; }
+    var ctaButtons = '';
+    if (implRunIsLive()) {
+      ctaButtons += '<button class="pr-implement-cancel pr-review-btn" type="button">Cancel</button>';
+    }
+    // Hide terminal: always available while no run is live, so the user
+    // can clear the persistent scrollback between or after runs.
+    if (!implRunIsLive()) {
+      ctaButtons += '<button class="pr-implement-dismiss pr-review-btn" type="button">Hide terminal</button>';
+    }
+    return '<div class="pr-implement-terminal" id="pr-implement-terminal-host">'
+      + '<div class="pr-implement-terminal-head">'
+        + '<span class="pr-implement-status ' + statusClass + '">' + escHtml(statusLabel) + '</span>'
+        + ctaButtons
+      + '</div>'
+      + '<div class="pr-implement-terminal-body"></div>'
+    + '</div>';
+  }
+
+  // Body of the Terminal tab. The xterm persists across implement runs
+  // (reviewTerminal); the chrome row shows the status of the most recent
+  // run. Empty-state only when no run has ever been started — the
+  // tab is always present so users can navigate to it predictably.
+  function renderTerminalTab() {
+    if (reviewTerminal) return renderImplementTerminalChrome();
+    return '<div class="pr-terminal-empty">'
+      + '<div class="pr-terminal-empty-title">No Claude run in progress</div>'
+      + '<div class="pr-terminal-empty-hint">Click <b>Implement</b> on a finding in the Review tab to start a Claude session here.</div>'
+    + '</div>';
+  }
+
+  // Tiny badge next to the "Terminal" tab label while a run is in flight.
+  // Mirrors how renderAiReviewTabCount uses the .pr-tab-count chip.
+  function renderTerminalTabBadge() {
+    if (!implRun) return '';
+    var label;
+    if (implRun.status === 'running') label = '●';
+    else if (implRun.status === 'done') label = '✓';
+    else if (implRun.status === 'error') label = '!';
+    else if (implRun.status === 'cancelled') label = '×';
+    else label = '●';
+    return ' <span class="pr-tab-count pr-tab-count-' + implRun.status + '">' + label + '</span>';
+  }
+
+  function bindTerminalTab() {
+    // The xterm itself is mounted by mountImplementTerminalIfActive after
+    // this runs; the chrome buttons get re-bound there too (same pattern as
+    // the old inline-on-Review-tab flow).
+  }
+
   // Local-changes block: shows uncommitted edits + unpushed commits in the
   // PR's worktree, with controls to commit (stage all + commit) and push to
   // the PR's head fork branch. Hidden when nothing is local.
@@ -2261,10 +2370,11 @@ window.PrReview = (function () {
 
     var rerunBtn = hostEl.querySelector('.pr-ai-rerun');
     if (rerunBtn) rerunBtn.addEventListener('click', function () {
-      if (aiReview.implementAllId) window.klaus.pr.reviewImplementCancel(aiReview.implementAllId);
-      aiReview.findings.forEach(function (f) {
-        if (f.implementId) window.klaus.pr.reviewImplementCancel(f.implementId);
-      });
+      // Cancel any in-flight implement run so its PTY exits, but KEEP the
+      // persistent reviewTerminal — the user wants new Implement runs to
+      // append to the same scrollback, not start fresh in a blank xterm.
+      if (implRunIsLive()) cancelImplementRun();
+      writeRunSeparator('Review rerun');
       // Clear the disk cache so Rerun gives a clean slate.
       if (lastState && lastState.baseOwner && lastState.baseRepo) {
         window.klaus.pr.cacheClearByPr(lastState.baseOwner, lastState.baseRepo, lastState.number);
@@ -2301,7 +2411,13 @@ window.PrReview = (function () {
       if (implementBtn) implementBtn.addEventListener('click', function () { startImplement(f); });
       if (redoBtn) redoBtn.addEventListener('click', function () { startImplement(f); });
       if (cancelImpl) cancelImpl.addEventListener('click', function () {
-        if (f.implementId) window.klaus.pr.reviewImplementCancel(f.implementId);
+        // Route through cancelImplementRun when the active run is this
+        // finding's so the inline terminal flips to 'cancelled' immediately.
+        if (implRun && implRun.requestId === f.implementId) {
+          cancelImplementRun();
+        } else if (f.implementId) {
+          window.klaus.pr.reviewImplementCancel(f.implementId);
+        }
       });
       if (commentBtn) commentBtn.addEventListener('click', function () { postFindingAsComment(f); });
 
@@ -2436,6 +2552,7 @@ window.PrReview = (function () {
   }
 
   function repaintAiReviewTab() {
+    repaintTerminalTabBadge();
     if (activeTab !== 'ai-review') return;
     var tab = hostEl.querySelector('.pr-review-ai-tab');
     if (!tab) return;
@@ -2444,6 +2561,118 @@ window.PrReview = (function () {
     // Update tab count badge as findings change.
     var tabBtn = hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
     if (tabBtn) tabBtn.innerHTML = 'Review' + renderAiReviewTabCount();
+  }
+
+  // Repaint just the Terminal tab body — used while the implement run's
+  // status transitions (running → done/error/cancelled). Cheap because
+  // the xterm element is moved back into the new chrome rather than
+  // re-instantiated.
+  function repaintTerminalTab() {
+    repaintTerminalTabBadge();
+    if (activeTab !== 'terminal') return;
+    var tab = hostEl.querySelector('.pr-review-terminal-tab');
+    if (!tab) return;
+    tab.innerHTML = renderTerminalTab();
+    mountImplementTerminalIfActive();
+  }
+
+  function repaintTerminalTabBadge() {
+    if (!hostEl) return;
+    var tabBtn = hostEl.querySelector('.pr-review-tab[data-tab="terminal"]');
+    if (tabBtn) tabBtn.innerHTML = 'Terminal' + renderTerminalTabBadge();
+  }
+
+  // Called by implement-run lifecycle callbacks. Keeps Review tab cards
+  // in sync (status, draft, usage) AND the Terminal tab chrome.
+  function repaintForImplRun() {
+    repaintAiReviewTab();
+    repaintTerminalTab();
+  }
+
+  // Lazy-create the persistent Terminal-tab xterm. Returns the existing
+  // instance on subsequent calls so multiple implement runs share the
+  // same scrollback. onData/onResize proxy to the *current* implRun,
+  // looked up at send time — so the reused terminal works across runs.
+  function ensureReviewTerminal() {
+    if (reviewTerminal) return reviewTerminal;
+    var theme = (window.ThemeManager && ThemeManager.getTerminalTheme)
+      ? ThemeManager.getTerminalTheme() : undefined;
+    var fontSize = (window.AppState && AppState.currentFontSize) || 13;
+    var fontFamily = (window.AppState && AppState.savedPrefs && AppState.savedPrefs.fontFamily)
+      || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
+    var terminal = new window.Terminal({
+      cursorBlink: true,
+      fontSize: fontSize,
+      fontFamily: fontFamily,
+      scrollback: 10000,
+      theme: theme,
+      allowProposedApi: true,
+    });
+    var fitAddon = new window.FitAddon.FitAddon();
+    terminal.loadAddon(fitAddon);
+    // Always-current proxy: typed input goes to whichever run is active.
+    // When no run is in flight, keystrokes are dropped (the user is just
+    // scrolling through the log of a finished run).
+    terminal.onData(function (data) {
+      if (!implRun) return;
+      window.klaus.pr.reviewImplementInput(implRun.requestId, data);
+    });
+    terminal.onResize(function (size) {
+      if (!implRun) return;
+      window.klaus.pr.reviewImplementResize(implRun.requestId, size.cols, size.rows);
+    });
+    reviewTerminal = { terminal: terminal, fitAddon: fitAddon, hasContent: false };
+    return reviewTerminal;
+  }
+
+  function disposeReviewTerminal() {
+    if (!reviewTerminal) return;
+    try { reviewTerminal.terminal.dispose(); } catch (_) {}
+    reviewTerminal = null;
+  }
+
+  // ANSI-bold cyan banner between runs so the scrollback is scannable.
+  function writeRunSeparator(label) {
+    if (!reviewTerminal) return;
+    var prefix = reviewTerminal.hasContent ? '\r\n' : '';
+    var line = prefix + '\x1b[1;36m── ' + label + ' ──\x1b[0m\r\n';
+    try { reviewTerminal.terminal.write(line); } catch (_) {}
+    reviewTerminal.hasContent = true;
+  }
+
+  // Re-parent the live xterm element back into the host. The xterm
+  // instance outlives innerHTML rewrites because we hold the JS
+  // reference in reviewTerminal; we just need to move its DOM back.
+  function mountImplementTerminalIfActive() {
+    if (!reviewTerminal) return;
+    var host = hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-body');
+    if (!host) return;
+    var term = reviewTerminal.terminal;
+    if (term.element && term.element.parentElement === host) return;
+    if (term.element) {
+      host.appendChild(term.element);
+    } else {
+      // First mount — xterm.open creates the element under the host.
+      term.open(host);
+    }
+    try { reviewTerminal.fitAddon.fit(); } catch (_) {}
+    // The cancel/dismiss/mark-done buttons live in the chrome row which
+    // gets re-rendered every repaint, so re-bind here.
+    var hostRow = hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-head');
+    if (hostRow) {
+      var cancelBtn = hostRow.querySelector('.pr-implement-cancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', cancelImplementRun);
+      var dismissBtn = hostRow.querySelector('.pr-implement-dismiss');
+      if (dismissBtn) dismissBtn.addEventListener('click', dismissImplementRun);
+    }
+  }
+
+  // Switch the PR review to the Terminal tab and re-render so the xterm
+  // chrome is on screen before the implement IPC starts streaming.
+  function switchToTerminalTab() {
+    if (activeTab === 'terminal') return;
+    activeTab = 'terminal';
+    if (lastState) render(lastState);
   }
 
   function startAiReview() {
@@ -2552,87 +2781,224 @@ window.PrReview = (function () {
     return bits.join(' \u00b7 ');
   }
 
+  // Strip the <DRAFT_PR_COMMENT>…</DRAFT_PR_COMMENT> block claude emits in
+  // single-finding mode out of the implement summary, returning both the
+  // cleaned text and the draft body.
+  function extractDraftCommentFromText(text) {
+    var src = text || '';
+    var m = src.match(/<DRAFT_PR_COMMENT>([\s\S]*?)<\/DRAFT_PR_COMMENT>/);
+    if (m) {
+      return {
+        text: (src.slice(0, m.index) + src.slice(m.index + m[0].length)).trim(),
+        draft: m[1].trim(),
+      };
+    }
+    // Truncated mid-stream / cancelled before the close marker: drop the
+    // dangling opener so the raw marker doesn't leak into the visible
+    // implement summary.
+    var openIdx = src.indexOf('<DRAFT_PR_COMMENT>');
+    if (openIdx !== -1) {
+      return { text: src.slice(0, openIdx).trim(), draft: null };
+    }
+    return { text: src, draft: null };
+  }
+
+  // Unified entry point for every implement flow (single finding from a
+  // finding card, single finding from a conversation thread, batch "all").
+  // Spawns an interactive `claude` in a PTY, mounts an xterm.js so the user
+  // can answer Bash/MCP permission prompts, and routes the JSONL-derived
+  // structured events back to the caller's mode-specific state updates.
+  //
+  // opts:
+  //   mode             — 'one' | 'all' (passed through to the IPC, controls
+  //                      the prompt template in claude-stream-ipc.js)
+  //   body             — the finding text(s) to apply
+  //   repaint()        — re-renders the surface that shows progress
+  //   onAssistantText? — latest assistant text block (for summary / draft)
+  //   onUsage?         — usage totals for this turn
+  //   onTool?          — chip-shaped { kind: 'tool', label }
+  //   onDone?          — fired on stop_reason=end_turn (or manual "mark done")
+  //   onError?         — IPC error / unexpected PTY exit
+  //   onCancelled?     — user cancelled mid-run
+  function startImplementRun(opts) {
+    if (implRunIsLive()) return;
+    // Carry over the persistent terminal but drop the finalized implRun
+    // so the new run's status/repaint isn't shadowed by the old one.
+    if (implRun) { cleanupImplementRun(); implRun = null; }
+    var requestId = (opts.mode === 'all' ? 'impla-' : 'impl-')
+      + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+
+    // Reuse the persistent xterm. If it doesn't exist yet, create it now
+    // (and the first mount in mountImplementTerminalIfActive will call
+    // terminal.open against the Terminal-tab host).
+    var rt = ensureReviewTerminal();
+
+    // Banner so successive runs are scannable in scrollback.
+    var bodyPreview = (opts.body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+    var label = (opts.mode === 'all' ? 'Implement all' : 'Implement')
+      + (bodyPreview ? ': ' + bodyPreview : '');
+    writeRunSeparator(label);
+
+    implRun = {
+      requestId: requestId,
+      mode: opts.mode,
+      status: 'running',
+      finalized: false,
+      repaint: opts.repaint,
+      onAssistantText: opts.onAssistantText,
+      onUsage: opts.onUsage,
+      onTool: opts.onTool,
+      onDone: opts.onDone,
+      onError: opts.onError,
+      onCancelled: opts.onCancelled,
+      unsubData: null,
+      unsubEvent: null,
+    };
+
+    // Wire output streams BEFORE the spawn so we don't miss the first
+    // bytes claude writes (typically a banner + prompt echo).
+    implRun.unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      try { rt.terminal.write(chunk); rt.hasContent = true; } catch (_) {}
+    });
+    implRun.unsubEvent = window.klaus.pr.onReviewImplementEvent(requestId, function (ev) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      if (ev.kind === 'tool') {
+        var hint = ev.hint ? String(ev.hint).split('/').pop().slice(0, 40) : '';
+        if (implRun.onTool) implRun.onTool({ kind: 'tool', label: ev.name + (hint ? ': ' + hint : '') });
+        if (implRun.repaint) implRun.repaint();
+      } else if (ev.kind === 'text') {
+        if (implRun.onAssistantText) implRun.onAssistantText(ev.text);
+        if (implRun.repaint) implRun.repaint();
+      } else if (ev.kind === 'usage') {
+        if (implRun.onUsage) implRun.onUsage(ev.usage);
+        if (implRun.repaint) implRun.repaint();
+      } else if (ev.kind === 'end_turn') {
+        finalizeImplementRun('done');
+      }
+    });
+    window.klaus.pr.onReviewImplementDone(requestId, function (data) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      // If we already finalized via end_turn, the PTY exit is just
+      // cleanup — don't downgrade the status.
+      if (implRun.finalized) { cleanupImplementRun(); return; }
+      var signal = data && data.signal;
+      if (implRun.status === 'cancelled' || signal === 'SIGTERM' || signal === 'SIGKILL') {
+        finalizeImplementRun('cancelled');
+      } else {
+        finalizeImplementRun('error', 'Claude exited without finishing the turn');
+      }
+    });
+
+    opts.repaint();
+
+    window.klaus.pr.reviewImplementStart(requestId, opts.mode, opts.body).then(function (r) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      if (r && r.error) {
+        finalizeImplementRun('error', r.error);
+      } else if (r && r.worktreePath) {
+        aiReview.worktreePath = r.worktreePath;
+      }
+    });
+  }
+
+  function finalizeImplementRun(finalStatus, errMsg) {
+    if (!implRun || implRun.finalized) return;
+    implRun.finalized = true;
+    implRun.status = finalStatus;
+    if (finalStatus === 'done' && implRun.onDone) implRun.onDone();
+    else if (finalStatus === 'error' && implRun.onError) implRun.onError(errMsg || 'Implementation failed');
+    else if (finalStatus === 'cancelled' && implRun.onCancelled) implRun.onCancelled();
+    if (implRun.repaint) implRun.repaint();
+    refreshLocalChanges();
+    // Ask the main process to terminate the PTY in case it's still alive
+    // (e.g. claude's interactive prompt is hanging after end_turn). Cancel
+    // is idempotent — if the PTY already exited it's a no-op.
+    try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
+  }
+
+  function cleanupImplementRun() {
+    if (!implRun) return;
+    if (implRun.unsubData) implRun.unsubData();
+    if (implRun.unsubEvent) implRun.unsubEvent();
+    implRun.unsubData = null;
+    implRun.unsubEvent = null;
+    // The xterm belongs to reviewTerminal (not implRun) and is reused
+    // across runs — only disposeReviewTerminal touches it.
+  }
+
+  function dismissImplementRun() {
+    cleanupImplementRun();
+    implRun = null;
+    disposeReviewTerminal();
+    repaintForImplRun();
+  }
+
+  // True only while a run is actively executing (PTY alive, no end_turn
+  // yet) — used as the guard for "can the user start a new Implement?".
+  // Done/error/cancelled runs are kept around so their final status
+  // renders, but they don't block a fresh run from appending to the
+  // same terminal.
+  function implRunIsLive() {
+    return !!(implRun && implRun.status === 'running');
+  }
+
+  function cancelImplementRun() {
+    if (!implRun) return;
+    implRun.status = 'cancelled';
+    if (implRun.repaint) implRun.repaint();
+    try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
+    // The actual finalize fires when the PTY exits — main process sends
+    // Ctrl+C first, then SIGTERM after a 2s grace period.
+  }
+
   function startImplement(f) {
-    if (f.implementId) return;
-    var requestId = 'impl-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    f.implementId = requestId;
-    f.status = 'implementing';
-    f.implementOut = '';
-    f.implementError = null;
-    // Clear any prior draft (and its queued pendingComments entry) so a
-    // redo doesn't accumulate stale drafts alongside the new one.
+    if (implRunIsLive()) return;
     if (f.implementDraftStatus === 'approved') {
+      // Clear the queued draft comment so a redo doesn't accumulate stale
+      // pendingComments entries alongside the new one.
       pendingComments = pendingComments.filter(function (c) {
         return !(c.fromImplementDraft && c.fromFindingId === f.id);
       });
     }
+    f.implementOut = '';
+    f.implementError = null;
     f.implementDraftComment = '';
     f.implementDraftStatus = null;
-    repaintAiReviewTab();
-
-    var buffered = '';
-    var unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
-      buffered += chunk;
-      var idx;
-      while ((idx = buffered.indexOf('\n')) !== -1) {
-        var line = buffered.slice(0, idx);
-        buffered = buffered.slice(idx + 1);
-        if (!line.trim()) continue;
-        try {
-          var ev = JSON.parse(line);
-          if (ev.type === 'assistant' && ev.message && ev.message.content) {
-            ev.message.content.forEach(function (block) {
-              if (block.type === 'text' && block.text) f.implementOut = block.text;
-            });
-          } else if (ev.type === 'result') {
-            if (ev.result) f.implementOut = ev.result;
-            f.usage = extractUsage(ev);
-          }
-        } catch (_) {}
-      }
-      repaintAiReviewTab();
-    });
-    window.klaus.pr.onReviewImplementDone(requestId, function (result) {
-      if (unsubData) unsubData();
-      if (f.implementId !== requestId) return;
-      f.implementId = null;
-      if (result && result.error) {
-        f.status = 'failed';
-        f.implementError = result.error;
-      } else if (result && result.cancelled) {
-        f.status = 'open';
-      } else {
-        f.status = 'implemented';
-        // Extract the draft PR comment Claude emits between the literal
-        // <DRAFT_PR_COMMENT> markers, strip the block from the summary so
-        // the user doesn't see the raw markers in the implement output.
-        var m = (f.implementOut || '').match(/<DRAFT_PR_COMMENT>([\s\S]*?)<\/DRAFT_PR_COMMENT>/);
-        if (m) {
-          f.implementDraftComment = m[1].trim();
+    f.status = 'implementing';
+    switchToTerminalTab();
+    startImplementRun({
+      mode: 'one',
+      body: f.text,
+      repaint: repaintForImplRun,
+      onAssistantText: function (text) { f.implementOut = text; },
+      onUsage: function (u) { f.usage = u; },
+      onDone: function () {
+        var parsed = extractDraftCommentFromText(f.implementOut);
+        f.implementOut = parsed.text;
+        if (parsed.draft) {
+          f.implementDraftComment = parsed.draft;
           f.implementDraftStatus = 'pending';
-          f.implementOut = (f.implementOut.slice(0, m.index)
-            + f.implementOut.slice(m.index + m[0].length)).trim();
         }
-      }
-      repaintAiReviewTab();
-      saveAiReviewCache();
-      refreshLocalChanges();
-    });
-
-    window.klaus.pr.reviewImplementStart(requestId, 'one', f.text).then(function (r) {
-      if (r && r.error) {
-        if (unsubData) unsubData();
+        f.status = 'implemented';
         f.implementId = null;
+        saveAiReviewCache();
+      },
+      onError: function (msg) {
         f.status = 'failed';
-        f.implementError = r.error;
-        repaintAiReviewTab();
-      } else if (r && r.worktreePath) {
-        // Capture the resolved worktree so the local-changes panel can fall
-        // back to it when the cross-clone lookup misses (fork-origin clones,
-        // unusual remote setups, etc.).
-        aiReview.worktreePath = r.worktreePath;
-      }
+        f.implementError = msg;
+        f.implementId = null;
+        saveAiReviewCache();
+      },
+      onCancelled: function () {
+        f.status = 'open';
+        f.implementId = null;
+        saveAiReviewCache();
+      },
     });
+    // Track the in-flight request on the finding so the per-card "Cancel"
+    // button and the Rerun handler can find it via aiReview.findings.
+    if (implRun) f.implementId = implRun.requestId;
   }
 
   // Does the pendingComments list already hold a draft sourced from this
@@ -2981,67 +3347,42 @@ window.PrReview = (function () {
 
   function startConvImplement(dbid) {
     var s = convClaudeState[dbid];
-    if (!s || s.implementId) return;
-    var requestId = 'cimp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    s.implementId = requestId;
+    if (!s || implRunIsLive()) return;
     s.implementOut = '';
     s.implementError = null;
     s.implementDraft = '';
     s.implementDraftStatus = null;
     repaintConversationTab();
 
-    var buffered = '';
-    var unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
-      buffered += chunk;
-      var idx;
-      while ((idx = buffered.indexOf('\n')) !== -1) {
-        var line = buffered.slice(0, idx);
-        buffered = buffered.slice(idx + 1);
-        if (!line.trim()) continue;
-        try {
-          var ev = JSON.parse(line);
-          if (ev.type === 'assistant' && ev.message && ev.message.content) {
-            ev.message.content.forEach(function (block) {
-              if (block.type === 'text' && block.text) s.implementOut = block.text;
-            });
-          } else if (ev.type === 'result' && ev.result) {
-            s.implementOut = ev.result;
-          }
-        } catch (_) {}
-      }
-      repaintConversationTab();
-    });
-    window.klaus.pr.onReviewImplementDone(requestId, function (result) {
-      if (unsubData) unsubData();
-      if (s.implementId !== requestId) return;
-      s.implementId = null;
-      if (result && result.error) {
-        s.implementError = result.error;
-      } else if (result && result.cancelled) {
-        // Leave implementOut as whatever streamed; no draft on cancel.
-      } else {
-        var m = (s.implementOut || '').match(/<DRAFT_PR_COMMENT>([\s\S]*?)<\/DRAFT_PR_COMMENT>/);
-        if (m) {
-          s.implementDraft = m[1].trim();
-          s.implementDraftStatus = 'pending';
-          s.implementOut = (s.implementOut.slice(0, m.index)
-            + s.implementOut.slice(m.index + m[0].length)).trim();
-        }
-      }
-      repaintConversationTab();
-      refreshLocalChanges();
-    });
+    // The xterm itself mounts in the Terminal tab; the conv card just
+    // mirrors progress text. Repaint all three surfaces so the user can
+    // switch tabs freely and see consistent state.
+    var repaintAll = function () { repaintAiReviewTab(); repaintConversationTab(); repaintTerminalTab(); };
 
-    // Single-finding mode triggers the DRAFT_PR_COMMENT prompt (set up in
-    // main/ipc/claude-stream-ipc.js); 'all' mode skips it.
-    window.klaus.pr.reviewImplementStart(requestId, 'one', buildConvPromptBody(s)).then(function (r) {
-      if (r && r.error) {
-        if (unsubData) unsubData();
+    switchToTerminalTab();
+    startImplementRun({
+      mode: 'one',
+      body: buildConvPromptBody(s),
+      repaint: repaintAll,
+      onAssistantText: function (text) { s.implementOut = text; },
+      onDone: function () {
+        var parsed = extractDraftCommentFromText(s.implementOut);
+        s.implementOut = parsed.text;
+        if (parsed.draft) {
+          s.implementDraft = parsed.draft;
+          s.implementDraftStatus = 'pending';
+        }
         s.implementId = null;
-        s.implementError = r.error;
-        repaintConversationTab();
-      }
+      },
+      onError: function (msg) {
+        s.implementError = msg;
+        s.implementId = null;
+      },
+      onCancelled: function () {
+        s.implementId = null;
+      },
     });
+    if (implRun) s.implementId = implRun.requestId;
   }
 
   // Approve and post the implement draft. Inline thread comments → reply
@@ -3144,83 +3485,61 @@ window.PrReview = (function () {
   }
 
   function startImplementAll() {
-    if (aiReview.implementAllId) return;
+    if (implRunIsLive()) return;
     var pending = aiReview.findings.filter(function (f) {
       return !f.ignored && f.status !== 'implemented' && f.status !== 'implementing';
     });
     if (pending.length === 0) return;
-    var requestId = 'impla-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-    aiReview.implementAllId = requestId;
+
+    pending.forEach(function (f) { f.status = 'implementing'; });
     aiReview.implementAllProgress = [{ kind: 'system', label: 'Implementing ' + pending.length + ' findings\u2026' }];
     aiReview.implementAllError = null;
     aiReview.implementAllSummary = null;
-    repaintAiReviewTab();
-
-    // Mark all targeted findings as implementing — the single claude run will
-    // touch all of them at once. We mark them implemented on success.
-    pending.forEach(function (f) { f.status = 'implementing'; });
+    aiReview.implementAllUsage = null;
 
     var combined = pending.map(function (f, i) {
       return '### Finding ' + (i + 1) + '\n' + f.text;
     }).join('\n\n');
 
-    var buffered = '';
-    var finalText = '';
-    var unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
-      buffered += chunk;
-      var idx;
-      while ((idx = buffered.indexOf('\n')) !== -1) {
-        var line = buffered.slice(0, idx);
-        buffered = buffered.slice(idx + 1);
-        if (!line.trim()) continue;
-        try {
-          var ev = JSON.parse(line);
-          if (ev.type === 'assistant' && ev.message && ev.message.content) {
-            ev.message.content.forEach(function (block) {
-              if (block.type === 'text' && block.text) finalText = block.text;
-              else if (block.type === 'tool_use' && block.name) {
-                var hint = (block.input && (block.input.file_path || block.input.command || block.input.pattern)) || '';
-                if (typeof hint === 'string') hint = hint.split('/').pop().slice(0, 40);
-                aiReview.implementAllProgress.push({ kind: 'tool', label: block.name + (hint ? ': ' + hint : '') });
-              }
-            });
-          } else if (ev.type === 'result') {
-            if (ev.result) finalText = ev.result;
-            aiReview.implementAllUsage = extractUsage(ev);
-          }
-        } catch (_) {}
-      }
-      repaintAiReviewTab();
-    });
-    window.klaus.pr.onReviewImplementDone(requestId, function (result) {
-      if (unsubData) unsubData();
-      if (aiReview.implementAllId !== requestId) return;
-      aiReview.implementAllId = null;
-      if (result && result.error) {
-        aiReview.implementAllError = result.error;
-        pending.forEach(function (f) { f.status = 'failed'; f.implementError = result.error; });
-      } else if (result && result.cancelled) {
-        pending.forEach(function (f) { if (f.status === 'implementing') f.status = 'open'; });
-      } else {
-        aiReview.implementAllSummary = finalText;
-        pending.forEach(function (f) { f.status = 'implemented'; f.implementOut = finalText; });
-      }
-      repaintAiReviewTab();
-      saveAiReviewCache();
-      refreshLocalChanges();
-    });
-
-    window.klaus.pr.reviewImplementStart(requestId, 'all', combined).then(function (r) {
-      if (r && r.error) {
-        if (unsubData) unsubData();
+    switchToTerminalTab();
+    startImplementRun({
+      mode: 'all',
+      body: combined,
+      repaint: repaintForImplRun,
+      onAssistantText: function (text) { aiReview.implementAllSummary = text; },
+      onUsage: function (u) { aiReview.implementAllUsage = u; },
+      onTool: function (chip) { aiReview.implementAllProgress.push(chip); },
+      onDone: function () {
+        pending.forEach(function (f) {
+          f.status = 'implemented';
+          f.implementOut = aiReview.implementAllSummary || '';
+          f.implementId = null;
+        });
         aiReview.implementAllId = null;
-        aiReview.implementAllError = r.error;
-        pending.forEach(function (f) { f.status = 'failed'; f.implementError = r.error; });
-        repaintAiReviewTab();
-      } else if (r && r.worktreePath) {
-        aiReview.worktreePath = r.worktreePath;
-      }
+        saveAiReviewCache();
+      },
+      onError: function (msg) {
+        aiReview.implementAllError = msg;
+        pending.forEach(function (f) {
+          f.status = 'failed';
+          f.implementError = msg;
+          f.implementId = null;
+        });
+        aiReview.implementAllId = null;
+        saveAiReviewCache();
+      },
+      onCancelled: function () {
+        pending.forEach(function (f) {
+          if (f.status === 'implementing') f.status = 'open';
+          f.implementId = null;
+        });
+        aiReview.implementAllId = null;
+        saveAiReviewCache();
+      },
     });
+    // Tracker for the Rerun button + the disabled state of the
+    // "Implement all" button while a run is in flight.
+    if (implRun) aiReview.implementAllId = implRun.requestId;
   }
 
   function bindFileList() {
