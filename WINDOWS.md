@@ -86,18 +86,19 @@ Run in dev mode (`npm start`) for everything except §6 (build).
   carries grep along. Confirm during smoke that searching inside a
   *non-git* folder (open-folder flow) still returns hits. If it doesn't,
   the fix is replacing the grep fallback with an in-process JS walker.
-- **No code signing** yet. SmartScreen will warn on first launch of the
-  NSIS installer until a real Authenticode cert is wired via `CSC_LINK`
-  + `CSC_KEY_PASSWORD`. Both are read by electron-builder automatically
-  once they're in env.
+- **Code signing** is wired via SSL.com eSigner (EV Authenticode cert) +
+  CodeSignTool v1.3.2 in CI — see `build/win-sign.js` and the
+  `signtoolOptions.sign` hook in `package.json`. Local Windows builds will
+  ship unsigned unless the eSigner env vars are set; production releases
+  built via `build-platforms.yml` are signed.
 - **`.ico` is rebuilt from `icon.png`** via `node scripts/generate-icon-ico.js`
   whenever the source icon changes. Bundles 16/32/48/256. The 256 entry
   is BMP-encoded (~270K of the 285K total) instead of PNG-embedded —
   bloated but valid; if installer size becomes a concern, swap the
   generator for one that PNG-embeds the 256.
 - **Auto-updater on Windows** is wired (electron-updater works on both
-  platforms), but signed installers are needed for the update flow to
-  not flag SmartScreen on every release.
+  platforms) and CI releases are signed, so SmartScreen no longer warns on
+  each release.
 - **e2e CI on Windows** stays off until the manual smoke confirms the
   shell path. Then add `windows-latest` to the matrix in
   `.github/workflows/ci.yml`.
