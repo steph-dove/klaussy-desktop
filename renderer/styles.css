@@ -1511,23 +1511,40 @@ body {
    the warning only on the pane it applies to, not across the whole area.
    Branchless containers switch to flex-column layout so the banner, label,
    and xterm stack cleanly in every view (single / columns / grid). */
+/* Single-line banner — explicit height + nowrap so a narrow columns/grid
+   pane can't wrap the text into a multi-line block that overflows the
+   container's top. order: -1 + position: relative pin it as the first
+   flex item even if another child is inserted earlier by mistake. */
 .terminal-warning {
   background: #c46a16;
   color: #fff;
-  padding: 6px 12px;
-  font-size: 12px;
-  line-height: 1.35;
+  padding: 0 10px;
+  height: 24px;
+  font-size: 11px;
+  line-height: 1;
   display: flex;
   align-items: center;
-  gap: 8px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  gap: 6px;
   flex-shrink: 0;
+  order: -1;
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .terminal-warning-icon {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: bold;
   flex-shrink: 0;
+}
+
+.terminal-warning-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .terminal-warning-link {
