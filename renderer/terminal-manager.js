@@ -73,9 +73,9 @@ window.TerminalManager = (function () {
       warning.className = 'terminal-warning';
       warning.innerHTML =
         '<span class="terminal-warning-icon" aria-hidden="true">&#9888;</span>' +
-        '<span class="terminal-warning-text">Not in a git worktree. ' +
-          '<a href="#" class="terminal-warning-link">Open as a worktree</a> ' +
-          'to unlock diff, commit, branch and PR features.' +
+        '<span class="terminal-warning-text">Not in a git worktree — ' +
+          '<a href="#" class="terminal-warning-link">Open as worktree</a>' +
+          ' to enable diff &amp; PR features.' +
         '</span>';
       warning.querySelector('.terminal-warning-link').addEventListener('click', function (e) {
         e.preventDefault();
