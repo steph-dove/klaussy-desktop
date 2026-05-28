@@ -288,6 +288,30 @@ function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
   return null;
 }
 
+// Resolve the exact commit this PR forked from — the same point GitHub's
+// "Files changed" tab diffs against (merge-base of the base branch and the PR
+// head). We fetch the base branch FRESH first: the local copy in a reused
+// clone/worktree is frequently stale, and a stale base makes `<base>...HEAD`
+// include every commit that landed on the real base after our stale ref but
+// before the PR branched — changes that are NOT part of this PR. Returns the
+// merge-base SHA, or '' on any failure so callers can fall back to the branch
+// name (degrading to today's behavior rather than erroring).
+function resolveBaseShaForWorktree(worktreePath, authedUrl, baseRefName) {
+  if (!worktreePath || !baseRefName) return '';
+  try {
+    // Fetch the base tip into FETCH_HEAD without touching any local branch ref
+    // (safe even though that branch may be checked out elsewhere).
+    execFileSync('git', ['fetch', authedUrl, baseRefName], {
+      cwd: worktreePath, stdio: 'pipe',
+    });
+    return execFileSync('git', ['merge-base', 'FETCH_HEAD', 'HEAD'], {
+      cwd: worktreePath, stdio: 'pipe',
+    }).toString().trim();
+  } catch (_) {
+    return '';
+  }
+}
+
 // Shared helper: ensure a worktree exists for prReview.active's PR head and
 // return its path. Used by G5 (which then spawns a task) and G7 (which runs
 // the AI review there).
@@ -370,6 +394,7 @@ async function ensureWorktreeForActivePr() {
       baseRepoCwd: cwd,
       existed: true,
       refreshed,
+      baseSha: resolveBaseShaForWorktree(existingWorktreePath, authedUrl, meta && meta.baseRefName),
     };
   }
 
@@ -416,7 +441,10 @@ async function ensureWorktreeForActivePr() {
   if (fs.existsSync(worktreePath)) {
     // Stale dir from a prior run we never wired up — reuse silently rather
     // than failing. git worktree add would error if it's still registered.
-    return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true };
+    return {
+      worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true,
+      baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName),
+    };
   }
 
   try {
@@ -425,7 +453,10 @@ async function ensureWorktreeForActivePr() {
     return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
 
-  return { worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: false };
+  return {
+    worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: false,
+    baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName),
+  };
 }
 
 module.exports = {
