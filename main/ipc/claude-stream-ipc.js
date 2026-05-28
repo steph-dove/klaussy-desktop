@@ -371,8 +371,13 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
   if (ensured.error) return { error: ensured.error };
 
   const baseBranch = (prReview.active.meta && prReview.active.meta.baseRefName) || 'main';
+  // Diff against the PR's true fork point (merge-base SHA), not the local base
+  // branch ref — the local ref is often stale, which pulls commits that aren't
+  // in the PR into `<base>...HEAD`. Fall back to the branch name if the SHA
+  // couldn't be resolved (e.g. offline base fetch).
+  const baseRef = ensured.baseSha || baseBranch;
   const prompt = PR_REVIEW_TEMPLATE
-    .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch)
+    .replace(/\{\{BASE_BRANCH\}\}/g, baseRef)
     .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
 
   spawnClaudeStream({
@@ -432,23 +437,51 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // Two prompts depending on whether we're implementing one finding or many.
   // Both share guardrails so claude doesn't drift into unrelated cleanup or
   // start running tests/commits.
+  // Structured workflow that forces usage-tracing before edits and a self-
+  // review after, so a fix for finding A doesn't ship a regression that a
+  // later review round flags as finding B (the "10 rounds of blockers" loop).
   const baseGuardrails =
-    `\n\nGuidelines:\n`
-    + `- Only change what the finding(s) ask for; do not add unrelated cleanup.\n`
-    + `- Do not run tests, install deps, or commit/push.\n`
-    + `- After making the changes, summarize each change in one short bullet,\n`
-    + `  prefixed with the file path. Be terse.\n`;
+    `\n\nWorkflow (mandatory):\n\n`
+    + `1. **Before editing.** For each symbol you will modify (function, class,\n`
+    + `   type, exported constant, IPC channel, config key): grep for every\n`
+    + `   usage in the repo and read the full file at each call site. For each\n`
+    + `   behavior you will change, trace one realistic call path end-to-end\n`
+    + `   and note any caller that depends on the current behavior (return\n`
+    + `   shape, null/empty handling, error propagation, ordering, side\n`
+    + `   effects). If a symbol crosses an IPC/preload boundary, grep the\n`
+    + `   matching channel name in both main and renderer.\n\n`
+    + `2. **While editing.**\n`
+    + `   - Only change what the finding(s) ask for; no unrelated cleanup.\n`
+    + `   - Preserve invariants callers rely on. If a function returns \`null\`\n`
+    + `     on miss and callers gate on \`if (x)\`, don't switch to returning\n`
+    + `     \`{}\` or throwing. If an event fires once, don't make it fire twice.\n`
+    + `   - Match the existing error/null-handling style; don't introduce new\n`
+    + `     failure modes the callers won't catch.\n`
+    + `   - Do not run tests, install deps, or commit/push.\n\n`
+    + `3. **After editing — self-review pass (required).** Re-read every call\n`
+    + `   site you found in step 1. For each one, state in one short sentence\n`
+    + `   whether the change is safe for that caller and why. If any caller\n`
+    + `   needs updating, update it in the same change and re-run this pass\n`
+    + `   on the updated caller. If you cannot verify a caller is safe (e.g.\n`
+    + `   the symbol crosses a process boundary, is reflected on, or is\n`
+    + `   consumed by code outside this repo), say so explicitly and stop —\n`
+    + `   surface the uncertainty rather than guess.\n\n`
+    + `4. **Summary.** One short bullet per change, prefixed with the file\n`
+    + `   path. Be terse. Then list the self-review notes from step 3 under a\n`
+    + `   "Call-site check:" heading.\n`;
   // Single-finding mode emits a follow-up PR comment draft between literal
   // markers so the renderer can extract it and present it to the reviewer
   // for approval. Batch "all" mode skips the marker — one comment for a mixed
   // batch of findings wouldn't map cleanly to any one finding card.
   const draftCommentInstruction =
-    `- Then, on a new line, output exactly one block delimited by these literal markers:\n`
-    + `    <DRAFT_PR_COMMENT>\n`
-    + `    One or two sentences written as a reply the reviewer could post under\n`
-    + `    the finding on GitHub — explain what you fixed and how. Do not repeat\n`
-    + `    the finding verbatim. Plain prose, no code fences, no bullets.\n`
-    + `    </DRAFT_PR_COMMENT>\n`;
+    `\n5. **Draft PR comment.** On a new line, output exactly one block\n`
+    + `   delimited by these literal markers:\n\n`
+    + `   <DRAFT_PR_COMMENT>\n`
+    + `   One or two sentences written as a reply the reviewer could post\n`
+    + `   under the finding on GitHub — explain what you fixed and how. Do\n`
+    + `   not repeat the finding verbatim. Plain prose, no code fences, no\n`
+    + `   bullets.\n`
+    + `   </DRAFT_PR_COMMENT>\n`;
   const prompt = mode === 'all'
     ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
     : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction;
@@ -915,6 +948,11 @@ Read every changed file in full for surrounding context.
 - Boundary conditions: empty inputs, nil/null, max values, overflow.
 - State mutations that violate invariants.
 
+### Cross-file coupling (do not skip)
+- For any exported symbol or shared contract changed in this diff (function signatures, return shapes, IPC channels, event names, config keys, enum variants): grep for usages in the repo and verify every call site still composes correctly. Read the consumer file in full, not just the diff.
+- Producer/consumer shape mismatches: when a value is set in one file and read in another, verify the consumer handles every shape/case the producer can now emit (added enum variants, optional fields, null/empty results, error states).
+- IPC/preload boundaries: if a handler return shape changed, grep the matching channel name on the other side and confirm every renderer call site still destructures correctly.
+
 ### Concurrency & State
 - Race conditions, shared mutable state.
 - Thread safety, async misuse, ordering assumptions.
@@ -1111,15 +1149,17 @@ Before synthesizing, validate every finding from the sub-agents. For each findin
 1. **Read the full file** referenced in the finding's location (not just the diff hunk).
 2. **Trace the code path** — follow function calls, imports, type definitions, and control flow to understand the full context. Read caller and callee files as needed.
 3. **Determine if the finding is still valid** given the full context. Common reasons a finding is invalid:
-   - The issue is already handled elsewhere (e.g., validation happens in a caller, error is caught upstream).
-   - The code path cannot actually be reached in the way the finding assumes.
+   - The issue is already handled elsewhere (e.g., validation happens in a caller, error is caught upstream). Verify by reading the caller — do not assume.
+   - The code path cannot actually be reached in the way the finding assumes. Verify by tracing — do not assume.
    - The finding misreads the logic due to missing surrounding context.
-   - The concern is about code that was not changed in this PR and is out of scope.
-   - A dependency or framework already guarantees the behavior the finding questions.
-4. **Remove invalid findings.** Do not include them in the final output. Do not note that they were removed.
-5. **Downgrade severity** if tracing reveals the issue is less impactful than initially assessed (e.g., a "High" race condition that only affects a debug-only path should be "Low" or "Nit").
+4. **Do NOT prune a finding just because:**
+   - The concern technically lives in unchanged code, if this PR's change exposes it (a new caller now hits an existing latent bug, a new return shape is fed to an old consumer, a new code path now reaches stale logic). The diff made it relevant — keep it.
+   - A framework, library, or dependency "probably" handles it. Verify by reading the framework's code or type definitions. Speculation is not validation.
+   - The fix would be small or "the author probably knows". Reviewers flag, authors decide.
+5. **Remove invalid findings.** Do not include them in the final output. Do not note that they were removed.
+6. **Downgrade severity** if tracing reveals the issue is less impactful than initially assessed (e.g., a "High" race condition that only affects a debug-only path should be "Low" or "Nit").
 
-Be thorough — read as many files as needed to verify each finding. A shorter, accurate review is far more valuable than a long review with false positives.
+Be thorough — read as many files as needed to verify each finding. A shorter, accurate review is far more valuable than a long review with false positives, but pruning real findings as "out of scope" creates the worse problem: the next review round flags them once the author's own changes expose the underlying issue.
 
 ---
 
