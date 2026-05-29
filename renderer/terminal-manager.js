@@ -234,13 +234,29 @@ window.TerminalManager = (function () {
       e.stopPropagation();
       container.classList.remove('drag-over');
       var files = Array.from(e.dataTransfer.files);
-      if (files.length > 0) {
-        var paths = files.map(function (f) {
-          var p = window.klaus.fs.getPathForFile(f);
-          return p.includes(' ') ? '"' + p + '"' : p;
-        }).join(' ');
-        window.klaus.terminal.write(id, paths);
+      if (files.length === 0) return;
+      // getPathForFile returns '' (or can throw) for files with no backing OS
+      // path — drop those rather than writing a blank/half-formed argument.
+      var paths = files.map(function (f) {
+        var p = '';
+        try { p = window.klaus.fs.getPathForFile(f) || ''; } catch (_err) { p = ''; }
+        return /\s/.test(p) ? '"' + p + '"' : p;
+      }).filter(Boolean).join(' ');
+      if (!paths) return;
+      // Route to whichever shell tab is active for this task, not always the
+      // primary. Sub-terminal wrappers have no drop handler of their own, so
+      // the drop bubbles up to `container` and fires here; without the
+      // activeSubId the path lands in the primary (Claude) terminal even when
+      // the user is typing in a Shell sub-tab. Fall back to the primary if the
+      // active sub isn't live — the main handler silently discards writes to a
+      // dead/missing sub, so we must not route there.
+      var entry = tasks.get(id);
+      var activeSubId = entry ? entry.activeSubId : null;
+      if (activeSubId != null && entry) {
+        var sub = entry.subTerminals.find(function (s) { return s.subId === activeSubId; });
+        if (!sub || !sub.alive) activeSubId = null;
       }
+      window.klaus.terminal.write(id, paths, activeSubId);
     });
 
     // Wire up I/O
