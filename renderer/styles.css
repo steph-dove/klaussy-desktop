@@ -1843,6 +1843,11 @@ body.task-branchless #ahead-behind {
   margin: 8px 0 0 2px;
 }
 
+#plan-modal.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+}
+
 /* ---- License Activation Modal — content styles only; shell + buttons
          come from the klaus-modal / klaus-btn primitives in the tokens
          section above. */
@@ -2061,9 +2066,31 @@ body.task-branchless #ahead-behind {
   padding: 3px 8px;
   background: var(--input-bg);
   border-radius: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plan-file-row > span {
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.plan-file-remove {
+  flex: none;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.plan-file-remove:hover {
+  color: var(--error);
 }
 
 #plan-modal-error {

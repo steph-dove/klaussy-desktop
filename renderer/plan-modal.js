@@ -627,7 +627,10 @@ window.ActionModal = (function () {
 
   var currentTaskId = null;
   var currentAction = 'plan';
-  var uploadedText = '';
+  // Absolute paths of dropped/picked uploads. We pass the paths to Claude (not
+  // the file contents) and let the CLI read them itself — works for any file
+  // type and for folders, with no size cap or binary handling on our side.
+  var uploadedPaths = [];
 
   function setTab(name) {
     tabs.forEach(function (t) {
@@ -645,7 +648,7 @@ window.ActionModal = (function () {
     fileDisplay.textContent = 'No files selected';
     fileDisplay.classList.remove('has-file');
     if (fileList) fileList.innerHTML = '';
-    uploadedText = '';
+    uploadedPaths = [];
     errorEl.textContent = '';
     submitBtn.disabled = false;
     submitBtn.textContent = cfg.submitLabel;
@@ -672,13 +675,87 @@ window.ActionModal = (function () {
     currentTaskId = null;
   }
 
+  // Quote a path for the shell only when it contains whitespace, matching the
+  // terminal drag-drop behavior.
+  function quotePath(p) {
+    return /\s/.test(p) ? '"' + p + '"' : p;
+  }
+
   function activeContent() {
     var activeTab = overlay.querySelector('.plan-modal-tab.active');
     var name = activeTab ? activeTab.dataset.tab : 'paste';
-    if (name === 'upload') {
-      return (uploadedText || '').trim() || textarea.value.trim();
+    if (name === 'upload' && uploadedPaths.length) {
+      // Hand Claude the paths and let it read them. A short lead-in tells it
+      // these are the inputs for the task; the plan flow's clarifying phase
+      // takes over from there.
+      return 'Use these files/folders for the task (read them):\n'
+        + uploadedPaths.map(quotePath).join('\n');
     }
     return textarea.value.trim();
+  }
+
+  // Shared by the file-picker change handler and drag-and-drop. Resolves each
+  // dropped/picked item to its absolute path (getPathForFile works for files
+  // and folders alike) and lists them; the paths are handed to Claude at
+  // submit time. Multiple items in one drop/pick are all kept.
+  function processFiles(files) {
+    if (!files || files.length === 0) return;
+    errorEl.textContent = '';
+    // getPathForFile returns '' (or can throw) for files with no backing OS
+    // path; skip those rather than letting an exception kill the handler.
+    var paths = files.map(function (f) {
+      try { return window.klaus.fs.getPathForFile(f) || ''; } catch (_err) { return ''; }
+    }).filter(Boolean);
+    if (paths.length === 0) {
+      errorEl.textContent = 'Could not resolve a path for the selected item(s).';
+      return;
+    }
+    // Accumulate across repeated drops/picks; dedupe so the same path added
+    // twice doesn't appear twice. Use the × buttons to drop individual items.
+    paths.forEach(function (p) {
+      if (uploadedPaths.indexOf(p) === -1) uploadedPaths.push(p);
+    });
+    renderUploadList();
+    var skipped = files.length - paths.length;
+    if (skipped > 0) errorEl.textContent = skipped + ' item(s) had no readable path and were skipped.';
+  }
+
+  function renderUploadList() {
+    if (uploadedPaths.length === 0) {
+      fileDisplay.textContent = 'No files selected';
+      fileDisplay.classList.remove('has-file');
+      fileList.innerHTML = '';
+      return;
+    }
+    fileDisplay.textContent = uploadedPaths.length === 1
+      ? basename(uploadedPaths[0])
+      : uploadedPaths.length + ' items selected';
+    fileDisplay.classList.add('has-file');
+    fileList.innerHTML = '';
+    uploadedPaths.forEach(function (p, i) {
+      var row = document.createElement('div');
+      row.className = 'plan-file-row';
+      var nameEl = document.createElement('span');
+      nameEl.textContent = basename(p);
+      nameEl.title = p;
+      var rm = document.createElement('button');
+      rm.className = 'plan-file-remove';
+      rm.type = 'button';
+      rm.textContent = '×';
+      rm.title = 'Remove';
+      rm.addEventListener('click', function () {
+        uploadedPaths.splice(i, 1);
+        renderUploadList();
+      });
+      row.appendChild(nameEl);
+      row.appendChild(rm);
+      fileList.appendChild(row);
+    });
+  }
+
+  function basename(p) {
+    var parts = String(p).split(/[\\/]/);
+    return parts[parts.length - 1] || p;
   }
 
   async function submit() {
@@ -736,33 +813,42 @@ window.ActionModal = (function () {
 
     fileBtn.addEventListener('click', function () { fileInput.click(); });
 
-    fileInput.addEventListener('change', async function () {
-      var files = fileInput.files ? Array.from(fileInput.files) : [];
-      if (files.length === 0) return;
-      fileDisplay.textContent = files.length === 1
-        ? files[0].name
-        : files.length + ' files selected';
-      fileDisplay.classList.add('has-file');
-      fileList.innerHTML = '';
-      files.forEach(function (f) {
-        var row = document.createElement('div');
-        row.className = 'plan-file-row';
-        row.textContent = f.name;
-        fileList.appendChild(row);
-      });
-      try {
-        var parts = await Promise.all(files.map(function (f) { return f.text(); }));
-        // Prefix each file's contents with a header so the prompt can tell
-        // where one file ends and the next begins. Without this, concatenated
-        // task specs would run into each other ambiguously.
-        uploadedText = parts.map(function (text, i) {
-          return '=== ' + files[i].name + ' ===\n' + text;
-        }).join('\n\n');
-      } catch (err) {
-        errorEl.textContent = 'Failed to read file: ' + ((err && err.message) || String(err));
-        uploadedText = '';
-      }
+    fileInput.addEventListener('change', function () {
+      processFiles(fileInput.files ? Array.from(fileInput.files) : []);
     });
+
+    // Drag-and-drop: drop a file anywhere on the modal to upload it. Only
+    // engages when files are actually being dragged, so text drags into the
+    // paste textarea keep their native behavior. A file drop flips to the
+    // upload tab and runs the same processing as the file picker.
+    var modalEl = document.getElementById('plan-modal');
+    if (modalEl) {
+      var draggingFiles = function (e) {
+        var types = e.dataTransfer && e.dataTransfer.types;
+        return !!types && Array.prototype.indexOf.call(types, 'Files') !== -1;
+      };
+      modalEl.addEventListener('dragover', function (e) {
+        if (!draggingFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        modalEl.classList.add('drag-over');
+      });
+      modalEl.addEventListener('dragleave', function (e) {
+        // Only clear when the cursor actually leaves the modal, not when it
+        // crosses between child elements (which also fire dragleave).
+        if (!modalEl.contains(e.relatedTarget)) modalEl.classList.remove('drag-over');
+      });
+      modalEl.addEventListener('drop', function (e) {
+        if (!draggingFiles(e)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        modalEl.classList.remove('drag-over');
+        var files = Array.from(e.dataTransfer.files);
+        if (files.length === 0) return;
+        setTab('upload');
+        processFiles(files);
+      });
+    }
 
     cancelBtn.addEventListener('click', close);
     submitBtn.addEventListener('click', submit);

@@ -376,10 +376,10 @@
         <div id="plan-file-picker">
           <span id="plan-file-display">No files selected</span>
           <button id="plan-file-btn" class="klaus-btn klaus-btn-secondary" type="button">Choose files</button>
-          <input type="file" id="plan-file-input" accept=".txt,.md,.markdown,.json,.yaml,.yml,.log,text/*" multiple style="display:none" />
+          <input type="file" id="plan-file-input" multiple style="display:none" />
         </div>
         <div id="plan-file-list"></div>
-        <p class="plan-modal-hint">Plain text / markdown. Each file's contents are inlined into the prompt with a header.</p>
+        <p class="plan-modal-hint">Any files or folders. Their paths are passed to Claude on submit, and Claude reads them directly.</p>
       </div>
 
       <div id="plan-modal-error"></div>
