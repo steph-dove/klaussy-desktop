@@ -344,7 +344,7 @@ window.DiffPanel = (function () {
         + '<span>Explanation</span>'
         + '<button class="diff-explanation-close" title="Close">&times;</button>'
       + '</div>'
-      + '<div class="diff-explanation-body">Sending to Claude…</div>';
+      + '<div class="diff-explanation-body">Sending to the agent…</div>';
     insertAfter.after(explanationEl);
 
     var bodyEl = explanationEl.querySelector('.diff-explanation-body');
@@ -929,7 +929,7 @@ window.DiffPanel = (function () {
 
         var wrap = document.createElement('div');
         wrap.className = 'inline-comment';
-        wrap.innerHTML = '<input type="text" placeholder="Comment for Claude..." class="inline-comment-input" />';
+        wrap.innerHTML = '<input type="text" placeholder="Comment for the agent..." class="inline-comment-input" />';
         lineEl.after(wrap);
 
         var inp = wrap.querySelector('input');

@@ -10,6 +10,28 @@
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+// Static AI-provider descriptors (id / displayName / shortLabel / defaultBin)
+// handed to the renderer as one source of truth for labels and the provider
+// picker. This preload is SANDBOXED — it can only require electron + Node
+// builtins, NOT local project files — so we pull the list from main over a
+// synchronous IPC (main owns the canonical registry). A hardcoded fallback
+// guarantees we never throw here and blank the renderer if that IPC is
+// unavailable; keep it in sync with main/state/ai-providers.js.
+let AGENT_PROVIDERS;
+try {
+  AGENT_PROVIDERS = ipcRenderer.sendSync('get-providers-sync');
+} catch (_e) {
+  AGENT_PROVIDERS = null;
+}
+if (!Array.isArray(AGENT_PROVIDERS) || AGENT_PROVIDERS.length === 0) {
+  AGENT_PROVIDERS = [
+    { id: 'claude', displayName: 'Claude Code', shortLabel: 'cc', defaultBin: 'claude' },
+    { id: 'codex', displayName: 'OpenAI Codex', shortLabel: 'cx', defaultBin: 'codex' },
+    { id: 'gemini', displayName: 'Gemini CLI', shortLabel: 'gm', defaultBin: 'gemini' },
+    { id: 'copilot', displayName: 'GitHub Copilot', shortLabel: 'cp', defaultBin: 'copilot' },
+  ];
+}
+
 contextBridge.exposeInMainWorld('klaus', {
   // ---- session: Session persistence + UI state ----
   session: {
@@ -110,7 +132,7 @@ contextBridge.exposeInMainWorld('klaus', {
         ipcRenderer.send('unsubscribe-terminal', channel);
       };
     },
-    addSub: (taskId, label, mode) => ipcRenderer.invoke('add-sub-terminal', { taskId, label, mode }),
+    addSub: (taskId, label, mode, initialPrompt) => ipcRenderer.invoke('add-sub-terminal', { taskId, label, mode, initialPrompt }),
     killSub: (taskId, subId) => ipcRenderer.invoke('kill-sub-terminal', { taskId, subId }),
     onSubData: (taskId, subId, callback) => {
       const channel = `terminal-data-${taskId}-${subId}`;
@@ -269,7 +291,7 @@ contextBridge.exposeInMainWorld('klaus', {
       return () => ipcRenderer.removeListener(channel, handler);
     },
     checkoutLocally: () => ipcRenderer.invoke('pr-checkout-locally'),
-    reviewAiStart: (requestId) => ipcRenderer.invoke('pr-review-ai-start', { requestId }),
+    reviewAiStart: (requestId, provider) => ipcRenderer.invoke('pr-review-ai-start', { requestId, provider }),
     reviewAiCancel: (requestId) => ipcRenderer.invoke('pr-review-ai-cancel', { requestId }),
     onReviewAiData: (requestId, callback) => {
       const channel = 'pr-review-ai-data-' + requestId;
@@ -287,16 +309,16 @@ contextBridge.exposeInMainWorld('klaus', {
     // main/state/pr-implement-pty.js). Renderer mounts xterm.js,
     // streams raw bytes via onReviewImplementPtyData, and parses
     // structured progress via onReviewImplementPtyEvent.
-    reviewImplementStart: (requestId, mode, body) =>
-      ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body }),
+    reviewImplementStart: (requestId, mode, body, provider) =>
+      ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body, provider }),
     reviewImplementInput: (requestId, data) =>
       ipcRenderer.invoke('pr-review-implement-input', { requestId, data }),
     reviewImplementResize: (requestId, cols, rows) =>
       ipcRenderer.invoke('pr-review-implement-resize', { requestId, cols, rows }),
     reviewImplementCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-implement-cancel', { requestId }),
-    reviewChatStart: (requestId, findingBody, messages, findingId) =>
-      ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages, findingId }),
+    reviewChatStart: (requestId, findingBody, messages, findingId, provider) =>
+      ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages, findingId, provider }),
     reviewChatCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-chat-cancel', { requestId }),
     onReviewChatData: (requestId, callback) => {
@@ -311,8 +333,8 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
-    reviewInvestigateStart: (requestId, findingBody) =>
-      ipcRenderer.invoke('pr-review-investigate-start', { requestId, findingBody }),
+    reviewInvestigateStart: (requestId, findingBody, provider) =>
+      ipcRenderer.invoke('pr-review-investigate-start', { requestId, findingBody, provider }),
     reviewInvestigateCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-investigate-cancel', { requestId }),
     onReviewInvestigateData: (requestId, callback) => {
@@ -597,6 +619,11 @@ contextBridge.exposeInMainWorld('klaus', {
     },
     getAboutInfo: () => ipcRenderer.invoke('get-about-info'),
     getClaudeInfo: () => ipcRenderer.invoke('get-claude-info'),
+    // Per-provider version probe for Preferences. provider = 'claude' | 'codex'
+    // | 'gemini' | 'copilot'. Returns { id, displayName, path, version }.
+    getAgentInfo: (provider) => ipcRenderer.invoke('get-agent-info', { provider }),
+    // Static list of supported AI CLIs for pickers/labels (no IPC round-trip).
+    providers: AGENT_PROVIDERS,
     getLogs: () => ipcRenderer.invoke('get-logs'),
     onMenuCopy: (callback) => {
       const listener = () => callback();

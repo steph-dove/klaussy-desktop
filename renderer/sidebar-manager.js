@@ -10,13 +10,13 @@ window.Sidebar = (function () {
     item.className = 'task-item';
     item.dataset.id = task.id;
 
-    var modeLabel = task.mode === 'shell' ? 'sh' : 'cc';
+    var modeLabel = AppUtils.modeShortLabel(task.mode);
     var tIconColor = AppUtils.iconColor(task.name);
     var tIconLetter = (task.name || '?').charAt(0).toUpperCase();
     item.innerHTML =
       '<span class="status-dot ' + (task.alive ? 'alive' : 'exited') + '"></span>' +
       '<span class="collapsed-icon" style="background:' + tIconColor + '" title="' + escHtml(task.name) + '">' + tIconLetter + '</span>' +
-      '<span class="task-mode" title="' + (task.mode === 'shell' ? 'Shell' : 'Claude Code') + '">' + modeLabel + '</span>' +
+      '<span class="task-mode" title="' + escHtml(AppUtils.modeDisplayName(task.mode)) + '">' + modeLabel + '</span>' +
       '<span class="task-name" title="' + escHtml(task.worktreePath) + '">' + escHtml(task.name) + '</span>' +
       '<span class="ci-status-icon" title="CI status"></span>' +
       '<span class="dirty-indicator"></span>' +
@@ -208,8 +208,8 @@ window.Sidebar = (function () {
     if (!item) return;
     var modeEl = item.querySelector('.task-mode');
     if (modeEl) {
-      modeEl.textContent = mode === 'shell' ? 'sh' : 'cc';
-      modeEl.title = mode === 'shell' ? 'Shell' : 'Claude Code';
+      modeEl.textContent = AppUtils.modeShortLabel(mode);
+      modeEl.title = AppUtils.modeDisplayName(mode);
     }
   }
 

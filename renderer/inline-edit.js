@@ -49,7 +49,7 @@ window.InlineEdit = (function () {
     var container = document.createElement('div');
     container.className = 'inline-edit-prompt';
     container.innerHTML =
-      '<input class="inline-edit-input" type="text" placeholder="Tell Claude what to change…" />' +
+      '<input class="inline-edit-input" type="text" placeholder="Tell the agent what to change…" />' +
       '<button class="inline-edit-submit" type="button" title="Submit (Enter)"></button>' +
       '<button class="inline-edit-dismiss" type="button" title="Cancel (Esc)">×</button>';
 
