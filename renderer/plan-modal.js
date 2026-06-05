@@ -180,7 +180,7 @@ window.ActionModal = (function () {
       label: 'Plan',
       title: 'Plan a task',
       submitLabel: 'Plan',
-      hint: 'Provide details. A new Claude tab opens on this worktree and runs a multi-agent flow: discovery → parallel exploration → clarify → parallel architectures → approve → implement → parallel review → summary. All local, no cloud round-trip.',
+      hint: 'Provide details. A new agent tab opens on this worktree and runs a multi-agent flow: discovery → parallel exploration → clarify → parallel architectures → approve → implement → parallel review → summary. All local, no cloud round-trip.',
       buildSubmission: function (content) {
         return PLAN_PROMPT.replace('{{TASK}}', content);
       },
@@ -189,7 +189,7 @@ window.ActionModal = (function () {
       label: 'Debug',
       title: 'Debug an issue',
       submitLabel: 'Debug',
-      hint: 'Provide details. A new Claude tab will open on this worktree and run <code>/debug</code>.',
+      hint: 'Provide details. A new agent tab will open on this worktree and run <code>/debug</code>.',
       buildSubmission: function (content) {
         return '/debug ' + content;
       },

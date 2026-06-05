@@ -141,7 +141,7 @@ window.Dialogs = (function () {
     var sections = [
       {
         title: 'Tasks & worktrees',
-        body: 'Click + in the sidebar to spawn a new task. Each task gets its own git worktree (sibling of the repo) and its own Claude Code instance. Use the New Worktree modal to either create a new branch (type a name) or continue an existing one (pick from the Branch dropdown). The Existing Worktree tab attaches Claude to a pre-existing worktree directory.',
+        body: 'Click + in the sidebar to spawn a new task. Each task gets its own git worktree (sibling of the repo) and its own agent instance. Use the New Worktree modal to either create a new branch (type a name) or continue an existing one (pick from the Branch dropdown). The Existing Worktree tab attaches an agent to a pre-existing worktree directory.',
       },
       {
         title: 'Sidebar at a glance',
@@ -153,7 +153,7 @@ window.Dialogs = (function () {
       },
       {
         title: 'Reviewing PRs (PR button)',
-        body: 'Pulls in someone else\'s PR for review. The Files tab shows the full diff with inline comment threads + draft review-comment composer (Finish review submits everything in one go). Conversation tab is the full GitHub-style comment feed. Checks tab lists CI runs with a Debug button on failures that has Claude diagnose them. Review tab runs an AI review and breaks the result into per-finding cards (Ignore / Implement / Add to PR). Implement-all bundles open findings into one Claude run.',
+        body: 'Pulls in someone else\'s PR for review. The Files tab shows the full diff with inline comment threads + draft review-comment composer (Finish review submits everything in one go). Conversation tab is the full GitHub-style comment feed. Checks tab lists CI runs with a Debug button on failures that has the agent diagnose them. Review tab runs an AI review and breaks the result into per-finding cards (Ignore / Implement / Add to PR). Implement-all bundles open findings into one agent run.',
       },
       {
         title: 'Pop-out & detach',
@@ -169,7 +169,7 @@ window.Dialogs = (function () {
       },
       {
         title: 'Notifications & idle',
-        body: 'Klaussy pings the macOS notification center when Claude finishes responding in a backgrounded task. Toggle per-task in the task notes / context menu.',
+        body: 'Klaussy pings the macOS notification center when the agent finishes responding in a backgrounded task. Toggle per-task in the task notes / context menu.',
       },
     ];
 

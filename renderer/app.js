@@ -647,7 +647,7 @@
         '<span class="saved-session-detail">' + escHtml(wt.branch) + '</span>' +
       '</div>' +
       '<div class="saved-session-actions">' +
-        '<button class="worktree-open-claude" title="Open with Claude Code">cc</button>' +
+        '<button class="worktree-open-claude" title="Open with ' + escHtml(AppUtils.modeDisplayName(defaultAgent())) + '">' + escHtml(AppUtils.modeShortLabel(defaultAgent())) + '</button>' +
         '<button class="worktree-open-shell" title="Open shell">sh</button>' +
         '<button class="worktree-remove" title="Remove worktree">\u00d7</button>' +
       '</div>';
@@ -655,7 +655,7 @@
     item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
       e.stopPropagation();
       var result;
-      try { result = await window.klaus.task.attachWorktree(wt.path, 'claude'); }
+      try { result = await window.klaus.task.attachWorktree(wt.path, defaultAgent()); }
       catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
       if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
       if (!result) { window.toast.error('Open failed: no response from main process'); return; }
@@ -1416,12 +1416,13 @@
 
     if (!task.alive) {
       items.push({ sep: true });
-      items.push({ label: 'Restart Claude', action: async function () {
-        var sessionId = await window.klaus.session.getLatest(task.worktreePath);
-        var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-        window.klaus.terminal.write(id, cmd + '\n');
-        task.mode = 'claude';
-        updateSidebarMode(id, 'claude');
+      var restartAgent = (task.mode && task.mode !== 'shell') ? task.mode : defaultAgent();
+      items.push({ label: 'Restart ' + AppUtils.modeDisplayName(restartAgent), action: async function () {
+        // restart-task respawns the task's original agent (consent/model/guard
+        // handled in main) — not hardcoded to Claude.
+        await window.klaus.task.restart(id);
+        task.mode = restartAgent;
+        updateSidebarMode(id, restartAgent);
         var resumeBtn = taskList.querySelector('.task-item[data-id="' + id + '"] .sidebar-resume-btn');
         if (resumeBtn) resumeBtn.remove();
       }});
@@ -1492,12 +1493,12 @@
         commands.push({ label: 'Pop Out', action: function () { window.klaus.task.popOut(AppState.activeTaskId); } });
         commands.push({ label: 'Kill Task', action: function () { window.klaus.task.kill(AppState.activeTaskId).then(function () { removeTaskFromUI(AppState.activeTaskId); }); } });
         if (!task.alive) {
-          commands.push({ label: 'Restart Claude', action: function () {
-            window.klaus.session.getLatest(task.worktreePath).then(function (sessionId) {
-              var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
-              window.klaus.terminal.write(AppState.activeTaskId, cmd + '\n');
-              task.mode = 'claude';
-              updateSidebarMode(AppState.activeTaskId, 'claude');
+          var paletteAgent = (task.mode && task.mode !== 'shell') ? task.mode : defaultAgent();
+          commands.push({ label: 'Restart ' + AppUtils.modeDisplayName(paletteAgent), action: function () {
+            // Respawn the task's original agent via main (not hardcoded Claude).
+            window.klaus.task.restart(AppState.activeTaskId).then(function () {
+              task.mode = paletteAgent;
+              updateSidebarMode(AppState.activeTaskId, paletteAgent);
             });
           }});
         }
