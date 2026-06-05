@@ -99,14 +99,14 @@
         <div id="empty-state">
           <div id="empty-state-default">
             <p>Click <strong>+</strong> to create a new task</p>
-            <p class="sub">Each task creates a git worktree and spawns Claude Code in it.</p>
-            <p class="sub" style="margin-top:14px;">No git? <a href="#" id="empty-state-open-folder" class="empty-state-link">Open a folder</a> to run Claude in any directory.</p>
+            <p class="sub">Each task creates a git worktree and spawns an agent in it.</p>
+            <p class="sub" style="margin-top:14px;">No git? <a href="#" id="empty-state-open-folder" class="empty-state-link">Open a folder</a> to run an agent in any directory.</p>
           </div>
           <div id="empty-state-no-project" style="display:none;">
             <p><strong>Welcome to Klaussy.</strong></p>
-            <p class="sub">Create or attach a git worktree to get started — pick a repo, name a branch, and Klaussy spawns a Claude Code session in it.</p>
+            <p class="sub">Create or attach a git worktree to get started — pick a repo, name a branch, and Klaussy spawns an agent session in it.</p>
             <button id="empty-state-add-project" class="empty-state-cta" type="button">Add a worktree</button>
-            <p class="sub" style="margin-top:18px;">Or <a href="#" id="empty-state-open-folder-np" class="empty-state-link">open any folder</a> to run Claude without git.</p>
+            <p class="sub" style="margin-top:18px;">Or <a href="#" id="empty-state-open-folder-np" class="empty-state-link">open any folder</a> to run an agent without git.</p>
             <p class="sub" style="margin-top:18px;">Or paste a GitHub PR URL into <strong>PR</strong> in the sidebar to review one without a local clone.</p>
           </div>
         </div>
@@ -147,7 +147,7 @@
           <div id="commit-area" style="display: none;">
             <textarea id="commit-message" rows="5" placeholder="Commit message... (Cmd+Enter to commit)" autocomplete="off" spellcheck="false"></textarea>
             <div id="commit-area-actions">
-              <button id="btn-claude-commit-msg" title="Write commit message with Claude">✨</button>
+              <button id="btn-claude-commit-msg" title="Write commit message with the agent">✨</button>
               <button id="btn-do-commit">Commit</button>
             </div>
           </div>
@@ -192,7 +192,7 @@
             <button id="btn-tree-new-file" title="New file">+ File</button>
             <button id="btn-tree-new-folder" title="New folder">+ Folder</button>
             <button id="btn-tree-refresh" title="Refresh tree">↻</button>
-            <button id="btn-run-app" title="Run app — Claude auto-detects how and streams output">▶ Run App</button>
+            <button id="btn-run-app" title="Run app — the agent auto-detects how and streams output">▶ Run App</button>
           </div>
           <div id="file-tree-filter-bar">
             <input type="text" id="file-tree-filter" placeholder="Filter files..." autocomplete="off" spellcheck="false" />
@@ -306,7 +306,7 @@
 
       <!-- Existing worktree tab -->
       <div id="tab-existing" class="tab-content">
-        <p>Select an existing worktree directory to attach Claude Code to.</p>
+        <p>Select an existing worktree directory to attach an agent to.</p>
         <div id="path-picker">
           <input id="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
           <button id="path-browse" type="button" class="modal-input-btn" title="Browse for a worktree folder">Browse</button>
@@ -365,7 +365,7 @@
   <div id="plan-modal-overlay" class="klaus-modal-overlay" style="display: none;">
     <div id="plan-modal" class="klaus-modal klaus-modal-wide">
       <h3 id="plan-modal-title">Plan a task</h3>
-      <p class="plan-modal-sub">Provide task details. A new Claude tab will open on this worktree and run a guided plan flow.</p>
+      <p class="plan-modal-sub">Provide task details. A new agent tab will open on this worktree and run a guided plan flow.</p>
       <div id="plan-modal-tabs">
         <button class="plan-modal-tab active" data-tab="paste">Paste text</button>
         <button class="plan-modal-tab" data-tab="upload">Upload file</button>
@@ -382,7 +382,7 @@
           <input type="file" id="plan-file-input" multiple style="display:none" />
         </div>
         <div id="plan-file-list"></div>
-        <p class="plan-modal-hint">Any files or folders. Their paths are passed to Claude on submit, and Claude reads them directly.</p>
+        <p class="plan-modal-hint">Any files or folders. Their paths are passed to the agent on submit, and the agent reads them directly.</p>
       </div>
 
       <div id="plan-modal-error"></div>
