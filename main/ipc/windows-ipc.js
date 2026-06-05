@@ -9,22 +9,46 @@ const { loadConfig, saveConfig } = require('../util/config');
 const { getLogBuffer } = require('../util/logging');
 const { allWindows, hardenWindow } = require('../state/windows');
 const { startAutoFetch } = require('../state/ci-poll');
+const { allProviders, getProvider, binFor } = require('../state/ai-providers');
+
+// Synchronous provider-list handed to the sandboxed preload (which can't
+// require local files). Registered on require, before any window/preload runs.
+ipcMain.on('get-providers-sync', (event) => {
+  try {
+    event.returnValue = allProviders();
+  } catch {
+    event.returnValue = null;
+  }
+});
+
+// Resolve a provider's configured binary and probe its --version. Returns
+// 'not found' if the binary isn't on PATH / errors out.
+function probeAgent(providerId, config) {
+  const provider = getProvider(providerId);
+  if (!provider) return null;
+  const bin = binFor(providerId, config);
+  let version = 'not found';
+  try {
+    version = execFileSync(bin, provider.versionArgs, { stdio: 'pipe', timeout: 5000 }).toString().trim();
+  } catch {}
+  return { id: providerId, displayName: provider.displayName, path: bin, version };
+}
 
 // ---- About Info (A7) ----
 
 ipcMain.handle('get-about-info', async () => {
   const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  let claudeVersion = 'not found';
-  try {
-    claudeVersion = execFileSync(claudeBin, ['--version'], { stdio: 'pipe', timeout: 5000 }).toString().trim();
-  } catch {}
+  const agents = allProviders().map((p) => probeAgent(p.id, config));
+  const claude = agents.find((a) => a.id === 'claude') || {};
   return {
     appVersion: app.getVersion(),
     electronVersion: process.versions.electron,
     nodeVersion: process.versions.node,
-    claudePath: claudeBin,
-    claudeVersion,
+    // Per-agent path/version for the About panel's CLI list.
+    agents,
+    // Back-compat: older renderer code reads these two directly.
+    claudePath: claude.path || (config.claudePath || 'claude'),
+    claudeVersion: claude.version || 'not found',
   };
 });
 
@@ -99,7 +123,14 @@ ipcMain.handle('get-preferences', () => {
     lineHeight: config.lineHeight || 1.2,
     cursorStyle: config.cursorStyle || 'block',
     claudePath: config.claudePath || '',
-    defaultMode: config.defaultMode || 'claude',
+    codexPath: config.codexPath || '',
+    geminiPath: config.geminiPath || '',
+    copilotPath: config.copilotPath || '',
+    // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
+    defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
+    defaultMode: config.defaultProvider || config.defaultMode || 'claude',
+    // Per-agent pinned model/version: { <agentId>: '<modelId>' }.
+    agentModel: config.agentModel || {},
     theme: config.theme || { preset: 'dark' },
     keybindings: config.keybindings || {},
     autoFetchInterval: config.autoFetchInterval || 60000,
@@ -113,7 +144,21 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.lineHeight !== undefined) config.lineHeight = prefs.lineHeight;
   if (prefs.cursorStyle !== undefined) config.cursorStyle = prefs.cursorStyle;
   if (prefs.claudePath !== undefined) config.claudePath = prefs.claudePath;
-  if (prefs.defaultMode !== undefined) config.defaultMode = prefs.defaultMode;
+  if (prefs.codexPath !== undefined) config.codexPath = prefs.codexPath;
+  if (prefs.geminiPath !== undefined) config.geminiPath = prefs.geminiPath;
+  if (prefs.copilotPath !== undefined) config.copilotPath = prefs.copilotPath;
+  if (prefs.defaultProvider !== undefined) {
+    config.defaultProvider = prefs.defaultProvider;
+    config.defaultMode = prefs.defaultProvider; // keep legacy key in sync
+  } else if (prefs.defaultMode !== undefined) {
+    config.defaultMode = prefs.defaultMode;
+    config.defaultProvider = prefs.defaultMode;
+  }
+  // Per-agent model selection. Merge so setting one agent's model doesn't drop
+  // the others.
+  if (prefs.agentModel !== undefined) {
+    config.agentModel = Object.assign({}, config.agentModel, prefs.agentModel);
+  }
   if (prefs.theme !== undefined) config.theme = prefs.theme;
   if (prefs.keybindings !== undefined) config.keybindings = prefs.keybindings;
   if (prefs.autoFetchInterval !== undefined) {
@@ -131,11 +176,15 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
 
 ipcMain.handle('get-claude-info', async () => {
   const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  try {
-    const version = execFileSync(claudeBin, ['--version'], { stdio: 'pipe', timeout: 5000 }).toString().trim();
-    return { path: claudeBin, version };
-  } catch {
-    return { path: claudeBin, version: 'not found' };
-  }
+  const info = probeAgent('claude', config);
+  return { path: info.path, version: info.version };
+});
+
+// Per-provider version probe for the preferences UI. { provider } in,
+// { id, displayName, path, version } out (version='not found' on failure).
+ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
+  const config = loadConfig();
+  const info = probeAgent(provider, config);
+  if (!info) return { id: provider, path: '', version: 'not found' };
+  return info;
 });

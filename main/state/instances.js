@@ -17,6 +17,9 @@ const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const { allWindows, getMainWindow } = require('./windows');
+const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-providers');
+const { ensureWorktreeConsentSync } = require('../util/agent-consent');
+const { beginSession } = require('../util/agent-concurrency');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -210,7 +213,7 @@ function sendCIFlipNotification(inst, run, bucket) {
 }
 
 function processIdleDetection(inst, data) {
-  if (inst.mode !== 'claude') return;
+  if (!isAgentMode(inst.mode)) return;
 
   inst.lastDataTime = Date.now();
   inst.notifiedIdle = false;
@@ -219,12 +222,14 @@ function processIdleDetection(inst, data) {
   const stripped = stripAnsi(data);
   inst.recentOutput = (inst.recentOutput + stripped).slice(-ROLLING_BUFFER_SIZE);
 
+  const agentName = displayNameFor(inst.mode);
+
   // Reset quiet timer
   if (inst.quietTimer) clearTimeout(inst.quietTimer);
   inst.quietTimer = setTimeout(() => {
-    if (inst.alive && inst.mode === 'claude' && !inst.notifiedIdle) {
+    if (inst.alive && isAgentMode(inst.mode) && !inst.notifiedIdle) {
       inst.notifiedIdle = true;
-      sendIdleNotification(inst, 'Claude has been idle for 15s');
+      sendIdleNotification(inst, `${agentName} has been idle for 15s`);
     }
   }, IDLE_TIMEOUT_MS);
 
@@ -232,7 +237,7 @@ function processIdleDetection(inst, data) {
   const tail = inst.recentOutput.slice(-200);
   for (const pattern of PROMPT_PATTERNS) {
     if (pattern.test(tail)) {
-      sendIdleNotification(inst, 'Claude is waiting for input');
+      sendIdleNotification(inst, `${agentName} is waiting for input`);
       break;
     }
   }
@@ -271,19 +276,29 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
 
-  // 'claude' mode launches claude code, 'shell' mode launches a login shell
+  // An agent mode (claude/codex/gemini/copilot) launches that CLI; 'shell'
+  // mode launches a plain login shell. The provider registry owns the exact
+  // command string (binary, resume flag) so this stays tool-agnostic.
   const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  let claudeCmd;
+  let agentCmd;
+  let session = { release: () => {} };
   if (mode === 'shell') {
-    claudeCmd = null;
-  } else if (resumeSessionId) {
-    claudeCmd = `${claudeBin} --resume ${resumeSessionId}`;
+    agentCmd = null;
   } else {
-    claudeCmd = claudeBin;
+    const provider = getProvider(mode) || getProvider('claude');
+    const bin = binFor(provider.id, config);
+    // Gated agents (Gemini) prompt once per worktree for trust + file access.
+    // If the user cancels, don't spawn at all.
+    const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
+    if (!consent.allowed) return { cancelled: true };
+    // Token-rotation guard: warn before a second concurrent Codex session.
+    session = beginSession(provider.id);
+    if (!session.ok) return { cancelled: true };
+    const model = (config.agentModel || {})[provider.id] || '';
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model });
   }
 
-  const args = claudeCmd ? shellRunCmdArgs(userShell, claudeCmd) : shellLoginArgs(userShell);
+  const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
   const ptyProc = pty.spawn(userShell, args, {
     name: 'xterm-256color',
     cols: 120,
@@ -297,8 +312,17 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {},
     subTerminals: [], nextSubId: 1,
     spawnTime: Date.now(),
-    preSpawnSessionIds: mode === 'claude' ? snapshotSessionIds(worktreePath) : new Set(),
-    claudeSessionId: mode === 'claude' ? (resumeSessionId || null) : null,
+    // The token-rotation concurrency slot for this agent process; restart-task
+    // hands it off (release old, acquire new) so the live-session count stays
+    // accurate. Released in onExit.
+    agentSession: session,
+    // Only providers with per-worktree .jsonl sessions (Claude today) snapshot
+    // pre-spawn ids for exact-session detection; others resume via their native
+    // "continue latest in this dir" flag instead (see ai-providers.js).
+    preSpawnSessionIds: (isAgentMode(mode) && getProvider(mode).perWorktreeSessions)
+      ? snapshotSessionIds(worktreePath) : new Set(),
+    claudeSessionId: (isAgentMode(mode) && getProvider(mode).supportsExactResume)
+      ? (resumeSessionId || null) : null,
     // G5: if this task was spawned from a PR review "Check out locally", the
     // PR number is recorded here so pr-for-branch can load the PR directly
     // instead of guessing from branch-name heuristics (which fail for fork
@@ -317,12 +341,13 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
 
   ptyProc.onExit(({ exitCode }) => {
     clearIdleTimer(instance);
+    session.release(); // free the concurrency slot (Codex token-rotation guard)
     // If this was a Claude session, auto-convert to shell in-place — but
     // only for natural exits. An explicit kill-task sets `killed`, and
     // restart-task sets `restarting`; neither should spawn a shell we'd
     // lose track of (kill-task already deleted the instances entry; the
     // orphan shell would have no Map entry and nothing could kill it).
-    if (instance.mode === 'claude' && !_isQuitting()
+    if (isAgentMode(instance.mode) && !_isQuitting()
         && !instance.killed && !instance.restarting) {
       convertInstanceToShell(instance);
       return;
@@ -339,7 +364,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
 }
 
 function convertInstanceToShell(inst) {
-  sendIdleNotification(inst, 'Claude has exited');
+  sendIdleNotification(inst, `${displayNameFor(inst.originalMode || inst.mode)} has exited`);
   const id = inst.id;
   const userShell = defaultShell();
   const ptyProc = pty.spawn(userShell, shellLoginArgs(userShell), {

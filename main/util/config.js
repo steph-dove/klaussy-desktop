@@ -1,6 +1,7 @@
 // Persistent config living at userData/config.json: repo path, project list,
-// UI prefs, notify toggles, claudePath, theme, and (historically) a PR-review
-// cache that has since moved to its own file-per-PR store.
+// UI prefs, notify toggles, per-agent CLI paths (claudePath / codexPath /
+// geminiPath / copilotPath), defaultProvider, theme, and (historically) a
+// PR-review cache that has since moved to its own file-per-PR store.
 //
 // saveConfig has ~64 call sites (prefs changes, PR cache writes, notify pref
 // updates, the 10s auto-save timer). Writes are atomic (tmp+rename) and
@@ -20,7 +21,7 @@ const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
 
-const CURRENT_SCHEMA_VERSION = 1;
+const CURRENT_SCHEMA_VERSION = 2;
 
 // Persist repo path in a simple JSON file in userData
 function getConfigPath() {
@@ -131,6 +132,16 @@ const migrations = [
     config.prReviews = undefined;
     if (migrated > 0) {
       console.log(`pr-review-cache: migrated ${migrated} legacy entries to userData/pr-review-cache/`);
+    }
+  },
+
+  // v1 → v2: multi-agent support. `defaultMode` ('claude' | 'shell') becomes
+  // `defaultProvider`, which now also accepts 'codex' | 'gemini' | 'copilot'.
+  // We keep `defaultMode` in place for one release so a downgrade still reads
+  // a sane value; the new code prefers `defaultProvider`.
+  function v1_to_v2(config) {
+    if (config.defaultProvider === undefined) {
+      config.defaultProvider = config.defaultMode || 'claude';
     }
   },
 ];

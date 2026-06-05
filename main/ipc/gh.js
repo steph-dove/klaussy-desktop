@@ -8,6 +8,7 @@ const { execFileSync, spawn } = require('child_process');
 const { ipcMain, shell, BrowserWindow } = require('electron');
 const { loadConfig } = require('../util/config');
 const { ghExec, clearGhTokenCache } = require('../util/exec');
+const { allProviders, getProvider, binFor, installCommandFor, authMetaFor } = require('../state/ai-providers');
 
 // Parse `gh auth status` output into structured account records.
 //
@@ -316,7 +317,42 @@ ipcMain.handle('check-dependencies', async () => {
   const authed = validAccounts.length > 0;
   const claudeVersion = probe(claudeBin, ['--version']);
 
+  // Probe every supported AI CLI so the Setup Check can list install status +
+  // a one-line install command per agent (optional — only Claude is required).
+  const agents = allProviders().map((p) => {
+    const provider = getProvider(p.id);
+    const bin = binFor(p.id, config);
+    const v = probe(bin, provider.versionArgs);
+    const auth = authMetaFor(p.id);
+    // authed: true / false when we have a verified status probe, else null
+    // (unknown) so the UI doesn't show a false "not signed in".
+    // Note: a "not signed in" status often exits non-zero and writes to
+    // stderr (e.g. `codex login status` → exit 1, stderr "Not logged in"), so
+    // check both streams and don't require a clean exit.
+    let authed = null;
+    if (v.ok && auth.statusArgs) {
+      const s = probe(bin, auth.statusArgs);
+      if (s.ok) {
+        authed = !auth.notAuthedPattern.test(s.output || '');
+      } else if (auth.notAuthedPattern.test(s.error || '')) {
+        authed = false;
+      }
+    }
+    return {
+      id: p.id,
+      name: `${p.displayName} (${p.defaultBin})`,
+      installed: v.ok,
+      version: v.ok ? v.output.split('\n')[0] : null,
+      path: bin,
+      required: p.id === 'claude', // Claude is the historical default/required CLI
+      installCommand: installCommandFor(p.id),
+      authed,
+      loginCommand: auth.loginCommand,
+    };
+  });
+
   return {
+    agents,
     // The renderer uses `platform` to pick OS-appropriate install commands
     // (brew vs winget vs apt). We resolve it here rather than have the
     // renderer sniff navigator.platform — cleaner and matches what the rest

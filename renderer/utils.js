@@ -37,10 +37,29 @@ window.AppUtils = (function () {
     return _iconColors[Math.abs(hash) % _iconColors.length];
   }
 
+  // ---- AI provider labels (single source: preload's static provider list) ----
+  // mode is a provider id ('claude' | 'codex' | 'gemini' | 'copilot') or
+  // 'shell'. Falls back gracefully if the preload bridge isn't ready.
+  function _providers() {
+    return (window.klaus && window.klaus.ui && window.klaus.ui.providers) || [];
+  }
+  function modeShortLabel(mode) {
+    if (mode === 'shell') return 'sh';
+    var p = _providers().find(function (x) { return x.id === mode; });
+    return p ? p.shortLabel : 'cc';
+  }
+  function modeDisplayName(mode) {
+    if (mode === 'shell') return 'Shell';
+    var p = _providers().find(function (x) { return x.id === mode; });
+    return p ? p.displayName : (mode || 'Agent');
+  }
+
   return {
     escHtml: escHtml,
     escAttr: escAttr,
     formatAge: formatAge,
     iconColor: iconColor,
+    modeShortLabel: modeShortLabel,
+    modeDisplayName: modeDisplayName,
   };
 })();

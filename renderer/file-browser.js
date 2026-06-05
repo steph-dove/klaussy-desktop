@@ -696,7 +696,7 @@ window.FileBrowser = (function () {
       bodyEl.textContent = accumulated;
     } else {
       bodyEl.classList.add('status-pulse');
-      bodyEl.textContent = agent ? 'Resuming…' : 'Sending to Claude…';
+      bodyEl.textContent = agent ? 'Resuming…' : 'Sending to the agent…';
     }
 
     // For done agents (rehydrated), nothing more to wire up.
