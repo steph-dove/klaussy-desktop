@@ -74,7 +74,7 @@ test('runConfigMigrations v0->v1 folds legacy prReviews and drops the key', asyn
 
     // Config: schemaVersion stamped, prReviews gone.
     const after = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(after.schemaVersion, 1);
+    assert.equal(after.schemaVersion, config.CURRENT_SCHEMA_VERSION);
     assert.equal('prReviews' in after, false);
     assert.equal(after.repoPath, '/x');  // untouched fields preserved
 
@@ -122,9 +122,36 @@ test('runConfigMigrations v0->v1 is a no-op when prReviews is absent', async () 
     config.runConfigMigrations();
     await waitForFlush();
     const after = JSON.parse(fs.readFileSync(file, 'utf8'));
-    assert.equal(after.schemaVersion, 1);
+    assert.equal(after.schemaVersion, config.CURRENT_SCHEMA_VERSION);
     assert.equal(after.repoPath, '/x');
     assert.equal(fs.existsSync(path.join(dir, 'pr-review-cache')), false);
+  } finally { restore(); }
+});
+
+test('runConfigMigrations v1->v2 derives defaultProvider from defaultMode', async () => {
+  const { dir, restore } = mkTestDir();
+  try {
+    const file = path.join(dir, 'config.json');
+    // v1 shape: legacy defaultMode, no defaultProvider yet.
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1, defaultMode: 'shell' }));
+    config.runConfigMigrations();
+    await waitForFlush();
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.schemaVersion, config.CURRENT_SCHEMA_VERSION);
+    assert.equal(after.defaultProvider, 'shell'); // mirrored from defaultMode
+    assert.equal(after.defaultMode, 'shell');      // kept one release for downgrade safety
+  } finally { restore(); }
+});
+
+test('runConfigMigrations v1->v2 defaults defaultProvider to claude when defaultMode absent', async () => {
+  const { dir, restore } = mkTestDir();
+  try {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 1 }));
+    config.runConfigMigrations();
+    await waitForFlush();
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.defaultProvider, 'claude');
   } finally { restore(); }
 });
 
