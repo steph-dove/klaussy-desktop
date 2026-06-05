@@ -307,7 +307,7 @@ window.PrReview = (function () {
         + '<div class="pr-review-actions">'
           + '<a href="#" class="pr-review-external" data-url="' + escHtml(meta.url || '') + '">Open on GitHub</a>'
           + '<button class="pr-review-btn js-pull-updates" title="Re-fetch PR data + advance the local worktree to the PR’s latest commit">Pull updates</button>'
-          + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this PR">Review with Claude</button>'
+          + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this PR">Review</button>'
           + '<button class="pr-review-btn js-checkout-local" title="Fetch this PR into a new worktree and spawn a task">Check out locally</button>'
           + renderMergeControl(state)
           + (isPopout
@@ -959,7 +959,7 @@ window.PrReview = (function () {
   // Rotating status messages shown before the first streamed chunk arrives.
   // Honest about what's happening at each stage — not fake tool steps.
   var EXPLAIN_STATUS_MESSAGES = [
-    'Sending to Claude\u2026',
+    'Sending to the agent\u2026',
     'Reading the change\u2026',
     'Considering intent\u2026',
     'Looking at surrounding context\u2026',
@@ -1269,16 +1269,26 @@ window.PrReview = (function () {
       // the main-window listener in app.js takes over from here.
     });
     var aiBtn = hostEl.querySelector('.js-ai-review');
-    if (aiBtn) aiBtn.addEventListener('click', function () {
-      // Always swing the user over to the Review tab; start a run if there
-      // isn't one in flight or completed already.
-      activeTab = 'ai-review';
-      if (!aiReview.requestId && !aiReview.finalText) {
-        startAiReview();
-      } else if (lastState) {
-        render(lastState);
-      }
-    });
+    if (aiBtn && window.AgentSplit && AgentSplit.createToolbar) {
+      // Replace the static review button with a global Agent + Version toolbar.
+      // The selection here is the one default agent (and its model) that every
+      // PR action uses — review, implement, CI debug, ask.
+      var toolbar = AgentSplit.createToolbar({
+        runLabel: 'Run Review',
+        onRun: function (agent) {
+          activeTab = 'ai-review';
+          startAiReview(agent); // no-ops if a run is already in flight
+        },
+      });
+      toolbar.classList.add('js-ai-review');
+      aiBtn.replaceWith(toolbar);
+    } else if (aiBtn) {
+      aiBtn.addEventListener('click', function () {
+        activeTab = 'ai-review';
+        if (!aiReview.requestId && !aiReview.finalText) startAiReview();
+        else if (lastState) render(lastState);
+      });
+    }
   }
 
   // ---- G7: AI review cache ----
@@ -1508,17 +1518,27 @@ window.PrReview = (function () {
         // Preserve user edits across streaming re-parses: once the user has
         // modified the review block via ✎, don't clobber their text with
         // fresh AI output.
+        //
+        // `userEdited` = the visible text diverged from the pristine AI text.
+        // While the AI is still streaming, its text GROWS each re-parse, so we
+        // must keep `originalText` in sync with it — otherwise the first parse
+        // freezes the body (originalText) and every later (longer) parse looks
+        // like a user edit, leaving a truncated finding. Agents that stream in
+        // many small deltas (Gemini) hit this; only a real ✎ edit, which
+        // changes `text` WITHOUT touching `originalText`, should diverge them.
         var userEdited = prev.originalText != null && prev.text !== prev.originalText;
         if (!userEdited) {
           prev.text = text;
+          prev.originalText = text;
           prev.severity = severityOf(text);
           if (loc && !prev.locationVerified) {
             prev.path = loc.path;
             prev.line = loc.line;
             prev.locationRaw = loc;
           }
+        } else if (prev.originalText == null) {
+          prev.originalText = text;
         }
-        if (prev.originalText == null) prev.originalText = text;
         return prev;
       }
       return {
@@ -1725,7 +1745,7 @@ window.PrReview = (function () {
       return localBlock
         + '<div class="pr-ai-empty">'
           + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
-          + '<div class="pr-ai-empty-hint">Spawns Claude in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
+          + '<div class="pr-ai-empty-hint">Spawns the selected agent in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
         + '</div>';
     }
 
@@ -1741,7 +1761,7 @@ window.PrReview = (function () {
             : aiReview.cancelled && !aiReview.finalText ? 'Cancelled'
             : aiReview.findings.length + ' finding' + (aiReview.findings.length === 1 ? '' : 's'))
       + '</span>'
-      + (usageStr ? '<span class="pr-ai-usage" title="Reported by claude for this review run; charged to your Anthropic account">' + escHtml(usageStr) + '</span>' : '')
+      + (usageStr ? '<span class="pr-ai-usage" title="Reported by the agent for this review run">' + escHtml(usageStr) + '</span>' : '')
       + (aiReview.requestId
           ? '<button class="pr-ai-cancel pr-review-btn" type="button">Cancel</button>'
           : '')
@@ -1830,8 +1850,8 @@ window.PrReview = (function () {
   function renderTerminalTab() {
     if (reviewTerminal) return renderImplementTerminalChrome();
     return '<div class="pr-terminal-empty">'
-      + '<div class="pr-terminal-empty-title">No Claude run in progress</div>'
-      + '<div class="pr-terminal-empty-hint">Click <b>Implement</b> on a finding in the Review tab to start a Claude session here.</div>'
+      + '<div class="pr-terminal-empty-title">No agent run in progress</div>'
+      + '<div class="pr-terminal-empty-hint">Click <b>Implement</b> on a finding in the Review tab to start an agent session here.</div>'
     + '</div>';
   }
 
@@ -2128,8 +2148,8 @@ window.PrReview = (function () {
     // actually a bug?", "what's the simplest fix?").
     var discussLabel = (f.chatMessages && f.chatMessages.length)
       ? 'Chat (' + f.chatMessages.filter(function (m) { return m.role === 'user'; }).length + ')'
-      : 'Ask Claude';
-    var discussBtn = '<button class="pr-ai-finding-discuss' + (f.chatOpen ? ' open' : '') + '" type="button" title="Discuss this finding with Claude">'
+      : 'Ask';
+    var discussBtn = '<button class="pr-ai-finding-discuss' + (f.chatOpen ? ' open' : '') + '" type="button" title="Discuss this finding with the agent">'
       + escHtml(discussLabel)
     + '</button>';
 
@@ -2138,8 +2158,8 @@ window.PrReview = (function () {
     // While streaming, the button flips to Cancel.
     var investigateBtn = f.investigateId
       ? '<button class="pr-ai-finding-investigate-cancel" type="button" title="Cancel investigation">Cancel investigate</button>'
-      : '<button class="pr-ai-finding-investigate" type="button" title="Ask Claude if this finding is actually valid">'
-        + (f.investigateResult ? 'Investigate again' : 'Claude investigate')
+      : '<button class="pr-ai-finding-investigate" type="button" title="Ask the agent if this finding is actually valid">'
+        + (f.investigateResult ? 'Investigate again' : 'Investigate')
         + '</button>';
 
     // Inline error block — shown below actions when Add-to-PR failed.
@@ -2161,12 +2181,12 @@ window.PrReview = (function () {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
         + commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
         + commentBtn
-        + '<button class="pr-ai-finding-redo" type="button" title="Run Claude implement again">Implement again</button>';
+        + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
     } else {
       actions = commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
-        + '<button class="pr-ai-finding-implement" type="button" title="Claude updates the file and drafts a follow-up PR comment for your approval">Claude implement</button>';
+        + '<button class="pr-ai-finding-implement" type="button" title="The agent updates the file and drafts a follow-up PR comment for your approval">Implement</button>';
     }
 
     var implementOutTxt = f.implementError || f.implementOut || '';
@@ -2272,7 +2292,7 @@ window.PrReview = (function () {
       body = '<div class="pr-ai-finding-investigate-body">' + renderMarkdown(f.investigateResult) + '</div>';
     }
     var header = '<div class="pr-ai-finding-investigate-head">'
-      + '<span class="pr-ai-finding-investigate-label">Claude verdict</span>'
+      + '<span class="pr-ai-finding-investigate-label">Agent verdict</span>'
       + (!f.investigateId && (f.investigateResult || f.investigateError)
           ? '<button class="pr-ai-finding-investigate-clear" type="button" title="Clear this verdict">Clear</button>'
           : '')
@@ -2331,7 +2351,7 @@ window.PrReview = (function () {
     return '<div class="pr-ai-finding-chat">'
       + (msgs || streamingBubble
           ? '<div class="pr-ai-finding-chat-messages">' + msgs + streamingBubble + '</div>'
-          : '<div class="pr-ai-finding-chat-hint">Ask Claude anything about this finding — is it really a bug? what’s the simplest fix? etc.</div>')
+          : '<div class="pr-ai-finding-chat-hint">Ask the agent anything about this finding — is it really a bug? what’s the simplest fix? etc.</div>')
       + errorBar
       + '<div class="pr-ai-finding-chat-composer">'
         + '<textarea class="pr-ai-finding-chat-input" rows="2" placeholder="Message Claude (⌘⏎ to send)"' + (streaming ? ' disabled' : '') + '></textarea>'
@@ -2675,8 +2695,9 @@ window.PrReview = (function () {
     if (lastState) render(lastState);
   }
 
-  function startAiReview() {
+  function startAiReview(provider) {
     if (aiReview.requestId) return;
+    provider = provider || (window.AgentSplit && AgentSplit.getAgent('review'));
     var requestId = 'air-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     aiReview.requestId = requestId;
     aiReview.finalText = '';
@@ -2716,7 +2737,7 @@ window.PrReview = (function () {
       if (aiReview.finalText) saveAiReviewCache();
     });
 
-    window.klaus.pr.reviewAiStart(requestId).then(function (r) {
+    window.klaus.pr.reviewAiStart(requestId, provider).then(function (r) {
       if (r && r.error) {
         if (unsubData) unsubData();
         aiReview.requestId = null;
@@ -2886,15 +2907,20 @@ window.PrReview = (function () {
       if (implRun.status === 'cancelled' || signal === 'SIGTERM' || signal === 'SIGKILL') {
         finalizeImplementRun('cancelled');
       } else {
-        finalizeImplementRun('error', 'Claude exited without finishing the turn');
+        finalizeImplementRun('error', 'The agent exited without finishing the turn');
       }
     });
 
     opts.repaint();
 
-    window.klaus.pr.reviewImplementStart(requestId, opts.mode, opts.body).then(function (r) {
+    // Implement with the current global default agent (the one shown on the
+    // Review split button / Preferences). opts.provider lets a caller override.
+    var implProvider = opts.provider || (window.AgentSplit && AgentSplit.getAgent());
+    window.klaus.pr.reviewImplementStart(requestId, opts.mode, opts.body, implProvider).then(function (r) {
       if (!implRun || implRun.requestId !== requestId) return;
-      if (r && r.error) {
+      if (r && r.cancelled) {
+        finalizeImplementRun('cancelled'); // user declined the trust prompt
+      } else if (r && r.error) {
         finalizeImplementRun('error', r.error);
       } else if (r && r.worktreePath) {
         aiReview.worktreePath = r.worktreePath;
@@ -3894,14 +3920,14 @@ window.PrReview = (function () {
 
     var investigateBtn = s.investigateId
       ? '<button class="pr-conv-claude-investigate-cancel" type="button" data-dbid="' + ctx.dbid + '" title="Cancel investigation">Cancel investigate</button>'
-      : '<button class="pr-conv-claude-investigate" type="button" data-dbid="' + ctx.dbid + '" title="Ask Claude if this comment’s concern is valid">'
-        + (s.investigateResult ? 'Investigate again' : 'Claude investigate')
+      : '<button class="pr-conv-claude-investigate" type="button" data-dbid="' + ctx.dbid + '" title="Ask the agent if this comment’s concern is valid">'
+        + (s.investigateResult ? 'Investigate again' : 'Investigate')
         + '</button>';
 
     var implementBtn = s.implementId
       ? '<button class="pr-conv-claude-implement-cancel" type="button" data-dbid="' + ctx.dbid + '" title="Cancel implement">Cancel implement</button>'
-      : '<button class="pr-conv-claude-implement" type="button" data-dbid="' + ctx.dbid + '" title="Claude updates the file(s) and drafts a reply for your approval">'
-        + (s.implementDraft ? 'Implement again' : 'Claude implement')
+      : '<button class="pr-conv-claude-implement" type="button" data-dbid="' + ctx.dbid + '" title="The agent updates the file(s) and drafts a reply for your approval">'
+        + (s.implementDraft ? 'Implement again' : 'Implement')
         + '</button>';
 
     var actions = '<div class="pr-conv-claude-actions">' + investigateBtn + implementBtn + '</div>';
@@ -3923,7 +3949,7 @@ window.PrReview = (function () {
         ? '<button class="pr-conv-claude-investigate-clear" type="button" data-dbid="' + ctx.dbid + '" title="Clear this verdict">Clear</button>'
         : '';
       investigatePanel = '<div class="pr-conv-claude-panel">'
-        + '<div class="pr-conv-claude-head"><span class="pr-conv-claude-label">Claude verdict</span>' + clearBtn + '</div>'
+        + '<div class="pr-conv-claude-head"><span class="pr-conv-claude-label">Agent verdict</span>' + clearBtn + '</div>'
         + body
       + '</div>';
     }
@@ -3940,7 +3966,7 @@ window.PrReview = (function () {
         + '</div>';
       }
       implementPanel = '<div class="pr-conv-claude-panel">'
-        + '<div class="pr-conv-claude-head"><span class="pr-conv-claude-label">Claude implement</span></div>'
+        + '<div class="pr-conv-claude-head"><span class="pr-conv-claude-label">Implement</span></div>'
         + iBody
       + '</div>';
     }
@@ -4325,14 +4351,14 @@ window.PrReview = (function () {
       var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
       var linkAttr = c.link ? ' data-link="' + escHtml(c.link) + '"' : '';
       var debugBtn = (b === 'fail' && c.link)
-        ? '<button class="pr-check-debug-btn" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(c.id ? String(c.id) : '') + '" title="Use Claude to diagnose this failure">Debug</button>'
+        ? '<button class="pr-check-debug-btn" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(c.id ? String(c.id) : '') + '" title="Use the agent to diagnose this failure">Debug</button>'
         : '';
       // Primary action for failing checks: spawn Claude in the PR worktree
       // with edit tools, then surface the resulting diff for the user to
       // review and push. Debug stays as the read-only inspector for cases
       // where you want analysis without auto-edit.
       var fixBtn = (b === 'fail' && c.link && c.id)
-        ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(String(c.id)) + '" title="Have Claude edit, commit, and push a fix">Fix</button>'
+        ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + escHtml(c.link) + '" data-name="' + escHtml(c.name || '') + '" data-check-id="' + escHtml(String(c.id)) + '" title="Have the agent edit, commit, and push a fix">Fix</button>'
         : '';
       var annotationsBtn = (b === 'fail' && c.id)
         ? '<button class="pr-check-annotations-btn" type="button" data-check-id="' + escHtml(String(c.id)) + '" data-name="' + escHtml(c.name || '') + '" title="Show file:line annotations">Annotations</button>'
@@ -4923,7 +4949,7 @@ window.PrReview = (function () {
         chatEl.innerHTML =
           '<div class="pr-check-debug-chat-log"></div>'
           + '<form class="pr-check-debug-chat-composer">'
-            + '<textarea class="pr-check-debug-chat-input" rows="2" placeholder="Ask Claude about this analysis…"></textarea>'
+            + '<textarea class="pr-check-debug-chat-input" rows="2" placeholder="Ask the agent about this analysis…"></textarea>'
             + '<button class="pr-check-debug-chat-send" type="submit">Send</button>'
           + '</form>';
         // Insert before the footer if it exists, otherwise at the end.
@@ -4989,7 +5015,7 @@ window.PrReview = (function () {
         '<div class="pr-check-debug-usage">Ran in ' + escHtml(String(entry.durationSec || 0)) + 's on your Anthropic account</div>'
         + '<div class="pr-check-debug-actions">'
           + '<button class="pr-check-debug-fix pr-check-action-primary" type="button" title="Apply this analysis as a code fix in the PR worktree">Fix this</button>'
-          + '<button class="pr-check-debug-open-task" type="button"' + (entry.openTaskState === 'opening' ? ' disabled' : '') + ' title="Spawn an interactive Claude task seeded with this analysis">' + escHtml(openLabel) + '</button>'
+          + '<button class="pr-check-debug-open-task" type="button"' + (entry.openTaskState === 'opening' ? ' disabled' : '') + ' title="Spawn an interactive agent task seeded with this analysis">' + escHtml(openLabel) + '</button>'
         + '</div>';
 
       footerEl.querySelector('.pr-check-debug-fix').addEventListener('click', function () {
@@ -5370,7 +5396,7 @@ window.PrReview = (function () {
 
       worktreePath = (result && result.worktreePath) || worktreePath;
       var seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-      progressItems.push({ kind: 'system', label: 'Claude finished in ' + seconds + 's. Loading diff…' });
+      progressItems.push({ kind: 'system', label: 'Agent finished in ' + seconds + 's. Loading diff…' });
       paintProgress();
 
       if (finalText) {
@@ -5425,7 +5451,7 @@ window.PrReview = (function () {
     }
     var files = (state && state.files) || [];
     if (files.length === 0) {
-      diffEl.innerHTML = '<div class="pr-check-fix-empty">Claude didn’t make any file changes. Read the summary above for context.</div>';
+      diffEl.innerHTML = '<div class="pr-check-fix-empty">The agent didn’t make any file changes. Read the summary above for context.</div>';
       return;
     }
 

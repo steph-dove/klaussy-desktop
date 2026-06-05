@@ -304,7 +304,7 @@ window.TerminalManager = (function () {
     subTabBar.className = 'sub-terminal-tabs';
     subTabBar.innerHTML =
       '<button class="sub-tab active" data-sub-id="0">Primary</button>' +
-      '<button class="sub-tab-add" title="Add shell tab">+</button>';
+      '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)">+</button></span>';
     container.insertBefore(subTabBar, label.nextSibling);
 
     subTabBar.addEventListener('click', function (e) {
@@ -326,10 +326,53 @@ window.TerminalManager = (function () {
       switchSubTerminal(taskEntry, null);
     });
 
-    subTabBar.querySelector('.sub-tab-add').addEventListener('click', async function () {
-      var result = await window.klaus.terminal.addSub(id, 'Shell');
-      if (result.error) return;
-      addSubTerminalTab(taskEntry, result.subId, result.label);
+    // The "+" opens a small picker so the user can start a new tab on this
+    // worktree with any AI agent (or a plain shell) — e.g. run the same task
+    // in Codex alongside the Claude primary tab.
+    var addBtn = subTabBar.querySelector('.sub-tab-add');
+    var addWrap = subTabBar.querySelector('.sub-tab-add-wrap');
+    var addMenu = document.createElement('div');
+    addMenu.className = 'actions-dropdown-menu sub-tab-add-menu';
+    addMenu.style.display = 'none';
+    var agentItems = ((window.klaus.ui && window.klaus.ui.providers) || []).map(function (p) {
+      return '<button class="actions-dropdown-item" data-mode="' + p.id + '">' + escHtml(p.displayName) + '</button>';
+    }).join('');
+    addMenu.innerHTML = agentItems
+      + '<div class="actions-dropdown-divider"></div>'
+      + '<button class="actions-dropdown-item" data-mode="shell">Shell</button>';
+    addWrap.appendChild(addMenu);
+
+    addBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var isOpen = addMenu.style.display !== 'none';
+      if (openMenuEl && openMenuEl !== addMenu) openMenuEl.style.display = 'none';
+      addMenu.style.display = isOpen ? 'none' : 'flex';
+      openMenuEl = isOpen ? null : addMenu;
+    });
+
+    addMenu.addEventListener('click', async function (e) {
+      e.stopPropagation();
+      var item = e.target.closest('.actions-dropdown-item');
+      if (!item) return;
+      addMenu.style.display = 'none';
+      openMenuEl = null;
+      var mode = item.dataset.mode;
+      var label = mode === 'shell' ? 'Shell'
+        : (window.AppUtils ? AppUtils.modeDisplayName(mode) : mode);
+      try {
+        var result = await window.klaus.terminal.addSub(id, label, mode);
+        if (!result || result.cancelled) return; // user declined the trust prompt
+        if (result.error) {
+          if (window.toast && window.toast.error) window.toast.error('New tab failed: ' + result.error);
+          return;
+        }
+        addSubTerminalTab(taskEntry, result.subId, result.label);
+        // Switch to the freshly-created tab so the user immediately sees the
+        // agent start (the "+" used to add a hidden tab and never switch).
+        switchSubTerminal(taskEntry, result.subId);
+      } catch (err) {
+        if (window.toast && window.toast.error) window.toast.error('New tab error: ' + (err && err.message || err));
+      }
     });
 
     window.klaus.task.getNotifyEnabled(id).then(function (val) {
@@ -351,13 +394,16 @@ window.TerminalManager = (function () {
     var id = taskEntry.id;
     var container = taskEntry.container;
     var subTabBar = container.querySelector('.sub-terminal-tabs');
-    var addBtn = subTabBar.querySelector('.sub-tab-add');
+    // Insert before the "+" group. The button lives inside .sub-tab-add-wrap,
+    // so reference the wrap (a direct child of the bar) — passing the button
+    // itself would throw, since it's not a direct child of subTabBar.
+    var addAnchor = subTabBar.querySelector('.sub-tab-add-wrap') || subTabBar.querySelector('.sub-tab-add');
 
     var tab = document.createElement('button');
     tab.className = 'sub-tab';
     tab.dataset.subId = subId;
     tab.innerHTML = escHtml(label) + ' <span class="sub-tab-close">&times;</span>';
-    subTabBar.insertBefore(tab, addBtn);
+    subTabBar.insertBefore(tab, addAnchor);
 
     var Terminal = window.Terminal;
     var FitAddon = window.FitAddon;
@@ -543,25 +589,30 @@ window.TerminalManager = (function () {
 
   // ---- openClaudeSubTerminal (Actions dropdown) ----
 
-  // Spawn a new Claude sub-tab on the given task's worktree, then type the
-  // provided command into it once Claude has finished booting. The delay is
-  // generous because Claude Code's TUI takes noticeably longer to render its
-  // input box than a plain login shell — runInSubTerminal's 400ms is enough
-  // for zsh but not for Claude. `label` becomes the tab's visible label.
+  // Spawn a new agent sub-tab on the given task's worktree, seeded with the
+  // Plan/Debug/Review prompt. The prompt is handed to the agent as its initial
+  // positional argument at spawn (see add-sub-terminal in main/ipc/tasks.js) —
+  // NOT typed in after boot. Typing raced the agent's TUI startup (a fixed
+  // delay is fragile across agents and machines) and mangled multi-line prompts
+  // by submitting them line-by-line; passing the prompt at spawn fixes both.
+  // `label` becomes the tab's visible label.
   async function openClaudeSubTerminal(taskId, label, command) {
     var taskEntry = tasks.get(taskId);
     if (!taskEntry) return { error: 'No active task' };
 
-    var result = await window.klaus.terminal.addSub(taskId, label, 'claude');
+    // Spawn the action sub-terminal with the PARENT task's agent so a Codex /
+    // Gemini / Copilot task's Plan/Debug/Review opens that same agent. A
+    // shell-only task falls back to the default agent. (NOTE: the Plan/Debug/
+    // Review prompt bodies are still Claude-flavored slash commands — see
+    // plan-modal.js; tuning them per-agent is a follow-up.)
+    var defaultAgent = (AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude';
+    var agentMode = (taskEntry.mode && taskEntry.mode !== 'shell') ? taskEntry.mode : defaultAgent;
+    var result = await window.klaus.terminal.addSub(taskId, label, agentMode, command);
     if (result.error) return { error: result.error };
+    if (result.cancelled) return { cancelled: true };
     addSubTerminalTab(taskEntry, result.subId, result.label);
     var subEntry = taskEntry.subTerminals[taskEntry.subTerminals.length - 1];
     switchSubTerminal(taskEntry, subEntry.subId);
-
-    setTimeout(function () {
-      if (!subEntry.alive) return;
-      window.klaus.terminal.write(taskId, command + '\r', subEntry.subId);
-    }, 2500);
 
     return { ok: true };
   }
@@ -587,10 +638,18 @@ window.TerminalManager = (function () {
     var menu = document.createElement('div');
     menu.className = 'actions-dropdown-menu';
     menu.style.display = 'none';
+    // "Run in <Agent>" spawns a sibling task in THIS worktree with another CLI,
+    // so you can run the same work in two agents side by side.
+    var providers = (window.klaus.ui && window.klaus.ui.providers) || [];
+    var runInItems = providers.map(function (p) {
+      return '<button class="actions-dropdown-item" data-run-in="' + p.id + '">Run in ' + escHtml(p.displayName) + '</button>';
+    }).join('');
     menu.innerHTML =
       '<button class="actions-dropdown-item" data-action="plan">Plan</button>' +
       '<button class="actions-dropdown-item" data-action="debug">Debug</button>' +
-      '<button class="actions-dropdown-item" data-action="review">Review</button>';
+      '<button class="actions-dropdown-item" data-action="review">Review</button>' +
+      '<div class="actions-dropdown-divider"></div>' +
+      runInItems;
 
     host.appendChild(btn);
     host.appendChild(menu);
@@ -610,13 +669,51 @@ window.TerminalManager = (function () {
       e.stopPropagation();
       var target = e.target.closest('.actions-dropdown-item');
       if (!target) return;
-      var action = target.dataset.action;
       menu.style.display = 'none';
       openMenuEl = null;
+
+      // "Run in <Agent>": spawn a sibling task in the same worktree with the
+      // chosen provider, so the user can compare/parallelize agents.
+      var runIn = target.dataset.runIn;
+      if (runIn) {
+        runInAnotherAgent(taskId, runIn);
+        return;
+      }
+
+      var action = target.dataset.action;
       if (window.ActionModal && typeof window.ActionModal.run === 'function') {
         window.ActionModal.run(taskId, action);
       }
     });
+  }
+
+  // Spawn a new task on the same worktree using a different AI CLI. Mirrors the
+  // attach-worktree flow the New Task dialog uses for an existing directory.
+  async function runInAnotherAgent(taskId, providerId) {
+    var src = tasks.get(taskId);
+    if (!src || !src.worktreePath) {
+      window.toast.error('Cannot determine worktree for this task');
+      return;
+    }
+    // A file-only (branchless) source isn't a git worktree, so attach-worktree
+    // would reject it ("not a git repository"). Open it as a plain folder
+    // instead so the sibling agent starts in the same directory.
+    var result;
+    try {
+      result = src.branch
+        ? await window.klaus.task.attachWorktree(src.worktreePath, providerId)
+        : await window.klaus.task.openFolder(src.worktreePath, providerId);
+    } catch (err) {
+      window.toast.error('Failed to start ' + providerId + ': ' + (err && err.message || err));
+      return;
+    }
+    if (!result || result.cancelled) return; // user declined the trust prompt
+    if (result.error) {
+      window.toast.error('Failed to start ' + providerId + ': ' + result.error);
+      return;
+    }
+    addTaskToUI(result);
+    switchToTask(result.id);
   }
 
   // ---- rewireTerminal ----

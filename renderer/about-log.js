@@ -17,15 +17,22 @@ window.Dialogs = (function () {
     document.body.appendChild(overlay);
 
     window.klaus.ui.getAboutInfo().then(function (info) {
+      // One row per detected AI CLI; falls back to the legacy single-Claude
+      // fields if an older main process didn't send the `agents` array.
+      var agents = (info.agents && info.agents.length)
+        ? info.agents
+        : [{ displayName: 'Claude CLI', version: info.claudeVersion }];
+      var agentRows = agents.map(function (a) {
+        return '<div class="about-row"><span>' + escHtml(a.displayName) + '</span><span>' + escHtml(a.version) + '</span></div>';
+      }).join('');
       dialog.innerHTML =
         '<h2>Klaussy</h2>' +
-        '<p class="about-tagline">Multi-terminal Claude Code worktree manager + PR reviewer.</p>' +
+        '<p class="about-tagline">Multi-terminal AI coding-agent worktree manager + PR reviewer.</p>' +
         '<div class="about-rows">' +
           '<div class="about-row"><span>Version</span><span>' + escHtml(info.appVersion) + '</span></div>' +
           '<div class="about-row"><span>Electron</span><span>' + escHtml(info.electronVersion) + '</span></div>' +
           '<div class="about-row"><span>Node</span><span>' + escHtml(info.nodeVersion) + '</span></div>' +
-          '<div class="about-row"><span>Claude CLI</span><span>' + escHtml(info.claudeVersion) + '</span></div>' +
-          '<div class="about-row"><span>Claude Path</span><span>' + escHtml(info.claudePath) + '</span></div>' +
+          agentRows +
         '</div>' +
         '<div class="about-actions">' +
           '<button class="about-howto" type="button">How to use</button>' +
@@ -249,7 +256,14 @@ window.Dialogs = (function () {
     var force = opts && opts.force;
     var deps = await window.klaus.gh.checkDependencies();
     var ghBad = !deps.gh.installed || !deps.gh.authed;
-    var claudeBad = !deps.claude.installed;
+    // Agent list: prefer the multi-agent `agents` array; fall back to the
+    // legacy single-Claude shape for older main processes.
+    var agentList = (deps.agents && deps.agents.length)
+      ? deps.agents
+      : [{ id: 'claude', name: 'Claude Code CLI (claude)', installed: deps.claude.installed, version: deps.claude.version, path: deps.claude.path, required: true }];
+    // Only a missing REQUIRED agent (Claude) is a problem worth auto-prompting
+    // about; codex/gemini/copilot are optional and shown for convenience.
+    var claudeBad = agentList.some(function (a) { return a.required && !a.installed; });
     if (!ghBad && !claudeBad && !force) return; // all good, stay quiet
 
     var existing = document.getElementById('deps-overlay');
@@ -281,21 +295,34 @@ window.Dialogs = (function () {
       } : null,
     });
 
-    var claudeRow = depRow({
-      name: 'Claude Code CLI (claude)',
-      ok: deps.claude.installed,
-      missing: !deps.claude.installed,
-      version: deps.claude.version,
-      problem: !deps.claude.installed
-        ? 'Not installed (looking for: ' + (deps.claude.path || 'claude') + ').'
-        : null,
-      fixes: [],
-    });
+    // One row per agent. The required Claude CLI is covered by the bundled
+    // "Install requirements" button; optional agents get a copyable
+    // `npm install -g …` command inline.
+    var agentRows = agentList.map(function (a) {
+      // Installed but a verified auth probe says not signed in → warn + show
+      // the login command. authed===null means "unknown" (no probe) — stay quiet.
+      var notSignedIn = a.installed && a.authed === false;
+      var problem = !a.installed
+        ? (a.required
+            ? 'Not installed (looking for: ' + (a.path || a.id) + ').'
+            : 'Optional — not installed (looking for: ' + (a.path || a.id) + ').')
+        : (notSignedIn ? 'Installed, but not signed in.' : null);
+      var fixes = [];
+      if (!a.installed && !a.required && a.installCommand) fixes.push(a.installCommand);
+      if (notSignedIn && a.loginCommand) fixes.push(a.loginCommand);
+      return depRow({
+        name: a.name,
+        ok: a.installed && a.authed !== false,
+        missing: !a.installed,
+        version: a.version,
+        problem: problem,
+        fixes: fixes,
+      });
+    }).join('');
 
-    // Anything missing → offer one-click install. The script handles all
-    // missing pieces in a single Terminal/cmd window so the user doesn't
-    // have to chase down brew/winget/apt commands per platform.
-    var anyMissing = !deps.gh.installed || !deps.claude.installed;
+    // A missing REQUIRED CLI → offer one-click install of the essentials
+    // bundle. Optional agents are installed via their own copyable command.
+    var anyMissing = !deps.gh.installed || claudeBad;
     var platformLabel = deps.platform === 'darwin' ? 'macOS'
       : deps.platform === 'win32' ? 'Windows'
       : deps.platform === 'linux' ? 'Linux'
@@ -335,7 +362,7 @@ window.Dialogs = (function () {
       + '</div>'
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
-      + '<div class="deps-rows">' + ghRow + claudeRow + '</div>'
+      + '<div class="deps-rows">' + ghRow + agentRows + '</div>'
       + installSection
       + '<div class="deps-actions">'
         + '<button class="deps-recheck" type="button">Re-check</button>'

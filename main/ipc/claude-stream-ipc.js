@@ -8,6 +8,7 @@ const { ipcMain } = require('electron');
 const crypto = require('crypto');
 const { execFile, execFileSync } = require('child_process');
 const { instances, spawnInWorktree } = require('../state/instances');
+const { isAgentMode } = require('../state/ai-providers');
 const { prReview, ensureWorktreeForActivePr, currentRepoPath } = require('../state/pr-review');
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
@@ -29,6 +30,33 @@ const {
 // staged diffs) can be many KB; sha1 keeps keys short and comparable.
 function shortHash(s) {
   return crypto.createHash('sha1').update(String(s || '')).digest('hex').slice(0, 12);
+}
+
+// The editor/diff AI features (inline edit, completion, explain, commit
+// message) and the read-only PR-review surfaces run on the user's chosen
+// default agent.
+function defaultAgentProvider() {
+  const c = loadConfig();
+  return c.defaultProvider || c.defaultMode || 'claude';
+}
+
+// Honor a renderer-chosen agent (from a split-button's agent picker) when it's
+// a valid agent id; otherwise use the surface's default resolution.
+function pickProvider(passed, fallback) {
+  return isAgentMode(passed) ? passed : fallback;
+}
+
+// Implement follows the agent of the task you're working this PR in: prefer a
+// live agent task on the PR's worktree (its current mode, or the original agent
+// if it has since converted to a shell), and fall back to the default agent
+// when no task is open on that worktree.
+function agentForWorktree(worktreePath) {
+  for (const [, inst] of instances) {
+    if (inst.worktreePath !== worktreePath) continue;
+    if (isAgentMode(inst.mode)) return inst.mode;
+    if (isAgentMode(inst.originalMode)) return inst.originalMode;
+  }
+  return defaultAgentProvider();
 }
 
 // Build the shared "failing CI check" context block — log tail, annotations,
@@ -152,6 +180,7 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
 
   spawnClaudeStream({
     requestId, procMap: debugCheckProcs, channelPrefix: 'pr-debug-check',
+    provider: defaultAgentProvider(),
     sender: event.sender, cwd, prompt,
     agentMeta: {
       kind: 'pr-debug-check',
@@ -224,6 +253,8 @@ ipcMain.handle('pr-fix-check-start', async (event, { requestId, checkLink, check
     requestId, procMap: fixCheckProcs, channelPrefix: 'pr-fix-check',
     sender: event.sender, cwd: ensured.worktreePath, prompt,
     streamJson: true,
+    provider: defaultAgentProvider(),
+    allowEdits: true,
     extraDoneFields: { worktreePath: ensured.worktreePath },
     agentMeta: {
       kind: 'pr-fix-check',
@@ -323,6 +354,7 @@ ipcMain.handle('inline-edit-start', (event, { requestId, worktreePath, instructi
     sender: event.sender,
     cwd: worktreePath || currentRepoPath() || require('os').homedir(),
     prompt,
+    provider: defaultAgentProvider(),
   });
   return { ok: true };
 });
@@ -352,6 +384,8 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
     sender: event.sender,
     cwd: worktreePath || currentRepoPath() || require('os').homedir(),
     prompt,
+    provider: defaultAgentProvider(),
+    promptConsent: false, // ghost text fires rapidly — never pop a dialog mid-typing
   });
   return { ok: true };
 });
@@ -362,13 +396,14 @@ ipcMain.handle('inline-complete-cancel', makeClaudeCancelHandler(inlineCompleteP
 // if needed) and spawns claude with the PR_REVIEW_TEMPLATE, streaming
 // stream-json events back to the renderer. Mirrors F6's protocol so the
 // renderer can reuse the same chunk parser.
-ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
+ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {}) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (reviewSurfaceAiProcs.has(requestId)) return { error: 'Already in flight' };
   if (!prReview.active) return { error: 'No active PR review' };
 
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
+  const reviewProvider = pickProvider(provider, defaultAgentProvider());
 
   const baseBranch = (prReview.active.meta && prReview.active.meta.baseRefName) || 'main';
   // Diff against the PR's true fork point (merge-base SHA), not the local base
@@ -386,6 +421,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId }) => {
     cwd: ensured.worktreePath,
     prompt,
     streamJson: true,
+    provider: reviewProvider,
     agentMeta: {
       kind: 'pr-review-ai',
       // Only one full AI review per PR makes sense — re-clicking "Run AI
@@ -425,7 +461,7 @@ ipcMain.handle('pr-review-ai-cancel', makeClaudeCancelHandler(reviewSurfaceAiPro
 // prompts since there was no TTY — so Edit calls reported "haven't granted
 // it yet" and the run hung. See feedback memories on `claude -p` and
 // the no-permission-bypass rule.
-ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, body }) => {
+ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, body, provider } = {}) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (implementPtySessions.has(requestId)) return { error: 'Already in flight' };
   if (!prReview.active) return { error: 'No active PR review' };
@@ -486,15 +522,21 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
     : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction;
 
-  // Permission consent: first time per repo, ask the user if Klaussy may
-  // pre-allow file edits scoped to this worktree (and deny secret files).
-  // If they Skip, we still launch the PTY but without writing
-  // settings.local.json — the user will answer Y/N per edit in the xterm.
-  const consent = await getOrAskRepoConsent(ensured.worktreePath);
-  if (consent === 'allow') {
-    const applyResult = applyWorktreePermissions(ensured.worktreePath);
-    if (!applyResult.applied) {
-      return { error: `Failed to apply permissions: ${applyResult.reason}` };
+  // Prefer an explicit agent from the split-button picker; otherwise follow the
+  // agent of the task running on this PR's worktree (then the default).
+  const implProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
+
+  // Permission consent (Claude only): pre-allow file edits scoped to this
+  // worktree via settings.local.json (and deny secret files). Other agents
+  // (Codex, etc.) prompt for edit approval in the xterm, which the user
+  // answers there — so there's nothing to pre-write for them.
+  if (implProvider === 'claude') {
+    const consent = await getOrAskRepoConsent(ensured.worktreePath);
+    if (consent === 'allow') {
+      const applyResult = applyWorktreePermissions(ensured.worktreePath);
+      if (!applyResult.applied) {
+        return { error: `Failed to apply permissions: ${applyResult.reason}` };
+      }
     }
   }
 
@@ -507,6 +549,7 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     requestId,
     worktreePath: ensured.worktreePath,
     prompt,
+    provider: implProvider,
     onData: (data) => { if (!sender.isDestroyed()) sender.send(dataChannel, data); },
     onEvent: (ev) => { if (!sender.isDestroyed()) sender.send(eventChannel, ev); },
     onExit: ({ exitCode, signal }) => {
@@ -546,7 +589,7 @@ ipcMain.handle('pr-review-implement-cancel', (_event, { requestId }) => {
 // panel. Stateless: each turn re-sends the conversation history so Claude
 // can respond coherently, and Claude runs read-only (Read/Grep/git OK, no
 // edits) so a discussion doesn't accidentally mutate the worktree.
-ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, messages, findingId }) => {
+ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, messages, findingId, provider } = {}) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (reviewChatProcs.has(requestId)) return { error: 'Already in flight' };
   if (!prReview.active) return { error: 'No active PR review' };
@@ -555,6 +598,7 @@ ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, m
 
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
+  const chatProvider = pickProvider(provider, defaultAgentProvider());
 
   // Serialize the conversation so Claude sees the full arc. Using explicit
   // Human/Assistant labels matches how Claude reads multi-turn transcripts
@@ -583,6 +627,7 @@ ipcMain.handle('pr-review-chat-start', async (event, { requestId, findingBody, m
     cwd: ensured.worktreePath,
     prompt,
     streamJson: true,
+    provider: chatProvider,
     extraDoneFields: { worktreePath: ensured.worktreePath },
     agentMeta: {
       kind: 'pr-review-chat',
@@ -606,7 +651,7 @@ ipcMain.handle('pr-review-chat-cancel', makeClaudeCancelHandler(reviewChatProcs)
 // worktree (read-only) and returns a Verdict/Reasoning/Recommendation block.
 // Separate from chat so the renderer can surface a crisp verdict UI without
 // conflating it with multi-turn discussion.
-ipcMain.handle('pr-review-investigate-start', async (event, { requestId, findingBody }) => {
+ipcMain.handle('pr-review-investigate-start', async (event, { requestId, findingBody, provider } = {}) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (investigateProcs.has(requestId)) return { error: 'Already in flight' };
   if (!prReview.active) return { error: 'No active PR review' };
@@ -614,6 +659,7 @@ ipcMain.handle('pr-review-investigate-start', async (event, { requestId, finding
 
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
+  const investigateProvider = pickProvider(provider, defaultAgentProvider());
 
   const prompt =
     `You are validating a PR-review finding. Decide whether the concern is real in the current code. ` +
@@ -630,6 +676,7 @@ ipcMain.handle('pr-review-investigate-start', async (event, { requestId, finding
     cwd: ensured.worktreePath,
     prompt,
     streamJson: true,
+    provider: investigateProvider,
     extraDoneFields: { worktreePath: ensured.worktreePath },
     agentMeta: {
       kind: 'pr-review-investigate',
@@ -685,6 +732,7 @@ ipcMain.handle('explain-diff-stream-start', (event, { requestId, worktreePath, f
     sender: event.sender,
     cwd: worktreePath || currentRepoPath() || require('os').homedir(),
     prompt: explainPrompt(file, hunk),
+    provider: defaultAgentProvider(),
     agentMeta: {
       kind: 'explain-diff',
       // Lookup-friendly key (no hashing): the renderer computes the same
@@ -761,6 +809,7 @@ ipcMain.handle('claude-commit-message-start', async (event, { requestId, worktre
     sender: event.sender,
     cwd: worktreePath,
     prompt,
+    provider: defaultAgentProvider(),
     agentMeta: {
       kind: 'commit-message',
       // One commit-message generation per worktree at a time — re-clicking
@@ -1242,7 +1291,7 @@ Do NOT write any files. Output the final review directly as your response to thi
 
 // Legacy config.prReviews cache was retired in favor of the file-per-PR cache
 
-ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, requestId }) => {
+ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, requestId, provider } = {}) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (aiReviewProcs.has(requestId)) return { error: 'Review already in flight for ' + requestId };
 
@@ -1258,6 +1307,7 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
     cwd: worktreePath,
     prompt,
     streamJson: true,
+    provider: pickProvider(provider, defaultAgentProvider()),
     agentMeta: {
       kind: 'pr-ai-review',
       // One AI review per (worktree, base) — re-running while it's still
