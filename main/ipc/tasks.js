@@ -4,6 +4,8 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
@@ -17,6 +19,9 @@ const {
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
+const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
+const { ensureWorktreeConsentSync } = require('../util/agent-consent');
+const { beginSession } = require('../util/agent-concurrency');
 
 // create-task / duplicate-task put worktrees as a sibling of the main repo
 // in a `klaus-worktrees/` directory.
@@ -35,8 +40,13 @@ ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branc
     return { error: 'Worktree no longer exists: ' + worktreePath };
   }
   const resumeMode = mode || 'claude';
+  // Only Claude tracks an exact session id to resume; other providers resume
+  // their latest session in the worktree via their native flag (handled by the
+  // registry's buildInteractiveCmd), so we don't pass a stale sessionId.
+  const provider = getProvider(resumeMode);
+  const exactId = provider && provider.supportsExactResume ? sessionId : null;
   try {
-    return spawnInWorktree(name, worktreePath, branch, resumeMode, resumeMode === 'claude' ? sessionId : null);
+    return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);
   } catch (err) {
     console.error('[resume-session] spawnInWorktree failed:', err);
     return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -285,20 +295,52 @@ ipcMain.on('resize-terminal', (_event, { id, cols, rows, subId }) => {
   }
 });
 
-ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode }) => {
+ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt }) => {
   const inst = instances.get(taskId);
   if (!inst) return { error: 'Instance not found' };
 
   const subId = inst.nextSubId++;
   const userShell = defaultShell();
 
-  // 'claude' mode launches Claude Code in a login shell (same recipe as
+  // An agent mode launches that CLI in a login shell (same recipe as
   // spawnInWorktree in main/state/instances.js). Default is a plain shell.
   let args;
-  if (mode === 'claude') {
+  let session = { release: () => {} };
+  let promptFile = null;     // staged-prompt tempfile, removed on exit
+  let needsEnter = false;    // codex-style TUIs pre-fill but wait for Enter
+  if (isAgentMode(mode)) {
     const config = loadConfig();
-    const claudeBin = config.claudePath || 'claude';
-    args = shellRunCmdArgs(userShell, claudeBin);
+    const provider = getProvider(mode);
+    const bin = binFor(provider.id, config);
+    const consent = ensureWorktreeConsentSync(provider.id, inst.worktreePath);
+    if (!consent.allowed) return { cancelled: true };
+    // Token-rotation guard: warn before a second concurrent Codex session.
+    session = beginSession(provider.id);
+    if (!session.ok) return { cancelled: true };
+    const model = (config.agentModel || {})[provider.id] || '';
+    let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model });
+    // Seed an initial prompt (Plan/Debug/Review) as the agent's first
+    // positional argument rather than typing it in after boot. Passing it at
+    // spawn avoids racing the TUI's startup and keeps multi-line prompts intact
+    // (typing a multi-line string submits it line-by-line). Mirrors
+    // pr-implement-pty: stage the prompt in a tempfile and expand it via
+    // $(cat …) so quotes/backticks/newlines need no shell escaping.
+    if (initialPrompt && initialPrompt.trim()) {
+      try {
+        const dir = path.join(os.tmpdir(), 'klaussy-action-prompts');
+        fs.mkdirSync(dir, { recursive: true });
+        promptFile = path.join(dir, `${taskId}-${subId}-${crypto.randomBytes(4).toString('hex')}.txt`);
+        fs.writeFileSync(promptFile, initialPrompt);
+        const promptFlag = provider.interactivePromptFlag ? `${provider.interactivePromptFlag} ` : '';
+        const quoted = `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+        agentCmd = `${agentCmd} ${promptFlag}${quoted}`;
+        needsEnter = !!provider.needsEnterToSubmit;
+      } catch (err) {
+        console.warn('[add-sub-terminal] failed to stage prompt:', err.message);
+        promptFile = null;
+      }
+    }
+    args = shellRunCmdArgs(userShell, agentCmd);
   } else {
     args = shellLoginArgs(userShell);
   }
@@ -311,8 +353,17 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode }) => {
     env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
   });
 
-  const sub = { subId, label: label || (mode === 'claude' ? 'Claude' : 'Shell'), pty: ptyProc, alive: true, mode: mode || 'shell' };
+  const sub = { subId, label: label || displayNameFor(mode || 'shell'), pty: ptyProc, alive: true, mode: mode || 'shell' };
   inst.subTerminals.push(sub);
+
+  // codex pre-fills its positional prompt but waits for an Enter to submit
+  // (Claude/Gemini auto-run theirs). Nudge it once the TUI is up, with a second
+  // attempt for a slow boot. Harmless for agents that already submitted.
+  if (needsEnter) {
+    const sendEnter = () => { if (sub.alive) { try { ptyProc.write('\r'); } catch {} } };
+    setTimeout(sendEnter, 3500);
+    setTimeout(sendEnter, 8000);
+  }
 
   ptyProc.onData((data) => {
     sendToTerminalSubscribers(`terminal-data-${taskId}-${subId}`, data);
@@ -320,6 +371,8 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode }) => {
 
   ptyProc.onExit(() => {
     sub.alive = false;
+    session.release(); // free the concurrency slot (Codex token-rotation guard)
+    if (promptFile) { try { fs.unlinkSync(promptFile); } catch {} }
     sendToTerminalSubscribers(`terminal-exit-${taskId}-${subId}`);
   });
 
@@ -373,19 +426,52 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   inst.restarting = true;
   try { inst.pty.kill(); } catch {}
 
-  // Resume as Claude — prefer this instance's tracked session so multiple
-  // terminals on the same worktree don't collide on the "latest" .jsonl.
+  // Resume as the same agent this task was originally running. For Claude we
+  // prefer this instance's tracked session id so multiple terminals on one
+  // worktree don't collide on the "latest" .jsonl; other providers resume
+  // their most recent session in the worktree via their native flag.
   const userShell = defaultShell();
   const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
-  const resumeId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath);
-  const claudeCmd = resumeId ? `${claudeBin} --resume ${resumeId}` : claudeBin;
-  inst.mode = 'claude';
-  inst.spawnTime = Date.now();
-  inst.preSpawnSessionIds = snapshotSessionIds(inst.worktreePath);
-  inst.claudeSessionId = resumeId || null;
+  const restartMode = isAgentMode(inst.originalMode) ? inst.originalMode
+    : (isAgentMode(inst.mode) ? inst.mode : 'claude');
+  const provider = getProvider(restartMode);
+  const bin = binFor(provider.id, config);
+  // The task already ran this agent, so consent is normally already stored
+  // (no re-prompt); we just carry the granted trust flag into the respawn.
+  const trust = ensureWorktreeConsentSync(provider.id, inst.worktreePath).trust;
+  const model = (config.agentModel || {})[provider.id] || '';
 
-  const args = shellRunCmdArgs(userShell, claudeCmd);
+  // Hand off the concurrency slot: free the slot the old (just-killed) process
+  // held, then re-acquire for the respawn. Releasing first means a plain
+  // restart won't warn — it only warns if *another* Codex task is still live,
+  // i.e. the restart would genuinely leave two Codex sessions running. If the
+  // user declines that overlap, fall back to a plain shell rather than leaving
+  // the task dead.
+  if (inst.agentSession) inst.agentSession.release();
+  const session = beginSession(provider.id);
+  if (!session.ok) {
+    inst.restarting = false;
+    inst.agentSession = null;
+    convertInstanceToShell(inst);
+    return { ok: true, downgradedToShell: true };
+  }
+  inst.agentSession = session;
+
+  let agentCmd;
+  if (provider.supportsExactResume) {
+    const resumeId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath);
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId: resumeId, trust, model });
+    inst.preSpawnSessionIds = snapshotSessionIds(inst.worktreePath);
+    inst.claudeSessionId = resumeId || null;
+  } else {
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model });
+    inst.preSpawnSessionIds = new Set();
+    inst.claudeSessionId = null;
+  }
+  inst.mode = restartMode;
+  inst.spawnTime = Date.now();
+
+  const args = shellRunCmdArgs(userShell, agentCmd);
   const ptyProc = pty.spawn(userShell, args, {
     name: 'xterm-256color',
     cols: cols || 120,
@@ -407,10 +493,11 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
-  // When this Claude exits, auto-convert to shell again
+  // When this agent exits, auto-convert to shell again
   ptyProc.onExit(() => {
     clearIdleTimer(inst);
-    if (inst.mode === 'claude') {
+    session.release(); // free the concurrency slot (Codex token-rotation guard)
+    if (isAgentMode(inst.mode)) {
       convertInstanceToShell(inst);
     } else {
       inst.alive = false;
@@ -485,7 +572,7 @@ ipcMain.handle('duplicate-task', async (_event, { id }) => {
     return { error: `Failed to create worktree: ${err.message}` };
   }
 
-  const mode = config.defaultMode || 'claude';
+  const mode = config.defaultProvider || config.defaultMode || 'claude';
   return spawnInWorktree(baseName, worktreePath, branch, mode);
 });
 

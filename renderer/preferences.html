@@ -243,21 +243,43 @@
       </div>
     </div>
 
-    <!-- Claude CLI Section -->
+    <!-- AI CLIs Section -->
     <div class="section">
-      <div class="section-title">Claude CLI</div>
+      <div class="section-title">AI CLIs</div>
 
       <div class="field field-full">
         <label>Claude Path</label>
         <input type="text" id="pref-claude-path" placeholder="claude (uses PATH)" spellcheck="false" />
       </div>
-      <div class="field-hint">Leave empty to use the default <code>claude</code> from PATH.</div>
-      <div class="claude-info" id="claude-info"></div>
+      <div class="claude-info" id="agent-info-claude"></div>
+
+      <div class="field field-full">
+        <label>Codex Path</label>
+        <input type="text" id="pref-codex-path" placeholder="codex (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-codex"></div>
+
+      <div class="field field-full">
+        <label>Gemini Path</label>
+        <input type="text" id="pref-gemini-path" placeholder="gemini (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-gemini"></div>
+
+      <div class="field field-full">
+        <label>Copilot Path</label>
+        <input type="text" id="pref-copilot-path" placeholder="copilot (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-copilot"></div>
+
+      <div class="field-hint">Leave a path empty to use that CLI from your PATH. Each new task uses the default agent below; you can switch per task in the New Task dialog.</div>
 
       <div class="field">
-        <label>Default Mode</label>
+        <label>Default Agent</label>
         <select id="pref-default-mode">
           <option value="claude">Claude Code</option>
+          <option value="codex">Codex</option>
+          <option value="gemini">Gemini</option>
+          <option value="copilot">Copilot</option>
           <option value="shell">Shell</option>
         </select>
       </div>

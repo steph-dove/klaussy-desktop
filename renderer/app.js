@@ -409,6 +409,15 @@
     if (prefs.theme !== undefined) {
       ThemeManager.apply(prefs.theme.preset);
     }
+    // Keep the single global default-agent state in sync when it's changed in
+    // Preferences, and refresh any agent split buttons showing it.
+    if (prefs.defaultProvider !== undefined || prefs.defaultMode !== undefined) {
+      if (!AppState.savedPrefs) AppState.savedPrefs = {};
+      var dp = prefs.defaultProvider || prefs.defaultMode;
+      AppState.savedPrefs.defaultProvider = dp;
+      AppState.savedPrefs.defaultMode = dp;
+      document.dispatchEvent(new CustomEvent('klaussy:default-agent-changed', { detail: { agent: dp } }));
+    }
   });
 
   // Load saved terminal preferences on startup
@@ -699,8 +708,10 @@
       var age = formatAge(s.savedAt);
       var pathShort = s.worktreePath ? s.worktreePath.split('/').slice(-2).join('/') : '';
 
-      var modeLabel = s.mode === 'shell' ? 'SH' : 'cc';
-      var modeTitle = s.mode === 'shell' ? 'Previous shell session' : 'Previous session';
+      var modeLabel = s.mode === 'shell' ? 'SH' : AppUtils.modeShortLabel(s.mode);
+      var modeTitle = s.mode === 'shell'
+        ? 'Previous shell session'
+        : 'Previous ' + AppUtils.modeDisplayName(s.mode) + ' session';
       var sIconColor = AppUtils.iconColor(s.name);
       var sIconLetter = (s.name || '?').charAt(0).toUpperCase();
       item.innerHTML =
@@ -733,6 +744,11 @@
           }
         } catch (err) {
           window.toast.error('Resume failed: ' + (err && err.message || err));
+          btn.disabled = false;
+          btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume';
+          return;
+        }
+        if (result && result.cancelled) { // user declined the trust prompt
           btn.disabled = false;
           btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume';
           return;
@@ -1179,7 +1195,7 @@
   // display, branch dropdown, and the basepath placeholder.
   function applyRepoSwitch(dir) {
     AppState.repoPath = dir;
-    if (modalRepoPathEl) modalRepoPathEl.textContent = dir;
+    if (modalRepoPathEl) { modalRepoPathEl.textContent = dir; modalRepoPathEl.title = dir; }
     selectedBaseBranch = '';
     populateBaseBranchSelect();
     if (!selectedBasePath) {
@@ -1277,7 +1293,7 @@
     basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
     basepathInput.classList.remove('has-path');
     activeTab = 'new';
-    selectedMode = AppState.savedPrefs.defaultMode || 'claude';
+    selectedMode = AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode || 'claude';
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
@@ -1287,7 +1303,7 @@
     if (envField) envField.value = '';
     // Sync the source-repo display to whatever AppState says — buttons
     // and drag handlers were wired once at IIFE init.
-    if (modalRepoPathEl) modalRepoPathEl.textContent = AppState.repoPath || 'No repo selected';
+    if (modalRepoPathEl) { modalRepoPathEl.textContent = AppState.repoPath || 'No repo selected'; modalRepoPathEl.title = AppState.repoPath || ''; }
     setTimeout(function () { modalInput.focus(); }, 50);
   }
 
@@ -1424,15 +1440,21 @@
 
   // ---- Command Palette (A3) ----
 
+  function defaultAgent() {
+    return (AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude';
+  }
+
   async function openFolderAsTask(mode) {
+    mode = mode || defaultAgent();
     var dir = await window.pickDirectoryPopup({
-      title: mode === 'shell' ? 'Open Folder in Shell' : 'Open Folder',
+      title: 'Open Folder in ' + AppUtils.modeDisplayName(mode),
       recentsKind: 'folders',
     });
     if (!dir) return;
-    var result = await window.klaus.task.openFolder(dir, mode || 'claude');
-    if (!result || result.error) {
-      if (result && result.error) window.toast.error(result.error);
+    var result = await window.klaus.task.openFolder(dir, mode);
+    if (!result || result.cancelled) return;
+    if (result.error) {
+      window.toast.error(result.error);
       return;
     }
     // Record on successful open so abandoned typing doesn't pollute the list.
@@ -1444,8 +1466,14 @@
   function buildPaletteCommands() {
     var commands = [
       { label: 'New Task', action: function () { showModal(); } },
-      { label: 'Open Folder…', action: function () { openFolderAsTask('claude'); } },
-      { label: 'Open Folder in Shell…', action: function () { openFolderAsTask('shell'); } },
+      { label: 'Open Folder…', action: function () { openFolderAsTask(defaultAgent()); } },
+    ];
+    // One "Open Folder in <Agent>…" entry per supported AI CLI, plus Shell.
+    ((window.klaus.ui && window.klaus.ui.providers) || []).forEach(function (p) {
+      commands.push({ label: 'Open Folder in ' + p.displayName + '…', action: function () { openFolderAsTask(p.id); } });
+    });
+    commands.push({ label: 'Open Folder in Shell…', action: function () { openFolderAsTask('shell'); } });
+    commands.push.apply(commands, [
       { label: 'Toggle Diff Panel', action: function () { btnDiff.click(); } },
       { label: 'Change Theme', action: function () { showThemePicker(); } },
       { label: 'Preferences', action: function () { window.klaus.ui.openPreferences(); } },
@@ -1453,7 +1481,7 @@
       { label: 'Zoom In', action: zoomIn },
       { label: 'Zoom Out', action: zoomOut },
       { label: 'Reset Zoom', action: zoomReset },
-    ];
+    ]);
 
     if (AppState.activeTaskId) {
       var task = tasks.get(AppState.activeTaskId);
@@ -1558,7 +1586,7 @@
   var diffPanelEl = document.getElementById('diff-panel');
   var btnOpenFolder = document.getElementById('btn-open-folder');
   if (btnOpenFolder) {
-    btnOpenFolder.addEventListener('click', function () { openFolderAsTask('claude'); });
+    btnOpenFolder.addEventListener('click', function () { openFolderAsTask(defaultAgent()); });
   }
 
   var btnRunApp = document.getElementById('btn-run-app');
@@ -1929,7 +1957,7 @@
     if (!link) return;
     link.addEventListener('click', function (e) {
       e.preventDefault();
-      openFolderAsTask('claude');
+      openFolderAsTask(defaultAgent());
     });
   });
   // Empty state stays in sync with project changes — the project-switcher
@@ -2002,6 +2030,8 @@
     modalCreate.disabled = false;
     modalCreate.textContent = 'Create';
 
+    // User declined the agent's worktree-trust prompt — close quietly.
+    if (result && result.cancelled) { hideModal(); return; }
     if (result.error) {
       modalError.textContent = result.error;
       return;

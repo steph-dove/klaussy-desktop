@@ -19,6 +19,7 @@ const {
   subscribeTerminalChannel, unsubscribeTerminalChannel,
   detectClaudeSessionId, findLatestSessionId,
 } = instancesModule;
+const { getProvider, isAgentMode } = require('../state/ai-providers');
 const { startAutoFetch, startCIPolling } = require('../state/ci-poll');
 const prReviewModule = require('../state/pr-review');
 require('../ipc/tasks');
@@ -133,14 +134,18 @@ function saveSessions() {
   // otherwise keep whatever was previously saved
   if (instances.size === 0) return;
 
-  // Group claude instances by worktree so we can disambiguate when multiple
-  // terminals share a worktree. Each instance owns its own session .jsonl.
-  const claudeByWorktree = new Map();
+  // Group exact-resume agents (Claude today) by worktree so we can
+  // disambiguate when multiple terminals share a worktree. Each such instance
+  // owns its own session .jsonl. Other providers don't track exact ids — they
+  // resume their latest session in the worktree via a native flag — so they're
+  // saved with sessionId=null and skipped here.
+  const exactByWorktree = new Map();
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
-    if (saveMode !== 'claude') continue;
-    if (!claudeByWorktree.has(inst.worktreePath)) claudeByWorktree.set(inst.worktreePath, []);
-    claudeByWorktree.get(inst.worktreePath).push(inst);
+    const provider = getProvider(saveMode);
+    if (!provider || !provider.supportsExactResume) continue;
+    if (!exactByWorktree.has(inst.worktreePath)) exactByWorktree.set(inst.worktreePath, []);
+    exactByWorktree.get(inst.worktreePath).push(inst);
   }
 
   // For each worktree, resolve instance session IDs by picking .jsonl files
@@ -148,7 +153,7 @@ function saveSessions() {
   // been claimed by another instance on the same worktree. This covers fresh
   // spawns (detect picks up the new file) and resumes where Claude forks the
   // session into a new .jsonl (detect supersedes the initial resume id).
-  for (const [, insts] of claudeByWorktree) {
+  for (const [, insts] of exactByWorktree) {
     insts.sort((a, b) => (a.spawnTime || 0) - (b.spawnTime || 0));
     const claimed = new Set();
     for (const inst of insts) {
@@ -162,7 +167,8 @@ function saveSessions() {
   const sessions = [];
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
-    const sessionId = saveMode === 'claude'
+    const provider = getProvider(saveMode);
+    const sessionId = provider && provider.supportsExactResume
       ? (inst.claudeSessionId || findLatestSessionId(inst.worktreePath))
       : null;
     sessions.push({

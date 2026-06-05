@@ -33,16 +33,25 @@
   var themeSelect = document.getElementById('pref-theme');
   var claudePath = document.getElementById('pref-claude-path');
   var defaultMode = document.getElementById('pref-default-mode');
-  var claudeInfo = document.getElementById('claude-info');
   var autoFetch = document.getElementById('pref-auto-fetch');
   var statusMsg = document.getElementById('status-msg');
+
+  // Per-agent path inputs, keyed by provider id → { input, infoEl, prefKey }.
+  var agentPaths = {
+    claude: { input: claudePath, infoEl: document.getElementById('agent-info-claude'), prefKey: 'claudePath' },
+    codex: { input: document.getElementById('pref-codex-path'), infoEl: document.getElementById('agent-info-codex'), prefKey: 'codexPath' },
+    gemini: { input: document.getElementById('pref-gemini-path'), infoEl: document.getElementById('agent-info-gemini'), prefKey: 'geminiPath' },
+    copilot: { input: document.getElementById('pref-copilot-path'), infoEl: document.getElementById('agent-info-copilot'), prefKey: 'copilotPath' },
+  };
 
   fontFamily.value = prefs.fontFamily;
   fontSize.value = prefs.fontSize;
   lineHeight.value = prefs.lineHeight;
   cursorStyle.value = prefs.cursorStyle;
-  claudePath.value = prefs.claudePath || '';
-  defaultMode.value = prefs.defaultMode;
+  Object.keys(agentPaths).forEach(function (id) {
+    agentPaths[id].input.value = prefs[agentPaths[id].prefKey] || '';
+  });
+  defaultMode.value = prefs.defaultProvider || prefs.defaultMode || 'claude';
   autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
 
   // Theme dropdown
@@ -54,15 +63,18 @@
   });
   themeSelect.value = prefs.theme.preset || 'dark';
 
-  // Claude info
-  loadClaudeInfo();
+  // Per-agent version probes
+  Object.keys(agentPaths).forEach(loadAgentInfo);
 
-  async function loadClaudeInfo() {
-    var info = await window.klaus.ui.getClaudeInfo();
-    if (info.version === 'not found') {
-      claudeInfo.innerHTML = 'Status: <span class="not-found">not found</span>';
+  async function loadAgentInfo(id) {
+    var infoEl = agentPaths[id].infoEl;
+    if (!infoEl) return;
+    infoEl.innerHTML = 'Status: <span class="version">checking…</span>';
+    var info = await window.klaus.ui.getAgentInfo(id);
+    if (!info || info.version === 'not found') {
+      infoEl.innerHTML = 'Status: <span class="not-found">not found</span>';
     } else {
-      claudeInfo.innerHTML = 'Status: <span class="version">' + escHtml(info.version) + '</span>';
+      infoEl.innerHTML = 'Status: <span class="version">' + escHtml(info.version) + '</span>';
     }
   }
 
@@ -180,8 +192,11 @@
       fontSize: parseInt(fontSize.value, 10) || 13,
       lineHeight: parseFloat(lineHeight.value) || 1.2,
       cursorStyle: cursorStyle.value,
-      claudePath: claudePath.value.trim(),
-      defaultMode: defaultMode.value,
+      claudePath: agentPaths.claude.input.value.trim(),
+      codexPath: agentPaths.codex.input.value.trim(),
+      geminiPath: agentPaths.gemini.input.value.trim(),
+      copilotPath: agentPaths.copilot.input.value.trim(),
+      defaultProvider: defaultMode.value,
       theme: { preset: themeSelect.value },
       keybindings: bindings,
       autoFetchInterval: fetchSeconds * 1000,
@@ -203,9 +218,12 @@
     el.addEventListener('input', saveAll);
   });
 
-  claudePath.addEventListener('change', function () {
-    saveAll();
-    setTimeout(loadClaudeInfo, 500);
+  // Re-probe an agent's version when its path changes.
+  Object.keys(agentPaths).forEach(function (id) {
+    agentPaths[id].input.addEventListener('change', function () {
+      saveAll();
+      setTimeout(function () { loadAgentInfo(id); }, 500);
+    });
   });
 
   function escHtml(str) {

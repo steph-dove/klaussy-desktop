@@ -27,11 +27,9 @@ const pty = require('node-pty');
 const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
-const {
-  snapshotSessionIds,
-  detectClaudeSessionId,
-  listSessionFiles,
-} = require('./instances');
+const { getProvider, binFor } = require('./ai-providers');
+const { ensureWorktreeConsentSync } = require('../util/agent-consent');
+const { beginSession } = require('../util/agent-concurrency');
 
 // requestId -> session record. Keyed by the renderer-supplied requestId so
 // the cancel IPC can look up the right PTY without leaking it across runs.
@@ -42,28 +40,12 @@ const SESSION_DETECT_TIMEOUT_MS = 30000;
 const JSONL_TAIL_INTERVAL_MS = 300;
 const CANCEL_GRACE_MS = 2000;
 
-// Encodes a worktree path the same way claude does when picking the
-// project directory under ~/.claude/projects. Used for the JSONL tail.
-function claudeProjectDirFor(worktreePath) {
-  const home = process.env.HOME || os.homedir();
-  return path.join(home, '.claude', 'projects', worktreePath.replace(/\//g, '-'));
-}
-
-function sumUsage(u) {
-  if (!u) return null;
-  return {
-    inputTokens: u.input_tokens || 0,
-    cacheCreationInputTokens: u.cache_creation_input_tokens || 0,
-    cacheReadInputTokens: u.cache_read_input_tokens || 0,
-    outputTokens: u.output_tokens || 0,
-  };
-}
-
-// Tails one .jsonl file forwards-only. Skips repeated `usage` totals
-// (same requestId fires N lines, one per content block) so we don't
-// double-emit progress. Dispatches normalized events back to the
-// caller-supplied `emit`.
-function startJsonlTail(filePath, emit) {
+// Tails one session .jsonl file forwards-only, dispatching the provider's
+// normalized events ({kind:'usage'|'tool'|'text'|'end_turn'}) back to `emit`.
+// Usage is deduped by requestId where the provider supplies one (Claude fires
+// N lines per turn with the same totals); providers without a requestId on
+// usage lines (Codex emits one token_count per turn) just pass through.
+function startJsonlTail(filePath, provider, emit) {
   let offset = 0;
   let leftover = '';
   let stopped = false;
@@ -99,42 +81,28 @@ function startJsonlTail(filePath, emit) {
   }
 
   function handleEvent(ev) {
-    const reqId = ev && ev.requestId;
-    const msg = ev && ev.message;
-    if (!msg) return;
-
-    // One turn = many JSONL lines (one per content block) all sharing
-    // the same usage totals. Dedupe by requestId so we only emit usage
-    // once per turn.
-    if (msg.usage && reqId && !seenRequestIds.has(reqId)) {
-      seenRequestIds.add(reqId);
-      emit({ kind: 'usage', usage: sumUsage(msg.usage) });
-    }
-
-    if (Array.isArray(msg.content)) {
-      for (const block of msg.content) {
-        if (!block) continue;
-        if (block.type === 'tool_use' && block.name) {
-          observedToolUse = true;
-          const inp = block.input || {};
-          const hint = inp.file_path || inp.command || inp.pattern || '';
-          emit({ kind: 'tool', name: block.name, hint: typeof hint === 'string' ? hint : '' });
-        } else if (block.type === 'text' && block.text) {
-          emit({ kind: 'text', text: block.text });
+    for (const e of provider.sessionLineToEvents(ev)) {
+      if (e.kind === 'usage') {
+        // Dedupe by requestId when present (Claude repeats totals across the
+        // N content-block lines of one turn). Providers without a requestId
+        // (Codex) pass each per-turn usage through.
+        const rid = e.requestId;
+        if (rid) {
+          if (seenRequestIds.has(rid)) continue;
+          seenRequestIds.add(rid);
         }
+        emit({ kind: 'usage', usage: e.usage });
+      } else if (e.kind === 'tool') {
+        observedToolUse = true;
+        emit({ kind: 'tool', name: e.name, hint: e.hint || '' });
+      } else if (e.kind === 'text') {
+        emit({ kind: 'text', text: e.text });
+      } else if (e.kind === 'end_turn') {
+        // A turn can end before any tool_use (the agent says "I'll start by
+        // reading X" and stops). Only honor end_turn after we've seen a tool,
+        // so we don't mark the run done before edits actually happened.
+        if (observedToolUse) emit({ kind: 'end_turn' });
       }
-    }
-
-    // `stop_reason` may live on the message or one rung higher depending
-    // on the line shape; check both. end_turn = claude finished an
-    // assistant turn, but a turn can end with `end_turn` BEFORE any
-    // tool_use (e.g. claude says "I'll start by reading X" and stops).
-    // For implement runs we only honor end_turn after we've seen at
-    // least one tool_use — otherwise an early end_turn would mark the
-    // run done while the actual edits haven't happened.
-    const stopReason = msg.stop_reason || ev.stop_reason;
-    if (stopReason === 'end_turn' && observedToolUse) {
-      emit({ kind: 'end_turn' });
     }
   }
 
@@ -145,26 +113,20 @@ function startJsonlTail(filePath, emit) {
   };
 }
 
-// Polls the project directory for a session file that didn't exist
-// when we spawned the PTY. Used to attach the JSONL tail once claude
-// has actually started writing.
-function waitForNewSessionFile(worktreePath, preSpawnIds, onFound, onTimeout) {
+// Polls for a session file that didn't exist when we spawned the PTY, using
+// the provider's detection (Claude: newest .jsonl in the per-worktree project
+// dir; Codex: newest rollout in the global tree whose cwd matches). Used to
+// attach the JSONL tail once the agent has actually started writing.
+function waitForNewSessionFile(provider, worktreePath, preSnapshot, onFound, onTimeout) {
   const start = Date.now();
-  const projectDir = claudeProjectDirFor(worktreePath);
   let timer = null;
   let stopped = false;
 
   function check() {
     if (stopped) return;
-    const files = listSessionFiles(worktreePath)
-      .filter(f => !preSpawnIds.has(f.sessionId))
-      .sort((a, b) => {
-        if (a.ctimeNs < b.ctimeNs) return -1;
-        if (a.ctimeNs > b.ctimeNs) return 1;
-        return 0;
-      });
-    if (files.length > 0) {
-      onFound(path.join(projectDir, files[0].name), files[0].sessionId);
+    const found = provider.findNewSession(worktreePath, preSnapshot);
+    if (found) {
+      onFound(found.filePath, found.sessionId);
       return;
     }
     if (Date.now() - start > SESSION_DETECT_TIMEOUT_MS) {
@@ -182,33 +144,37 @@ function waitForNewSessionFile(worktreePath, preSpawnIds, onFound, onTimeout) {
 
 // Public entry point for the IPC layer.
 //
-// Spawns an interactive claude in `worktreePath`, then writes `prompt`
-// followed by Enter so the user sees the prompt body as the first line
-// of the turn. `onData` is called with raw PTY bytes for the inline
-// xterm; `onEvent` receives normalized JSONL events; `onExit` fires
-// once when the PTY exits.
+// Spawns the chosen agent interactively in `worktreePath` with `prompt` as the
+// initial message. `onData` is raw PTY bytes for the inline xterm; `onEvent`
+// receives normalized JSONL events; `onExit` fires once when the PTY exits.
+// `provider` selects the agent (default 'claude').
 // Caller is responsible for resolving the user's permission consent and
-// applying the worktree settings.local.json BEFORE calling this — see
-// util/worktree-permissions.js. We trust whatever permission setup is in
-// place when this runs.
-function startImplementPty({ requestId, worktreePath, prompt, onData, onEvent, onExit }) {
+// applying the worktree settings.local.json BEFORE calling this (Claude only) —
+// see util/worktree-permissions.js. Other agents prompt for edit approval in
+// the xterm, which the user answers there.
+function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude', onData, onEvent, onExit }) {
   if (implementPtySessions.has(requestId)) {
     return { error: 'Already in flight' };
   }
 
   const config = loadConfig();
-  const claudeBin = config.claudePath || 'claude';
+  const prov = getProvider(provider) || getProvider('claude');
+  const bin = binFor(prov.id, config);
+  // Gated agents (Gemini) prompt once per worktree for trust + file access.
+  const consent = ensureWorktreeConsentSync(prov.id, worktreePath);
+  if (!consent.allowed) return { cancelled: true };
+  // Token-rotation guard: warn before a second concurrent Codex session.
+  const authSlot = beginSession(prov.id);
+  if (!authSlot.ok) return { cancelled: true };
   const userShell = defaultShell();
   const extraEnv = sanitizeExtraEnv({});
 
-  // Pass the implement prompt as the first positional arg to `claude` so
-  // it lands as the initial user message in the interactive session.
-  // Inlining the prompt into the shell command would require escaping
-  // quotes, backticks, newlines and shell metacharacters reliably — too
-  // many edge cases. Instead: write the prompt to a tempfile and use a
-  // `"$(cat …)"` substitution that the shell expands into a single arg.
-  // The tempfile lives under the OS temp dir and is removed when the
-  // PTY exits (best-effort).
+  // Pass the implement prompt as the first positional arg to the agent so it
+  // lands as the initial user message in the interactive session. Inlining the
+  // prompt into the shell command would require escaping quotes, backticks,
+  // newlines and shell metacharacters reliably — too many edge cases. Instead:
+  // write the prompt to a tempfile and use a `"$(cat …)"` substitution that the
+  // shell expands into a single arg. The tempfile is removed when the PTY exits.
   const promptDir = path.join(os.tmpdir(), 'klaussy-implement-prompts');
   try { fs.mkdirSync(promptDir, { recursive: true }); } catch (err) {
     console.warn('[pr-implement-pty] mkdir failed for', promptDir, err.message);
@@ -220,15 +186,21 @@ function startImplementPty({ requestId, worktreePath, prompt, onData, onEvent, o
     return { error: `Failed to stage implement prompt: ${err.message}` };
   }
 
-  // Use the user's login shell to launch claude — matches how PR-review
-  // worktree tasks are spawned (instances.js:spawnInWorktree) so the
-  // claude resolution behavior is identical (PATH, nvm, etc.).
-  // Single-quote the path so a worktree with $ or ` (rare but possible)
+  // Launch via the user's login shell (matches spawnInWorktree's PATH/nvm
+  // resolution). buildInteractiveCmd gives the base agent command; we append
+  // the prompt arg. Single-quote the tempfile path so a worktree with $ or `
   // doesn't trigger unwanted expansion.
-  const shellCmd = `${claudeBin} "$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+  const model = (config.agentModel || {})[prov.id] || '';
+  const agentCmd = prov.buildInteractiveCmd(bin, { trust: consent.trust, model });
+  // Most agents take the prompt as a bare positional arg (Claude, Codex). Some
+  // need a flag to execute it interactively (Gemini: `-i`). interactivePromptFlag
+  // supplies that; default is none.
+  const promptFlag = prov.interactivePromptFlag ? `${prov.interactivePromptFlag} ` : '';
+  const quotedPrompt = `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+  const shellCmd = `${agentCmd} ${promptFlag}${quotedPrompt}`;
   const args = shellRunCmdArgs(userShell, shellCmd);
 
-  const preSpawnIds = snapshotSessionIds(worktreePath);
+  const preSnapshot = prov.snapshotSessions(worktreePath);
   let ptyProc;
   try {
     ptyProc = pty.spawn(userShell, args, {
@@ -242,6 +214,7 @@ function startImplementPty({ requestId, worktreePath, prompt, onData, onEvent, o
     // node-pty can throw on missing native bindings / bad shell path.
     // Clean up the staged prompt so /tmp doesn't accumulate orphans.
     try { fs.unlinkSync(promptFile); } catch {}
+    authSlot.release(); // never spawned — free the concurrency slot
     return { error: `Failed to spawn implement PTY: ${err.message}` };
   }
 
@@ -271,6 +244,7 @@ function startImplementPty({ requestId, worktreePath, prompt, onData, onEvent, o
     if (session.stopSessionWait) { try { session.stopSessionWait(); } catch {} }
     if (session.stopJsonlTail) { try { session.stopJsonlTail(); } catch {} }
     try { fs.unlinkSync(promptFile); } catch {}
+    authSlot.release(); // free the concurrency slot (Codex token-rotation guard)
     implementPtySessions.delete(requestId);
     if (!session.finished) onExit({ exitCode, signal });
   });
@@ -295,13 +269,14 @@ function startImplementPty({ requestId, worktreePath, prompt, onData, onEvent, o
   }, 15000);
 
   session.stopSessionWait = waitForNewSessionFile(
-    worktreePath, preSpawnIds,
+    prov, worktreePath, preSnapshot,
     (filePath, sessionId) => {
       session.sessionId = sessionId;
-      session.stopJsonlTail = startJsonlTail(filePath, (ev) => {
+      session.stopJsonlTail = startJsonlTail(filePath, prov, (ev) => {
+        session.gotAgentEvent = true;
         if (ev.kind === 'end_turn') {
           // Mark the run finished here, but let the user keep the PTY
-          // open so they can read claude's output. The IPC handler
+          // open so they can read the agent's output. The IPC handler
           // will close it on cancel or when the renderer dismisses.
           session.finished = true;
         }
@@ -309,11 +284,26 @@ function startImplementPty({ requestId, worktreePath, prompt, onData, onEvent, o
       });
     },
     () => {
-      // Couldn't find a session file in 30s — claude probably failed
+      // Couldn't find a session file in 30s — the agent probably failed
       // to start. Let the user see the PTY output anyway; the IPC
       // handler will still emit an exit event when the PTY dies.
     },
   );
+
+  // Submit the pre-filled positional prompt for agents whose TUI doesn't
+  // auto-run it (Codex). Claude auto-runs, so this stays off for it. We send
+  // once the TUI has had time to render, and retry once if no agent event has
+  // arrived yet (an extra Enter after the turn is already running is a no-op).
+  if (prov.needsEnterToSubmit) {
+    for (const ms of [3500, 8000]) {
+      setTimeout(() => {
+        if (!implementPtySessions.has(requestId) || session.finished || session.gotAgentEvent) return;
+        try { ptyProc.write('\r'); } catch (err) {
+          console.warn('[pr-implement-pty] submit-enter failed', err.message);
+        }
+      }, ms);
+    }
+  }
 
   return { ok: true };
 }
