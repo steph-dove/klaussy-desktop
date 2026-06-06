@@ -179,6 +179,9 @@
   window.klaus.task.onConverted(function (data) {
     var t = tasks.get(data.id);
     if (!t) return;
+    // Remember which agent just exited so the Resume button re-launches THAT
+    // agent (not hardcoded to Claude).
+    if (t.mode && t.mode !== 'shell') t.resumeAgent = t.mode;
     t.alive = true;
     t.mode = 'shell';
     updateSidebarItem(data.id);
