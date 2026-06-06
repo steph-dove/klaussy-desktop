@@ -690,6 +690,21 @@
     taskList.appendChild(item);
   }
 
+  // Worktree rows render their quick-open button's label/title from the default
+  // agent at creation time; when the default changes in Preferences, refresh
+  // them in place so the button reflects the new agent (the click handler
+  // already reads defaultAgent() live).
+  function refreshWorktreeAgentButtons() {
+    var agent = defaultAgent();
+    var label = AppUtils.modeShortLabel(agent);
+    var title = 'Open with ' + AppUtils.modeDisplayName(agent);
+    taskList.querySelectorAll('.worktree-item .worktree-open-claude').forEach(function (btn) {
+      btn.textContent = label;
+      btn.title = title;
+    });
+  }
+  document.addEventListener('klaussy:default-agent-changed', refreshWorktreeAgentButtons);
+
   async function loadSavedSessions(runningTasks) {
     var sessions = await window.klaus.session.listSaved();
     if (!sessions || sessions.length === 0) return;
