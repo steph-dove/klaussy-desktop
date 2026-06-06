@@ -144,6 +144,14 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     }
   }
 
+  // Ensure the chosen location exists — git worktree add creates the leaf dir
+  // but not missing parents (e.g. a suggested "<repo>-worktrees" folder).
+  try {
+    fs.mkdirSync(worktreeDir, { recursive: true });
+  } catch (e) {
+    return { error: 'Could not create the worktree location ' + worktreeDir + ': ' + e.message };
+  }
+
   // Create the worktree (matching klausify CLI: git worktree add ../<repo>-<branch> -b <branch>)
   try {
     execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, baseBranch], {
@@ -180,6 +188,13 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
 
   if (fs.existsSync(worktreePath)) {
     return { error: 'Worktree directory already exists: ' + worktreePath };
+  }
+
+  // Ensure the chosen location exists (git only creates the leaf dir).
+  try {
+    fs.mkdirSync(worktreeDir, { recursive: true });
+  } catch (e) {
+    return { error: 'Could not create the worktree location ' + worktreeDir + ': ' + e.message };
   }
 
   try {

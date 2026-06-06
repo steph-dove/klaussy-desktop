@@ -871,6 +871,12 @@
   let selectedBasePath = null;
   let selectedMode = 'claude';
   let selectedBaseBranch = '';
+  // True only once the user deliberately picks a base branch. The combobox is
+  // pre-filled with the default branch, so without this flag "no name" would
+  // always be read as "continue the default branch" and never as "name
+  // required" — and checking out the default usually fails (it's already the
+  // primary worktree's branch).
+  let baseBranchUserPicked = false;
 
   // Shell selector
   const shellOptions = document.querySelectorAll('.shell-option');
@@ -893,10 +899,18 @@
       modalTabs.forEach(function (t) { t.classList.toggle('active', t === tab); });
       tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-' + activeTab); });
       modalError.textContent = '';
+      clearFieldFlags();
       if (activeTab === 'new') {
         setTimeout(function () { modalInput.focus(); }, 50);
       }
     });
+  });
+
+  // Clear the name field's required-ring (and stale error) as soon as the
+  // user starts typing a name.
+  modalInput.addEventListener('input', function () {
+    modalInput.classList.remove('modal-field-invalid');
+    if (modalError) modalError.textContent = '';
   });
 
   // Combobox wiring — input shows the picked branch (or filter text); list
@@ -912,6 +926,7 @@
       baseBranchList.hidden = false;
     });
     baseBranchInput.addEventListener('input', function () {
+      baseBranchInput.classList.remove('modal-field-invalid');
       renderBaseBranchOptions(baseBranchInput.value.trim());
       baseBranchList.hidden = false;
     });
@@ -955,6 +970,7 @@
 
   function pickBaseBranch(name) {
     selectedBaseBranch = name;
+    baseBranchUserPicked = true;
     setBaseBranchInputDisplay(name, name === baseBranchDefault);
     baseBranchList.hidden = true;
   }
@@ -1043,6 +1059,8 @@
     var v = pathInput.value.trim();
     selectedWorktreePath = v || null;
     pathInput.classList.toggle('has-path', !!v);
+    pathInput.classList.remove('modal-field-invalid');
+    if (modalError) modalError.textContent = '';
   });
 
   // Drag a folder from Finder onto the picker to set the path. We resolve
@@ -1129,22 +1147,45 @@
       list.hidden = true;
       button.setAttribute('aria-expanded', 'false');
     }
+    // Render one row. `it` = { path, label?, sub?, tag?, kind?, removable? }.
+    // removable defaults to true (shows the ✕); discovered items pass false.
+    function renderItem(it) {
+      var p = it.path;
+      var label = it.label && it.label !== p ? it.label : '';
+      var subText = it.sub != null ? it.sub : (label ? p : '');
+      var sub = subText ? '<span class="modal-recents-sub">' + escHtml(subText) + '</span>' : '';
+      var main = label ? escHtml(label) : escHtml(p);
+      var tag = it.tag ? '<span class="modal-recents-tag">' + escHtml(it.tag) + '</span>' : '';
+      var rm = it.removable === false ? ''
+        : '<button type="button" class="modal-recents-remove" title="Remove from recents" data-path="' + escHtml(p) + '">×</button>';
+      return '<div class="modal-recents-item" data-path="' + escHtml(p) + '" data-kind="' + escHtml(it.kind || '') + '">'
+        + '<span class="modal-recents-pick">' + main + sub + '</span>'
+        + tag + rm
+      + '</div>';
+    }
     function open() {
-      Promise.resolve(opts.loadItems()).then(function (items) {
-        if (!items || !items.length) {
+      Promise.resolve(opts.loadItems()).then(function (data) {
+        // `data` is either a flat item array or a list of { header, items }
+        // sections. Normalize to sections so the renderer is uniform.
+        var sections = (data && data.length && data[0] && data[0].items)
+          ? data
+          : [{ header: null, items: data || [] }];
+        var total = sections.reduce(function (n, s) { return n + (s.items ? s.items.length : 0); }, 0);
+        if (!total) {
           list.innerHTML = '<div class="modal-recents-empty">' + escHtml(opts.emptyText || 'No recent paths') + '</div>';
         } else {
-          list.innerHTML = items.map(function (it) {
-            var p = it.path;
-            var label = it.label && it.label !== p ? it.label : '';
-            var sub = label ? '<span class="modal-recents-sub">' + escHtml(p) + '</span>' : '';
-            var main = label ? escHtml(label) : escHtml(p);
-            return '<div class="modal-recents-item" data-path="' + escHtml(p) + '">'
-              + '<span class="modal-recents-pick">' + main + sub + '</span>'
-              + '<button type="button" class="modal-recents-remove" title="Remove from recents" data-path="' + escHtml(p) + '">×</button>'
-            + '</div>';
+          list.innerHTML = sections.filter(function (s) { return s.items && s.items.length; }).map(function (s) {
+            var head = s.header ? '<div class="modal-recents-section">' + escHtml(s.header) + '</div>' : '';
+            return head + s.items.map(renderItem).join('');
           }).join('');
         }
+        list.hidden = false;
+        button.setAttribute('aria-expanded', 'true');
+      }).catch(function (err) {
+        // A discovery call rejected (rare — handlers normally return []). Degrade
+        // to the empty state and still open, rather than leaving a dead button.
+        console.error('[recents-dropdown] loadItems failed:', err);
+        list.innerHTML = '<div class="modal-recents-empty">' + escHtml(opts.emptyText || 'Could not load') + '</div>';
         list.hidden = false;
         button.setAttribute('aria-expanded', 'true');
       });
@@ -1165,7 +1206,7 @@
       if (pick) {
         e.stopPropagation();
         var p = pick.getAttribute('data-path');
-        opts.onPick(p);
+        opts.onPick(p, { kind: pick.getAttribute('data-kind') || '' });
         close();
       }
     });
@@ -1176,10 +1217,61 @@
     });
   }
 
+  // Discovery promises, cached per modal-open so toggling a dropdown doesn't
+  // re-crawl the filesystem / re-shell `git worktree list`. Reset in showModal;
+  // the repos cache is also invalidated when a discovered repo is adopted (it
+  // then moves into the Projects section).
+  var discoverReposCache = null;
+  var discoverWorktreesCache = null;
+  // Cache the promise, but drop it on rejection so the next open retries
+  // instead of re-serving a permanently-rejected promise for the modal session.
+  function getDiscoveredRepos() {
+    if (!discoverReposCache) {
+      discoverReposCache = window.klaus.repo.discoverRepos().catch(function (e) {
+        discoverReposCache = null;
+        throw e;
+      });
+    }
+    return discoverReposCache;
+  }
+  function getDiscoveredWorktrees() {
+    if (!discoverWorktreesCache) {
+      discoverWorktreesCache = window.klaus.repo.discoverWorktrees().catch(function (e) {
+        discoverWorktreesCache = null;
+        throw e;
+      });
+    }
+    return discoverWorktreesCache;
+  }
+
   bindRecentsDropdown(pathRecentsBtn, pathRecentsList, {
     loadItems: function () {
-      return window.klaus.repo.recentPathsGet().then(function (r) {
-        return (r.worktrees || []).map(function (p) { return { path: p }; });
+      return Promise.all([
+        getDiscoveredWorktrees(),
+        window.klaus.repo.recentPathsGet(),
+      ]).then(function (res) {
+        var groups = res[0] || [];
+        var recents = (res[1] && res[1].worktrees) || [];
+        // One section per repo (discovered worktrees), then a Recent section.
+        var sections = groups.map(function (g) {
+          return {
+            header: g.repoName,
+            items: (g.worktrees || []).map(function (w) {
+              return {
+                label: w.name,
+                path: w.path,
+                sub: w.branch || w.path,
+                tag: w.active ? 'active' : '',
+                kind: 'worktree',
+                removable: false,
+              };
+            }),
+          };
+        });
+        if (recents.length) {
+          sections.push({ header: 'Recent', items: recents.map(function (p) { return { path: p, kind: 'recent' }; }) });
+        }
+        return sections;
       });
     },
     onPick: function (p) {
@@ -1188,18 +1280,21 @@
       pathInput.classList.add('has-path');
     },
     onRemove: function (p) { return window.klaus.repo.recentPathsRemove('worktrees', p); },
-    emptyText: 'No recent worktrees yet',
+    emptyText: 'No worktrees found',
   });
   // Switch the active repo (used by the source-repo Browse button, the
   // recents dropdown, and the drag-and-drop handler). Re-syncs the path
   // display, branch dropdown, and the basepath placeholder.
   function applyRepoSwitch(dir) {
     AppState.repoPath = dir;
+    if (modalRepoRow) modalRepoRow.classList.remove('modal-field-invalid');
+    if (modalError) modalError.textContent = '';
     if (modalRepoPathEl) { modalRepoPathEl.textContent = dir; modalRepoPathEl.title = dir; }
     selectedBaseBranch = '';
+    baseBranchUserPicked = false;
     populateBaseBranchSelect();
     if (!selectedBasePath) {
-      basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
+      basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — ▾ for suggestions, or drag/paste';
     }
   }
 
@@ -1215,21 +1310,41 @@
     applyRepoSwitch(added.path);
   });
 
-  // Source-repo recents dropdown: lists config.projects, picks via
-  // switchProject, ✕ removes via removeProject.
+  // Source-repo dropdown: two sections. "Projects" = config.projects (pick via
+  // switchProject, ✕ removes via removeProject). "Discovered" = git repos found
+  // on disk but not yet configured (pick adopts via addProject, then switches).
   bindRecentsDropdown(modalRepoRecentsBtn, modalRepoRecentsList, {
     loadItems: function () {
-      return window.klaus.repo.listProjects().then(function (projects) {
-        return (projects || []).map(function (p) {
-          return { label: p.name, path: p.path };
-        });
+      return Promise.all([
+        window.klaus.repo.listProjects(),
+        getDiscoveredRepos(),
+      ]).then(function (res) {
+        var projects = res[0] || [];
+        var discovered = res[1] || [];
+        return [
+          { header: 'Projects', items: projects.map(function (p) {
+            return { label: p.name, path: p.path, kind: 'project' };
+          }) },
+          { header: 'Discovered', items: discovered.map(function (r) {
+            return { label: r.name, path: r.path, sub: r.path, kind: 'discovered', removable: false };
+          }) },
+        ];
       });
     },
-    onPick: function (p) {
-      window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
+    onPick: function (p, info) {
+      if (info && info.kind === 'discovered') {
+        // Adopt the discovered repo as a project, then make it active. Drop the
+        // repos cache so it moves Projects→Discovered on the next open.
+        window.klaus.repo.addProject(p).then(function (added) {
+          discoverReposCache = null;
+          if (added) applyRepoSwitch(added.path);
+        });
+      } else {
+        window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
+      }
     },
     onRemove: function (p) { return window.klaus.repo.removeProject(p); },
-    emptyText: 'No recent repos yet',
+    emptyText: 'No repos found',
   });
 
   // Source-repo drag-and-drop fallback. Drop a folder onto the row to
@@ -1260,8 +1375,22 @@
 
   bindRecentsDropdown(basepathRecentsBtn, basepathRecentsList, {
     loadItems: function () {
-      return window.klaus.repo.recentPathsGet().then(function (r) {
-        return (r.basepaths || []).map(function (p) { return { path: p }; });
+      return Promise.all([
+        AppState.repoPath ? window.klaus.repo.suggestWorktreeLocations(AppState.repoPath) : Promise.resolve([]),
+        window.klaus.repo.recentPathsGet(),
+      ]).then(function (res) {
+        var suggested = res[0] || [];
+        var recents = (res[1] && res[1].basepaths) || [];
+        var sections = [];
+        if (suggested.length) {
+          sections.push({ header: 'Suggested', items: suggested.map(function (s) {
+            return { label: s.label, path: s.path, sub: s.path, tag: s.recommended ? 'recommended' : '', kind: 'suggested', removable: false };
+          }) });
+        }
+        if (recents.length) {
+          sections.push({ header: 'Recent', items: recents.map(function (p) { return { path: p, kind: 'recent' }; }) });
+        }
+        return sections;
       });
     },
     onPick: function (p) {
@@ -1270,7 +1399,7 @@
       basepathInput.classList.add('has-path');
     },
     onRemove: function (p) { return window.klaus.repo.recentPathsRemove('basepaths', p); },
-    emptyText: 'No recent base paths yet',
+    emptyText: 'No suggestions yet',
   });
 
   function defaultBasePathDisplay() {
@@ -1282,15 +1411,20 @@
 
   function showModal() {
     modalOverlay.style.display = 'flex';
+    // Fresh discovery each time the modal opens so adopted repos / new
+    // worktrees show up; cached within a single open across dropdown toggles.
+    discoverReposCache = null;
+    discoverWorktreesCache = null;
     modalInput.value = '';
     modalError.textContent = '';
+    clearFieldFlags();
     modalCreate.disabled = false;
     selectedWorktreePath = null;
     pathInput.value = '';
     pathInput.classList.remove('has-path');
     selectedBasePath = null;
     basepathInput.value = '';
-    basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — drag a folder or paste to override';
+    basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — ▾ for suggestions, or drag/paste';
     basepathInput.classList.remove('has-path');
     activeTab = 'new';
     selectedMode = AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode || 'claude';
@@ -1298,9 +1432,8 @@
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
     selectedBaseBranch = '';
+    baseBranchUserPicked = false;
     populateBaseBranchSelect();
-    var envField = document.getElementById('modal-env-vars');
-    if (envField) envField.value = '';
     // Sync the source-repo display to whatever AppState says — buttons
     // and drag handlers were wired once at IIFE init.
     if (modalRepoPathEl) { modalRepoPathEl.textContent = AppState.repoPath || 'No repo selected'; modalRepoPathEl.title = AppState.repoPath || ''; }
@@ -1966,32 +2099,44 @@
   // can re-run the no-project check without polling.
   window.addEventListener('klaussy:project-changed', updateEmptyState);
 
-  // ---- E3: Parse env vars from modal ----
-
-  var modalEnvVars = document.getElementById('modal-env-vars');
+  // Clear the red "required" ring from every field that can carry it.
+  function clearFieldFlags() {
+    [modalRepoRow, modalInput, baseBranchInput, pathInput].forEach(function (el) {
+      if (el) el.classList.remove('modal-field-invalid');
+    });
+  }
+  // Abort a submit: re-enable Create, show the message, ring + focus the field.
+  function failValidation(message, fieldEl) {
+    modalCreate.disabled = false;
+    modalCreate.textContent = 'Create';
+    modalError.textContent = message;
+    if (fieldEl) {
+      fieldEl.classList.add('modal-field-invalid');
+      var focusEl = fieldEl.tagName === 'INPUT' ? fieldEl : fieldEl.querySelector('input, button');
+      if (focusEl && focusEl.focus) setTimeout(function () { focusEl.focus(); }, 0);
+    }
+  }
 
   async function submitModal() {
     modalCreate.disabled = true;
     modalCreate.textContent = 'Creating...';
     modalError.textContent = '';
-
-    // Parse env vars
-    var envVars = {};
-    var envText = modalEnvVars.value.trim();
-    if (envText) {
-      envText.split('\n').forEach(function (line) {
-        var eq = line.indexOf('=');
-        if (eq > 0) {
-          envVars[line.substring(0, eq).trim()] = line.substring(eq + 1).trim();
-        }
-      });
-    }
+    clearFieldFlags();
 
     var result;
 
     if (activeTab === 'new') {
+      // A source repo is required for both create and checkout paths.
+      if (!AppState.repoPath) {
+        return failValidation('Select a source repo first.', modalRepoRow);
+      }
       var name = modalInput.value.trim();
       if (name) {
+        // The branch name is sanitized to [a-zA-Z0-9_-]; a name with no
+        // letters/digits would collapse to an empty branch and fail in git.
+        if (!/[a-zA-Z0-9]/.test(name)) {
+          return failValidation('Name must include at least one letter or number.', modalInput);
+        }
         // Name typed: create a new branch with that name, based on the
         // selected branch (or the default if none picked).
         result = await window.klaus.task.create(
@@ -1999,31 +2144,33 @@
           AppState.repoPath,
           selectedMode,
           selectedBasePath,
-          Object.keys(envVars).length > 0 ? envVars : undefined,
+          undefined,
           selectedBaseBranch || null,
         );
-      } else if (selectedBaseBranch) {
-        // No name + branch picked: check that branch out directly so the
-        // user can continue work on it in a fresh worktree.
+      } else if (baseBranchUserPicked && selectedBaseBranch) {
+        // No name, but the user *deliberately* picked a branch: check it out
+        // directly so they can continue work on it in a fresh worktree. We
+        // require an explicit pick (not the auto-default) so an unnamed submit
+        // with the default branch still asks for a name instead of trying to
+        // re-check-out the primary worktree's branch.
+        // A branch can only live in one worktree — if it's already checked out,
+        // tell the user to name a new branch off it rather than failing in git.
+        var picked = baseBranchData.find(function (b) { return b.localName === selectedBaseBranch; });
+        if (picked && picked.inWorktree) {
+          return failValidation('"' + selectedBaseBranch + '" is already checked out in another worktree. Enter a name to branch off it instead.', baseBranchInput);
+        }
         result = await window.klaus.task.checkoutBranch(
           AppState.repoPath,
           selectedBaseBranch,
           selectedMode,
           selectedBasePath,
-          Object.keys(envVars).length > 0 ? envVars : undefined,
         );
       } else {
-        modalCreate.disabled = false;
-        modalCreate.textContent = 'Create';
-        modalError.textContent = 'Enter a name (creates a new branch) or pick an existing branch to continue.';
-        return;
+        return failValidation('Name the worktree, or pick an existing branch from "Base branch" to continue it.', modalInput);
       }
     } else {
       if (!selectedWorktreePath) {
-        modalCreate.disabled = false;
-        modalCreate.textContent = 'Create';
-        modalError.textContent = 'Select a directory first.';
-        return;
+        return failValidation('Select a worktree first.', pathInput);
       }
       result = await window.klaus.task.attachWorktree(selectedWorktreePath, selectedMode);
     }

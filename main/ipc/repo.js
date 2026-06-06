@@ -3,6 +3,8 @@
 // hide-worktree and the new-window opener.
 
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { execFileSync, execSync } = require('child_process');
 const { ipcMain, dialog } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
@@ -192,44 +194,38 @@ ipcMain.handle('new-window', () => {
   return { ok: true };
 });
 
-ipcMain.handle('list-worktrees', async () => {
-  const config = loadConfig();
-  const repoPath = config.repoPath;
-  if (!repoPath) return [];
+// Parse `git worktree list --porcelain` into [{ path, branch, bare }].
+function parseWorktreePorcelain(output) {
+  const worktrees = [];
+  let current = {};
+  output.split('\n').forEach(line => {
+    if (line.startsWith('worktree ')) {
+      if (current.path) worktrees.push(current);
+      current = { path: line.substring(9) };
+    } else if (line.startsWith('branch ')) {
+      current.branch = line.substring(7).replace('refs/heads/', '');
+    } else if (line === 'bare') {
+      current.bare = true;
+    } else if (line === '') {
+      if (current.path) worktrees.push(current);
+      current = {};
+    }
+  });
+  if (current.path) worktrees.push(current);
+  return worktrees;
+}
 
-  // Verify it's a git repo before listing worktrees
+// List the (non-bare, non-hidden) worktrees of a single repo, decorated with
+// active status. Returns [] if repoPath isn't a usable git repo.
+async function worktreesForRepo(repoPath, hidden, activePaths) {
   try {
     await execFileP('git', ['rev-parse', '--git-dir'], { cwd: repoPath });
   } catch {
     return [];
   }
-
   try {
-    const { stdout: output } = await execFileP('git', ['worktree', 'list', '--porcelain'], {
-      cwd: repoPath,
-    });
-
-    const worktrees = [];
-    let current = {};
-    output.split('\n').forEach(line => {
-      if (line.startsWith('worktree ')) {
-        if (current.path) worktrees.push(current);
-        current = { path: line.substring(9) };
-      } else if (line.startsWith('branch ')) {
-        current.branch = line.substring(7).replace('refs/heads/', '');
-      } else if (line === 'bare') {
-        current.bare = true;
-      } else if (line === '') {
-        if (current.path) worktrees.push(current);
-        current = {};
-      }
-    });
-    if (current.path) worktrees.push(current);
-
-    // Filter out bare and hidden worktrees, add active status
-    const activePaths = new Set(Array.from(instances.values()).map(i => i.worktreePath));
-    const hidden = new Set(config.hiddenWorktrees || []);
-    return worktrees
+    const { stdout } = await execFileP('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath });
+    return parseWorktreePorcelain(stdout)
       .filter(w => !w.bare && !hidden.has(w.path))
       .map(w => ({
         path: w.path,
@@ -240,6 +236,164 @@ ipcMain.handle('list-worktrees', async () => {
   } catch {
     return [];
   }
+}
+
+ipcMain.handle('list-worktrees', async () => {
+  const config = loadConfig();
+  const repoPath = config.repoPath;
+  if (!repoPath) return [];
+  const activePaths = new Set(Array.from(instances.values()).map(i => i.worktreePath));
+  const hidden = new Set(config.hiddenWorktrees || []);
+  return worktreesForRepo(repoPath, hidden, activePaths);
+});
+
+// Discover worktrees across every configured project (+ the active repo),
+// grouped by repo. Powers the "Existing worktree" tab dropdown so the user
+// can jump to any worktree without first switching the active project.
+ipcMain.handle('discover-worktrees', async () => {
+  const config = loadConfig();
+  const activePaths = new Set(Array.from(instances.values()).map(i => i.worktreePath));
+  const hidden = new Set(config.hiddenWorktrees || []);
+
+  // Union of configured projects + active repo, deduped by path.
+  const repos = [];
+  const seenRepo = new Set();
+  for (const p of [...(config.projects || []), ...(config.repoPath ? [{ name: path.basename(config.repoPath), path: config.repoPath }] : [])]) {
+    if (p && p.path && !seenRepo.has(p.path)) {
+      seenRepo.add(p.path);
+      repos.push(p);
+    }
+  }
+
+  const groups = await Promise.all(repos.map(async (repo) => {
+    const worktrees = await worktreesForRepo(repo.path, hidden, activePaths);
+    return { repoName: repo.name || path.basename(repo.path), repoPath: repo.path, worktrees };
+  }));
+  // Drop repos that contributed no worktrees (unreadable / all hidden).
+  return groups.filter(g => g.worktrees.length > 0);
+});
+
+// Folders to crawl (one level deep) for git repos, beyond project siblings:
+// the usual dev-folder conventions in $HOME.
+const COMMON_DEV_DIRS = ['projects', 'code', 'dev', 'src', 'repos', 'work', 'Developer', 'git'];
+const DISCOVER_SKIP = new Set(['node_modules', '.Trash', 'Library', 'Applications']);
+
+// Scan one directory for git repos. A child counts as a repo only if it has a
+// `.git` *directory* (excludes worktrees, whose `.git` is a file). A child that
+// is NOT a repo is descended into while `depthRemaining > 0`, which catches the
+// common org-grouping pattern (~/projects/<org>/<repo>) without surfacing
+// vendored/sub-repos (repos themselves are never descended into).
+async function collectRepos(dir, depthRemaining, configuredPaths, seenRepo, found) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  await Promise.all(entries.map(async (entry) => {
+    if (!entry.isDirectory() && !entry.isSymbolicLink()) return;
+    if (entry.name.startsWith('.') || DISCOVER_SKIP.has(entry.name)) return;
+    const repoPath = path.join(dir, entry.name);
+    let isRepo = false;
+    try {
+      const st = await fs.promises.stat(path.join(repoPath, '.git'));
+      isRepo = st.isDirectory();
+    } catch {}
+    if (isRepo) {
+      let real;
+      try { real = await fs.promises.realpath(repoPath); } catch { real = repoPath; }
+      if (seenRepo.has(real) || configuredPaths.has(real) || configuredPaths.has(repoPath)) return;
+      seenRepo.add(real);
+      found.push({ path: repoPath, name: entry.name });
+    } else if (depthRemaining > 0) {
+      await collectRepos(repoPath, depthRemaining - 1, configuredPaths, seenRepo, found);
+    }
+  }));
+}
+
+// Discover git repos on disk for the "New worktree" source-repo dropdown.
+// Scans (deduped) parent dirs of configured projects + the active repo, common
+// $HOME dev folders, and any config.repoScanRoots — each root one level deep,
+// descending one extra level into non-repo folders (org grouping). Paths
+// already configured as projects are omitted (they show separately).
+ipcMain.handle('discover-repos', async () => {
+  const config = loadConfig();
+  const home = os.homedir();
+
+  // Build the set of scan roots (realpath-deduped).
+  const rootCandidates = [];
+  for (const p of config.projects || []) {
+    if (p && p.path) rootCandidates.push(path.dirname(p.path));
+  }
+  if (config.repoPath) rootCandidates.push(path.dirname(config.repoPath));
+  for (const d of COMMON_DEV_DIRS) rootCandidates.push(path.join(home, d));
+  for (const r of config.repoScanRoots || []) {
+    if (typeof r === 'string' && r) rootCandidates.push(r);
+  }
+
+  const roots = [];
+  const seenRoot = new Set();
+  for (const r of rootCandidates) {
+    let real;
+    try { real = await fs.promises.realpath(r); } catch { continue; }
+    if (seenRoot.has(real)) continue;
+    seenRoot.add(real);
+    roots.push(real);
+  }
+
+  const configuredPaths = new Set((config.projects || []).map(p => p.path));
+  const found = [];
+  const seenRepo = new Set();
+
+  // depthRemaining = 1: scan each root's children, and descend one extra level
+  // into any child that isn't itself a repo (org-grouped clones).
+  await Promise.all(roots.map(root => collectRepos(root, 1, configuredPaths, seenRepo, found)));
+
+  found.sort((a, b) => a.name.localeCompare(b.name));
+  return found;
+});
+
+// Ranked location suggestions for the "New worktree" Location dropdown — the
+// parent directory the new worktree gets created under. Ordered:
+//   1. Alongside this repo's existing worktrees (most common parent), if any
+//      — marked recommended.
+//   2. The repo's parent dir (the klausify sibling default).
+//   3. A tidy dedicated "<repo>-worktrees" folder next to the repo.
+// Recent base paths are surfaced separately by the renderer (recent-paths-get).
+ipcMain.handle('suggest-worktree-locations', async (_event, { repoPath }) => {
+  if (!repoPath) return [];
+
+  const suggestions = [];
+  const seen = new Set();
+  const add = (p, label, recommended) => {
+    if (!p || seen.has(p)) return;
+    seen.add(p);
+    suggestions.push({ path: p, label, recommended: !!recommended });
+  };
+
+  // 1. Where this repo's existing worktrees already live (skip the primary
+  //    checkout), ranked by how many sit under each parent.
+  try {
+    const { stdout } = await execFileP('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath });
+    const counts = new Map();
+    for (const w of parseWorktreePorcelain(stdout)) {
+      if (w.bare || w.path === repoPath) continue;
+      const parent = path.dirname(w.path);
+      counts.set(parent, (counts.get(parent) || 0) + 1);
+    }
+    const ranked = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+    ranked.forEach(([parent], i) => {
+      add(parent, i === 0 ? 'Alongside existing worktrees' : 'Existing worktree folder', i === 0);
+    });
+  } catch {}
+
+  // 2. Repo parent (sibling) — the default. Recommended only if nothing above.
+  add(path.dirname(repoPath), 'Next to the repo (default)', suggestions.length === 0);
+
+  // 3. Dedicated, tidy worktrees folder convention next to the repo.
+  add(path.join(path.dirname(repoPath), path.basename(repoPath) + '-worktrees'), 'Dedicated worktrees folder');
+
+  return suggestions;
 });
 
 // Recently-used paths for the worktree modal's basepath + existing-worktree

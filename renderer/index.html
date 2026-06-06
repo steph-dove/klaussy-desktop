@@ -280,7 +280,7 @@
           <div id="modal-repo-row">
             <span id="modal-repo-path" class="modal-repo-path">No repo selected</span>
             <button id="btn-modal-repo-browse" type="button" class="modal-input-btn" title="Browse for a git repo">Browse</button>
-            <button id="btn-modal-repo-recents" type="button" class="modal-input-btn modal-recents-btn" title="Recent repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
+            <button id="btn-modal-repo-recents" type="button" class="modal-input-btn modal-recents-btn" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
             <div id="modal-repo-recents-list" class="modal-recents-list" hidden role="listbox"></div>
           </div>
         </div>
@@ -306,11 +306,11 @@
 
       <!-- Existing worktree tab -->
       <div id="tab-existing" class="tab-content">
-        <p>Select an existing worktree directory to attach an agent to.</p>
+        <p>Pick a discovered worktree from the ▾ menu, or drag/paste a worktree directory to attach an agent to.</p>
         <div id="path-picker">
           <input id="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
           <button id="path-browse" type="button" class="modal-input-btn" title="Browse for a worktree folder">Browse</button>
-          <button id="path-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Recent worktrees" aria-haspopup="listbox" aria-expanded="false">▾</button>
+          <button id="path-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Discovered &amp; recent worktrees" aria-haspopup="listbox" aria-expanded="false">▾</button>
           <div id="path-recents-list" class="modal-recents-list" hidden role="listbox"></div>
         </div>
       </div>
@@ -325,12 +325,6 @@
           <button class="shell-option" data-shell="copilot">Copilot</button>
           <button class="shell-option" data-shell="shell">Shell</button>
         </div>
-      </div>
-
-      <!-- Env vars (E3) -->
-      <div id="env-vars-section">
-        <label>Environment Variables <span class="env-hint">(KEY=VALUE, one per line)</span></label>
-        <textarea id="modal-env-vars" rows="2" placeholder="e.g. DEBUG=true" spellcheck="false"></textarea>
       </div>
 
       <div id="modal-error"></div>
