@@ -24,6 +24,7 @@
             <div class="token-tile-value" id="token-tile-today-value">—</div>
           </div>
           <select id="token-tile-range" title="Chart range">
+            <option value="1d">1d</option>
             <option value="7d">7d</option>
             <option value="14d">14d</option>
             <option value="30d" selected>30d</option>
@@ -42,6 +43,8 @@
           <span id="token-tile-total">—</span>
           <span id="token-tile-range-label"></span>
         </div>
+        <!-- Per-agent breakdown for the selected range (only agents with data) -->
+        <div id="token-tile-agents"></div>
       </div>
 
       <div id="sidebar-header">

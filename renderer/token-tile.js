@@ -14,7 +14,36 @@
   const fromInput = document.getElementById('token-tile-from');
   const toInput = document.getElementById('token-tile-to');
   const chart = document.getElementById('token-tile-chart');
+  const agentsEl = document.getElementById('token-tile-agents');
   if (!todayEl || !rangeSel || !chart || !window.klaus || !window.klaus.tokenUsage) return;
+
+  // Per-agent dot colors. Names come from the provider registry via AppUtils.
+  const AGENT_COLORS = {
+    claude: '#d97757', codex: '#10a37f', gemini: '#4285f4', copilot: '#8957e5',
+  };
+  function agentName(id) {
+    return (window.AppUtils && AppUtils.modeDisplayName)
+      ? AppUtils.modeDisplayName(id)
+      : (id.charAt(0).toUpperCase() + id.slice(1));
+  }
+  function escHtml(s) {
+    return (window.AppUtils && AppUtils.escHtml) ? AppUtils.escHtml(s) : String(s);
+  }
+
+  // Compact list of "● Agent  total" rows for the selected range. Hidden when
+  // there's no usage to attribute.
+  function renderAgents(byAgent) {
+    if (!agentsEl) return;
+    if (!byAgent || !byAgent.length) { agentsEl.innerHTML = ''; return; }
+    agentsEl.innerHTML = byAgent.map(function (a) {
+      var color = AGENT_COLORS[a.agent] || 'var(--accent)';
+      return '<div class="token-agent-row">'
+        + '<span class="token-agent-dot" style="background:' + color + '"></span>'
+        + '<span class="token-agent-name">' + escHtml(agentName(a.agent)) + '</span>'
+        + '<span class="token-agent-val">' + fmt(a.total) + '</span>'
+      + '</div>';
+    }).join('');
+  }
 
   function fmt(n) {
     if (n == null || isNaN(n)) return '—';
@@ -36,6 +65,7 @@
     const slot = W / series.length;
     const barW = Math.max(0.5, slot * 0.78);
     const todayStr = todayKey();
+    const nowHour = new Date().getHours();
     const ns = 'http://www.w3.org/2000/svg';
     for (let i = 0; i < series.length; i++) {
       const p = series[i];
@@ -48,7 +78,9 @@
       r.setAttribute('width', barW.toFixed(2));
       r.setAttribute('height', Math.max(0.5, h).toFixed(2));
       r.setAttribute('rx', '0.5');
-      r.setAttribute('class', p.day === todayStr ? 'token-tile-bar is-today' : 'token-tile-bar');
+      // Hourly series highlight the current hour; daily series highlight today.
+      const highlight = (p.hour != null) ? (p.hour === nowHour) : (p.day === todayStr);
+      r.setAttribute('class', highlight ? 'token-tile-bar is-today' : 'token-tile-bar');
       const title = document.createElementNS(ns, 'title');
       title.textContent = `${p.day}: ${fmt(p.tokens)} tokens`;
       r.appendChild(title);
@@ -87,8 +119,9 @@
     totalEl.textContent = `${fmt(data.total)} total`;
     rangeLabelEl.textContent = spec.kind === 'custom'
       ? `${spec.from} → ${spec.to}`
-      : ({ '7d': '7 days', '14d': '14 days', '30d': '30 days', '6m': '6 months', '1y': '1 year', 'all': 'all time' }[spec.preset] || '');
+      : ({ '1d': 'today', '7d': '7 days', '14d': '14 days', '30d': '30 days', '6m': '6 months', '1y': '1 year', 'all': 'all time' }[spec.preset] || '');
     renderChart(data.series || []);
+    renderAgents(data.byAgent || []);
   }
 
   rangeSel.addEventListener('change', () => {
