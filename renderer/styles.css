@@ -11526,4 +11526,42 @@ body.task-branchless .file-viewer-blame-btn {
   font-variant-numeric: tabular-nums;
 }
 
+/* Per-agent usage breakdown under the chart. */
+#token-tile-agents {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#token-tile-agents:empty { display: none; }
+#token-tile-agents:not(:empty) {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.token-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.token-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.token-agent-name {
+  color: var(--text-muted);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.token-agent-val {
+  color: var(--text);
+  font-weight: 600;
+}
+
 .file-md-preview img { max-width: 100%; height: auto; }
