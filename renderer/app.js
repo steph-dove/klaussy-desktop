@@ -636,6 +636,7 @@
     var item = document.createElement('div');
     item.className = 'task-item worktree-item';
     item.dataset.path = wt.path;
+    item.dataset.repo = wt.repoPath || '';
 
     var iconColor = AppUtils.iconColor(wt.name);
     var iconLetter = (wt.name || '?').charAt(0).toUpperCase();
@@ -704,6 +705,7 @@
       var item = document.createElement('div');
       item.className = 'task-item saved-session';
       item.dataset.idx = idx;
+      item.dataset.repo = s.repoPath || '';
 
       var age = formatAge(s.savedAt);
       var pathShort = s.worktreePath ? s.worktreePath.split('/').slice(-2).join('/') : '';
@@ -1310,40 +1312,33 @@
     applyRepoSwitch(added.path);
   });
 
-  // Source-repo dropdown: two sections. "Projects" = config.projects (pick via
-  // switchProject, ✕ removes via removeProject). "Discovered" = git repos found
-  // on disk but not yet configured (pick adopts via addProject, then switches).
+  // Source-repo dropdown: two sections. "Open repos" = base repos of worktrees
+  // currently in the sidebar (auto-derived, not a user-managed list).
+  // "Discovered" = git repos found on disk, excluding the open ones. Picking
+  // either just makes it the active source repo.
   bindRecentsDropdown(modalRepoRecentsBtn, modalRepoRecentsList, {
     loadItems: function () {
-      return Promise.all([
-        window.klaus.repo.listProjects(),
-        getDiscoveredRepos(),
-      ]).then(function (res) {
-        var projects = res[0] || [];
-        var discovered = res[1] || [];
+      return getDiscoveredRepos().then(function (discovered) {
+        var open = (window.ProjectSwitcher && window.ProjectSwitcher.sidebarRepos)
+          ? window.ProjectSwitcher.sidebarRepos() : [];
+        var openPaths = {};
+        open.forEach(function (r) { openPaths[r.path] = true; });
         return [
-          { header: 'Projects', items: projects.map(function (p) {
-            return { label: p.name, path: p.path, kind: 'project' };
+          { header: 'Open repos', items: open.map(function (r) {
+            return { label: r.name, path: r.path, sub: r.path, kind: 'open', removable: false };
           }) },
-          { header: 'Discovered', items: discovered.map(function (r) {
-            return { label: r.name, path: r.path, sub: r.path, kind: 'discovered', removable: false };
-          }) },
+          { header: 'Discovered', items: (discovered || [])
+            .filter(function (r) { return !openPaths[r.path]; })
+            .map(function (r) {
+              return { label: r.name, path: r.path, sub: r.path, kind: 'discovered', removable: false };
+            }) },
         ];
       });
     },
-    onPick: function (p, info) {
-      if (info && info.kind === 'discovered') {
-        // Adopt the discovered repo as a project, then make it active. Drop the
-        // repos cache so it moves Projects→Discovered on the next open.
-        window.klaus.repo.addProject(p).then(function (added) {
-          discoverReposCache = null;
-          if (added) applyRepoSwitch(added.path);
-        });
-      } else {
-        window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
-      }
+    onPick: function (p) {
+      // Both sections are real git repos — just switch the active source repo.
+      window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
     },
-    onRemove: function (p) { return window.klaus.repo.removeProject(p); },
     emptyText: 'No repos found',
   });
 

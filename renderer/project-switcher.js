@@ -1,79 +1,104 @@
+// Repo filter for the sidebar. The dropdown lists the distinct base repos of
+// whatever worktrees are currently in the sidebar (running tasks, resumable
+// worktrees, and saved sessions) and filters the list to one repo. Picking a
+// repo also makes it the active source repo for the New Worktree modal.
+//
+// There is no longer a user-managed "projects" list — repos appear here purely
+// because you have a worktree from them open. Each sidebar `.task-item` is
+// stamped with `data-repo` (its base repo path); this module reads that.
+
 window.ProjectSwitcher = (function () {
-  var projectSelect = document.getElementById('project-select');
-  var btnAddProject = document.getElementById('btn-add-project');
+  var repoSelect = document.getElementById('project-select');
   var taskList = document.getElementById('task-list');
 
-  async function loadProjects() {
-    var projects = await window.klaus.repo.listProjects();
-    var current = await window.klaus.repo.get();
-    projectSelect.innerHTML = '';
+  function basename(p) {
+    if (!p) return '';
+    var parts = p.replace(/\/+$/, '').split('/');
+    return parts[parts.length - 1] || p;
+  }
 
-    if (projects.length === 0 && current) {
-      await window.klaus.repo.switchProject(current);
-      projects = [{ name: current.split('/').pop(), path: current }];
+  // Distinct base repos present among the sidebar items, sorted by name.
+  function sidebarRepos() {
+    var seen = new Set();
+    var repos = [];
+    taskList.querySelectorAll('.task-item').forEach(function (item) {
+      var repo = item.dataset.repo;
+      if (!repo || seen.has(repo)) return;
+      seen.add(repo);
+      repos.push({ path: repo, name: basename(repo) });
+    });
+    repos.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return repos;
+  }
+
+  // Rebuild the dropdown from the current sidebar, preserving the selection if
+  // that repo still has items (otherwise fall back to "All repos").
+  function refresh() {
+    var repos = sidebarRepos();
+    var current = AppState.selectedRepoFilter;
+    var stillPresent = current && repos.some(function (r) { return r.path === current; });
+    if (!stillPresent && current) {
+      AppState.selectedRepoFilter = null;
+      current = null;
     }
 
+    repoSelect.innerHTML = '';
     var allOpt = document.createElement('option');
     allOpt.value = '';
-    allOpt.textContent = 'All Projects';
-    if (!AppState.selectedProjectFilter) allOpt.selected = true;
-    projectSelect.appendChild(allOpt);
+    allOpt.textContent = 'All repos';
+    if (!current) allOpt.selected = true;
+    repoSelect.appendChild(allOpt);
 
-    projects.forEach(function (p) {
+    repos.forEach(function (r) {
       var opt = document.createElement('option');
-      opt.value = p.path;
-      opt.textContent = p.name;
-      if (p.path === AppState.selectedProjectFilter) opt.selected = true;
-      projectSelect.appendChild(opt);
+      opt.value = r.path;
+      opt.textContent = r.name;
+      opt.title = r.path;
+      if (r.path === current) opt.selected = true;
+      repoSelect.appendChild(opt);
     });
 
-    if (!AppState.repoPath && projects.length > 0) {
-      AppState.repoPath = projects[0].path;
-    }
+    filterTaskList();
   }
 
   function filterTaskList() {
+    var filter = AppState.selectedRepoFilter;
     taskList.querySelectorAll('.task-item').forEach(function (item) {
-      var id = Number(item.dataset.id);
-      var task = AppState.tasks.get(id);
-      if (!task || !AppState.selectedProjectFilter) {
-        item.style.display = '';
-        return;
-      }
-      var matches = task.worktreePath && task.worktreePath.startsWith(AppState.selectedProjectFilter);
-      if (!matches && task.worktreePath) {
-        var parentDir = task.worktreePath.substring(0, task.worktreePath.lastIndexOf('/'));
-        var projectParent = AppState.selectedProjectFilter.substring(0, AppState.selectedProjectFilter.lastIndexOf('/'));
-        matches = parentDir === projectParent;
-      }
-      item.style.display = matches ? '' : 'none';
+      if (!filter) { item.style.display = ''; return; }
+      item.style.display = (item.dataset.repo === filter) ? '' : 'none';
     });
   }
 
-  projectSelect.addEventListener('change', function () {
-    var newPath = projectSelect.value;
-    AppState.selectedProjectFilter = newPath || null;
+  repoSelect.addEventListener('change', function () {
+    var repo = repoSelect.value || null;
+    AppState.selectedRepoFilter = repo;
     filterTaskList();
-  });
-
-  btnAddProject.addEventListener('click', async function () {
-    var dir = await window.pickDirectoryPopup({
-      title: 'Add project',
-      placeholder: 'Drag a git repo folder here or paste a path',
-    });
-    if (!dir) return;
-    var result = await window.klaus.repo.addProject(dir);
-    if (result) {
-      AppState.repoPath = result.path;
-      await loadProjects();
-      // Notify other modules (e.g. the empty-state guidance in app.js) that
-      // the active project changed so they can re-render without polling.
-      window.dispatchEvent(new CustomEvent('klaussy:project-changed'));
+    // Picking a specific repo also makes it the active source repo for the
+    // New Worktree modal (default source, base-branch list, suggestions).
+    if (repo) {
+      AppState.repoPath = repo;
+      window.klaus.repo.switchProject(repo).then(function () {
+        window.dispatchEvent(new CustomEvent('klaussy:project-changed'));
+      });
     }
   });
 
+  // Keep the dropdown in sync with the sidebar without hooking every add/remove
+  // site: rebuild whenever the task list's children change (debounced to a
+  // microtask so a burst of appends during load coalesces into one rebuild).
+  var pending = false;
+  var observer = new MutationObserver(function () {
+    if (pending) return;
+    pending = true;
+    Promise.resolve().then(function () { pending = false; refresh(); });
+  });
+  observer.observe(taskList, { childList: true });
+
   return {
-    loadProjects: loadProjects,
+    // `loadProjects` name retained so app.js's existing call sites keep working.
+    loadProjects: refresh,
+    refresh: refresh,
     filterTaskList: filterTaskList,
+    sidebarRepos: sidebarRepos,
   };
 })();

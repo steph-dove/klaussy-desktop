@@ -290,6 +290,7 @@ window.TerminalManager = (function () {
 
     var taskEntry = {
       id: id, name: name, worktreePath: worktreePath, branch: branch,
+      repoPath: task.repoPath || null,
       mode: task.mode || 'claude',
       terminal: terminal, fitAddon: fitAddon, searchAddon: searchAddon,
       container: container, cleanup: cleanup,

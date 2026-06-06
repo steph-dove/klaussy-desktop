@@ -47,7 +47,6 @@
         <div class="header-buttons">
           <button id="btn-diff" title="Toggle diff panel">&#916;</button>
           <button id="btn-layout" title="Cycle layout: single / columns / grid">&#9638;</button>
-          <button id="btn-dirty-filter" title="Show only tasks with changes">!</button>
           <button id="btn-review-pr" title="Review a Pull Request…">PR</button>
           <button id="btn-open-folder" title="Open a folder (no git required)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h3.5c.412 0 .807.164 1.098.455L7.44 2.544a.25.25 0 0 0 .177.073h6.633c.966 0 1.75.784 1.75 1.75v8.883A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75C0 1.784.784 1 1.75 1zm0 1.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4.367a.25.25 0 0 0-.25-.25H7.617a1.75 1.75 0 0 1-1.237-.513L5.293 2.517a.25.25 0 0 0-.177-.073H1.75z"/></svg></button>
           <button id="btn-new-task" title="New Task">+</button>
@@ -75,10 +74,9 @@
         <div id="agents-panel-empty">No active agents</div>
       </div>
 
-      <!-- Project switcher (Phase 3) -->
+      <!-- Repo filter — narrows the sidebar to one base repo -->
       <div id="project-switcher">
-        <select id="project-select" title="Switch project"></select>
-        <button id="btn-add-project" title="Add project">+</button>
+        <select id="project-select" title="Filter worktrees by repository"></select>
       </div>
 
       <div id="task-list"></div>

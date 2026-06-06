@@ -6,7 +6,7 @@ window.AppState = {
   layoutIndex: 0,
   currentFontSize: 13,
   savedPrefs: {},
-  selectedProjectFilter: null,
+  selectedRepoFilter: null,   // base-repo path the sidebar is filtered to (null = all)
   ciStatusMap: new Map(),    // taskId -> runs[]
   sidebarCollapsed: false,
 };

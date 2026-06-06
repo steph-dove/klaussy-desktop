@@ -244,7 +244,10 @@ ipcMain.handle('list-worktrees', async () => {
   if (!repoPath) return [];
   const activePaths = new Set(Array.from(instances.values()).map(i => i.worktreePath));
   const hidden = new Set(config.hiddenWorktrees || []);
-  return worktreesForRepo(repoPath, hidden, activePaths);
+  // All worktrees here belong to the queried repo — stamp it so the sidebar
+  // repo-filter can group them.
+  const list = await worktreesForRepo(repoPath, hidden, activePaths);
+  return list.map(w => ({ ...w, repoPath }));
 });
 
 // Discover worktrees across every configured project (+ the active repo),
@@ -341,13 +344,15 @@ ipcMain.handle('discover-repos', async () => {
     roots.push(real);
   }
 
-  const configuredPaths = new Set((config.projects || []).map(p => p.path));
+  // No exclusion set: there's no longer a separate "Projects" section to avoid
+  // duplicating. The renderer dedupes the discovered list against the currently
+  // "Open repos" so previously-used repos (nothing open) still surface here.
   const found = [];
   const seenRepo = new Set();
 
   // depthRemaining = 1: scan each root's children, and descend one extra level
   // into any child that isn't itself a repo (org-grouped clones).
-  await Promise.all(roots.map(root => collectRepos(root, 1, configuredPaths, seenRepo, found)));
+  await Promise.all(roots.map(root => collectRepos(root, 1, new Set(), seenRepo, found)));
 
   found.sort((a, b) => a.name.localeCompare(b.name));
   return found;
