@@ -185,6 +185,45 @@
       color: var(--accent);
     }
 
+    /* Window color swatches */
+    .window-color-swatches {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      width: 100%;
+    }
+
+    .window-color-swatch {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: 2px solid transparent;
+      cursor: pointer;
+      padding: 0;
+      outline: none;
+      position: relative;
+      box-shadow: 0 0 0 1px var(--border) inset;
+    }
+
+    .window-color-swatch:hover {
+      transform: scale(1.08);
+    }
+
+    .window-color-swatch.selected {
+      border-color: var(--text);
+    }
+
+    /* "None" swatch — a neutral tile with a diagonal slash. */
+    .window-color-swatch.none {
+      background: var(--input-bg);
+    }
+    .window-color-swatch.none::after {
+      content: '';
+      position: absolute;
+      inset: 4px;
+      background: linear-gradient(to top right, transparent 45%, var(--error) 45%, var(--error) 55%, transparent 55%);
+    }
+
     .status-msg {
       font-size: 12px;
       color: var(--success);
@@ -241,6 +280,17 @@
         <label>Theme</label>
         <select id="pref-theme"></select>
       </div>
+    </div>
+
+    <!-- Window Section -->
+    <div class="section">
+      <div class="section-title">Window</div>
+
+      <div class="field field-full">
+        <label>Window color</label>
+        <div id="window-color-swatches" class="window-color-swatches"></div>
+      </div>
+      <div class="field-hint">Tints this window's top bar so you can tell multiple windows apart — e.g. one per project. The main window remembers its color; other windows keep theirs until closed.</div>
     </div>
 
     <!-- AI CLIs Section -->

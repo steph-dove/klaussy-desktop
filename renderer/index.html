@@ -11,6 +11,8 @@
 <body>
   <!-- Main app -->
   <div id="app" style="display: none;">
+    <!-- Per-window accent strip (color set via Preferences → Window) -->
+    <div id="window-color-bar"></div>
     <div id="sidebar">
       <!-- Token-spend leaderboard: today's running total + a daily chart
            with selectable range. Lives at the top of the sidebar above the
@@ -545,6 +547,7 @@
   <script src="ollama-consent.js"></script>
   <script src="license-activation.js"></script>
   <script src="pr-review.js"></script>
+  <script src="window-color.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -240,6 +240,51 @@ body {
 #app {
   display: flex;
   height: 100vh;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* Per-window accent bar at the top of the window. Two modes:
+   - Native frame (non-macOS): a thin colored strip under the OS title bar,
+     shown only when a color is set.
+   - macOS custom-titlebar (hidden-inset frame): the bar IS the window's top —
+     always present, draggable, houses the inset traffic lights, and fills with
+     the window color (Chrome-profile style) or the sidebar bg by default. */
+#window-color-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 0;
+  background: var(--window-color, transparent);
+  z-index: 1000;
+  transition: height 0.15s ease;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+/* --- Native-frame fallback (non-macOS): thin strip + subtle header tint --- */
+body.has-window-color:not(.custom-titlebar) #window-color-bar {
+  height: 6px;
+}
+body.has-window-color:not(.custom-titlebar) #app {
+  padding-top: 6px;
+}
+body.has-window-color:not(.custom-titlebar) #sidebar-header {
+  background: color-mix(in srgb, var(--window-color) 20%, var(--sidebar-bg));
+}
+
+/* --- macOS custom title bar --- */
+body.custom-titlebar #window-color-bar {
+  height: 38px;
+  background: var(--window-color, var(--sidebar-bg));
+  border-bottom: 1px solid var(--border);
+  pointer-events: auto;
+  -webkit-app-region: drag;
+  transition: background 0.15s ease;
+}
+body.custom-titlebar #app {
+  padding-top: 38px;
 }
 
 /* Sidebar */

@@ -617,6 +617,16 @@ contextBridge.exposeInMainWorld('klaus', {
     openPreferences: () => ipcRenderer.invoke('open-preferences'),
     getPreferences: () => ipcRenderer.invoke('get-preferences'),
     setPreferences: (prefs) => ipcRenderer.invoke('set-preferences', prefs),
+    // Per-window top-bar color. An app window reads its own color; Preferences
+    // reads/writes the color of the window that opened it.
+    getWindowColor: () => ipcRenderer.invoke('window-color-get'),
+    onWindowColorChanged: (callback) => {
+      const handler = (_event, color) => callback(color);
+      ipcRenderer.on('window-color-changed', handler);
+      return () => ipcRenderer.removeListener('window-color-changed', handler);
+    },
+    prefsGetWindowColor: () => ipcRenderer.invoke('prefs-window-color-get'),
+    prefsSetWindowColor: (color) => ipcRenderer.invoke('prefs-window-color-set', { color }),
     onPreferencesChanged: (callback) => {
       ipcRenderer.on('preferences-changed', (_event, prefs) => callback(prefs));
     },
@@ -627,6 +637,9 @@ contextBridge.exposeInMainWorld('klaus', {
     getAgentInfo: (provider) => ipcRenderer.invoke('get-agent-info', { provider }),
     // Static list of supported AI CLIs for pickers/labels (no IPC round-trip).
     providers: AGENT_PROVIDERS,
+    // Platform string ('darwin' | 'win32' | 'linux') — the renderer uses this
+    // to enable the macOS custom-titlebar layout.
+    platform: process.platform,
     getLogs: () => ipcRenderer.invoke('get-logs'),
     onMenuCopy: (callback) => {
       const listener = () => callback();

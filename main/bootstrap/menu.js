@@ -8,6 +8,7 @@
 
 const { app, BrowserWindow, Menu } = require('electron');
 const { createWindow } = require('../state/windows');
+const { openPreferencesWindow } = require('../ipc/windows-ipc');
 const { checkNow: checkForUpdatesNow } = require('./auto-updater');
 
 function installAppMenu() {
@@ -20,6 +21,14 @@ function installAppMenu() {
         {
           label: 'Check for Updates…',
           click: () => { checkForUpdatesNow(); },
+        },
+        { type: 'separator' },
+        {
+          label: 'Preferences…',
+          accelerator: 'CmdOrCtrl+,',
+          click: (_item, focusedWindow) => {
+            openPreferencesWindow(focusedWindow || BrowserWindow.getFocusedWindow());
+          },
         },
         { type: 'separator' },
         { role: 'hide' },
