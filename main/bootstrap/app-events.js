@@ -19,7 +19,7 @@ const {
   subscribeTerminalChannel, unsubscribeTerminalChannel,
   detectClaudeSessionId, findLatestSessionId,
 } = instancesModule;
-const { getProvider, isAgentMode } = require('../state/ai-providers');
+const { getProvider, isAgentMode, allProviders, binFor } = require('../state/ai-providers');
 const { startAutoFetch, startCIPolling } = require('../state/ci-poll');
 const prReviewModule = require('../state/pr-review');
 require('../ipc/tasks');
@@ -105,28 +105,44 @@ function refreshSpawnPath() {
   } catch { /* shell or registry read failed; keep current PATH */ }
 }
 
+// Resolve whether a binary is reachable: a configured absolute path is checked
+// on disk; a bare name is looked up on PATH via `which`.
+function binPresent(bin, cb) {
+  if (bin && bin.includes('/')) { cb(fs.existsSync(bin)); return; }
+  execFile('which', [bin], { timeout: 2000 }, (err) => cb(!err));
+}
+
+// Startup nudge: gh is needed for PR/GitHub features, and at least ONE agent
+// CLI is needed to run tasks. We don't require any specific agent — Claude,
+// Codex, Gemini, or Copilot all satisfy it — so a Codex-only user isn't told
+// they're "missing Claude".
 function checkExternalCLIs() {
-  const deps = [
-    { bin: 'gh', name: 'GitHub CLI', uses: 'PR review and GitHub features' },
-    { bin: 'claude', name: 'Claude Code', uses: 'AI features (inline edits, ghost text, completions)' },
-  ];
-  const missing = [];
-  let remaining = deps.length;
-  deps.forEach((d) => {
-    execFile('which', [d.bin], { timeout: 2000 }, (err) => {
-      if (err) missing.push(d);
-      if (--remaining === 0 && missing.length) {
-        const detail = missing.map((m) => `• ${m.name} (${m.bin}) — used for ${m.uses}`).join('\n');
-        dialog.showMessageBox({
-          type: 'info',
-          title: 'Optional CLIs not found',
-          message: 'Klaussy will run, but some features need these CLIs on your PATH:',
-          detail,
-          buttons: ['OK'],
-        });
-      }
+  const config = loadConfig();
+  const agents = allProviders().map((p) => ({ name: p.displayName, bin: binFor(p.id, config) }));
+  let remaining = 1 + agents.length;
+  let ghMissing = false;
+  let anyAgent = false;
+
+  const finish = () => {
+    if (--remaining > 0) return;
+    const problems = [];
+    if (ghMissing) problems.push('• GitHub CLI (gh) — used for PR review and GitHub features');
+    if (!anyAgent) {
+      const names = allProviders().map((p) => p.displayName).join(', ');
+      problems.push(`• An AI agent CLI (${names}) — needed to run tasks`);
+    }
+    if (!problems.length) return;
+    dialog.showMessageBox({
+      type: 'info',
+      title: 'Optional CLIs not found',
+      message: 'Klaussy will run, but some features need these on your PATH:',
+      detail: problems.join('\n') + '\n\nOpen Setup Check in the app to install them.',
+      buttons: ['OK'],
     });
-  });
+  };
+
+  binPresent('gh', (ok) => { if (!ok) ghMissing = true; finish(); });
+  agents.forEach((a) => binPresent(a.bin, (ok) => { if (ok) anyAgent = true; finish(); }));
 }
 
 function saveSessions() {

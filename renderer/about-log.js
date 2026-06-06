@@ -260,11 +260,13 @@ window.Dialogs = (function () {
     // legacy single-Claude shape for older main processes.
     var agentList = (deps.agents && deps.agents.length)
       ? deps.agents
-      : [{ id: 'claude', name: 'Claude Code CLI (claude)', installed: deps.claude.installed, version: deps.claude.version, path: deps.claude.path, required: true }];
-    // Only a missing REQUIRED agent (Claude) is a problem worth auto-prompting
-    // about; codex/gemini/copilot are optional and shown for convenience.
-    var claudeBad = agentList.some(function (a) { return a.required && !a.installed; });
-    if (!ghBad && !claudeBad && !force) return; // all good, stay quiet
+      : [{ id: 'claude', name: 'Claude Code CLI (claude)', installed: deps.claude.installed, version: deps.claude.version, path: deps.claude.path, isDefault: true }];
+    // The setup gate is "at least one agent installed" — any of Claude / Codex /
+    // Gemini / Copilot counts. We auto-prompt only when gh is bad or NO agent is
+    // installed, so a Codex-only user is never nagged about a missing Claude.
+    var anyAgentInstalled = agentList.some(function (a) { return a.installed; });
+    var noAgent = !anyAgentInstalled;
+    if (!ghBad && !noAgent && !force) return; // all good, stay quiet
 
     var existing = document.getElementById('deps-overlay');
     if (existing) existing.remove();
@@ -302,13 +304,15 @@ window.Dialogs = (function () {
       // Installed but a verified auth probe says not signed in → warn + show
       // the login command. authed===null means "unknown" (no probe) — stay quiet.
       var notSignedIn = a.installed && a.authed === false;
+      // With no agent installed, every row is an actionable "pick one" option;
+      // once at least one is installed, the rest are just optional extras.
       var problem = !a.installed
-        ? (a.required
+        ? (noAgent
             ? 'Not installed (looking for: ' + (a.path || a.id) + ').'
             : 'Optional — not installed (looking for: ' + (a.path || a.id) + ').')
         : (notSignedIn ? 'Installed, but not signed in.' : null);
       var fixes = [];
-      if (!a.installed && !a.required && a.installCommand) fixes.push(a.installCommand);
+      if (!a.installed && a.installCommand) fixes.push(a.installCommand); // every agent shows its install command
       if (notSignedIn && a.loginCommand) fixes.push(a.loginCommand);
       return depRow({
         name: a.name,
@@ -322,7 +326,7 @@ window.Dialogs = (function () {
 
     // A missing REQUIRED CLI → offer one-click install of the essentials
     // bundle. Optional agents are installed via their own copyable command.
-    var anyMissing = !deps.gh.installed || claudeBad;
+    var anyMissing = !deps.gh.installed || noAgent;
     var platformLabel = deps.platform === 'darwin' ? 'macOS'
       : deps.platform === 'win32' ? 'Windows'
       : deps.platform === 'linux' ? 'Linux'
@@ -331,10 +335,12 @@ window.Dialogs = (function () {
     // they're agreeing to before a 2 GB download starts. The script in main
     // is idempotent — already-installed pieces are skipped — but this list
     // is the *full* set so the user can audit it once.
+    var defaultAgent = agentList.filter(function (a) { return a.isDefault; })[0] || agentList[0] || {};
+    var defaultAgentName = defaultAgent.name || 'your AI agent';
     var requirements = [
-      { name: 'Node.js + npm',  why: 'Runtime for the Claude Code CLI and other npm-installed tools.' },
+      { name: 'Node.js + npm',  why: 'Runtime for the agent CLIs and other npm-installed tools.' },
       { name: 'GitHub CLI (gh)', why: 'PR review, CI status, and GitHub auth (the Sign-in button uses gh under the hood).' },
-      { name: 'Claude Code CLI', why: 'The AI assistant Klaussy orchestrates across worktrees.' },
+      { name: defaultAgentName, why: 'Your current default AI agent. You can install another any time from the rows above.' },
       { name: 'Ollama',           why: 'Local model server for inline tab-autocomplete. Runs on your machine — no code leaves your laptop. ~2 GB.' },
     ];
     var requirementList = requirements.map(function (r) {
@@ -347,11 +353,11 @@ window.Dialogs = (function () {
           + '<ul class="deps-install-list">' + requirementList + '</ul>'
         + '</details>'
         + '<button class="deps-install-btn" type="button">Install requirements</button>'
-        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and installs the bundle (~2 GB total — Ollama is the bulk of it). You’ll still complete <code>gh auth login</code> and <code>claude</code> sign-in once it finishes.</p>'
+        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and installs the bundle (~2 GB total — Ollama is the bulk of it). You’ll still complete <code>gh auth login</code> and <code>' + escHtml(defaultAgent.loginCommand || 'agent') + '</code> sign-in once it finishes.</p>'
       + '</div>'
       : '';
 
-    var allOkBanner = (!ghBad && !claudeBad)
+    var allOkBanner = (!ghBad && !noAgent)
       ? '<div class="deps-all-ok">All dependencies look good.</div>'
       : '';
 
