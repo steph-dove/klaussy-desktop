@@ -211,10 +211,16 @@ window.Sidebar = (function () {
     var existing = item.querySelector('.sidebar-resume-btn');
     if (existing) existing.remove();
 
+    // Resume the agent that actually exited (captured on conversion), falling
+    // back to the global default — never hardcoded to Claude.
+    var agent = (task.resumeAgent && task.resumeAgent !== 'shell')
+      ? task.resumeAgent
+      : ((AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude');
+
     var btn = document.createElement('button');
     btn.className = 'sidebar-resume-btn';
     btn.textContent = 'Resume';
-    btn.title = 'Resume Claude session';
+    btn.title = 'Resume ' + AppUtils.modeDisplayName(agent) + ' session';
     var closeBtn = item.querySelector('.task-close');
     if (closeBtn) {
       item.insertBefore(btn, closeBtn);
@@ -223,11 +229,22 @@ window.Sidebar = (function () {
     }
     btn.addEventListener('click', async function (e) {
       e.stopPropagation();
-      var sessionId = await window.klaus.session.getLatest(task.worktreePath);
-      var cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
+      var cmd;
+      if (agent === 'claude') {
+        // Claude tracks a per-worktree session id, so we can resume the exact
+        // conversation.
+        var sessionId = await window.klaus.session.getLatest(task.worktreePath);
+        cmd = sessionId ? 'claude --resume ' + sessionId : 'claude';
+      } else {
+        // Other agents resume their latest session in-dir via their own CLI;
+        // launch the agent's binary (custom paths still resolve via PATH).
+        var providers = (window.klaus.ui && window.klaus.ui.providers) || [];
+        var p = providers.find(function (x) { return x.id === agent; });
+        cmd = (p && p.defaultBin) || agent;
+      }
       window.klaus.terminal.write(id, cmd + '\n');
-      task.mode = 'claude';
-      updateMode(id, 'claude');
+      task.mode = agent;
+      updateMode(id, agent);
       btn.remove();
     });
   }

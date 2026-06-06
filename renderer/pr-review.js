@@ -2354,7 +2354,7 @@ window.PrReview = (function () {
           : '<div class="pr-ai-finding-chat-hint">Ask the agent anything about this finding — is it really a bug? what’s the simplest fix? etc.</div>')
       + errorBar
       + '<div class="pr-ai-finding-chat-composer">'
-        + '<textarea class="pr-ai-finding-chat-input" rows="2" placeholder="Message Claude (⌘⏎ to send)"' + (streaming ? ' disabled' : '') + '></textarea>'
+        + '<textarea class="pr-ai-finding-chat-input" rows="2" placeholder="Message the agent (⌘⏎ to send)"' + (streaming ? ' disabled' : '') + '></textarea>'
         + (streaming
             ? '<button class="pr-ai-finding-chat-cancel" type="button">Cancel</button>'
             : '<button class="pr-ai-finding-chat-send" type="button">Send</button>')
