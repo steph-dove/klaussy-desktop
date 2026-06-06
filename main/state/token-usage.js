@@ -12,7 +12,9 @@
 //     `event_msg`/`token_count` event at `payload.info.last_token_usage`
 //     ({ input_tokens, output_tokens, total_tokens, ... }). `last_` is the
 //     per-turn delta; `total_token_usage` is cumulative, so we sum `last_`.
-// Gemini/Copilot don't surface reliable per-turn usage yet, so they're omitted.
+//   - gemini: ~/.gemini/tmp/<project>/chats/session-*.jsonl — each assistant
+//     message line carries `tokens: { input, output, cached, thoughts, total }`.
+// Copilot doesn't log token usage, so it's omitted.
 // Other line types (permission-mode, summary, user input, tool results) carry
 // no usage field and are skipped.
 //
@@ -41,6 +43,7 @@ const { app } = require('electron');
 const CACHE_VERSION = 2;
 const CLAUDE_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const CODEX_SESSIONS = path.join(os.homedir(), '.codex', 'sessions');
+const GEMINI_TMP = path.join(os.homedir(), '.gemini', 'tmp');
 
 function cachePath() {
   return path.join(app.getPath('userData'), 'token-usage-cache.json');
@@ -121,7 +124,15 @@ function extractCodex(obj) {
   return { key: 'cx:' + obj.timestamp + ':' + tokens, day: localDay(obj.timestamp), tokens };
 }
 
-const EXTRACTORS = { claude: extractClaude, codex: extractCodex };
+function extractGemini(obj) {
+  const t = obj && obj.tokens;
+  if (!t || typeof t !== 'object') return null;
+  const tokens = t.total != null ? t.total : (t.input || 0) + (t.output || 0);
+  // Each assistant message has a stable id; fall back to timestamp.
+  return { key: 'gm:' + (obj.id || obj.timestamp), day: localDay(obj.timestamp), tokens };
+}
+
+const EXTRACTORS = { claude: extractClaude, codex: extractCodex, gemini: extractGemini };
 
 // Walk Claude's per-project dirs (one level) for *.jsonl.
 function* claudeFiles() {
@@ -155,6 +166,9 @@ function* walkJsonl(dir) {
 function* sessionFiles() {
   for (const file of claudeFiles()) yield { file, agent: 'claude' };
   for (const file of walkJsonl(CODEX_SESSIONS)) yield { file, agent: 'codex' };
+  // Gemini's *.jsonl under tmp are the chat sessions; non-usage lines (e.g.
+  // `$set` snapshots) are simply skipped by extractGemini.
+  for (const file of walkJsonl(GEMINI_TMP)) yield { file, agent: 'gemini' };
 }
 
 // Stream a single file from `fromOffset` forward, line-by-line, applying
