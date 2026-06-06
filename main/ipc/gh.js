@@ -298,6 +298,10 @@ ipcMain.handle('check-dependencies', async () => {
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
+  // The user's current default agent — the one the installer offers and the
+  // one we treat as "primary" for setup. Not hard-required: any installed
+  // agent satisfies the setup gate (the renderer checks "≥1 agent installed").
+  const defaultProvider = config.defaultProvider || config.defaultMode || 'claude';
 
   function probe(cmd, args) {
     try {
@@ -344,7 +348,7 @@ ipcMain.handle('check-dependencies', async () => {
       installed: v.ok,
       version: v.ok ? v.output.split('\n')[0] : null,
       path: bin,
-      required: p.id === 'claude', // Claude is the historical default/required CLI
+      isDefault: p.id === defaultProvider, // the user's current default agent
       installCommand: installCommandFor(p.id),
       authed,
       loginCommand: auth.loginCommand,
@@ -353,6 +357,9 @@ ipcMain.handle('check-dependencies', async () => {
 
   return {
     agents,
+    // The current default agent — the renderer names it in the install bundle.
+    // Any installed agent satisfies setup; this is just which one we'd install.
+    defaultProvider,
     // The renderer uses `platform` to pick OS-appropriate install commands
     // (brew vs winget vs apt). We resolve it here rather than have the
     // renderer sniff navigator.platform — cleaner and matches what the rest
@@ -382,10 +389,13 @@ ipcMain.handle('check-dependencies', async () => {
 // Each script is idempotent — guarded with `command -v` (or `Get-Command`)
 // so re-running it after a partial install just fills in the missing pieces.
 
-const INSTALL_SCRIPT_MAC = `#!/bin/bash
+// The bundle installs Node, gh, Ollama, and the user's chosen agent CLI
+// (`agent`: { displayName, bin, installCommand, loginCommand }).
+function installScriptMac(agent) {
+  return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, Claude Code, Ollama — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, ${agent.displayName}, Ollama — ~2 GB total, mostly Ollama)"
 echo
 
 if ! command -v brew >/dev/null 2>&1; then
@@ -402,14 +412,14 @@ fi
 echo "→ brew install node gh ollama"
 brew install node gh ollama
 
-# Make brew's bins reachable in this shell before invoking npm/claude —
+# Make brew's bins reachable in this shell before invoking npm —
 # fresh installs add to PATH via shell rc files this subshell hasn't sourced.
 export PATH="$(brew --prefix 2>/dev/null)/bin:$PATH"
 hash -r
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "→ npm install -g @anthropic-ai/claude-code"
-  npm install -g @anthropic-ai/claude-code
+if ! command -v ${agent.bin} >/dev/null 2>&1; then
+  echo "→ ${agent.installCommand}"
+  ${agent.installCommand}
 fi
 
 echo
@@ -417,14 +427,16 @@ echo "✓ All requirements installed."
 echo
 echo "Next steps:"
 echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
-echo "  2. Run 'claude' once to log in to Claude"
+echo "  2. Run '${agent.loginCommand}' once to sign in to ${agent.displayName}"
 echo
 read -p "Press Enter to close this window…"
 `;
+}
 
-const INSTALL_SCRIPT_WIN = `$ErrorActionPreference = 'Stop'
+function installScriptWin(agent) {
+  return `$ErrorActionPreference = 'Stop'
 Write-Host 'Installing Klaussy requirements…'
-Write-Host '(Node, GitHub CLI, Claude Code, Ollama — ~2 GB total, mostly Ollama)'
+Write-Host '(Node, GitHub CLI, ${agent.displayName}, Ollama — ~2 GB total, mostly Ollama)'
 Write-Host ''
 
 function Test-Cmd($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
@@ -445,9 +457,9 @@ winget install --id Ollama.Ollama  -e --accept-source-agreements --accept-packag
 
 Sync-Path
 
-if (-not (Test-Cmd claude)) {
-  Write-Host '→ npm install -g @anthropic-ai/claude-code'
-  npm install -g @anthropic-ai/claude-code
+if (-not (Test-Cmd ${agent.bin})) {
+  Write-Host '→ ${agent.installCommand}'
+  ${agent.installCommand}
 }
 
 Write-Host ''
@@ -455,15 +467,17 @@ Write-Host '✓ All requirements installed.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:'
 Write-Host '  1. Run ''gh auth login'' to authenticate GitHub (or use Klaussy''s Sign in button)'
-Write-Host '  2. Run ''claude'' once to log in to Claude'
+Write-Host '  2. Run ''${agent.loginCommand}'' once to sign in to ${agent.displayName}'
 Write-Host ''
 Read-Host 'Press Enter to close this window'
 `;
+}
 
-const INSTALL_SCRIPT_LINUX = `#!/bin/bash
+function installScriptLinux(agent) {
+  return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, Claude Code, Ollama — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, ${agent.displayName}, Ollama — ~2 GB total, mostly Ollama)"
 echo "(sudo password may be required)"
 echo
 
@@ -472,8 +486,8 @@ sudo apt update
 sudo apt install -y nodejs npm gh
 hash -r
 
-echo "→ npm install -g @anthropic-ai/claude-code"
-sudo npm install -g @anthropic-ai/claude-code
+echo "→ sudo ${agent.installCommand}"
+sudo ${agent.installCommand}
 hash -r
 
 if ! command -v ollama >/dev/null 2>&1; then
@@ -486,10 +500,25 @@ echo "✓ All requirements installed."
 echo
 echo "Next steps:"
 echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
-echo "  2. Run 'claude' once to log in to Claude"
+echo "  2. Run '${agent.loginCommand}' once to sign in to ${agent.displayName}"
 echo
 read -p "Press Enter to close this window…"
 `;
+}
+
+// Resolve the agent the installer should set up — the user's current default.
+function installerAgentInfo() {
+  const config = loadConfig();
+  const id = config.defaultProvider || config.defaultMode || 'claude';
+  const provider = getProvider(id) || getProvider('claude');
+  const auth = authMetaFor(provider.id) || {};
+  return {
+    displayName: provider.displayName,
+    bin: provider.defaultBin,
+    installCommand: installCommandFor(provider.id), // "npm install -g <pkg>"
+    loginCommand: auth.loginCommand || provider.defaultBin,
+  };
+}
 
 // Pick the first terminal emulator that exists on the user's PATH. Linux
 // has no canonical "open a terminal" command — distros ship different
@@ -509,11 +538,12 @@ ipcMain.handle('install-requirements', async () => {
   const platform = process.platform;
   const tmpDir = os.tmpdir();
   const stamp = Date.now();
+  const agent = installerAgentInfo(); // installs the user's current default agent
 
   try {
     if (platform === 'darwin') {
       const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
-      fs.writeFileSync(scriptPath, INSTALL_SCRIPT_MAC, { mode: 0o755 });
+      fs.writeFileSync(scriptPath, installScriptMac(agent), { mode: 0o755 });
       // osascript opens Terminal.app and runs the script in a new tab; the
       // script's trailing `read` keeps the window open for output review.
       spawn('osascript', [
@@ -525,7 +555,7 @@ ipcMain.handle('install-requirements', async () => {
 
     if (platform === 'win32') {
       const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.ps1`);
-      fs.writeFileSync(scriptPath, INSTALL_SCRIPT_WIN);
+      fs.writeFileSync(scriptPath, installScriptWin(agent));
       // -NoExit so the window stays open after the script finishes; the
       // empty title argument is required by `start` when the next arg is
       // quoted-looking.
@@ -542,7 +572,7 @@ ipcMain.handle('install-requirements', async () => {
       return { error: 'No terminal emulator found. Install one of: gnome-terminal, konsole, xterm.' };
     }
     const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
-    fs.writeFileSync(scriptPath, INSTALL_SCRIPT_LINUX, { mode: 0o755 });
+    fs.writeFileSync(scriptPath, installScriptLinux(agent), { mode: 0o755 });
     // gnome-terminal uses `--`, the rest use `-e`. xterm/konsole/xfce4 all
     // accept `-e <command>`; gnome-terminal needs `-- bash <script>`.
     const args = term === 'gnome-terminal' ? ['--', 'bash', scriptPath] : ['-e', `bash ${scriptPath}`];
