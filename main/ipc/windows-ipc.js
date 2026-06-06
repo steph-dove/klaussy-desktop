@@ -7,7 +7,7 @@ const { execFileSync } = require('child_process');
 const { app, ipcMain, BrowserWindow, nativeTheme } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { getLogBuffer } = require('../util/logging');
-const { allWindows, hardenWindow } = require('../state/windows');
+const { allWindows, hardenWindow, getMainWindow } = require('../state/windows');
 const { startAutoFetch } = require('../state/ci-poll');
 const { allProviders, getProvider, binFor } = require('../state/ai-providers');
 
@@ -83,14 +83,60 @@ nativeTheme.on('updated', () => {
   }
 });
 
+// ---- Per-window top-bar color ----
+//
+// Each app window can carry an accent color (shown as a top strip + header
+// tint) so multiple windows — e.g. a work project vs a side project, each with
+// its own terminals — are easy to tell apart. The color is per-window: the
+// main window persists its choice in config.windowColor; secondary windows are
+// session-only (kept in a Map keyed by webContents id). The picker lives in the
+// (global) Preferences window, so we remember which window opened it and apply
+// the color to that owner.
+const windowColors = new Map(); // webContents.id -> color string
+
+function windowColorFor(win) {
+  if (!win || win.isDestroyed()) return null;
+  const id = win.webContents.id;
+  if (windowColors.has(id)) return windowColors.get(id);
+  if (win === getMainWindow()) return loadConfig().windowColor || null;
+  return null;
+}
+
+function setWindowColor(win, color) {
+  if (!win || win.isDestroyed()) return;
+  const id = win.webContents.id;
+  if (color) windowColors.set(id, color); else windowColors.delete(id);
+  // The main window's color survives restarts; secondary windows don't reopen,
+  // so they stay session-only.
+  if (win === getMainWindow()) {
+    const config = loadConfig();
+    config.windowColor = color || null;
+    saveConfig(config);
+  }
+  win.webContents.send('window-color-changed', color || null);
+}
+
+// An app window applies its own color on load.
+ipcMain.handle('window-color-get', (event) => {
+  return windowColorFor(BrowserWindow.fromWebContents(event.sender));
+});
+
 // ---- Preferences Window (B1-B4) ----
 
 let prefsWindow = null;
+// The app window that opened Preferences — the target of the window-color
+// picker (Preferences is a single shared window).
+let prefsOwner = null;
 
-ipcMain.handle('open-preferences', () => {
+// Open (or focus) the shared Preferences window, remembering which app window
+// it was opened from so the per-window color picker targets the right window.
+// Exported so the app menu's "Preferences…" item can call it directly with the
+// focused window (a menu click has no event.sender).
+function openPreferencesWindow(ownerWin) {
+  if (ownerWin && !ownerWin.isDestroyed()) prefsOwner = ownerWin;
   if (prefsWindow && !prefsWindow.isDestroyed()) {
     prefsWindow.focus();
-    return { ok: true };
+    return;
   }
 
   prefsWindow = new BrowserWindow({
@@ -112,6 +158,17 @@ ipcMain.handle('open-preferences', () => {
 
   prefsWindow.loadFile(path.join(__dirname, '..', '..', 'renderer', 'preferences.html'));
   prefsWindow.on('closed', () => { prefsWindow = null; });
+}
+
+ipcMain.handle('open-preferences', (event) => {
+  openPreferencesWindow(BrowserWindow.fromWebContents(event.sender));
+  return { ok: true };
+});
+
+// The Preferences window's window-color picker reads/writes the owner window.
+ipcMain.handle('prefs-window-color-get', () => windowColorFor(prefsOwner));
+ipcMain.handle('prefs-window-color-set', (_event, { color }) => {
+  if (prefsOwner && !prefsOwner.isDestroyed()) setWindowColor(prefsOwner, color || null);
   return { ok: true };
 });
 
@@ -188,3 +245,5 @@ ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
   if (!info) return { id: provider, path: '', version: 'not found' };
   return info;
 });
+
+module.exports = { openPreferencesWindow };

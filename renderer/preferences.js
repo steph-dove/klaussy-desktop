@@ -231,4 +231,63 @@
     div.textContent = str;
     return div.innerHTML;
   }
+
+  // ---- Window color ----
+  // Per-window accent, applied to the window that opened Preferences (not a
+  // global pref). "None" clears it.
+  (function initWindowColor() {
+    var container = document.getElementById('window-color-swatches');
+    if (!container || !window.klaus.ui.prefsGetWindowColor) return;
+
+    var presets = [
+      { name: 'None', value: null },
+      // Solids
+      { name: 'Red', value: '#e5484d' },
+      { name: 'Orange', value: '#f5821f' },
+      { name: 'Amber', value: '#f5b800' },
+      { name: 'Green', value: '#46a758' },
+      { name: 'Teal', value: '#12a594' },
+      { name: 'Blue', value: '#3b82f6' },
+      { name: 'Purple', value: '#8e4ec6' },
+      { name: 'Pink', value: '#e93d82' },
+      // Gradients — full CSS values, applied straight to the bar background.
+      { name: 'Sunset', value: 'linear-gradient(90deg, #ff8a00, #e52e71)' },
+      { name: 'Ocean', value: 'linear-gradient(90deg, #2193b0, #6dd5ed)' },
+      { name: 'Aurora', value: 'linear-gradient(90deg, #00c6ff, #0072ff)' },
+      { name: 'Forest', value: 'linear-gradient(90deg, #11998e, #38ef7d)' },
+      { name: 'Grape', value: 'linear-gradient(90deg, #8e2de2, #4a00e0)' },
+      { name: 'Mango', value: 'linear-gradient(90deg, #f7971e, #ffd200)' },
+    ];
+
+    var current = null;
+
+    function markSelected() {
+      container.querySelectorAll('.window-color-swatch').forEach(function (el) {
+        var val = el.dataset.value || null;
+        el.classList.toggle('selected', val === current);
+      });
+    }
+
+    presets.forEach(function (p) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'window-color-swatch' + (p.value ? '' : ' none');
+      if (p.value) btn.style.background = p.value;
+      if (p.value) btn.dataset.value = p.value;
+      btn.title = p.name;
+      btn.addEventListener('click', function () {
+        current = p.value;
+        markSelected();
+        window.klaus.ui.prefsSetWindowColor(p.value).then(function () {
+          showStatus('Saved');
+        });
+      });
+      container.appendChild(btn);
+    });
+
+    window.klaus.ui.prefsGetWindowColor().then(function (color) {
+      current = color || null;
+      markSelected();
+    }).catch(function () {});
+  })();
 })();

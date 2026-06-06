@@ -37,12 +37,19 @@ function hardenWindow(win) {
 
 function createWindow(opts) {
   opts = opts || {};
+  // macOS: hide the native title bar and inset the traffic lights so the
+  // renderer can paint its own full-width top bar (the per-window accent color,
+  // Chrome-profile style). The renderer mirrors this by adding a
+  // `custom-titlebar` body class on darwin so it reserves space + makes the bar
+  // draggable.
+  const isMac = process.platform === 'darwin';
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
     title: 'Klaussy',
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
     backgroundColor: '#1a1a2e',
+    ...(isMac ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 19, y: 12 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, '..', '..', 'preload.js'),
       contextIsolation: true,
