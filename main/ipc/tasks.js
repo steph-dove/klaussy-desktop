@@ -10,6 +10,7 @@ const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
+const { baseRepoForWorktree } = require('../util/git-repo');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
@@ -31,7 +32,13 @@ function getWorktreeDir(repoPath) {
 
 ipcMain.handle('list-saved-sessions', () => {
   const config = loadConfig();
-  return config.savedSessions || [];
+  // Backfill repoPath for sessions saved before it was tracked, so the sidebar
+  // repo-filter can group them. Best-effort: only resolves if the worktree
+  // still exists.
+  return (config.savedSessions || []).map(s => ({
+    ...s,
+    repoPath: s.repoPath || baseRepoForWorktree(s.worktreePath),
+  }));
 });
 
 ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branch, mode }) => {
@@ -283,8 +290,8 @@ ipcMain.handle('open-folder', async (_event, { folderPath, mode }) => {
 });
 
 ipcMain.handle('list-tasks', () => {
-  return Array.from(instances.values()).map(({ id, name, worktreePath, branch, mode, alive }) => ({
-    id, name, worktreePath, branch, mode, alive,
+  return Array.from(instances.values()).map(({ id, name, worktreePath, branch, mode, alive, repoPath }) => ({
+    id, name, worktreePath, branch, mode, alive, repoPath,
   }));
 });
 

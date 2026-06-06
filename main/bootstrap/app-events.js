@@ -193,6 +193,7 @@ function saveSessions() {
       worktreePath: inst.worktreePath,
       branch: inst.branch,
       mode: saveMode,
+      repoPath: inst.repoPath || null,
       savedAt: new Date().toISOString(),
     });
   }

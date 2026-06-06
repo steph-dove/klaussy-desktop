@@ -13,7 +13,8 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
-const { loadConfig } = require('../util/config');
+const { loadConfig, saveConfig } = require('../util/config');
+const { baseRepoForWorktree } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const { allWindows, getMainWindow } = require('./windows');
@@ -307,8 +308,14 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
+  // The base repo this worktree belongs to — used to group/filter worktrees by
+  // repository in the sidebar. Derived from the worktree's common git dir so it
+  // works for created, attached, and resumed worktrees alike (null for plain
+  // non-git folders).
+  const repoPath = baseRepoForWorktree(worktreePath);
+
   const instance = {
-    id, name, worktreePath, branch, mode, originalMode: mode,
+    id, name, worktreePath, branch, mode, originalMode: mode, repoPath,
     pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {},
     subTerminals: [], nextSubId: 1,
     spawnTime: Date.now(),
@@ -333,6 +340,20 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   };
   initIdleDetectionFields(instance);
   instances.set(id, instance);
+
+  // Remember the repo so discovery (scan roots, existing-worktree grouping)
+  // keeps working without a user-managed "projects" list. This is invisible
+  // plumbing — the repo is never surfaced as a manually-created project.
+  if (repoPath) {
+    try {
+      const cfg = loadConfig();
+      if (!cfg.projects) cfg.projects = [];
+      if (!cfg.projects.find(p => p.path === repoPath)) {
+        cfg.projects.push({ name: path.basename(repoPath), path: repoPath });
+        saveConfig(cfg);
+      }
+    } catch {}
+  }
 
   ptyProc.onData((data) => {
     processIdleDetection(instance, data);
@@ -360,7 +381,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   // in a later phase without a circular import between state modules).
   _startCIPolling(id, worktreePath, branch);
 
-  return { id, name, worktreePath, branch, mode };
+  return { id, name, worktreePath, branch, mode, repoPath };
 }
 
 function convertInstanceToShell(inst) {

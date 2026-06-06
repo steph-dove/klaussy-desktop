@@ -9,6 +9,7 @@ window.Sidebar = (function () {
     var item = document.createElement('div');
     item.className = 'task-item';
     item.dataset.id = task.id;
+    item.dataset.repo = task.repoPath || '';
 
     var modeLabel = AppUtils.modeShortLabel(task.mode);
     var tIconColor = AppUtils.iconColor(task.name);
@@ -40,6 +41,7 @@ window.Sidebar = (function () {
         path: task.worktreePath,
         name: task.name,
         branch: task.branch || '',
+        repoPath: task.repoPath || '',
       };
       stopDirtyWatch(task);
       await window.klaus.task.kill(task.id);
@@ -119,16 +121,6 @@ window.Sidebar = (function () {
     var taskId = findTaskIdByWorktree(data.worktreePath);
     if (taskId !== null) refreshDirty(taskId);
   });
-
-  // Filter toggle — hides rows without local changes while active.
-  var dirtyFilterBtn = document.getElementById('btn-dirty-filter');
-  if (dirtyFilterBtn) {
-    dirtyFilterBtn.addEventListener('click', function () {
-      var active = taskList.classList.toggle('dirty-filter-active');
-      dirtyFilterBtn.classList.toggle('active', active);
-      dirtyFilterBtn.title = active ? 'Showing only tasks with changes' : 'Show only tasks with changes';
-    });
-  }
 
   // ---- Task Notes Popover ----
 
