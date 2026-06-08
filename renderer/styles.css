@@ -9361,6 +9361,48 @@ body.pr-review-popout #pr-review-root {
 }
 .skills-source-user    { background: rgba(46, 160, 67, 0.18); color: var(--diff-add-fg, #7ce27c); }
 .skills-source-project { background: rgba(137, 87, 229, 0.18); color: #b48cff; }
+.skills-source-plugin  { background: rgba(56, 139, 253, 0.18); color: #79b8ff; }
+
+/* Insert/Run share the outlined look of Copy; Run is filled to read as the
+   primary action. */
+.skills-preview-insert, .skills-preview-run {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.skills-preview-insert:hover, .skills-preview-run:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+.skills-preview-run {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.skills-preview-run:hover { filter: brightness(1.08); }
+
+/* Slash-command launcher (Cmd+/) — palette variant with a command list. */
+.palette.slash-launcher { width: 560px; max-width: 90vw; }
+.slash-launcher .palette-item { display: block; }
+.slash-launcher .slash-cmd-name {
+  font-family: 'SF Mono', Menlo, monospace;
+  color: var(--text);
+  margin-right: 8px;
+}
+.slash-launcher .slash-cmd-desc {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.slash-launcher .palette-empty { color: var(--text-muted); cursor: default; }
 .skills-row-desc {
   color: var(--text-dim);
   font-size: 12px;

@@ -1660,6 +1660,7 @@
     commands.push({ label: 'Review Pull Request\u2026', action: function () { showPrPicker(); } });
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
+    commands.push({ label: 'Run Slash Command…', action: function () { Dialogs.showSlashLauncher(); } });
     commands.push({ label: 'Skills & Commands', action: function () { Dialogs.showSkills(); } });
     commands.push({ label: 'Memory (CLAUDE.md)', action: function () { Dialogs.showMemory(); } });
     commands.push({ label: 'MCP Servers', action: function () { Dialogs.showMcpServers(); } });
@@ -1717,6 +1718,12 @@
     if (e.metaKey && e.key === 'p' && !e.shiftKey) {
       e.preventDefault();
       if (window.QuickOpen) window.QuickOpen.show();
+    }
+    // Cmd+/: slash-command launcher — fire any installed /command into the
+    // active terminal without remembering its plugin namespace.
+    if (e.metaKey && e.key === '/') {
+      e.preventDefault();
+      if (window.Dialogs && Dialogs.showSlashLauncher) Dialogs.showSlashLauncher();
     }
   });
 

@@ -1,6 +1,29 @@
 window.Dialogs = (function () {
   var escHtml = AppUtils.escHtml;
 
+  // Write a slash command into the active task's terminal. `run` appends a
+  // carriage return so the CLI executes it immediately; otherwise it's left
+  // on the prompt for the user to edit and submit. Routes to the active sub-
+  // terminal (Shell tab) when one is live, mirroring the drag-drop handler.
+  function sendSlashToTerminal(insert, run) {
+    var state = window.AppState;
+    var id = state && state.activeTaskId;
+    if (!insert || id == null) {
+      if (window.toast) window.toast.error('Open a terminal first, then insert the command.');
+      return false;
+    }
+    var entry = state.tasks && state.tasks.get(id);
+    var subId = entry ? entry.activeSubId : null;
+    if (subId != null && entry) {
+      var sub = (entry.subTerminals || []).find(function (s) { return s.subId === subId; });
+      if (!sub || !sub.alive) subId = null;
+    }
+    // A trailing space keeps the cursor off the command token (so the CLI's own
+    // arg hints show); run-mode submits with \r instead.
+    window.klaus.terminal.write(id, insert + (run ? '\r' : ' '), subId);
+    return true;
+  }
+
   function showAbout() {
     var overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
@@ -556,7 +579,7 @@ window.Dialogs = (function () {
         row.addEventListener('click', function () {
           listPane.querySelectorAll('.skills-row').forEach(function (r) { r.classList.remove('selected'); });
           row.classList.add('selected');
-          loadSkillPreview(previewPane, row.dataset.path, row.dataset.name);
+          loadSkillPreview(previewPane, row.dataset.path, row.dataset.name, row.dataset.insert);
         });
       });
       // Selection priority: an explicit autoSelectPath (e.g. just-created
@@ -661,7 +684,7 @@ window.Dialogs = (function () {
     });
   }
 
-  function loadSkillPreview(pane, filePath, name) {
+  function loadSkillPreview(pane, filePath, name, insert) {
     pane.innerHTML = '<div class="skills-preview-loading">Loading\u2026</div>';
     window.klaus.skills.readFile(filePath).then(function (result) {
       if (result && result.error) {
@@ -669,10 +692,17 @@ window.Dialogs = (function () {
         return;
       }
       var original = (result && result.content) || '';
+      // Slash invocation buttons only make sense when we know the command/skill
+      // string to type into the terminal.
+      var slashBtns = insert
+        ? '<button class="skills-preview-insert" type="button" title="Insert ' + escHtml(insert) + ' into the active terminal">Insert</button>'
+          + '<button class="skills-preview-run" type="button" title="Run ' + escHtml(insert) + ' in the active terminal">Run</button>'
+        : '';
       pane.innerHTML =
         '<div class="skills-preview-head">'
           + '<div class="skills-preview-title">' + escHtml(name || filePath.split('/').pop()) + '<span class="skills-preview-dirty" hidden>\u00b7 unsaved</span></div>'
           + '<div class="skills-preview-actions">'
+            + slashBtns
             + '<button class="skills-preview-copy" type="button" title="Copy file contents">Copy</button>'
             + '<button class="skills-preview-save" type="button" title="Save (\u2318S)" disabled>Save</button>'
           + '</div>'
@@ -684,7 +714,20 @@ window.Dialogs = (function () {
       var saveBtn = pane.querySelector('.skills-preview-save');
       var dirtyMark = pane.querySelector('.skills-preview-dirty');
       var copyBtn = pane.querySelector('.skills-preview-copy');
+      var insertBtn = pane.querySelector('.skills-preview-insert');
+      var runBtn = pane.querySelector('.skills-preview-run');
       ta.value = original;
+
+      if (insertBtn) {
+        insertBtn.addEventListener('click', function () {
+          if (sendSlashToTerminal(insert, false) && window.toast) window.toast.success('Inserted ' + insert);
+        });
+      }
+      if (runBtn) {
+        runBtn.addEventListener('click', function () {
+          sendSlashToTerminal(insert, true);
+        });
+      }
 
       function setDirty(d) {
         saveBtn.disabled = !d;
@@ -729,8 +772,12 @@ window.Dialogs = (function () {
   }
 
   function renderSkillRow(s) {
-    var sourceCls = s.source === 'user' ? 'skills-source-user' : 'skills-source-project';
-    return '<div class="skills-row" data-path="' + escHtml(s.path) + '" data-name="' + escHtml(s.name) + '" title="' + escHtml(s.path) + '">'
+    var sourceCls = s.kind === 'user' ? 'skills-source-user'
+      : s.kind === 'plugin' ? 'skills-source-plugin'
+      : 'skills-source-project';
+    return '<div class="skills-row" data-path="' + escHtml(s.path) + '" data-name="' + escHtml(s.name) + '"'
+      + ' data-insert="' + escHtml(s.insert || '') + '" data-kind="' + escHtml(s.kind || '') + '"'
+      + ' title="' + escHtml(s.path) + '">'
       + '<div class="skills-row-main">'
         + '<span class="skills-row-name">' + escHtml(s.name) + '</span>'
         + '<span class="skills-row-source ' + sourceCls + '">' + escHtml(s.source) + '</span>'
@@ -1194,9 +1241,93 @@ window.Dialogs = (function () {
     });
   }
 
+  // Quick slash-command launcher. Lists every discovered command (and skill)
+  // and, on pick, types it into the active terminal so users can fire a
+  // `/command` without remembering the exact plugin namespace. Enter runs it;
+  // ⌘/Ctrl+Enter (or the "Insert" affordance) just inserts it for editing.
+  function showSlashLauncher() {
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var palette = document.createElement('div');
+    palette.className = 'palette slash-launcher';
+    palette.innerHTML =
+      '<input type="text" class="palette-input" placeholder="Run a slash command…  (Enter runs, ⌘Enter inserts)" autocomplete="off" spellcheck="false" value="/" />'
+      + '<div class="palette-list"><div class="skills-loading">Reading installed commands…</div></div>';
+    overlay.appendChild(palette);
+    document.body.appendChild(overlay);
+    var input = palette.querySelector('.palette-input');
+    var list = palette.querySelector('.palette-list');
+
+    function close() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+    var all = [];
+    var filtered = [];
+    var sel = 0;
+
+    function render() {
+      if (filtered.length === 0) {
+        list.innerHTML = '<div class="palette-item palette-empty">No matching commands</div>';
+        return;
+      }
+      list.innerHTML = filtered.map(function (c, i) {
+        var cls = c.kind === 'user' ? 'skills-source-user' : c.kind === 'plugin' ? 'skills-source-plugin' : 'skills-source-project';
+        return '<div class="palette-item' + (i === sel ? ' selected' : '') + '" data-i="' + i + '">'
+          + '<span class="slash-cmd-name">' + escHtml(c.insert) + '</span>'
+          + '<span class="skills-row-source ' + cls + '">' + escHtml(c.source) + '</span>'
+          + (c.description ? '<div class="slash-cmd-desc">' + escHtml(c.description) + '</div>' : '')
+        + '</div>';
+      }).join('');
+      list.querySelectorAll('.palette-item[data-i]').forEach(function (el) {
+        el.addEventListener('click', function () { pick(filtered[+el.dataset.i], false); });
+        el.addEventListener('mouseenter', function () { sel = +el.dataset.i; paint(); });
+      });
+    }
+    function paint() {
+      list.querySelectorAll('.palette-item').forEach(function (el, i) {
+        el.classList.toggle('selected', i === sel);
+      });
+    }
+    function applyFilter() {
+      var q = input.value.replace(/^\//, '').toLowerCase().trim();
+      filtered = all.filter(function (c) {
+        return !q || c.insert.toLowerCase().indexOf(q) !== -1
+          || (c.description && c.description.toLowerCase().indexOf(q) !== -1);
+      });
+      sel = 0;
+      render();
+    }
+    function pick(c, run) {
+      if (!c) return;
+      close();
+      if (sendSlashToTerminal(c.insert, run) && !run && window.toast) window.toast.success('Inserted ' + c.insert);
+    }
+
+    input.addEventListener('input', applyFilter);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(sel + 1, filtered.length - 1); paint(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(sel - 1, 0); paint(); }
+      else if (e.key === 'Enter') { e.preventDefault(); pick(filtered[sel], !(e.metaKey || e.ctrlKey)); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+
+    window.klaus.skills.listSkills().then(function (r) {
+      // Commands are the typeable slash entries; include user-invocable skills
+      // too since the CLI exposes those at `/` as well.
+      var cmds = (r && r.commands) || [];
+      var skills = ((r && r.skills) || []).filter(function (s) { return s.insert; });
+      all = cmds.concat(skills);
+      applyFilter();
+      // Keep the caret after the leading "/".
+      input.setSelectionRange(input.value.length, input.value.length);
+    });
+    setTimeout(function () { input.focus(); }, 50);
+  }
+
   return {
     showAbout: showAbout,
     showLog: showLog,
+    showSlashLauncher: showSlashLauncher,
     showHowToUse: showHowToUse,
     showLicenses: showLicenses,
     checkAndPromptDeps: checkAndPromptDeps,
