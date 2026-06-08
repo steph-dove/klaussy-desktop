@@ -9,6 +9,42 @@ const { loadConfig } = require('../util/config');
 const { currentRepoPath } = require('../state/pr-review');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
 
+// Enumerate installed plugins from ~/.claude/plugins/installed_plugins.json.
+// Plugins no longer live at ~/.claude/plugins/<name>/ — Claude Code now keeps
+// them under ~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/ and
+// records the real install path (plus marketplace) in installed_plugins.json.
+// Each returned entry carries everything callers need: the install dir, the
+// bare plugin name (for `/<plugin>:<cmd>` namespacing the CLI expects) and the
+// marketplace it came from.
+function listInstalledPlugins() {
+  const homedir = require('os').homedir();
+  const manifest = path.join(homedir, '.claude', 'plugins', 'installed_plugins.json');
+  let raw;
+  try { raw = JSON.parse(fs.readFileSync(manifest, 'utf8')); } catch (_) { return []; }
+  const out = [];
+  const seen = new Set();
+  for (const [key, installs] of Object.entries((raw && raw.plugins) || {})) {
+    // key is "<plugin>@<marketplace>".
+    const at = key.lastIndexOf('@');
+    const pluginName = at > 0 ? key.slice(0, at) : key;
+    const marketplace = at > 0 ? key.slice(at + 1) : '';
+    if (!Array.isArray(installs)) continue;
+    for (const inst of installs) {
+      const dir = inst && inst.installPath;
+      if (!dir || seen.has(dir) || !fs.existsSync(dir)) continue;
+      seen.add(dir);
+      out.push({
+        pluginName,
+        marketplace,
+        scope: inst.scope || 'user',
+        version: inst.version || '',
+        dir,
+      });
+    }
+  }
+  return out;
+}
+
 // List Claude skills + slash commands from disk so users can discover what
 // they have installed without leaving Klaussy. Walks user-level skills + a
 // source per klausify project (most users keep skills per-repo, so showing
@@ -38,6 +74,18 @@ ipcMain.handle('list-skills', async () => {
       label: path.basename(active),
       skillsDir: path.join(active, '.claude', 'skills'),
       cmdsDir: path.join(active, '.claude', 'commands'),
+    });
+  }
+  // Plugins: this is where most installed skills/commands actually live.
+  // `pluginName` is carried through so commands can be namespaced the way the
+  // CLI expects them to be typed: `/<plugin>:<command>`.
+  for (const pl of listInstalledPlugins()) {
+    sources.push({
+      kind: 'plugin',
+      label: pl.pluginName,
+      pluginName: pl.pluginName,
+      skillsDir: path.join(pl.dir, 'skills'),
+      cmdsDir: path.join(pl.dir, 'commands'),
     });
   }
 
@@ -71,10 +119,14 @@ ipcMain.handle('list-skills', async () => {
         if (!fs.existsSync(skillFile)) continue;
         const text = fs.readFileSync(skillFile, 'utf8');
         const fm = parseFrontmatter(text);
+        const base = fm.name || ent.name;
         skills.push({
-          name: fm.name || ent.name,
+          name: src.pluginName ? src.pluginName + ':' + base : base,
           description: fm.description || '',
           source: src.label,
+          kind: src.kind,
+          // What the user types to invoke it in a Claude terminal.
+          insert: '/' + (src.pluginName ? src.pluginName + ':' + base : base),
           path: skillFile,
         });
       }
@@ -90,22 +142,29 @@ ipcMain.handle('list-skills', async () => {
         const fm = parseFrontmatter(text);
         // Body after frontmatter for a fallback description.
         let body = text.replace(/^---[\s\S]*?\n---\s*/, '').trim();
+        const cmdBase = ent.name.replace(/\.md$/, '');
+        // Plugin commands are namespaced `/<plugin>:<command>` by the CLI;
+        // user/project commands are just `/<command>`.
+        const slash = '/' + (src.pluginName ? src.pluginName + ':' + cmdBase : cmdBase);
         commands.push({
-          name: '/' + ent.name.replace(/\.md$/, ''),
+          name: slash,
           description: fm.description || body.split('\n')[0].slice(0, 160),
           source: src.label,
+          kind: src.kind,
+          insert: slash,
           path: file,
         });
       }
     } catch (_) {}
   }
 
-  // Sort: user first, then projects alphabetically by label, then by name
-  // within each source.
+  // Sort: user → plugin → project, then alphabetically by source label, then
+  // by name within each source.
+  const rank = (k) => (k === 'user' ? 0 : k === 'plugin' ? 1 : 2);
   const sorter = (a, b) => {
-    if (a.source === 'user' && b.source !== 'user') return -1;
-    if (b.source === 'user' && a.source !== 'user') return 1;
-    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    const ra = rank(a.kind), rb = rank(b.kind);
+    if (ra !== rb) return ra - rb;
+    if (a.source !== b.source) return String(a.source).localeCompare(String(b.source));
     return a.name.localeCompare(b.name);
   };
   skills.sort(sorter);
@@ -113,20 +172,26 @@ ipcMain.handle('list-skills', async () => {
   return { skills, commands };
 });
 
+// Skill/command files live under ~/.claude (user + plugin cache) OR under a
+// project root (project-scope .claude/skills). Allow either; reject anything
+// else so a compromised renderer can't read arbitrary files through here.
+function safeSkillPath(filePath) {
+  const claudeHome = path.join(require('os').homedir(), '.claude');
+  return pathUnder(claudeHome, filePath) || pathUnderAnyRoot(filePath);
+}
+
 ipcMain.handle('open-skill-file', (_event, { filePath }) => {
   if (!filePath) return { ok: false };
-  const claudeHome = path.join(require('os').homedir(), '.claude');
-  const safe = pathUnder(claudeHome, filePath);
-  if (!safe) return { error: 'path outside ~/.claude' };
+  const safe = safeSkillPath(filePath);
+  if (!safe) return { error: 'path outside ~/.claude or an allowed project root' };
   shell.openPath(safe);
   return { ok: true };
 });
 
 ipcMain.handle('read-skill-file', (_event, { filePath }) => {
   if (!filePath) return { error: 'No file path' };
-  const claudeHome = path.join(require('os').homedir(), '.claude');
-  const safe = pathUnder(claudeHome, filePath);
-  if (!safe) return { error: 'path outside ~/.claude' };
+  const safe = safeSkillPath(filePath);
+  if (!safe) return { error: 'path outside ~/.claude or an allowed project root' };
   try {
     const content = fs.readFileSync(safe, 'utf8');
     return { content };
@@ -138,9 +203,8 @@ ipcMain.handle('read-skill-file', (_event, { filePath }) => {
 ipcMain.handle('write-skill-file', (_event, { filePath, content }) => {
   if (!filePath) return { error: 'No file path' };
   if (typeof content !== 'string') return { error: 'Content must be a string' };
-  const claudeHome = path.join(require('os').homedir(), '.claude');
-  const safe = pathUnder(claudeHome, filePath);
-  if (!safe) return { error: 'path outside ~/.claude' };
+  const safe = safeSkillPath(filePath);
+  if (!safe) return { error: 'path outside ~/.claude or an allowed project root' };
   try {
     fs.writeFileSync(safe, content, 'utf8');
     return { ok: true };
@@ -167,6 +231,15 @@ ipcMain.handle('list-memory-files', () => {
     const dotFile = path.join(p.path, '.claude', 'CLAUDE.md');
     const file = fs.existsSync(rootFile) ? rootFile : (fs.existsSync(dotFile) ? dotFile : rootFile);
     scopes.push({ kind: 'project', label: p.name || path.basename(p.path), file });
+  }
+  // Include the active repo even if it isn't in config.projects (parity with
+  // list-skills) so its CLAUDE.md is reachable during transient setup.
+  const activeRepo = currentRepoPath();
+  if (activeRepo && !projects.find((p) => p && p.path === activeRepo)) {
+    const rootFile = path.join(activeRepo, 'CLAUDE.md');
+    const dotFile = path.join(activeRepo, '.claude', 'CLAUDE.md');
+    const file = fs.existsSync(rootFile) ? rootFile : (fs.existsSync(dotFile) ? dotFile : rootFile);
+    scopes.push({ kind: 'project', label: path.basename(activeRepo), file });
   }
   for (const s of scopes) {
     out.push({
@@ -239,17 +312,19 @@ ipcMain.handle('list-mcp-servers', () => {
 // each plugin's plugin.json (or package.json fallback) to get name +
 // description + what it bundles (skills/commands/agents).
 ipcMain.handle('list-plugins', () => {
-  const homedir = require('os').homedir();
-  const root = path.join(homedir, '.claude', 'plugins');
   const out = [];
-  let entries = [];
-  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (_) { return { plugins: out }; }
-  for (const ent of entries) {
-    if (!ent.isDirectory()) continue;
-    const pluginDir = path.join(root, ent.name);
+  for (const pl of listInstalledPlugins()) {
+    const pluginDir = pl.dir;
+    // The manifest now lives at <plugin>/.claude-plugin/plugin.json; keep the
+    // old fallbacks for older / hand-rolled plugins.
     let manifest = {};
-    for (const candidate of ['plugin.json', 'package.json', 'manifest.json']) {
-      const f = path.join(pluginDir, candidate);
+    const candidates = [
+      path.join(pluginDir, '.claude-plugin', 'plugin.json'),
+      path.join(pluginDir, 'plugin.json'),
+      path.join(pluginDir, 'package.json'),
+      path.join(pluginDir, 'manifest.json'),
+    ];
+    for (const f of candidates) {
       if (!fs.existsSync(f)) continue;
       try { manifest = JSON.parse(fs.readFileSync(f, 'utf8')); break; } catch (_) {}
     }
@@ -263,9 +338,11 @@ ipcMain.handle('list-plugins', () => {
       } catch (_) {}
     }
     out.push({
-      name: manifest.name || ent.name,
+      name: manifest.name || pl.pluginName,
       description: manifest.description || '',
-      version: manifest.version || '',
+      version: manifest.version || pl.version || '',
+      marketplace: pl.marketplace || '',
+      scope: pl.scope || 'user',
       author: typeof manifest.author === 'string' ? manifest.author : (manifest.author && manifest.author.name) || '',
       path: pluginDir,
       bundles,
