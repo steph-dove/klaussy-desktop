@@ -10,6 +10,7 @@ const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
+const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree } = require('../util/git-repo');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
@@ -28,6 +29,53 @@ const { beginSession } = require('../util/agent-concurrency');
 // in a `klaus-worktrees/` directory.
 function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
+}
+
+// Freshen `branch` from origin before a worktree is created off it, so the
+// new worktree starts from the latest remote state instead of whatever was
+// fetched last. Non-fatal by design: returns null on success (or when there's
+// nothing to do), or a human-readable warning string on failure — the caller
+// continues creating the worktree either way and surfaces the warning.
+async function freshenBranchFromOrigin(repoPath, branch) {
+  // Local-only repo (no origin): nothing to freshen, no warning.
+  try {
+    execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: repoPath, stdio: 'pipe' });
+  } catch {
+    return null;
+  }
+
+  const firstLine = (err) =>
+    ((err && err.stderr ? String(err.stderr) : '') || (err && err.message) || '')
+      .trim().split('\n')[0];
+
+  try {
+    await execFileP('git', ['fetch', 'origin', branch], { cwd: repoPath, timeout: 30000 });
+  } catch (err) {
+    // A branch that only exists locally isn't a fetch failure — there is
+    // simply no remote counterpart to pull.
+    if (/couldn't find remote ref/i.test(String(err && err.stderr || ''))) return null;
+    return 'Could not fetch latest "' + branch + '" from origin — continuing with the local copy. (' + firstLine(err) + ')';
+  }
+
+  // Update the local branch ref. If it's checked out in the source repo we
+  // must go through pull (git refuses ref updates under a checkout); otherwise
+  // a fetch refspec fast-forwards it directly (and creates it if missing).
+  let head = null;
+  try {
+    head = execFileSync('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: repoPath, stdio: 'pipe' })
+      .toString().trim();
+  } catch { /* detached HEAD */ }
+
+  try {
+    if (head === branch) {
+      await execFileP('git', ['pull', '--ff-only', 'origin', branch], { cwd: repoPath, timeout: 60000 });
+    } else {
+      await execFileP('git', ['fetch', 'origin', branch + ':' + branch], { cwd: repoPath, timeout: 30000 });
+    }
+  } catch (err) {
+    return 'Fetched origin, but could not fast-forward local "' + branch + '" — continuing with the local copy. (' + firstLine(err) + ')';
+  }
+  return null;
 }
 
 ipcMain.handle('list-saved-sessions', () => {
@@ -151,6 +199,11 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     }
   }
 
+  // Freshen the base from origin so the worktree starts from the latest
+  // commit. Non-fatal: on failure we keep going with the local state and
+  // surface the warning on the result.
+  const freshenWarning = await freshenBranchFromOrigin(repoPath, baseBranch);
+
   // Ensure the chosen location exists — git worktree add creates the leaf dir
   // but not missing parents (e.g. a suggested "<repo>-worktrees" folder).
   try {
@@ -177,7 +230,9 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
   } catch {}
 
-  return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
+  const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
+  if (freshenWarning && result && !result.error) result.warning = freshenWarning;
+  return result;
 });
 
 // Create worktree from an existing branch
@@ -204,6 +259,10 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
     return { error: 'Could not create the worktree location ' + worktreeDir + ': ' + e.message };
   }
 
+  // Freshen the branch from origin before checking it out (non-fatal; also
+  // creates the local branch from origin when it doesn't exist yet).
+  const freshenWarning = await freshenBranchFromOrigin(repoPath, branch);
+
   try {
     // Check if it's a local branch already
     try {
@@ -220,7 +279,9 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
   }
 
   const name = sanitized;
-  return spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
+  const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
+  if (freshenWarning && result && !result.error) result.warning = freshenWarning;
+  return result;
 });
 
 // Attach to an existing worktree directory

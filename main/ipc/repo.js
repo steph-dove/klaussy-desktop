@@ -319,7 +319,10 @@ async function collectRepos(dir, depthRemaining, configuredPaths, seenRepo, foun
 // $HOME dev folders, and any config.repoScanRoots — each root one level deep,
 // descending one extra level into non-repo folders (org grouping). Paths
 // already configured as projects are omitted (they show separately).
-ipcMain.handle('discover-repos', async () => {
+// Also exported for gh-list-recent-repos, which matches GitHub repos against
+// clones already on disk (config.projects alone misses repos the user has
+// cloned but never opened in the app).
+async function discoverReposOnDisk() {
   const config = loadConfig();
   const home = os.homedir();
 
@@ -356,7 +359,11 @@ ipcMain.handle('discover-repos', async () => {
 
   found.sort((a, b) => a.name.localeCompare(b.name));
   return found;
-});
+}
+
+ipcMain.handle('discover-repos', async () => discoverReposOnDisk());
+
+module.exports = { discoverReposOnDisk };
 
 // Ranked location suggestions for the "New worktree" Location dropdown — the
 // parent directory the new worktree gets created under. Ordered:

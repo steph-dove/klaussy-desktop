@@ -687,6 +687,8 @@ contextBridge.exposeInMainWorld('klaus', {
     switchAccount: (username) => ipcRenderer.invoke('gh-switch-account', { username }),
     detectAccountForRepo: (owner, repo, prNumber) =>
       ipcRenderer.invoke('gh-detect-account-for-repo', { owner, repo, prNumber }),
+    listRecentRepos: () => ipcRenderer.invoke('gh-list-recent-repos'),
+    cloneRepo: (nameWithOwner) => ipcRenderer.invoke('gh-clone-repo', { nameWithOwner }),
     openExternal: (url) => ipcRenderer.invoke('open-external', { url }),
     ciStatus: (worktreePath, branch) => ipcRenderer.invoke('ci-status', { worktreePath, branch }),
     ciRunLogs: (worktreePath, runId) => ipcRenderer.invoke('ci-run-logs', { worktreePath, runId }),

@@ -1263,6 +1263,29 @@
     }
     return discoverWorktreesCache;
   }
+  // Recently-pushed GitHub repos for the source-repo dropdown. Degrades to an
+  // empty list when gh is missing/unauthed/offline — the section just doesn't
+  // render, the rest of the dropdown is unaffected.
+  var recentGhReposCache = null;
+  function getRecentGithubRepos() {
+    if (!recentGhReposCache) {
+      recentGhReposCache = window.klaus.gh.listRecentRepos().then(function (res) {
+        if (!res || res.error) {
+          if (res && res.error) console.warn('[gh-recent-repos]', res.error);
+          // Transient failure (gh offline/unauthed): drop the cache so the
+          // next dropdown open retries, same as the rejection path below.
+          recentGhReposCache = null;
+          return [];
+        }
+        return res.repos || [];
+      }).catch(function (e) {
+        console.warn('[gh-recent-repos]', e);
+        recentGhReposCache = null;
+        return [];
+      });
+    }
+    return recentGhReposCache;
+  }
 
   bindRecentsDropdown(pathRecentsBtn, pathRecentsList, {
     loadItems: function () {
@@ -1336,25 +1359,82 @@
   // either just makes it the active source repo.
   bindRecentsDropdown(modalRepoRecentsBtn, modalRepoRecentsList, {
     loadItems: function () {
-      return getDiscoveredRepos().then(function (discovered) {
+      return Promise.all([
+        getDiscoveredRepos(),
+        getRecentGithubRepos(),
+      ]).then(function (res) {
+        var discovered = res[0] || [];
+        var ghRepos = res[1] || [];
         var open = (window.ProjectSwitcher && window.ProjectSwitcher.sidebarRepos)
           ? window.ProjectSwitcher.sidebarRepos() : [];
         var openPaths = {};
         open.forEach(function (r) { openPaths[r.path] = true; });
+        // GitHub items: already-cloned ones act like any local repo; the rest
+        // get a "clone" tag and a gh: pseudo-path so onPick knows to clone
+        // first. Skip ones whose clone is already in the Open section.
+        var ghLocalPaths = {};
+        var ghItems = ghRepos.filter(function (r) {
+          return !(r.localPath && openPaths[r.localPath]);
+        }).map(function (r) {
+          if (r.localPath) ghLocalPaths[r.localPath] = true;
+          return r.localPath
+            ? { label: r.nameWithOwner, path: r.localPath, sub: r.localPath, kind: 'github', removable: false }
+            : { label: r.nameWithOwner, path: 'gh:' + r.nameWithOwner, sub: 'Not cloned yet — select to clone', tag: 'clone', kind: 'github-clone', removable: false };
+        });
         return [
           { header: 'Open repos', items: open.map(function (r) {
             return { label: r.name, path: r.path, sub: r.path, kind: 'open', removable: false };
           }) },
+          { header: 'GitHub — recently pushed', items: ghItems },
           { header: 'Discovered', items: (discovered || [])
-            .filter(function (r) { return !openPaths[r.path]; })
+            .filter(function (r) { return !openPaths[r.path] && !ghLocalPaths[r.path]; })
             .map(function (r) {
               return { label: r.name, path: r.path, sub: r.path, kind: 'discovered', removable: false };
             }) },
         ];
       });
     },
-    onPick: function (p) {
-      // Both sections are real git repos — just switch the active source repo.
+    onPick: function (p, info) {
+      if (info && info.kind === 'github-clone') {
+        // Not on disk yet: clone into the default projects dir, then switch.
+        var nameWithOwner = p.replace(/^gh:/, '');
+        if (modalRepoPathEl) {
+          modalRepoPathEl.textContent = 'Cloning ' + nameWithOwner + '…';
+          modalRepoPathEl.title = '';
+        }
+        window.toast.info('Cloning ' + nameWithOwner + '…');
+        var restoreRepoLabel = function () {
+          if (modalRepoPathEl) {
+            modalRepoPathEl.textContent = AppState.repoPath || 'No repo selected';
+            modalRepoPathEl.title = AppState.repoPath || '';
+          }
+        };
+        window.klaus.gh.cloneRepo(nameWithOwner).then(function (res) {
+          if (!res || res.error) {
+            restoreRepoLabel();
+            window.toast.error((res && res.error) || 'Clone failed');
+            return;
+          }
+          // The clone is now a configured project — refresh dropdown caches
+          // so it shows under Open/Discovered next time.
+          discoverReposCache = null;
+          recentGhReposCache = null;
+          window.toast.success('Cloned ' + nameWithOwner);
+          window.klaus.repo.switchProject(res.path).then(function () {
+            applyRepoSwitch(res.path);
+          }).catch(function (e) {
+            console.error('[switch-project]', e);
+            restoreRepoLabel();
+            window.toast.error('Cloned, but could not switch to ' + res.path);
+          });
+        }).catch(function (e) {
+          console.error('[gh-clone-repo]', e);
+          restoreRepoLabel();
+          window.toast.error('Clone failed: ' + ((e && e.message) || e));
+        });
+        return;
+      }
+      // Every other section is a real git repo on disk — just switch.
       window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
     },
     emptyText: 'No repos found',
@@ -1428,6 +1508,7 @@
     // worktrees show up; cached within a single open across dropdown toggles.
     discoverReposCache = null;
     discoverWorktreesCache = null;
+    recentGhReposCache = null;
     modalInput.value = '';
     modalError.textContent = '';
     clearFieldFlags();
@@ -2204,6 +2285,10 @@
       modalError.textContent = result.error;
       return;
     }
+
+    // Non-fatal: base branch couldn't be freshened from origin before the
+    // worktree was created — the task still started from the local state.
+    if (result.warning) window.toast.warn(result.warning);
 
     // Record the paths we just used so they show in the recents dropdowns
     // next time. Only record on a successful create/attach so abandoned
