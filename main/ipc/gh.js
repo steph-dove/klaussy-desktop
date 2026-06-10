@@ -6,9 +6,10 @@ const os = require('os');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { ipcMain, shell, BrowserWindow } = require('electron');
-const { loadConfig } = require('../util/config');
-const { ghExec, clearGhTokenCache } = require('../util/exec');
+const { loadConfig, saveConfig } = require('../util/config');
+const { ghExec, clearGhTokenCache, execFileP } = require('../util/exec');
 const { allProviders, getProvider, binFor, installCommandFor, authMetaFor } = require('../state/ai-providers');
+const { discoverReposOnDisk } = require('./repo');
 
 // Parse `gh auth status` output into structured account records.
 //
@@ -230,6 +231,193 @@ ipcMain.handle('gh-login-start', async (event, opts) => {
 ipcMain.handle('gh-login-cancel', async () => {
   killActiveLogin();
   return { ok: true };
+});
+
+// ---- Recent GitHub repos: list + clone-on-demand --------------------------
+//
+// Powers the New Task modal's "GitHub" section: the 5 most recently pushed
+// repos the active gh account can push to (owned + collaborator + org).
+// Each entry carries `localPath` when an existing clone is found among
+// configured projects or under a known clone parent, so the renderer can
+// switch straight to it instead of cloning again.
+
+// origin URLs of every configured project (and the active repo), for matching
+// listed GitHub repos to clones already on disk — including clones whose
+// directory name differs from the repo name.
+async function knownRepoRemotes() {
+  const config = loadConfig();
+  const paths = new Set();
+  for (const p of config.projects || []) {
+    if (p && p.path) paths.add(p.path);
+  }
+  if (config.repoPath) paths.add(config.repoPath);
+  const out = [];
+  await Promise.all(Array.from(paths).map(async (repoPath) => {
+    try {
+      const { stdout } = await execFileP('git', ['config', '--get', 'remote.origin.url'], {
+        cwd: repoPath, timeout: 3000,
+      });
+      out.push({ path: repoPath, url: stdout.trim() });
+    } catch { /* no origin / not a repo anymore — skip */ }
+  }));
+  return out;
+}
+
+// Where a fresh clone should land: the directory that already holds the most
+// configured projects, falling back to ~/klaussy-projects.
+function defaultCloneParent() {
+  const config = loadConfig();
+  const counts = new Map();
+  const bump = (repoPath) => {
+    const dir = path.dirname(repoPath);
+    counts.set(dir, (counts.get(dir) || 0) + 1);
+  };
+  for (const p of config.projects || []) {
+    if (p && p.path) bump(p.path);
+  }
+  if (config.repoPath) bump(config.repoPath);
+  let best = null;
+  let bestCount = 0;
+  for (const [dir, count] of counts) {
+    if (count > bestCount && fs.existsSync(dir)) { best = dir; bestCount = count; }
+  }
+  return best || path.join(os.homedir(), 'klaussy-projects');
+}
+
+// Does this remote URL point at owner/name? Anchored to the end so
+// "owner/name-extra" doesn't match. Covers SSH and HTTPS forms.
+function remoteMatches(url, nameWithOwner) {
+  const escaped = nameWithOwner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp('[:/]' + escaped + '(\\.git)?/?$', 'i').test(url.trim());
+}
+
+// origin URL of a top-level clone, read straight from .git/config — no git
+// subprocess, so it's cheap enough to run across every discovered repo.
+// (Discovery only returns repos where .git is a directory, so the file is
+// always at this path; worktrees with a .git *file* return null, which is
+// fine — they're never the canonical clone we're matching against.)
+function originUrlOf(repoPath) {
+  try {
+    const conf = fs.readFileSync(path.join(repoPath, '.git', 'config'), 'utf-8');
+    const m = conf.match(/\[remote "origin"\][^[]*?url\s*=\s*(.+)/);
+    return m ? m[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+ipcMain.handle('gh-list-recent-repos', async () => {
+  let repos;
+  try {
+    const { stdout } = await execFileP('gh', [
+      'api', 'user/repos?sort=pushed&per_page=5&affiliation=owner,collaborator,organization_member',
+    ], { timeout: 15000, maxBuffer: 4 * 1024 * 1024 });
+    repos = JSON.parse(stdout);
+  } catch (err) {
+    const msg = ((err.stderr ? String(err.stderr) : '') || err.message || '').trim().split('\n')[0];
+    return { error: msg || 'Could not list GitHub repos' };
+  }
+  if (!Array.isArray(repos)) return { error: 'Unexpected response from gh api' };
+
+  const remotes = await knownRepoRemotes();
+  const cloneParent = defaultCloneParent();
+  // Repos on disk beyond config.projects — same crawl as the Discovered
+  // dropdown section (common dev dirs, org subdirs, scan roots). Matched by
+  // origin URL (read from .git/config, no subprocess) rather than directory
+  // name, so renamed clones (e.g. klausify cloned as "klaus") still count.
+  let discoveredRemotes = [];
+  try {
+    const discovered = await discoverReposOnDisk();
+    discoveredRemotes = discovered
+      .map((d) => ({ path: d.path, url: originUrlOf(d.path) }))
+      .filter((d) => d.url);
+  } catch { /* degrade to config-only matching */ }
+
+  const out = [];
+  for (const r of repos) {
+    if (!r || !r.full_name || !r.name) continue;
+    // Existing clone? Configured projects first, then discovered repos, then
+    // <cloneParent>/<name> — all verified by origin URL before trusting.
+    let localPath = null;
+    const known = remotes.find((k) => remoteMatches(k.url, r.full_name))
+      || discoveredRemotes.find((k) => remoteMatches(k.url, r.full_name));
+    if (known) {
+      localPath = known.path;
+    } else {
+      const direct = path.join(cloneParent, r.name);
+      const directUrl = originUrlOf(direct);
+      if (directUrl && remoteMatches(directUrl, r.full_name)) localPath = direct;
+    }
+    out.push({
+      nameWithOwner: r.full_name,
+      name: r.name,
+      owner: r.owner ? r.owner.login : null,
+      defaultBranch: r.default_branch || 'main',
+      isPrivate: !!r.private,
+      pushedAt: r.pushed_at || null,
+      localPath,
+    });
+  }
+  return { repos: out };
+});
+
+// Clone a GitHub repo into the default clone parent and adopt it as a
+// configured project. Idempotent: an existing clone at the target path is
+// adopted instead of re-cloned.
+ipcMain.handle('gh-clone-repo', async (_event, { nameWithOwner }) => {
+  if (typeof nameWithOwner !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(nameWithOwner)) {
+    return { error: 'Invalid repository name: ' + nameWithOwner };
+  }
+  // path.join(parent, '..') must never escape the clone parent — GitHub can't
+  // host dot-only names, so anything matching is a forged renderer payload.
+  if (nameWithOwner.split('/').some((seg) => /^\.+$/.test(seg))) {
+    return { error: 'Invalid repository name: ' + nameWithOwner };
+  }
+  const parent = defaultCloneParent();
+  try {
+    fs.mkdirSync(parent, { recursive: true });
+  } catch (e) {
+    return { error: 'Could not create clone directory ' + parent + ': ' + e.message };
+  }
+
+  const repoName = nameWithOwner.split('/')[1];
+  const target = path.join(parent, repoName);
+
+  const adopt = () => {
+    const config = loadConfig();
+    config.projects = config.projects || [];
+    if (!config.projects.some((p) => p && p.path === target)) {
+      config.projects.push({ name: repoName, path: target });
+      saveConfig(config);
+    }
+    return { path: target, name: repoName };
+  };
+
+  if (fs.existsSync(target)) {
+    // Adopt only if it's really a clone of the requested repo — a same-named
+    // directory cloned from elsewhere must not be silently adopted (the
+    // renderer would then toast success and switch to the wrong codebase).
+    if (fs.existsSync(path.join(target, '.git'))) {
+      try {
+        const { stdout } = await execFileP('git', ['config', '--get', 'remote.origin.url'], {
+          cwd: target, timeout: 3000,
+        });
+        if (remoteMatches(stdout, nameWithOwner)) return adopt();
+      } catch { /* no origin — treat as a different repo below */ }
+      return { error: target + ' already exists but is a clone of a different repository.' };
+    }
+    return { error: 'Path already exists and is not a git repo: ' + target };
+  }
+
+  try {
+    await execFileP('gh', ['repo', 'clone', nameWithOwner, target], {
+      timeout: 5 * 60 * 1000, maxBuffer: 10 * 1024 * 1024,
+    });
+  } catch (err) {
+    const tail = ((err.stderr ? String(err.stderr) : '') || err.message || '').trim().split('\n').pop();
+    return { error: 'Clone failed: ' + tail };
+  }
+  return adopt();
 });
 
 // Probe each logged-in gh account's token against the GitHub REST API for
