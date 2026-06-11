@@ -175,6 +175,34 @@
     }
   });
 
+  // ---- Repo-intel notifications ----
+  // conventions-cli runs in the background at session create; without these
+  // toasts there is zero visible evidence it happened (artifacts land in the
+  // BASE repo, which worktrees don't show).
+  if (window.klaus.task.onRepoIntelEvent) {
+    window.klaus.task.onRepoIntelEvent(function (ev) {
+      if (!ev || !ev.repoPath) return;
+      var repoName = ev.repoPath.split('/').filter(Boolean).pop();
+      if (ev.type === 'started') {
+        window.toast.info(repoName + (ev.enriching
+          ? ': graphing the repo and building conventions-aware skills (klausify init + Claude enrichment — may take a few minutes)…'
+          : ': graphing the repo and extracting conventions…'));
+      } else if (ev.type === 'generated') {
+        if (ev.enrichFailed) {
+          window.toast.warn(repoName + ': repo graphed + skills ready, but Claude enrichment of CLAUDE.md failed — will retry on a later session');
+        } else {
+          window.toast.success(repoName + ': repo graphed + conventions ready'
+            + (ev.wroteSkills ? ' (CLAUDE.md, rules, skills, import graph)' : ' (import graph)')
+            + ' — agents are now conventions-aware');
+        }
+      } else if (ev.type === 'fresh') {
+        window.toast.info(repoName + ': conventions + repo graph loaded (cached) — agents are conventions-aware');
+      } else if (ev.type === 'failed') {
+        window.toast.warn(repoName + ': repo analysis failed (' + (ev.error || 'is klausify/conventions installed?') + ') — agents run without repo intelligence');
+      }
+    });
+  }
+
   // ---- Handle Claude → shell conversion ----
   window.klaus.task.onConverted(function (data) {
     var t = tasks.get(data.id);
@@ -2613,6 +2641,12 @@
     // Non-fatal: base branch couldn't be freshened from origin before the
     // worktree was created — the task still started from the local state.
     if (result.warning) window.toast.warn(result.warning);
+    // Visible evidence of the pre-create fetch+pull ("pulled main a1b2c3d →
+    // e4f5a6b" / "up to date") — silence here read as "nothing happened".
+    if (result.freshenInfo) {
+      var freshRepo = result.repoPath ? result.repoPath.split('/').filter(Boolean).pop() + ': ' : '';
+      window.toast.info(freshRepo + result.freshenInfo);
+    }
 
 
     // "New window": this window creates the tasks (instances are global) but
@@ -2695,6 +2729,7 @@
               }
               if (res.cancelled) { skipped.push(repo.name); return; }
               if (res.warning) window.toast.warn(repo.name + ': ' + res.warning);
+              if (res.freshenInfo) window.toast.info(repo.name + ': ' + res.freshenInfo);
               if (newWindowIds) newWindowIds.push(res.id); else addTaskToUI(res);
               created++;
             } catch (e) {
