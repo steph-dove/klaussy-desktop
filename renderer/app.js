@@ -186,6 +186,7 @@
     t.mode = 'shell';
     updateSidebarItem(data.id);
     updateSidebarMode(data.id, 'shell');
+    if (window.TerminalManager && TerminalManager.refreshAgentChip) TerminalManager.refreshAgentChip(data.id);
     showResumeButton(data.id, t);
     // Refit terminal and sync size to new shell pty
     setTimeout(function () {
@@ -883,6 +884,10 @@
   const modalRepoBrowseBtn = document.getElementById('btn-modal-repo-browse');
   const modalRepoRecentsBtn = document.getElementById('btn-modal-repo-recents');
   const modalRepoRecentsList = document.getElementById('modal-repo-recents-list');
+  const multiRepoRow = document.getElementById('modal-multirepo-row');
+  const multiRepoEmptyEl = document.getElementById('modal-multirepo-empty');
+  const multiRepoAddBtn = document.getElementById('btn-modal-multirepo-add');
+  const multiRepoList = document.getElementById('modal-multirepo-list');
   const modalTabs = document.querySelectorAll('.modal-tab');
   const tabContents = document.querySelectorAll('.tab-content');
 
@@ -1330,6 +1335,12 @@
   // display, branch dropdown, and the basepath placeholder.
   function applyRepoSwitch(dir) {
     AppState.repoPath = dir;
+    // A repo can't be both the source and an "Also create in" target — the
+    // fan-out would hit "worktree already exists" on the duplicate.
+    if (additionalRepos.some(function (r) { return r.path === dir; })) {
+      additionalRepos = additionalRepos.filter(function (r) { return r.path !== dir; });
+      renderRepoChips();
+    }
     if (modalRepoRow) modalRepoRow.classList.remove('modal-field-invalid');
     if (modalError) modalError.textContent = '';
     if (modalRepoPathEl) { modalRepoPathEl.textContent = dir; modalRepoPathEl.title = dir; }
@@ -1357,87 +1368,169 @@
   // currently in the sidebar (auto-derived, not a user-managed list).
   // "Discovered" = git repos found on disk, excluding the open ones. Picking
   // either just makes it the active source repo.
-  bindRecentsDropdown(modalRepoRecentsBtn, modalRepoRecentsList, {
-    loadItems: function () {
-      return Promise.all([
-        getDiscoveredRepos(),
-        getRecentGithubRepos(),
-      ]).then(function (res) {
-        var discovered = res[0] || [];
-        var ghRepos = res[1] || [];
-        var open = (window.ProjectSwitcher && window.ProjectSwitcher.sidebarRepos)
-          ? window.ProjectSwitcher.sidebarRepos() : [];
-        var openPaths = {};
-        open.forEach(function (r) { openPaths[r.path] = true; });
-        // GitHub items: already-cloned ones act like any local repo; the rest
-        // get a "clone" tag and a gh: pseudo-path so onPick knows to clone
-        // first. Skip ones whose clone is already in the Open section.
-        var ghLocalPaths = {};
-        var ghItems = ghRepos.filter(function (r) {
-          return !(r.localPath && openPaths[r.localPath]);
-        }).map(function (r) {
-          if (r.localPath) ghLocalPaths[r.localPath] = true;
-          return r.localPath
-            ? { label: r.nameWithOwner, path: r.localPath, sub: r.localPath, kind: 'github', removable: false }
-            : { label: r.nameWithOwner, path: 'gh:' + r.nameWithOwner, sub: 'Not cloned yet — select to clone', tag: 'clone', kind: 'github-clone', removable: false };
-        });
-        return [
-          { header: 'Open repos', items: open.map(function (r) {
-            return { label: r.name, path: r.path, sub: r.path, kind: 'open', removable: false };
-          }) },
-          { header: 'GitHub — recently pushed', items: ghItems },
-          { header: 'Discovered', items: (discovered || [])
-            .filter(function (r) { return !openPaths[r.path] && !ghLocalPaths[r.path]; })
-            .map(function (r) {
-              return { label: r.name, path: r.path, sub: r.path, kind: 'discovered', removable: false };
-            }) },
-        ];
+  // Sections for both repo dropdowns (source repo + "Also create in"):
+  // Open repos / GitHub recently-pushed / Discovered. `excludePaths` hides
+  // repos already chosen elsewhere (the primary repo, existing chips).
+  function buildRepoPickerSections(excludePaths) {
+    var exclude = excludePaths || {};
+    return Promise.all([
+      getDiscoveredRepos(),
+      getRecentGithubRepos(),
+    ]).then(function (res) {
+      var discovered = res[0] || [];
+      var ghRepos = res[1] || [];
+      var open = (window.ProjectSwitcher && window.ProjectSwitcher.sidebarRepos)
+        ? window.ProjectSwitcher.sidebarRepos() : [];
+      var openPaths = {};
+      open.forEach(function (r) { openPaths[r.path] = true; });
+      // GitHub items: already-cloned ones act like any local repo; the rest
+      // get a "clone" tag and a gh: pseudo-path so onPick knows to clone
+      // first. Skip ones whose clone is already in the Open section.
+      var ghLocalPaths = {};
+      var ghItems = ghRepos.filter(function (r) {
+        return !(r.localPath && (openPaths[r.localPath] || exclude[r.localPath]));
+      }).map(function (r) {
+        if (r.localPath) ghLocalPaths[r.localPath] = true;
+        return r.localPath
+          ? { label: r.nameWithOwner, path: r.localPath, sub: r.localPath, kind: 'github', removable: false }
+          : { label: r.nameWithOwner, path: 'gh:' + r.nameWithOwner, sub: 'Not cloned yet — select to clone', tag: 'clone', kind: 'github-clone', removable: false };
       });
-    },
+      return [
+        { header: 'Open repos', items: open.filter(function (r) { return !exclude[r.path]; }).map(function (r) {
+          return { label: r.name, path: r.path, sub: r.path, kind: 'open', removable: false };
+        }) },
+        { header: 'GitHub — recently pushed', items: ghItems },
+        { header: 'Discovered', items: (discovered || [])
+          .filter(function (r) { return !openPaths[r.path] && !ghLocalPaths[r.path] && !exclude[r.path]; })
+          .map(function (r) {
+            return { label: r.name, path: r.path, sub: r.path, kind: 'discovered', removable: false };
+          }) },
+      ];
+    });
+  }
+
+  // Clone a gh:-pseudo-path pick, then hand the local path to `onCloned`.
+  // Shared by the source-repo picker (switches to it) and the multi-repo
+  // picker (adds a chip).
+  function cloneGithubPick(pseudoPath, onCloned, onFail) {
+    var nameWithOwner = pseudoPath.replace(/^gh:/, '');
+    window.toast.info('Cloning ' + nameWithOwner + '…');
+    window.klaus.gh.cloneRepo(nameWithOwner).then(function (res) {
+      if (!res || res.error) {
+        if (onFail) onFail();
+        window.toast.error((res && res.error) || 'Clone failed');
+        return;
+      }
+      // The clone is now a configured project — refresh dropdown caches
+      // so it shows under Open/Discovered next time.
+      discoverReposCache = null;
+      recentGhReposCache = null;
+      window.toast.success('Cloned ' + nameWithOwner);
+      onCloned(res.path);
+    }).catch(function (e) {
+      console.error('[gh-clone-repo]', e);
+      if (onFail) onFail();
+      window.toast.error('Clone failed: ' + ((e && e.message) || e));
+    });
+  }
+
+  bindRecentsDropdown(modalRepoRecentsBtn, modalRepoRecentsList, {
+    loadItems: function () { return buildRepoPickerSections(); },
     onPick: function (p, info) {
       if (info && info.kind === 'github-clone') {
         // Not on disk yet: clone into the default projects dir, then switch.
-        var nameWithOwner = p.replace(/^gh:/, '');
         if (modalRepoPathEl) {
-          modalRepoPathEl.textContent = 'Cloning ' + nameWithOwner + '…';
+          modalRepoPathEl.textContent = 'Cloning ' + p.replace(/^gh:/, '') + '…';
           modalRepoPathEl.title = '';
         }
-        window.toast.info('Cloning ' + nameWithOwner + '…');
         var restoreRepoLabel = function () {
           if (modalRepoPathEl) {
             modalRepoPathEl.textContent = AppState.repoPath || 'No repo selected';
             modalRepoPathEl.title = AppState.repoPath || '';
           }
         };
-        window.klaus.gh.cloneRepo(nameWithOwner).then(function (res) {
-          if (!res || res.error) {
-            restoreRepoLabel();
-            window.toast.error((res && res.error) || 'Clone failed');
-            return;
-          }
-          // The clone is now a configured project — refresh dropdown caches
-          // so it shows under Open/Discovered next time.
-          discoverReposCache = null;
-          recentGhReposCache = null;
-          window.toast.success('Cloned ' + nameWithOwner);
-          window.klaus.repo.switchProject(res.path).then(function () {
-            applyRepoSwitch(res.path);
+        cloneGithubPick(p, function (localPath) {
+          window.klaus.repo.switchProject(localPath).then(function () {
+            applyRepoSwitch(localPath);
           }).catch(function (e) {
             console.error('[switch-project]', e);
             restoreRepoLabel();
-            window.toast.error('Cloned, but could not switch to ' + res.path);
+            window.toast.error('Cloned, but could not switch to ' + localPath);
           });
-        }).catch(function (e) {
-          console.error('[gh-clone-repo]', e);
-          restoreRepoLabel();
-          window.toast.error('Clone failed: ' + ((e && e.message) || e));
-        });
+        }, restoreRepoLabel);
         return;
       }
       // Every other section is a real git repo on disk — just switch.
       window.klaus.repo.switchProject(p).then(function () { applyRepoSwitch(p); });
     },
     emptyText: 'No repos found',
+  });
+
+  // ---- "Also create in" multi-repo chips -----------------------------------
+  // The same task (branch + worktree naming schema) is fanned out to each of
+  // these repos on submit — common when one ticket spans multiple repos. The
+  // resulting tasks are independent; this list is just creation-time input.
+  var additionalRepos = []; // [{ name, path }]
+  // Clones started from the multi-repo dropdown that haven't finished yet.
+  // Submit is blocked while > 0 so a repo the user picked can't be silently
+  // missing from the fan-out. Stamped with the modal session so a clone that
+  // finishes after close/reopen doesn't add a chip to the wrong session.
+  var pendingChipClones = 0;
+  var modalSession = 0;
+
+  function renderRepoChips() {
+    multiRepoRow.querySelectorAll('.modal-multirepo-chip').forEach(function (el) { el.remove(); });
+    multiRepoEmptyEl.hidden = additionalRepos.length > 0;
+    additionalRepos.forEach(function (r) {
+      var chip = document.createElement('span');
+      chip.className = 'modal-multirepo-chip';
+      chip.title = r.path;
+      var label = document.createElement('span');
+      label.textContent = r.name;
+      var rm = document.createElement('button');
+      rm.type = 'button';
+      rm.textContent = '×';
+      rm.title = 'Remove ' + r.name;
+      rm.addEventListener('click', function () {
+        additionalRepos = additionalRepos.filter(function (x) { return x.path !== r.path; });
+        renderRepoChips();
+      });
+      chip.appendChild(label);
+      chip.appendChild(rm);
+      multiRepoRow.insertBefore(chip, multiRepoAddBtn);
+    });
+  }
+
+  function addRepoChip(repoPath) {
+    if (!repoPath || repoPath === AppState.repoPath) return;
+    if (additionalRepos.some(function (r) { return r.path === repoPath; })) return;
+    var name = repoPath.split('/').filter(Boolean).pop() || repoPath;
+    additionalRepos.push({ name: name, path: repoPath });
+    renderRepoChips();
+  }
+
+  bindRecentsDropdown(multiRepoAddBtn, multiRepoList, {
+    loadItems: function () {
+      var exclude = {};
+      if (AppState.repoPath) exclude[AppState.repoPath] = true;
+      additionalRepos.forEach(function (r) { exclude[r.path] = true; });
+      return buildRepoPickerSections(exclude);
+    },
+    onPick: function (p, info) {
+      if (info && info.kind === 'github-clone') {
+        var session = modalSession;
+        pendingChipClones++;
+        cloneGithubPick(p, function (localPath) {
+          pendingChipClones = Math.max(0, pendingChipClones - 1);
+          if (session === modalSession) addRepoChip(localPath);
+        }, function () {
+          pendingChipClones = Math.max(0, pendingChipClones - 1);
+        });
+        return;
+      }
+      addRepoChip(p);
+    },
+    emptyText: 'No other repos found',
   });
 
   // Source-repo drag-and-drop fallback. Drop a folder onto the row to
@@ -1509,6 +1602,10 @@
     discoverReposCache = null;
     discoverWorktreesCache = null;
     recentGhReposCache = null;
+    additionalRepos = [];
+    modalSession++;
+    pendingChipClones = 0;
+    renderRepoChips();
     modalInput.value = '';
     modalError.textContent = '';
     clearFieldFlags();
@@ -2224,12 +2321,29 @@
     modalError.textContent = '';
     clearFieldFlags();
 
+    // Snapshot everything the fan-out needs BEFORE the first await. The
+    // primary create can take seconds (consent prompt, origin fetch) and the
+    // inputs aren't locked meanwhile — live reads after the await could hand
+    // secondary repos a different name/base/agent than the primary task got.
+    var fanoutRepos = activeTab === 'new'
+      ? additionalRepos.filter(function (r) { return r.path !== AppState.repoPath; })
+      : [];
+    var fanoutName = modalInput.value.trim();
+    var fanoutBase = selectedBaseBranch;
+    var fanoutBasePath = selectedBasePath;
+    var fanoutMode = selectedMode;
+
     var result;
 
     if (activeTab === 'new') {
       // A source repo is required for both create and checkout paths.
       if (!AppState.repoPath) {
         return failValidation('Select a source repo first.', modalRepoRow);
+      }
+      // A repo picked for "Also create in" is still cloning — submitting now
+      // would silently drop it from the fan-out.
+      if (pendingChipClones > 0) {
+        return failValidation('Still cloning a repo for "Also create in" — give it a moment and try again.', multiRepoRow);
       }
       var name = modalInput.value.trim();
       if (name) {
@@ -2302,5 +2416,58 @@
     hideModal();
     addTaskToUI(result);
     switchToTask(result.id);
+
+    // Fan the same task out to the "Also create in" repos: same branch name
+    // and worktree naming schema in each. Sequential on purpose — each spawn
+    // can pop a worktree-consent prompt, and parallel creates would stack
+    // dialogs. Per-repo failures don't stop the rest; they're reported at the
+    // end so successful repos keep their tasks.
+    if (fanoutRepos.length) {
+      var failures = [];
+      var skipped = [];
+      var created = 0;
+      var fanout = fanoutRepos.reduce(function (chain, repo) {
+        return chain.then(function () {
+          var call = fanoutName
+            ? window.klaus.task.create(fanoutName, repo.path, fanoutMode, fanoutBasePath, undefined, fanoutBase || null, true)
+            : window.klaus.task.checkoutBranch(repo.path, fanoutBase, fanoutMode, fanoutBasePath);
+          return call.then(function (res) {
+            // Everything in here counts as this repo's outcome — a throw from
+            // addTaskToUI/toast must not kill the chain for the repos after it.
+            try {
+              if (!res || res.error) {
+                failures.push(repo.name + ': ' + ((res && res.error) || 'failed'));
+                return;
+              }
+              if (res.cancelled) { skipped.push(repo.name); return; }
+              if (res.warning) window.toast.warn(repo.name + ': ' + res.warning);
+              addTaskToUI(res);
+              created++;
+            } catch (e) {
+              console.error('[multi-repo fanout]', repo.name, e);
+              failures.push(repo.name + ': ' + ((e && e.message) || e));
+            }
+          }, function (e) {
+            failures.push(repo.name + ': ' + ((e && e.message) || e));
+          });
+        });
+      }, Promise.resolve());
+      fanout.then(function () {
+        if (failures.length) {
+          window.toast.error('Could not create in ' + failures.join(' · '));
+        }
+        if (skipped.length) {
+          window.toast.info('Skipped (trust prompt declined): ' + skipped.join(', '));
+        }
+        if (!failures.length && !skipped.length) {
+          window.toast.success('Created in ' + (created + 1) + ' repos');
+        }
+      }).catch(function (e) {
+        // Belt-and-braces: the chain shouldn't reject, but if it ever does the
+        // user must not be left believing every repo got its task.
+        console.error('[multi-repo fanout]', e);
+        window.toast.error('Multi-repo creation was interrupted: ' + ((e && e.message) || e));
+      });
+    }
   }
 })();

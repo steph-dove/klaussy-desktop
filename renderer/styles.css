@@ -2252,6 +2252,27 @@ body.task-branchless #ahead-behind {
   cursor: grabbing;
 }
 
+/* Top-bar pieces: <repo> › <branch> ... <agent + version> */
+.grid-label-repo {
+  color: var(--text-dim);
+  font-weight: 500;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.grid-label-sep {
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.grid-label-branch {
+  color: var(--text);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .grid-label-actions {
   display: flex;
   align-items: center;
@@ -10436,6 +10457,66 @@ body.task-branchless .file-viewer-blame-btn {
 #modal-repo-row.drag-over {
   border-color: var(--accent);
   background: var(--surface-hover);
+}
+
+/* "Also create in" multi-repo row: chips for each extra repo + an add button
+   that opens the same repo dropdown as the source-repo picker. */
+#modal-multirepo-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+#modal-multirepo-picker label {
+  font-size: 13px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+#modal-multirepo-row {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 0;
+}
+#modal-multirepo-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.modal-multirepo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 200px;
+  padding: 2px 4px 2px 8px;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+.modal-multirepo-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-multirepo-chip button {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.modal-multirepo-chip button:hover {
+  color: var(--text);
 }
 
 .modal-repo-path {

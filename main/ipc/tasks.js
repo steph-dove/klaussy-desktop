@@ -148,7 +148,7 @@ ipcMain.handle('dismiss-saved-session', (_event, { worktreePath, sessionId }) =>
   return { ok: true };
 });
 
-ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase }) => {
+ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase, baseBranchFallback }) => {
   // Validate repoPath is a git repo
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
@@ -171,6 +171,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   // Resolve the base. Caller can pass an explicit branch (chosen from the
   // dropdown); otherwise fall back to origin/HEAD or the usual defaults.
   let baseBranch = (requestedBase || '').trim();
+  let baseFallbackFrom = null;
   if (baseBranch) {
     try {
       execFileSync('git', ['rev-parse', '--verify', baseBranch], { cwd: repoPath, stdio: 'pipe' });
@@ -178,7 +179,15 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
       try {
         execFileSync('git', ['branch', baseBranch, 'origin/' + baseBranch], { cwd: repoPath, stdio: 'pipe' });
       } catch (err) {
-        return { error: 'Base branch "' + baseBranch + '" not found locally or on origin.' };
+        // Multi-repo create passes baseBranchFallback for secondary repos:
+        // the base was picked from the primary repo's branch list, so a repo
+        // that doesn't have it should branch from its own default instead of
+        // failing the whole fan-out. The swap is surfaced via result.warning.
+        if (!baseBranchFallback) {
+          return { error: 'Base branch "' + baseBranch + '" not found locally or on origin.' };
+        }
+        baseFallbackFrom = baseBranch;
+        baseBranch = '';
       }
     }
   }
@@ -203,6 +212,10 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   // commit. Non-fatal: on failure we keep going with the local state and
   // surface the warning on the result.
   const freshenWarning = await freshenBranchFromOrigin(repoPath, baseBranch);
+  const fallbackWarning = baseFallbackFrom
+    ? 'Base "' + baseFallbackFrom + '" not found in this repo — branched from "' + baseBranch + '" instead.'
+    : null;
+  const warning = [fallbackWarning, freshenWarning].filter(Boolean).join(' ') || null;
 
   // Ensure the chosen location exists — git worktree add creates the leaf dir
   // but not missing parents (e.g. a suggested "<repo>-worktrees" folder).
@@ -231,8 +244,135 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   } catch {}
 
   const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
-  if (freshenWarning && result && !result.error) result.warning = freshenWarning;
+  if (warning && result && !result.error) result.warning = warning;
   return result;
+});
+
+// ---- Current model for the sub-tab agent labels -----------------------------
+// "Claude Fable 5", not "claude code 2.1.172". Resolution order: the pinned
+// per-provider model from Preferences, then (Claude only) the model stamped on
+// the worktree's newest session JSONL. Null until a session exists — the
+// renderer shows the bare agent name and re-asks on tab switches.
+
+// Last "model" value in a session JSONL written at/after `minTs` (ms epoch),
+// scanning backwards in chunks. A shallow tail isn't enough — the file can
+// end in a multi-hundred-KB tool result with no assistant line in it. The
+// timestamp gate matters for resumed sessions: the file's tail still carries
+// the model of whoever ran the session LAST time until the current run's
+// first response lands, and reporting that would mislabel the tab. Entry
+// timestamps increase down the file, so the newest model line decides: if
+// it predates minTs, no in-run model exists yet. Chunks overlap 4KB so a
+// line can't be lost on a boundary; capped so a giant session can't stall
+// the main process.
+function lastModelInFile(filePath, minTs) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch {
+    return null;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    const CHUNK = 256 * 1024;
+    const OVERLAP = 4096;
+    const MAX_SCAN = 4 * 1024 * 1024;
+    let end = size;
+    let scanned = 0;
+    while (end > 0 && scanned < MAX_SCAN) {
+      const len = Math.min(CHUNK, end);
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, end - len);
+      const lines = buf.toString('utf-8').split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const m = lines[i].match(/"model"\s*:\s*"([^"]+)"/);
+        // Skip "<synthetic>" (error placeholder entries).
+        if (!m || !m[1] || m[1].startsWith('<')) continue;
+        if (minTs) {
+          const t = lines[i].match(/"timestamp"\s*:\s*"([^"]+)"/);
+          const ts = t ? Date.parse(t[1]) : NaN;
+          // Newest model entry predates this run — nothing current in here.
+          if (!Number.isNaN(ts) && ts < minTs) return null;
+        }
+        return m[1];
+      }
+      if (len >= end) break;
+      end -= (len - OVERLAP);
+      scanned += len;
+    }
+  } catch { /* unreadable — treat as no model */ } finally {
+    try { fs.closeSync(fd); } catch {}
+  }
+  return null;
+}
+
+// The model this task's Claude session is on. Prefer the instance's tracked
+// session id (exact file); fall back to the newest session in the worktree's
+// project dir — but ONLY the newest. Falling back to older sessions reports
+// whatever model some previous task ran, which is worse than showing nothing.
+function currentClaudeSessionModel(worktreePath, sessionId, spawnedAtMs) {
+  try {
+    const home = process.env.HOME || os.homedir();
+    if (!home || !worktreePath) return null;
+    // Same encoding listSessionFiles (state/instances.js) uses.
+    const projectDir = path.join(home, '.claude', 'projects', worktreePath.replace(/\//g, '-'));
+    if (sessionId) {
+      const exact = path.join(projectDir, sessionId + '.jsonl');
+      if (fs.existsSync(exact)) {
+        const model = lastModelInFile(exact, spawnedAtMs);
+        if (model) return model;
+      }
+    }
+    const files = fs.readdirSync(projectDir)
+      // agent-*.jsonl are subagent transcripts — they often run a different
+      // model (e.g. a Haiku helper) and would mislabel the tab.
+      .filter((f) => f.endsWith('.jsonl') && !f.startsWith('agent-'))
+      .map((f) => {
+        const p = path.join(projectDir, f);
+        return { p, mtime: fs.statSync(p).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    if (!files.length) return null;
+    return lastModelInFile(files[0].p, spawnedAtMs);
+  } catch { /* no sessions yet / dir missing */
+    return null;
+  }
+}
+
+// The Claude CLI's own configured default model (~/.claude/settings.json,
+// "model" key) — what an unpinned spawn actually runs before any session
+// evidence exists. Briefly cached; the user can edit settings.json anytime.
+let claudeSettingsModelCache = null; // { value, at }
+function claudeDefaultModelFromSettings() {
+  if (claudeSettingsModelCache && Date.now() - claudeSettingsModelCache.at < 60 * 1000) {
+    return claudeSettingsModelCache.value;
+  }
+  let value = null;
+  try {
+    const p = path.join(process.env.HOME || os.homedir(), '.claude', 'settings.json');
+    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    if (parsed && typeof parsed.model === 'string' && parsed.model) value = parsed.model;
+  } catch { /* no settings / no model key */ }
+  claudeSettingsModelCache = { value, at: Date.now() };
+  return value;
+}
+
+// Resolution order: the model the app pinned at spawn (Preferences), then
+// session JSONL evidence from THIS run (catches in-session /model switches),
+// then the CLI's configured default. Bare null → renderer shows the agent
+// name alone.
+ipcMain.handle('agent-current-model', async (_event, { worktreePath, mode, taskId }) => {
+  if (!mode || mode === 'shell') return { model: null };
+  const config = loadConfig();
+  let model = (config.agentModel || {})[mode] || null;
+  if (!model && mode === 'claude') {
+    const inst = taskId != null ? instances.get(taskId) : null;
+    model = currentClaudeSessionModel(
+      worktreePath,
+      inst ? inst.claudeSessionId : null,
+      inst ? inst.spawnTime : null
+    ) || claudeDefaultModelFromSettings();
+  }
+  return { model };
 });
 
 // Create worktree from an existing branch
