@@ -962,6 +962,16 @@ window.TerminalManager = (function () {
     applyLayout();
   }
 
+  // Jump straight to a named layout ('single' | 'columns' | 'grid'). Used by
+  // multi-repo/worktree creation to open the new terminals side by side —
+  // in single layout the extra tasks spawn invisibly and look like failures.
+  function setLayout(name) {
+    var idx = layouts.indexOf(name);
+    if (idx === -1) return;
+    AppState.layoutIndex = idx;
+    applyLayout();
+  }
+
   function fitAllTerminals() {
     setTimeout(function () {
       tasks.forEach(function (task, id) {
@@ -1020,6 +1030,7 @@ window.TerminalManager = (function () {
     rewireTerminal: rewireTerminal,
     cycleLayout: cycleLayout,
     applyLayout: applyLayout,
+    setLayout: setLayout,
     currentLayout: currentLayout,
     fitAllTerminals: fitAllTerminals,
     zoomIn: zoomIn,

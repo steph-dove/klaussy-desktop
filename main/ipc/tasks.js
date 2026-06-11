@@ -159,10 +159,14 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
   const branch = sanitized;
 
-  // Match klausify CLI convention: worktree as sibling of repo
+  // Default layout: one folder per session holding every repo's worktree —
+  // ~/klaussy/sessions/<session>/<repo>. An explicit basePath (legacy /
+  // power-user callers) keeps the old sibling convention <repo>-<branch>.
   const repoBasename = path.basename(repoPath);
-  const worktreeDir = basePath || path.dirname(repoPath);
-  const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitized);
+  const worktreeDir = basePath || path.join(os.homedir(), 'klaussy', 'sessions', sanitized);
+  const worktreePath = basePath
+    ? path.join(worktreeDir, repoBasename + '-' + sanitized)
+    : path.join(worktreeDir, repoBasename);
 
   if (fs.existsSync(worktreePath)) {
     return { error: 'Worktree directory already exists: ' + worktreePath };
@@ -385,8 +389,11 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
 
   const sanitized = branch.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
   const repoBasename = path.basename(repoPath);
-  const worktreeDir = basePath || path.dirname(repoPath);
-  const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitized);
+  // Same session-folder layout as create-task: ~/klaussy/sessions/<session>/<repo>.
+  const worktreeDir = basePath || path.join(os.homedir(), 'klaussy', 'sessions', sanitized);
+  const worktreePath = basePath
+    ? path.join(worktreeDir, repoBasename + '-' + sanitized)
+    : path.join(worktreeDir, repoBasename);
 
   if (fs.existsSync(worktreePath)) {
     return { error: 'Worktree directory already exists: ' + worktreePath };

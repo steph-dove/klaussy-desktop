@@ -10,6 +10,10 @@ window.Sidebar = (function () {
     item.className = 'task-item';
     item.dataset.id = task.id;
     item.dataset.repo = task.repoPath || '';
+    // Session identity = the branch name shared by repos created together
+    // (multi-repo fan-out stamps the same branch in each). Drives the
+    // sidebar's session filter.
+    item.dataset.branch = task.branch || '';
 
     var modeLabel = AppUtils.modeShortLabel(task.mode);
     var tIconColor = AppUtils.iconColor(task.name);
