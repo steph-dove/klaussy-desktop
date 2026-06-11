@@ -421,6 +421,18 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
   return { results };
 });
 
+// Repository-intelligence block (conventions + import graph) for renderer-
+// side prompt builders (Plan / Debug / Review sub-tabs). '' until generated.
+ipcMain.handle('get-repo-intel', (_event, { worktreePath }) => {
+  try {
+    const { getRepoIntelBlock } = require('../state/repo-intel');
+    return { block: getRepoIntelBlock(worktreePath) || '' };
+  } catch (e) {
+    console.warn('[get-repo-intel]', e.message);
+    return { block: '' };
+  }
+});
+
 // ---- Current model for the sub-tab agent labels -----------------------------
 // "Claude Fable 5", not "claude code 2.1.172". Resolution order: the pinned
 // per-provider model from Preferences, then (Claude only) the model stamped on

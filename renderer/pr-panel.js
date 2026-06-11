@@ -1130,51 +1130,16 @@ window.PRPanel = (function () {
 
   // ---- F6 finding parser + Fix button wiring ----
 
-  // Split Claude's review text into preamble / findings / postamble. Each
-  // finding starts at a `**[Severity: …]**` line; postamble begins at the
-  // final "**Overall verdict:**" if present.
-  function parseReviewFindings(text) {
-    if (!text) return { preamble: '', findings: [], postamble: '' };
-    // Tolerant split: line start, optional whitespace, 0–2 asterisks, then
-    // `[Severity:`. Kept in lockstep with pr-review.js. Looser markdown
-    // prefixes caused false splits on `---` rules.
-    var parts = text.split(/(?=^\s*\*{0,2}\[Severity:)/m);
-    if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
-    var preamble = parts[0].trim();
-    var findings = [];
-    var postamble = '';
-    for (var i = 1; i < parts.length; i++) {
-      var block = parts[i];
-      var m = block.match(/(^|\n)\s*\*\*Overall verdict:/i);
-      if (m) {
-        findings.push(block.slice(0, m.index).trim());
-        postamble = block.slice(m.index).trim();
-      } else {
-        findings.push(block.trim());
-      }
-    }
-    // Junk filter (mirrors pr-review.js): drop findings that don't actually
-    // contain a severity marker, or whose only content is a `---`/`===`
-    // separator. Safety net against loose split boundaries.
-    findings = findings.filter(function (f) {
-      if (!f) return false;
-      if (!/\*{0,2}\[Severity:/i.test(f)) return false;
-      var lines = f.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
-      var meaningful = lines.filter(function (l) {
-        if (/^\*?\*?\[[^\]]+\]\*?\*?$/.test(l)) return false;
-        if (/^-{3,}$/.test(l)) return false;
-        if (/^={3,}$/.test(l)) return false;
-        return true;
-      });
-      return meaningful.length > 0;
-    });
-    return { preamble: preamble, findings: findings, postamble: postamble };
-  }
-
-  function severityOf(findingText) {
-    var m = (findingText || '').match(/\*{0,2}\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*{0,2}/);
-    return m ? m[1].trim().toLowerCase() : '';
-  }
+  // Shared with pr-review.js via renderer/finding-parser.js — previously a
+  // hand-synced copy that had already drifted (stricter split regex here
+  // than in pr-review.js). Defensive fallback so a missing shared script
+  // degrades to whole-text rendering instead of killing the module.
+  var _FP = window.FindingParser || {
+    parseReviewFindings: function (t) { return { preamble: t || '', findings: [], postamble: '' }; },
+    severityOf: function () { return ''; },
+  };
+  var parseReviewFindings = _FP.parseReviewFindings;
+  var severityOf = _FP.severityOf;
 
   function renderReviewContent(text) {
     var parsed = parseReviewFindings(text);

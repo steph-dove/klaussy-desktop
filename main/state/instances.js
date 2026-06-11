@@ -314,6 +314,18 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   // non-git folders).
   const repoPath = baseRepoForWorktree(worktreePath);
 
+  // Kick off repo-intel generation for the base repo (conventions + import
+  // graph for agent prompts). Fire-and-forget: cheap when fresh, never blocks
+  // the spawn, degrades silently if the conventions CLI is missing. Lazy
+  // require avoids loading electron's app module before bootstrap.
+  if (repoPath) {
+    try {
+      require('./repo-intel').ensureRepoIntel(repoPath);
+    } catch (e) {
+      console.warn('[repo-intel] ensure failed:', e.message);
+    }
+  }
+
   const instance = {
     id, name, worktreePath, branch, mode, originalMode: mode, repoPath,
     pty: ptyProc, alive: true, popoutWindows: new Set(), extraEnv: extraEnv || {},
