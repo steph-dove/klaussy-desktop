@@ -86,7 +86,13 @@ sock.on('end', () => {
     console.error('[klaussy] silent-failure review unavailable: ' + res.error);
     process.exit(0);
   }
-  if (res.skipped || !res.findingsCount) process.exit(0);
+  if (res.skipped) process.exit(0);
+  if (!res.findingsCount) {
+    // Visible evidence on the clean path too — silence reads as "the check
+    // never ran" (and the ~30-60s pause becomes inexplicable).
+    console.error('[klaussy] silent-failure review passed: no issues in the staged changes');
+    process.exit(0);
+  }
   console.error('');
   console.error('[klaussy] Silent-failure review found ' + res.findingsCount + ' issue(s) in the staged changes:');
   console.error('');
