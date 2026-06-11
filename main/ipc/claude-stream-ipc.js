@@ -12,6 +12,22 @@ const { isAgentMode } = require('../state/ai-providers');
 const { prReview, ensureWorktreeForActivePr, currentRepoPath } = require('../state/pr-review');
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
+const { getRepoIntelBlock, ensureRepoIntel } = require('../state/repo-intel');
+
+// Repo-intel block formatted for template substitution: surrounded by
+// newlines when present, empty when not — the templates' {{REPO_SPECIFIC_CHECKS}}
+// slots sit on their own lines either way. Also nudges a (re)generation so a
+// repo reviewed before any session was opened gets intel for the NEXT run.
+function repoIntelFor(worktreePath) {
+  try {
+    ensureRepoIntel(worktreePath);
+    const block = getRepoIntelBlock(worktreePath);
+    return block ? '\n' + block + '\n' : '';
+  } catch (e) {
+    console.warn('[repo-intel] substitution failed:', e.message);
+    return '';
+  }
+}
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
   debugCheckProcs, fixCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
@@ -411,9 +427,12 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {})
   // in the PR into `<base>...HEAD`. Fall back to the branch name if the SHA
   // couldn't be resolved (e.g. offline base fetch).
   const baseRef = ensured.baseSha || baseBranch;
+  // Function replacements: the intel block is arbitrary repo content — a
+  // string replacement would interpret `$&`/`$'`/`$$` in it as patterns and
+  // silently mangle the prompt.
   const prompt = PR_REVIEW_TEMPLATE
-    .replace(/\{\{BASE_BRANCH\}\}/g, baseRef)
-    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
+    .replace(/\{\{BASE_BRANCH\}\}/g, () => baseRef)
+    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(ensured.worktreePath));
 
   spawnClaudeStream({
     requestId, procMap: reviewSurfaceAiProcs, channelPrefix: 'pr-review-ai',
@@ -518,9 +537,13 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     + `   not repeat the finding verbatim. Plain prose, no code fences, no\n`
     + `   bullets.\n`
     + `   </DRAFT_PR_COMMENT>\n`;
-  const prompt = mode === 'all'
+  // Implement runs get the repo's conventions/graph context too — fixes
+  // should follow house rules, not generic style.
+  const implIntel = repoIntelFor(ensured.worktreePath);
+  const prompt = (mode === 'all'
     ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
-    : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction;
+    : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction)
+    + (implIntel ? '\n' + implIntel : '');
 
   // Prefer an explicit agent from the split-button picker; otherwise follow the
   // agent of the task running on this PR's worktree (then the default).
@@ -1287,7 +1310,17 @@ After: "Leaks a connection if the request times out. Wrap the close in a defer."
 
 ## IMPORTANT: Output
 
-Do NOT write any files. Output the final review directly as your response to this prompt. The user will read it from your stdout.`;
+Do NOT write any files. Output the final review directly as your response to this prompt. The user will read it from your stdout.
+
+Structure the final response EXACTLY like this (the UI parses it into cards):
+
+1. A short intro/context paragraph (optional).
+2. The literal marker \`<FINDINGS>\` on its own line.
+3. Every review comment, each starting with its \`**[Severity: …]**\` line, in the comment format defined above.
+4. The literal marker \`</FINDINGS>\` on its own line.
+5. The final PR summary (**Overall verdict:**, highest-risk issues, etc.) AFTER the closing marker.
+
+Do not put anything between the markers except the findings themselves. If there are zero findings, still emit both markers with nothing in between.`;
 
 // Legacy config.prReviews cache was retired in favor of the file-per-PR cache
 
@@ -1295,9 +1328,10 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
   if (!requestId) return { error: 'Missing requestId' };
   if (aiReviewProcs.has(requestId)) return { error: 'Review already in flight for ' + requestId };
 
+  // Function replacements — see pr-review-ai-start for why.
   const prompt = PR_REVIEW_TEMPLATE
-    .replace(/\{\{BASE_BRANCH\}\}/g, baseBranch || 'main')
-    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, '');
+    .replace(/\{\{BASE_BRANCH\}\}/g, () => baseBranch || 'main')
+    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(worktreePath));
 
   // stream-json gives us a JSONL event per assistant/tool/result block so we
   // can surface progress in the UI instead of a 15-minute silent spinner.

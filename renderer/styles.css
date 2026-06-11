@@ -4914,6 +4914,22 @@ body.task-branchless #ahead-behind {
   border-radius: 0 6px 6px 0;
 }
 
+/* "conventions-aware" chip — shown when repo intel (conventions-cli output)
+   is cached and being injected into the review prompt. */
+.pr-ai-conventions-chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--success, #7ce27c);
+  border: 1px solid var(--success, #7ce27c);
+  border-radius: 4px;
+  padding: 1px 6px;
+  align-self: center;
+  margin: 0 6px;
+}
+
 .pr-ai-finding-sev-blocker { border-left-color: #b84545; background: rgba(184, 69, 69, 0.06); }
 .pr-ai-finding-sev-high    { border-left-color: #e27c7c; background: rgba(226, 124, 124, 0.05); }
 .pr-ai-finding-sev-medium  { border-left-color: #d29922; background: rgba(210, 153, 34, 0.05); }

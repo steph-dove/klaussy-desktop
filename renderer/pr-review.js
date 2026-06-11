@@ -1386,87 +1386,20 @@ window.PrReview = (function () {
 
   // ---- G7: AI review tab ----
 
-  // Strip em/en dashes outside of fenced and inline code. Em dash is the
-  // single strongest AI tell and the prompt rule alone is unreliable;
-  // this is the belt to the prompt's suspenders. Idempotent — safe to
-  // call on every parse during streaming.
-  function sanitizeAiTone(text) {
-    if (!text) return text;
-    var fenceParts = text.split(/(```[\s\S]*?```)/g);
-    for (var i = 0; i < fenceParts.length; i += 2) {
-      var inlineParts = fenceParts[i].split(/(`[^`\n]*`)/g);
-      for (var j = 0; j < inlineParts.length; j += 2) {
-        inlineParts[j] = inlineParts[j]
-          .replace(/\s*—\s*/g, ', ')
-          .replace(/\s*–\s*/g, ' - ');
-      }
-      fenceParts[i] = inlineParts.join('');
-    }
-    return fenceParts.join('');
-  }
-
-  // F6's review template emits findings prefixed with `**[Severity: ...]**`;
-  // split the streaming text into preamble + findings + postamble. If the
-  // parser doesn't match (memory says it can be unreliable) we fall back to
-  // a single card containing the whole review.
-  function parseReviewFindings(text) {
-    if (!text) return { preamble: '', findings: [], postamble: '' };
-    text = sanitizeAiTone(text);
-    // Split anchor: line start, then any combination of common markdown
-    // leaders (ATX header `###`, bullet `-`/`*`/`+`, numbered list `1.`,
-    // blockquote `>`), then 0–2 leading asterisks, then `[Severity:`.
-    //
-    // Claude routinely decorates findings with its own headers ("### **[Severity: ..." —
-    // the template doesn't ask for it, but the model adds them anyway) so we
-    // have to allow header prefixes. False positives on `---` rules aren't a
-    // concern because `[Severity:` followed by `]` is a very specific token.
-    var parts = text.split(/(?=^[\s>]*(?:#{1,6}\s+)?(?:[-*+]\s+)?(?:\d+[.)]\s+)?\*{0,2}\[Severity:)/m);
-    if (parts.length === 1) return { preamble: text.trim(), findings: [], postamble: '' };
-    var preamble = parts[0].trim();
-    var findings = [];
-    var postamble = '';
-    for (var i = 1; i < parts.length; i++) {
-      var block = parts[i];
-      var m = block.match(/(^|\n)\s*\*\*Overall verdict:/i);
-      if (m) {
-        findings.push(block.slice(0, m.index).trim());
-        postamble = block.slice(m.index).trim();
-      } else {
-        findings.push(block.trim());
-      }
-    }
-    // Drop empty or junk entries: every real finding must actually start
-    // with a severity marker, have some body beyond that marker, and not
-    // be just a separator (`---`, empty lines, etc.). Prevents stray blocks
-    // of just `---` from rendering as cards when the split regex picks up
-    // an ambient reference near the separator.
-    findings = findings.filter(function (f) {
-      if (!f) return false;
-      // Must contain a severity marker near the top — split anchor requires
-      // this, but a lenient split could emit text that *follows* the anchor
-      // without the marker itself; sanity-check here.
-      if (!/\*{0,2}\[Severity:/i.test(f)) return false;
-      var lines = f.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
-      if (lines.length === 0) return false;
-      // Require at least one line of real content beyond the bracket marker,
-      // horizontal rules, and other decoration.
-      var meaningful = lines.filter(function (l) {
-        if (/^\*?\*?\[[^\]]+\]\*?\*?$/.test(l)) return false; // bare [X] marker
-        if (/^-{3,}$/.test(l)) return false;                  // ---
-        if (/^={3,}$/.test(l)) return false;                  // ===
-        return true;
-      });
-      return meaningful.length > 0;
-    });
-    return { preamble: preamble, findings: findings, postamble: postamble };
-  }
-
-  function severityOf(text) {
-    // Mirror the parser's tolerance: accept `[Severity: …]` with 0–2 stars
-    // on either side, matching however the AI ended up formatting it.
-    var m = (text || '').match(/\*{0,2}\[Severity:\s*([^\]|]+)(?:\|[^\]]*)?\]\*{0,2}/);
-    return m ? m[1].trim().toLowerCase() : '';
-  }
+  // Shared with pr-panel.js via renderer/finding-parser.js — the single
+  // source of truth for splitting review text into preamble / finding cards /
+  // postamble (delimited <FINDINGS> contract first, legacy [Severity:]
+  // anchors second, whole-text fallback card last). Defensive fallback: if
+  // the shared script ever fails to load, the surface must degrade to
+  // whole-text cards, not die at module eval.
+  var _FP = window.FindingParser || {
+    sanitizeAiTone: function (t) { return t; },
+    parseReviewFindings: function (t) { return { preamble: t || '', findings: [], postamble: '' }; },
+    severityOf: function () { return ''; },
+  };
+  var sanitizeAiTone = _FP.sanitizeAiTone;
+  var parseReviewFindings = _FP.parseReviewFindings;
+  var severityOf = _FP.severityOf;
 
   // Extract `[Location: path/to/file.ts:42 …]` into structured fields.
   // Returns { path, line, snippet } or null. Accepts 0–2 bold asterisks
@@ -1732,6 +1665,37 @@ window.PrReview = (function () {
     });
   }
 
+  // Whether repo-intel (conventions + import graph from conventions-cli) is
+  // cached for this PR's repo — surfaced as a chip so the user knows the
+  // review prompt is conventions-aware. null = unknown / no worktree yet.
+  var repoIntelState = { path: null, available: null };
+  function checkRepoIntel(worktreePath) {
+    if (!worktreePath) {
+      // No worktree (PR switched / not checked out) — don't keep showing the
+      // previous repo's chip.
+      repoIntelState = { path: null, available: null };
+      return;
+    }
+    if (repoIntelState.path === worktreePath) return;
+    repoIntelState.path = worktreePath;
+    repoIntelState.available = null;
+    window.klaus.task.getRepoIntel(worktreePath).then(function (res) {
+      if (repoIntelState.path !== worktreePath) return; // PR switched meanwhile
+      var avail = !!(res && res.block);
+      if (repoIntelState.available !== avail) {
+        repoIntelState.available = avail;
+        repaintAiReviewTab();
+      }
+    }).catch(function (e) {
+      console.warn('[pr-review repo-intel]', e);
+    });
+  }
+  function repoIntelChip() {
+    return repoIntelState.available
+      ? '<span class="pr-ai-conventions-chip" title="This repo’s conventions, rules, and import graph (conventions-cli) are injected into the review prompt">conventions-aware</span>'
+      : '';
+  }
+
   function renderAiReviewTabCount() {
     var openFindings = aiReview.findings.filter(function (f) { return !f.ignored && f.status !== 'implemented'; }).length;
     if (!openFindings && !aiReview.requestId && !aiReview.finalText) return '';
@@ -1741,10 +1705,12 @@ window.PrReview = (function () {
 
   function renderAiReviewTab() {
     var localBlock = renderLocalChanges();
+    checkRepoIntel((localChanges && localChanges.worktreePath) || aiReview.worktreePath);
     if (!aiReview.requestId && !aiReview.finalText && !aiReview.error && !aiReview.cancelled) {
       return localBlock
         + '<div class="pr-ai-empty">'
           + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
+          + repoIntelChip()
           + '<div class="pr-ai-empty-hint">Spawns the selected agent in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
         + '</div>';
     }
@@ -1761,6 +1727,7 @@ window.PrReview = (function () {
             : aiReview.cancelled && !aiReview.finalText ? 'Cancelled'
             : aiReview.findings.length + ' finding' + (aiReview.findings.length === 1 ? '' : 's'))
       + '</span>'
+      + repoIntelChip()
       + (usageStr ? '<span class="pr-ai-usage" title="Reported by the agent for this review run">' + escHtml(usageStr) + '</span>' : '')
       + (aiReview.requestId
           ? '<button class="pr-ai-cancel pr-review-btn" type="button">Cancel</button>'
