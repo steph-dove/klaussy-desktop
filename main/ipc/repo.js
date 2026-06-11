@@ -194,6 +194,34 @@ ipcMain.handle('new-window', () => {
   return { ok: true };
 });
 
+// New-window session handoff. Instances are global to the main process, so
+// the originating window creates the session's tasks, then opens a fresh
+// window which claims these ids and renders them (terminal data fans out to
+// every subscribed window). Keyed by the new window's webContents id — a
+// FIFO would let an unrelated secondary window (Cmd+N, reloads) steal the
+// handoff or adopt a stale one hours later.
+const pendingWindowTasks = new Map(); // webContents.id -> ids
+ipcMain.handle('new-window-with-tasks', (_event, { ids }) => {
+  const clean = Array.isArray(ids) ? ids.filter((n) => Number.isFinite(n)) : [];
+  if (!Array.isArray(ids) || clean.length !== ids.length) {
+    console.warn('[new-window-with-tasks] dropped invalid ids:', ids);
+  }
+  if (!clean.length) return { error: 'no valid task ids to hand off' };
+  const win = createWindow({ secondary: true });
+  if (!win || !win.webContents) return { error: 'could not open a new window' };
+  const wcId = win.webContents.id; // capture now — unavailable after destroy
+  pendingWindowTasks.set(wcId, clean);
+  // Window closed (or crashed) before its renderer claimed — drop the entry
+  // so nothing can ever adopt it later.
+  win.on('closed', () => pendingWindowTasks.delete(wcId));
+  return { ok: true };
+});
+ipcMain.handle('claim-pending-tasks', (event) => {
+  const ids = pendingWindowTasks.get(event.sender.id) || [];
+  pendingWindowTasks.delete(event.sender.id);
+  return ids;
+});
+
 // Parse `git worktree list --porcelain` into [{ path, branch, bare }].
 function parseWorktreePorcelain(output) {
   const worktrees = [];

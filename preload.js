@@ -680,6 +680,8 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.on('show-gh-accounts', () => callback());
     },
     newWindow: () => ipcRenderer.invoke('new-window'),
+    newWindowWithTasks: (ids) => ipcRenderer.invoke('new-window-with-tasks', { ids }),
+    claimPendingTasks: () => ipcRenderer.invoke('claim-pending-tasks'),
   },
 
   // ---- gh: gh CLI accounts, external URL opener, CI status, dep probe ----

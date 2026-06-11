@@ -1,14 +1,19 @@
-// Repo filter for the sidebar. The dropdown lists the distinct base repos of
-// whatever worktrees are currently in the sidebar (running tasks, resumable
-// worktrees, and saved sessions) and filters the list to one repo. Picking a
-// repo also makes it the active source repo for the New Worktree modal.
+// Repo + session filters for the sidebar. The repo dropdown lists the
+// distinct base repos of whatever worktrees are currently in the sidebar
+// (running tasks, resumable worktrees, and saved sessions); the session
+// dropdown lists the distinct branch names — a "session" is the branch name
+// shared by the repos created together in one multi-repo create. Both
+// filters combine. Picking a repo also makes it the active source repo for
+// the New Session modal.
 //
 // There is no longer a user-managed "projects" list — repos appear here purely
 // because you have a worktree from them open. Each sidebar `.task-item` is
-// stamped with `data-repo` (its base repo path); this module reads that.
+// stamped with `data-repo` (base repo path) and `data-branch` (session);
+// this module reads those.
 
 window.ProjectSwitcher = (function () {
   var repoSelect = document.getElementById('project-select');
+  var sessionSelect = document.getElementById('session-select');
   var taskList = document.getElementById('task-list');
 
   function basename(p) {
@@ -31,8 +36,22 @@ window.ProjectSwitcher = (function () {
     return repos;
   }
 
-  // Rebuild the dropdown from the current sidebar, preserving the selection if
-  // that repo still has items (otherwise fall back to "All repos").
+  // Distinct sessions (branch names) present among the sidebar items.
+  function sidebarSessions() {
+    var seen = new Set();
+    var sessions = [];
+    taskList.querySelectorAll('.task-item').forEach(function (item) {
+      var branch = item.dataset.branch;
+      if (!branch || seen.has(branch)) return;
+      seen.add(branch);
+      sessions.push(branch);
+    });
+    sessions.sort(function (a, b) { return a.localeCompare(b); });
+    return sessions;
+  }
+
+  // Rebuild both dropdowns from the current sidebar, preserving selections
+  // that still have items (otherwise fall back to "All ...").
   function refresh() {
     var repos = sidebarRepos();
     var current = AppState.selectedRepoFilter;
@@ -58,14 +77,39 @@ window.ProjectSwitcher = (function () {
       repoSelect.appendChild(opt);
     });
 
+    var sessions = sidebarSessions();
+    var curSession = AppState.selectedSessionFilter;
+    if (curSession && sessions.indexOf(curSession) === -1) {
+      AppState.selectedSessionFilter = null;
+      curSession = null;
+    }
+
+    sessionSelect.innerHTML = '';
+    var allSess = document.createElement('option');
+    allSess.value = '';
+    allSess.textContent = 'All sessions';
+    if (!curSession) allSess.selected = true;
+    sessionSelect.appendChild(allSess);
+
+    sessions.forEach(function (branch) {
+      var opt = document.createElement('option');
+      opt.value = branch;
+      opt.textContent = branch;
+      opt.title = 'Session: ' + branch;
+      if (branch === curSession) opt.selected = true;
+      sessionSelect.appendChild(opt);
+    });
+
     filterTaskList();
   }
 
   function filterTaskList() {
-    var filter = AppState.selectedRepoFilter;
+    var repoFilter = AppState.selectedRepoFilter;
+    var sessionFilter = AppState.selectedSessionFilter;
     taskList.querySelectorAll('.task-item').forEach(function (item) {
-      if (!filter) { item.style.display = ''; return; }
-      item.style.display = (item.dataset.repo === filter) ? '' : 'none';
+      var show = (!repoFilter || item.dataset.repo === repoFilter)
+        && (!sessionFilter || item.dataset.branch === sessionFilter);
+      item.style.display = show ? '' : 'none';
     });
   }
 
@@ -74,13 +118,18 @@ window.ProjectSwitcher = (function () {
     AppState.selectedRepoFilter = repo;
     filterTaskList();
     // Picking a specific repo also makes it the active source repo for the
-    // New Worktree modal (default source, base-branch list, suggestions).
+    // New Session modal (default source, base-branch list, suggestions).
     if (repo) {
       AppState.repoPath = repo;
       window.klaus.repo.switchProject(repo).then(function () {
         window.dispatchEvent(new CustomEvent('klaussy:project-changed'));
       });
     }
+  });
+
+  sessionSelect.addEventListener('change', function () {
+    AppState.selectedSessionFilter = sessionSelect.value || null;
+    filterTaskList();
   });
 
   // Keep the dropdown in sync with the sidebar without hooking every add/remove

@@ -594,7 +594,46 @@
     await loadProjects();
     updateEmptyState();
     if (isSecondaryWindow) {
-      await loadWorktreeList();
+      // A session may have been handed to this window ("Open in: New window")
+      // — adopt those tasks before listing resumable worktrees so they render
+      // as live terminals, not idle worktree rows.
+      var adoptedPaths = [];
+      var pendingIds = [];
+      try {
+        pendingIds = (await window.klaus.ui.claimPendingTasks()) || [];
+      } catch (e) {
+        console.error('[claim-pending-tasks]', e);
+      }
+      if (pendingIds.length) {
+        // The claim is consumed — if rendering fails the ids can't be
+        // re-claimed, so surface it loudly instead of showing the session's
+        // worktrees as innocently idle rows.
+        try {
+          var allTasks = await window.klaus.task.list();
+          pendingIds.forEach(function (tid) {
+            var t = (allTasks || []).find(function (x) { return x.id === tid; });
+            if (!t) return;
+            try {
+              addTaskToUI(t);
+              adoptedPaths.push(t.worktreePath);
+            } catch (e) {
+              console.error('[adopt-task]', tid, e);
+            }
+          });
+          if (adoptedPaths.length > 1) {
+            TerminalManager.setLayout(adoptedPaths.length >= 3 ? 'grid' : 'columns');
+          }
+          if (adoptedPaths.length < pendingIds.length && window.toast) {
+            window.toast.error('Some handed-off session terminals could not be rendered — their agents are still running; restart the app to reattach.');
+          }
+        } catch (e) {
+          console.error('[adopt-pending-tasks]', e);
+          if (window.toast) {
+            window.toast.error('The session handed to this window could not be rendered — its agents are still running; restart the app to reattach.');
+          }
+        }
+      }
+      await loadWorktreeList(adoptedPaths);
     } else {
       loadExistingTasks();
     }
@@ -624,9 +663,11 @@
     });
   }
 
-  async function loadWorktreeList() {
+  async function loadWorktreeList(skipPaths) {
+    var skip = skipPaths || [];
     var worktrees = await window.klaus.repo.listWorktrees();
     worktrees.forEach(function (wt) {
+      if (skip.indexOf(wt.path) !== -1) return;
       addWorktreeToSidebar(wt);
     });
   }
@@ -641,6 +682,7 @@
     item.className = 'task-item worktree-item';
     item.dataset.path = wt.path;
     item.dataset.repo = wt.repoPath || '';
+    item.dataset.branch = wt.branch || '';
 
     var iconColor = AppUtils.iconColor(wt.name);
     var iconLetter = (wt.name || '?').charAt(0).toUpperCase();
@@ -725,6 +767,7 @@
       item.className = 'task-item saved-session';
       item.dataset.idx = idx;
       item.dataset.repo = s.repoPath || '';
+      item.dataset.branch = s.branch || '';
 
       var age = formatAge(s.savedAt);
       var pathShort = s.worktreePath ? s.worktreePath.split('/').slice(-2).join('/') : '';
@@ -869,31 +912,19 @@
   const modalError = document.getElementById('modal-error');
   const modalCreate = document.getElementById('modal-create');
   const modalCancel = document.getElementById('modal-cancel');
-  const pathInput = document.getElementById('path-input');
-  const pathPicker = document.getElementById('path-picker');
-  const pathBrowseBtn = document.getElementById('path-browse');
-  const pathRecentsBtn = document.getElementById('path-recents-btn');
-  const pathRecentsList = document.getElementById('path-recents-list');
-  const basepathInput = document.getElementById('basepath-input');
-  const basepathRow = document.getElementById('basepath-row');
-  const basepathBrowseBtn = document.getElementById('basepath-browse');
-  const basepathRecentsBtn = document.getElementById('basepath-recents-btn');
-  const basepathRecentsList = document.getElementById('basepath-recents-list');
+  const existingSessionSelect = document.getElementById('existing-session-select');
   const modalRepoRow = document.getElementById('modal-repo-row');
   const modalRepoPathEl = document.getElementById('modal-repo-path');
   const modalRepoBrowseBtn = document.getElementById('btn-modal-repo-browse');
   const modalRepoRecentsBtn = document.getElementById('btn-modal-repo-recents');
   const modalRepoRecentsList = document.getElementById('modal-repo-recents-list');
   const multiRepoRow = document.getElementById('modal-multirepo-row');
-  const multiRepoEmptyEl = document.getElementById('modal-multirepo-empty');
+  const multiRepoRowsEl = document.getElementById('modal-multirepo-rows');
   const multiRepoAddBtn = document.getElementById('btn-modal-multirepo-add');
-  const multiRepoList = document.getElementById('modal-multirepo-list');
   const modalTabs = document.querySelectorAll('.modal-tab');
   const tabContents = document.querySelectorAll('.tab-content');
 
   let activeTab = 'new';
-  let selectedWorktreePath = null;
-  let selectedBasePath = null;
   let selectedMode = 'claude';
   let selectedBaseBranch = '';
   // True only once the user deliberately picks a base branch. The combobox is
@@ -912,11 +943,21 @@
     });
   });
 
+  // "Open session in new window" — always visible; pre-checked when this
+  // window is crowded (3+ open tasks).
+  const windowSelector = document.getElementById('window-selector');
+  const openNewWindowCheck = document.getElementById('open-new-window-check');
+
   // Tab switching
-  var baseBranchInput = document.getElementById('modal-base-branch-input');
-  var baseBranchList = document.getElementById('modal-base-branch-list');
+  var modalBaseSelect = document.getElementById('modal-base-branch');
   var baseBranchData = []; // [{ localName, isRemote, ... }]
   var baseBranchDefault = ''; // pre-selected branch (dev > main > master fallback)
+
+  // The action button reads "Resume" on the Existing Session tab — nothing
+  // is being created there.
+  function syncCreateButtonLabel() {
+    modalCreate.textContent = activeTab === 'existing' ? 'Resume' : 'Create';
+  }
 
   modalTabs.forEach(function (tab) {
     tab.addEventListener('click', function () {
@@ -925,6 +966,7 @@
       tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-' + activeTab); });
       modalError.textContent = '';
       clearFieldFlags();
+      syncCreateButtonLabel();
       if (activeTab === 'new') {
         setTimeout(function () { modalInput.focus(); }, 50);
       }
@@ -938,105 +980,43 @@
     if (modalError) modalError.textContent = '';
   });
 
-  // Combobox wiring — input shows the picked branch (or filter text); list
-  // opens on focus; click outside dismisses; arrow keys navigate.
-  if (baseBranchInput) {
-    baseBranchInput.addEventListener('focus', function () {
-      // First focus = clear placeholder default + open list with everything visible.
-      if (baseBranchInput.classList.contains('has-default')) {
-        baseBranchInput.classList.remove('has-default');
-        baseBranchInput.value = '';
-      }
-      renderBaseBranchOptions('');
-      baseBranchList.hidden = false;
-    });
-    baseBranchInput.addEventListener('input', function () {
-      baseBranchInput.classList.remove('modal-field-invalid');
-      renderBaseBranchOptions(baseBranchInput.value.trim());
-      baseBranchList.hidden = false;
-    });
-    baseBranchInput.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') { baseBranchList.hidden = true; baseBranchInput.blur(); }
-      else if (e.key === 'Enter') {
-        e.preventDefault();
-        var first = baseBranchList.querySelector('.basebranch-option');
-        if (first) { pickBaseBranch(first.dataset.branch); return; }
-        // Free-text fallback: no list match, accept whatever the user typed.
-        // Main process validates the ref at submit time and falls back to
-        // creating a tracking branch from origin/<name> if it only exists there.
-        var typed = baseBranchInput.value.trim();
-        if (typed) pickBaseBranch(typed);
-      }
-    });
-    document.addEventListener('mousedown', function (e) {
-      if (!document.getElementById('basebranch-combobox').contains(e.target)) {
-        baseBranchList.hidden = true;
-        var typed = baseBranchInput.value.trim();
-        if (!typed) {
-          // Empty input: restore the previously-picked value.
-          if (selectedBaseBranch) {
-            setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
-          }
-        } else if (typed !== selectedBaseBranch
-                   && typed !== selectedBaseBranch + ' (default)') {
-          // User typed something custom and dismissed without pressing Enter —
-          // commit it so submit reads the typed value, not the prior selection.
-          pickBaseBranch(typed);
-        }
-      }
+  // Primary base-branch select — lives inline in the source-repo row, same
+  // style/behavior as the extra repo rows' selects. Change = a deliberate
+  // pick (drives the "continue this branch" no-name flow).
+  if (modalBaseSelect) {
+    modalBaseSelect.addEventListener('change', function () {
+      selectedBaseBranch = modalBaseSelect.value;
+      baseBranchUserPicked = true;
+      modalBaseSelect.classList.remove('modal-field-invalid');
+      if (modalError) modalError.textContent = '';
     });
   }
 
-  function setBaseBranchInputDisplay(branchName, isDefault) {
-    if (!baseBranchInput) return;
-    baseBranchInput.value = branchName + (isDefault ? ' (default)' : '');
-    baseBranchInput.classList.toggle('has-default', !!isDefault);
-  }
-
-  function pickBaseBranch(name) {
-    selectedBaseBranch = name;
-    baseBranchUserPicked = true;
-    setBaseBranchInputDisplay(name, name === baseBranchDefault);
-    baseBranchList.hidden = true;
-  }
-
-  function renderBaseBranchOptions(filter) {
-    if (!baseBranchList) return;
-    var lc = (filter || '').toLowerCase();
-    var matches = baseBranchData.filter(function (b) {
-      return !lc || b.localName.toLowerCase().includes(lc);
-    });
-    if (matches.length === 0) {
-      baseBranchList.innerHTML = '<div class="basebranch-option-empty">No matching branches</div>';
+  function renderBaseBranchSelect() {
+    if (!modalBaseSelect) return;
+    if (!baseBranchData.length) {
+      modalBaseSelect.hidden = true;
+      modalBaseSelect.innerHTML = '';
       return;
     }
-    baseBranchList.innerHTML = matches.map(function (b) {
-      var defCls = b.localName === baseBranchDefault ? ' is-default' : '';
-      var tag = b.localName === baseBranchDefault ? 'default'
-        : b.isRemote ? 'remote' : '';
-      return '<div class="basebranch-option' + defCls + '" data-branch="' + escHtml(b.localName) + '">'
-        + '<span>' + escHtml(b.localName) + '</span>'
-        + (tag ? '<span class="basebranch-option-tag">' + tag + '</span>' : '')
-      + '</div>';
+    modalBaseSelect.innerHTML = baseBranchData.map(function (b) {
+      var isDef = b.localName === baseBranchDefault;
+      var sel = b.localName === selectedBaseBranch ? ' selected' : '';
+      return '<option value="' + escHtml(b.localName) + '"' + sel + '>'
+        + escHtml(b.localName) + (isDef ? ' (default)' : '')
+        + '</option>';
     }).join('');
-    baseBranchList.querySelectorAll('.basebranch-option').forEach(function (el) {
-      el.addEventListener('mousedown', function (e) {
-        // mousedown (not click) so we fire before the input's blur dismiss.
-        e.preventDefault();
-        pickBaseBranch(el.dataset.branch);
-      });
-    });
+    modalBaseSelect.hidden = false;
   }
 
   // Optimistic populate from cached refs; then `git fetch` in the background
   // and re-render so remote branches stay fresh without blocking the modal.
   async function populateBaseBranchSelect() {
-    if (!baseBranchInput) return;
+    if (!modalBaseSelect) return;
     if (!AppState.repoPath) {
       baseBranchData = [];
       baseBranchDefault = '';
-      baseBranchInput.value = 'No project selected';
-      baseBranchInput.classList.add('has-default');
+      renderBaseBranchSelect();
       return;
     }
     await loadBaseBranchData();
@@ -1074,95 +1054,8 @@
     if (!selectedBaseBranch) {
       selectedBaseBranch = baseBranchDefault;
     }
-    setBaseBranchInputDisplay(selectedBaseBranch, selectedBaseBranch === baseBranchDefault);
+    renderBaseBranchSelect();
   }
-
-  // Typed/pasted path: mirror into selectedWorktreePath on every edit. The
-  // attach-worktree handler in main validates the path is a git repo, so we
-  // don't need client-side checks here.
-  pathInput.addEventListener('input', function () {
-    var v = pathInput.value.trim();
-    selectedWorktreePath = v || null;
-    pathInput.classList.toggle('has-path', !!v);
-    pathInput.classList.remove('modal-field-invalid');
-    if (modalError) modalError.textContent = '';
-  });
-
-  // Drag a folder from Finder onto the picker to set the path. We resolve
-  // the OS path via webUtils.getPathForFile (exposed in preload) because
-  // File.path was removed in Electron 32+.
-  ['dragenter', 'dragover'].forEach(function (evt) {
-    pathPicker.addEventListener(evt, function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      pathPicker.classList.add('drag-over');
-    });
-  });
-  ['dragleave', 'drop'].forEach(function (evt) {
-    pathPicker.addEventListener(evt, function (e) {
-      e.preventDefault();
-      e.stopPropagation();
-      pathPicker.classList.remove('drag-over');
-    });
-  });
-  pathPicker.addEventListener('drop', function (e) {
-    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!file) return;
-    var p = window.klaus.fs.getPathForFile(file);
-    if (!p) return;
-    selectedWorktreePath = p;
-    pathInput.value = p;
-    pathInput.classList.add('has-path');
-  });
-
-  // Typed/pasted basepath: mirror into selectedBasePath on every edit.
-  basepathInput.addEventListener('input', function () {
-    var v = basepathInput.value.trim();
-    selectedBasePath = v || null;
-    basepathInput.classList.toggle('has-path', !!v);
-  });
-
-  // Drag a folder from Finder to override the basepath.
-  ['dragenter', 'dragover'].forEach(function (evt) {
-    basepathRow.addEventListener(evt, function (e) {
-      e.preventDefault(); e.stopPropagation();
-      basepathRow.classList.add('drag-over');
-    });
-  });
-  ['dragleave', 'drop'].forEach(function (evt) {
-    basepathRow.addEventListener(evt, function (e) {
-      e.preventDefault(); e.stopPropagation();
-      basepathRow.classList.remove('drag-over');
-    });
-  });
-  basepathRow.addEventListener('drop', function (e) {
-    var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!file) return;
-    var p = window.klaus.fs.getPathForFile(file);
-    if (!p) return;
-    selectedBasePath = p;
-    basepathInput.value = p;
-    basepathInput.classList.add('has-path');
-  });
-
-  // Worktree-path / basepath Browse: native Finder via the parentless
-  // browse-directory IPC (sidesteps the scopedbookmarksagent hang that
-  // affects sheet-attached NSOpenPanels on this Mac). The inputs still
-  // accept drag/paste as a fallback path.
-  pathBrowseBtn.addEventListener('click', async function () {
-    var dir = await window.klaus.repo.browseDirectory();
-    if (!dir) return;
-    selectedWorktreePath = dir;
-    pathInput.value = dir;
-    pathInput.classList.add('has-path');
-  });
-  basepathBrowseBtn.addEventListener('click', async function () {
-    var dir = await window.klaus.repo.browseDirectory();
-    if (!dir) return;
-    selectedBasePath = dir;
-    basepathInput.value = dir;
-    basepathInput.classList.add('has-path');
-  });
 
   // Recents dropdown helper. items = [{ label, path }]. Wires the ▾ button
   // to toggle a list of paths next to its input. Each item has a × that
@@ -1292,64 +1185,109 @@
     return recentGhReposCache;
   }
 
-  bindRecentsDropdown(pathRecentsBtn, pathRecentsList, {
-    loadItems: function () {
-      return Promise.all([
-        getDiscoveredWorktrees(),
-        window.klaus.repo.recentPathsGet(),
-      ]).then(function (res) {
-        var groups = res[0] || [];
-        var recents = (res[1] && res[1].worktrees) || [];
-        // One section per repo (discovered worktrees), then a Recent section.
-        var sections = groups.map(function (g) {
-          return {
-            header: g.repoName,
-            items: (g.worktrees || []).map(function (w) {
-              return {
-                label: w.name,
-                path: w.path,
-                sub: w.branch || w.path,
-                tag: w.active ? 'active' : '',
-                kind: 'worktree',
-                removable: false,
-              };
-            }),
-          };
+  // ---- Existing sessions (Existing Session tab) -----------------------------
+  // A session is ONE unit no matter how many repos it spans. Worktrees under
+  // ~/klaussy/sessions/<name>/ group by that folder name (the canonical
+  // multi-repo layout); everything else (legacy single worktrees) groups by
+  // branch under a separate "Other worktrees" optgroup so old work stays
+  // reachable without flooding the session list.
+  var existingSessionsMap = {}; // option value -> [{ path, branch, repoName, active }]
+  var SESSION_DIR_RE = /\/klaussy\/sessions\/([^/]+)\//;
+
+  function populateExistingSessions() {
+    var session = modalSession;
+    existingSessionSelect.innerHTML = '<option value="">Loading sessions…</option>';
+    getDiscoveredWorktrees().then(function (groups) {
+      // A slow discovery from a previous modal open must not overwrite the
+      // current open's data (stale `active` flags → double-resume).
+      if (session !== modalSession) return;
+      existingSessionsMap = {};
+      var sessions = {}; // name -> worktrees (session-folder layout)
+      var legacy = {};   // branch -> worktrees (everything else)
+      (groups || []).forEach(function (g) {
+        (g.worktrees || []).forEach(function (w) {
+          if (!w.branch) return;
+          var entry = { path: w.path, branch: w.branch, repoName: g.repoName, active: !!w.active };
+          var m = w.path.match(SESSION_DIR_RE);
+          if (m) {
+            (sessions[m[1]] = sessions[m[1]] || []).push(entry);
+          } else {
+            (legacy[w.branch] = legacy[w.branch] || []).push(entry);
+          }
         });
-        if (recents.length) {
-          sections.push({ header: 'Recent', items: recents.map(function (p) { return { path: p, kind: 'recent' }; }) });
-        }
-        return sections;
       });
-    },
-    onPick: function (p) {
-      selectedWorktreePath = p;
-      pathInput.value = p;
-      pathInput.classList.add('has-path');
-    },
-    onRemove: function (p) { return window.klaus.repo.recentPathsRemove('worktrees', p); },
-    emptyText: 'No worktrees found',
-  });
+
+      var optionFor = function (value, label, wts) {
+        existingSessionsMap[value] = wts;
+        var repos = wts.map(function (w) { return w.repoName; }).join(', ');
+        return '<option value="' + escHtml(value) + '" title="' + escHtml(repos) + '">'
+          + escHtml(label) + ' — ' + wts.length + (wts.length === 1 ? ' repo (' : ' repos (') + escHtml(repos) + ')'
+          + '</option>';
+      };
+
+      var sessionNames = Object.keys(sessions).sort();
+      var legacyNames = Object.keys(legacy).sort();
+      if (!sessionNames.length && !legacyNames.length) {
+        existingSessionSelect.innerHTML = '<option value="">No sessions found</option>';
+        return;
+      }
+      var html = '<option value="">Pick a session…</option>';
+      if (sessionNames.length) {
+        html += '<optgroup label="Sessions">' + sessionNames.map(function (n) {
+          return optionFor('s:' + n, n, sessions[n]);
+        }).join('') + '</optgroup>';
+      }
+      if (legacyNames.length) {
+        html += '<optgroup label="Other worktrees">' + legacyNames.map(function (n) {
+          return optionFor('b:' + n, n, legacy[n]);
+        }).join('') + '</optgroup>';
+      }
+      existingSessionSelect.innerHTML = html;
+    }).catch(function (e) {
+      console.warn('[existing-sessions]', e);
+      if (session === modalSession) {
+        existingSessionSelect.innerHTML = '<option value="">Could not load sessions</option>';
+      }
+    });
+  }
+
+  // Resume one worktree of a session: prefer the saved session entry (carries
+  // the agent + exact session id), else the worktree's latest Claude session,
+  // else a fresh spawn — resume-session handles a null sessionId gracefully.
+  async function resumeSessionWorktree(wt, sessionName, savedList, mode) {
+    var saved = (savedList || []).find(function (s) { return s && s.worktreePath === wt.path; });
+    var resumeMode = (saved && saved.mode) || mode;
+    // Shell entries attach a plain shell — same special-case as the sidebar's
+    // saved-session Resume path.
+    if (resumeMode === 'shell') {
+      return window.klaus.task.attachWorktree(wt.path, 'shell');
+    }
+    var sessionId = saved && saved.sessionId;
+    if (!sessionId) {
+      try { sessionId = await window.klaus.session.getLatest(wt.path); } catch (e) { sessionId = null; }
+    }
+    return window.klaus.session.resume({
+      sessionId: sessionId || null,
+      name: sessionName,
+      worktreePath: wt.path,
+      branch: wt.branch || sessionName,
+      mode: resumeMode,
+    });
+  }
   // Switch the active repo (used by the source-repo Browse button, the
   // recents dropdown, and the drag-and-drop handler). Re-syncs the path
-  // display, branch dropdown, and the basepath placeholder.
+  // display and branch dropdown.
   function applyRepoSwitch(dir) {
     AppState.repoPath = dir;
-    // A repo can't be both the source and an "Also create in" target — the
-    // fan-out would hit "worktree already exists" on the duplicate.
-    if (additionalRepos.some(function (r) { return r.path === dir; })) {
-      additionalRepos = additionalRepos.filter(function (r) { return r.path !== dir; });
-      renderRepoChips();
-    }
+    // A repo can't be both the source and an extra-row target — the fan-out
+    // would hit "worktree already exists" on the duplicate.
+    additionalRepoRows.filter(function (r) { return r.path === dir; }).forEach(removeRepoRow);
     if (modalRepoRow) modalRepoRow.classList.remove('modal-field-invalid');
     if (modalError) modalError.textContent = '';
     if (modalRepoPathEl) { modalRepoPathEl.textContent = dir; modalRepoPathEl.title = dir; }
     selectedBaseBranch = '';
     baseBranchUserPicked = false;
     populateBaseBranchSelect();
-    if (!selectedBasePath) {
-      basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — ▾ for suggestions, or drag/paste';
-    }
   }
 
   // Source-repo Browse: native Finder via browse-directory IPC. addProject
@@ -1466,72 +1404,160 @@
     emptyText: 'No repos found',
   });
 
-  // ---- "Also create in" multi-repo chips -----------------------------------
-  // The same task (branch + worktree naming schema) is fanned out to each of
-  // these repos on submit — common when one ticket spans multiple repos. The
-  // resulting tasks are independent; this list is just creation-time input.
-  var additionalRepos = []; // [{ name, path }]
-  // Clones started from the multi-repo dropdown that haven't finished yet.
-  // Submit is blocked while > 0 so a repo the user picked can't be silently
-  // missing from the fan-out. Stamped with the modal session so a clone that
-  // finishes after close/reopen doesn't add a chip to the wrong session.
-  var pendingChipClones = 0;
+  // ---- Multi-repo rows ------------------------------------------------------
+  // The "+" bar appends a repo-picker row identical to the source-repo one
+  // (path display, Browse, ▾ dropdown, drag-and-drop) plus a ×. On submit the
+  // same branch + worktree naming schema fans out to every row with a repo
+  // picked — common when one ticket spans multiple repos. The resulting tasks
+  // are independent; these rows are just creation-time input.
+  var additionalRepoRows = []; // [{ el, pathEl, path, name }]
+  // Clones started from a row's dropdown that haven't finished yet. Submit is
+  // blocked while > 0 so a repo the user picked can't be silently missing
+  // from the fan-out. Stamped with the modal session so a clone that finishes
+  // after close/reopen doesn't write into the wrong session's rows.
+  var pendingRepoClones = 0;
   var modalSession = 0;
 
-  function renderRepoChips() {
-    multiRepoRow.querySelectorAll('.modal-multirepo-chip').forEach(function (el) { el.remove(); });
-    multiRepoEmptyEl.hidden = additionalRepos.length > 0;
-    additionalRepos.forEach(function (r) {
-      var chip = document.createElement('span');
-      chip.className = 'modal-multirepo-chip';
-      chip.title = r.path;
-      var label = document.createElement('span');
-      label.textContent = r.name;
-      var rm = document.createElement('button');
-      rm.type = 'button';
-      rm.textContent = '×';
-      rm.title = 'Remove ' + r.name;
-      rm.addEventListener('click', function () {
-        additionalRepos = additionalRepos.filter(function (x) { return x.path !== r.path; });
-        renderRepoChips();
-      });
-      chip.appendChild(label);
-      chip.appendChild(rm);
-      multiRepoRow.insertBefore(chip, multiRepoAddBtn);
+  // Rows with a repo picked, primary-repo collisions and duplicates dropped.
+  // Empty rows (added but never filled) are simply ignored.
+  function selectedAdditionalRepos() {
+    var seen = {};
+    var out = [];
+    additionalRepoRows.forEach(function (r) {
+      if (!r.path || r.path === AppState.repoPath || seen[r.path]) return;
+      seen[r.path] = true;
+      out.push({ name: r.name, path: r.path, baseBranch: r.baseBranch || '' });
+    });
+    return out;
+  }
+
+  function setRepoRowPath(row, p) {
+    row.path = p || null;
+    row.name = p ? (p.split('/').filter(Boolean).pop() || p) : '';
+    row.pathEl.textContent = p || 'No repo selected';
+    row.pathEl.title = p || '';
+    // Each repo gets its own base-branch select — repos in one ticket often
+    // have different defaults (main vs master vs develop). Prefill with the
+    // primary's picked base when this repo has that branch, else the repo's
+    // own default. If the list can't load, the select stays hidden and
+    // create-task resolves the default server-side.
+    row.baseBranch = '';
+    row.baseEl.hidden = true;
+    row.baseEl.innerHTML = '';
+    if (!p) return;
+    var req = (row.branchReq || 0) + 1;
+    row.branchReq = req;
+    window.klaus.task.listBranches(p).then(function (res) {
+      if (row.branchReq !== req || !row.el.isConnected || row.path !== p) return;
+      var branches = (res && !res.error && res.branches) || [];
+      if (!branches.length) return;
+      var def = (selectedBaseBranch && branches.some(function (b) { return b.localName === selectedBaseBranch; }))
+        ? selectedBaseBranch
+        : (res.defaultBranch || branches[0].localName);
+      row.baseEl.innerHTML = branches.map(function (b) {
+        return '<option value="' + escHtml(b.localName) + '"' + (b.localName === def ? ' selected' : '') + '>'
+          + escHtml(b.localName) + '</option>';
+      }).join('');
+      row.baseBranch = def;
+      row.baseEl.hidden = false;
+    }).catch(function (e) {
+      console.warn('[multirepo list-branches]', e);
     });
   }
 
-  function addRepoChip(repoPath) {
-    if (!repoPath || repoPath === AppState.repoPath) return;
-    if (additionalRepos.some(function (r) { return r.path === repoPath; })) return;
-    var name = repoPath.split('/').filter(Boolean).pop() || repoPath;
-    additionalRepos.push({ name: name, path: repoPath });
-    renderRepoChips();
+  function removeRepoRow(row) {
+    additionalRepoRows = additionalRepoRows.filter(function (r) { return r !== row; });
+    row.el.remove();
   }
 
-  bindRecentsDropdown(multiRepoAddBtn, multiRepoList, {
-    loadItems: function () {
-      var exclude = {};
-      if (AppState.repoPath) exclude[AppState.repoPath] = true;
-      additionalRepos.forEach(function (r) { exclude[r.path] = true; });
-      return buildRepoPickerSections(exclude);
-    },
-    onPick: function (p, info) {
-      if (info && info.kind === 'github-clone') {
-        var session = modalSession;
-        pendingChipClones++;
-        cloneGithubPick(p, function (localPath) {
-          pendingChipClones = Math.max(0, pendingChipClones - 1);
-          if (session === modalSession) addRepoChip(localPath);
-        }, function () {
-          pendingChipClones = Math.max(0, pendingChipClones - 1);
+  function addRepoRow() {
+    var row = { el: null, pathEl: null, baseEl: null, path: null, name: '', baseBranch: '', branchReq: 0 };
+    var el = document.createElement('div');
+    el.className = 'modal-multirepo-item';
+    el.innerHTML =
+      '<span class="modal-repo-path">No repo selected</span>' +
+      '<select class="mr-base" hidden title="Base branch in this repo"></select>' +
+      '<button type="button" class="modal-input-btn mr-browse" title="Browse for a git repo">Browse</button>' +
+      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>' +
+      '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo">×</button>' +
+      '<div class="modal-recents-list" hidden role="listbox"></div>';
+    row.el = el;
+    row.pathEl = el.querySelector('.modal-repo-path');
+    row.baseEl = el.querySelector('.mr-base');
+    row.baseEl.addEventListener('change', function () {
+      row.baseBranch = row.baseEl.value;
+    });
+
+    el.querySelector('.mr-browse').addEventListener('click', async function () {
+      var dir = await window.klaus.repo.browseDirectory();
+      if (!dir) return;
+      var added = await window.klaus.repo.addProject(dir);
+      if (!added) return;
+      setRepoRowPath(row, added.path);
+    });
+
+    el.querySelector('.mr-remove').addEventListener('click', function () {
+      removeRepoRow(row);
+    });
+
+    bindRecentsDropdown(el.querySelector('.mr-recents'), el.querySelector('.modal-recents-list'), {
+      loadItems: function () {
+        var exclude = {};
+        if (AppState.repoPath) exclude[AppState.repoPath] = true;
+        additionalRepoRows.forEach(function (r) {
+          if (r !== row && r.path) exclude[r.path] = true;
         });
-        return;
-      }
-      addRepoChip(p);
-    },
-    emptyText: 'No other repos found',
-  });
+        return buildRepoPickerSections(exclude);
+      },
+      onPick: function (p, info) {
+        if (info && info.kind === 'github-clone') {
+          var session = modalSession;
+          var nameWithOwner = p.replace(/^gh:/, '');
+          pendingRepoClones++;
+          row.pathEl.textContent = 'Cloning ' + nameWithOwner + '…';
+          cloneGithubPick(p, function (localPath) {
+            pendingRepoClones = Math.max(0, pendingRepoClones - 1);
+            if (session !== modalSession || !row.el.isConnected) return;
+            setRepoRowPath(row, localPath);
+          }, function () {
+            pendingRepoClones = Math.max(0, pendingRepoClones - 1);
+            if (session === modalSession && row.el.isConnected) setRepoRowPath(row, row.path);
+          });
+          return;
+        }
+        setRepoRowPath(row, p);
+      },
+      emptyText: 'No other repos found',
+    });
+
+    // Drag-and-drop parity with the source-repo row.
+    ['dragenter', 'dragover'].forEach(function (evt) {
+      el.addEventListener(evt, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        el.classList.add('drag-over');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (evt) {
+      el.addEventListener(evt, function (e) {
+        e.preventDefault(); e.stopPropagation();
+        el.classList.remove('drag-over');
+      });
+    });
+    el.addEventListener('drop', async function (e) {
+      var file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (!file) return;
+      var p = window.klaus.fs.getPathForFile(file);
+      if (!p) return;
+      var added = await window.klaus.repo.addProject(p);
+      if (!added) return;
+      setRepoRowPath(row, added.path);
+    });
+
+    additionalRepoRows.push(row);
+    multiRepoRowsEl.appendChild(el);
+  }
+
+  multiRepoAddBtn.addEventListener('click', function () { addRepoRow(); });
 
   // Source-repo drag-and-drop fallback. Drop a folder onto the row to
   // switch the active repo — same path as the Browse button.
@@ -1559,42 +1585,6 @@
     });
   }
 
-  bindRecentsDropdown(basepathRecentsBtn, basepathRecentsList, {
-    loadItems: function () {
-      return Promise.all([
-        AppState.repoPath ? window.klaus.repo.suggestWorktreeLocations(AppState.repoPath) : Promise.resolve([]),
-        window.klaus.repo.recentPathsGet(),
-      ]).then(function (res) {
-        var suggested = res[0] || [];
-        var recents = (res[1] && res[1].basepaths) || [];
-        var sections = [];
-        if (suggested.length) {
-          sections.push({ header: 'Suggested', items: suggested.map(function (s) {
-            return { label: s.label, path: s.path, sub: s.path, tag: s.recommended ? 'recommended' : '', kind: 'suggested', removable: false };
-          }) });
-        }
-        if (recents.length) {
-          sections.push({ header: 'Recent', items: recents.map(function (p) { return { path: p, kind: 'recent' }; }) });
-        }
-        return sections;
-      });
-    },
-    onPick: function (p) {
-      selectedBasePath = p;
-      basepathInput.value = p;
-      basepathInput.classList.add('has-path');
-    },
-    onRemove: function (p) { return window.klaus.repo.recentPathsRemove('basepaths', p); },
-    emptyText: 'No suggestions yet',
-  });
-
-  function defaultBasePathDisplay() {
-    if (!AppState.repoPath) return 'Default';
-    var p = AppState.repoPath;
-    var slash = p.lastIndexOf('/');
-    return slash > 0 ? p.substring(0, slash) : 'Default';
-  }
-
   function showModal() {
     modalOverlay.style.display = 'flex';
     // Fresh discovery each time the modal opens so adopted repos / new
@@ -1602,26 +1592,25 @@
     discoverReposCache = null;
     discoverWorktreesCache = null;
     recentGhReposCache = null;
-    additionalRepos = [];
+    additionalRepoRows.slice().forEach(removeRepoRow);
     modalSession++;
-    pendingChipClones = 0;
-    renderRepoChips();
+    pendingRepoClones = 0;
     modalInput.value = '';
     modalError.textContent = '';
     clearFieldFlags();
     modalCreate.disabled = false;
-    selectedWorktreePath = null;
-    pathInput.value = '';
-    pathInput.classList.remove('has-path');
-    selectedBasePath = null;
-    basepathInput.value = '';
-    basepathInput.placeholder = 'Default: ' + defaultBasePathDisplay() + ' — ▾ for suggestions, or drag/paste';
-    basepathInput.classList.remove('has-path');
+    populateExistingSessions();
+    // Default to this window; pre-check "new window" once it's crowded
+    // (3+ open tasks).
+    var openTaskCount = AppState.tasks ? AppState.tasks.size : 0;
+    windowSelector.style.display = '';
+    openNewWindowCheck.checked = openTaskCount >= 3;
     activeTab = 'new';
     selectedMode = AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode || 'claude';
     modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === selectedMode); });
+    syncCreateButtonLabel();
     selectedBaseBranch = '';
     baseBranchUserPicked = false;
     populateBaseBranchSelect();
@@ -2299,14 +2288,14 @@
 
   // Clear the red "required" ring from every field that can carry it.
   function clearFieldFlags() {
-    [modalRepoRow, modalInput, baseBranchInput, pathInput].forEach(function (el) {
+    [modalRepoRow, multiRepoRow, modalInput, modalBaseSelect, existingSessionSelect].forEach(function (el) {
       if (el) el.classList.remove('modal-field-invalid');
     });
   }
   // Abort a submit: re-enable Create, show the message, ring + focus the field.
   function failValidation(message, fieldEl) {
     modalCreate.disabled = false;
-    modalCreate.textContent = 'Create';
+    syncCreateButtonLabel();
     modalError.textContent = message;
     if (fieldEl) {
       fieldEl.classList.add('modal-field-invalid');
@@ -2315,9 +2304,21 @@
     }
   }
 
+  // Wrapper: an IPC rejection anywhere in the submit flow must not leave the
+  // modal stuck on a disabled "Creating..." button with the error only in
+  // DevTools.
   async function submitModal() {
+    try {
+      await submitModalInner();
+    } catch (e) {
+      console.error('[submitModal]', e);
+      failValidation('Something went wrong: ' + ((e && e.message) || e), null);
+    }
+  }
+
+  async function submitModalInner() {
     modalCreate.disabled = true;
-    modalCreate.textContent = 'Creating...';
+    modalCreate.textContent = activeTab === 'existing' ? 'Resuming...' : 'Creating...';
     modalError.textContent = '';
     clearFieldFlags();
 
@@ -2325,13 +2326,18 @@
     // primary create can take seconds (consent prompt, origin fetch) and the
     // inputs aren't locked meanwhile — live reads after the await could hand
     // secondary repos a different name/base/agent than the primary task got.
-    var fanoutRepos = activeTab === 'new'
-      ? additionalRepos.filter(function (r) { return r.path !== AppState.repoPath; })
-      : [];
+    var fanoutRepos = activeTab === 'new' ? selectedAdditionalRepos() : [];
+    // Existing-session resume: filled in by the 'existing' branch below.
+    var fanoutResume = [];
+    var fanoutSavedList = [];
+    var fanoutSessionName = '';
     var fanoutName = modalInput.value.trim();
     var fanoutBase = selectedBaseBranch;
-    var fanoutBasePath = selectedBasePath;
+    // Sessions live in the default ~/klaussy/sessions/<session>/<repo> layout
+    // (resolved by the main process when no basePath is passed).
+    var fanoutBasePath = null;
     var fanoutMode = selectedMode;
+    var openInNewWindow = openNewWindowCheck.checked;
 
     var result;
 
@@ -2340,10 +2346,23 @@
       if (!AppState.repoPath) {
         return failValidation('Select a source repo first.', modalRepoRow);
       }
-      // A repo picked for "Also create in" is still cloning — submitting now
+      // A repo picked in an extra row is still cloning — submitting now
       // would silently drop it from the fan-out.
-      if (pendingChipClones > 0) {
-        return failValidation('Still cloning a repo for "Also create in" — give it a moment and try again.', multiRepoRow);
+      if (pendingRepoClones > 0) {
+        return failValidation('Still cloning a repo — give it a moment and try again.', multiRepoRow);
+      }
+      // Session layout is ~/klaussy/sessions/<session>/<repo folder name> —
+      // two repos with the same folder name would collide on the second
+      // create with a baffling "already exists" error.
+      var baseNames = {};
+      var nameCollision = null;
+      [{ path: AppState.repoPath }].concat(fanoutRepos).forEach(function (r) {
+        var b = (r.path || '').split('/').filter(Boolean).pop();
+        if (baseNames[b] && baseNames[b] !== r.path) nameCollision = b;
+        baseNames[b] = r.path;
+      });
+      if (nameCollision) {
+        return failValidation('Two repos in this session share the folder name "' + nameCollision + '" — they would collide in the session folder. Rename one clone or create them as separate sessions.', multiRepoRow);
       }
       var name = modalInput.value.trim();
       if (name) {
@@ -2358,7 +2377,7 @@
           name,
           AppState.repoPath,
           selectedMode,
-          selectedBasePath,
+          null,
           undefined,
           selectedBaseBranch || null,
         );
@@ -2372,31 +2391,48 @@
         // tell the user to name a new branch off it rather than failing in git.
         var picked = baseBranchData.find(function (b) { return b.localName === selectedBaseBranch; });
         if (picked && picked.inWorktree) {
-          return failValidation('"' + selectedBaseBranch + '" is already checked out in another worktree. Enter a name to branch off it instead.', baseBranchInput);
+          return failValidation('"' + selectedBaseBranch + '" is already checked out in another worktree. Enter a name to branch off it instead.', modalBaseSelect);
         }
         result = await window.klaus.task.checkoutBranch(
           AppState.repoPath,
           selectedBaseBranch,
           selectedMode,
-          selectedBasePath,
+          null,
         );
       } else {
-        return failValidation('Name the worktree, or pick an existing branch from "Base branch" to continue it.', modalInput);
+        return failValidation('Name the session, or pick an existing branch in the repo row to continue it.', modalInput);
       }
     } else {
-      if (!selectedWorktreePath) {
-        return failValidation('Select a worktree first.', pathInput);
+      // Existing Session: resume every worktree in the picked session (one
+      // unit across repos), each with its saved agent + session id where
+      // known. Option values carry an "s:" / "b:" prefix (session folder vs
+      // legacy branch group) — strip it for display/task naming.
+      var sessKey = existingSessionSelect.value;
+      if (!sessKey) {
+        return failValidation('Pick a session to resume.', existingSessionSelect);
       }
-      result = await window.klaus.task.attachWorktree(selectedWorktreePath, selectedMode);
+      var sessName = sessKey.slice(2);
+      var sessWts = (existingSessionsMap[sessKey] || []).filter(function (w) { return !w.active; });
+      if (!sessWts.length) {
+        return failValidation('Every worktree in this session is already open.', existingSessionSelect);
+      }
+      try {
+        fanoutSavedList = (await window.klaus.session.listSaved()) || [];
+      } catch (e) {
+        fanoutSavedList = [];
+      }
+      fanoutSessionName = sessName;
+      result = await resumeSessionWorktree(sessWts[0], sessName, fanoutSavedList, selectedMode);
+      fanoutResume = sessWts.slice(1);
     }
 
     modalCreate.disabled = false;
-    modalCreate.textContent = 'Create';
+    syncCreateButtonLabel();
 
     // User declined the agent's worktree-trust prompt — close quietly.
     if (result && result.cancelled) { hideModal(); return; }
-    if (result.error) {
-      modalError.textContent = result.error;
+    if (!result || result.error) {
+      modalError.textContent = (result && result.error) || 'Failed to start the session.';
       return;
     }
 
@@ -2404,18 +2440,58 @@
     // worktree was created — the task still started from the local state.
     if (result.warning) window.toast.warn(result.warning);
 
-    // Record the paths we just used so they show in the recents dropdowns
-    // next time. Only record on a successful create/attach so abandoned
-    // typing doesn't pollute the list.
-    if (activeTab === 'new' && selectedBasePath) {
-      window.klaus.repo.recentPathsAdd('basepaths', selectedBasePath);
-    } else if (activeTab === 'existing' && selectedWorktreePath) {
-      window.klaus.repo.recentPathsAdd('worktrees', selectedWorktreePath);
-    }
+
+    // "New window": this window creates the tasks (instances are global) but
+    // doesn't render them; the ids are handed to a fresh window once the
+    // whole fan-out has finished.
+    var newWindowIds = openInNewWindow ? [result.id] : null;
+    var finalizeNewWindow = function () {
+      if (!newWindowIds) return;
+      var ids = newWindowIds;
+      newWindowIds = null; // both fan-out chains call this; only fire once
+      window.klaus.ui.newWindowWithTasks(ids).then(function (res) {
+        if (res && res.error) throw new Error(res.error);
+        window.toast.success('Session opened in a new window');
+      }).catch(function (e) {
+        console.error('[new-window-with-tasks]', e);
+        // Don't strand invisible tasks: render them here instead.
+        window.klaus.task.list().then(function (all) {
+          var added = 0;
+          var firstId = null;
+          ids.forEach(function (tid) {
+            if (AppState.tasks.get(tid)) return;
+            var info = (all || []).find(function (x) { return x.id === tid; });
+            if (!info) return;
+            addTaskToUI(info);
+            added++;
+            if (firstId === null) firstId = tid;
+          });
+          if (added > 1 && TerminalManager.currentLayout() === 'single') {
+            TerminalManager.setLayout(added >= 3 ? 'grid' : 'columns');
+          }
+          if (firstId !== null) switchToTask(firstId);
+          window.toast.error('Could not open a new window — session opened here instead.');
+        }).catch(function (e2) {
+          console.error('[new-window fallback]', e2);
+          window.toast.error('Could not open a new window or render the session here — its agents are still running; restart the app to reattach.');
+        });
+      });
+    };
 
     hideModal();
-    addTaskToUI(result);
-    switchToTask(result.id);
+    if (!newWindowIds) {
+      addTaskToUI(result);
+      switchToTask(result.id);
+    }
+
+    // Multi-repo / session-resume creates open side by side immediately — in
+    // single layout the extra tasks would spawn invisibly and look like they
+    // failed. Columns for two terminals, grid once there are three or more.
+    var extraCount = fanoutRepos.length + fanoutResume.length;
+    if (!newWindowIds && extraCount > 0 && TerminalManager.currentLayout() === 'single') {
+      TerminalManager.setLayout(extraCount >= 2 ? 'grid' : 'columns');
+    }
+    if (newWindowIds && !extraCount) finalizeNewWindow();
 
     // Fan the same task out to the "Also create in" repos: same branch name
     // and worktree naming schema in each. Sequential on purpose — each spawn
@@ -2428,9 +2504,13 @@
       var created = 0;
       var fanout = fanoutRepos.reduce(function (chain, repo) {
         return chain.then(function () {
+          // Each row carries its own base branch (repos in one ticket often
+          // default to different branches); fall back to the primary's pick,
+          // and create-task still has baseBranchFallback as the last resort.
+          var repoBase = repo.baseBranch || fanoutBase || null;
           var call = fanoutName
-            ? window.klaus.task.create(fanoutName, repo.path, fanoutMode, fanoutBasePath, undefined, fanoutBase || null, true)
-            : window.klaus.task.checkoutBranch(repo.path, fanoutBase, fanoutMode, fanoutBasePath);
+            ? window.klaus.task.create(fanoutName, repo.path, fanoutMode, fanoutBasePath, undefined, repoBase, true)
+            : window.klaus.task.checkoutBranch(repo.path, repoBase || fanoutBase, fanoutMode, fanoutBasePath);
           return call.then(function (res) {
             // Everything in here counts as this repo's outcome — a throw from
             // addTaskToUI/toast must not kill the chain for the repos after it.
@@ -2441,7 +2521,7 @@
               }
               if (res.cancelled) { skipped.push(repo.name); return; }
               if (res.warning) window.toast.warn(repo.name + ': ' + res.warning);
-              addTaskToUI(res);
+              if (newWindowIds) newWindowIds.push(res.id); else addTaskToUI(res);
               created++;
             } catch (e) {
               console.error('[multi-repo fanout]', repo.name, e);
@@ -2462,11 +2542,58 @@
         if (!failures.length && !skipped.length) {
           window.toast.success('Created in ' + (created + 1) + ' repos');
         }
+        finalizeNewWindow();
       }).catch(function (e) {
         // Belt-and-braces: the chain shouldn't reject, but if it ever does the
-        // user must not be left believing every repo got its task.
+        // user must not be left believing every repo got its task — and the
+        // already-created tasks must still reach a window.
         console.error('[multi-repo fanout]', e);
         window.toast.error('Multi-repo creation was interrupted: ' + ((e && e.message) || e));
+        finalizeNewWindow();
+      });
+    }
+
+    // Existing-session fan-out: resume the rest of the session's worktrees.
+    // Same sequential / per-repo failure semantics as the repo fan-out.
+    if (fanoutResume.length) {
+      var rsFailures = [];
+      var rsSkipped = [];
+      var rsResumed = 0;
+      var rsFanout = fanoutResume.reduce(function (chain, wt) {
+        return chain.then(function () {
+          return resumeSessionWorktree(wt, fanoutSessionName, fanoutSavedList, fanoutMode).then(function (res) {
+            try {
+              if (!res || res.error) {
+                rsFailures.push(wt.repoName + ': ' + ((res && res.error) || 'failed'));
+                return;
+              }
+              if (res.cancelled) { rsSkipped.push(wt.repoName); return; }
+              if (newWindowIds) newWindowIds.push(res.id); else addTaskToUI(res);
+              rsResumed++;
+            } catch (e) {
+              console.error('[session resume fanout]', wt.path, e);
+              rsFailures.push(wt.repoName + ': ' + ((e && e.message) || e));
+            }
+          }, function (e) {
+            rsFailures.push(wt.repoName + ': ' + ((e && e.message) || e));
+          });
+        });
+      }, Promise.resolve());
+      rsFanout.then(function () {
+        if (rsFailures.length) {
+          window.toast.error('Could not resume ' + rsFailures.join(' · '));
+        }
+        if (rsSkipped.length) {
+          window.toast.info('Skipped (trust prompt declined): ' + rsSkipped.join(', '));
+        }
+        if (!rsFailures.length && !rsSkipped.length) {
+          window.toast.success('Resumed session in ' + (rsResumed + 1) + ' repos');
+        }
+        finalizeNewWindow();
+      }).catch(function (e) {
+        console.error('[session resume fanout]', e);
+        window.toast.error('Session resume was interrupted: ' + ((e && e.message) || e));
+        finalizeNewWindow();
       });
     }
   }

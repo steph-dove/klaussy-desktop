@@ -79,9 +79,11 @@
         <div id="agents-panel-empty">No active agents</div>
       </div>
 
-      <!-- Repo filter — narrows the sidebar to one base repo -->
+      <!-- Repo + session filters — narrow the sidebar to one base repo and/or
+           one session (the branch name shared by repos created together) -->
       <div id="project-switcher">
-        <select id="project-select" title="Filter worktrees by repository"></select>
+        <select id="project-select" title="Filter by repository"></select>
+        <select id="session-select" title="Filter by session (shared branch name)"></select>
       </div>
 
       <div id="task-list"></div>
@@ -101,8 +103,8 @@
       <div id="terminal-area">
         <div id="empty-state">
           <div id="empty-state-default">
-            <p>Click <strong>+</strong> to create a new task</p>
-            <p class="sub">Each task creates a git worktree and spawns an agent in it.</p>
+            <p>Click <strong>+</strong> to start a new session</p>
+            <p class="sub">A session creates a git worktree in each selected repo and spawns an agent in it.</p>
             <p class="sub" style="margin-top:14px;">No git? <a href="#" id="empty-state-open-folder" class="empty-state-link">Open a folder</a> to run an agent in any directory.</p>
           </div>
           <div id="empty-state-no-project" style="display:none;">
@@ -272,57 +274,37 @@
   <div id="modal-overlay" style="display: none;">
     <div id="modal">
       <div id="modal-tabs">
-        <button class="modal-tab active" data-tab="new">New Worktree</button>
-        <button class="modal-tab" data-tab="existing">Existing Worktree</button>
+        <button class="modal-tab active" data-tab="new">New Session</button>
+        <button class="modal-tab" data-tab="existing">Existing Session</button>
       </div>
 
       <!-- New worktree tab -->
       <div id="tab-new" class="tab-content active">
+        <p id="modal-repo-instruction">Select all repos you'll work on in this session.</p>
         <div id="modal-repo-picker">
-          <label>Source repo:</label>
           <div id="modal-repo-row">
             <span id="modal-repo-path" class="modal-repo-path">No repo selected</span>
+            <select id="modal-base-branch" class="mr-base" hidden title="Base branch"></select>
             <button id="btn-modal-repo-browse" type="button" class="modal-input-btn" title="Browse for a git repo">Browse</button>
             <button id="btn-modal-repo-recents" type="button" class="modal-input-btn modal-recents-btn" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
             <div id="modal-repo-recents-list" class="modal-recents-list" hidden role="listbox"></div>
           </div>
         </div>
         <div id="modal-multirepo-picker">
-          <label>Also create in:</label>
+          <div id="modal-multirepo-rows"></div>
           <div id="modal-multirepo-row">
-            <span id="modal-multirepo-empty">Same branch + worktree in more repos (optional)</span>
-            <button id="btn-modal-multirepo-add" type="button" class="modal-input-btn modal-recents-btn" title="Add another repo — creates the same branch and worktree there too" aria-haspopup="listbox" aria-expanded="false">+</button>
-            <div id="modal-multirepo-list" class="modal-recents-list" hidden role="listbox"></div>
+            <button id="btn-modal-multirepo-add" type="button" class="modal-multirepo-addbar" title="Add another repo to this session">+</button>
           </div>
         </div>
-        <p>Enter a name (creates a new branch off the default), or pick an existing branch to continue working on it in a worktree.</p>
+        <p>Name the session (creates a branch with that name off each repo's selected base).</p>
         <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
-        <div id="basebranch-picker">
-          <label>Base branch:</label>
-          <div id="basebranch-combobox">
-            <input id="modal-base-branch-input" type="text" placeholder="Search branches..." autocomplete="off" spellcheck="false" />
-            <div id="modal-base-branch-list" hidden></div>
-          </div>
-        </div>
-        <div id="basepath-picker">
-          <label>Location:</label>
-          <div id="basepath-row">
-            <input id="basepath-input" type="text" spellcheck="false" autocomplete="off" placeholder="Default (repo parent dir) — drag a folder or paste to override">
-            <button id="basepath-browse" type="button" class="modal-input-btn" title="Browse for a folder">Browse</button>
-            <button id="basepath-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Recent base paths" aria-haspopup="listbox" aria-expanded="false">▾</button>
-            <div id="basepath-recents-list" class="modal-recents-list" hidden role="listbox"></div>
-          </div>
-        </div>
       </div>
 
       <!-- Existing worktree tab -->
       <div id="tab-existing" class="tab-content">
-        <p>Pick a discovered worktree from the ▾ menu, or drag/paste a worktree directory to attach an agent to.</p>
-        <div id="path-picker">
-          <input id="path-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
-          <button id="path-browse" type="button" class="modal-input-btn" title="Browse for a worktree folder">Browse</button>
-          <button id="path-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Discovered &amp; recent worktrees" aria-haspopup="listbox" aria-expanded="false">▾</button>
-          <div id="path-recents-list" class="modal-recents-list" hidden role="listbox"></div>
+        <p>Pick a session to resume — every repo in it reopens with its agent session.</p>
+        <div id="existing-session-row">
+          <select id="existing-session-select"></select>
         </div>
       </div>
 
@@ -337,6 +319,12 @@
           <button class="shell-option" data-shell="shell">Shell</button>
         </div>
       </div>
+
+      <!-- Pre-checked when the window is getting crowded (3+ tasks). -->
+      <label id="window-selector" style="display:none;">
+        <input type="checkbox" id="open-new-window-check">
+        <span>Open session in new window</span>
+      </label>
 
       <div id="modal-error"></div>
       <div id="modal-actions">

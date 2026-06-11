@@ -676,7 +676,8 @@ body.custom-titlebar #app {
   display: none;
 }
 
-#project-select {
+#project-select,
+#session-select {
   flex: 1;
   background: var(--input-bg);
   color: var(--text);
@@ -690,7 +691,8 @@ body.custom-titlebar #app {
   min-width: 0;
 }
 
-#project-select:focus {
+#project-select:focus,
+#session-select:focus {
   border-color: var(--accent);
 }
 
@@ -1086,7 +1088,10 @@ body.custom-titlebar #app {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 24px;
-  width: 400px;
+  /* Wide enough that multi-repo rows (path + base-branch select + buttons)
+     don't crush the path display into a few characters. */
+  width: 560px;
+  max-width: calc(100vw - 48px);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
@@ -1179,42 +1184,28 @@ body.custom-titlebar #app {
 }
 
 /* Path picker */
-#path-picker {
+/* Existing Session tab: one dropdown listing sessions (branch name + the
+   repos that share it). */
+#existing-session-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+}
+#existing-session-select {
+  flex: 1;
   background: var(--input-bg);
+  color: var(--text);
   border: 1px dashed var(--border);
   border-radius: 8px;
-  padding: 14px 12px;
-  transition: border-color 120ms, background 120ms;
-}
-
-#path-input {
-  flex: 1;
+  padding: 12px;
   font-size: 13px;
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
-  color: var(--text-dim);
-  background: transparent;
-  border: none;
   outline: none;
-  padding: 0;
+  cursor: pointer;
   min-width: 0;
 }
-
-#path-input::placeholder {
-  color: var(--text-dim);
-  opacity: 0.7;
+#existing-session-select:focus {
+  border-color: var(--accent);
 }
 
-#path-input.has-path {
-  color: var(--text);
-}
-
-#path-picker.drag-over {
-  border-color: var(--accent, #4a9eff);
-  background: var(--surface-hover);
-}
 
 /* Branch picker (from branch tab) */
 #branch-filter {
@@ -1287,136 +1278,6 @@ body.custom-titlebar #app {
   color: #fff;
 }
 
-/* Base path picker (new worktree tab) */
-#basepath-picker {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-}
-
-#basebranch-picker {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-}
-#basebranch-picker label {
-  font-size: 13px;
-  color: var(--text-dim);
-  flex-shrink: 0;
-}
-#basebranch-combobox {
-  flex: 1;
-  position: relative;
-  min-width: 0;
-}
-#modal-base-branch-input {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--input-bg);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-}
-#modal-base-branch-input:focus { border-color: var(--accent); }
-#modal-base-branch-input.has-default { color: var(--text-dim); font-style: italic; }
-#modal-base-branch-list {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  margin-top: 4px;
-  max-height: 220px;
-  overflow-y: auto;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 200;
-}
-#modal-base-branch-list[hidden] { display: none; }
-.basebranch-option {
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.basebranch-option:hover, .basebranch-option.active {
-  background: var(--surface-hover);
-}
-.basebranch-option.is-default { color: var(--accent); font-weight: 600; }
-.basebranch-option-tag {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--text-muted);
-  background: rgba(128, 128, 128, 0.15);
-  padding: 0 6px;
-  border-radius: 3px;
-  align-self: center;
-}
-.basebranch-option-empty {
-  padding: 12px;
-  color: var(--text-muted);
-  font-size: 12px;
-  text-align: center;
-}
-
-#basepath-picker label {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
-}
-
-#basepath-row {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--input-bg);
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  min-width: 0;
-  transition: border-color 120ms, background 120ms;
-}
-
-#basepath-row.drag-over {
-  border-color: var(--accent);
-  background: var(--surface-hover);
-}
-
-#basepath-input {
-  flex: 1;
-  font-size: 13px;
-  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
-  color: var(--text-dim);
-  background: transparent;
-  border: none;
-  outline: none;
-  padding: 0;
-  min-width: 0;
-}
-
-#basepath-input::placeholder {
-  color: var(--text-dim);
-  opacity: 0.7;
-}
-
-#basepath-input.has-path {
-  color: var(--text);
-}
-
 /* Shell selector */
 #shell-selector {
   display: flex;
@@ -1473,6 +1334,26 @@ body.custom-titlebar #app {
   background: var(--accent-dim);
   color: var(--text);
   box-shadow: inset 0 0 0 1px rgba(108, 92, 231, 0.5);
+}
+
+/* "Open session in new window" checkbox — shown when this window already has
+   open tasks; pre-checked when it's crowded (3+). */
+#window-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+#window-selector:hover {
+  color: var(--text);
+}
+#window-selector input {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 #modal-input {
@@ -10425,8 +10306,8 @@ body.task-branchless .file-viewer-blame-btn {
 
 .log-error .log-msg { color: var(--error); }
 
-/* Source-repo picker — mirrors #basepath-picker / #basepath-row so all
-   three modal path rows share the same dashed-drop-zone aesthetic. */
+/* Source-repo picker — the dashed-drop-zone aesthetic shared by the modal's
+   repo rows. */
 #modal-repo-picker {
   display: flex;
   align-items: center;
@@ -10440,7 +10321,8 @@ body.task-branchless .file-viewer-blame-btn {
   flex-shrink: 0;
 }
 
-#modal-repo-row {
+#modal-repo-row,
+.modal-multirepo-item {
   position: relative;
   flex: 1;
   display: flex;
@@ -10454,69 +10336,71 @@ body.task-branchless .file-viewer-blame-btn {
   transition: border-color 120ms, background 120ms;
 }
 
-#modal-repo-row.drag-over {
+#modal-repo-row.drag-over,
+.modal-multirepo-item.drag-over {
   border-color: var(--accent);
   background: var(--surface-hover);
 }
 
-/* "Also create in" multi-repo row: chips for each extra repo + an add button
-   that opens the same repo dropdown as the source-repo picker. */
+/* Multi-repo picker: instruction line above the source repo, extra repo rows
+   (each a clone of the source-repo row), and a full-width "+" bar that
+   appends another row. */
+#modal-repo-instruction {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 #modal-multirepo-picker {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   margin-bottom: 8px;
 }
-#modal-multirepo-picker label {
-  font-size: 13px;
-  color: var(--text-muted);
-  flex-shrink: 0;
+#modal-multirepo-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+#modal-multirepo-rows:empty {
+  margin: 0;
 }
 #modal-multirepo-row {
   position: relative;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-  padding: 4px 0;
 }
-#modal-multirepo-empty {
-  font-size: 12px;
+.modal-multirepo-addbar {
+  display: block;
+  width: 100%;
+  padding: 4px 12px;
+  background: var(--input-bg);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
   color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms, color 120ms;
 }
-.modal-multirepo-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 200px;
-  padding: 2px 4px 2px 8px;
+.modal-multirepo-addbar:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--text);
+}
+/* Per-row base-branch select — repos in one ticket can have different
+   default branches (main vs master vs develop). */
+.mr-base {
+  flex-shrink: 0;
+  max-width: 150px;
   background: var(--surface-hover);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
-  font-size: 12px;
-  color: var(--text);
-}
-.modal-multirepo-chip span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.modal-multirepo-chip button {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  padding: 0 3px;
+  border-radius: 4px;
   color: var(--text-muted);
+  font-size: 11px;
+  padding: 2px 4px;
   cursor: pointer;
-  font-size: 12px;
-  line-height: 1;
 }
-.modal-multirepo-chip button:hover {
+.mr-base:hover,
+.mr-base:focus {
   color: var(--text);
+  border-color: var(--accent);
+  outline: none;
 }
 
 .modal-repo-path {
@@ -10536,10 +10420,6 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 /* Recents dropdown (worktree modal: source repo + worktree path + base path) */
-#path-picker,
-#basepath-row {
-  position: relative;
-}
 
 .modal-input-btn {
   background: var(--surface-hover);
