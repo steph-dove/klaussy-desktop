@@ -191,6 +191,9 @@ ipcMain.handle('get-preferences', () => {
     theme: config.theme || { preset: 'dark' },
     keybindings: config.keybindings || {},
     autoFetchInterval: config.autoFetchInterval || 60000,
+    // Pre-commit silent-failure review (app commit flow + git hook). On by
+    // default; explicit false opts out.
+    preCommitReview: config.preCommitReview !== false,
   };
 });
 
@@ -221,6 +224,18 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.autoFetchInterval !== undefined) {
     config.autoFetchInterval = prefs.autoFetchInterval;
     startAutoFetch(); // Reset the auto-fetch timer
+  }
+  if (prefs.preCommitReview !== undefined) {
+    config.preCommitReview = !!prefs.preCommitReview;
+    // Opting out removes installed git hooks; opting back in re-installs on
+    // the next session create.
+    if (!config.preCommitReview) {
+      try {
+        require('../state/precommit-hook').uninstallAllHooks();
+      } catch (e) {
+        console.warn('[precommit-hook] uninstall failed:', e.message);
+      }
+    }
   }
   saveConfig(config);
 

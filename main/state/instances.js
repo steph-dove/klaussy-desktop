@@ -324,6 +324,13 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     } catch (e) {
       console.warn('[repo-intel] ensure failed:', e.message);
     }
+    // Pre-commit silent-failure hook (terminal/agent commits). Idempotent,
+    // pref-gated inside.
+    try {
+      require('./precommit-hook').installHookForRepo(repoPath);
+    } catch (e) {
+      console.warn('[precommit-hook] install failed:', e.message);
+    }
   }
 
   const instance = {

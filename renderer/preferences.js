@@ -53,6 +53,7 @@
   });
   defaultMode.value = prefs.defaultProvider || prefs.defaultMode || 'claude';
   autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
+  document.getElementById('pref-precommit-review').checked = prefs.preCommitReview !== false;
 
   // Theme dropdown
   themes.forEach(function (t) {
@@ -200,6 +201,7 @@
       theme: { preset: themeSelect.value },
       keybindings: bindings,
       autoFetchInterval: fetchSeconds * 1000,
+      preCommitReview: document.getElementById('pref-precommit-review').checked,
     };
 
     await window.klaus.ui.setPreferences(updated);

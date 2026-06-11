@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld('klaus', {
     currentModel: (worktreePath, mode, taskId) => ipcRenderer.invoke('agent-current-model', { worktreePath, mode, taskId }),
     deleteSession: (worktreePaths) => ipcRenderer.invoke('delete-session', { worktreePaths }),
     getRepoIntel: (worktreePath, agent) => ipcRenderer.invoke('get-repo-intel', { worktreePath, agent }),
+    precommitReview: (worktreePath, provider) => ipcRenderer.invoke('precommit-review-run', { worktreePath, provider }),
+    precommitReviewCancel: (worktreePath) => ipcRenderer.invoke('precommit-review-cancel', { worktreePath }),
     onRepoIntelEvent: (callback) => {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on('repo-intel-event', listener);

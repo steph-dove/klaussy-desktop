@@ -471,6 +471,15 @@ window.DiffPanel = (function () {
     // Don't refresh if an explanation is being shown
     if (diffViewEl && diffViewEl.querySelector('.diff-explanation')) return;
 
+    // The staged set may have changed (stage/unstage/hunk ops all land
+    // here) — a prior "Commit anyway" clearance must not certify a diff it
+    // never reviewed. Findings stay visible for reference; the flag resets.
+    if (precommitCleared && !precommitPending) {
+      precommitCleared = false;
+      var cb = document.getElementById('btn-do-commit');
+      if (cb && cb.textContent === 'Commit anyway') cb.textContent = 'Commit';
+    }
+
     if (diffMode === 'branch') {
       await refreshBranchDiff();
       return;
@@ -1401,7 +1410,100 @@ window.DiffPanel = (function () {
   function toggleCommitArea() {
     var visible = commitAreaEl.style.display !== 'none';
     commitAreaEl.style.display = visible ? 'none' : 'flex';
-    if (!visible) commitInput.focus();
+    if (!visible) {
+      commitInput.focus();
+      // Fresh open = fresh review state for whatever is staged now. A review
+      // still in flight from the previous open keeps the button disabled —
+      // re-enabling here allowed double doCommit races.
+      commitFlowGen++;
+      precommitCleared = false;
+      clearPrecommitFindings();
+      var b = document.getElementById('btn-do-commit');
+      if (b) { b.textContent = precommitPending ? 'Reviewing changes…' : 'Commit'; b.disabled = precommitPending; }
+    }
+  }
+
+  // ---- Pre-commit silent-failure review (app commit flow) ----
+  // First Commit click runs the review (skippable); findings render above
+  // the message box and the button re-arms as "Commit anyway" — the user
+  // decides fix-first vs commit. Pref `preCommitReview` (default on) gates it.
+  var precommitCleared = false;
+  var precommitPending = false;
+  // Bumped whenever the commit area is (re)opened: a review that resolves
+  // after the user closed/reopened must not act on the stale flow.
+  var commitFlowGen = 0;
+
+  function clearPrecommitFindings() {
+    var box = document.getElementById('precommit-findings');
+    if (box) box.remove();
+  }
+
+  function renderPrecommitFindings(text, count) {
+    clearPrecommitFindings();
+    var box = document.createElement('div');
+    box.id = 'precommit-findings';
+    box.innerHTML =
+      '<div class="precommit-findings-head">Silent-failure review found ' + count + ' issue' + (count === 1 ? '' : 's')
+        + ' in the staged changes — fix them, or commit anyway.'
+        + '<button type="button" class="precommit-findings-close" title="Dismiss">&times;</button></div>'
+      + '<pre class="precommit-findings-body"></pre>';
+    box.querySelector('.precommit-findings-body').textContent = text;
+    box.querySelector('.precommit-findings-close').addEventListener('click', clearPrecommitFindings);
+    commitAreaEl.insertBefore(box, commitAreaEl.firstChild);
+  }
+
+  // Returns true → proceed with the commit now; false → findings rendered,
+  // stop and let the user decide. Degrades to "proceed" on any infra error —
+  // the review must never make committing impossible.
+  async function runPrecommitReview(btn) {
+    var prefs;
+    try {
+      prefs = (await window.klaus.ui.getPreferences()) || {};
+    } catch (e) {
+      // Can't read the pref → fail toward OFF: the review is a billed agent
+      // run the user may have opted out of.
+      window.toast.warn('Could not read preferences — committing without the silent-failure review');
+      return true;
+    }
+    if (prefs.preCommitReview === false) return true;
+
+    // Review with the agent of the task on this worktree (default otherwise).
+    var agent = prefs.defaultProvider || 'claude';
+    try {
+      AppState.tasks.forEach(function (t) {
+        if (t && t.worktreePath === currentWorktreePath && t.mode && t.mode !== 'shell') agent = t.mode;
+      });
+    } catch (e) { /* keep default */ }
+
+    btn.textContent = 'Reviewing changes…';
+    var skip = document.createElement('button');
+    skip.type = 'button';
+    skip.id = 'precommit-skip';
+    skip.textContent = 'Skip review';
+    skip.addEventListener('click', function () {
+      window.klaus.task.precommitReviewCancel(currentWorktreePath);
+    });
+    if (btn.parentNode) btn.parentNode.insertBefore(skip, btn.nextSibling);
+
+    var res;
+    try {
+      res = await window.klaus.task.precommitReview(currentWorktreePath, agent);
+    } catch (e) {
+      res = { error: (e && e.message) || String(e) };
+    }
+    if (skip.parentNode) skip.remove();
+
+    if (!res || res.cancelled) return true; // skipped — user's call
+    if (res.error) {
+      window.toast.warn('Silent-failure review unavailable (' + res.error + ') — committing without it');
+      return true;
+    }
+    if (res.skipped || !res.findingsCount) {
+      if (!res.skipped) window.toast.success('Silent-failure review: no issues in the staged changes');
+      return true;
+    }
+    renderPrecommitFindings(res.text, res.findingsCount);
+    return false; // caller arms "Commit anyway" (after staleness checks)
   }
 
   async function doCommit() {
@@ -1411,11 +1513,40 @@ window.DiffPanel = (function () {
       return;
     }
     var btn = document.getElementById('btn-do-commit');
+    if (precommitPending) return; // a review is already running for this panel
+    btn.disabled = true;
+
+    if (!precommitCleared) {
+      var gen = commitFlowGen;
+      precommitPending = true;
+      var proceed;
+      try {
+        proceed = await runPrecommitReview(btn);
+      } finally {
+        precommitPending = false;
+      }
+      if (gen !== commitFlowGen) {
+        // The commit area was closed/reopened mid-review — this flow is
+        // stale; the fresh open starts from scratch.
+        btn.disabled = false;
+        btn.textContent = 'Commit';
+        return;
+      }
+      if (!proceed) {
+        precommitCleared = true; // informed decision: next click commits
+        btn.disabled = false;
+        btn.textContent = 'Commit anyway';
+        return;
+      }
+    }
+    clearPrecommitFindings();
+
     btn.disabled = true;
     btn.textContent = 'Committing...';
     var result = await window.klaus.git.commit(currentWorktreePath, msg);
     btn.disabled = false;
     btn.textContent = 'Commit';
+    precommitCleared = false;
     if (!result || result.error) {
       var errMsg = (result && result.error) || 'unknown failure';
       showDiffStatus('Commit failed: ' + errMsg, 'error');
