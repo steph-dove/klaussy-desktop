@@ -11,6 +11,7 @@ const { loadConfig, saveConfig } = require('../util/config');
 const { execFileP } = require('../util/exec');
 const { getMainWindow, createWindow } = require('../state/windows');
 const { instances } = require('../state/instances');
+const { baseRepoForWorktree } = require('../util/git-repo');
 
 ipcMain.handle('select-repo', async () => {
   const result = await dialog.showOpenDialog({
@@ -253,8 +254,14 @@ async function worktreesForRepo(repoPath, hidden, activePaths) {
   }
   try {
     const { stdout } = await execFileP('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath });
+    // The repository's primary checkout also appears in the porcelain list —
+    // it is NOT a session worktree and must never show up as resumable /
+    // deletable. Resolve it via the common git dir so this also holds when
+    // the configured "repo" is itself a linked worktree (then the porcelain
+    // is enumerated from a sibling and the primary is a different path).
+    const primary = baseRepoForWorktree(repoPath) || repoPath;
     return parseWorktreePorcelain(stdout)
-      .filter(w => !w.bare && !hidden.has(w.path))
+      .filter(w => !w.bare && !hidden.has(w.path) && w.path !== primary)
       .map(w => ({
         path: w.path,
         name: path.basename(w.path),

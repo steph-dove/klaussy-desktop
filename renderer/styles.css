@@ -140,6 +140,19 @@
   border-color: var(--border-strong);
 }
 
+.klaus-btn-danger {
+  background: var(--error, #c0392b);
+  border-color: var(--error, #c0392b);
+  color: #fff;
+}
+.klaus-btn-danger:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.klaus-btn-danger:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .klaus-btn-danger-ghost {
   background: transparent;
   border-color: var(--border);
@@ -667,9 +680,169 @@ body.custom-titlebar #app {
 #project-switcher {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   gap: 6px;
+}
+
+/* Full-width row under the filters: opens the Manage Sessions modal. */
+#btn-manage-sessions {
+  flex: 1 1 100%;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 3px 6px;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+#btn-manage-sessions:hover {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+/* Manage Sessions modal list */
+#sessions-modal-list {
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 8px 0;
+}
+.sessions-modal-section {
+  padding: 8px 2px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.sessions-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  background: var(--input-bg);
+}
+.sessions-modal-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sessions-modal-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sessions-modal-open {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--success);
+  border: 1px solid var(--success);
+  border-radius: 3px;
+  padding: 0 4px;
+  margin-left: 6px;
+}
+.sessions-modal-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sessions-modal-delete {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: border-color 120ms, color 120ms, background 120ms;
+}
+.sessions-modal-delete:hover {
+  color: #fff;
+  background: var(--error, #c0392b);
+  border-color: var(--error, #c0392b);
+}
+.sessions-modal-delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sessions-modal-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Delete-session confirmation dialog. Must stack above the Manage Sessions
+   overlay (both are .klaus-modal-overlay at z-index 220, and this one sits
+   earlier in the DOM). */
+#delete-session-overlay {
+  z-index: 240;
+}
+#delete-session-list {
+  max-height: 180px;
+  overflow-y: auto;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--input-bg);
+}
+.delete-session-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  min-width: 0;
+}
+.delete-session-repo {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.delete-session-path {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.delete-session-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0;
+}
+#delete-session-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  outline: none;
+}
+#delete-session-input:focus {
+  border-color: var(--error, #c0392b);
 }
 
 #sidebar.collapsed #project-switcher {
