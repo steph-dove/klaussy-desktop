@@ -4914,6 +4914,60 @@ body.task-branchless #ahead-behind {
   border-radius: 0 6px 6px 0;
 }
 
+/* Pre-commit silent-failure review (diff panel commit area) */
+#precommit-findings {
+  width: 100%;
+  border: 1px solid var(--error, #c0392b);
+  border-radius: 8px;
+  background: rgba(226, 124, 124, 0.06);
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+.precommit-findings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+.precommit-findings-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.precommit-findings-body {
+  margin: 0;
+  padding: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+}
+#precommit-skip {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  margin-left: 6px;
+  cursor: pointer;
+}
+#precommit-skip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 /* "conventions-aware" chip — shown when repo intel (conventions-cli output)
    is cached and being injected into the review prompt. */
 .pr-ai-conventions-chip {

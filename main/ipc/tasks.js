@@ -461,6 +461,33 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
   return { results };
 });
 
+// Pre-commit silent-failure review for the diff panel's Commit button. The
+// renderer shows findings and the user decides fix-first vs commit-anyway.
+ipcMain.handle('precommit-review-run', async (_event, { worktreePath, provider }) => {
+  try {
+    const { runStagedCheck } = require('../state/precommit-review');
+    return await runStagedCheck({ worktreePath, provider });
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+ipcMain.handle('precommit-review-cancel', (_event, { worktreePath }) => {
+  try {
+    const { cancelStagedCheck } = require('../state/precommit-review');
+    return { cancelled: cancelStagedCheck(worktreePath) };
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
+// Arm the pre-commit socket server at boot so hooks installed in previous
+// runs work in this one (the hook no-ops when the app isn't running).
+try {
+  require('../state/precommit-hook').startPrecommitServer();
+} catch (e) {
+  console.warn('[precommit-hook] server start failed:', e.message);
+}
+
 // Repository-intelligence block (conventions + import graph) for renderer-
 // side prompt builders (Plan / Debug / Review sub-tabs). '' until generated.
 // `agent` enables the slim graph-only block for claude in synced worktrees
