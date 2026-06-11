@@ -33,28 +33,47 @@ function getWorktreeDir(repoPath) {
 
 // Freshen `branch` from origin before a worktree is created off it, so the
 // new worktree starts from the latest remote state instead of whatever was
-// fetched last. Non-fatal by design: returns null on success (or when there's
-// nothing to do), or a human-readable warning string on failure — the caller
-// continues creating the worktree either way and surfaces the warning.
+// fetched last. Non-fatal by design. Returns { warning, info }:
+//   warning — failure text (caller continues anyway and shows a warn toast)
+//   info    — success evidence ("pulled a1b2c3d → e4f5a6b" / "up to date"),
+//             surfaced as an info toast so the fetch+pull isn't invisible.
 async function freshenBranchFromOrigin(repoPath, branch) {
-  // Local-only repo (no origin): nothing to freshen, no warning.
+  // Local-only repo (no origin): nothing to freshen, nothing to report.
   try {
     execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: repoPath, stdio: 'pipe' });
   } catch {
-    return null;
+    return { warning: null, info: null };
   }
 
   const firstLine = (err) =>
     ((err && err.stderr ? String(err.stderr) : '') || (err && err.message) || '')
       .trim().split('\n')[0];
+  const tipOf = () => {
+    try {
+      // Fully qualified — a tag named like the branch would otherwise shadow
+      // it (rev-parse resolves refs/tags before refs/heads) and make the
+      // before/after comparison lie.
+      return execFileSync('git', ['rev-parse', '--short', 'refs/heads/' + branch], { cwd: repoPath, stdio: 'pipe' })
+        .toString().trim();
+    } catch {
+      return null;
+    }
+  };
+
+  const before = tipOf();
 
   try {
     await execFileP('git', ['fetch', 'origin', branch], { cwd: repoPath, timeout: 30000 });
   } catch (err) {
     // A branch that only exists locally isn't a fetch failure — there is
     // simply no remote counterpart to pull.
-    if (/couldn't find remote ref/i.test(String(err && err.stderr || ''))) return null;
-    return 'Could not fetch latest "' + branch + '" from origin — continuing with the local copy. (' + firstLine(err) + ')';
+    if (/couldn't find remote ref/i.test(String(err && err.stderr || ''))) {
+      return { warning: null, info: '"' + branch + '" is local-only (no origin counterpart to pull)' };
+    }
+    return {
+      warning: 'Could not fetch latest "' + branch + '" from origin — continuing with the local copy. (' + firstLine(err) + ')',
+      info: null,
+    };
   }
 
   // Update the local branch ref. If it's checked out in the source repo we
@@ -73,9 +92,18 @@ async function freshenBranchFromOrigin(repoPath, branch) {
       await execFileP('git', ['fetch', 'origin', branch + ':' + branch], { cwd: repoPath, timeout: 30000 });
     }
   } catch (err) {
-    return 'Fetched origin, but could not fast-forward local "' + branch + '" — continuing with the local copy. (' + firstLine(err) + ')';
+    return {
+      warning: 'Fetched origin, but could not fast-forward local "' + branch + '" — continuing with the local copy. (' + firstLine(err) + ')',
+      info: null,
+    };
   }
-  return null;
+
+  const after = tipOf();
+  let info;
+  if (!before && after) info = 'fetched "' + branch + '" from origin (' + after + ')';
+  else if (before && after && before !== after) info = 'pulled "' + branch + '" ' + before + ' → ' + after;
+  else info = '"' + branch + '" is up to date with origin';
+  return { warning: null, info };
 }
 
 ipcMain.handle('list-saved-sessions', () => {
@@ -215,7 +243,8 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   // Freshen the base from origin so the worktree starts from the latest
   // commit. Non-fatal: on failure we keep going with the local state and
   // surface the warning on the result.
-  const freshenWarning = await freshenBranchFromOrigin(repoPath, baseBranch);
+  const freshen = await freshenBranchFromOrigin(repoPath, baseBranch);
+  const freshenWarning = freshen.warning;
   const fallbackWarning = baseFallbackFrom
     ? 'Base "' + baseFallbackFrom + '" not found in this repo — branched from "' + baseBranch + '" instead.'
     : null;
@@ -273,9 +302,20 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
   } catch {}
 
+  // Seed the worktree with the base repo's intel artifacts (CLAUDE.md,
+  // rules, skills) BEFORE the agent spawns — worktrees only contain
+  // committed files, and an agent that boots without CLAUDE.md announces
+  // "no CLAUDE.md provided".
+  try { require('../state/repo-intel').syncIntelIntoWorktree(worktreePath); } catch (e) {
+    console.warn('[repo-intel] pre-spawn sync failed:', e.message);
+  }
+
   const warning = [fallbackWarning, freshenWarning, reusedBranchWarning].filter(Boolean).join(' ') || null;
   const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
-  if (warning && result && !result.error) result.warning = warning;
+  if (result && !result.error) {
+    if (warning) result.warning = warning;
+    if (freshen.info) result.freshenInfo = freshen.info;
+  }
   return result;
 });
 
@@ -423,10 +463,12 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
 
 // Repository-intelligence block (conventions + import graph) for renderer-
 // side prompt builders (Plan / Debug / Review sub-tabs). '' until generated.
-ipcMain.handle('get-repo-intel', (_event, { worktreePath }) => {
+// `agent` enables the slim graph-only block for claude in synced worktrees
+// (CLAUDE.md loads natively there — full injection pays its tokens twice).
+ipcMain.handle('get-repo-intel', (_event, { worktreePath, agent }) => {
   try {
     const { getRepoIntelBlock } = require('../state/repo-intel');
-    return { block: getRepoIntelBlock(worktreePath) || '' };
+    return { block: getRepoIntelBlock(worktreePath, agent) || '' };
   } catch (e) {
     console.warn('[get-repo-intel]', e.message);
     return { block: '' };
@@ -589,7 +631,8 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
 
   // Freshen the branch from origin before checking it out (non-fatal; also
   // creates the local branch from origin when it doesn't exist yet).
-  const freshenWarning = await freshenBranchFromOrigin(repoPath, branch);
+  const freshen = await freshenBranchFromOrigin(repoPath, branch);
+  const freshenWarning = freshen.warning;
 
   try {
     // Check if it's a local branch already
@@ -606,9 +649,17 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
     return { error: 'Failed to create worktree: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
 
+  // Same pre-spawn intel seeding as create-task.
+  try { require('../state/repo-intel').syncIntelIntoWorktree(worktreePath); } catch (e) {
+    console.warn('[repo-intel] pre-spawn sync failed:', e.message);
+  }
+
   const name = sanitized;
   const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
-  if (freshenWarning && result && !result.error) result.warning = freshenWarning;
+  if (result && !result.error) {
+    if (freshenWarning) result.warning = freshenWarning;
+    if (freshen.info) result.freshenInfo = freshen.info;
+  }
   return result;
 });
 

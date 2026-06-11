@@ -18,10 +18,13 @@ const { getRepoIntelBlock, ensureRepoIntel } = require('../state/repo-intel');
 // newlines when present, empty when not — the templates' {{REPO_SPECIFIC_CHECKS}}
 // slots sit on their own lines either way. Also nudges a (re)generation so a
 // repo reviewed before any session was opened gets intel for the NEXT run.
-function repoIntelFor(worktreePath) {
+// Pass the target agent: claude in a synced worktree gets the slim
+// graph-only block (CLAUDE.md/rules load natively there — re-injecting them
+// pays their tokens twice in every prompt).
+function repoIntelFor(worktreePath, agentMode) {
   try {
     ensureRepoIntel(worktreePath);
-    const block = getRepoIntelBlock(worktreePath);
+    const block = getRepoIntelBlock(worktreePath, agentMode);
     return block ? '\n' + block + '\n' : '';
   } catch (e) {
     console.warn('[repo-intel] substitution failed:', e.message);
@@ -192,7 +195,8 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
     + `1. **What broke** — one or two sentences naming the actual failure.\n`
     + `2. **Caused by this PR?** — yes / no / likely, with the specific evidence from the diff vs log.\n`
     + `3. **Fix** — concrete, code-level suggestion. Use file:line references when possible.\n`
-    + `Keep it tight; no preamble.`;
+    + `Keep it tight; no preamble.`
+    + repoIntelFor(cwd, defaultAgentProvider());
 
   spawnClaudeStream({
     requestId, procMap: debugCheckProcs, channelPrefix: 'pr-debug-check',
@@ -263,7 +267,8 @@ ipcMain.handle('pr-fix-check-start', async (event, { requestId, checkLink, check
     + `\nAfter editing, output a short summary in this exact structure:\n`
     + `1. **Root cause** — one sentence.\n`
     + `2. **Files changed** — bullet list of \`path\` — what changed.\n`
-    + `3. **Why this fixes it** — one or two sentences tying the change back to the failure.\n`;
+    + `3. **Why this fixes it** — one or two sentences tying the change back to the failure.\n`
+    + repoIntelFor(ensured.worktreePath, defaultAgentProvider());
 
   spawnClaudeStream({
     requestId, procMap: fixCheckProcs, channelPrefix: 'pr-fix-check',
@@ -432,7 +437,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {})
   // silently mangle the prompt.
   const prompt = PR_REVIEW_TEMPLATE
     .replace(/\{\{BASE_BRANCH\}\}/g, () => baseRef)
-    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(ensured.worktreePath));
+    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(ensured.worktreePath, reviewProvider));
 
   spawnClaudeStream({
     requestId, procMap: reviewSurfaceAiProcs, channelPrefix: 'pr-review-ai',
@@ -537,17 +542,18 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     + `   not repeat the finding verbatim. Plain prose, no code fences, no\n`
     + `   bullets.\n`
     + `   </DRAFT_PR_COMMENT>\n`;
+  // Prefer an explicit agent from the split-button picker; otherwise follow the
+  // agent of the task running on this PR's worktree (then the default).
+  const implProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
+
   // Implement runs get the repo's conventions/graph context too — fixes
-  // should follow house rules, not generic style.
-  const implIntel = repoIntelFor(ensured.worktreePath);
+  // should follow house rules, not generic style. (Provider-aware: claude in
+  // a synced worktree gets the slim graph-only block.)
+  const implIntel = repoIntelFor(ensured.worktreePath, implProvider);
   const prompt = (mode === 'all'
     ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
     : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction)
     + (implIntel ? '\n' + implIntel : '');
-
-  // Prefer an explicit agent from the split-button picker; otherwise follow the
-  // agent of the task running on this PR's worktree (then the default).
-  const implProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
 
   // Permission consent (Claude only): pre-allow file edits scoped to this
   // worktree via settings.local.json (and deny secret files). Other agents
@@ -1329,9 +1335,10 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
   if (aiReviewProcs.has(requestId)) return { error: 'Review already in flight for ' + requestId };
 
   // Function replacements — see pr-review-ai-start for why.
+  const reviewAgent = pickProvider(provider, defaultAgentProvider());
   const prompt = PR_REVIEW_TEMPLATE
     .replace(/\{\{BASE_BRANCH\}\}/g, () => baseBranch || 'main')
-    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(worktreePath));
+    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(worktreePath, reviewAgent));
 
   // stream-json gives us a JSONL event per assistant/tool/result block so we
   // can surface progress in the UI instead of a 15-minute silent spinner.
