@@ -84,6 +84,7 @@
       <div id="project-switcher">
         <select id="project-select" title="Filter by repository"></select>
         <select id="session-select" title="Filter by session (shared branch name)"></select>
+        <button id="btn-manage-sessions" type="button" title="Manage sessions — review and delete sessions and their worktrees">Manage sessions</button>
       </div>
 
       <div id="task-list"></div>
@@ -337,6 +338,36 @@
   <!-- Directory picker dialog: replaces native NSOpenPanel file browser because
        macOS's scopedbookmarksagent can wedge and freeze the app. Paste a path
        or drag a folder from Finder. -->
+  <!-- Delete-session confirmation: requires typing "delete" to arm the
+       Delete button. -->
+  <div id="delete-session-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="delete-session-modal" class="klaus-modal klaus-modal-wide">
+      <h3 id="delete-session-title">Delete session</h3>
+      <p>This permanently deletes <strong>all work in this session — including uncommitted changes</strong> — and removes these worktrees:</p>
+      <div id="delete-session-list"></div>
+      <p class="delete-session-note">Open terminals on these worktrees will be closed. Branches are kept in each repo.</p>
+      <p class="delete-session-note">Type <strong>delete</strong> to confirm:</p>
+      <input id="delete-session-input" type="text" autocomplete="off" spellcheck="false" placeholder="delete">
+      <div class="klaus-modal-actions">
+        <button id="delete-session-cancel" class="klaus-btn klaus-btn-ghost">Cancel</button>
+        <button id="delete-session-confirm" class="klaus-btn klaus-btn-danger" disabled>Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Sessions: list every session (and legacy worktree group) with a
+       Delete action — removes the session's worktrees and folder after an
+       explicit warning. Opened from the sidebar's "Manage sessions" button. -->
+  <div id="sessions-modal-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="sessions-modal" class="klaus-modal klaus-modal-wide">
+      <h3>Manage Sessions</h3>
+      <div id="sessions-modal-list"></div>
+      <div class="klaus-modal-actions">
+        <button id="sessions-modal-close" class="klaus-btn klaus-btn-ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div id="dir-pick-overlay" class="klaus-modal-overlay" style="display: none;">
     <div id="dir-pick-modal" class="klaus-modal">
       <h3 id="dir-pick-title">Select folder</h3>

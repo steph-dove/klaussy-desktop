@@ -1194,6 +1194,27 @@
   var existingSessionsMap = {}; // option value -> [{ path, branch, repoName, active }]
   var SESSION_DIR_RE = /\/klaussy\/sessions\/([^/]+)\//;
 
+  // Shared by the Existing Session dropdown and the Manage Sessions modal:
+  // worktrees under ~/klaussy/sessions/<name>/ group by that folder name,
+  // everything else groups by branch ("legacy").
+  function groupWorktreesIntoSessions(groups) {
+    var sessions = {}; // name -> worktrees (session-folder layout)
+    var legacy = {};   // branch -> worktrees (everything else)
+    (groups || []).forEach(function (g) {
+      (g.worktrees || []).forEach(function (w) {
+        if (!w.branch) return;
+        var entry = { path: w.path, branch: w.branch, repoName: g.repoName, active: !!w.active };
+        var m = w.path.match(SESSION_DIR_RE);
+        if (m) {
+          (sessions[m[1]] = sessions[m[1]] || []).push(entry);
+        } else {
+          (legacy[w.branch] = legacy[w.branch] || []).push(entry);
+        }
+      });
+    });
+    return { sessions: sessions, legacy: legacy };
+  }
+
   function populateExistingSessions() {
     var session = modalSession;
     existingSessionSelect.innerHTML = '<option value="">Loading sessions…</option>';
@@ -1202,20 +1223,9 @@
       // current open's data (stale `active` flags → double-resume).
       if (session !== modalSession) return;
       existingSessionsMap = {};
-      var sessions = {}; // name -> worktrees (session-folder layout)
-      var legacy = {};   // branch -> worktrees (everything else)
-      (groups || []).forEach(function (g) {
-        (g.worktrees || []).forEach(function (w) {
-          if (!w.branch) return;
-          var entry = { path: w.path, branch: w.branch, repoName: g.repoName, active: !!w.active };
-          var m = w.path.match(SESSION_DIR_RE);
-          if (m) {
-            (sessions[m[1]] = sessions[m[1]] || []).push(entry);
-          } else {
-            (legacy[w.branch] = legacy[w.branch] || []).push(entry);
-          }
-        });
-      });
+      var grouped = groupWorktreesIntoSessions(groups);
+      var sessions = grouped.sessions;
+      var legacy = grouped.legacy;
 
       var optionFor = function (value, label, wts) {
         existingSessionsMap[value] = wts;
@@ -1274,6 +1284,170 @@
       mode: resumeMode,
     });
   }
+
+  // ---- Manage Sessions (sidebar) --------------------------------------------
+  // Lists every session with a per-session Delete: warns that ALL work in the
+  // session goes away, closes its open terminals, then removes the worktrees
+  // and the session folder (delete-session IPC). Branches are kept.
+  var sessionsModalOverlay = document.getElementById('sessions-modal-overlay');
+  var sessionsModalList = document.getElementById('sessions-modal-list');
+  var btnManageSessions = document.getElementById('btn-manage-sessions');
+  var sessionsModalClose = document.getElementById('sessions-modal-close');
+
+  function closeTasksOnPaths(paths) {
+    return window.klaus.task.list().then(function (all) {
+      var chain = Promise.resolve();
+      (all || []).forEach(function (t) {
+        if (paths.indexOf(t.worktreePath) === -1) return;
+        chain = chain.then(function () {
+          return window.klaus.task.kill(t.id).then(function () {
+            if (AppState.tasks && AppState.tasks.has(t.id)) {
+              TerminalManager.removeTaskFromUI(t.id);
+            }
+          }).catch(function (e) {
+            console.warn('[delete-session kill]', t.id, e);
+          });
+        });
+      });
+      return chain;
+    });
+  }
+
+  // Typed confirmation: the Delete button stays disabled until the user
+  // types "delete". Returns a promise resolving true (confirmed) / false.
+  var confirmDeleteSession = (function () {
+    var overlay = document.getElementById('delete-session-overlay');
+    var titleEl = document.getElementById('delete-session-title');
+    var listEl = document.getElementById('delete-session-list');
+    var input = document.getElementById('delete-session-input');
+    var btnCancel = document.getElementById('delete-session-cancel');
+    var btnConfirm = document.getElementById('delete-session-confirm');
+    var resolver = null;
+
+    function close(result) {
+      overlay.style.display = 'none';
+      if (resolver) {
+        var r = resolver;
+        resolver = null;
+        r(result);
+      }
+    }
+    btnCancel.addEventListener('click', function () { close(false); });
+    btnConfirm.addEventListener('click', function () {
+      if (!btnConfirm.disabled) close(true);
+    });
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) close(false);
+    });
+    input.addEventListener('input', function () {
+      btnConfirm.disabled = input.value.trim().toLowerCase() !== 'delete';
+    });
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !btnConfirm.disabled) close(true);
+      if (e.key === 'Escape') close(false);
+    });
+
+    return function (name, wts) {
+      return new Promise(function (resolve) {
+        resolver = resolve;
+        titleEl.textContent = 'Delete session "' + name + '"?';
+        listEl.innerHTML = wts.map(function (w) {
+          return '<div class="delete-session-item"><span class="delete-session-repo">' + escHtml(w.repoName) + '</span>'
+            + '<span class="delete-session-path">' + escHtml(w.path) + '</span></div>';
+        }).join('');
+        input.value = '';
+        btnConfirm.disabled = true;
+        overlay.style.display = 'flex';
+        setTimeout(function () { input.focus(); }, 50);
+      });
+    };
+  })();
+
+  async function deleteSessionFlow(name, wts) {
+    var ok = await confirmDeleteSession(name, wts);
+    if (!ok) return false;
+    var paths = wts.map(function (w) { return w.path; });
+    try {
+      await closeTasksOnPaths(paths);
+      var res = await window.klaus.task.deleteSession(paths);
+      if (!res || res.error) {
+        window.toast.error((res && res.error) || 'Delete failed');
+        return true;
+      }
+      var failed = (res.results || []).filter(function (r) { return !r.ok; });
+      var okCount = (res.results || []).length - failed.length;
+      if (okCount) {
+        window.toast.success('Deleted "' + name + '" (' + okCount + ' worktree' + (okCount === 1 ? '' : 's') + ')');
+      }
+      if (failed.length) {
+        window.toast.error('Could not delete: ' + failed.map(function (f) {
+          return f.path.split('/').pop() + ' (' + f.error + ')';
+        }).join(' · '));
+      }
+      // Drop the deleted worktrees' idle rows from the sidebar.
+      paths.forEach(function (p) {
+        var row = taskList.querySelector('.worktree-item[data-path="' + CSS.escape(p) + '"]');
+        if (row) row.remove();
+      });
+      discoverWorktreesCache = null;
+    } catch (e) {
+      console.error('[delete-session]', e);
+      window.toast.error('Delete failed: ' + ((e && e.message) || e));
+    }
+    return true;
+  }
+
+  function renderSessionsModalList() {
+    sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Loading…</div>';
+    discoverWorktreesCache = null;
+    getDiscoveredWorktrees().then(function (groups) {
+      var grouped = groupWorktreesIntoSessions(groups);
+      var section = function (title, map) {
+        var names = Object.keys(map).sort();
+        if (!names.length) return '';
+        return '<div class="sessions-modal-section">' + escHtml(title) + '</div>' + names.map(function (n) {
+          var wts = map[n];
+          var repos = wts.map(function (w) { return w.repoName; }).join(', ');
+          var open = wts.some(function (w) { return w.active; });
+          return '<div class="sessions-modal-row" data-name="' + escHtml(n) + '">'
+            + '<div class="sessions-modal-info">'
+            +   '<span class="sessions-modal-name">' + escHtml(n) + (open ? ' <span class="sessions-modal-open">open</span>' : '') + '</span>'
+            +   '<span class="sessions-modal-sub">' + wts.length + (wts.length === 1 ? ' repo: ' : ' repos: ') + escHtml(repos) + '</span>'
+            + '</div>'
+            + '<button type="button" class="sessions-modal-delete" data-name="' + escHtml(n) + '">Delete</button>'
+            + '</div>';
+        }).join('');
+      };
+      var html = section('Sessions', grouped.sessions) + section('Other worktrees', grouped.legacy);
+      sessionsModalList.innerHTML = html || '<div class="sessions-modal-empty">No sessions found</div>';
+
+      sessionsModalList.querySelectorAll('.sessions-modal-delete').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          var n = btn.dataset.name;
+          var wts = grouped.sessions[n] || grouped.legacy[n] || [];
+          if (!wts.length) return;
+          btn.disabled = true;
+          var acted = await deleteSessionFlow(n, wts);
+          btn.disabled = false;
+          if (acted) renderSessionsModalList();
+        });
+      });
+    }).catch(function (e) {
+      console.warn('[manage-sessions]', e);
+      sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Could not load sessions</div>';
+    });
+  }
+
+  btnManageSessions.addEventListener('click', function () {
+    sessionsModalOverlay.style.display = 'flex';
+    renderSessionsModalList();
+  });
+  sessionsModalClose.addEventListener('click', function () {
+    sessionsModalOverlay.style.display = 'none';
+  });
+  sessionsModalOverlay.addEventListener('click', function (e) {
+    if (e.target === sessionsModalOverlay) sessionsModalOverlay.style.display = 'none';
+  });
   // Switch the active repo (used by the source-repo Browse button, the
   // recents dropdown, and the drag-and-drop handler). Re-syncs the path
   // display and branch dropdown.

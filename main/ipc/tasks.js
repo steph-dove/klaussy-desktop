@@ -219,7 +219,6 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   const fallbackWarning = baseFallbackFrom
     ? 'Base "' + baseFallbackFrom + '" not found in this repo — branched from "' + baseBranch + '" instead.'
     : null;
-  const warning = [fallbackWarning, freshenWarning].filter(Boolean).join(' ') || null;
 
   // Ensure the chosen location exists — git worktree add creates the leaf dir
   // but not missing parents (e.g. a suggested "<repo>-worktrees" folder).
@@ -230,13 +229,40 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   }
 
   // Create the worktree (matching klausify CLI: git worktree add ../<repo>-<branch> -b <branch>)
+  let reusedBranchWarning = null;
+  const cleanupSessionDir = () => {
+    // We created ~/klaussy/sessions/<session>/ above; don't leave an empty
+    // husk behind on failure (it would block / confuse the next attempt).
+    if (basePath) return;
+    try {
+      if (fs.existsSync(worktreeDir) && fs.readdirSync(worktreeDir).length === 0) fs.rmdirSync(worktreeDir);
+    } catch {}
+  };
   try {
     execFileSync('git', ['worktree', 'add', '-b', branch, worktreePath, baseBranch], {
       cwd: repoPath,
       stdio: 'pipe',
     });
   } catch (err) {
-    return { error: `Failed to create worktree: ${err.stderr ? err.stderr.toString() : err.message}` };
+    const msg = err.stderr ? err.stderr.toString() : err.message;
+    // Deleting a session keeps its branches, so recreating one with the same
+    // name hits "a branch named 'x' already exists". Continue that branch
+    // instead of failing — and say so.
+    if (/branch named .* already exists/i.test(msg)) {
+      try {
+        execFileSync('git', ['worktree', 'add', worktreePath, branch], {
+          cwd: repoPath,
+          stdio: 'pipe',
+        });
+        reusedBranchWarning = 'Branch "' + branch + '" already existed (kept from a previous session) — continued it instead of branching from "' + baseBranch + '".';
+      } catch (err2) {
+        cleanupSessionDir();
+        return { error: `Failed to create worktree: ${err2.stderr ? err2.stderr.toString() : err2.message}` };
+      }
+    } else {
+      cleanupSessionDir();
+      return { error: `Failed to create worktree: ${msg}` };
+    }
   }
 
   // Verify the worktree was created in the correct repo
@@ -247,9 +273,152 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
   } catch {}
 
+  const warning = [fallbackWarning, freshenWarning, reusedBranchWarning].filter(Boolean).join(' ') || null;
   const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
   if (warning && result && !result.error) result.warning = warning;
   return result;
+});
+
+// Find the repository a worktree path is REGISTERED to by scanning the
+// configured repos' `git worktree list` output. Needed when the worktree's
+// directory no longer exists (stale registration): baseRepoForWorktree can't
+// run there (no cwd), but the registration still names the path verbatim.
+function findRepoForRegisteredWorktree(wtPath) {
+  const config = loadConfig();
+  const candidates = new Set();
+  for (const p of config.projects || []) {
+    if (p && p.path) candidates.add(p.path);
+  }
+  if (config.repoPath) candidates.add(config.repoPath);
+  // Configured "repos" can themselves be linked worktrees — resolve their
+  // primaries too so registrations are found at the common git dir.
+  for (const c of Array.from(candidates)) {
+    const base = baseRepoForWorktree(c);
+    if (base) candidates.add(base);
+  }
+  for (const repo of candidates) {
+    try {
+      const out = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+        cwd: repo, stdio: 'pipe', timeout: 10000,
+      }).toString();
+      if (out.split('\n').indexOf('worktree ' + wtPath) !== -1) {
+        return baseRepoForWorktree(repo) || repo;
+      }
+    } catch { /* repo gone / not git — keep scanning */ }
+  }
+  return null;
+}
+
+// Delete a whole session: remove every worktree (git worktree remove --force,
+// with a sessions-root-only rm fallback) and the now-empty session folder,
+// then scrub config debris (saved sessions, recents, hidden list) for the
+// deleted paths. Destructive by design — the renderer collects an explicit
+// confirmation first. Branches are intentionally kept.
+ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
+  if (!Array.isArray(worktreePaths) || !worktreePaths.length) {
+    return { error: 'No worktrees given' };
+  }
+  const sessionsRoot = path.join(os.homedir(), 'klaussy', 'sessions');
+  const inSessionsRoot = (p) => p.startsWith(sessionsRoot + path.sep);
+  const results = [];
+  const sessionDirs = new Set();
+
+  for (const wtPath of worktreePaths) {
+    if (typeof wtPath !== 'string' || !path.isAbsolute(wtPath)) {
+      results.push({ path: String(wtPath), error: 'invalid path' });
+      continue;
+    }
+    // Backstop — the renderer closes terminals first, but never rip a
+    // worktree out from under a live PTY.
+    const live = Array.from(instances.values()).find((i) => i.worktreePath === wtPath);
+    if (live) {
+      results.push({ path: wtPath, error: 'a terminal is still open on this worktree' });
+      continue;
+    }
+
+    // baseRepoForWorktree needs the directory to exist (it runs git there);
+    // for stale registrations (dir already deleted) resolve the owning repo
+    // from the registrations themselves.
+    const repo = baseRepoForWorktree(wtPath) || findRepoForRegisteredWorktree(wtPath);
+    // Never delete a repository's primary checkout — it can reach here via
+    // stale UI data even though discovery filters it out.
+    if (repo && repo === wtPath) {
+      results.push({ path: wtPath, error: "this is the repository's main checkout, not a session worktree" });
+      continue;
+    }
+    let removed = false;
+    let gitError = null;
+    if (repo && repo !== wtPath) {
+      try {
+        // Double --force: a single one still refuses locked worktrees and
+        // worktrees containing submodules. The user has already typed
+        // "delete" past an explicit warning at this point.
+        await execFileP('git', ['worktree', 'remove', '--force', '--force', wtPath], { cwd: repo, timeout: 30000 });
+        removed = true;
+      } catch (err) {
+        gitError = ((err && err.stderr ? String(err.stderr) : '') || (err && err.message) || '').trim().split('\n')[0];
+      }
+    }
+    if (!removed) {
+      // Fallback only INSIDE ~/klaussy/sessions — never force-delete
+      // arbitrary paths.
+      if (inSessionsRoot(wtPath)) {
+        try {
+          fs.rmSync(wtPath, { recursive: true, force: true });
+          if (repo && repo !== wtPath) {
+            try { await execFileP('git', ['worktree', 'prune'], { cwd: repo, timeout: 15000 }); } catch {}
+          }
+          removed = true;
+        } catch (err2) {
+          results.push({ path: wtPath, error: (gitError || '') + ' / rm failed: ' + err2.message });
+          continue;
+        }
+      } else {
+        results.push({
+          path: wtPath,
+          error: gitError
+            ? 'git worktree remove failed: ' + gitError
+            : 'could not locate the repository this worktree belongs to',
+        });
+        continue;
+      }
+    }
+    results.push({ path: wtPath, ok: true });
+    const parent = path.dirname(wtPath);
+    if (inSessionsRoot(parent)) sessionDirs.add(parent);
+  }
+
+  // Remove now-empty session folders (sessions root only).
+  for (const dir of sessionDirs) {
+    try {
+      if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+    } catch { /* leftover files — leave the folder for the user */ }
+  }
+
+  // Scrub config references to the deleted paths.
+  const deleted = new Set(results.filter((r) => r.ok).map((r) => r.path));
+  if (deleted.size) {
+    const config = loadConfig();
+    let dirty = false;
+    if (Array.isArray(config.savedSessions)) {
+      const before = config.savedSessions.length;
+      config.savedSessions = config.savedSessions.filter((s) => !s || !deleted.has(s.worktreePath));
+      dirty = dirty || config.savedSessions.length !== before;
+    }
+    if (config.recentPaths && Array.isArray(config.recentPaths.worktrees)) {
+      const before = config.recentPaths.worktrees.length;
+      config.recentPaths.worktrees = config.recentPaths.worktrees.filter((p) => !deleted.has(p));
+      dirty = dirty || config.recentPaths.worktrees.length !== before;
+    }
+    if (Array.isArray(config.hiddenWorktrees)) {
+      const before = config.hiddenWorktrees.length;
+      config.hiddenWorktrees = config.hiddenWorktrees.filter((p) => !deleted.has(p));
+      dirty = dirty || config.hiddenWorktrees.length !== before;
+    }
+    if (dirty) saveConfig(config);
+  }
+
+  return { results };
 });
 
 // ---- Current model for the sub-tab agent labels -----------------------------

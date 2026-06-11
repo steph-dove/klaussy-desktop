@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback }),
     listBranches: (repoPath) => ipcRenderer.invoke('list-branches', { repoPath }),
     currentModel: (worktreePath, mode, taskId) => ipcRenderer.invoke('agent-current-model', { worktreePath, mode, taskId }),
+    deleteSession: (worktreePaths) => ipcRenderer.invoke('delete-session', { worktreePaths }),
     checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
     attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),
     openFolder: (folderPath, mode) => ipcRenderer.invoke('open-folder', { folderPath, mode }),
