@@ -55,9 +55,18 @@ window.TerminalManager = (function () {
     // The name span carries the drag/click behaviors; the actions span holds
     // the dropdown. Splitting them avoids the dropdown trigger accidentally
     // starting a drag or switching tasks as a side-effect of clicking.
+    // Layout: <dot> <repo name> › <branch>. The agent + version live on the
+    // sub-tabs (each tab can run a different agent), not up here.
+    // Branch, not the worktree dir name — the dir prepends the repo name
+    // (repo-branch), which would just repeat the repo segment.
+    var repoName = task.repoPath ? task.repoPath.split('/').filter(Boolean).pop() : '';
+    var branchLabel = branch || (worktreePath ? worktreePath.split('/').filter(Boolean).pop() : name);
     var nameSpan = document.createElement('span');
     nameSpan.className = 'grid-label-name';
-    nameSpan.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>' + escHtml(name);
+    nameSpan.title = worktreePath || '';
+    nameSpan.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>'
+      + (repoName ? '<span class="grid-label-repo">' + escHtml(repoName) + '</span><span class="grid-label-sep">›</span>' : '')
+      + '<span class="grid-label-branch">' + escHtml(branchLabel) + '</span>';
 
     var actionsSpan = document.createElement('span');
     actionsSpan.className = 'grid-label-actions';
@@ -300,13 +309,16 @@ window.TerminalManager = (function () {
     };
     tasks.set(id, taskEntry);
 
-    // Sub-terminal tab bar
+    // Sub-terminal tab bar. Tabs are labeled with the model their agent is on
+    // ("Claude Fable 5", "Shell"), via the .sub-tab-label span — a span so
+    // the async model stamp can't clobber sibling nodes/listeners.
     var subTabBar = document.createElement('div');
     subTabBar.className = 'sub-terminal-tabs';
     subTabBar.innerHTML =
-      '<button class="sub-tab active" data-sub-id="0">Primary</button>' +
+      '<button class="sub-tab active" data-sub-id="0"><span class="sub-tab-label">Primary</span></button>' +
       '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)">+</button></span>';
     container.insertBefore(subTabBar, label.nextSibling);
+    updatePrimaryAgentTab(taskEntry);
 
     subTabBar.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -367,7 +379,7 @@ window.TerminalManager = (function () {
           if (window.toast && window.toast.error) window.toast.error('New tab failed: ' + result.error);
           return;
         }
-        addSubTerminalTab(taskEntry, result.subId, result.label);
+        addSubTerminalTab(taskEntry, result.subId, result.label, mode, true);
         // Switch to the freshly-created tab so the user immediately sees the
         // agent start (the "+" used to add a hidden tab and never switch).
         switchSubTerminal(taskEntry, result.subId);
@@ -389,9 +401,114 @@ window.TerminalManager = (function () {
     switchToTask(id);
   }
 
+  // ---- Agent tab labels (sub-tabs show the model the agent is on) ----
+
+  // "Claude Fable 5", not "claude code 2.1.172". Raw ids come from the
+  // pinned Preferences model or the session JSONL (agent-current-model IPC).
+  function prettyModelName(raw) {
+    if (!raw) return null;
+    var s = String(raw).replace(/\[[^\]]*\]\s*$/, '').trim(); // strip "[1m]"-style suffix
+    var cap = function (w) { return w.charAt(0).toUpperCase() + w.slice(1); };
+    // claude-fable-5 → Claude Fable 5; claude-opus-4-8 → Claude Opus 4.8
+    var c = s.match(/^claude-([a-z]+)-(\d+)(?:-(\d+))?/i);
+    if (c) return 'Claude ' + cap(c[1]) + ' ' + c[2] + (c[3] ? '.' + c[3] : '');
+    // Pinned aliases (opus/sonnet/haiku) resolve to the latest of the tier.
+    if (/^(opus|sonnet|haiku|fable|mythos)$/i.test(s)) return 'Claude ' + cap(s);
+    if (/^gpt-/i.test(s)) return s.replace(/^gpt-/i, 'GPT-');
+    var g = s.match(/^gemini-([\d.]+)-([a-z]+)(-preview)?/i);
+    if (g) return 'Gemini ' + g[1] + ' ' + cap(g[2]) + (g[3] ? ' (preview)' : '');
+    return s;
+  }
+
+  // Label a tab for its agent: agent name immediately, model once known.
+  // The model may not exist yet at spawn time (the session file appears with
+  // the agent's first response), so callers re-apply on tab switches until a
+  // model resolves — and recheck occasionally after that, so an in-session
+  // /model switch eventually shows.
+  var MODEL_RECHECK_MS = 30 * 1000;
+  function applyAgentLabel(span, mode, worktreePath, taskId) {
+    if (!span) return;
+    var isShell = !mode || mode === 'shell';
+    var modeChanged = span.dataset.mode !== (mode || 'shell');
+    span.dataset.mode = mode || 'shell';
+    if (modeChanged) delete span.dataset.modelTries;
+    if (modeChanged || !span.dataset.modelResolved) {
+      delete span.dataset.modelResolved;
+      span.textContent = isShell ? 'Shell'
+        : ((window.AppUtils && AppUtils.modeDisplayName) ? AppUtils.modeDisplayName(mode) : mode);
+      span.title = '';
+    }
+    if (isShell) return;
+    span.dataset.modelCheckedAt = String(Date.now());
+    window.klaus.task.currentModel(worktreePath, mode, taskId).then(function (res) {
+      if (span.dataset.mode !== mode) return; // re-labeled meanwhile (mode change)
+      var pretty = prettyModelName(res && res.model);
+      if (!pretty) {
+        // No model on disk yet — a fresh session has no assistant turn until
+        // the first response. Retry with backoff so the label upgrades on its
+        // own; tab switches and the 30s recheck also retrigger.
+        var tries = Number(span.dataset.modelTries || 0);
+        if (tries < 5) {
+          span.dataset.modelTries = String(tries + 1);
+          setTimeout(function () {
+            if (span.isConnected && span.dataset.mode === mode && !span.dataset.modelResolved) {
+              applyAgentLabel(span, mode, worktreePath, taskId);
+            }
+          }, 10000 * (tries + 1));
+        }
+        return;
+      }
+      span.textContent = pretty;
+      span.title = String(res.model);
+      span.dataset.modelResolved = '1';
+      delete span.dataset.modelTries;
+    }).catch(function (e) {
+      console.warn('[agent-current-model]', e);
+    });
+  }
+
+  // The primary tab tracks the task's own mode (it can change: agent exits to
+  // shell, sidebar Resume relaunches an agent).
+  function updatePrimaryAgentTab(taskEntry) {
+    var span = taskEntry.container.querySelector('.sub-tab[data-sub-id="0"] .sub-tab-label');
+    applyAgentLabel(span, taskEntry.mode, taskEntry.worktreePath, taskEntry.id);
+  }
+
+  // Re-resolve tab labels on tab switches: immediately while unresolved (the
+  // session file may not have existed yet), then at most every 30s once a
+  // model is showing (cheap staleness guard for /model switches).
+  function refreshAgentLabels(taskEntry) {
+    var due = function (span) {
+      if (!span) return false;
+      if (!span.dataset.modelResolved) return true;
+      return Date.now() - Number(span.dataset.modelCheckedAt || 0) > MODEL_RECHECK_MS;
+    };
+    var primary = taskEntry.container.querySelector('.sub-tab[data-sub-id="0"] .sub-tab-label');
+    if (due(primary)) {
+      applyAgentLabel(primary, taskEntry.mode, taskEntry.worktreePath, taskEntry.id);
+    }
+    taskEntry.subTerminals.forEach(function (s) {
+      var span = s.tab && s.tab.querySelector('.sub-tab-label');
+      if (span && span.dataset.agentTab && due(span)) {
+        applyAgentLabel(span, s.mode, taskEntry.worktreePath, taskEntry.id);
+      }
+    });
+  }
+
+  // Periodic sweep so labels stay truthful without user interaction — e.g. a
+  // label resolved early from the CLI-default fallback upgrades to session
+  // evidence (or reflects an in-session /model switch) within ~30s.
+  setInterval(function () {
+    tasks.forEach(function (t) { refreshAgentLabels(t); });
+  }, MODEL_RECHECK_MS);
+
   // ---- Sub-terminal Management ----
 
-  function addSubTerminalTab(taskEntry, subId, label) {
+  // `agentTab` = the tab was opened as a plain agent/shell from the "+"
+  // picker, so its label is the agent + version. Purpose-named tabs (Plan /
+  // Debug / Review, runInSubTerminal) keep their given label — it says what
+  // the tab is *for*, and runInSubTerminal reuses tabs by label match.
+  function addSubTerminalTab(taskEntry, subId, label, mode, agentTab) {
     var id = taskEntry.id;
     var container = taskEntry.container;
     var subTabBar = container.querySelector('.sub-terminal-tabs');
@@ -403,7 +520,14 @@ window.TerminalManager = (function () {
     var tab = document.createElement('button');
     tab.className = 'sub-tab';
     tab.dataset.subId = subId;
-    tab.innerHTML = escHtml(label) + ' <span class="sub-tab-close">&times;</span>';
+    tab.innerHTML = '<span class="sub-tab-label"></span> <span class="sub-tab-close">&times;</span>';
+    var labelSpan = tab.querySelector('.sub-tab-label');
+    if (agentTab) {
+      labelSpan.dataset.agentTab = '1';
+      applyAgentLabel(labelSpan, mode, taskEntry.worktreePath, taskEntry.id);
+    } else {
+      labelSpan.textContent = label;
+    }
     subTabBar.insertBefore(tab, addAnchor);
 
     var Terminal = window.Terminal;
@@ -489,7 +613,8 @@ window.TerminalManager = (function () {
     });
 
     var subEntry = {
-      subId: subId, label: label, terminal: subTerminal, fitAddon: subFitAddon,
+      subId: subId, label: label, mode: mode || 'shell',
+      terminal: subTerminal, fitAddon: subFitAddon,
       wrapper: subWrapper, tab: tab, cleanup: subCleanup, alive: true,
     };
     taskEntry.subTerminals.push(subEntry);
@@ -519,6 +644,7 @@ window.TerminalManager = (function () {
   function switchSubTerminal(taskEntry, subId) {
     var container = taskEntry.container;
     taskEntry.activeSubId = subId;
+    refreshAgentLabels(taskEntry);
 
     var xtermEls = container.querySelectorAll(':scope > .xterm');
     xtermEls.forEach(function (el) {
@@ -611,7 +737,7 @@ window.TerminalManager = (function () {
     var result = await window.klaus.terminal.addSub(taskId, label, agentMode, command);
     if (result.error) return { error: result.error };
     if (result.cancelled) return { cancelled: true };
-    addSubTerminalTab(taskEntry, result.subId, result.label);
+    addSubTerminalTab(taskEntry, result.subId, result.label, agentMode);
     var subEntry = taskEntry.subTerminals[taskEntry.subTerminals.length - 1];
     switchSubTerminal(taskEntry, subEntry.subId);
 
@@ -901,5 +1027,12 @@ window.TerminalManager = (function () {
     zoomReset: zoomReset,
     runInSubTerminal: runInSubTerminal,
     openClaudeSubTerminal: openClaudeSubTerminal,
+    // For callers that change a task's mode after creation (agent → shell
+    // conversion, sidebar Resume) so the primary tab's agent label stays
+    // truthful.
+    refreshAgentChip: function (taskId) {
+      var t = tasks.get(taskId);
+      if (t) updatePrimaryAgentTab(t);
+    },
   };
 })();

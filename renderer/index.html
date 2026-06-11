@@ -287,6 +287,14 @@
             <div id="modal-repo-recents-list" class="modal-recents-list" hidden role="listbox"></div>
           </div>
         </div>
+        <div id="modal-multirepo-picker">
+          <label>Also create in:</label>
+          <div id="modal-multirepo-row">
+            <span id="modal-multirepo-empty">Same branch + worktree in more repos (optional)</span>
+            <button id="btn-modal-multirepo-add" type="button" class="modal-input-btn modal-recents-btn" title="Add another repo — creates the same branch and worktree there too" aria-haspopup="listbox" aria-expanded="false">+</button>
+            <div id="modal-multirepo-list" class="modal-recents-list" hidden role="listbox"></div>
+          </div>
+        </div>
         <p>Enter a name (creates a new branch off the default), or pick an existing branch to continue working on it in a worktree.</p>
         <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
         <div id="basebranch-picker">

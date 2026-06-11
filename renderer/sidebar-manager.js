@@ -245,6 +245,7 @@ window.Sidebar = (function () {
       window.klaus.terminal.write(id, cmd + '\n');
       task.mode = agent;
       updateMode(id, agent);
+      if (window.TerminalManager && TerminalManager.refreshAgentChip) TerminalManager.refreshAgentChip(id);
       btn.remove();
     });
   }
@@ -293,13 +294,10 @@ window.Sidebar = (function () {
       nameEl.textContent = newName;
       task.name = newName;
       window.klaus.task.rename(id, newName);
-      var gridLabel = task.container.querySelector('.grid-label');
-      if (gridLabel) {
-        var dot = gridLabel.querySelector('.grid-dot');
-        gridLabel.textContent = '';
-        if (dot) gridLabel.appendChild(dot);
-        gridLabel.appendChild(document.createTextNode(newName));
-      }
+      // The terminal top bar shows repo › worktree-dir › agent, none of which
+      // change on rename — only the sidebar name needs updating. (The old
+      // wholesale .grid-label rewrite here also destroyed the name/actions
+      // span structure and with it the actions dropdown.)
     }
 
     input.addEventListener('blur', commit);
