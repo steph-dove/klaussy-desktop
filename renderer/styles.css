@@ -11818,3 +11818,198 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .file-md-preview img { max-width: 100%; height: auto; }
+
+/* =========================================================================
+   PR review makeover — structured finding cards, verdict banner, and the
+   always-on terminal chrome. Built on the existing theme tokens so light and
+   dark both come along for free. Appended last so these win over the older
+   .pr-ai-finding rules above.
+   ========================================================================= */
+
+/* Severity hue tokens — one source of truth for chips, borders, and the
+   verdict. Translucent fills sit fine on both the light and dark surface. */
+:root {
+  --sev-blocker: #f0584f;
+  --sev-high:    #f0584f;
+  --sev-medium:  #d29922;
+  --sev-low:     #4493f8;
+  --sev-warn:    #d29922;
+  --sev-nit:     var(--text-muted);
+}
+
+.pr-ai-findings { gap: 14px; }
+
+/* Card: a touch more lift, smoother corners, and a hover that hints the card
+   is interactive without shouting. */
+.pr-ai-finding {
+  border-radius: var(--radius-md);
+  border-left-width: 3px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transition: box-shadow 0.12s ease, border-color 0.12s ease, opacity 0.1s ease;
+}
+.pr-ai-finding:hover { box-shadow: 0 3px 10px rgba(0, 0, 0, 0.22); }
+
+/* Header row above the comment body for structured findings: severity chip,
+   category, title on the left; location chip on the right. */
+.pr-ai-finding-head-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px 0 14px;
+}
+.pr-ai-finding-head-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.pr-ai-finding-head-row + .pr-ai-finding-body { padding-top: 8px; }
+
+.pr-ai-finding-chip {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+.pr-ai-finding-chip-blocker { color: var(--sev-blocker); background: rgba(240, 88, 79, 0.14); border-color: rgba(240, 88, 79, 0.35); }
+.pr-ai-finding-chip-high    { color: var(--sev-high);    background: rgba(240, 88, 79, 0.12); border-color: rgba(240, 88, 79, 0.30); }
+.pr-ai-finding-chip-medium  { color: var(--sev-medium);  background: rgba(210, 153, 34, 0.14); border-color: rgba(210, 153, 34, 0.34); }
+.pr-ai-finding-chip-low     { color: var(--sev-low);     background: rgba(68, 147, 248, 0.14); border-color: rgba(68, 147, 248, 0.32); }
+.pr-ai-finding-chip-warn    { color: var(--sev-warn);    background: rgba(210, 153, 34, 0.12); border-color: rgba(210, 153, 34, 0.30); }
+.pr-ai-finding-chip-nit,
+.pr-ai-finding-chip-note    { color: var(--text-muted);  background: rgba(128, 128, 128, 0.14); border-color: rgba(128, 128, 128, 0.30); }
+
+.pr-ai-finding-cat {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.pr-ai-finding-title-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pr-ai-finding-loc {
+  flex: none;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+}
+.pr-ai-finding-loc.verified {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+/* Tighten the structured body: severity/title now live in the header, so the
+   body is just the comment prose (+ original code + suggestion). */
+.pr-ai-finding-body { font-size: 13px; }
+.pr-ai-finding-body p:first-child { margin-top: 0; }
+.pr-ai-finding-body p:last-child { margin-bottom: 0; }
+
+/* "Add to PR" reads as the primary affordance on an open finding. */
+.pr-ai-finding-comment {
+  font-weight: 600;
+  border-color: var(--border-strong);
+}
+.pr-ai-finding-comment:hover {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ---- Verdict banner ---- */
+.pr-ai-verdict {
+  margin: 0 0 4px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pr-ai-verdict-approve { border-left-color: var(--success); }
+.pr-ai-verdict-changes { border-left-color: var(--sev-medium); }
+.pr-ai-verdict-block   { border-left-color: var(--sev-blocker); }
+.pr-ai-verdict-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pr-ai-verdict-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: var(--text);
+  background: rgba(128, 128, 128, 0.14);
+}
+.pr-ai-verdict-approve .pr-ai-verdict-badge { color: var(--success); background: rgba(63, 185, 80, 0.14); }
+.pr-ai-verdict-changes .pr-ai-verdict-badge { color: var(--sev-medium); background: rgba(210, 153, 34, 0.16); }
+.pr-ai-verdict-block .pr-ai-verdict-badge   { color: var(--sev-blocker); background: rgba(240, 88, 79, 0.16); }
+.pr-ai-verdict-coverage { font-size: 12px; color: var(--text-muted); }
+.pr-ai-verdict-risks {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.pr-ai-verdict-risks li { margin: 2px 0; }
+
+/* ---- Always-on terminal chrome ---- */
+.pr-term-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+  min-width: 0;
+}
+.pr-term-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--input-bg);
+  white-space: nowrap;
+}
+.pr-term-chip-chat.running {
+  color: var(--success);
+  border-color: rgba(63, 185, 80, 0.4);
+  background: rgba(63, 185, 80, 0.1);
+}
+.pr-term-chip-chat.error {
+  color: var(--error);
+  border-color: rgba(240, 88, 79, 0.4);
+  background: rgba(240, 88, 79, 0.1);
+}
+.pr-term-chip-impl.running {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.pr-term-chip-impl.done { color: var(--success); border-color: rgba(63, 185, 80, 0.4); }
+.pr-term-chip-impl.error { color: var(--error); border-color: rgba(240, 88, 79, 0.4); }
+.pr-tchat-restart { font-weight: 600; }

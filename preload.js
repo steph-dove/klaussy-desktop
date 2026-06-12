@@ -346,6 +346,35 @@ contextBridge.exposeInMainWorld('klaus', {
     // pop-out — uses this to find a run it didn't start).
     reviewImplementActive: () =>
       ipcRenderer.invoke('pr-review-implement-active'),
+    // Persistent PR-aware terminal chat (Terminal tab). One long-lived agent
+    // session per PR worktree, keyed by chatKey (worktree-derived). Distinct
+    // from reviewChatStart below (per-finding "Ask" chat).
+    reviewTchatStart: (provider) =>
+      ipcRenderer.invoke('pr-review-tchat-start', { provider }),
+    reviewTchatInput: (chatKey, data) =>
+      ipcRenderer.invoke('pr-review-tchat-input', { chatKey, data }),
+    reviewTchatResize: (chatKey, cols, rows) =>
+      ipcRenderer.invoke('pr-review-tchat-resize', { chatKey, cols, rows }),
+    reviewTchatCancel: (chatKey) =>
+      ipcRenderer.invoke('pr-review-tchat-cancel', { chatKey }),
+    reviewTchatAttach: (chatKey) =>
+      ipcRenderer.invoke('pr-review-tchat-attach', { chatKey }),
+    reviewTchatDetach: (chatKey) =>
+      ipcRenderer.invoke('pr-review-tchat-detach', { chatKey }),
+    reviewTchatActive: () =>
+      ipcRenderer.invoke('pr-review-tchat-active'),
+    onReviewTchatData: (chatKey, callback) => {
+      const channel = 'pr-review-tchat-data-' + chatKey;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onReviewTchatExit: (chatKey, callback) => {
+      const channel = 'pr-review-tchat-exit-' + chatKey;
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
     reviewChatStart: (requestId, findingBody, messages, findingId, provider) =>
       ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages, findingId, provider }),
     reviewChatCancel: (requestId) =>
