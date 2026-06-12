@@ -194,6 +194,9 @@ ipcMain.handle('get-preferences', () => {
     // Pre-commit silent-failure review (app commit flow + git hook). On by
     // default; explicit false opts out.
     preCommitReview: config.preCommitReview !== false,
+    // Klausify CLAUDE.md enrichment runs the Claude CLI = API spend on the
+    // user's machine, so it's OFF by default — opt in explicitly.
+    repoIntelEnrich: config.repoIntelEnrich === true,
   };
 });
 
@@ -236,6 +239,9 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
         console.warn('[precommit-hook] uninstall failed:', e.message);
       }
     }
+  }
+  if (prefs.repoIntelEnrich !== undefined) {
+    config.repoIntelEnrich = !!prefs.repoIntelEnrich;
   }
   saveConfig(config);
 

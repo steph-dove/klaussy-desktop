@@ -350,6 +350,12 @@
         <input type="checkbox" id="pref-precommit-review" />
       </div>
       <div class="field-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
+
+      <div class="field">
+        <label>Enrich CLAUDE.md with your agent</label>
+        <input type="checkbox" id="pref-repo-intel-enrich" />
+      </div>
+      <div class="field-hint">When generating repo intelligence for a new repo, run your agent to rewrite CLAUDE.md into richer prose. This makes an API call (billed to your agent account) on your machine. Off by default — the conventions, rules, skills, and import graph are still generated either way.</div>
     </div>
 
     <!-- Keybindings Section -->

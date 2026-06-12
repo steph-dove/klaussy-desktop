@@ -392,7 +392,9 @@ function ensureRepoIntel(repoOrWorktreePath) {
         return;
       }
 
-      notifyWindows({ type: 'started', repoPath: base, enriching: !!currentVersion });
+      // "enriching" only when klausify is present AND the user opted into the
+      // billed Claude rewrite — drives the toast's "may take a few minutes".
+      notifyWindows({ type: 'started', repoPath: base, enriching: !!currentVersion && loadConfig().repoIntelEnrich === true });
 
       // Pass 1 — graph data: always safe (writes only .conventions/).
       await execFileP('conventions', ['discover', '--format', 'json', '-q'], {
@@ -415,16 +417,25 @@ function ensureRepoIntel(repoOrWorktreePath) {
       let enrichFailed = false;
       if (currentVersion) {
         // Pass 2a — klausify init: CLAUDE.md + rules + conventions-aware
-        // skills + settings, WITH the Claude enrichment pass. No --force, so
-        // existing files (handcrafted CLAUDE.md, customized skills) are
-        // preserved. -b is mandatory to keep it non-interactive.
+        // skills + settings. No --force, so existing files (handcrafted
+        // CLAUDE.md, customized skills) are preserved. -b is mandatory to
+        // keep it non-interactive.
+        //
+        // Enrichment (the Claude pass that rewrites CLAUDE.md into richer
+        // prose) invokes the claude CLI = real API spend on the user's
+        // machine. Off by default; --skip-enrich still produces the full
+        // skills/rules/settings + a templated CLAUDE.md, just without the
+        // LLM rewrite.
+        const enrich = loadConfig().repoIntelEnrich === true;
+        const initArgs = ['init', '--repo', base, '-b', defaultBranchOf(base)];
+        if (!enrich) initArgs.push('--skip-enrich');
         //
         // Guard: klausify's exists-check → write window isn't atomic (it
         // even runs a pip upgrade in between). Snapshot a pre-existing
         // CLAUDE.md and restore it if the run somehow replaced it.
         let preClaudeMd = null;
         try { preClaudeMd = fs.readFileSync(a.claudeMd, 'utf-8'); } catch { /* absent */ }
-        const { stdout: initOut } = await execFileP('klausify', ['init', '--repo', base, '-b', defaultBranchOf(base)], {
+        const { stdout: initOut } = await execFileP('klausify', initArgs, {
           timeout: 15 * 60 * 1000, // enrichment invokes the claude CLI
           maxBuffer: 16 * 1024 * 1024,
         });
