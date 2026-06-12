@@ -307,6 +307,40 @@ ipcMain.handle('discover-worktrees', async () => {
     const worktrees = await worktreesForRepo(repo.path, hidden, activePaths);
     return { repoName: repo.name || path.basename(repo.path), repoPath: repo.path, worktrees };
   }));
+
+  // The session folders on disk are ground truth: ~/klaussy/sessions/<name>/
+  // <repo> worktrees must show up even when their base repo has drifted out
+  // of config.projects (config races / removals made real sessions read as
+  // "No sessions found"). Scan the root directly and merge anything the
+  // config-driven pass missed.
+  try {
+    const sessionsRoot = path.join(os.homedir(), 'klaussy', 'sessions');
+    const known = new Set();
+    for (const g of groups) for (const w of g.worktrees) known.add(w.path);
+    const extrasByRepo = new Map();
+    for (const sessionName of fs.readdirSync(sessionsRoot)) {
+      const sdir = path.join(sessionsRoot, sessionName);
+      let entries;
+      try { entries = fs.readdirSync(sdir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const wt = path.join(sdir, e.name);
+        if (known.has(wt) || hidden.has(wt)) continue;
+        if (!fs.existsSync(path.join(wt, '.git'))) continue;
+        let branch = '';
+        try {
+          branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: wt, stdio: 'pipe' })
+            .toString().trim();
+        } catch { continue; } // broken worktree — not resumable
+        if (!extrasByRepo.has(e.name)) extrasByRepo.set(e.name, []);
+        extrasByRepo.get(e.name).push({ path: wt, name: e.name, branch, active: activePaths.has(wt) });
+      }
+    }
+    for (const [repoName, worktrees] of extrasByRepo) {
+      groups.push({ repoName, repoPath: null, worktrees });
+    }
+  } catch { /* no sessions root yet */ }
+
   // Drop repos that contributed no worktrees (unreadable / all hidden).
   return groups.filter(g => g.worktrees.length > 0);
 });
