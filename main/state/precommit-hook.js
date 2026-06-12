@@ -193,6 +193,33 @@ const msgFile = process.argv[2];
 const cwd = process.argv[3] || process.cwd();
 let msg = '';
 try { msg = fs.readFileSync(msgFile, 'utf8'); } catch { process.exit(0); }
+
+// Strip agent attribution before anything else: AI agents (Claude, Codex,
+// Gemini, Copilot, …) like to append "Co-Authored-By: <agent>" trailers and
+// "Generated with <tool>" / 🤖 promo lines. Remove them so commits read as the
+// human's own work. Human co-author trailers are preserved — only lines that
+// name an AI agent/tool (or its bot email) are dropped.
+const AGENT = /(claude|anthropic|codex|openai|chatgpt|\\bgpt\\b|gemini|google\\s+ai|copilot|cursor|llm\\b|\\bai\\s+assistant\\b)/i;
+const stripLine = (l) => {
+  const t = l.trim();
+  if (/^co-authored-by:/i.test(t) && AGENT.test(t)) return true;
+  if (/^(generated|assisted|created|authored)(\\s+\\w+)?\\s+(with|by|using)\\b/i.test(t) && AGENT.test(t)) return true;
+  if (/generated with \\[?claude/i.test(t)) return true;
+  if (/🤖/.test(t)) return true;
+  return false;
+};
+{
+  const lines = msg.split('\\n');
+  const kept = [];
+  for (const l of lines) { if (!stripLine(l)) kept.push(l); }
+  // Collapse blank-line runs left where trailers were removed, and trim
+  // trailing blanks, but keep the body's leading structure intact.
+  let cleaned = kept.join('\\n').replace(/\\n{3,}/g, '\\n\\n').replace(/\\s+$/, '') + '\\n';
+  if (cleaned !== msg) {
+    try { fs.writeFileSync(msgFile, cleaned); msg = cleaned; } catch { /* keep original on write failure */ }
+  }
+}
+
 const subject = (msg.split('\\n').find((l) => l.trim() && !l.startsWith('#')) || '').trim();
 if (!subject) process.exit(0); // git rejects empty messages itself
 
