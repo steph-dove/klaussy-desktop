@@ -76,7 +76,12 @@ const timer = setTimeout(() => {
   console.error('[klaussy] silent-failure review timed out — committing without it');
   process.exit(0);
 }, 200000);
-sock.on('connect', () => sock.write(JSON.stringify({ cwd }) + '\\n'));
+sock.on('connect', () => {
+  // Announce immediately — the review takes 30-60s and an unexplained pause
+  // reads as a hang (or as "no check ran").
+  console.error('[klaussy] reviewing staged changes for silent failures (your agent is reading the diff)…');
+  sock.write(JSON.stringify({ cwd }) + '\\n');
+});
 sock.on('data', (d) => { buf += d; });
 sock.on('end', () => {
   clearTimeout(timer);

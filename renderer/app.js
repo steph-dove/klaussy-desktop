@@ -203,6 +203,24 @@
     });
   }
 
+  // ---- Pre-commit review notifications ----
+  // Both surfaces (Commit button + git hook from any terminal) broadcast
+  // their lifecycle — seeing checks run, even on the good path, is the point.
+  if (window.klaus.task.onPrecommitEvent) {
+    window.klaus.task.onPrecommitEvent(function (ev) {
+      if (!ev || !ev.wtName) return;
+      if (ev.type === 'started') {
+        window.toast.info('🛡 ' + ev.wtName + ': pre-commit review running — ' + (ev.provider || 'agent') + ' is reading the staged diff…');
+      } else if (ev.type === 'passed') {
+        window.toast.success('🛡 ' + ev.wtName + ': pre-commit review passed — no silent failures in the staged changes');
+      } else if (ev.type === 'findings') {
+        window.toast.warn('🛡 ' + ev.wtName + ': pre-commit review found ' + ev.findingsCount + ' issue' + (ev.findingsCount === 1 ? '' : 's') + ' — see the committing terminal or commit panel');
+      } else if (ev.type === 'error') {
+        window.toast.warn('🛡 ' + ev.wtName + ': pre-commit review could not run (' + (ev.error || 'unknown') + ') — commit proceeded unreviewed');
+      }
+    });
+  }
+
   // ---- Handle Claude → shell conversion ----
   window.klaus.task.onConverted(function (data) {
     var t = tasks.get(data.id);

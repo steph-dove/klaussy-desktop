@@ -12,9 +12,23 @@
 // repo-intel block rides along so findings respect house conventions.
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { execFileSync } = require('child_process');
 const { spawnClaudeStream } = require('./claude-streaming');
 const { getRepoIntelBlock } = require('./repo-intel');
+
+// Live progress to every window — users should SEE pre-commit checks
+// running (and passing), not infer them from a pause. Mirrors the
+// repo-intel event pattern.
+function notifyWindows(payload) {
+  try {
+    const { allWindows } = require('./windows');
+    for (const w of allWindows) {
+      if (w && !w.isDestroyed()) w.webContents.send('precommit-event', payload);
+    }
+  } catch { /* early boot — nothing to tell */ }
+}
 
 const DIFF_CAP_BYTES = 200 * 1024;   // beyond this the diff is truncated (noted in prompt)
 const CHECK_TIMEOUT_MS = 3 * 60 * 1000;
@@ -24,12 +38,14 @@ const NO_ISSUES_TOKEN = 'NO_SILENT_FAILURES';
 const inflight = new Map(); // worktreePath -> { promise, requestId }
 const procMap = new Map();  // requestId -> child proc (spawnClaudeStream contract)
 
-// Agent-agnostic, single-lens prompt — condensed from the silent-failure-
-// hunter reviewer we use on this codebase itself. Deliberately excludes
-// style/perf/architecture so it stays fast and findings stay actionable.
-const CHECK_PROMPT = `You are a silent-failure hunter. Review ONLY the staged diff below, which is about to be committed. Your single lens: errors that disappear instead of surfacing.
+// Agent-agnostic pre-commit prompt — four commit-time lenses, condensed
+// from the silent-failure-hunter reviewer we use on this codebase itself.
+// Deliberately excludes style/perf/architecture so it stays fast and
+// findings stay actionable. (Lint is handled separately by the repo's real
+// linter, not by the agent.)
+const CHECK_PROMPT = `You are a pre-commit reviewer. Review ONLY the staged diff below, which is about to be committed. Apply exactly these four lenses to the CHANGED lines and their immediate context — nothing else.
 
-Hunt for, in the CHANGED lines and their immediate context:
+LENS 1 — Silent failures (your primary lens):
 - Empty or swallowing catch blocks (caught errors not rethrown, surfaced, or meaningfully handled)
 - Catch-and-continue where later code depends on the failed step
 - Fallback values that mask failures (return null/[]/default on error with no signal to the caller or user)
@@ -39,7 +55,20 @@ Hunt for, in the CHANGED lines and their immediate context:
 - Optional chaining or defaults that convert real bugs into silent no-ops
 - Killed/ignored exit codes, suppressed stderr
 
-Explicitly NOT in scope: style, naming, performance, architecture, test coverage, anything outside the diff. Do not suggest refactors.
+LENS 2 — Secrets & credentials (always Severity: High):
+- API keys, tokens, passwords, private keys, connection strings with credentials, high-entropy literals that look like secrets — in ADDED lines. Placeholder values that are obviously fake (e.g. "YOUR_API_KEY", "xxx") are NOT findings.
+
+LENS 3 — Debug leftovers (Severity: Low):
+- Added print-debugging (console.log/print/dbg!) that is clearly scaffolding rather than intentional logging per this repo's conventions
+- Newly commented-out blocks of code
+- Added TODO/FIXME/HACK markers with no ticket reference
+
+LENS 4 — Blatant correctness landmines (Severity: High ONLY — if you are not CERTAIN it is broken, do not report it):
+- Unreachable code introduced by the change
+- Conditions that are always true/false, inverted comparisons, assignment-in-condition
+- Off-by-default boolean confusion (e.g. flag checked with the opposite sense of every other use in the file)
+
+Explicitly NOT in scope: style, naming, formatting, performance, architecture, test coverage, lint-level nits, anything outside the diff. Do not suggest refactors.
 
 Be precise and skeptical, but only report real issues — a deliberate, well-signposted degradation (comment explains it, user is notified elsewhere) is NOT a finding.
 
@@ -68,6 +97,54 @@ function stagedDiff(worktreePath) {
   } catch (e) {
     return { error: 'could not read staged diff: ' + ((e && e.stderr ? String(e.stderr) : e.message) || '').trim().split('\n')[0] };
   }
+}
+
+// Run the repo's REAL linter on the staged files (deterministic, fast, no
+// tokens) — agent-judged linting would be slow and flaky. Targeted at the
+// staged files only so monorepo-wide lint runs don't stall commits.
+// Returns { tool, errors, output } when a linter ran and found problems,
+// { tool, errors: 0 } when it ran clean, or null when no linter applies /
+// the linter itself broke (lint infra failure must never block a commit).
+const { execFile } = require('child_process');
+function lintStaged(worktreePath) {
+  return new Promise((resolve) => {
+    let files;
+    try {
+      files = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
+        cwd: worktreePath, stdio: 'pipe',
+      }).toString().split('\n').filter(Boolean);
+    } catch {
+      return resolve(null);
+    }
+    if (!files.length) return resolve(null);
+
+    const jsFiles = files.filter((f) => /\.(js|jsx|ts|tsx|mjs|cjs)$/.test(f)).slice(0, 50);
+    const pyFiles = files.filter((f) => /\.py$/.test(f)).slice(0, 50);
+
+    const eslintBin = path.join(worktreePath, 'node_modules', '.bin', 'eslint');
+    const run = (cmd, args, tool) => {
+      execFile(cmd, args, { cwd: worktreePath, timeout: 45000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+        if (!err) return resolve({ tool, errors: 0 });
+        // Exit 1 = lint findings; anything else (config error, crash,
+        // timeout) = infra failure → don't block, don't report.
+        if (err.code === 1) {
+          const output = (String(stdout) + '\n' + String(stderr)).trim();
+          const counted = (output.match(/^\s*\d+:\d+|error/gmi) || []).length;
+          return resolve({ tool, errors: Math.max(1, counted), output: output.slice(0, 8000) });
+        }
+        resolve(null);
+      });
+    };
+
+    if (jsFiles.length && fs.existsSync(eslintBin)) {
+      return run(eslintBin, ['--no-warn-ignored', ...jsFiles], 'eslint');
+    }
+    if (pyFiles.length) {
+      // ruff is fast enough to just attempt; ENOENT lands in the infra path.
+      return run('ruff', ['check', '--quiet', ...pyFiles], 'ruff');
+    }
+    resolve(null);
+  });
 }
 
 // The <FINDINGS> marker is ground truth: agents deviate from the exact
@@ -109,6 +186,9 @@ function runStagedCheck({ worktreePath, provider }) {
   // that short-circuits every future check for this worktree.
   const entry = { promise: null, requestId };
   inflight.set(worktreePath, entry);
+
+  const wtName = path.basename(worktreePath);
+  notifyWindows({ type: 'started', worktreePath, wtName, provider: provider || 'claude' });
 
   const promise = new Promise((resolve) => {
     let text = '';
@@ -180,14 +260,49 @@ function runStagedCheck({ worktreePath, provider }) {
     }
   });
 
-  entry.promise = promise;
+  // Real linter runs in parallel with the agent pass; results merge into one
+  // report. Lint findings block like agent findings; lint INFRA failures
+  // never do (lintStaged returns null for those).
+  const lintPromise = lintStaged(worktreePath).catch(() => null);
+  const combined = (async () => {
+    const [agent, lint] = await Promise.all([promise, lintPromise]);
+    const lintErrors = lint && lint.errors ? lint.errors : 0;
+    const lintText = lintErrors
+      ? '## Lint (' + lint.tool + '): ' + lintErrors + ' problem(s) in staged files\n\n```\n' + lint.output + '\n```'
+      : '';
+    if (agent.error || agent.cancelled || agent.skipped) {
+      // Agent pass didn't produce findings — but real lint errors still count.
+      if (lintErrors) {
+        return { ...agent, error: undefined, cancelled: undefined, skipped: undefined,
+          text: lintText, findingsCount: lintErrors, lintErrors, agentUnavailable: agent.error || (agent.cancelled ? 'cancelled' : 'skipped') };
+      }
+      return agent;
+    }
+    return {
+      ...agent,
+      text: (lintText ? lintText + '\n\n' : '') + (agent.text || ''),
+      findingsCount: (agent.findingsCount || 0) + lintErrors,
+      lintErrors,
+    };
+  })();
+
+  entry.promise = combined;
   // Cleanup is keyed to OUR requestId — a check started after this one
   // settles must not have its fresh entry deleted by us.
-  promise.then(() => {
+  combined.then((result) => {
     const cur = inflight.get(worktreePath);
     if (cur && cur.requestId === requestId) inflight.delete(worktreePath);
+    notifyWindows({
+      type: result.error ? 'error' : result.cancelled ? 'cancelled'
+        : result.findingsCount ? 'findings' : 'passed',
+      worktreePath,
+      wtName,
+      findingsCount: result.findingsCount || 0,
+      lintErrors: result.lintErrors || 0,
+      error: result.error || null,
+    });
   });
-  return promise;
+  return combined;
 }
 
 // Cancel an in-flight check for a worktree (the renderer's Skip button).
