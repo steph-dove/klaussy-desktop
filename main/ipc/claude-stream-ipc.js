@@ -42,6 +42,10 @@ const {
   getImplementSnapshot, getActiveImplementByWorktree,
   implementPtySessions,
 } = require('../state/pr-implement-pty');
+const {
+  startOrAttachChat, writeChat, resizeChat, cancelChat,
+  getChatSnapshot, chatActiveForWorktree, chatKeyFor,
+} = require('../state/pr-chat-pty');
 
 // requestId -> Set<WebContents> currently attached to that run's xterm. A run
 // can be viewed by 0..N surfaces (main window + pop-out, or none while
@@ -712,6 +716,129 @@ ipcMain.handle('pr-review-implement-resize', (_event, { requestId, cols, rows })
 ipcMain.handle('pr-review-implement-cancel', (_event, { requestId }) => {
   if (!requestId) return { ok: false };
   return cancelImplementPty(requestId);
+});
+
+// ---- Persistent PR-aware terminal chat (Terminal tab) ----
+//
+// One long-lived agent session per PR worktree, seeded with the PR context so
+// the reviewer can just start chatting about the change. Distinct from the
+// per-finding 'pr-review-chat-start' below (that's a stateless one-finding
+// discussion); this is the always-on terminal. Output fans out to every
+// attached surface (main + pop-out) keyed by the worktree-derived chatKey.
+const tchatSubscribers = new Map();
+function tchatSubs(chatKey) {
+  let set = tchatSubscribers.get(chatKey);
+  if (!set) { set = new Set(); tchatSubscribers.set(chatKey, set); }
+  return set;
+}
+function broadcastToTchatSubs(chatKey, channel, payload) {
+  const set = tchatSubscribers.get(chatKey);
+  if (!set) return;
+  for (const wc of [...set]) {
+    if (!wc || wc.isDestroyed()) { set.delete(wc); continue; }
+    try { wc.send(channel, payload); } catch {}
+  }
+}
+
+// One-time context the chat agent is seeded with. Tells it which PR it's
+// looking at and where to find the diff; the agent runs the git commands
+// itself (keeps the seed small even for huge PRs).
+function buildChatSeedPrompt() {
+  const a = prReview.active;
+  const meta = (a && a.meta) || {};
+  const base = meta.baseRefName || 'the base branch';
+  const head = meta.headRefName || 'this branch';
+  const num = (a && a.number) || meta.number || '';
+  const title = meta.title || '';
+  let body = (meta.body || '').trim();
+  if (body.length > 1200) body = body.slice(0, 1200) + '\n...(truncated)';
+  const lines = [];
+  lines.push(`I'm reviewing pull request #${num}${title ? `: "${title}"` : ''}.`);
+  lines.push(`It merges ${head} into ${base}, and that branch is checked out in this worktree.`);
+  if (body) lines.push(`\nPR description:\n${body}`);
+  lines.push(`\nTo see the change: \`git diff ${base}...HEAD\` for the full diff, \`git diff --stat ${base}...HEAD\` for the file list, \`git log ${base}..HEAD --oneline\` for the commits. Read whatever files you need for context.`);
+  lines.push(`\nI'll ask you questions about this PR. Keep answers short and direct, like a colleague at a desk. Don't commit or push. Wait for my first question, a one-line "ready" is enough to start.`);
+  return lines.join('\n');
+}
+
+ipcMain.handle('pr-review-tchat-start', async (event, { provider } = {}) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+  if (prReview.active) prReview.active.worktreePath = ensured.worktreePath;
+
+  const chatProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
+  const sender = event.sender;
+
+  // chatKey is deterministic from the worktree, so we can compute the channel
+  // names up front (and they line up on re-attach). Subscribe BEFORE spawning
+  // so we don't miss the agent's first bytes.
+  const chatKey = chatKeyFor(ensured.worktreePath);
+  const dataChannel = `pr-review-tchat-data-${chatKey}`;
+  const exitChannel = `pr-review-tchat-exit-${chatKey}`;
+  tchatSubs(chatKey).add(sender);
+  sender.once('destroyed', () => {
+    const set = tchatSubscribers.get(chatKey);
+    if (set) set.delete(sender);
+  });
+
+  const result = startOrAttachChat({
+    worktreePath: ensured.worktreePath,
+    provider: chatProvider,
+    seedPrompt: buildChatSeedPrompt(),
+    onData: (data) => broadcastToTchatSubs(chatKey, dataChannel, data),
+    onExit: (info) => {
+      broadcastToTchatSubs(chatKey, exitChannel, info);
+      tchatSubscribers.delete(chatKey);
+    },
+  });
+  if (result.cancelled) { tchatSubs(chatKey).delete(sender); return { cancelled: true }; }
+  if (result.error) { tchatSubs(chatKey).delete(sender); return { error: result.error }; }
+  return { ok: true, chatKey, worktreePath: ensured.worktreePath, already: !!result.already, provider: chatProvider };
+});
+
+// (Re)attach a surface: register it and hand back the buffered scrollback +
+// status so it can repaint a session it didn't start (pop-out, remount).
+ipcMain.handle('pr-review-tchat-attach', (event, { chatKey } = {}) => {
+  if (!chatKey) return { found: false };
+  const snap = getChatSnapshot(chatKey);
+  if (!snap.found) return { found: false };
+  const sender = event.sender;
+  tchatSubs(chatKey).add(sender);
+  sender.once('destroyed', () => {
+    const set = tchatSubscribers.get(chatKey);
+    if (set) set.delete(sender);
+  });
+  return { found: true, live: snap.live, status: snap.status, buffer: snap.buffer };
+});
+
+ipcMain.handle('pr-review-tchat-detach', (event, { chatKey } = {}) => {
+  if (!chatKey) return { ok: false };
+  const set = tchatSubscribers.get(chatKey);
+  if (set) set.delete(event.sender);
+  return { ok: true };
+});
+
+// Discover a backgrounded chat for the active PR so a fresh surface can find
+// the session it didn't start.
+ipcMain.handle('pr-review-tchat-active', () => {
+  if (!prReview.active || !prReview.active.worktreePath) return { active: null };
+  return { active: chatActiveForWorktree(prReview.active.worktreePath) };
+});
+
+ipcMain.handle('pr-review-tchat-input', (_event, { chatKey, data } = {}) => {
+  if (!chatKey || typeof data !== 'string') return { error: 'Bad args' };
+  return writeChat(chatKey, data);
+});
+
+ipcMain.handle('pr-review-tchat-resize', (_event, { chatKey, cols, rows } = {}) => {
+  if (!chatKey) return { error: 'Bad args' };
+  return resizeChat(chatKey, cols, rows);
+});
+
+ipcMain.handle('pr-review-tchat-cancel', (_event, { chatKey } = {}) => {
+  if (!chatKey) return { ok: false };
+  return cancelChat(chatKey);
 });
 
 // Discuss a finding with Claude inline — the renderer's "Ask Claude" chat
@@ -1416,17 +1543,43 @@ After: "Leaks a connection if the request times out. Wrap the close in a defer."
 
 ## IMPORTANT: Output
 
-Do NOT write any files. Output the final review directly as your response to this prompt. The user will read it from your stdout.
+Do NOT write any files. Output the final review directly as your response. The UI parses your output into cards, so the shape matters.
 
-Structure the final response EXACTLY like this (the UI parses it into cards):
+Structure the final response EXACTLY like this. Emit the review as a SINGLE JSON object wrapped in literal markers:
 
-1. A short intro/context paragraph (optional).
-2. The literal marker \`<FINDINGS>\` on its own line.
-3. Every review comment, each starting with its \`**[Severity: …]**\` line, in the comment format defined above.
-4. The literal marker \`</FINDINGS>\` on its own line.
-5. The final PR summary (**Overall verdict:**, highest-risk issues, etc.) AFTER the closing marker.
+<FINDINGS_JSON>
+{
+  "findings": [
+    {
+      "severity": "Blocker | High | Medium | Low | Warn | Nit",
+      "category": "Correctness | Concurrency | Design | Performance | Reliability | Security | Readability | Tests | Dependencies | Scope | Conventions",
+      "path": "repo-relative/path/to/file",
+      "line": 0,
+      "side": "RIGHT",
+      "title": "one short line summarizing the issue, no severity prefix",
+      "code": "the original code being reviewed, verbatim from the file, up to 10 lines",
+      "body": "the review comment, written in your own words as the reviewer. This is what gets posted to GitHub.",
+      "suggestion": "a concrete suggested change (prose or a code snippet), or omit if none"
+    }
+  ],
+  "summary": {
+    "verdict": "Approve | Request Changes | Block",
+    "highestRisk": ["short phrase", "short phrase"],
+    "testCoverage": "one short sentence on test coverage"
+  }
+}
+</FINDINGS_JSON>
 
-Do not put anything between the markers except the findings themselves. If there are zero findings, still emit both markers with nothing in between.`;
+Rules for the JSON (follow exactly, the parser is strict):
+
+- It must be valid JSON: double-quoted keys and string values, no trailing commas, no comments. Escape any newline or double-quote that appears inside a string value so the JSON stays parseable. You may wrap the object in a json code fence; the parser accepts it with or without one.
+- path and line place the inline comment on GitHub, so they must be accurate. line is the line number in the file CURRENT (post-change) state that the comment attaches to. If you are not confident of the exact line, set line to null and the comment posts as a general PR comment instead of an inline one. side is "RIGHT" for added or existing code, "LEFT" only for a removed line.
+- title is a short label shown on the card header. Do NOT repeat the severity or location in it.
+- body is the ONLY field posted to GitHub as the comment. Do NOT prefix it with the severity, location, category, or any bracketed header; those render from their own fields. Apply every Voice and style rule to it (no em dashes, no AI tells, terse, opinionated, first person where natural). Write it as if you are the human reviewer leaving the comment.
+- code is the original snippet the comment is about, quoted verbatim. Do NOT put your suggested fix in code; that goes in suggestion.
+- Sort findings by severity: Blocker, then High, Medium, Low, Warn, Nit.
+- If there are zero findings, emit an empty findings array and still fill in summary.
+- Output nothing after the closing marker.`;
 
 // Legacy config.prReviews cache was retired in favor of the file-per-PR cache
 

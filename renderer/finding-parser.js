@@ -5,8 +5,14 @@
 //
 // Parse strategy, most to least structured (memory: the parser has a history
 // of unreliability — the full-text fallback must always survive):
-//   1. <FINDINGS>…</FINDINGS> contract: the review template instructs the
-//      agent to wrap the findings list in literal markers. Inside the
+//   0. <FINDINGS_JSON> contract: the review template asks the agent to emit a
+//      single JSON object ({findings:[…], summary:{…}}) wrapped in literal
+//      markers, optionally inside a ```json fence. This is the preferred path
+//      because each finding arrives as real fields (severity, path, line,
+//      title, body, suggestion) instead of being regex-scraped out of prose.
+//      Streaming-safe: while the JSON is still arriving we recover whatever
+//      complete finding objects exist so far and ignore the truncated tail.
+//   1. <FINDINGS>…</FINDINGS> contract: older marker format. Inside the
 //      markers, findings split on the `[Severity: …]` anchor; everything
 //      before the opening marker is preamble, after the closing marker is
 //      postamble. Streaming-safe: a missing closing marker treats the rest
@@ -15,6 +21,11 @@
 //      contracts often enough that this stays load-bearing).
 //   3. Single-card fallback: no anchors at all → the entire review renders
 //      as one preamble card.
+//
+// Findings are always returned as objects with a `structured` flag. JSON
+// findings carry real metadata fields; marker/text findings carry only
+// `{ structured:false, text }` and the renderer scrapes location/severity
+// out of `text` exactly as before. Only pr-review.js consumes `.findings`.
 
 window.FindingParser = (function () {
   // Strip em/en dashes outside of fenced and inline code. Em dash is the
@@ -83,11 +94,159 @@ window.FindingParser = (function () {
     return { preamble: preamble, findings: filterJunk(findings), postamble: postamble };
   }
 
+  // Wrap a legacy (marker/text) finding string in the common object shape so
+  // every code path returns the same kind of thing. The renderer still scrapes
+  // location and severity out of `.text` for these.
+  function legacyFinding(text) { return { structured: false, text: text }; }
+
+  // ---- Stage 0: structured JSON contract ----
+
+  // Pull complete top-level `{…}` objects out of a (possibly truncated) JSON
+  // array body. String-aware brace matching so braces inside string values
+  // (code snippets) don't throw off the depth count. A trailing incomplete
+  // object is simply dropped — that's what makes streaming safe.
+  function extractObjectSources(body) {
+    var objs = [];
+    var depth = 0, start = -1, inStr = false, esc = false;
+    for (var i = 0; i < body.length; i++) {
+      var ch = body[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') { inStr = true; }
+      else if (ch === '{') { if (depth === 0) start = i; depth++; }
+      else if (ch === '}') { depth--; if (depth === 0 && start !== -1) { objs.push(body.slice(start, i + 1)); start = -1; } }
+    }
+    return objs;
+  }
+
+  function coerceSeverity(s) {
+    var v = String(s == null ? '' : s).trim().toLowerCase();
+    if (v === 'critical') return 'blocker';
+    if (v === 'info' || v === 'note' || v === 'nitpick') return 'nit';
+    if (v === 'warning') return 'warn';
+    return v;
+  }
+
+  function looksLikeCode(s) {
+    if (!s) return false;
+    if (/\n/.test(s)) return true;
+    return /[{};()=<>]|=>|::|\bfunction\b|\bconst\b|\breturn\b|\bif\b/.test(s);
+  }
+
+  // The text that actually posts to the PR: the prose body, then an optional
+  // "Suggested change" block. No severity/location/category headers — those
+  // are card metadata, not comment content. Keeping them out is what makes the
+  // posted comment read like a person wrote it.
+  function composeFindingText(obj) {
+    var body = String(obj.body == null ? '' : obj.body).trim();
+    var suggestion = String(obj.suggestion == null ? '' : obj.suggestion).trim();
+    if (!suggestion) return body;
+    var block = looksLikeCode(suggestion)
+      ? '```\n' + suggestion.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```$/, '') + '\n```'
+      : suggestion;
+    return (body ? body + '\n\n' : '') + 'Suggested change:\n\n' + block;
+  }
+
+  function normalizeJsonFinding(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    var text = composeFindingText(obj);
+    var title = String(obj.title == null ? '' : obj.title).trim();
+    if (!text.trim() && !title) return null;
+    var line = null;
+    if (typeof obj.line === 'number' && isFinite(obj.line)) line = obj.line;
+    else if (typeof obj.line === 'string' && /^\d+$/.test(obj.line.trim())) line = parseInt(obj.line, 10);
+    var side = String(obj.side == null ? '' : obj.side).trim().toUpperCase();
+    if (side !== 'LEFT' && side !== 'RIGHT') side = 'RIGHT';
+    return {
+      structured: true,
+      text: text,
+      title: title,
+      severity: coerceSeverity(obj.severity),
+      category: String(obj.category == null ? '' : obj.category).trim(),
+      path: obj.path ? String(obj.path).trim() : null,
+      line: line,
+      side: side,
+      code: String(obj.code == null ? '' : obj.code),
+      suggestion: String(obj.suggestion == null ? '' : obj.suggestion),
+    };
+  }
+
+  function normalizeSummary(s) {
+    if (!s || typeof s !== 'object') return null;
+    var risks = Array.isArray(s.highestRisk) ? s.highestRisk
+              : Array.isArray(s.highest_risk) ? s.highest_risk : [];
+    var verdict = String(s.verdict == null ? '' : s.verdict).trim();
+    var coverage = String((s.testCoverage != null ? s.testCoverage : s.test_coverage) || '').trim();
+    if (!verdict && !risks.length && !coverage) return null;
+    return { verdict: verdict, highestRisk: risks.map(String), testCoverage: coverage };
+  }
+
+  // Locate the <FINDINGS_JSON> block, tolerate an optional ```json fence and
+  // truncated/streaming content. Returns { findings:[normalized], summary } or
+  // null when there's no recoverable JSON contract.
+  function parseJsonContract(text) {
+    var open = text.indexOf('<FINDINGS_JSON>');
+    if (open === -1) return null;
+    var rest = text.slice(open + '<FINDINGS_JSON>'.length);
+    var close = rest.indexOf('</FINDINGS_JSON>');
+    var inner = close !== -1 ? rest.slice(0, close) : rest;
+    // Strip a leading ```json fence and a trailing ``` (closing fence may not
+    // have streamed in yet).
+    inner = inner.replace(/^\s*```[a-zA-Z0-9_-]*\s*/, '');
+    var fenceEnd = inner.lastIndexOf('```');
+    if (fenceEnd !== -1) inner = inner.slice(0, fenceEnd);
+    inner = inner.trim();
+    if (!inner) return { findings: [], summary: null };
+
+    var rawFindings = null;
+    var summary = null;
+    try {
+      var parsed = JSON.parse(inner);
+      if (Array.isArray(parsed)) {
+        rawFindings = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        rawFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
+        summary = parsed.summary || null;
+      }
+    } catch (_) {
+      // Streaming / truncated: recover whatever complete finding objects exist.
+      var arrKey = inner.indexOf('"findings"');
+      var scanFrom = arrKey !== -1 ? inner.indexOf('[', arrKey) : inner.indexOf('[');
+      if (scanFrom !== -1) {
+        rawFindings = [];
+        var sources = extractObjectSources(inner.slice(scanFrom));
+        for (var i = 0; i < sources.length; i++) {
+          try { rawFindings.push(JSON.parse(sources[i])); } catch (_e) {}
+        }
+      }
+    }
+    if (!rawFindings) return null;
+    var findings = rawFindings.map(normalizeJsonFinding).filter(Boolean);
+    return { findings: findings, summary: normalizeSummary(summary) };
+  }
+
   function parseReviewFindings(text) {
-    if (!text) return { preamble: '', findings: [], postamble: '' };
+    var empty = { preamble: '', findings: [], postamble: '', structured: false, summary: null };
+    if (!text) return empty;
     text = sanitizeAiTone(text);
 
-    // Stage 1: delimited contract.
+    // Stage 0: structured JSON contract (preferred).
+    var json = parseJsonContract(text);
+    if (json && json.findings.length) {
+      return {
+        preamble: text.slice(0, text.indexOf('<FINDINGS_JSON>')).trim(),
+        findings: json.findings,
+        postamble: '',
+        structured: true,
+        summary: json.summary,
+      };
+    }
+
+    // Stage 1: delimited <FINDINGS> contract.
     var open = text.indexOf('<FINDINGS>');
     if (open !== -1) {
       var close = text.indexOf('</FINDINGS>', open);
@@ -100,11 +259,12 @@ window.FindingParser = (function () {
       var postamble = [inside.postamble, outerPost].filter(Boolean).join('\n\n');
       // A marker section with zero parsed findings still falls back cleanly:
       // everything lands in preamble/postamble and renders as text.
-      return { preamble: preamble, findings: inside.findings, postamble: postamble };
+      return { preamble: preamble, findings: inside.findings.map(legacyFinding), postamble: postamble, structured: false, summary: null };
     }
 
     // Stage 2 + 3: legacy anchors over the whole text / single-card fallback.
-    return splitOnSeverity(text);
+    var legacy = splitOnSeverity(text);
+    return { preamble: legacy.preamble, findings: legacy.findings.map(legacyFinding), postamble: legacy.postamble, structured: false, summary: null };
   }
 
   function severityOf(findingText) {

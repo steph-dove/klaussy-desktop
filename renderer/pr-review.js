@@ -112,6 +112,7 @@ window.PrReview = (function () {
     cancelled: false,
     worktreePath: null,         // where the implement IPCs will run
     findings: [],               // [{ id, text, severity, status, ignored, implementId, implementOut, implementError, usage }]
+    summary: null,              // { verdict, highestRisk[], testCoverage } from the structured JSON contract
     implementAllId: null,
     implementAllProgress: [],
     implementAllError: null,
@@ -137,6 +138,16 @@ window.PrReview = (function () {
   //   - hasContent flips true once the first byte has been written, so we
   //     can suppress the leading separator on the first-ever run.
   var reviewTerminal = null;
+
+  // The persistent PR-aware chat session that backs the Terminal tab. The
+  // default agent runs in the PR's worktree, seeded once with the PR context,
+  // and stays open so the reviewer can chat about the change. Keystrokes go
+  // here whenever no implement run is live; implement runs share the same
+  // xterm, separated by banners.
+  //
+  // Shape: { chatKey, worktreePath, status: 'starting'|'running'|'exited'|'error',
+  //          starting, unsubData, unsubExit }
+  var chatRun = null;
 
   // Re-attach bookkeeping: which PR we've already checked for a backgrounded
   // implement run (so we ask main at most once per PR per mount), and the
@@ -200,6 +211,9 @@ window.PrReview = (function () {
       cleanupImplementRun();
       implRun = null;
     }
+    // Detach the chat session too — it survives in the background like the
+    // implement run and re-attaches when this PR is reopened.
+    teardownChatRun();
     disposeReviewTerminal();
     if (hostEl) {
       hostEl.innerHTML = '';
@@ -255,6 +269,9 @@ window.PrReview = (function () {
         cleanupImplementRun();
         implRun = null;
       }
+      // Detach (don't kill) the previous PR's chat session — it keeps running
+      // for that worktree and re-attaches if the user reopens the PR.
+      teardownChatRun();
       disposeReviewTerminal();
       implReattachCheckedPr = null;
       // Don't cancel in-flight AI work for the previous PR — those agents
@@ -264,7 +281,7 @@ window.PrReview = (function () {
       // matches) and reset our own state for the new PR.
       aiReview = {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
-        worktreePath: null, findings: [],
+        worktreePath: null, findings: [], summary: null,
         implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
         implementAllUsage: null, usage: null,
       };
@@ -445,7 +462,7 @@ window.PrReview = (function () {
         if (!line.trim()) return;
         try { handleAiEvent(JSON.parse(line)); } catch (_) {}
       });
-      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      applyReviewParse();
       repaintAiReviewTab();
       rehydrateChatAgents();
 
@@ -463,7 +480,7 @@ window.PrReview = (function () {
             if (!line.trim()) continue;
             try { handleAiEvent(JSON.parse(line)); } catch (_) {}
           }
-          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          applyReviewParse();
           repaintAiReviewTab();
         });
         window.klaus.pr.onReviewAiDone(agentId, function (result) {
@@ -472,7 +489,7 @@ window.PrReview = (function () {
           aiReview.requestId = null;
           if (result && result.error) aiReview.error = result.error;
           if (result && result.cancelled) aiReview.cancelled = true;
-          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          applyReviewParse();
           repaintAiReviewTab();
           if (aiReview.finalText) saveAiReviewCache();
         });
@@ -519,7 +536,7 @@ window.PrReview = (function () {
         if (!line.trim()) return;
         try { handleAiEvent(JSON.parse(line)); } catch (_) {}
       });
-      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      applyReviewParse();
       aiReview.worktreePath = (agent.sourceContext && agent.sourceContext.worktreePath) || aiReview.worktreePath;
 
       if (agent.status === 'running') {
@@ -536,7 +553,7 @@ window.PrReview = (function () {
             if (!line.trim()) continue;
             try { handleAiEvent(JSON.parse(line)); } catch (_) {}
           }
-          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          applyReviewParse();
           repaintAiReviewTab();
         });
         window.klaus.pr.onReviewAiDone(agent.id, function (result) {
@@ -545,7 +562,7 @@ window.PrReview = (function () {
           aiReview.requestId = null;
           if (result && result.error) aiReview.error = result.error;
           if (result && result.cancelled) aiReview.cancelled = true;
-          reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+          applyReviewParse();
           repaintAiReviewTab();
           if (aiReview.finalText) saveAiReviewCache();
         });
@@ -1320,7 +1337,7 @@ window.PrReview = (function () {
     var cached = result.cached;
 
     aiReview.finalText = cached.finalText || '';
-    reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+    applyReviewParse();
     if (cached.findingState) {
       aiReview.findings.forEach(function (f) {
         var saved = cached.findingState[f.key];
@@ -1459,12 +1476,31 @@ window.PrReview = (function () {
   // per-card status (ignored, implementing, implemented) when the same
   // finding text reappears. Keying on the first-line snippet survives
   // chunk boundaries better than full-text equality.
+  // Single entry point for (re)parsing the accumulated review text: capture
+  // the structured summary (verdict / highest-risk / test coverage) when the
+  // JSON contract provides it, then reconcile the finding cards. Called on
+  // every stream chunk and on cache load.
+  function applyReviewParse() {
+    var parsed = parseReviewFindings(aiReview.finalText);
+    if (parsed.summary) aiReview.summary = parsed.summary;
+    reconcileFindings(parsed.findings);
+  }
+
   function reconcileFindings(parsedFindings) {
     var byKey = {};
     aiReview.findings.forEach(function (f) { byKey[f.key] = f; });
-    var next = parsedFindings.map(function (text, idx) {
-      var key = findingKey(text, idx);
-      var loc = parseLocation(text);
+    var next = parsedFindings.map(function (pf, idx) {
+      // Findings arrive as objects from the parser. Structured (JSON) findings
+      // carry real metadata fields; legacy (marker/text) findings carry only
+      // `{ structured:false, text }` and we scrape location/severity out of
+      // `text` exactly as before.
+      var structured = !!(pf && pf.structured);
+      var text = (pf && pf.text) || '';
+      var key = structured ? structuredFindingKey(pf, idx) : findingKey(text, idx);
+      // For structured findings the location is given; for legacy we scrape it.
+      var loc = structured
+        ? (pf.path && pf.line ? { path: pf.path, line: pf.line, snippet: '' } : null)
+        : parseLocation(text);
       var prev = byKey[key];
       if (prev) {
         // Preserve user edits across streaming re-parses: once the user has
@@ -1482,7 +1518,14 @@ window.PrReview = (function () {
         if (!userEdited) {
           prev.text = text;
           prev.originalText = text;
-          prev.severity = severityOf(text);
+          prev.severity = structured ? pf.severity : severityOf(text);
+          if (structured) {
+            prev.title = pf.title;
+            prev.category = pf.category;
+            prev.code = pf.code;
+            prev.suggestion = pf.suggestion;
+            prev.side = pf.side || 'RIGHT';
+          }
           if (loc && !prev.locationVerified) {
             prev.path = loc.path;
             prev.line = loc.line;
@@ -1501,7 +1544,14 @@ window.PrReview = (function () {
         // restore the original, and so we know whether the user edited.
         originalText: text,
         textEditing: false,
-        severity: severityOf(text),
+        severity: structured ? pf.severity : severityOf(text),
+        // Structured-finding metadata (undefined for legacy findings — the
+        // renderer treats their absence as "legacy card").
+        structured: structured,
+        title: structured ? pf.title : '',
+        category: structured ? pf.category : '',
+        code: structured ? pf.code : '',
+        suggestion: structured ? pf.suggestion : '',
         status: 'open',
         implementId: null,
         implementOut: '',
@@ -1515,7 +1565,7 @@ window.PrReview = (function () {
         // for comments about deleted code, rare for a review.
         path: loc ? loc.path : null,
         line: loc ? loc.line : null,
-        side: 'RIGHT',
+        side: structured ? (pf.side || 'RIGHT') : 'RIGHT',
         locationRaw: loc,
         locationVerified: false,
         // Post mode: 'inline' if we have a verified file+line (draft review
@@ -1553,6 +1603,16 @@ window.PrReview = (function () {
     // the index so keys are still stable for unparseable findings.
     var firstLine = (text || '').split('\n').find(function (l) { return l.trim(); }) || '';
     return idx + '|' + firstLine.slice(0, 80);
+  }
+
+  // Stable key for a structured finding. Title + path:line is far more stable
+  // across streaming re-parses (and cache reloads) than scraping the first
+  // prose line, since the prose body grows chunk by chunk while the title and
+  // location are fixed once the object closes.
+  function structuredFindingKey(pf, idx) {
+    var anchor = (pf.title || '').slice(0, 80) || (pf.text || '').split('\n')[0].slice(0, 80);
+    var loc = pf.path ? pf.path + ':' + (pf.line || '') : '';
+    return idx + '|' + anchor + '|' + loc;
   }
 
   // Normalize a line for fuzzy matching. The snippet in a finding often
@@ -1635,7 +1695,10 @@ window.PrReview = (function () {
           repaintAiReviewTab();
           return;
         }
-        var snippet = firstCodeBlock(f.text) || (f.locationRaw && f.locationRaw.snippet) || '';
+        // Structured findings carry the original code verbatim in `f.code`;
+        // legacy findings only have a fenced block pasted into the prose. Use
+        // whichever exists as the snippet source.
+        var snippet = f.code || firstCodeBlock(f.text) || (f.locationRaw && f.locationRaw.snippet) || '';
         // Build candidate list from the fenced code block lines + the
         // location-hint snippet. Considered together (not in priority order)
         // so a tangential first-line match doesn't pre-empt a more relevant
@@ -1799,46 +1862,82 @@ window.PrReview = (function () {
     }
 
     return '<div class="pr-ai-tab pr-ai-' + status + '">'
-      + localBlock + head + progress + implementAllSummary + implementAllError + body
+      + localBlock + head + renderReviewSummary() + progress + implementAllSummary + implementAllError + body
     + '</div>';
   }
 
-  function renderImplementTerminalChrome() {
-    var statusLabel;
-    var statusClass = '';
-    if (!implRun) { statusLabel = 'Idle — no run in progress'; statusClass = ''; }
-    else if (implRun.status === 'done') { statusLabel = 'Done'; statusClass = 'done'; }
-    else if (implRun.status === 'error') { statusLabel = 'Error'; statusClass = 'error'; }
-    else if (implRun.status === 'cancelled') { statusLabel = 'Cancelled'; statusClass = ''; }
-    else { statusLabel = 'Running…'; }
+  // Verdict banner from the structured summary: Approve / Request Changes /
+  // Block, plus the highest-risk bullets and test-coverage note. Only renders
+  // once the review has finished and the JSON contract gave us a summary.
+  function renderReviewSummary() {
+    var s = aiReview.summary;
+    if (!s || aiReview.requestId) return '';
+    if (!s.verdict && (!s.highestRisk || !s.highestRisk.length) && !s.testCoverage) return '';
+    var verdictKey = (s.verdict || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-+|-+$/g, '');
+    var verdictCls = verdictKey.indexOf('block') === 0 ? 'block'
+      : verdictKey.indexOf('request') === 0 || verdictKey.indexOf('changes') !== -1 ? 'changes'
+      : verdictKey.indexOf('approve') === 0 ? 'approve'
+      : 'neutral';
+    var risks = (s.highestRisk || []).filter(Boolean);
+    return '<div class="pr-ai-verdict pr-ai-verdict-' + verdictCls + '">'
+      + '<div class="pr-ai-verdict-head">'
+        + (s.verdict ? '<span class="pr-ai-verdict-badge">' + escHtml(s.verdict) + '</span>' : '')
+        + (s.testCoverage ? '<span class="pr-ai-verdict-coverage">Tests: ' + escHtml(s.testCoverage) + '</span>' : '')
+      + '</div>'
+      + (risks.length
+          ? '<ol class="pr-ai-verdict-risks">'
+              + risks.map(function (r) { return '<li>' + escHtml(r) + '</li>'; }).join('')
+            + '</ol>'
+          : '')
+    + '</div>';
+  }
+
+  // Chrome above the shared xterm. Shows the chat session's status, plus the
+  // implement run's status when one exists, and the controls for whichever is
+  // relevant. The host ids are unchanged so mountImplementTerminalIfActive can
+  // re-parent the live xterm into the body.
+  function renderTerminalChrome() {
+    var chips = [];
+    var chatLabel = !chatRun || chatRun.starting ? 'Starting chat…'
+      : chatRun.status === 'running' ? 'Chat ready'
+      : chatRun.status === 'exited' ? 'Chat ended'
+      : chatRun.status === 'error' ? 'Chat unavailable'
+      : 'Chat';
+    var chatCls = (chatRun && chatRun.status === 'running') ? 'running'
+      : (chatRun && chatRun.status === 'error') ? 'error' : '';
+    var dot = (chatRun && chatRun.status === 'running') ? '● ' : '';
+    chips.push('<span class="pr-term-chip pr-term-chip-chat ' + chatCls + '">' + dot + escHtml(chatLabel) + '</span>');
+    if (implRun) {
+      var implLabel = implRunIsLive() ? 'Implementing…'
+        : implRun.status === 'done' ? 'Implement done'
+        : implRun.status === 'error' ? 'Implement error'
+        : implRun.status === 'cancelled' ? 'Implement cancelled'
+        : 'Implement';
+      chips.push('<span class="pr-term-chip pr-term-chip-impl ' + escHtml(implRun.status || '') + '">' + escHtml(implLabel) + '</span>');
+    }
     var ctaButtons = '';
     if (implRunIsLive()) {
-      ctaButtons += '<button class="pr-implement-cancel pr-review-btn" type="button">Cancel</button>';
+      ctaButtons += '<button class="pr-implement-cancel pr-review-btn" type="button">Stop implement</button>';
     }
-    // Hide terminal: always available while no run is live, so the user
-    // can clear the persistent scrollback between or after runs.
-    if (!implRunIsLive()) {
-      ctaButtons += '<button class="pr-implement-dismiss pr-review-btn" type="button">Hide terminal</button>';
+    if (chatRun && (chatRun.status === 'exited' || chatRun.status === 'error')) {
+      ctaButtons += '<button class="pr-tchat-restart pr-review-btn" type="button">Restart chat</button>';
     }
     return '<div class="pr-implement-terminal" id="pr-implement-terminal-host">'
       + '<div class="pr-implement-terminal-head">'
-        + '<span class="pr-implement-status ' + statusClass + '">' + escHtml(statusLabel) + '</span>'
+        + '<span class="pr-term-chips">' + chips.join('') + '</span>'
         + ctaButtons
       + '</div>'
       + '<div class="pr-implement-terminal-body"></div>'
     + '</div>';
   }
 
-  // Body of the Terminal tab. The xterm persists across implement runs
-  // (reviewTerminal); the chrome row shows the status of the most recent
-  // run. Empty-state only when no run has ever been started — the
-  // tab is always present so users can navigate to it predictably.
+  // Body of the Terminal tab. Always renders the live terminal host — the tab
+  // is an always-on chat with the default agent (seeded with the PR context),
+  // and implement runs stream into the same xterm, separated by banners. The
+  // chat session itself is started lazily by ensureChatSession when the tab is
+  // shown.
   function renderTerminalTab() {
-    if (reviewTerminal) return renderImplementTerminalChrome();
-    return '<div class="pr-terminal-empty">'
-      + '<div class="pr-terminal-empty-title">No agent run in progress</div>'
-      + '<div class="pr-terminal-empty-hint">Click <b>Implement</b> on a finding in the Review tab to start an agent session here.</div>'
-    + '</div>';
+    return renderTerminalChrome();
   }
 
   // Tiny badge next to the "Terminal" tab label while a run is in flight.
@@ -2072,6 +2171,45 @@ window.PrReview = (function () {
     });
   }
 
+  // Severity → display label. Keeps the chip text tidy regardless of how the
+  // agent cased it.
+  var SEV_LABELS = {
+    blocker: 'Blocker', high: 'High', medium: 'Medium',
+    low: 'Low', warn: 'Warn', nit: 'Nit',
+  };
+
+  // Header row for a structured finding: severity chip, category, title, and a
+  // location chip. Legacy (marker/text) findings render their own bracketed
+  // headers inside the prose, so this returns nothing for them to avoid
+  // doubling up.
+  function renderFindingHeader(f) {
+    if (!f.structured) return '';
+    var sev = (f.severity || '').toLowerCase();
+    var sevLabel = SEV_LABELS[sev] || (f.severity ? f.severity : 'Note');
+    var chip = '<span class="pr-ai-finding-chip pr-ai-finding-chip-' + (sev ? sev.replace(/\s+/g, '-') : 'note') + '">'
+      + escHtml(sevLabel) + '</span>';
+    var cat = f.category
+      ? '<span class="pr-ai-finding-cat">' + escHtml(f.category) + '</span>'
+      : '';
+    var title = f.title
+      ? '<span class="pr-ai-finding-title-text">' + escHtml(f.title) + '</span>'
+      : '';
+    var locChip = '';
+    if (f.path && f.line) {
+      var verified = f.postMode === 'inline' && f.locationVerified;
+      locChip = '<span class="pr-ai-finding-loc' + (verified ? ' verified' : '') + '"'
+        + ' title="' + escHtml(verified ? 'Will post as an inline comment here' : 'Location not verified yet — may post as a general comment') + '">'
+        + escHtml(f.path.split('/').pop()) + ':' + f.line
+      + '</span>';
+    } else if (f.path) {
+      locChip = '<span class="pr-ai-finding-loc">' + escHtml(f.path.split('/').pop()) + '</span>';
+    }
+    return '<div class="pr-ai-finding-head-row">'
+      + '<span class="pr-ai-finding-head-left">' + chip + cat + title + '</span>'
+      + locChip
+    + '</div>';
+  }
+
   function renderFindingCard(f) {
     var sevCls = f.severity ? ' pr-ai-finding-sev-' + f.severity.replace(/\s+/g, '-') : '';
     var statusCls = f.ignored ? ' ignored'
@@ -2243,7 +2381,8 @@ window.PrReview = (function () {
         preText = preText.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
       }
 
-      bodyHtml = '<div class="pr-ai-finding-body">'
+      bodyHtml = renderFindingHeader(f)
+        + '<div class="pr-ai-finding-body">'
         + (preText ? renderMarkdown(preText) : '')
         + originalSnippetHtml
         + (postText ? renderMarkdown(postText) : '')
@@ -2387,7 +2526,7 @@ window.PrReview = (function () {
       }
       aiReview = {
         requestId: null, finalText: '', progress: [], error: null, cancelled: false,
-        worktreePath: aiReview.worktreePath, findings: [],
+        worktreePath: aiReview.worktreePath, findings: [], summary: null,
         implementAllId: null, implementAllProgress: [], implementAllError: null, implementAllSummary: null,
         implementAllUsage: null, usage: null,
       };
@@ -2617,16 +2756,25 @@ window.PrReview = (function () {
     });
     var fitAddon = new window.FitAddon.FitAddon();
     terminal.loadAddon(fitAddon);
-    // Always-current proxy: typed input goes to whichever run is active.
-    // When no run is in flight, keystrokes are dropped (the user is just
-    // scrolling through the log of a finished run).
+    // Always-current proxy: typed input goes to whichever session owns the
+    // terminal right now. A live implement run takes priority; otherwise the
+    // persistent chat session gets the keystrokes. Both share this one xterm.
     terminal.onData(function (data) {
-      if (!implRun) return;
-      window.klaus.pr.reviewImplementInput(implRun.requestId, data);
+      if (implRun && implRunIsLive()) {
+        window.klaus.pr.reviewImplementInput(implRun.requestId, data);
+      } else if (chatRun && chatRun.chatKey && chatRun.status === 'running') {
+        window.klaus.pr.reviewTchatInput(chatRun.chatKey, data);
+      }
     });
     terminal.onResize(function (size) {
-      if (!implRun) return;
-      window.klaus.pr.reviewImplementResize(implRun.requestId, size.cols, size.rows);
+      // Keep both PTYs sized to the shared xterm so neither wraps oddly when it
+      // next takes focus.
+      if (implRun && implRunIsLive()) {
+        window.klaus.pr.reviewImplementResize(implRun.requestId, size.cols, size.rows);
+      }
+      if (chatRun && chatRun.chatKey) {
+        window.klaus.pr.reviewTchatResize(chatRun.chatKey, size.cols, size.rows);
+      }
     });
     reviewTerminal = { terminal: terminal, fitAddon: fitAddon, hasContent: false };
     return reviewTerminal;
@@ -2638,6 +2786,91 @@ window.PrReview = (function () {
     reviewTerminal = null;
   }
 
+  // Drop this surface's subscription to the chat session. Does NOT kill the
+  // PTY — the session keeps running in the background so a pop-out / navigate-
+  // back can re-attach to it (same model as implement runs).
+  function teardownChatRun() {
+    if (!chatRun) return;
+    try { if (chatRun.unsubData) chatRun.unsubData(); } catch (_) {}
+    try { if (chatRun.unsubExit) chatRun.unsubExit(); } catch (_) {}
+    if (chatRun.chatKey) { try { window.klaus.pr.reviewTchatDetach(chatRun.chatKey); } catch (_) {} }
+    chatRun = null;
+  }
+
+  // Subscribe the shared xterm to a chat session's streams, then replay its
+  // buffered scrollback. Replaying via attach covers both the spawn gap (bytes
+  // emitted before this listener attached) and full re-attach on pop-out; the
+  // agent's TUI redraws full frames, so any overlap just repaints.
+  function subscribeChat(rt, chatKey) {
+    if (chatRun.unsubData) { try { chatRun.unsubData(); } catch (_) {} }
+    if (chatRun.unsubExit) { try { chatRun.unsubExit(); } catch (_) {} }
+    chatRun.unsubData = window.klaus.pr.onReviewTchatData(chatKey, function (chunk) {
+      if (!chatRun || chatRun.chatKey !== chatKey) return;
+      // Only one PTY paints the shared xterm at a time. While an implement run
+      // owns the terminal, drop chat bytes here so the two TUIs don't interleave
+      // and corrupt the display. The bytes stay in main's chat buffer; the chat
+      // TUI redraws a full frame on the user's next keystroke (and on the resize
+      // nudge fired when the implement run finishes), so nothing is lost.
+      if (implRun && implRunIsLive()) return;
+      try { rt.terminal.write(chunk); rt.hasContent = true; } catch (_) {}
+    });
+    chatRun.unsubExit = window.klaus.pr.onReviewTchatExit(chatKey, function () {
+      if (!chatRun || chatRun.chatKey !== chatKey) return;
+      chatRun.status = 'exited';
+      try { rt.terminal.write('\r\n\x1b[2m── chat session ended (Restart chat to resume) ──\x1b[0m\r\n'); } catch (_) {}
+      repaintTerminalTab();
+    });
+    window.klaus.pr.reviewTchatAttach(chatKey).then(function (a) {
+      if (!a || !a.found || !chatRun || chatRun.chatKey !== chatKey) return;
+      if (a.buffer) { try { rt.terminal.write(a.buffer); rt.hasContent = true; } catch (_) {} }
+      if (activeTab === 'terminal') {
+        mountImplementTerminalIfActive();
+        try { rt.fitAddon.fit(); } catch (_) {}
+      }
+    }).catch(function () {});
+  }
+
+  // Ensure the persistent chat session exists for the active PR. Starting it
+  // provisions the PR's worktree if needed (same on-demand checkout as
+  // implement), then seeds the agent with the PR context. Idempotent: a
+  // running/starting session is left alone; a re-mount with a backgrounded
+  // session re-attaches via the `already` flag. `force` restarts after an
+  // exit/error (the Restart chat button).
+  function ensureChatSession(force) {
+    if (!lastState) return;
+    if (!window.klaus.pr.reviewTchatStart) return; // stale preload
+    if (chatRun && chatRun.starting) return;
+    if (chatRun && chatRun.status === 'running' && !force) return;
+    if (chatRun && (chatRun.status === 'error') && !force) return; // don't auto-retry a failed start
+    var rt = ensureReviewTerminal();
+    if (chatRun) teardownChatRun();
+    chatRun = { chatKey: null, worktreePath: null, status: 'starting', starting: true, unsubData: null, unsubExit: null };
+    repaintTerminalTab();
+    var agent = window.AgentSplit && AgentSplit.getAgent();
+    window.klaus.pr.reviewTchatStart(agent).then(function (r) {
+      if (!chatRun) return; // torn down (PR switched) while starting
+      chatRun.starting = false;
+      if (!r || r.error || r.cancelled) {
+        chatRun.status = 'error';
+        var msg = (r && r.error) ? r.error : (r && r.cancelled) ? 'Agent access was declined.' : 'Could not start the chat session.';
+        try { rt.terminal.write('\r\n\x1b[31m' + msg + '\x1b[0m\r\n'); rt.hasContent = true; } catch (_) {}
+        repaintTerminalTab();
+        return;
+      }
+      chatRun.chatKey = r.chatKey;
+      chatRun.worktreePath = r.worktreePath;
+      chatRun.status = 'running';
+      subscribeChat(rt, r.chatKey);
+      repaintTerminalTab();
+    }).catch(function (err) {
+      if (!chatRun) return;
+      chatRun.starting = false;
+      chatRun.status = 'error';
+      try { rt.terminal.write('\r\n\x1b[31m' + ((err && err.message) || 'Chat failed to start') + '\x1b[0m\r\n'); } catch (_) {}
+      repaintTerminalTab();
+    });
+  }
+
   // ANSI-bold cyan banner between runs so the scrollback is scannable.
   function writeRunSeparator(label) {
     if (!reviewTerminal) return;
@@ -2647,30 +2880,39 @@ window.PrReview = (function () {
     reviewTerminal.hasContent = true;
   }
 
-  // Re-parent the live xterm element back into the host. The xterm
-  // instance outlives innerHTML rewrites because we hold the JS
-  // reference in reviewTerminal; we just need to move its DOM back.
+  // Mount the shared xterm into the Terminal-tab host and make sure the
+  // persistent chat session is running. Creates the xterm on first call (so the
+  // tab is a live terminal even before any implement run), re-parents it on
+  // subsequent repaints, and (re-)binds the chrome buttons.
   function mountImplementTerminalIfActive() {
-    if (!reviewTerminal) return;
-    var host = hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-body');
+    var host = hostEl && hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-body');
+    // No host means the Terminal tab isn't on screen — don't provision a
+    // worktree / start the agent just because some background repaint ran.
     if (!host) return;
-    var term = reviewTerminal.terminal;
-    if (term.element && term.element.parentElement === host) return;
-    if (term.element) {
+    // Tab is visible: make sure the persistent chat session is running. This is
+    // what makes the terminal "always open with the default agent". Idempotent
+    // after the first start.
+    ensureChatSession();
+    var rt = ensureReviewTerminal();
+    var term = rt.terminal;
+    if (term.element && term.element.parentElement === host) {
+      // Already mounted here; still rebind buttons below (chrome re-rendered).
+    } else if (term.element) {
       host.appendChild(term.element);
+      try { rt.fitAddon.fit(); } catch (_) {}
     } else {
       // First mount — xterm.open creates the element under the host.
       term.open(host);
+      try { rt.fitAddon.fit(); } catch (_) {}
     }
-    try { reviewTerminal.fitAddon.fit(); } catch (_) {}
-    // The cancel/dismiss/mark-done buttons live in the chrome row which
-    // gets re-rendered every repaint, so re-bind here.
+    // The control buttons live in the chrome row which gets re-rendered every
+    // repaint, so re-bind here.
     var hostRow = hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-head');
     if (hostRow) {
       var cancelBtn = hostRow.querySelector('.pr-implement-cancel');
       if (cancelBtn) cancelBtn.addEventListener('click', cancelImplementRun);
-      var dismissBtn = hostRow.querySelector('.pr-implement-dismiss');
-      if (dismissBtn) dismissBtn.addEventListener('click', dismissImplementRun);
+      var restartBtn = hostRow.querySelector('.pr-tchat-restart');
+      if (restartBtn) restartBtn.addEventListener('click', function () { ensureChatSession(true); });
     }
   }
 
@@ -2792,6 +3034,7 @@ window.PrReview = (function () {
     var requestId = 'air-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     aiReview.requestId = requestId;
     aiReview.finalText = '';
+    aiReview.summary = null;
     aiReview.progress = [{ kind: 'system', label: 'Preparing worktree\u2026' }];
     aiReview.error = null;
     aiReview.cancelled = false;
@@ -2812,7 +3055,7 @@ window.PrReview = (function () {
         if (!line.trim()) continue;
         try { handleAiEvent(JSON.parse(line)); } catch (_) {}
       }
-      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      applyReviewParse();
       repaintAiReviewTab();
     });
     window.klaus.pr.onReviewAiDone(requestId, function (result) {
@@ -2821,7 +3064,7 @@ window.PrReview = (function () {
       aiReview.requestId = null;
       if (result && result.error) aiReview.error = result.error;
       if (result && result.cancelled) aiReview.cancelled = true;
-      reconcileFindings(parseReviewFindings(aiReview.finalText).findings);
+      applyReviewParse();
       repaintAiReviewTab();
       // Persist as soon as we have any content (even partial / cancelled —
       // user may still want to revisit the partial findings).
@@ -3033,6 +3276,30 @@ window.PrReview = (function () {
     // (e.g. claude's interactive prompt is hanging after end_turn). Cancel
     // is idempotent — if the PTY already exited it's a no-op.
     try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
+    // The chat session's output was suppressed while this run owned the
+    // terminal (subscribeChat drops bytes when implRunIsLive). Now that the run
+    // is done, nudge the chat PTY with a resize so its TUI repaints a fresh
+    // frame at the bottom instead of waiting for the user's next keystroke.
+    nudgeChatRedraw();
+  }
+
+  // Force the chat TUI to repaint by toggling its PTY size (two SIGWINCHes).
+  // Used after an implement run releases the shared terminal. No-op when there's
+  // no live chat session or the terminal tab isn't on screen.
+  function nudgeChatRedraw() {
+    if (!chatRun || chatRun.status !== 'running' || !chatRun.chatKey) return;
+    if (activeTab !== 'terminal' || !reviewTerminal) return;
+    var t = reviewTerminal.terminal;
+    var cols = t.cols, rows = t.rows;
+    if (!cols || !rows) return;
+    try {
+      window.klaus.pr.reviewTchatResize(chatRun.chatKey, Math.max(2, cols - 1), rows);
+      setTimeout(function () {
+        if (chatRun && chatRun.chatKey) {
+          try { window.klaus.pr.reviewTchatResize(chatRun.chatKey, cols, rows); } catch (_) {}
+        }
+      }, 60);
+    } catch (_) {}
   }
 
   function cleanupImplementRun() {
@@ -3147,13 +3414,11 @@ window.PrReview = (function () {
     }
     if (f.commentStatus === 'posting' || f.commentStatus === 'posted') return;
 
-    // Post the review block as-is. Prepend an "AI-generated" attribution
-    // only when the user hasn't edited the text — once they've rewritten it,
-    // the attribution is misleading.
-    var userEdited = f.originalText != null && f.text !== f.originalText;
-    var attributedBody = userEdited
-      ? f.text
-      : '> *AI-generated review finding (via Klaussy):*\n\n' + (f.text || '');
+    // Post the review block as the reviewer's own words. No bot attribution:
+    // the finding is theirs to stand behind, and the prompt already strips the
+    // AI tells (em dashes, filler, signposting) so it reads like a human wrote
+    // it. Whether or not they edited the text, it posts verbatim.
+    var attributedBody = f.text || '';
 
     if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
       pendingComments.push({
