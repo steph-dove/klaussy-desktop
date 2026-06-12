@@ -73,13 +73,13 @@ const cwd = process.argv[2] || process.cwd();
 let buf = '';
 // Hard ceiling: a wedged app must not hold commits hostage.
 const timer = setTimeout(() => {
-  console.error('[klaussy] silent-failure review timed out — committing without it');
+  console.error('[klaussy] pre-commit review timed out — committing without it');
   process.exit(0);
 }, 200000);
 sock.on('connect', () => {
   // Announce immediately — the review takes 30-60s and an unexplained pause
   // reads as a hang (or as "no check ran").
-  console.error('[klaussy] reviewing staged changes for silent failures (your agent is reading the diff)…');
+  console.error('[klaussy] pre-commit review running — silent failures · secrets · debug leftovers · landmines · lint (your agent is reading the staged diff)…');
   sock.write(JSON.stringify({ cwd }) + '\\n');
 });
 sock.on('data', (d) => { buf += d; });
@@ -88,18 +88,20 @@ sock.on('end', () => {
   let res;
   try { res = JSON.parse(buf); } catch { process.exit(0); }
   if (res.error) {
-    console.error('[klaussy] silent-failure review unavailable: ' + res.error);
+    console.error('[klaussy] pre-commit review unavailable: ' + res.error);
     process.exit(0);
   }
   if (res.skipped) process.exit(0);
   if (!res.findingsCount) {
     // Visible evidence on the clean path too — silence reads as "the check
     // never ran" (and the ~30-60s pause becomes inexplicable).
-    console.error('[klaussy] silent-failure review passed: no issues in the staged changes');
+    console.error('[klaussy] pre-commit review passed — no silent failures, secrets, or debug leftovers in the staged changes'
+      + (res.lintTool ? ' (' + res.lintTool + ' clean)' : ''));
     process.exit(0);
   }
   console.error('');
-  console.error('[klaussy] Silent-failure review found ' + res.findingsCount + ' issue(s) in the staged changes:');
+  console.error('[klaussy] Pre-commit review found ' + res.findingsCount + ' issue(s) in the staged changes'
+    + (res.lintErrors ? ' (' + res.lintErrors + ' from lint)' : '') + ':');
   console.error('');
   console.error(res.text);
   console.error('');

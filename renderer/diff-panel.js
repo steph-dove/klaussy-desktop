@@ -1443,7 +1443,7 @@ window.DiffPanel = (function () {
     var box = document.createElement('div');
     box.id = 'precommit-findings';
     box.innerHTML =
-      '<div class="precommit-findings-head">Silent-failure review found ' + count + ' issue' + (count === 1 ? '' : 's')
+      '<div class="precommit-findings-head">Pre-commit review found ' + count + ' issue' + (count === 1 ? '' : 's')
         + ' in the staged changes — fix them, or commit anyway.'
         + '<button type="button" class="precommit-findings-close" title="Dismiss">&times;</button></div>'
       + '<pre class="precommit-findings-body"></pre>';
@@ -1462,7 +1462,7 @@ window.DiffPanel = (function () {
     } catch (e) {
       // Can't read the pref → fail toward OFF: the review is a billed agent
       // run the user may have opted out of.
-      window.toast.warn('Could not read preferences — committing without the silent-failure review');
+      window.toast.warn('Could not read preferences — committing without the pre-commit review');
       return true;
     }
     if (prefs.preCommitReview === false) return true;
@@ -1495,11 +1495,11 @@ window.DiffPanel = (function () {
 
     if (!res || res.cancelled) return true; // skipped — user's call
     if (res.error) {
-      window.toast.warn('Silent-failure review unavailable (' + res.error + ') — committing without it');
+      window.toast.warn('Pre-commit review unavailable (' + res.error + ') — committing without it');
       return true;
     }
     if (res.skipped || !res.findingsCount) {
-      if (!res.skipped) window.toast.success('Silent-failure review: no issues in the staged changes');
+      if (!res.skipped) window.toast.success('Pre-commit review passed — silent failures, secrets, debug leftovers, landmines + lint all clean');
       return true;
     }
     renderPrecommitFindings(res.text, res.findingsCount);

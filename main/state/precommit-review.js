@@ -270,11 +270,12 @@ function runStagedCheck({ worktreePath, provider }) {
     const lintText = lintErrors
       ? '## Lint (' + lint.tool + '): ' + lintErrors + ' problem(s) in staged files\n\n```\n' + lint.output + '\n```'
       : '';
+    const lintTool = (lint && lint.tool) || null;
     if (agent.error || agent.cancelled || agent.skipped) {
       // Agent pass didn't produce findings — but real lint errors still count.
       if (lintErrors) {
         return { ...agent, error: undefined, cancelled: undefined, skipped: undefined,
-          text: lintText, findingsCount: lintErrors, lintErrors, agentUnavailable: agent.error || (agent.cancelled ? 'cancelled' : 'skipped') };
+          text: lintText, findingsCount: lintErrors, lintErrors, lintTool, agentUnavailable: agent.error || (agent.cancelled ? 'cancelled' : 'skipped') };
       }
       return agent;
     }
@@ -283,6 +284,7 @@ function runStagedCheck({ worktreePath, provider }) {
       text: (lintText ? lintText + '\n\n' : '') + (agent.text || ''),
       findingsCount: (agent.findingsCount || 0) + lintErrors,
       lintErrors,
+      lintTool,
     };
   })();
 
