@@ -2218,6 +2218,25 @@
     addTaskToUI(task);
   });
 
+  // A backgrounded PR-implement run wants attention (finished / errored /
+  // paused after a turn while no surface was attached). Toast it so the user
+  // knows to reopen the PR — works from any view, even the tasks layout.
+  if (window.klaus.pr.onImplementAttention) {
+    window.klaus.pr.onImplementAttention(function (ev) {
+      if (!ev || !window.toast) return;
+      var pr = ev.prNumber ? ('PR #' + ev.prNumber) : 'A PR';
+      if (ev.status === 'error') {
+        window.toast.warn(pr + ': background implement run hit an error — reopen the PR to view');
+      } else if (ev.status === 'cancelled') {
+        window.toast.info(pr + ': background implement run was cancelled');
+      } else if (ev.status === 'paused') {
+        window.toast.info(pr + ': implement agent finished a turn and may need your input — reopen the PR');
+      } else {
+        window.toast.success(pr + ': background implement run finished — reopen the PR to review');
+      }
+    });
+  }
+
   // Keep the main-window panel visibility in sync with main-process state
   // changes (e.g. the pop-out's "pop back in" button clears popout → we want
   // the main panel mounted again; prReviewClose from anywhere unmounts us).

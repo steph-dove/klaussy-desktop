@@ -35,10 +35,73 @@ const { beginSession } = require('../util/agent-concurrency');
 // the cancel IPC can look up the right PTY without leaking it across runs.
 const implementPtySessions = new Map();
 
+// requestId -> { buffer, status, worktreePath, at } for runs that have exited.
+// Retained briefly so a renderer that re-opens the PR right after a run
+// finishes can still repaint the final output. Pruned by TTL.
+const recentImplementRuns = new Map();
+
 const SESSION_DETECT_INTERVAL_MS = 250;
 const SESSION_DETECT_TIMEOUT_MS = 30000;
 const JSONL_TAIL_INTERVAL_MS = 300;
 const CANCEL_GRACE_MS = 2000;
+// Cap the replay buffer. Claude's interactive TUI redraws full frames, so the
+// tail always reconstructs the current screen even if the head was trimmed; a
+// resize-driven repaint on attach cleans up any residue. 1 MB is generous.
+const OUTPUT_BUFFER_CAP = 1024 * 1024;
+const RECENT_RUN_TTL_MS = 5 * 60 * 1000;
+
+function normWt(p) { return String(p || '').replace(/\/+$/, ''); }
+
+function appendToBuffer(session, data) {
+  session.outputBuffer += data;
+  if (session.outputBuffer.length > OUTPUT_BUFFER_CAP) {
+    session.outputBuffer = session.outputBuffer.slice(session.outputBuffer.length - OUTPUT_BUFFER_CAP);
+  }
+}
+
+// Live status of a session: cancelling > finished(done) > running.
+function liveStatus(session) {
+  if (session.cancelled) return 'cancelled';
+  if (session.finished) return 'done';
+  return 'running';
+}
+
+// Snapshot for a (re)attaching renderer: the buffered output + current status,
+// from the live session if it's still running, else the retained recent run.
+function getImplementSnapshot(requestId) {
+  const live = implementPtySessions.get(requestId);
+  if (live) {
+    return { found: true, live: true, status: liveStatus(live), buffer: live.outputBuffer, worktreePath: live.worktreePath };
+  }
+  const recent = recentImplementRuns.get(requestId);
+  if (recent && Date.now() - recent.at < RECENT_RUN_TTL_MS) {
+    return { found: true, live: false, status: recent.status, buffer: recent.buffer, worktreePath: recent.worktreePath };
+  }
+  return { found: false };
+}
+
+// Find the run (live preferred, else recent) for a given worktree so a fresh
+// renderer (e.g. a pop-out) can rediscover a run it didn't start.
+function getActiveImplementByWorktree(worktreePath) {
+  const wt = normWt(worktreePath);
+  for (const [requestId, s] of implementPtySessions) {
+    if (normWt(s.worktreePath) === wt) return { requestId, status: liveStatus(s), live: true };
+  }
+  let best = null;
+  for (const [requestId, r] of recentImplementRuns) {
+    if (normWt(r.worktreePath) === wt && Date.now() - r.at < RECENT_RUN_TTL_MS) {
+      if (!best || r.at > best.at) best = { requestId, status: r.status, live: false, at: r.at };
+    }
+  }
+  return best ? { requestId: best.requestId, status: best.status, live: false } : null;
+}
+
+function pruneRecentRuns() {
+  const now = Date.now();
+  for (const [k, r] of recentImplementRuns) {
+    if (now - r.at >= RECENT_RUN_TTL_MS) recentImplementRuns.delete(k);
+  }
+}
 
 // Tails one session .jsonl file forwards-only, dispatching the provider's
 // normalized events ({kind:'usage'|'tool'|'text'|'end_turn'}) back to `emit`.
@@ -229,14 +292,21 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
     stopJsonlTail: null,
     sessionId: null,
     finished: false,
+    cancelled: false,
     killTimer: null,
     promptSent: false,
+    // Re-attach support: a rolling copy of the raw PTY output so a renderer
+    // that remounts / pops out / refocuses can repaint without losing the run.
+    outputBuffer: '',
+    lastActivityAt: Date.now(),
   };
   implementPtySessions.set(requestId, session);
 
   let observedBytes = 0;
   ptyProc.onData((data) => {
     observedBytes += data.length;
+    appendToBuffer(session, data);
+    session.lastActivityAt = Date.now();
     onData(data);
   });
   ptyProc.onExit(({ exitCode, signal }) => {
@@ -245,8 +315,21 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
     if (session.stopJsonlTail) { try { session.stopJsonlTail(); } catch {} }
     try { fs.unlinkSync(promptFile); } catch {}
     authSlot.release(); // free the concurrency slot (Codex token-rotation guard)
+    // Retain the buffer + final status briefly so a re-opening renderer can
+    // still show the completed run. `finished` wins over `cancelled` because
+    // the renderer sends a cleanup Ctrl+C right after a normal end_turn — that
+    // shouldn't relabel a completed run as cancelled.
+    const finalStatus = session.finished ? 'done'
+      : session.cancelled ? 'cancelled'
+      : exitCode === 0 ? 'done' : 'error';
+    pruneRecentRuns();
+    recentImplementRuns.set(requestId, {
+      buffer: session.outputBuffer, status: finalStatus, worktreePath, at: Date.now(),
+    });
     implementPtySessions.delete(requestId);
-    if (!session.finished) onExit({ exitCode, signal });
+    // Always emit exit now (even on a "finished" run) so detached/re-attached
+    // renderers learn the PTY is gone; the renderer dedupes its own done state.
+    onExit({ exitCode, signal, status: finalStatus });
   });
 
   // Fallback paste: if the arg-form prompt didn't take after 15s and
@@ -328,6 +411,7 @@ function resizeImplementPty(requestId, cols, rows) {
 function cancelImplementPty(requestId) {
   const session = implementPtySessions.get(requestId);
   if (!session) return { error: 'Not found' };
+  session.cancelled = true;
   try {
     session.pty.write('\x03');
   } catch (err) {
@@ -350,5 +434,7 @@ module.exports = {
   writeImplementPty,
   resizeImplementPty,
   cancelImplementPty,
+  getImplementSnapshot,
+  getActiveImplementByWorktree,
   implementPtySessions,
 };

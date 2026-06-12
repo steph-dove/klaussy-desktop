@@ -336,6 +336,16 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('pr-review-implement-resize', { requestId, cols, rows }),
     reviewImplementCancel: (requestId) =>
       ipcRenderer.invoke('pr-review-implement-cancel', { requestId }),
+    // Re-attach a surface to a (possibly backgrounded) run; returns the
+    // buffered output + status to repaint. Detach leaves the run running.
+    reviewImplementAttach: (requestId) =>
+      ipcRenderer.invoke('pr-review-implement-attach', { requestId }),
+    reviewImplementDetach: (requestId) =>
+      ipcRenderer.invoke('pr-review-implement-detach', { requestId }),
+    // Discover a backgrounded run for the active PR (a fresh surface — e.g. a
+    // pop-out — uses this to find a run it didn't start).
+    reviewImplementActive: () =>
+      ipcRenderer.invoke('pr-review-implement-active'),
     reviewChatStart: (requestId, findingBody, messages, findingId, provider) =>
       ipcRenderer.invoke('pr-review-chat-start', { requestId, findingBody, messages, findingId, provider }),
     reviewChatCancel: (requestId) =>
@@ -405,6 +415,13 @@ contextBridge.exposeInMainWorld('klaus', {
       const handler = (_event, task) => callback(task);
       ipcRenderer.on('pr-checkout-ready', handler);
       return () => ipcRenderer.removeListener('pr-checkout-ready', handler);
+    },
+    // Backgrounded implement run wants attention (finished / errored / paused
+    // after a turn while no surface was attached). Fires in every window.
+    onImplementAttention: (callback) => {
+      const handler = (_event, payload) => callback(payload);
+      ipcRenderer.on('pr-implement-attention', handler);
+      return () => ipcRenderer.removeListener('pr-implement-attention', handler);
     },
     popOut: () => ipcRenderer.invoke('pop-out-pr-review'),
     popIn: () => ipcRenderer.invoke('pop-in-pr-review'),

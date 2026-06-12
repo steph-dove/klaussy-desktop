@@ -138,12 +138,21 @@ window.PrReview = (function () {
   //     can suppress the leading separator on the first-ever run.
   var reviewTerminal = null;
 
+  // Re-attach bookkeeping: which PR we've already checked for a backgrounded
+  // implement run (so we ask main at most once per PR per mount), and the
+  // window focus/visibility handler that re-fits the xterm after the OS
+  // un-occludes it (belt-and-suspenders for a blank repaint on refocus).
+  var implReattachCheckedPr = null;
+  var implFocusRefitHandler = null;
+  var implVisibilityRefitHandler = null;
+
   function mount(options) {
     hostEl = options.host;
     isPopout = !!options.isPopout;
     hostEl.classList.add('pr-review-host');
     renderLoading();
     initSelectionExplain();
+    setupImplementFocusRefit();
 
     // Fetch the current gh user once per mount. Drives whether the edit
     // pencil shows on a comment. If this fails we simply don't show the
@@ -180,14 +189,15 @@ window.PrReview = (function () {
   function unmount() {
     if (unsubState) { try { unsubState(); } catch (_) {} unsubState = null; }
     teardownSelectionExplain();
-    // Tear down any in-flight implement PTY — the embedded xterm is
-    // about to be dropped from the DOM and the user has no way to
-    // answer prompts. Cancel sends Ctrl+C; the main process SIGTERMs
-    // 2s later if needed.
+    teardownImplementFocusRefit();
+    implReattachCheckedPr = null;
+    // DETACH the in-flight implement run — do NOT cancel it. The PTY lives in
+    // the main process and stays running in the background; re-opening this PR
+    // (here or in a pop-out) re-attaches and repaints from the buffer. This is
+    // what stopped runs from vanishing on pop-out / space-switch / navigate.
     if (implRun) {
-      try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
-      if (implRun.unsubData) implRun.unsubData();
-      if (implRun.unsubEvent) implRun.unsubEvent();
+      try { window.klaus.pr.reviewImplementDetach(implRun.requestId); } catch (_) {}
+      cleanupImplementRun();
       implRun = null;
     }
     disposeReviewTerminal();
@@ -231,18 +241,17 @@ window.PrReview = (function () {
       // Stop any in-flight checks polling so it doesn't repaint with the
       // previous PR's data after the new PR's render lands.
       clearChecksPolling();
-      // Cancel any in-flight implement PTY — the Terminal-tab xterm is
-      // tied to the *previous* PR, and the user can't answer prompts
-      // after navigating away. PTY-based implements are not backgroundable
-      // like the stream-json agents (no agent registry entry, no
-      // re-attach path), so we tear down here.
+      // DETACH (don't cancel) the previous PR's implement run — it keeps
+      // running in the background and can be re-attached by re-opening that
+      // PR. Drop our local subscriptions + xterm; the main process owns the
+      // PTY and its output buffer.
       if (implRun) {
-        try { window.klaus.pr.reviewImplementCancel(implRun.requestId); } catch (_) {}
-        if (implRun.unsubData) implRun.unsubData();
-        if (implRun.unsubEvent) implRun.unsubEvent();
+        try { window.klaus.pr.reviewImplementDetach(implRun.requestId); } catch (_) {}
+        cleanupImplementRun();
         implRun = null;
       }
       disposeReviewTerminal();
+      implReattachCheckedPr = null;
       // Don't cancel in-flight AI work for the previous PR — those agents
       // are now backgroundable and the user can monitor / re-attach via the
       // Agents panel. Just drop the local subscriptions by stashing the old
@@ -365,6 +374,11 @@ window.PrReview = (function () {
     }
     renderThreadsStatusBadge(state);
     renderPendingReviewBar(state);
+
+    // Re-attach to a backgrounded implement run for this PR, if any (pop-out,
+    // navigate-back, or a teardown that dropped the local run while the PTY
+    // kept going). Cheap: asks main at most once per PR per mount.
+    maybeReattachImplement(state.number);
 
     // If a navigation intent is pending for this PR (set by AgentRouter when
     // the user clicks "Open" on an explain agent), apply it now: switch to
@@ -2654,6 +2668,105 @@ window.PrReview = (function () {
     }
   }
 
+  // After the OS un-occludes the window (Space-switch back, app refocus), the
+  // xterm can paint blank until it's nudged. Re-fit + force a full refresh so
+  // a backgrounded-then-foregrounded run's output reappears immediately.
+  function setupImplementFocusRefit() {
+    if (implFocusRefitHandler) return;
+    var refit = function () {
+      if (!reviewTerminal || activeTab !== 'terminal') return;
+      try {
+        reviewTerminal.fitAddon.fit();
+        reviewTerminal.terminal.refresh(0, reviewTerminal.terminal.rows - 1);
+      } catch (_) {}
+    };
+    implFocusRefitHandler = refit;
+    implVisibilityRefitHandler = function () { if (!document.hidden) refit(); };
+    window.addEventListener('focus', implFocusRefitHandler);
+    document.addEventListener('visibilitychange', implVisibilityRefitHandler);
+  }
+
+  function teardownImplementFocusRefit() {
+    if (implFocusRefitHandler) {
+      window.removeEventListener('focus', implFocusRefitHandler);
+      implFocusRefitHandler = null;
+    }
+    if (implVisibilityRefitHandler) {
+      document.removeEventListener('visibilitychange', implVisibilityRefitHandler);
+      implVisibilityRefitHandler = null;
+    }
+  }
+
+  // Ask the main process whether a backgrounded implement run exists for the
+  // PR now on screen; if so, re-attach to it. Covers pop-out (fresh window),
+  // navigate-away-and-back, and any teardown that dropped the local run while
+  // the PTY kept going. Runs at most once per PR per mount.
+  function maybeReattachImplement(prNumber) {
+    if (implRun) return;
+    if (implReattachCheckedPr === prNumber) return;
+    implReattachCheckedPr = prNumber;
+    window.klaus.pr.reviewImplementActive().then(function (res) {
+      var active = res && res.active;
+      if (!active || !active.requestId) return;
+      if (implRun) return; // a fresh run started while we were asking
+      attachToExistingRun(active.requestId, active.status);
+    }).catch(function () {});
+  }
+
+  // Re-bind a surface to an already-running (or just-finished) PTY: subscribe
+  // to its live streams, replay its buffered output into the xterm, and adopt
+  // its status. Used by maybeReattachImplement — not the start path.
+  function attachToExistingRun(requestId, snapStatus) {
+    if (implRun && implRun.requestId === requestId) return;
+    if (implRun) { cleanupImplementRun(); implRun = null; }
+    var rt = ensureReviewTerminal();
+    implRun = {
+      requestId: requestId,
+      mode: requestId.indexOf('impla-') === 0 ? 'all' : 'one',
+      status: snapStatus === 'running' ? 'running' : snapStatus,
+      finalized: snapStatus !== 'running',
+      repaint: repaintForImplRun,
+      onAssistantText: null, onUsage: null, onTool: null,
+      onDone: function () { refreshLocalChanges(); },
+      onError: null, onCancelled: null,
+      unsubData: null, unsubEvent: null, unsubDone: null,
+      reattached: true,
+    };
+    implRun.unsubData = window.klaus.pr.onReviewImplementData(requestId, function (chunk) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      try { rt.terminal.write(chunk); rt.hasContent = true; } catch (_) {}
+    });
+    implRun.unsubEvent = window.klaus.pr.onReviewImplementEvent(requestId, function (ev) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      if (ev.kind === 'tool' || ev.kind === 'text' || ev.kind === 'usage') {
+        if (implRun.repaint) implRun.repaint();
+      } else if (ev.kind === 'end_turn') {
+        finalizeImplementRun('done');
+      }
+    });
+    implRun.unsubDone = window.klaus.pr.onReviewImplementDone(requestId, function (data) {
+      if (!implRun || implRun.requestId !== requestId) return;
+      if (implRun.finalized) { cleanupImplementRun(); return; }
+      var signal = data && data.signal;
+      if (implRun.status === 'cancelled' || signal === 'SIGTERM' || signal === 'SIGKILL') {
+        finalizeImplementRun('cancelled');
+      } else {
+        finalizeImplementRun((data && data.status) || 'done');
+      }
+    });
+    // Pull the buffered output + authoritative status and repaint.
+    window.klaus.pr.reviewImplementAttach(requestId).then(function (r) {
+      if (!r || !r.found || !implRun || implRun.requestId !== requestId) return;
+      if (r.buffer) { try { rt.terminal.write(r.buffer); rt.hasContent = true; } catch (_) {} }
+      if (r.status && r.status !== 'running') { implRun.status = r.status; implRun.finalized = true; }
+      if (activeTab === 'terminal') {
+        mountImplementTerminalIfActive();
+        try { rt.fitAddon.fit(); } catch (_) {}
+      }
+      if (implRun.repaint) implRun.repaint();
+    }).catch(function () {});
+  }
+
   // Switch the PR review to the Terminal tab and re-render so the xterm
   // chrome is on screen before the implement IPC starts streaming.
   function switchToTerminalTab() {
@@ -2841,6 +2954,7 @@ window.PrReview = (function () {
       onCancelled: opts.onCancelled,
       unsubData: null,
       unsubEvent: null,
+      unsubDone: null,
     };
 
     // Wire output streams BEFORE the spawn so we don't miss the first
@@ -2865,7 +2979,7 @@ window.PrReview = (function () {
         finalizeImplementRun('done');
       }
     });
-    window.klaus.pr.onReviewImplementDone(requestId, function (data) {
+    implRun.unsubDone = window.klaus.pr.onReviewImplementDone(requestId, function (data) {
       if (!implRun || implRun.requestId !== requestId) return;
       // If we already finalized via end_turn, the PTY exit is just
       // cleanup — don't downgrade the status.
@@ -2914,8 +3028,10 @@ window.PrReview = (function () {
     if (!implRun) return;
     if (implRun.unsubData) implRun.unsubData();
     if (implRun.unsubEvent) implRun.unsubEvent();
+    if (implRun.unsubDone) implRun.unsubDone();
     implRun.unsubData = null;
     implRun.unsubEvent = null;
+    implRun.unsubDone = null;
     // The xterm belongs to reviewTerminal (not implRun) and is reused
     // across runs — only disposeReviewTerminal touches it.
   }
