@@ -1679,9 +1679,8 @@ body.custom-titlebar #app {
   padding: 0;
 }
 
-.terminal-container.branchless .xterm {
+.terminal-container.branchless .terminal-body {
   flex: 1;
-  height: auto;
   min-height: 0;
 }
 
@@ -1760,14 +1759,18 @@ body.task-branchless #ahead-behind {
   display: flex;
 }
 
-/* The main xterm is a direct child of .terminal-container; it takes the
-   remaining space below the header and sub-tab bars in flex flow. Sub-
-   terminal wrappers (which are not direct children of .xterm) have their
-   own flex:1 rule in the sub-terminal section. */
-.terminal-container > .xterm {
+/* The main xterm opens into .terminal-body, a flex child that takes the
+   remaining space below the header and sub-tab bars. FitAddon measures the
+   xterm's parentElement (this wrapper) for its row count, so the wrapper's
+   height MUST equal exactly the available terminal area — never the container
+   (which also holds the header + sub-tab chrome). Mirrors .sub-terminal-wrapper. */
+.terminal-body {
   flex: 1;
   min-height: 0;
-  height: auto;
+  overflow: hidden;
+}
+.terminal-body > .xterm {
+  height: 100%;
 }
 
 /* Resume button in sidebar task item */
@@ -2239,9 +2242,9 @@ body.task-branchless #ahead-behind {
   display: flex;
 }
 
-#terminals.columns-view .terminal-container .xterm {
+#terminals.columns-view .terminal-container .terminal-body {
   flex: 1;
-  height: auto;
+  min-height: 0;
 }
 
 /* Grid view */
@@ -2270,9 +2273,9 @@ body.task-branchless #ahead-behind {
   display: flex;
 }
 
-#terminals.grid-view .terminal-container .xterm {
+#terminals.grid-view .terminal-container .terminal-body {
   flex: 1;
-  height: auto;
+  min-height: 0;
 }
 
 /* Worktree header bar — sized to match the (shortened) sidebar-footer.
