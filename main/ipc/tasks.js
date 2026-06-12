@@ -461,6 +461,32 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
   return { results };
 });
 
+// Sibling repos in the same session, so an agent planning in one worktree
+// knows the work spans the whole session. A session's worktrees live under
+// ~/klaussy/sessions/<name>/<repo>; the siblings are the other repo dirs in
+// that <name> folder. Returns { session, repos:[{name,path,isCurrent}] } —
+// empty repos for a non-session (legacy) worktree.
+ipcMain.handle('get-session-repos', (_event, { worktreePath }) => {
+  try {
+    if (typeof worktreePath !== 'string') return { session: null, repos: [] };
+    const m = worktreePath.replace(/\/+$/, '').match(/^(.*\/klaussy\/sessions\/([^/]+))\/([^/]+)$/);
+    if (!m) return { session: null, repos: [] };
+    const sessionDir = m[1];
+    const sessionName = m[2];
+    const currentRepo = m[3];
+    const repos = fs.readdirSync(sessionDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => ({
+        name: e.name,
+        path: path.join(sessionDir, e.name),
+        isCurrent: e.name === currentRepo,
+      }));
+    return { session: sessionName, repos };
+  } catch (e) {
+    return { session: null, repos: [] };
+  }
+});
+
 // Pre-commit silent-failure review for the diff panel's Commit button. The
 // renderer shows findings and the user decides fix-first vs commit-anyway.
 ipcMain.handle('precommit-review-run', async (_event, { worktreePath, provider }) => {
