@@ -7,7 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
-const { app, ipcMain, BrowserWindow } = require('electron');
+const { app, ipcMain, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
@@ -79,7 +79,7 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   }
 });
 
-ipcMain.handle('pr-load', async (_event, { number, url }) => {
+ipcMain.handle('pr-load', async (event, { number, url }) => {
   // URL-form calls don't need an active project — gh derives the repo from
   // the URL. The number-only form (used by the picker's "open in current
   // project" list) does, since gh resolves it against the cwd's origin.
@@ -98,6 +98,15 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
     ]);
     const base = parseBaseFromUrl(meta.url);
     const repo = base ? `${base.owner}/${base.name}` : null;
+    // If a DIFFERENT window owned the previous review, tell it (and its
+    // pop-out) to exit — the review is single-active global state, so it can't
+    // keep showing a review it no longer owns.
+    const prev = prReview.active;
+    if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
+      const prevWc = webContents.fromId(prev.ownerWcId);
+      if (prevWc && !prevWc.isDestroyed()) { try { prevWc.send('pr-review-state', null); } catch (_) {} }
+      if (prev.popout && !prev.popout.isDestroyed()) { try { prev.popout.webContents.send('pr-review-state', null); } catch (_) {} }
+    }
     prReview.active = {
       repo, number: meta.number, meta, diff,
       baseOwner: base ? base.owner : null,
@@ -105,6 +114,10 @@ ipcMain.handle('pr-load', async (_event, { number, url }) => {
       threads: null, // null = loading, [] = loaded-empty
       threadsError: null,
       popout: null,
+      // The window that opened this review owns it — broadcastPrReview targets
+      // only this window (+ its pop-out), so other windows aren't pulled into
+      // PR-review mode.
+      ownerWcId: event.sender.id,
     };
     broadcastPrReview();
 
