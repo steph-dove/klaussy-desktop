@@ -93,10 +93,10 @@ sock.on('end', () => {
   }
   if (res.skipped) process.exit(0);
   if (!res.findingsCount) {
-    // Visible evidence on the clean path too — silence reads as "the check
-    // never ran" (and the ~30-60s pause becomes inexplicable).
-    console.error('[klaussy] pre-commit review passed — no silent failures, secrets, or debug leftovers in the staged changes'
-      + (res.lintTool ? ' (' + res.lintTool + ' clean)' : ''));
+    // Visible evidence on the clean path too — the full scorecard, so the
+    // committer sees everything that was checked.
+    console.error('[klaussy] pre-commit review passed:');
+    if (res.checklist) console.error(res.checklist);
     process.exit(0);
   }
   console.error('');
