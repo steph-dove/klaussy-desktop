@@ -2612,6 +2612,7 @@ window.PrReview = (function () {
       fontFamily: fontFamily,
       scrollback: 10000,
       theme: theme,
+      minimumContrastRatio: 4.5, // never let low-contrast (e.g. white-on-white) text vanish
       allowProposedApi: true,
     });
     var fitAddon = new window.FitAddon.FitAddon();

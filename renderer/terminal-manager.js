@@ -50,6 +50,11 @@ window.TerminalManager = (function () {
       cursorStyle: AppState.savedPrefs.cursorStyle || 'block',
       scrollback: 10000,
       theme: termTheme,
+      // Auto-darken/lighten any cell whose fg/bg contrast is too low so text is
+      // never invisible — e.g. a program emitting white/bright-white (or
+      // truecolor white) foreground while we're in light mode. Only adjusts
+      // cells below the ratio; normal high-contrast text is untouched.
+      minimumContrastRatio: 4.5,
       allowProposedApi: true,
     });
 
@@ -590,6 +595,7 @@ window.TerminalManager = (function () {
       cursorStyle: AppState.savedPrefs.cursorStyle || 'block',
       scrollback: 10000,
       theme: termTheme,
+      minimumContrastRatio: 4.5, // never let low-contrast (e.g. white-on-white) text vanish
       allowProposedApi: true,
     });
 

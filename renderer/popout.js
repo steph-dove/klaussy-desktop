@@ -24,6 +24,7 @@
         cursor: '#6c5ce7',
         selectionBackground: '#6c5ce744',
       },
+      minimumContrastRatio: 4.5, // never let low-contrast text vanish
       allowProposedApi: true,
     });
 

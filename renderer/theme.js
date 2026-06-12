@@ -69,11 +69,16 @@ window.ThemeManager = (function () {
       surface: '#f2f2f7', surfaceHover: '#e5e5ea',
       inputBg: '#ffffff', success: '#34c759', error: '#ff3b30',
       termBg: '#ffffff', termFg: '#1c1c1e', termCursor: '#5856d6', termSelection: '#5856d633',
+      // On a light background, the ANSI "white" colors are the trap: programs
+      // assume a dark terminal and emit white / bright-white foreground text,
+      // which vanishes on white. So white maps to a readable gray and
+      // brightWhite to a dark gray (NOT near-white) — the bright/emphasis color
+      // on a light theme should be the highest-contrast, i.e. dark.
       termAnsi: {
         black: '#1c1c1e', red: '#c41a16', green: '#007400', yellow: '#b5890a',
-        blue: '#0451a5', magenta: '#a626a4', cyan: '#0b7261', white: '#8e8e93',
+        blue: '#0451a5', magenta: '#a626a4', cyan: '#0b7261', white: '#6e6e73',
         brightBlack: '#6e6e73', brightRed: '#cf222e', brightGreen: '#1a7f37', brightYellow: '#a67c00',
-        brightBlue: '#0969da', brightMagenta: '#8b57ce', brightCyan: '#0e8585', brightWhite: '#f5f5f7',
+        brightBlue: '#0969da', brightMagenta: '#8b57ce', brightCyan: '#0e8585', brightWhite: '#48484a',
       },
       diffText: '#24292f',
       diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#1a7f37',
