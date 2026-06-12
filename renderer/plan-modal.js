@@ -779,6 +779,35 @@ window.ActionModal = (function () {
     }
   }
 
+  // Session context: when this worktree is part of a multi-repo session,
+  // tell the agent about ALL the repos so it plans for the whole space, not
+  // just its own checkout. '' for single-repo / non-session worktrees. The
+  // agent can read the sibling worktrees at their paths but edits land in
+  // its own — so cross-repo work should be surfaced, then done in each repo's
+  // own session terminal.
+  async function sessionContextFor(taskId) {
+    try {
+      var task = AppState.tasks.get(taskId);
+      if (!task || !task.worktreePath) return '';
+      var res = await window.klaus.task.getSessionRepos(task.worktreePath);
+      var repos = (res && res.repos) || [];
+      if (repos.length <= 1) return '';
+      var lines = repos.map(function (r) {
+        return '- ' + r.name + ' — ' + r.path + (r.isCurrent ? '  (this worktree)' : '');
+      }).join('\n');
+      return '## Session context\n\n'
+        + 'This worktree is part of the multi-repo session "' + res.session + '", which spans '
+        + repos.length + ' repositories (each in its own worktree, all on branch "' + (task.branch || res.session) + '"):\n\n'
+        + lines + '\n\n'
+        + 'Plan for the whole session: a change here may require coordinated changes in the sibling repos above. '
+        + 'You can read those worktrees at their paths to understand the full space. Your edits apply to THIS worktree only — '
+        + 'call out any cross-repo work explicitly so it can be carried out in each repo\'s own session terminal.';
+    } catch (e) {
+      console.warn('[plan-modal session-context]', e);
+      return '';
+    }
+  }
+
   async function submit() {
     if (currentTaskId == null) return;
     var cfg = ACTIONS[currentAction] || ACTIONS.plan;
@@ -792,6 +821,10 @@ window.ActionModal = (function () {
     submitBtn.textContent = 'Starting…';
     try {
       var command = cfg.buildSubmission(content);
+      // Multi-repo session awareness first (the full space), then this repo's
+      // conventions/graph context.
+      var sessionCtx = await sessionContextFor(currentTaskId);
+      if (sessionCtx) command += '\n\n' + sessionCtx;
       // Append the repo's conventions/graph context so Plan and Debug runs
       // reason with house rules from the start instead of rediscovering them.
       var intel = await repoIntelFor(currentTaskId);
@@ -818,8 +851,10 @@ window.ActionModal = (function () {
   // placeholder stays and the prompt's own fallback (read CLAUDE.md) applies.
   async function runReview(taskId) {
     var prompt = REVIEW_PROMPT;
+    var sessionCtx = await sessionContextFor(taskId);
     var intel = await repoIntelFor(taskId);
-    if (intel) prompt = prompt.split('{{REPO_SPECIFIC_CHECKS}}').join('\n' + intel + '\n');
+    var block = [sessionCtx, intel].filter(Boolean).join('\n\n');
+    if (block) prompt = prompt.split('{{REPO_SPECIFIC_CHECKS}}').join('\n' + block + '\n');
     return TerminalManager.openClaudeSubTerminal(taskId, 'Review', prompt);
   }
 
