@@ -12,7 +12,9 @@ window.ThemeManager = (function () {
       text: '#ececec', textMuted: '#9b9b9b', textDim: '#6b6b6b',
       surface: '#242424', surfaceHover: '#2e2e2e',
       inputBg: '#111111', success: '#3fb950', error: '#f0584f',
-      termBg: '#161616', termFg: '#ececec', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
+      // termFg softer than the UI text — pure white in a full terminal is
+      // fatiguing.
+      termBg: '#161616', termFg: '#cccccc', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
     },
     midnight: {
       name: 'Midnight',
