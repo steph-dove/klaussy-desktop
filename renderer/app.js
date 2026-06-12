@@ -213,7 +213,12 @@
       } else if (ev.type === 'fresh') {
         window.toast.info(repoName + ': conventions + repo graph loaded (cached) — agents are conventions-aware');
       } else if (ev.type === 'failed') {
-        window.toast.warn(repoName + ': repo analysis failed (' + (ev.error || 'is klausify/conventions installed?') + ') — agents run without repo intelligence');
+        var why = ev.error || '';
+        // A raw "spawn conventions ENOENT" is meaningless to users — the CLI
+        // isn't on PATH yet. Translate it into something actionable.
+        if (/ENOENT/i.test(why)) why = 'analysis tools not found on PATH — they may still be installing, or run: pipx install conventions-cli klausify';
+        else if (!why) why = 'is klausify/conventions installed?';
+        window.toast.warn(repoName + ': repo analysis unavailable (' + why + ') — agents run without repo intelligence');
       }
     });
   }

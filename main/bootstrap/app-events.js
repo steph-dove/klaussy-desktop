@@ -53,6 +53,18 @@ function fixSpawnPath() {
     path.join(homedir, '.cargo/bin'),
     '/Applications/Cursor.app/Contents/Resources/app/bin',
   ];
+  // macOS `pip install --user` drops console scripts (conventions, klausify)
+  // into ~/Library/Python/<X.Y>/bin — NOT ~/.local/bin. Without this, a
+  // pip-user fallback install "succeeds" but the CLI is invisible to spawns
+  // (spawn ENOENT). The minor version varies, so enumerate what exists.
+  if (process.platform === 'darwin') {
+    try {
+      const pyRoot = path.join(homedir, 'Library', 'Python');
+      for (const e of require('fs').readdirSync(pyRoot, { withFileTypes: true })) {
+        if (e.isDirectory()) candidates.push(path.join(pyRoot, e.name, 'bin'));
+      }
+    } catch { /* no ~/Library/Python — nothing pip-user installed */ }
+  }
   const have = (process.env.PATH || '').split(':').filter(Boolean);
   const want = candidates.filter((p) => !have.includes(p));
   if (want.length) {

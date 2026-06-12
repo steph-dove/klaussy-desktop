@@ -464,7 +464,13 @@ function ensureRepoIntel(repoOrWorktreePath) {
       // First-run: make sure the analysis CLIs exist (auto-installs from
       // PyPI if not). Cheap when already present. If install fails the
       // generation below degrades to whatever artifacts exist.
-      await ensureReviewTools();
+      // `firstToolsCall` = were WE the caller that actually ran (and toasted)
+      // the install? ensureReviewTools is single-flight, so only the first
+      // caller's await emits the tools-failed toast; later repos get the
+      // cached result silently. The gate below uses this to decide whether a
+      // per-repo "unavailable" toast is needed or would just duplicate.
+      const firstToolsCall = !toolsPromise;
+      const toolsOk = await ensureReviewTools();
       const currentVersion = (await getKlausifyVersion()) || '';
       const a = artifactPaths(base);
       const srcMtime = artifactsMtime(base);
@@ -487,6 +493,28 @@ function ensureRepoIntel(repoOrWorktreePath) {
         if (!freshNotified.has(base)) {
           freshNotified.add(base);
           notifyWindows({ type: 'fresh', repoPath: base });
+        }
+        return;
+      }
+
+      // About to (re)generate — pass 1 unconditionally spawns the `conventions`
+      // CLI (the klausify spawn below is separately guarded by currentVersion,
+      // so it can't ENOENT). If conventions isn't reachable (install failed, or
+      // installed somewhere not on the GUI's PATH), spawning it throws
+      // `spawn conventions ENOENT`. Probe first and degrade to whatever
+      // artifacts exist instead of crashing into ENOENT.
+      const haveConventions = toolsOk || (await toolPresent('conventions'));
+      if (!haveConventions) {
+        console.warn('[repo-intel] conventions CLI unavailable — skipping generation for', base);
+        buildBlock(base, ''); // use a committed CLAUDE.md/graph if present
+        syncIntelIntoActiveWorktrees(base);
+        failedAt.set(base, Date.now()); // back off; retry naturally later
+        // Per-repo signal so a 2nd+ repo in a session still gets feedback: the
+        // global tools-failed toast fires only once per app run. Suppress it
+        // only for the repo whose own ensureReviewTools call just emitted
+        // tools-failed, to avoid a duplicate toast on that same failure.
+        if (!firstToolsCall) {
+          notifyWindows({ type: 'failed', repoPath: base, error: 'analysis tools not reachable on PATH (ENOENT)' });
         }
         return;
       }
