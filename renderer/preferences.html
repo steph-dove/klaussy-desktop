@@ -346,10 +346,10 @@
       <div class="field-hint">Seconds between background fetches. Set to 0 to disable.</div>
 
       <div class="field">
-        <label>Review commits for silent failures</label>
+        <label>Pre-commit review (silent failures, secrets, debug leftovers + lint)</label>
         <input type="checkbox" id="pref-precommit-review" />
       </div>
-      <div class="field-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for swallowed errors. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
+      <div class="field-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
     </div>
 
     <!-- Keybindings Section -->

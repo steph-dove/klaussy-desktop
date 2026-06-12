@@ -210,9 +210,9 @@
     window.klaus.task.onPrecommitEvent(function (ev) {
       if (!ev || !ev.wtName) return;
       if (ev.type === 'started') {
-        window.toast.info('🛡 ' + ev.wtName + ': pre-commit review running — ' + (ev.provider || 'agent') + ' is reading the staged diff…');
+        window.toast.info('🛡 ' + ev.wtName + ': pre-commit review running — ' + (ev.provider || 'agent') + ' checking silent failures, secrets, debug leftovers, landmines + lint…');
       } else if (ev.type === 'passed') {
-        window.toast.success('🛡 ' + ev.wtName + ': pre-commit review passed — no silent failures in the staged changes');
+        window.toast.success('🛡 ' + ev.wtName + ': pre-commit review passed — staged changes clean across all lenses');
       } else if (ev.type === 'findings') {
         window.toast.warn('🛡 ' + ev.wtName + ': pre-commit review found ' + ev.findingsCount + ' issue' + (ev.findingsCount === 1 ? '' : 's') + ' — see the committing terminal or commit panel');
       } else if (ev.type === 'error') {
