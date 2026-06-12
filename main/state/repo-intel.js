@@ -108,6 +108,100 @@ function notifyWindows(payload) {
   } catch { /* no windows yet (early boot) — nothing to tell */ }
 }
 
+// First-run install of the analysis CLIs (conventions-cli + klausify, both
+// on PyPI). Without these, repo intelligence silently never works. Prefer
+// pipx (isolated, installs to ~/.local/bin which is already on the spawn
+// PATH); fall back to `python3 -m pip install --user`. Single-flight, one
+// attempt per app run — never throws. Resolves true when both tools are
+// available afterward.
+let toolsPromise = null;
+// Command name (what we run / detect) vs PyPI package name (what we install)
+// — they differ for conventions. Presence is checked with `--help`: the
+// `conventions` CLI has no `--version` flag, but both support `--help` and
+// exit 0.
+const TOOLS = [
+  { cmd: 'conventions', pkg: 'conventions-cli' },
+  { cmd: 'klausify', pkg: 'klausify' },
+];
+
+async function toolPresent(cmd) {
+  try {
+    await execFileP(cmd, ['--help'], { timeout: 15000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function pickInstaller() {
+  try {
+    await execFileP('pipx', ['--version'], { timeout: 10000 });
+    return { kind: 'pipx' };
+  } catch { /* no pipx */ }
+  for (const py of ['python3', 'python']) {
+    try {
+      await execFileP(py, ['-m', 'pip', '--version'], { timeout: 10000 });
+      return { kind: 'pip', py };
+    } catch { /* try next */ }
+  }
+  return null;
+}
+
+function ensureReviewTools() {
+  if (toolsPromise) return toolsPromise;
+  toolsPromise = (async () => {
+    const missing = [];
+    for (const t of TOOLS) if (!(await toolPresent(t.cmd))) missing.push(t);
+    if (!missing.length) return true;
+    const pkgs = missing.map((t) => t.pkg);
+    const manual = 'pipx install ' + pkgs.join(' ');
+
+    const installer = await pickInstaller();
+    if (!installer) {
+      console.warn('[repo-intel] cannot auto-install', pkgs.join(', '), '— no pipx or pip found');
+      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: 'no pipx or pip available', manual });
+      return false;
+    }
+
+    notifyWindows({ type: 'tools-installing', missing: pkgs, installer: installer.kind });
+    console.log('[repo-intel] installing', pkgs.join(', '), 'via', installer.kind);
+    try {
+      if (installer.kind === 'pipx') {
+        // Separate installs so one failure doesn't abort the other.
+        for (const pkg of pkgs) {
+          await execFileP('pipx', ['install', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
+        }
+      } else {
+        await execFileP(installer.py, ['-m', 'pip', 'install', '--user', ...pkgs], {
+          timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024,
+        });
+      }
+    } catch (err) {
+      const first = ((err && err.stderr ? String(err.stderr) : '') || (err && err.message) || '').trim().split('\n').pop();
+      console.warn('[repo-intel] tool install failed:', first);
+      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: first, manual });
+      return false;
+    }
+
+    // New binaries land in ~/.local/bin (pipx) or the pip user bin — make
+    // them findable in this session without a restart.
+    try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+    // Drop the cached "missing" klausify version so the next ensure re-probes.
+    klausifyVersion = { value: null, at: 0, promise: null };
+
+    const ok = (await Promise.all(missing.map((t) => toolPresent(t.cmd)))).every(Boolean);
+    if (ok) {
+      console.log('[repo-intel] installed', pkgs.join(', '));
+      notifyWindows({ type: 'tools-installed', installed: pkgs });
+    } else {
+      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: 'installed but not on PATH',
+        manual: 'restart Klaussy, or run: ' + manual });
+    }
+    return ok;
+  })();
+  return toolsPromise;
+}
+
 // Resolve a worktree (or repo) path to its primary checkout — intel belongs
 // to the base repo and is shared by every worktree/session under it.
 // Memoized: the mapping is immutable for a given path, and the underlying
@@ -366,6 +460,10 @@ function ensureRepoIntel(repoOrWorktreePath) {
 
   const p = (async () => {
     try {
+      // First-run: make sure the analysis CLIs exist (auto-installs from
+      // PyPI if not). Cheap when already present. If install fails the
+      // generation below degrades to whatever artifacts exist.
+      await ensureReviewTools();
       const currentVersion = (await getKlausifyVersion()) || '';
       const a = artifactPaths(base);
       const srcMtime = artifactsMtime(base);
@@ -565,4 +663,4 @@ function getRepoIntelBlock(repoOrWorktreePath, agentMode) {
   return full;
 }
 
-module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree };
+module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureReviewTools };
