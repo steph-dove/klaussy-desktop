@@ -84,6 +84,11 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.on('repo-intel-event', listener);
       return () => ipcRenderer.removeListener('repo-intel-event', listener);
     },
+    onPrecommitEvent: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('precommit-event', listener);
+      return () => ipcRenderer.removeListener('precommit-event', listener);
+    },
     checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
     attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),
     openFolder: (folderPath, mode) => ipcRenderer.invoke('open-folder', { folderPath, mode }),
