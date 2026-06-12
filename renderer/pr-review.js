@@ -218,6 +218,11 @@ window.PrReview = (function () {
   }
 
   function render(state) {
+    // The main window never paints a popped-out review — app.js hides this
+    // surface and the pop-out owns the display. Without this, a late
+    // onReviewState(popped:true) (the broadcast races app.js's unmount) could
+    // repaint the panel back in, leaving the review visible in BOTH windows.
+    if (state && state.popped && !isPopout) return;
     // Preserve selection across updates unless the PR number changed, and
     // fire a one-shot checks fetch when a new PR comes into view (also
     // covers first-load since lastState is null then).
@@ -2709,7 +2714,12 @@ window.PrReview = (function () {
       var active = res && res.active;
       if (!active || !active.requestId) return;
       if (implRun) return; // a fresh run started while we were asking
+      // Surface it: jump to the Terminal tab so a fresh surface (pop-out,
+      // reopened PR) actually shows the implementation instead of looking like
+      // it was never requested.
+      if (activeTab !== 'terminal') activeTab = 'terminal';
       attachToExistingRun(active.requestId, active.status);
+      if (lastState) render(lastState);
     }).catch(function () {});
   }
 
