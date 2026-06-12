@@ -35,7 +35,11 @@ const { app } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 
 const KLAUSSY_DIR = path.join(os.homedir(), '.klaussy');
-const META_PATH = path.join(KLAUSSY_DIR, 'precommit.json');
+const META_PATH = path.join(KLAUSSY_DIR, 'precommit.json'); // legacy single-pointer fallback
+// One <pid>.json per running instance, so multiple Klaussy instances each run
+// their own review server and the hook client can find whichever is live.
+const SOCKETS_DIR = path.join(KLAUSSY_DIR, 'sockets');
+const REGISTRY_FILE = path.join(SOCKETS_DIR, process.pid + '.json');
 const CLIENT_PATH = path.join(KLAUSSY_DIR, 'precommit-client.js');
 const COMMITMSG_CLIENT_PATH = path.join(KLAUSSY_DIR, 'commitmsg-client.js');
 const REVIEWED_LOG = path.join(KLAUSSY_DIR, 'reviewed-commits.log');
@@ -121,65 +125,92 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-let meta;
+// Discover every running Klaussy review server. Multiple instances can run at
+// once (dev + packaged, or separate launches), each with its own socket.
+const KDIR = path.join(os.homedir(), '.klaussy');
+const candidates = [];
+function addSock(s) { if (s && typeof s === 'string' && candidates.indexOf(s) === -1) candidates.push(s); }
+// 1) The instance that owns THIS terminal (env injected by the app on spawn) —
+//    so the review (and its scorecard) lands in the window you're working in.
+addSock(process.env.KLAUSSY_REVIEW_SOCK);
+// 2) Every registered instance.
 try {
-  meta = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.klaussy', 'precommit.json'), 'utf8'));
-} catch {
-  process.exit(0); // app never ran — never block
-}
-if (!meta || typeof meta.socket !== 'string' || !meta.socket) process.exit(0);
-let sock;
-try { sock = net.connect(meta.socket); } catch { process.exit(0); }
-sock.setEncoding('utf8');
+  const dir = path.join(KDIR, 'sockets');
+  for (const f of fs.readdirSync(dir)) {
+    if (f.slice(-5) !== '.json') continue;
+    try { addSock(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).socket); } catch (e) {}
+  }
+} catch (e) {}
+// 3) Legacy single-pointer fallback.
+try { addSock(JSON.parse(fs.readFileSync(path.join(KDIR, 'precommit.json'), 'utf8')).socket); } catch (e) {}
+
+if (!candidates.length) process.exit(0); // app never ran — never block
+
 const cwd = process.argv[2] || process.cwd();
 const kind = process.argv[3] === 'pre-push' ? 'pre-push' : 'pre-commit';
 const localSha = process.argv[4] || null;
 const remoteSha = process.argv[5] || null;
 const gateName = kind === 'pre-push' ? 'pre-push review' : 'pre-commit review';
-let buf = '';
-// Hard ceiling: a wedged app must not hold commits/pushes hostage.
-const timer = setTimeout(() => {
-  console.error('[klaussy] ' + gateName + ' timed out — proceeding without it');
-  process.exit(0);
-}, 200000);
-sock.on('connect', () => {
-  console.error('[klaussy] ' + gateName + ' running — silent failures · secrets · debug leftovers · landmines · lint (your agent is reading the '
-    + (kind === 'pre-push' ? 'push range' : 'staged diff') + ')…');
-  sock.write(JSON.stringify({ cwd, kind, localSha, remoteSha }) + '\\n');
-});
-sock.on('data', (d) => { buf += d; });
-sock.on('end', () => {
-  clearTimeout(timer);
-  let res;
-  try { res = JSON.parse(buf); } catch { process.exit(0); }
-  if (res.error) {
-    console.error('[klaussy] ' + gateName + ' unavailable: ' + res.error);
+
+let idx = 0;
+function tryNext() {
+  if (idx >= candidates.length) process.exit(0); // no live instance — never block
+  const target = candidates[idx++];
+  let sock;
+  try { sock = net.connect(target); } catch (e) { return tryNext(); }
+  sock.setEncoding('utf8');
+  let buf = '';
+  let connected = false;
+  // Hard ceiling: a wedged app must not hold commits/pushes hostage.
+  const timer = setTimeout(() => {
+    console.error('[klaussy] ' + gateName + ' timed out — proceeding without it');
     process.exit(0);
-  }
-  if (res.allReviewed) {
-    console.error('[klaussy] ' + gateName + ' skipped — all ' + res.commitCount + ' commit'
-      + (res.commitCount === 1 ? '' : 's') + ' in this push already passed review at commit time ✓');
-    process.exit(0);
-  }
-  if (res.skipped) process.exit(0);
-  if (!res.findingsCount) {
-    // Visible evidence on the clean path too — the full scorecard, so the
-    // committer sees everything that was checked.
-    console.error('[klaussy] ' + gateName + ' passed:');
-    if (res.checklist) console.error(res.checklist);
-    process.exit(0);
-  }
-  console.error('');
-  console.error('[klaussy] ' + gateName.charAt(0).toUpperCase() + gateName.slice(1) + ' found ' + res.findingsCount + ' issue(s)'
-    + (res.lintErrors ? ' (' + res.lintErrors + ' from lint)' : '') + ':');
-  console.error('');
-  console.error(res.text);
-  console.error('');
-  console.error('Fix the issues, or bypass this check with: ' + (kind === 'pre-push' ? 'git push --no-verify' : 'git commit --no-verify'));
-  console.error('');
-  process.exit(1);
-});
-sock.on('error', () => { clearTimeout(timer); process.exit(0); }); // app not running
+  }, 200000);
+  sock.on('connect', () => {
+    connected = true;
+    console.error('[klaussy] ' + gateName + ' running — silent failures · secrets · debug leftovers · landmines · lint (your agent is reading the '
+      + (kind === 'pre-push' ? 'push range' : 'staged diff') + ')…');
+    sock.write(JSON.stringify({ cwd, kind, localSha, remoteSha }) + '\\n');
+  });
+  sock.on('data', (d) => { buf += d; });
+  sock.on('end', () => {
+    clearTimeout(timer);
+    let res;
+    try { res = JSON.parse(buf); } catch (e) { process.exit(0); }
+    if (res.error) {
+      console.error('[klaussy] ' + gateName + ' unavailable: ' + res.error);
+      process.exit(0);
+    }
+    if (res.allReviewed) {
+      console.error('[klaussy] ' + gateName + ' skipped — all ' + res.commitCount + ' commit'
+        + (res.commitCount === 1 ? '' : 's') + ' in this push already passed review at commit time ✓');
+      process.exit(0);
+    }
+    if (res.skipped) process.exit(0);
+    if (!res.findingsCount) {
+      // Visible evidence on the clean path too — the full scorecard, so the
+      // committer sees everything that was checked.
+      console.error('[klaussy] ' + gateName + ' passed:');
+      if (res.checklist) console.error(res.checklist);
+      process.exit(0);
+    }
+    console.error('');
+    console.error('[klaussy] ' + gateName.charAt(0).toUpperCase() + gateName.slice(1) + ' found ' + res.findingsCount + ' issue(s)'
+      + (res.lintErrors ? ' (' + res.lintErrors + ' from lint)' : '') + ':');
+    console.error('');
+    console.error(res.text);
+    console.error('');
+    console.error('Fix the issues, or bypass this check with: ' + (kind === 'pre-push' ? 'git push --no-verify' : 'git commit --no-verify'));
+    console.error('');
+    process.exit(1);
+  });
+  sock.on('error', () => {
+    clearTimeout(timer);
+    if (!connected) return tryNext(); // that instance isn't up — try the next
+    process.exit(0); // mid-stream failure — never block
+  });
+}
+tryNext();
 `;
 
 const COMMITMSG_CLIENT_SCRIPT = `// Klaussy commit-msg client — written by Klaussy; edits will be overwritten.
@@ -260,7 +291,10 @@ process.exit(0);
 // ---- Socket server -----------------------------------------------------------
 
 function socketPath() {
-  return path.join(app.getPath('userData'), 'precommit.sock');
+  // Per-PROCESS socket so multiple Klaussy instances (dev + packaged, or two
+  // separate launches) each run their own review server instead of one stealing
+  // the socket from the other. The hook client discovers all live sockets.
+  return path.join(app.getPath('userData'), 'precommit-' + process.pid + '.sock');
 }
 
 function commonHooksDir(repoPath) {
@@ -356,24 +390,46 @@ function startPrecommitServer() {
     console.warn('[precommit-hook] git-hook review not yet supported on Windows — skipping');
     return;
   }
-  const sock = socketPath();
-  // Don't steal a live socket from another running instance (packaged app +
-  // dev session is a real combo): if something answers, leave it be.
-  const probe = net.connect(sock);
-  let probeDone = false;
-  const proceed = (takeover) => {
-    if (probeDone) return;
-    probeDone = true;
-    try { probe.destroy(); } catch {}
-    if (!takeover) {
-      console.warn('[precommit-hook] another instance owns the pre-commit socket — not taking over');
-      return;
+  // Each instance owns a unique per-pid socket, so there's nothing to steal —
+  // just clean up after any instances that died without unregistering, then
+  // start our own server.
+  pruneDeadInstances();
+  reallyStartServer(socketPath());
+}
+
+// Drop registry entries (and their stale sockets) for instances no longer
+// running, so the hook client doesn't waste time dialing dead sockets.
+function pruneDeadInstances() {
+  let files = [];
+  try { files = fs.readdirSync(SOCKETS_DIR); } catch { return; }
+  for (const f of files) {
+    if (!f.endsWith('.json')) continue;
+    const p = path.join(SOCKETS_DIR, f);
+    let entry;
+    try { entry = JSON.parse(fs.readFileSync(p, 'utf8')); }
+    catch { try { fs.rmSync(p, { force: true }); } catch {} continue; }
+    let alive = false;
+    if (entry && entry.pid) {
+      try { process.kill(entry.pid, 0); alive = true; }
+      catch (e) { alive = e.code === 'EPERM'; } // EPERM = exists, not ours
     }
-    reallyStartServer(sock);
+    if (!alive) {
+      try { fs.rmSync(p, { force: true }); } catch {}
+      if (entry && entry.socket) { try { fs.rmSync(entry.socket, { force: true }); } catch {} }
+    }
+  }
+}
+
+let cleanupRegistered = false;
+function registerCleanupOnce() {
+  if (cleanupRegistered) return;
+  cleanupRegistered = true;
+  const cleanup = () => {
+    try { fs.rmSync(REGISTRY_FILE, { force: true }); } catch {}
+    try { fs.rmSync(socketPath(), { force: true }); } catch {}
   };
-  probe.once('connect', () => proceed(false));
-  probe.once('error', () => proceed(true)); // nothing listening — ours to claim
-  setTimeout(() => proceed(true), 1000);
+  try { app.on('will-quit', cleanup); } catch {}
+  process.on('exit', cleanup);
 }
 
 function reallyStartServer(sock) {
@@ -436,13 +492,20 @@ function reallyStartServer(sock) {
   server.listen(sock, () => {
     try { fs.chmodSync(sock, 0o600); } catch {}
     try {
-      fs.mkdirSync(KLAUSSY_DIR, { recursive: true });
+      fs.mkdirSync(SOCKETS_DIR, { recursive: true });
+      // Route THIS instance's own terminals' hooks back to itself: a commit in
+      // this window's embedded terminal is reviewed here and its scorecard
+      // shows in this window. Child PTYs inherit process.env.
+      process.env.KLAUSSY_REVIEW_SOCK = sock;
+      fs.writeFileSync(REGISTRY_FILE, JSON.stringify({ socket: sock, pid: process.pid }));
+      // Legacy single-pointer fallback for any old client still on disk.
       fs.writeFileSync(META_PATH, JSON.stringify({ socket: sock, pid: process.pid }));
       fs.writeFileSync(CLIENT_PATH, CLIENT_SCRIPT);
       fs.writeFileSync(COMMITMSG_CLIENT_PATH, COMMITMSG_CLIENT_SCRIPT);
     } catch (e) {
       console.warn('[precommit-hook] could not write client/meta:', e.message);
     }
+    registerCleanupOnce();
   });
 }
 
