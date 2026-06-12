@@ -3,12 +3,16 @@ window.ThemeManager = (function () {
   var presets = {
     dark: {
       name: 'Dark',
-      bg: '#0f0f1a', sidebarBg: '#16162a', border: '#2a2a4a',
-      accent: '#6c5ce7', accentHover: '#7d6ef0',
-      text: '#e0e0e0', textMuted: '#888', textDim: '#666',
-      surface: '#1e1e36', surfaceHover: '#2a2a4a',
-      inputBg: '#0f0f1a', success: '#00e676', error: '#ff5252',
-      termBg: '#0f0f1a', termFg: '#e0e0e0', termCursor: '#6c5ce7', termSelection: '#6c5ce744',
+      // Neutral charcoal — no blue/purple tint, with distinct elevation steps
+      // (bg → sidebar → surface → hover) so panels/cards separate cleanly.
+      // Inputs sit recessed below bg; the accent is a calm blue, not a loud
+      // purple.
+      bg: '#161616', sidebarBg: '#1d1d1d', border: '#343434',
+      accent: '#4a9eff', accentHover: '#62acff',
+      text: '#ececec', textMuted: '#9b9b9b', textDim: '#6b6b6b',
+      surface: '#242424', surfaceHover: '#2e2e2e',
+      inputBg: '#111111', success: '#3fb950', error: '#f0584f',
+      termBg: '#161616', termFg: '#ececec', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
     },
     midnight: {
       name: 'Midnight',
