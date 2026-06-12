@@ -32,7 +32,11 @@ jobs:
               dist/Klaussy-*.AppImage
               dist/Klaussy-*.deb
               dist/latest-linux.yml
-          - os: windows-latest
+          # Pinned to windows-2022: `windows-latest` rotated to a newer image
+          # whose Visual Studio the bundled node-gyp doesn't detect ("Could
+          # not find any Visual Studio installation"), breaking the node-pty
+          # native rebuild. 2022 has the VS toolchain node-gyp understands.
+          - os: windows-2022
             script: dist:win
             artifact_glob: |
               dist/Klaussy-*.exe
