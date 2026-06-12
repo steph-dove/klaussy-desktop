@@ -8,6 +8,28 @@ window.TerminalManager = (function () {
   var layouts = ['single', 'columns', 'grid'];
   var layoutIcons = { single: '\u25A8', columns: '\u2759\u2759', grid: '\u2637' };
 
+  // Keep an xterm fitted to its wrapper whenever the wrapper's box actually
+  // changes \u2014 layout switch, sidebar collapse, window resize, font zoom,
+  // devtools, pane drag, or a task becoming active. A ResizeObserver fires
+  // AFTER layout settles, replacing the fragile setTimeout(50) guesswork that
+  // left terminals mis-sized. Skips hidden/zero-size wrappers (fitting those
+  // yields garbage row counts). Returns a disconnect fn for cleanup.
+  function observeWrapperFit(wrapperEl, fit) {
+    if (typeof ResizeObserver === 'undefined') return function () {};
+    var pending = false;
+    var ro = new ResizeObserver(function () {
+      if (pending) return; // coalesce bursts into one fit per frame
+      pending = true;
+      requestAnimationFrame(function () {
+        pending = false;
+        if (!wrapperEl.clientHeight || !wrapperEl.clientWidth || wrapperEl.offsetParent === null) return;
+        try { fit(); } catch (e) { /* terminal disposed mid-resize */ }
+      });
+    });
+    ro.observe(wrapperEl);
+    return function () { try { ro.disconnect(); } catch (e) {} };
+  }
+
   // ---- addTaskToUI ----
 
   function addTaskToUI(task) {
@@ -158,7 +180,17 @@ window.TerminalManager = (function () {
     // on this task's worktree and kicks off the appropriate command.
     buildActionsDropdown(actionsSpan, id);
 
-    terminal.open(container);
+    // Open the xterm into a dedicated flex body, NOT straight into the
+    // container. FitAddon sizes the terminal from `element.parentElement`'s
+    // height — if that parent is the container, it includes the grid-label
+    // header + sub-terminal-tabs bar, so fit() proposes ~3 too many rows and
+    // the terminal overflows past the bottom edge. The body wrapper makes the
+    // measured parent equal exactly the available terminal area (this mirrors
+    // how sub-terminals already open into .sub-terminal-wrapper).
+    var termBody = document.createElement('div');
+    termBody.className = 'terminal-body';
+    container.appendChild(termBody);
+    terminal.open(termBody);
 
     // Scroll-to-bottom button
     var scrollBtn = document.createElement('button');
@@ -308,6 +340,22 @@ window.TerminalManager = (function () {
       subTerminals: [], activeSubId: null,
     };
     tasks.set(id, taskEntry);
+
+    // Auto-fit the primary terminal whenever its body resizes (this also
+    // performs the initial fit once the body first gets a real height, and
+    // re-fits when the task becomes active). Only emits an IPC resize when the
+    // grid actually changed, so it doesn't churn the PTY on no-op observations.
+    // Stored on the task (NOT in `cleanup`) because rewireTerminal() empties
+    // and rebuilds `cleanup` for I/O listeners — the observer is a DOM concern
+    // that must survive a resume/reconnect. Disconnected in removeTaskFromUI.
+    taskEntry.disconnectResize = observeWrapperFit(termBody, function () {
+      var t = taskEntry.terminal;
+      var pc = t.cols, pr = t.rows;
+      taskEntry.fitAddon.fit();
+      if (t.cols !== pc || t.rows !== pr) {
+        window.klaus.terminal.resize(id, t.cols, t.rows);
+      }
+    });
 
     // Sub-terminal tab bar. Tabs are labeled with the model their agent is on
     // ("Claude Fable 5", "Shell"), via the .sub-tab-label span — a span so
@@ -619,6 +667,17 @@ window.TerminalManager = (function () {
     };
     taskEntry.subTerminals.push(subEntry);
 
+    // Same auto-fit for the sub-terminal's wrapper. subCleanup runs on the
+    // explicit sub-close path; on full task removal the container (and this
+    // wrapper) is detached, so the observer is collected with it.
+    subCleanup.push(observeWrapperFit(subWrapper, function () {
+      var pc = subTerminal.cols, pr = subTerminal.rows;
+      subFitAddon.fit();
+      if (subTerminal.cols !== pc || subTerminal.rows !== pr) {
+        window.klaus.terminal.resize(id, subTerminal.cols, subTerminal.rows, subId);
+      }
+    }));
+
     tab.addEventListener('click', function (e) {
       if (e.target.classList.contains('sub-tab-close')) return;
       switchSubTerminal(taskEntry, subId);
@@ -646,8 +705,10 @@ window.TerminalManager = (function () {
     taskEntry.activeSubId = subId;
     refreshAgentLabels(taskEntry);
 
-    var xtermEls = container.querySelectorAll(':scope > .xterm');
-    xtermEls.forEach(function (el) {
+    // The primary xterm now lives inside :scope > .terminal-body (its flex
+    // wrapper), so toggle the body, not a direct-child .xterm.
+    var primaryBodies = container.querySelectorAll(':scope > .terminal-body');
+    primaryBodies.forEach(function (el) {
       el.style.display = subId === null || subId === undefined ? '' : 'none';
     });
 
@@ -874,6 +935,7 @@ window.TerminalManager = (function () {
     var task = tasks.get(id);
     if (!task) return;
     task.cleanup.forEach(function (fn) { fn(); });
+    if (task.disconnectResize) task.disconnectResize();
     task.terminal.dispose();
     task.container.remove();
     var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
