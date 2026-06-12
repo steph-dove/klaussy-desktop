@@ -4,7 +4,7 @@
 // cancel handler is a thin makeClaudeCancelHandler over the matching
 // proc map.
 
-const { ipcMain } = require('electron');
+const { ipcMain, BrowserWindow } = require('electron');
 const crypto = require('crypto');
 const { execFile, execFileSync } = require('child_process');
 const { instances, spawnInWorktree } = require('../state/instances');
@@ -39,8 +39,41 @@ const {
 } = require('../state/claude-streaming');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
+  getImplementSnapshot, getActiveImplementByWorktree,
   implementPtySessions,
 } = require('../state/pr-implement-pty');
+
+// requestId -> Set<WebContents> currently attached to that run's xterm. A run
+// can be viewed by 0..N surfaces (main window + pop-out, or none while
+// backgrounded). PTY output is fanned out to whoever is attached; the run
+// itself survives even when the set is empty (that's what makes it
+// backgroundable + re-attachable — bugs 1/2/5).
+const implementSubscribers = new Map();
+
+function implementSubs(requestId) {
+  let set = implementSubscribers.get(requestId);
+  if (!set) { set = new Set(); implementSubscribers.set(requestId, set); }
+  return set;
+}
+
+function broadcastToImplementSubs(requestId, channel, payload) {
+  const set = implementSubscribers.get(requestId);
+  if (!set) return;
+  for (const wc of [...set]) {
+    if (!wc || wc.isDestroyed()) { set.delete(wc); continue; }
+    try { wc.send(channel, payload); } catch {}
+  }
+}
+
+// Notify every window (regardless of which surface is showing) that a
+// backgrounded implement run wants attention — finished, errored, or paused
+// after a turn while nobody was watching. app.js turns this into a toast so the
+// user knows to reopen the PR.
+function notifyImplementAttention(payload) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) { try { w.webContents.send('pr-implement-attention', payload); } catch {} }
+  }
+}
 const {
   getOrAskRepoConsent, applyWorktreePermissions,
 } = require('../util/worktree-permissions');
@@ -493,6 +526,9 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
 
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
+  // Stash the worktree on the active PR so 'pr-review-implement-active' can
+  // match a backgrounded run to this PR (e.g. when a fresh pop-out asks).
+  if (prReview.active) prReview.active.worktreePath = ensured.worktreePath;
 
   // Two prompts depending on whether we're implementing one finding or many.
   // Both share guardrails so claude doesn't drift into unrelated cleanup or
@@ -570,33 +606,97 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   }
 
   const sender = event.sender;
+  const prNumber = prReview.active && prReview.active.number;
   const dataChannel = `pr-review-implement-pty-data-${requestId}`;
   const eventChannel = `pr-review-implement-pty-event-${requestId}`;
   const exitChannel = `pr-review-implement-pty-exit-${requestId}`;
+
+  // The starting window is the first subscriber; more attach via
+  // 'pr-review-implement-attach' (pop-out, re-mount). Output fans out to all
+  // attached surfaces. Crucially we DON'T cancel the PTY when a surface goes
+  // away — the run persists in the background and can be re-attached.
+  implementSubs(requestId).add(sender);
 
   const result = startImplementPty({
     requestId,
     worktreePath: ensured.worktreePath,
     prompt,
     provider: implProvider,
-    onData: (data) => { if (!sender.isDestroyed()) sender.send(dataChannel, data); },
-    onEvent: (ev) => { if (!sender.isDestroyed()) sender.send(eventChannel, ev); },
-    onExit: ({ exitCode, signal }) => {
-      if (!sender.isDestroyed()) sender.send(exitChannel, { exitCode, signal });
+    onData: (data) => broadcastToImplementSubs(requestId, dataChannel, data),
+    onEvent: (ev) => {
+      broadcastToImplementSubs(requestId, eventChannel, ev);
+      // Turn finished with nobody attached. Normally the renderer sends the
+      // cleanup Ctrl+C on finalize; with no surface, main MUST wind the PTY
+      // down itself — otherwise the idle Claude TUI (and its agent-concurrency
+      // slot, released only in onExit) leaks until app quit. cancel → onExit →
+      // slot freed + run retained in recentImplementRuns for replay on reopen.
+      // The onExit branch fires the single "finished" notification.
+      if (ev && ev.kind === 'end_turn' && implementSubs(requestId).size === 0) {
+        try { cancelImplementPty(requestId); } catch {}
+      }
+    },
+    onExit: ({ exitCode, signal, status }) => {
+      broadcastToImplementSubs(requestId, exitChannel, { exitCode, signal, status });
+      // If the run ended while backgrounded, surface it everywhere.
+      if (implementSubs(requestId).size === 0) {
+        notifyImplementAttention({ requestId, prNumber, status: status || 'done' });
+      }
+      implementSubscribers.delete(requestId);
     },
   });
-  if (result.error) return { error: result.error };
+  if (result.error) { implementSubscribers.delete(requestId); return { error: result.error }; }
 
-  // If the renderer that started the run goes away, terminate the PTY —
-  // there's no UI left to answer prompts and the user can't see output.
-  // This mirrors spawnClaudeStream's foreground behavior.
+  // A surface going away just detaches it — the run keeps going. (No
+  // cancel-on-destroy: that was the cause of runs vanishing on pop-out /
+  // space-switch / navigate-away.)
   sender.once('destroyed', () => {
-    if (implementPtySessions.has(requestId)) {
-      try { cancelImplementPty(requestId); } catch {}
-    }
+    const set = implementSubscribers.get(requestId);
+    if (set) set.delete(sender);
   });
 
-  return { ok: true, worktreePath: ensured.worktreePath };
+  return { ok: true, worktreePath: ensured.worktreePath, requestId };
+});
+
+// (Re)attach a surface to a run: register it as a subscriber and hand back the
+// buffered output + current status so it can repaint. Used on remount, pop-out,
+// and refocus. Returns { found:false } if the run is gone (older than the
+// recent-run TTL).
+ipcMain.handle('pr-review-implement-attach', (event, { requestId } = {}) => {
+  if (!requestId) return { found: false };
+  const sender = event.sender;
+  // Subscribe BEFORE snapshotting the buffer: any byte emitted in the gap is
+  // then duplicated into the replay (a harmless TUI redraw) rather than missed.
+  if (implementPtySessions.has(requestId)) {
+    implementSubs(requestId).add(sender);
+    sender.once('destroyed', () => {
+      const set = implementSubscribers.get(requestId);
+      if (set) set.delete(sender);
+    });
+  }
+  const snap = getImplementSnapshot(requestId);
+  if (!snap.found) {
+    const set = implementSubscribers.get(requestId);
+    if (set) set.delete(sender);
+    return { found: false };
+  }
+  return { found: true, live: snap.live, status: snap.status, buffer: snap.buffer };
+});
+
+// Detach without cancelling — the surface is going away but the run continues.
+ipcMain.handle('pr-review-implement-detach', (event, { requestId } = {}) => {
+  if (!requestId) return { ok: false };
+  const set = implementSubscribers.get(requestId);
+  if (set) set.delete(event.sender);
+  return { ok: true };
+});
+
+// Discover a backgrounded run for the active PR (so a fresh surface — e.g. a
+// pop-out — can find a run it didn't start). Matches by the PR's worktree.
+ipcMain.handle('pr-review-implement-active', () => {
+  if (!prReview.active) return { active: null };
+  const wt = prReview.active.worktreePath;
+  if (!wt) return { active: null };
+  return { active: getActiveImplementByWorktree(wt) };
 });
 
 ipcMain.handle('pr-review-implement-input', (_event, { requestId, data }) => {

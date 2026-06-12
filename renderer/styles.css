@@ -6414,7 +6414,7 @@ body.pr-review-popout #pr-review-root {
 .pr-review-terminal-tab {
   display: flex;
   flex-direction: column;
-  background: #000;
+  background: var(--term-bg);
   overflow: hidden;
 }
 .pr-implement-terminal {
@@ -6422,7 +6422,7 @@ body.pr-review-popout #pr-review-root {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  background: #000;
+  background: var(--term-bg);
 }
 .pr-implement-terminal-head {
   display: flex;
@@ -6438,7 +6438,7 @@ body.pr-review-popout #pr-review-root {
 .pr-implement-terminal-head .pr-implement-status {
   flex: 1;
 }
-.pr-implement-terminal-head .pr-implement-status.done { color: #56d364; }
+.pr-implement-terminal-head .pr-implement-status.done { color: var(--success, #56d364); }
 .pr-implement-terminal-head .pr-implement-status.error { color: var(--diff-del-fg, #e27c7c); }
 .pr-implement-terminal-head .pr-review-btn {
   padding: 3px 10px;
@@ -6448,7 +6448,7 @@ body.pr-review-popout #pr-review-root {
   flex: 1;
   min-height: 0;
   padding: 6px 8px;
-  background: #000;
+  background: var(--term-bg);
   overflow: hidden;
 }
 .pr-implement-terminal-body .xterm,

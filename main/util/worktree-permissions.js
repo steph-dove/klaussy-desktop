@@ -30,6 +30,7 @@ const fs = require('fs');
 const path = require('path');
 const { dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('./config');
+const { baseRepoForWorktree } = require('./git-repo');
 
 const SECRET_GLOBS = [
   // dotenv + direnv (top-level and nested)
@@ -52,6 +53,43 @@ const SECRET_GLOBS = [
 
 const TOUCH_TOOLS = ['Read', 'Edit', 'Write', 'MultiEdit'];
 
+// Bash command families an implement run is expected to use — pre-approved so
+// the agent doesn't stop to ask for routine review/test/build/install/commit
+// work. Each becomes a `Bash(<prefix>:*)` allow rule (prefix-matches the
+// command line; a compound command like `x && rm -rf y` won't match a single
+// prefix and still prompts). DELIBERATELY EXCLUDED so they still prompt:
+// git push / reset / clean / rebase, rm, mv, chmod, sudo, npx (arbitrary
+// package exec), `env`/`printenv` (bulk secret dump), and — critically — ALL
+// network egress (curl, wget, nc, ssh, scp, http clients). That last exclusion
+// is the secret-exfiltration backstop: even though content readers (cat/grep)
+// are allowed for review, nothing can send a file off the machine without a
+// prompt. The file-tool deny-list still blocks Read/Edit of .env & friends.
+const BASH_ALLOW = [
+  // read-only git (inspection)
+  'git status', 'git diff', 'git log', 'git show', 'git branch', 'git rev-parse',
+  'git ls-files', 'git remote', 'git stash list', 'git blame', 'git config --get',
+  // staging + committing (NOT push/reset/clean)
+  'git add', 'git commit', 'git restore --staged',
+  // file inspection / listing
+  'ls', 'cat', 'head', 'tail', 'find', 'grep', 'rg', 'wc', 'pwd', 'tree', 'which',
+  'echo', 'sed -n', 'awk', 'sort', 'uniq', 'diff', 'stat', 'file',
+  // node / js — test, lint, build, install
+  'npm test', 'npm run', 'npm install', 'npm ci', 'npm exec',
+  'pnpm test', 'pnpm run', 'pnpm install', 'pnpm lint', 'pnpm build', 'pnpm exec',
+  'yarn test', 'yarn run', 'yarn install', 'yarn lint', 'yarn build',
+  'tsc', 'eslint', 'prettier', 'vitest', 'jest',
+  // python
+  'pytest', 'python -m pytest', 'python3 -m pytest', 'python -m', 'python3 -m',
+  'pip install', 'pip3 install', 'poetry install', 'poetry run', 'uv ',
+  'ruff', 'mypy', 'black', 'flake8', 'pyright',
+  // rust
+  'cargo test', 'cargo check', 'cargo clippy', 'cargo build', 'cargo fmt', 'cargo add', 'cargo run',
+  // go
+  'go test', 'go vet', 'go build', 'go run', 'gofmt', 'golangci-lint',
+  // generic build runners
+  'make', 'bundle install', 'bundle exec', 'rake', 'gradle', './gradlew', 'mvn',
+];
+
 function normalizePath(p) {
   // Claude's permission glob format expects forward slashes regardless of
   // host OS. On Windows path.join produces backslashes; normalize so the
@@ -61,7 +99,12 @@ function normalizePath(p) {
 
 function buildRulesForWorktree(worktreePath) {
   const root = normalizePath(worktreePath);
-  const allow = TOUCH_TOOLS.map((t) => `${t}(${root}/**)`);
+  // File tools scoped to the worktree; Bash families pre-approved by command
+  // prefix (Bash rules aren't path-scoped — the agent runs with cwd = worktree).
+  const allow = [
+    ...TOUCH_TOOLS.map((t) => `${t}(${root}/**)`),
+    ...BASH_ALLOW.map((c) => `Bash(${c}:*)`),
+  ];
   const deny = [];
   for (const tool of TOUCH_TOOLS) {
     for (const glob of SECRET_GLOBS) {
@@ -71,20 +114,31 @@ function buildRulesForWorktree(worktreePath) {
   return { allow, deny };
 }
 
+// Consent is a per-REPO decision, not per-worktree: PR-implement worktrees are
+// ephemeral (a new one per PR), so keying consent by worktree path made the
+// native dialog re-appear for every PR of the same repo. Resolve the worktree
+// to its base repo so one "Allow for this repo" covers all its worktrees.
+function consentKeyFor(worktreePath) {
+  let base;
+  try { base = baseRepoForWorktree(worktreePath); } catch { base = null; }
+  return normalizePath(base || worktreePath);
+}
+
 // Read the saved decision for this worktree, if any. Returns one of:
 //   'allow' | 'skip' | null  (null means we haven't asked yet)
 function getStoredConsent(worktreePath) {
   const config = loadConfig();
   const perms = config.klaussyPermissions || {};
   if (perms.allowAllRepos) return 'allow';
-  const norm = normalizePath(worktreePath);
   const map = perms.repoConsent || {};
-  const v = map[norm];
+  // Keyed by repo now; fall back to a legacy worktree-path key so existing
+  // decisions made before this change still count.
+  const v = map[consentKeyFor(worktreePath)] ?? map[normalizePath(worktreePath)];
   return v === 'allow' || v === 'skip' ? v : null;
 }
 
 function persistConsent(worktreePath, decision, opts) {
-  const norm = normalizePath(worktreePath);
+  const norm = consentKeyFor(worktreePath);
   const config = loadConfig();
   const prev = config.klaussyPermissions || {};
   const repoConsent = { ...(prev.repoConsent || {}) };
