@@ -1,26 +1,27 @@
-// Pre-commit silent-failure review: a provider-agnostic, read-only agent
-// pass over the STAGED diff, run before a commit lands. Used by two
-// surfaces:
-//   - the diff panel's Commit button (renderer shows findings; the user
+// Pre-commit / pre-push agent review: a provider-agnostic, read-only pass
+// over a diff that is about to leave the developer's hands. Surfaces:
+//   - diff panel Commit button (staged diff; renderer shows findings, user
 //     decides fix-first vs commit-anyway)
-//   - the installed git pre-commit hook (terminal/agent commits phone home
-//     over a local socket; findings print in the committing terminal so the
-//     committer — human or agent — can fix or bypass)
+//   - git pre-commit hook (staged diff; findings print in the committing
+//     terminal — the committer, human or agent, fixes or bypasses)
+//   - git pre-push hook (the whole push range remoteSha..localSha; catches
+//     cross-commit issues and anything that bypassed pre-commit)
 //
-// The diff is INLINED into the prompt (capped) rather than fetched by the
-// agent, so every provider behaves identically in headless text mode. The
-// repo-intel block rides along so findings respect house conventions.
+// Four lenses (silent failures · secrets · debug leftovers · correctness
+// landmines) + the repo's real linter, with a visible per-lens scorecard on
+// every result. The diff is INLINED into the prompt (capped) so every
+// provider behaves identically in headless text mode; the repo-intel block
+// rides along so findings respect house conventions.
 
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, execFile } = require('child_process');
 const { spawnClaudeStream } = require('./claude-streaming');
 const { getRepoIntelBlock } = require('./repo-intel');
 
-// Live progress to every window — users should SEE pre-commit checks
-// running (and passing), not infer them from a pause. Mirrors the
-// repo-intel event pattern.
+// Live progress to every window — users should SEE reviews running (and
+// passing), not infer them from a pause.
 function notifyWindows(payload) {
   try {
     const { allWindows } = require('./windows');
@@ -34,16 +35,16 @@ const DIFF_CAP_BYTES = 200 * 1024;   // beyond this the diff is truncated (noted
 const CHECK_TIMEOUT_MS = 3 * 60 * 1000;
 const NO_ISSUES_TOKEN = 'NO_SILENT_FAILURES';
 
-// One in-flight check per worktree; a second request joins the first.
-const inflight = new Map(); // worktreePath -> { promise, requestId }
+// One in-flight check per (worktree, scope); a second request joins the first.
+const inflight = new Map(); // key -> { promise, requestId }
 const procMap = new Map();  // requestId -> child proc (spawnClaudeStream contract)
 
-// Agent-agnostic pre-commit prompt — four commit-time lenses, condensed
-// from the silent-failure-hunter reviewer we use on this codebase itself.
-// Deliberately excludes style/perf/architecture so it stays fast and
-// findings stay actionable. (Lint is handled separately by the repo's real
-// linter, not by the agent.)
-const CHECK_PROMPT = `You are a pre-commit reviewer. Review ONLY the staged diff below, which is about to be committed. Apply exactly these four lenses to the CHANGED lines and their immediate context — nothing else.
+// Agent-agnostic prompt — four lenses, condensed from the silent-failure-
+// hunter reviewer we use on this codebase itself. Deliberately excludes
+// style/perf/architecture so it stays fast and findings stay actionable.
+// (Lint is handled separately by the repo's real linter, not by the agent.)
+function checkPrompt(contextLine) {
+  return `You are a pre-commit reviewer. ${contextLine} Apply exactly these four lenses to the CHANGED lines and their immediate context — nothing else.
 
 LENS 1 — Silent failures (your primary lens):
 - Empty or swallowing catch blocks (caught errors not rethrown, surfaced, or meaningfully handled)
@@ -82,13 +83,16 @@ Output contract (the tooling parses this):
 What is wrong, why it matters, and the minimal fix.
 
 then the literal marker </FINDINGS> on its own line. Nothing after it. Keep each finding under 6 lines.`;
+}
 
 // { diff } | { empty: true } | { error } — a git failure must NOT read as
-// "nothing staged" (that would silently disable the feature on every commit).
-function stagedDiff(worktreePath) {
+// "nothing to review" (that would silently disable the feature).
+// `range` null = staged diff (pre-commit); otherwise e.g. "abc123..def456".
+function diffFor(worktreePath, range) {
   try {
-    const out = execFileSync('git', ['diff', '--cached'], {
-      cwd: worktreePath, stdio: 'pipe', maxBuffer: 32 * 1024 * 1024,
+    const args = range ? ['diff', range] : ['diff', '--cached'];
+    const out = execFileSync('git', args, {
+      cwd: worktreePath, stdio: 'pipe', maxBuffer: 64 * 1024 * 1024,
     }).toString();
     if (!out.trim()) return { empty: true };
     if (out.length > DIFF_CAP_BYTES) {
@@ -96,27 +100,31 @@ function stagedDiff(worktreePath) {
     }
     return { diff: out };
   } catch (e) {
-    return { error: 'could not read staged diff: ' + ((e && e.stderr ? String(e.stderr) : e.message) || '').trim().split('\n')[0] };
+    return { error: 'could not read diff: ' + ((e && e.stderr ? String(e.stderr) : e.message) || '').trim().split('\n')[0] };
   }
 }
 
-// Run the repo's REAL linter on the staged files (deterministic, fast, no
+// Run the repo's REAL linter on the changed files (deterministic, fast, no
 // tokens) — agent-judged linting would be slow and flaky. Targeted at the
-// staged files only so monorepo-wide lint runs don't stall commits.
+// changed files only so monorepo-wide lint runs don't stall the gate.
 // Returns { tool, errors, output } when a linter ran and found problems,
 // { tool, errors: 0 } when it ran clean, or null when no linter applies /
-// the linter itself broke (lint infra failure must never block a commit).
-const { execFile } = require('child_process');
-function lintStaged(worktreePath) {
+// the linter itself broke (lint infra failure must never block).
+function lintChanged(worktreePath, range) {
   return new Promise((resolve) => {
     let files;
     try {
-      files = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
+      const args = range
+        ? ['diff', range, '--name-only', '--diff-filter=ACMR']
+        : ['diff', '--cached', '--name-only', '--diff-filter=ACMR'];
+      files = execFileSync('git', args, {
         cwd: worktreePath, stdio: 'pipe',
       }).toString().split('\n').filter(Boolean);
     } catch {
       return resolve(null);
     }
+    // Only lint files that still exist at the current checkout.
+    files = files.filter((f) => fs.existsSync(path.join(worktreePath, f)));
     if (!files.length) return resolve(null);
 
     const jsFiles = files.filter((f) => /\.(js|jsx|ts|tsx|mjs|cjs)$/.test(f)).slice(0, 50);
@@ -167,18 +175,18 @@ function lensCountsOf(text, totalAgentFindings) {
 }
 
 // The visible scorecard — users should see the full list of what was
-// checked, pass or fail, on every commit.
+// checked, pass or fail, on every gate.
 function buildChecklist(lensCounts, lintErrors, lintTool) {
-  const row = (n, label) => (n ? `  \u2717 ${label} \u2014 ${n} issue${n === 1 ? '' : 's'}` : `  \u2713 ${label} \u2014 clean`);
+  const row = (n, label) => (n ? `  ✗ ${label} — ${n} issue${n === 1 ? '' : 's'}` : `  ✓ ${label} — clean`);
   const lines = [
     row(lensCounts.silent, 'silent failures'),
     row(lensCounts.secrets, 'secrets & credentials'),
     row(lensCounts.debug, 'debug leftovers'),
     row(lensCounts.correctness, 'correctness landmines'),
   ];
-  if (lensCounts.other) lines.push(`  \u2717 other findings \u2014 ${lensCounts.other}`);
+  if (lensCounts.other) lines.push(`  ✗ other findings — ${lensCounts.other}`);
   if (lintTool) lines.push(row(lintErrors, `lint (${lintTool})`));
-  else lines.push('  \u2013 lint \u2014 no linter detected for the staged files');
+  else lines.push('  – lint — no linter detected for the changed files');
   return lines.join('\n');
 }
 
@@ -196,36 +204,42 @@ function countFindings(text) {
   return m ? m.length : 0;
 }
 
-// Run the check. Resolves { skipped:true } when nothing is staged, else
-// { text, findingsCount, provider } or { error }. Never rejects.
-function runStagedCheck({ worktreePath, provider }) {
+// Core runner shared by the staged (pre-commit) and range (pre-push) gates.
+// Resolves { skipped:true } when there's nothing to review, else
+// { text, checklist, findingsCount, lintErrors, lintTool, provider } or
+// { error }. Never rejects.
+function runCheck({ worktreePath, provider, range, kind }) {
   if (!worktreePath) return Promise.resolve({ error: 'no worktree' });
-  const existing = inflight.get(worktreePath);
+  const flightKey = worktreePath + ' ' + (range || 'staged');
+  const existing = inflight.get(flightKey);
   if (existing) return existing.promise;
 
-  const staged = stagedDiff(worktreePath);
-  if (staged.error) return Promise.resolve({ error: staged.error });
-  if (staged.empty) return Promise.resolve({ skipped: true, reason: 'nothing staged' });
+  const d = diffFor(worktreePath, range);
+  if (d.error) return Promise.resolve({ error: d.error });
+  if (d.empty) return Promise.resolve({ skipped: true, reason: 'nothing to review' });
 
   const requestId = 'precommit-' + crypto.randomUUID();
   let intel = '';
   try { intel = getRepoIntelBlock(worktreePath, provider) || ''; } catch { /* optional context */ }
 
-  const prompt = CHECK_PROMPT
-    + '\n\n## Staged diff\n\n```diff\n' + staged.diff + '\n```\n'
+  const contextLine = range
+    ? 'Review ONLY the branch diff below — the full set of changes about to be PUSHED.'
+    : 'Review ONLY the staged diff below, which is about to be committed.';
+  const prompt = checkPrompt(contextLine)
+    + '\n\n## Diff under review\n\n```diff\n' + d.diff + '\n```\n'
     + (intel ? '\n' + intel + '\n' : '');
 
   // Register the inflight entry BEFORE the executor runs: spawnClaudeStream
   // can settle synchronously (consent declined, sync throw), and a finish()
   // that runs before registration would leave a permanently stale entry
-  // that short-circuits every future check for this worktree.
+  // that short-circuits every future check for this scope.
   const entry = { promise: null, requestId };
-  inflight.set(worktreePath, entry);
+  inflight.set(flightKey, entry);
 
   const wtName = path.basename(worktreePath);
-  notifyWindows({ type: 'started', worktreePath, wtName, provider: provider || 'claude' });
+  notifyWindows({ type: 'started', kind: kind || 'commit', worktreePath, wtName, provider: provider || 'claude' });
 
-  const promise = new Promise((resolve) => {
+  const agentPromise = new Promise((resolve) => {
     let text = '';
     let settled = false;
     const finish = (result) => {
@@ -283,7 +297,7 @@ function runStagedCheck({ worktreePath, provider }) {
         streamJson: false,
         provider: provider || 'claude',
         allowEdits: false,
-        // Never pop a consent dialog from a pre-commit hook context.
+        // Never pop a consent dialog from a hook context.
         promptConsent: false,
       });
       // spawnClaudeStream returns the child proc or null. The null paths
@@ -297,13 +311,13 @@ function runStagedCheck({ worktreePath, provider }) {
 
   // Real linter runs in parallel with the agent pass; results merge into one
   // report. Lint findings block like agent findings; lint INFRA failures
-  // never do (lintStaged returns null for those).
-  const lintPromise = lintStaged(worktreePath).catch(() => null);
+  // never do (lintChanged returns null for those).
+  const lintPromise = lintChanged(worktreePath, range).catch(() => null);
   const combined = (async () => {
-    const [agent, lint] = await Promise.all([promise, lintPromise]);
+    const [agent, lint] = await Promise.all([agentPromise, lintPromise]);
     const lintErrors = lint && lint.errors ? lint.errors : 0;
     const lintText = lintErrors
-      ? '## Lint (' + lint.tool + '): ' + lintErrors + ' problem(s) in staged files\n\n```\n' + lint.output + '\n```'
+      ? '## Lint (' + lint.tool + '): ' + lintErrors + ' problem(s) in changed files\n\n```\n' + lint.output + '\n```'
       : '';
     const lintTool = (lint && lint.tool) || null;
     const agentCount = (!agent.error && !agent.cancelled && !agent.skipped && agent.findingsCount) || 0;
@@ -332,11 +346,12 @@ function runStagedCheck({ worktreePath, provider }) {
   // Cleanup is keyed to OUR requestId — a check started after this one
   // settles must not have its fresh entry deleted by us.
   combined.then((result) => {
-    const cur = inflight.get(worktreePath);
-    if (cur && cur.requestId === requestId) inflight.delete(worktreePath);
+    const cur = inflight.get(flightKey);
+    if (cur && cur.requestId === requestId) inflight.delete(flightKey);
     notifyWindows({
       type: result.error ? 'error' : result.cancelled ? 'cancelled'
         : result.findingsCount ? 'findings' : 'passed',
+      kind: kind || 'commit',
       worktreePath,
       wtName,
       findingsCount: result.findingsCount || 0,
@@ -347,9 +362,20 @@ function runStagedCheck({ worktreePath, provider }) {
   return combined;
 }
 
-// Cancel an in-flight check for a worktree (the renderer's Skip button).
+// Staged-diff gate (Commit button + pre-commit hook).
+function runStagedCheck({ worktreePath, provider }) {
+  return runCheck({ worktreePath, provider, range: null, kind: 'commit' });
+}
+
+// Push-range gate (pre-push hook). `range` like "<remoteSha>..<localSha>".
+function runRangeCheck({ worktreePath, provider, range }) {
+  if (!range) return Promise.resolve({ error: 'no range' });
+  return runCheck({ worktreePath, provider, range, kind: 'push' });
+}
+
+// Cancel an in-flight staged check for a worktree (the renderer's Skip button).
 function cancelStagedCheck(worktreePath) {
-  const entry = inflight.get(worktreePath);
+  const entry = inflight.get(worktreePath + ' staged');
   if (!entry) return false;
   try {
     const proc = procMap.get(entry.requestId);
@@ -358,4 +384,4 @@ function cancelStagedCheck(worktreePath) {
   return true;
 }
 
-module.exports = { runStagedCheck, cancelStagedCheck, NO_ISSUES_TOKEN };
+module.exports = { runStagedCheck, runRangeCheck, cancelStagedCheck, NO_ISSUES_TOKEN };
