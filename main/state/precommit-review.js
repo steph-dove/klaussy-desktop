@@ -77,8 +77,9 @@ Output contract (the tooling parses this):
 - Otherwise output the literal marker <FINDINGS> on its own line, then each finding as:
 
 **[Severity: High | Medium | Low]**
+**[Lens: Silent failure | Secrets | Debug leftover | Correctness]**
 **[Location: file_path:line]**
-What is swallowed, why it matters, and the minimal fix.
+What is wrong, why it matters, and the minimal fix.
 
 then the literal marker </FINDINGS> on its own line. Nothing after it. Keep each finding under 6 lines.`;
 
@@ -145,6 +146,40 @@ function lintStaged(worktreePath) {
     }
     resolve(null);
   });
+}
+
+// Per-lens tallies from the agent's [Lens: …] tags, for the visible
+// checklist. Untagged findings land in `other` so they're never hidden.
+function lensCountsOf(text, totalAgentFindings) {
+  const counts = { silent: 0, secrets: 0, debug: 0, correctness: 0, other: 0 };
+  const tags = (text || '').match(/\[Lens:\s*([^\]]+)\]/gi) || [];
+  for (const t of tags) {
+    const v = t.toLowerCase();
+    if (/silent/.test(v)) counts.silent++;
+    else if (/secret|credential/.test(v)) counts.secrets++;
+    else if (/debug|leftover/.test(v)) counts.debug++;
+    else if (/correct|landmine/.test(v)) counts.correctness++;
+    else counts.other++;
+  }
+  const tagged = counts.silent + counts.secrets + counts.debug + counts.correctness + counts.other;
+  if (totalAgentFindings > tagged) counts.other += totalAgentFindings - tagged;
+  return counts;
+}
+
+// The visible scorecard — users should see the full list of what was
+// checked, pass or fail, on every commit.
+function buildChecklist(lensCounts, lintErrors, lintTool) {
+  const row = (n, label) => (n ? `  \u2717 ${label} \u2014 ${n} issue${n === 1 ? '' : 's'}` : `  \u2713 ${label} \u2014 clean`);
+  const lines = [
+    row(lensCounts.silent, 'silent failures'),
+    row(lensCounts.secrets, 'secrets & credentials'),
+    row(lensCounts.debug, 'debug leftovers'),
+    row(lensCounts.correctness, 'correctness landmines'),
+  ];
+  if (lensCounts.other) lines.push(`  \u2717 other findings \u2014 ${lensCounts.other}`);
+  if (lintTool) lines.push(row(lintErrors, `lint (${lintTool})`));
+  else lines.push('  \u2013 lint \u2014 no linter detected for the staged files');
+  return lines.join('\n');
 }
 
 // The <FINDINGS> marker is ground truth: agents deviate from the exact
@@ -271,17 +306,22 @@ function runStagedCheck({ worktreePath, provider }) {
       ? '## Lint (' + lint.tool + '): ' + lintErrors + ' problem(s) in staged files\n\n```\n' + lint.output + '\n```'
       : '';
     const lintTool = (lint && lint.tool) || null;
+    const agentCount = (!agent.error && !agent.cancelled && !agent.skipped && agent.findingsCount) || 0;
+    const lensCounts = lensCountsOf(agent.text || '', agentCount);
+    const checklist = buildChecklist(lensCounts, lintErrors, lintTool);
     if (agent.error || agent.cancelled || agent.skipped) {
       // Agent pass didn't produce findings — but real lint errors still count.
       if (lintErrors) {
         return { ...agent, error: undefined, cancelled: undefined, skipped: undefined,
-          text: lintText, findingsCount: lintErrors, lintErrors, lintTool, agentUnavailable: agent.error || (agent.cancelled ? 'cancelled' : 'skipped') };
+          text: checklist + '\n\n' + lintText, checklist, findingsCount: lintErrors, lintErrors, lintTool,
+          agentUnavailable: agent.error || (agent.cancelled ? 'cancelled' : 'skipped') };
       }
       return agent;
     }
     return {
       ...agent,
-      text: (lintText ? lintText + '\n\n' : '') + (agent.text || ''),
+      text: checklist + '\n\n' + (lintText ? lintText + '\n\n' : '') + (agent.text || ''),
+      checklist,
       findingsCount: (agent.findingsCount || 0) + lintErrors,
       lintErrors,
       lintTool,
