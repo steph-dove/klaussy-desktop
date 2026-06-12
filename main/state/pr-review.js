@@ -13,7 +13,7 @@
 const path = require('path');
 const fs = require('fs');
 const { execFile, execFileSync } = require('child_process');
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { instances } = require('./instances');
 
@@ -28,15 +28,35 @@ function setDeps({ ghJson } = {}) {
 }
 
 function broadcastPrReview() {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (win.isDestroyed()) continue;
-    win.webContents.send('pr-review-state', prReview.active ? sanitizePrReview(prReview.active) : null);
+  // Review closed: tell every window so the one showing it exits. Harmless for
+  // windows not in review mode (their exitPrReviewMode is a no-op).
+  if (!prReview.active) {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('pr-review-state', null);
+    }
+    return;
+  }
+  // A live review goes ONLY to the window that opened it (+ its pop-out). Other
+  // windows must NOT be dragged into PR-review mode — that was the "opens in
+  // every window" bug. The review is single-active global state, so exactly one
+  // window owns it at a time.
+  const payload = sanitizePrReview(prReview.active);
+  const targets = new Set();
+  const ownerWc = prReview.active.ownerWcId != null
+    ? webContents.fromId(prReview.active.ownerWcId) : null;
+  if (ownerWc && !ownerWc.isDestroyed()) targets.add(ownerWc);
+  if (prReview.active.popout && !prReview.active.popout.isDestroyed()) {
+    targets.add(prReview.active.popout.webContents);
+  }
+  for (const wc of targets) {
+    try { wc.send('pr-review-state', payload); } catch { /* window gone */ }
   }
 }
 
 function sanitizePrReview(s) {
-  // Strip the BrowserWindow reference — not serializable across IPC.
-  const { popout, ...rest } = s;
+  // Strip the BrowserWindow reference + owner id — not serializable / not for
+  // the renderer.
+  const { popout, ownerWcId, ...rest } = s;
   return { ...rest, popped: !!popout };
 }
 
