@@ -531,11 +531,16 @@
     if (e.target === themeOverlay) themeOverlay.style.display = 'none';
   });
 
-  // Update terminal themes when theme changes
+  // Update terminal themes when theme changes — primary AND sub-terminals, so
+  // a live dark↔light switch doesn't leave an open sub-terminal on the stale
+  // theme (e.g. dark fg on a now-light background).
   window.addEventListener('theme-changed', function () {
     var theme = ThemeManager.getTerminalTheme();
     tasks.forEach(function (task) {
       task.terminal.options.theme = theme;
+      (task.subTerminals || []).forEach(function (sub) {
+        if (sub && sub.terminal) sub.terminal.options.theme = theme;
+      });
     });
   });
 
