@@ -35,6 +35,7 @@ const { execFileSync } = require('child_process');
 const { app } = require('electron');
 const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree } = require('../util/git-repo');
+const { loadConfig } = require('../util/config');
 
 const inflight = new Map();  // base repo path -> Promise
 const memCache = new Map();  // base repo path -> { block, srcMtime, cliVersion }
