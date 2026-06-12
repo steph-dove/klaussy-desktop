@@ -181,7 +181,22 @@
   // BASE repo, which worktrees don't show).
   if (window.klaus.task.onRepoIntelEvent) {
     window.klaus.task.onRepoIntelEvent(function (ev) {
-      if (!ev || !ev.repoPath) return;
+      if (!ev) return;
+      // Tool auto-install lifecycle (conventions-cli + klausify from PyPI) —
+      // these events carry no repoPath.
+      if (ev.type === 'tools-installing') {
+        window.toast.info('Installing repo-analysis tools (' + (ev.missing || []).join(', ') + ') via ' + (ev.installer || 'pipx') + '…');
+        return;
+      }
+      if (ev.type === 'tools-installed') {
+        window.toast.success('Repo-analysis tools installed (' + (ev.installed || []).join(', ') + ') — repo intelligence is ready');
+        return;
+      }
+      if (ev.type === 'tools-failed') {
+        window.toast.warn('Could not auto-install ' + (ev.missing || []).join(', ') + ' (' + (ev.reason || 'unknown') + '). Install manually: ' + (ev.manual || 'pipx install conventions-cli klausify'));
+        return;
+      }
+      if (!ev.repoPath) return;
       var repoName = ev.repoPath.split('/').filter(Boolean).pop();
       if (ev.type === 'started') {
         window.toast.info(repoName + (ev.enriching

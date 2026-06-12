@@ -260,6 +260,18 @@ function install() {
     createWindow();
     if (!process.env.KLAUSSY_E2E) checkExternalCLIs();
 
+    // First-run: auto-install the repo-analysis CLIs (conventions-cli +
+    // klausify) from PyPI if missing, so repo intelligence works out of the
+    // box. Background, after the window exists so its toasts are visible;
+    // never blocks startup.
+    if (!process.env.KLAUSSY_E2E) {
+      setTimeout(() => {
+        try { require('../state/repo-intel').ensureReviewTools(); } catch (e) {
+          console.warn('[repo-intel] ensureReviewTools at boot failed:', e.message);
+        }
+      }, 3000);
+    }
+
     // Periodically save sessions in case quit events don't fire
     setInterval(() => {
       if (!isQuitting && instances.size > 0) {
