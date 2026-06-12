@@ -466,7 +466,13 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
 ipcMain.handle('precommit-review-run', async (_event, { worktreePath, provider }) => {
   try {
     const { runStagedCheck } = require('../state/precommit-review');
-    return await runStagedCheck({ worktreePath, provider });
+    const result = await runStagedCheck({ worktreePath, provider });
+    // A clean app-side review counts for the pre-push skip too: leave the
+    // passmark so the commit that follows gets recorded by post-commit.
+    if (result && !result.error && !result.skipped && !result.cancelled && !result.findingsCount) {
+      try { require('../state/precommit-hook').leaveReviewPassmark(worktreePath); } catch {}
+    }
+    return result;
   } catch (e) {
     return { error: e.message };
   }

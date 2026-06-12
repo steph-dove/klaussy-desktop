@@ -209,14 +209,16 @@
   if (window.klaus.task.onPrecommitEvent) {
     window.klaus.task.onPrecommitEvent(function (ev) {
       if (!ev || !ev.wtName) return;
+      var gate = ev.kind === 'push' ? 'pre-push review' : 'pre-commit review';
+      var scope = ev.kind === 'push' ? 'push range' : 'staged changes';
       if (ev.type === 'started') {
-        window.toast.info('🛡 ' + ev.wtName + ': pre-commit review running — ' + (ev.provider || 'agent') + ' checking silent failures, secrets, debug leftovers, landmines + lint…');
+        window.toast.info('🛡 ' + ev.wtName + ': ' + gate + ' running — ' + (ev.provider || 'agent') + ' checking silent failures, secrets, debug leftovers, landmines + lint…');
       } else if (ev.type === 'passed') {
-        window.toast.success('🛡 ' + ev.wtName + ': pre-commit review passed — staged changes clean across all lenses');
+        window.toast.success('🛡 ' + ev.wtName + ': ' + gate + ' passed — ' + scope + ' clean across all lenses');
       } else if (ev.type === 'findings') {
-        window.toast.warn('🛡 ' + ev.wtName + ': pre-commit review found ' + ev.findingsCount + ' issue' + (ev.findingsCount === 1 ? '' : 's') + ' — see the committing terminal or commit panel');
+        window.toast.warn('🛡 ' + ev.wtName + ': ' + gate + ' found ' + ev.findingsCount + ' issue' + (ev.findingsCount === 1 ? '' : 's') + ' — see the terminal or commit panel');
       } else if (ev.type === 'error') {
-        window.toast.warn('🛡 ' + ev.wtName + ': pre-commit review could not run (' + (ev.error || 'unknown') + ') — commit proceeded unreviewed');
+        window.toast.warn('🛡 ' + ev.wtName + ': ' + gate + ' could not run (' + (ev.error || 'unknown') + ') — proceeded unreviewed');
       }
     });
   }

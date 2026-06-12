@@ -229,7 +229,13 @@ ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
 
 ipcMain.handle('git-commit', async (_event, { worktreePath, message }) => {
   try {
-    await execFileP('git', ['commit', '-m', message], { cwd: worktreePath });
+    // The app's commit flow runs the review itself (diff panel) — skip the
+    // pre-commit hook so the same diff isn't reviewed (and billed) twice.
+    // commit-msg/post-commit hooks don't honor this var and still run.
+    await execFileP('git', ['commit', '-m', message], {
+      cwd: worktreePath,
+      env: { ...process.env, KLAUSSY_SKIP_REVIEW: '1' },
+    });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
