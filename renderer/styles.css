@@ -6429,7 +6429,7 @@ body.pr-review-popout #pr-review-root {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: var(--surface-2, #1a1a1a);
+  background: var(--surface);
   border-bottom: 1px solid var(--border);
   font-size: 12px;
   color: var(--muted);
