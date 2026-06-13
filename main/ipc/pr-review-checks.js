@@ -374,8 +374,16 @@ ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => 
       cwd, maxBuffer: 4 * 1024 * 1024, timeout: 10000,
     });
     const arr = JSON.parse(stdout);
-    return {
-      annotations: (Array.isArray(arr) ? arr : []).map((a) => ({
+    // De-duplicate identical annotations. GitHub's check-run annotations
+    // endpoint commonly returns the same annotation more than once (test
+    // reporters that post per-retry, matrix legs that each annotate the same
+    // failure, etc.), which otherwise renders as visible repeats. Two
+    // genuinely-distinct findings that happen to share a line keep a different
+    // title/message, so they survive — only byte-identical entries collapse.
+    const seen = new Set();
+    const annotations = [];
+    for (const a of Array.isArray(arr) ? arr : []) {
+      const norm = {
         path: a.path || '',
         startLine: a.start_line || null,
         endLine: a.end_line || null,
@@ -383,8 +391,13 @@ ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => 
         title: a.title || '',
         message: a.message || '',
         rawDetails: a.raw_details || '',
-      })),
-    };
+      };
+      const key = [norm.path, norm.startLine, norm.endLine, norm.level, norm.title, norm.message].join('');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      annotations.push(norm);
+    }
+    return { annotations };
   } catch (err) {
     // gh exits non-zero on 403 (token scope), 404 (no annotations / wrong id),
     // and on plain network failures. Surface the *useful* part of stderr —
