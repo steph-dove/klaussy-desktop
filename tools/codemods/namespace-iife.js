@@ -26,27 +26,50 @@ module.exports = function (fileInfo, api, options) {
   if (!NS) throw new Error('--namespace is required');
 
   const root = j(fileInfo.source);
+  const isWrapperCallee = (n) =>
+    n && (n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression');
 
-  // Find the `window.<NS> = (function(){...})()` assignment.
+  // Two supported shapes:
+  //   (A) namespace module: `window.<NS> = (function(){...})();`
+  //   (B) anonymous entry IIFE: `(function(){...})();` (no assignment) — the
+  //       namespace `window.<NS>` is created fresh and the IIFE keeps running.
+  let assignPath = null;   // ExpressionStatement>AssignmentExpression path (A)
+  let iifeStmtPath = null; // ExpressionStatement path of the bare IIFE (B)
+  let callExpr, wrapperFn;
+
   const assign = root.find(j.AssignmentExpression, (n) =>
     n.operator === '=' &&
     n.left.type === 'MemberExpression' &&
     n.left.object.type === 'Identifier' && n.left.object.name === 'window' &&
     n.left.property.type === 'Identifier' && n.left.property.name === NS &&
-    n.right.type === 'CallExpression' &&
-    (n.right.callee.type === 'FunctionExpression' || n.right.callee.type === 'ArrowFunctionExpression')
+    n.right.type === 'CallExpression' && isWrapperCallee(n.right.callee)
   );
-  if (assign.size() !== 1) throw new Error(`expected exactly one 'window.${NS} = (function(){...})()' (found ${assign.size()})`);
+  if (assign.size() === 1) {
+    assignPath = assign.paths()[0];
+    callExpr = assignPath.node.right;
+    wrapperFn = callExpr.callee;
+  } else {
+    // Look for a top-level bare IIFE statement.
+    const iifes = root.find(j.ExpressionStatement).filter((p) =>
+      p.parent.node.type === 'Program' &&
+      p.node.expression.type === 'CallExpression' &&
+      isWrapperCallee(p.node.expression.callee)
+    );
+    if (iifes.size() !== 1) {
+      throw new Error(`expected one 'window.${NS} = (fn)()' or one bare top-level '(fn)()' (found ${assign.size()} / ${iifes.size()})`);
+    }
+    iifeStmtPath = iifes.paths()[0];
+    callExpr = iifeStmtPath.node.expression;
+    wrapperFn = callExpr.callee;
+  }
 
-  const assignPath = assign.paths()[0];
-  const callExpr = assignPath.node.right;
-  const wrapperFn = callExpr.callee;
   const bodyBlock = wrapperFn.body; // BlockStatement
   if (!bodyBlock || bodyBlock.type !== 'BlockStatement') throw new Error('wrapper has no block body');
 
   // The wrapper's scope, via a path to the function expression.
-  const wrapperFnPath = assign.find(j.FunctionExpression).paths()[0]
-    || assign.find(j.ArrowFunctionExpression).paths()[0];
+  const scopeRoot = assignPath ? assign : root;
+  const wrapperFnPath = scopeRoot.find(j.FunctionExpression).paths().find((p) => p.node === wrapperFn)
+    || scopeRoot.find(j.ArrowFunctionExpression).paths().find((p) => p.node === wrapperFn);
   const wrapperScope = wrapperFnPath.scope;
 
   // Collect top-level declared names (function declarations + var/let/const
@@ -152,21 +175,22 @@ module.exports = function (fileInfo, api, options) {
   }
   bodyBlock.body = newBody;
 
-  // --- Reshape the IIFE: window.NS = window.NS || {}; (function(PR){...})(window.NS); ---
+  // --- Reshape: window.NS = window.NS || {}; (function(PR){...})(window.NS); ---
+  // The wrapper now takes PR; the call passes window.NS. (async/arrow flags on
+  // wrapperFn are left intact — we only swap params/args.)
   wrapperFn.params = [j.identifier(PR)];
-  // Replace the whole `window.NS = (fn)()` statement with two statements.
-  const assignStmtPath = assignPath.parent; // ExpressionStatement
   const winNs = () => j.memberExpression(j.identifier('window'), j.identifier(NS));
   const initStmt = j.expressionStatement(
     j.assignmentExpression('=', winNs(), j.logicalExpression('||', winNs(), j.objectExpression([])))
   );
-  // Preserve the file-top doc comment that was attached to the original
-  // `window.NS = (...)()` statement.
-  carryComments(assignStmtPath.node, initStmt);
-  // New call passes window.NS as PR.
   callExpr.arguments = [winNs()];
+
+  // The statement to replace: the `window.NS = (fn)()` assignment (A) or the
+  // bare IIFE statement (B). Replace it with [initStmt, iifeStmt].
+  const origStmtPath = assignPath ? assignPath.parent : iifeStmtPath;
+  carryComments(origStmtPath.node, initStmt); // keep the file-top doc comment
   const iifeStmt = j.expressionStatement(callExpr);
-  j(assignStmtPath).replaceWith([initStmt, iifeStmt]);
+  j(origStmtPath).replaceWith([initStmt, iifeStmt]);
 
   return root.toSource({ quote: 'single', lineTerminator: '\n' });
 };
