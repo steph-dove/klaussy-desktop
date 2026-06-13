@@ -48,6 +48,8 @@ require('./main/ipc/claude-stream-ipc');
 require('./main/ipc/pr-review-terminal');
 require('./main/ipc/agents');
 require('./main/ipc/pr-review');
+require('./main/ipc/pr-review-checks');
+require('./main/ipc/pr-review-comments');
 require('./main/ipc/ollama');
 require('./main/ipc/license');
 require('./main/ipc/token-usage');
