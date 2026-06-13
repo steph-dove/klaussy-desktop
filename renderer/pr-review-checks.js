@@ -1042,8 +1042,9 @@
     if (state.threadsError) {
       var err = document.createElement('span');
       err.className = 'pr-threads-status error';
-      err.title = state.threadsError;
-      err.textContent = 'threads: error';
+      err.title = state.threadsError + (state.threadsErrorFix ? '\n\nFix: ' + state.threadsErrorFix : '')
+        + '\n\nSee the Conversation tab for details.';
+      err.textContent = 'threads unavailable';
       actions.insertBefore(err, actions.firstChild);
     } else if (!state.threads) {
       var pend = document.createElement('span');

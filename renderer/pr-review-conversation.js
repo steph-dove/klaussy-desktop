@@ -155,9 +155,17 @@
       + '<div class="pr-conv-body">' + (meta.body ? PR.renderCommentBody(meta.body) : '<em class="pr-conv-empty">No description provided.</em>') + '</div>'
     + '</div>';
 
-    var feed = items.length === 0
-      ? '<div class="pr-conv-empty-feed">No comments or reviews yet.</div>'
-      : items.map(PR.renderConversationItem).join('');
+    // When the threads/comments fetch failed, don't imply the PR is empty —
+    // show the actionable gh-error banner instead of "No comments yet".
+    var feed;
+    if (state.threadsError) {
+      feed = PR.renderGhErrorBanner(state.threadsError, state.threadsErrorFix)
+        + (items.length ? items.map(PR.renderConversationItem).join('') : '');
+    } else {
+      feed = items.length === 0
+        ? '<div class="pr-conv-empty-feed">No comments or reviews yet.</div>'
+        : items.map(PR.renderConversationItem).join('');
+    }
 
     var composer = '<div class="pr-conv-new-comment">'
         + '<div class="pr-conv-new-head">Add a comment</div>'
