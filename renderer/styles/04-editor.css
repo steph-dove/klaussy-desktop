@@ -1,0 +1,407 @@
+/* ---- Inline File Viewer (C1) ---- */
+
+.file-viewer-header-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+
+.file-viewer-back {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.file-viewer-back:hover {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.file-viewer-path {
+  font-family: 'SF Mono', monospace;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* K3: inline AI edit. */
+.inline-edit-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.inline-edit-prompt::before {
+  content: '✨';
+  padding: 0 6px 0 10px;
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+/* Using inline-flex + size-by-ch lets the widget hug its content until
+   the user starts typing; then the input grows naturally with text. */
+.inline-edit-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-size: 13px;
+  padding: 8px 4px;
+  width: 28ch;
+  min-width: 28ch;
+  max-width: 70vw;
+}
+
+.inline-edit-input::placeholder { color: var(--text-muted); }
+
+.inline-edit-submit {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+.inline-edit-submit::before { content: '⏎'; }
+.inline-edit-submit:hover { background: var(--accent); color: white; }
+
+.inline-edit-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.inline-edit-dismiss:hover { background: var(--surface-hover); color: var(--text); }
+
+.inline-edit-status {
+  font-size: 13px;
+  color: var(--text);
+  padding: 8px 10px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* file-viewer-body already has display:flex, so we need relative for the
+   absolutely-positioned overlay to anchor to it. */
+.file-viewer-body { position: relative; }
+
+.inline-edit-stream {
+  position: absolute;
+  left: 12px;
+  right: 80px;       /* clear of Monaco's minimap (~60px) + breathing room */
+  bottom: 12px;
+  max-height: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  z-index: 10;
+}
+
+.inline-edit-stream-header {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-hover);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.inline-edit-stream-header::before {
+  content: '✨';
+  font-size: 10px;
+}
+
+.inline-edit-stream.ready .inline-edit-stream-header {
+  color: var(--text);
+}
+
+.inline-edit-stream-body {
+  margin: 0;
+  white-space: pre;
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: auto;
+  flex: 1;
+  padding: 10px 12px;
+  line-height: 1.5;
+}
+
+.inline-edit-stream-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-hover);
+}
+
+.inline-edit-accept,
+.inline-edit-reject {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: system-ui, -apple-system, sans-serif;
+  pointer-events: auto;
+  user-select: none;
+}
+.inline-edit-accept {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.inline-edit-accept:disabled { opacity: 0.4; cursor: not-allowed; }
+.inline-edit-accept:hover:not(:disabled) { filter: brightness(1.1); }
+.inline-edit-reject:hover:not(:disabled) { background: var(--surface-hover); }
+
+/* K8: status bar below the editor. */
+.file-viewer-statusbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-alt, var(--surface));
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  user-select: none;
+  height: 22px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+}
+
+.file-viewer-statusbar .statusbar-left,
+.file-viewer-statusbar .statusbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.statusbar-item {
+  white-space: nowrap;
+}
+
+.statusbar-item[hidden] { display: none; }
+
+.statusbar-ai-toggle {
+  font-weight: 500;
+  padding: 0 6px;
+  border-radius: 3px;
+  transition: background 0.1s;
+}
+.statusbar-ai-toggle:hover { background: var(--surface-hover); color: var(--text); }
+.statusbar-ai-toggle.active { color: var(--accent); }
+
+/* K7: git gutter change markers. Monaco puts linesDecorationsClassName
+   on a thin element in the gutter left of line numbers. We paint a solid
+   color bar for added/modified, and a wedge for deletions. */
+.git-gutter-added,
+.git-gutter-modified,
+.git-gutter-deleted {
+  width: 3px !important;
+  margin-left: 3px;
+}
+
+.git-gutter-added { background: #4ade80; }      /* green */
+.git-gutter-modified { background: #fbbf24; }   /* amber */
+.git-gutter-deleted {
+  background: transparent;
+  border-top: 4px solid #ef4444;                /* red, points at the deletion */
+  height: 0 !important;
+}
+
+.file-viewer-tabs {
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt, var(--surface));
+  flex-shrink: 0;
+  min-height: 30px;
+  scrollbar-width: thin;
+}
+
+.file-viewer-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px 6px 12px;
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  user-select: none;
+  max-width: 200px;
+  min-width: 0;
+}
+
+.file-viewer-tab:hover { background: var(--surface-hover); }
+
+.file-viewer-tab.active {
+  background: var(--bg);
+  color: var(--text);
+  border-bottom: 2px solid var(--accent);
+  margin-bottom: -1px;
+}
+
+.file-viewer-tab .tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.file-viewer-tab .tab-dirty-dot {
+  color: var(--accent);
+  font-size: 10px;
+  visibility: hidden;
+}
+
+.file-viewer-tab.dirty .tab-dirty-dot { visibility: visible; }
+.file-viewer-tab.dirty:not(:hover) .tab-close { display: none; }
+
+.file-viewer-tab .tab-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 3px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.file-viewer-tab:hover .tab-close,
+.file-viewer-tab.active .tab-close { opacity: 1; }
+
+.file-viewer-tab .tab-close:hover { background: var(--surface-hover); color: var(--text); }
+
+.file-viewer-body {
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+  tab-size: 4;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+
+/* Search bar */
+#search-bar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 8px 8px;
+  padding: 6px 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+#search-input {
+  width: 200px;
+  padding: 5px 8px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+#search-input:focus {
+  border-color: var(--accent);
+}
+
+#search-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 40px;
+  text-align: center;
+}
+
+#search-bar button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+#search-bar button:hover {
+  background: var(--surface-hover);
+  color: #ccc;
+}
+
+#search-close {
+  font-size: 16px;
+  margin-left: 2px;
+}
+
+/* Notification badge */
+.task-item .unread-badge {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  display: none;
+}
+
+.task-item .unread-badge.visible {
+  display: block;
+}
