@@ -1,25 +1,32 @@
 // Diff panel module — git status, diff viewer, staging, commits, inline comments
-window.DiffPanel = (function () {
-  let panelEl, fileListEl, diffViewEl, commitAreaEl, commitInput;
-  let currentWorktreePath = null;
-  let currentFiles = [];
-  let selectedFile = null;
-  let commentCallback = null;
-  let refreshInterval = null;
-  let watchedWorktreePath = null;
-  let unsubscribeWatcher = null;
-  let currentParsedHunks = [];
-  let currentRawDiff = '';
-  let currentDiffStaged = false;
-  let selectedLineKeys = new Set();
-  let refreshPaused = false;
-  let diffViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('diffViewMode')) || 'unified';
+window.DiffPanel = window.DiffPanel || {};
+
+(function(DP) {
+  DP.panelEl = undefined;
+  DP.fileListEl = undefined;
+  DP.diffViewEl = undefined;
+  DP.commitAreaEl = undefined;
+  DP.commitInput = undefined;
+  DP.currentWorktreePath = null;
+  DP.currentFiles = [];
+  DP.selectedFile = null;
+  DP.commentCallback = null;
+  DP.refreshInterval = null;
+  DP.watchedWorktreePath = null;
+  DP.unsubscribeWatcher = null;
+  DP.currentParsedHunks = [];
+  DP.currentRawDiff = '';
+  DP.currentDiffStaged = false;
+  DP.selectedLineKeys = new Set();
+  DP.refreshPaused = false;
+  DP.diffViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('diffViewMode')) || 'unified';
 
   // Branch diff mode state
-  let diffMode = 'working'; // 'working' or 'branch'
-  let baseBranch = null;
-  let branchList = [];
-  let remoteList = [];
+  DP.diffMode = 'working'; // 'working' or 'branch'
+
+  DP.baseBranch = null;
+  DP.branchList = [];
+  DP.remoteList = [];
 
   // Subscribe to the renderer event bus for task switches. updateWorktree is
   // the expensive path (re-fetches git state); skip when the panel isn't
@@ -29,64 +36,64 @@ window.DiffPanel = (function () {
   Events.on('task:switched', function (detail) {
     var task = detail && detail.task;
     if (!task) return;
-    if (!isVisible()) return;
-    updateWorktree(task.worktreePath);
-    if (detail.refreshDiff) refresh();
+    if (!DP.isVisible()) return;
+    DP.updateWorktree(task.worktreePath);
+    if (detail.refreshDiff) DP.refresh();
   });
 
-  function init() {
-    panelEl = document.getElementById('diff-panel');
-    fileListEl = document.getElementById('diff-file-list');
-    diffViewEl = document.getElementById('diff-view');
-    commitAreaEl = document.getElementById('commit-area');
-    commitInput = document.getElementById('commit-message');
+  DP.init = function() {
+    DP.panelEl = document.getElementById('diff-panel');
+    DP.fileListEl = document.getElementById('diff-file-list');
+    DP.diffViewEl = document.getElementById('diff-view');
+    DP.commitAreaEl = document.getElementById('commit-area');
+    DP.commitInput = document.getElementById('commit-message');
 
-    document.getElementById('btn-refresh-diff').addEventListener('click', refresh);
-    document.getElementById('btn-close-diff').addEventListener('click', hide);
+    document.getElementById('btn-refresh-diff').addEventListener('click', DP.refresh);
+    document.getElementById('btn-close-diff').addEventListener('click', DP.hide);
 
     // D1: Fetch & Pull
     document.getElementById('btn-fetch').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
-      var result = await window.klaus.git.fetch(currentWorktreePath);
+      var result = await window.klaus.git.fetch(DP.currentWorktreePath);
       this.disabled = false;
       this.textContent = 'Fetch';
-      updateAheadBehind();
-      refresh();
+      DP.updateAheadBehind();
+      DP.refresh();
     });
     document.getElementById('btn-pull').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
-      var result = await window.klaus.git.pull(currentWorktreePath);
+      var result = await window.klaus.git.pull(DP.currentWorktreePath);
       this.disabled = false;
       this.textContent = 'Pull';
-      updateAheadBehind();
-      refresh();
+      DP.updateAheadBehind();
+      DP.refresh();
     });
-    document.getElementById('btn-commit').addEventListener('click', toggleCommitArea);
-    document.getElementById('btn-push').addEventListener('click', pushChanges);
-    document.getElementById('btn-create-pr').addEventListener('click', createPR);
-    document.getElementById('btn-do-commit').addEventListener('click', doCommit);
-    document.getElementById('btn-claude-commit-msg').addEventListener('click', generateCommitMessageWithClaude);
+    document.getElementById('btn-commit').addEventListener('click', DP.toggleCommitArea);
+    document.getElementById('btn-push').addEventListener('click', DP.pushChanges);
+    document.getElementById('btn-create-pr').addEventListener('click', DP.createPR);
+    document.getElementById('btn-do-commit').addEventListener('click', DP.doCommit);
+    document.getElementById('btn-claude-commit-msg').addEventListener('click', DP.generateCommitMessageWithClaude);
 
-    commitInput.addEventListener('keydown', (e) => {
+    DP.commitInput.addEventListener('keydown', (e) => {
       // Textarea default: Enter inserts a newline (important for multi-line
       // commit messages with a subject + body). Cmd/Ctrl+Enter submits.
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
-        doCommit();
+        DP.doCommit();
       }
       if (e.key === 'Escape') {
-        commitAreaEl.style.display = 'none';
+        DP.commitAreaEl.style.display = 'none';
       }
     });
 
-    initSelectionExplain();
-  }
+    DP.initSelectionExplain();
+  };
 
   // --- Selection-based Explain ---
 
-  function initSelectionExplain() {
+  DP.initSelectionExplain = function() {
     // Create floating action group (Explain + Comment).
     var fab = document.createElement('div');
     fab.id = 'diff-selection-fab';
@@ -117,7 +124,7 @@ window.DiffPanel = (function () {
       var sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.toString().trim()) {
         fab.style.display = 'none';
-        refreshPaused = false;
+        DP.refreshPaused = false;
         return;
       }
       // Check if the selection is inside the diff view
@@ -125,11 +132,11 @@ window.DiffPanel = (function () {
       var focus = sel.focusNode;
       if (!diffContent.contains(anchor) && !diffContent.contains(focus)) {
         fab.style.display = 'none';
-        refreshPaused = false;
+        DP.refreshPaused = false;
         return;
       }
       // Pause refresh while text is selected
-      refreshPaused = true;
+      DP.refreshPaused = true;
       // Position near the end of the selection
       var range = sel.getRangeAt(0);
       var rect = range.getBoundingClientRect();
@@ -142,13 +149,13 @@ window.DiffPanel = (function () {
     fab.addEventListener('mousedown', function (e) { e.preventDefault(); });
 
     fab.querySelector('#explain-selection-btn').addEventListener('click', function () {
-      var text = getSelectedDiffText();
-      if (text) { fab.style.display = 'none'; explainSelection(text); }
+      var text = DP.getSelectedDiffText();
+      if (text) { fab.style.display = 'none'; DP.explainSelection(text); }
     });
 
     commentBtn.addEventListener('click', function () {
       fab.style.display = 'none';
-      commentOnSelection();
+      DP.commentOnSelection();
     });
 
     // Right-click context menu in diff area
@@ -168,10 +175,10 @@ window.DiffPanel = (function () {
       if (!item) return;
       menu.style.display = 'none';
       if (item.dataset.action === 'explain') {
-        var text = getSelectedDiffText();
-        if (text) explainSelection(text);
+        var text = DP.getSelectedDiffText();
+        if (text) DP.explainSelection(text);
       } else if (item.dataset.action === 'comment') {
-        commentOnSelection();
+        DP.commentOnSelection();
       }
     });
 
@@ -179,15 +186,15 @@ window.DiffPanel = (function () {
     document.addEventListener('click', function () {
       menu.style.display = 'none';
     });
-  }
+  };
 
   // Compute the PR comment range (side + line, optional start) from the current
   // text selection — maps selected text to .diff-line elements with data-*-ln.
-  function computeSelectionCommentRange() {
+  DP.computeSelectionCommentRange = function() {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed) return null;
     var range = sel.getRangeAt(0);
-    var allLines = Array.from(diffViewEl.querySelectorAll('.diff-line'));
+    var allLines = Array.from(DP.diffViewEl.querySelectorAll('.diff-line'));
     var touched = allLines.filter(function (el) {
       try { return range.intersectsNode(el); } catch (_) { return false; }
     });
@@ -212,25 +219,25 @@ window.DiffPanel = (function () {
     // Remember the anchor element for where to insert the composer
     out.anchorEl = touched[touched.length - 1];
     return out;
-  }
+  };
 
-  function commentOnSelection() {
+  DP.commentOnSelection = function() {
     var pr = (window.PRPanel && window.PRPanel.getCurrentPR) ? window.PRPanel.getCurrentPR() : null;
     if (!pr || !pr.number || !pr.headRefOid) {
       window.toast.error('No PR loaded for this worktree.');
       return;
     }
-    var range = computeSelectionCommentRange();
+    var range = DP.computeSelectionCommentRange();
     if (!range) {
       window.toast.error('Select one or more diff lines (add / delete / context) to comment on.');
       return;
     }
-    var file = selectedFile;
+    var file = DP.selectedFile;
     if (!file) { window.toast.error('No file selected.'); return; }
 
     // Clear selection + dismiss any existing composer
     window.getSelection().removeAllRanges();
-    var existing = diffViewEl.querySelector('.diff-comment-area');
+    var existing = DP.diffViewEl.querySelector('.diff-comment-area');
     if (existing) existing.remove();
 
     var rangeLabel = range.startLine
@@ -241,7 +248,7 @@ window.DiffPanel = (function () {
     area.className = 'diff-comment-area';
     area.innerHTML =
       '<div class="diff-comment-header">' +
-        '<span>Comment on <code>' + escHtml(rangeLabel) + '</code></span>' +
+        '<span>Comment on <code>' + DP.escHtml(rangeLabel) + '</code></span>' +
         '<button class="diff-comment-close" type="button" title="Close">&times;</button>' +
       '</div>' +
       '<textarea class="diff-comment-input" placeholder="Write a comment..." rows="3"></textarea>' +
@@ -249,14 +256,14 @@ window.DiffPanel = (function () {
         '<button class="diff-comment-post" type="button">Post</button>' +
       '</div>';
 
-    var anchor = range.anchorEl || diffViewEl.lastElementChild;
+    var anchor = range.anchorEl || DP.diffViewEl.lastElementChild;
     anchor.after(area);
 
     var ta = area.querySelector('.diff-comment-input');
     var postBtn = area.querySelector('.diff-comment-post');
     ta.focus();
 
-    function close() { area.remove(); refreshPaused = false; }
+    function close() { area.remove(); DP.refreshPaused = false; }
     area.querySelector('.diff-comment-close').addEventListener('click', close);
     ta.addEventListener('keydown', function (ev) {
       if (ev.key === 'Escape') close();
@@ -269,7 +276,7 @@ window.DiffPanel = (function () {
       postBtn.disabled = true;
       postBtn.textContent = '...';
       var result = await window.klaus.pr.addReviewComment({
-        worktreePath: currentWorktreePath,
+        worktreePath: DP.currentWorktreePath,
         prNumber: pr.number,
         body: body,
         path: file,
@@ -288,17 +295,17 @@ window.DiffPanel = (function () {
       close();
       if (window.PRPanel && window.PRPanel.loadPR) window.PRPanel.loadPR();
     });
-  }
+  };
 
-  function getSelectedDiffText() {
+  DP.getSelectedDiffText = function() {
     var sel = window.getSelection();
     if (!sel || sel.isCollapsed) return null;
     return sel.toString().trim();
-  }
+  };
 
-  async function explainSelection(text) {
+  DP.explainSelection = async function(text) {
     // Remove any existing explanation
-    var existing = diffViewEl.querySelector('.diff-explanation');
+    var existing = DP.diffViewEl.querySelector('.diff-explanation');
     if (existing) existing.remove();
 
     // Find where to insert the explanation — after the last selected line
@@ -307,24 +314,24 @@ window.DiffPanel = (function () {
     var lineEl = anchor;
     while (lineEl && !lineEl.classList) lineEl = lineEl.parentElement;
     while (lineEl && !lineEl.classList.contains('diff-line')) lineEl = lineEl.parentElement;
-    var insertAfter = lineEl || diffViewEl.lastElementChild;
+    var insertAfter = lineEl || DP.diffViewEl.lastElementChild;
 
-    var file = selectedFile || 'unknown';
-    runExplainStream({
+    var file = DP.selectedFile || 'unknown';
+    DP.runExplainStream({
       file: file,
       text: text,
       insertAfter: insertAfter,
-      onClose: function () { refreshPaused = false; },
+      onClose: function () { DP.refreshPaused = false; },
     });
 
     // Clear selection but keep refresh paused until explanation is dismissed.
     window.getSelection().removeAllRanges();
-  }
+  };
 
   // Shared streaming/backgrounded explain — used by selection-FAB and
   // per-hunk button. Mirrors pr-review.js explainSelection: same dedupeKey
   // formula, registry lookup for re-attachment, agent survives close.
-  async function runExplainStream(opts) {
+  DP.runExplainStream = async function(opts) {
     var file = opts.file;
     var text = opts.text;
     var insertAfter = opts.insertAfter;
@@ -389,73 +396,73 @@ window.DiffPanel = (function () {
     });
 
     if (!existingAgent || existingAgent.status !== 'running') {
-      window.klaus.ai.explainDiffStreamStart(requestId, currentWorktreePath, file, text, null);
+      window.klaus.ai.explainDiffStreamStart(requestId, DP.currentWorktreePath, file, text, null);
     }
-  }
+  };
 
   // H3: file-watch replaces 5s polling. A 30s safety-net interval catches the
   // rare case where fs.watch misses an event (e.g. filesystem remounts).
-  function startWatching(worktreePath) {
-    if (watchedWorktreePath === worktreePath) return;
-    stopWatching();
+  DP.startWatching = function(worktreePath) {
+    if (DP.watchedWorktreePath === worktreePath) return;
+    DP.stopWatching();
     if (!worktreePath) return;
-    watchedWorktreePath = worktreePath;
+    DP.watchedWorktreePath = worktreePath;
     window.klaus.fs.watchWorktree(worktreePath);
-    unsubscribeWatcher = window.klaus.fs.onWorktreeChanged(function (data) {
-      if (data.worktreePath !== watchedWorktreePath) return;
-      refresh();
-      updateAheadBehind();
+    DP.unsubscribeWatcher = window.klaus.fs.onWorktreeChanged(function (data) {
+      if (data.worktreePath !== DP.watchedWorktreePath) return;
+      DP.refresh();
+      DP.updateAheadBehind();
     });
-    if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(refresh, 30000);
-  }
+    if (DP.refreshInterval) clearInterval(DP.refreshInterval);
+    DP.refreshInterval = setInterval(DP.refresh, 30000);
+  };
 
-  function stopWatching() {
-    if (unsubscribeWatcher) { try { unsubscribeWatcher(); } catch (_) {} unsubscribeWatcher = null; }
-    if (watchedWorktreePath) { window.klaus.fs.unwatchWorktree(watchedWorktreePath); watchedWorktreePath = null; }
-    if (refreshInterval) { clearInterval(refreshInterval); refreshInterval = null; }
-  }
+  DP.stopWatching = function() {
+    if (DP.unsubscribeWatcher) { try { DP.unsubscribeWatcher(); } catch (_) {} DP.unsubscribeWatcher = null; }
+    if (DP.watchedWorktreePath) { window.klaus.fs.unwatchWorktree(DP.watchedWorktreePath); DP.watchedWorktreePath = null; }
+    if (DP.refreshInterval) { clearInterval(DP.refreshInterval); DP.refreshInterval = null; }
+  };
 
-  async function show(worktreePath) {
-    currentWorktreePath = worktreePath;
-    panelEl.classList.add('visible');
-    selectedFile = null;
-    branchList = [];
-    remoteList = [];
-    diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
-    await refresh();
-    updateAheadBehind();
-    startWatching(worktreePath);
-    rehydrateCommitMessage();
+  DP.show = async function(worktreePath) {
+    DP.currentWorktreePath = worktreePath;
+    DP.panelEl.classList.add('visible');
+    DP.selectedFile = null;
+    DP.branchList = [];
+    DP.remoteList = [];
+    DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+    await DP.refresh();
+    DP.updateAheadBehind();
+    DP.startWatching(worktreePath);
+    DP.rehydrateCommitMessage();
     // Trigger refit after panel appears
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
-  }
+  };
 
-  function hide() {
-    panelEl.classList.remove('visible');
-    stopWatching();
+  DP.hide = function() {
+    DP.panelEl.classList.remove('visible');
+    DP.stopWatching();
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
-  }
+  };
 
-  function isVisible() {
-    return panelEl.classList.contains('visible');
-  }
+  DP.isVisible = function() {
+    return DP.panelEl.classList.contains('visible');
+  };
 
-  function updateWorktree(worktreePath) {
-    var changed = currentWorktreePath !== worktreePath;
-    currentWorktreePath = worktreePath;
+  DP.updateWorktree = function(worktreePath) {
+    var changed = DP.currentWorktreePath !== worktreePath;
+    DP.currentWorktreePath = worktreePath;
     if (changed) {
-      selectedFile = null;
-      diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+      DP.selectedFile = null;
+      DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
       // Detach from any commit-message agent for the previous worktree.
-      resetCommitMsgState();
-      rehydrateCommitMessage();
+      DP.resetCommitMsgState();
+      DP.rehydrateCommitMessage();
     }
     // Force refresh even if paused (this is an explicit task switch, not auto-refresh)
-    refreshPaused = false;
-    refresh();
-    updateAheadBehind();
-    if (isVisible()) startWatching(worktreePath);
+    DP.refreshPaused = false;
+    DP.refresh();
+    DP.updateAheadBehind();
+    if (DP.isVisible()) DP.startWatching(worktreePath);
     // Reload the currently active non-Changes tab
     if (window._reloadDiffTab) {
       var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
@@ -463,74 +470,74 @@ window.DiffPanel = (function () {
         window._reloadDiffTab(activeTab.dataset.tab, worktreePath);
       }
     }
-  }
+  };
 
-  async function refresh() {
-    if (!currentWorktreePath) return;
-    if (refreshPaused) return;
+  DP.refresh = async function() {
+    if (!DP.currentWorktreePath) return;
+    if (DP.refreshPaused) return;
     // Don't refresh if an explanation is being shown
-    if (diffViewEl && diffViewEl.querySelector('.diff-explanation')) return;
+    if (DP.diffViewEl && DP.diffViewEl.querySelector('.diff-explanation')) return;
 
     // The staged set may have changed (stage/unstage/hunk ops all land
     // here) — a prior "Commit anyway" clearance must not certify a diff it
     // never reviewed. Findings stay visible for reference; the flag resets.
-    if (precommitCleared && !precommitPending) {
-      precommitCleared = false;
+    if (DP.precommitCleared && !DP.precommitPending) {
+      DP.precommitCleared = false;
       var cb = document.getElementById('btn-do-commit');
       if (cb && cb.textContent === 'Commit anyway') cb.textContent = 'Commit';
     }
 
-    if (diffMode === 'branch') {
-      await refreshBranchDiff();
+    if (DP.diffMode === 'branch') {
+      await DP.refreshBranchDiff();
       return;
     }
 
-    const result = await window.klaus.git.status(currentWorktreePath);
+    const result = await window.klaus.git.status(DP.currentWorktreePath);
     if (result.error) {
-      fileListEl.innerHTML = '<div class="diff-error">' + escHtml(result.error) + '</div>';
+      DP.fileListEl.innerHTML = '<div class="diff-error">' + DP.escHtml(result.error) + '</div>';
       return;
     }
-    currentFiles = result.files;
-    renderFileList(result.files, result.branch);
+    DP.currentFiles = result.files;
+    DP.renderFileList(result.files, result.branch);
 
-    if (selectedFile) {
-      const still = currentFiles.find(function (f) { return f.file === selectedFile; });
+    if (DP.selectedFile) {
+      const still = DP.currentFiles.find(function (f) { return f.file === DP.selectedFile; });
       if (still) {
-        await showFileDiff(selectedFile, still.staged);
+        await DP.showFileDiff(DP.selectedFile, still.staged);
       } else {
-        selectedFile = null;
-        diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
+        DP.selectedFile = null;
+        DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
       }
     }
-  }
+  };
 
-  async function refreshBranchDiff() {
-    if (!baseBranch) {
-      fileListEl.innerHTML = renderModeToggle('') + '<div class="diff-empty">Select a base branch</div>';
+  DP.refreshBranchDiff = async function() {
+    if (!DP.baseBranch) {
+      DP.fileListEl.innerHTML = DP.renderModeToggle('') + '<div class="diff-empty">Select a base branch</div>';
       return;
     }
-    var result = await window.klaus.git.branchFiles(currentWorktreePath, baseBranch);
+    var result = await window.klaus.git.branchFiles(DP.currentWorktreePath, DP.baseBranch);
     if (result.error) {
-      fileListEl.innerHTML = renderModeToggle('') + '<div class="diff-error">' + escHtml(result.error) + '</div>';
+      DP.fileListEl.innerHTML = DP.renderModeToggle('') + '<div class="diff-error">' + DP.escHtml(result.error) + '</div>';
       return;
     }
-    currentFiles = result.files.map(function (f) { return { status: f.status, file: f.file, staged: false }; });
-    renderBranchFileList(result.files);
+    DP.currentFiles = result.files.map(function (f) { return { status: f.status, file: f.file, staged: false }; });
+    DP.renderBranchFileList(result.files);
 
-    if (selectedFile) {
-      var still = currentFiles.find(function (f) { return f.file === selectedFile; });
+    if (DP.selectedFile) {
+      var still = DP.currentFiles.find(function (f) { return f.file === DP.selectedFile; });
       if (still) {
-        await showFileDiff(selectedFile, false);
+        await DP.showFileDiff(DP.selectedFile, false);
       } else {
-        selectedFile = null;
-        diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
+        DP.selectedFile = null;
+        DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
       }
     }
-  }
+  };
 
-  function renderModeToggle(branchName) {
-    var workingActive = diffMode === 'working' ? ' active' : '';
-    var branchActive = diffMode === 'branch' ? ' active' : '';
+  DP.renderModeToggle = function(branchName) {
+    var workingActive = DP.diffMode === 'working' ? ' active' : '';
+    var branchActive = DP.diffMode === 'branch' ? ' active' : '';
 
     var html = '<div class="diff-mode-bar">';
     html += '<div class="diff-mode-toggle">';
@@ -538,1459 +545,126 @@ window.DiffPanel = (function () {
     html += '<button class="diff-mode-btn js-mode-branch' + branchActive + '">Branch</button>';
     html += '</div>';
 
-    if (diffMode === 'branch') {
+    if (DP.diffMode === 'branch') {
       html += '<select class="diff-base-select js-base-select">';
-      var allBranches = branchList.concat(remoteList);
+      var allBranches = DP.branchList.concat(DP.remoteList);
       for (var i = 0; i < allBranches.length; i++) {
         var b = allBranches[i];
-        var sel = b === baseBranch ? ' selected' : '';
-        var isRemote = remoteList.indexOf(b) >= 0 && branchList.indexOf(b) < 0;
-        html += '<option value="' + escAttr(b) + '"' + sel + '>' + escHtml(b) + '</option>';
+        var sel = b === DP.baseBranch ? ' selected' : '';
+        var isRemote = DP.remoteList.indexOf(b) >= 0 && DP.branchList.indexOf(b) < 0;
+        html += '<option value="' + DP.escAttr(b) + '"' + sel + '>' + DP.escHtml(b) + '</option>';
       }
       html += '</select>';
     } else {
       if (branchName) {
-        html += '<span class="diff-branch-label">on <strong>' + escHtml(branchName) + '</strong></span>';
+        html += '<span class="diff-branch-label">on <strong>' + DP.escHtml(branchName) + '</strong></span>';
       }
     }
 
     html += '</div>';
     return html;
-  }
+  };
 
-  function bindModeToggle() {
-    var workingBtn = fileListEl.querySelector('.js-mode-working');
-    var branchBtn = fileListEl.querySelector('.js-mode-branch');
-    var selectEl = fileListEl.querySelector('.js-base-select');
+  DP.bindModeToggle = function() {
+    var workingBtn = DP.fileListEl.querySelector('.js-mode-working');
+    var branchBtn = DP.fileListEl.querySelector('.js-mode-branch');
+    var selectEl = DP.fileListEl.querySelector('.js-base-select');
 
     if (workingBtn) {
       workingBtn.addEventListener('click', function () {
-        if (diffMode === 'working') return;
-        diffMode = 'working';
-        selectedFile = null;
-        diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
-        commitAreaEl.style.display = 'none';
+        if (DP.diffMode === 'working') return;
+        DP.diffMode = 'working';
+        DP.selectedFile = null;
+        DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+        DP.commitAreaEl.style.display = 'none';
         document.getElementById('diff-footer').style.display = '';
-        refresh();
+        DP.refresh();
       });
     }
 
     if (branchBtn) {
       branchBtn.addEventListener('click', async function () {
-        if (diffMode === 'branch') return;
-        diffMode = 'branch';
-        selectedFile = null;
-        diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+        if (DP.diffMode === 'branch') return;
+        DP.diffMode = 'branch';
+        DP.selectedFile = null;
+        DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
         document.getElementById('diff-footer').style.display = '';
 
         // Fetch branches if not cached
-        if (branchList.length === 0) {
-          var result = await window.klaus.git.branches(currentWorktreePath);
-          branchList = result.branches || [];
-          remoteList = result.remotes || [];
+        if (DP.branchList.length === 0) {
+          var result = await window.klaus.git.branches(DP.currentWorktreePath);
+          DP.branchList = result.branches || [];
+          DP.remoteList = result.remotes || [];
         }
         // Auto-select a sensible default if not set
-        if (!baseBranch) {
+        if (!DP.baseBranch) {
           var defaults = ['main', 'master', 'dev', 'develop'];
           for (var i = 0; i < defaults.length; i++) {
-            if (branchList.indexOf(defaults[i]) >= 0 || remoteList.indexOf('origin/' + defaults[i]) >= 0) {
-              baseBranch = branchList.indexOf(defaults[i]) >= 0 ? defaults[i] : 'origin/' + defaults[i];
+            if (DP.branchList.indexOf(defaults[i]) >= 0 || DP.remoteList.indexOf('origin/' + defaults[i]) >= 0) {
+              DP.baseBranch = DP.branchList.indexOf(defaults[i]) >= 0 ? defaults[i] : 'origin/' + defaults[i];
               break;
             }
           }
-          if (!baseBranch && branchList.length > 0) baseBranch = branchList[0];
+          if (!DP.baseBranch && DP.branchList.length > 0) DP.baseBranch = DP.branchList[0];
         }
-        refresh();
+        DP.refresh();
       });
     }
 
     if (selectEl) {
       selectEl.addEventListener('change', function () {
-        baseBranch = selectEl.value;
-        selectedFile = null;
-        diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
-        refresh();
+        DP.baseBranch = selectEl.value;
+        DP.selectedFile = null;
+        DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+        DP.refresh();
       });
     }
-  }
+  };
 
-  function renderBranchFileList(files) {
-    var html = renderModeToggle('');
+  DP.renderBranchFileList = function(files) {
+    var html = DP.renderModeToggle('');
 
     if (files.length === 0) {
-      html += '<div class="diff-empty">No changes from ' + escHtml(baseBranch) + '</div>';
-      fileListEl.innerHTML = html;
-      bindModeToggle();
+      html += '<div class="diff-empty">No changes from ' + DP.escHtml(DP.baseBranch) + '</div>';
+      DP.fileListEl.innerHTML = html;
+      DP.bindModeToggle();
       return;
     }
 
     html += '<div class="diff-section-header"><span>Changed files (' + files.length + ')</span></div>';
     files.forEach(function (f) {
-      var statusClass = getBranchStatusClass(f.status);
+      var statusClass = DP.getBranchStatusClass(f.status);
       var statusLabel = f.status.charAt(0);
-      var sel = f.file === selectedFile ? ' selected' : '';
+      var sel = f.file === DP.selectedFile ? ' selected' : '';
       html +=
-        '<div class="diff-file' + sel + '" data-file="' + escAttr(f.file) + '" data-staged="false">' +
+        '<div class="diff-file' + sel + '" data-file="' + DP.escAttr(f.file) + '" data-staged="false">' +
           '<span class="diff-file-status ' + statusClass + '">' + statusLabel + '</span>' +
-          '<span class="diff-file-name" title="' + escAttr(f.file) + '">' + escHtml(basename(f.file)) + '</span>' +
-          '<span class="diff-file-path" title="' + escAttr(f.file) + '">' + escHtml(dirname(f.file)) + '</span>' +
+          '<span class="diff-file-name" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.basename(f.file)) + '</span>' +
+          '<span class="diff-file-path" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.dirname(f.file)) + '</span>' +
         '</div>';
     });
 
-    fileListEl.innerHTML = html;
-    bindModeToggle();
+    DP.fileListEl.innerHTML = html;
+    DP.bindModeToggle();
 
-    fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
+    DP.fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
       var file = el.dataset.file;
       el.addEventListener('click', function () {
-        selectedFile = file;
-        fileListEl.querySelectorAll('.diff-file').forEach(function (f) { f.classList.remove('selected'); });
+        DP.selectedFile = file;
+        DP.fileListEl.querySelectorAll('.diff-file').forEach(function (f) { f.classList.remove('selected'); });
         el.classList.add('selected');
-        showFileDiff(file, false);
+        DP.showFileDiff(file, false);
       });
     });
-  }
+  };
 
-  function getBranchStatusClass(status) {
+  DP.getBranchStatusClass = function(status) {
     var s = status.trim();
     if (s.startsWith('M')) return 'modified';
     if (s.startsWith('A')) return 'added';
     if (s.startsWith('D')) return 'deleted';
     if (s.startsWith('R')) return 'renamed';
     return '';
-  }
-
-  function renderFileList(files, branch) {
-    var staged = files.filter(function (f) { return f.staged; });
-    var unstaged = files.filter(function (f) { return !f.staged; });
-
-    var html = renderModeToggle(branch);
-
-    if (files.length === 0) {
-      html += '<div class="diff-empty">No changes</div>';
-      fileListEl.innerHTML = html;
-      bindModeToggle();
-      return;
-    }
-
-    if (staged.length > 0) {
-      html += '<div class="diff-section-header"><span>Staged (' + staged.length + ')</span>';
-      html += '<button class="diff-section-btn js-unstage-all" title="Unstage all">Unstage All</button></div>';
-      staged.forEach(function (f) { html += renderFileItem(f, true); });
-    }
-
-    if (unstaged.length > 0) {
-      html += '<div class="diff-section-header"><span>Changes (' + unstaged.length + ')</span>';
-      html += '<button class="diff-section-btn js-stage-all" title="Stage all">Stage All</button></div>';
-      unstaged.forEach(function (f) { html += renderFileItem(f, false); });
-    }
-
-    fileListEl.innerHTML = html;
-    bindModeToggle();
-    addCheckoutToBranchSelect();
-    checkConflicts();
-
-    // Bind section buttons
-    var stageAllBtn = fileListEl.querySelector('.js-stage-all');
-    if (stageAllBtn) stageAllBtn.addEventListener('click', stageAll);
-    var unstageAllBtn = fileListEl.querySelector('.js-unstage-all');
-    if (unstageAllBtn) unstageAllBtn.addEventListener('click', unstageAll);
-
-    // Bind file clicks and action buttons
-    fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
-      var file = el.dataset.file;
-      var isStaged = el.dataset.staged === 'true';
-
-      el.addEventListener('click', function (e) {
-        if (e.target.closest('.diff-file-action')) return;
-        selectedFile = file;
-        fileListEl.querySelectorAll('.diff-file').forEach(function (f) { f.classList.remove('selected'); });
-        el.classList.add('selected');
-        showFileDiff(file, isStaged);
-      });
-
-      el.addEventListener('dblclick', function (e) {
-        if (e.target.closest('.diff-file-action')) return;
-        e.preventDefault();
-        e.stopPropagation();
-        window.getSelection().removeAllRanges();
-        var fab = document.getElementById('explain-selection-btn');
-        if (fab) fab.style.display = 'none';
-        refreshPaused = true;
-        var fullPath = currentWorktreePath + '/' + file;
-        setTimeout(function () {
-          if (typeof window.openFileViewer === 'function') {
-            window.openFileViewer(fullPath, file);
-          }
-          refreshPaused = false;
-        }, 50);
-      });
-    });
-
-    fileListEl.querySelectorAll('.diff-file-action').forEach(function (btn) {
-      btn.addEventListener('click', async function (e) {
-        e.stopPropagation();
-        var file = btn.dataset.file;
-        var action = btn.dataset.action;
-        if (action === 'stage') {
-          await window.klaus.git.stage(currentWorktreePath, [file]);
-        } else if (action === 'unstage') {
-          await window.klaus.git.unstage(currentWorktreePath, [file]);
-        } else if (action === 'discard') {
-          // Use a visible confirmation
-          btn.textContent = '?';
-          btn.title = 'Click again to confirm discard';
-          btn.dataset.action = 'discard-confirm';
-        } else if (action === 'discard-confirm') {
-          await window.klaus.git.discard(currentWorktreePath, [file]);
-        }
-        if (action !== 'discard') await refresh();
-      });
-    });
-  }
-
-  function renderFileItem(f, isStaged) {
-    var statusClass = getStatusClass(f.status);
-    var statusLabel = getStatusLabel(f.status);
-    var sel = f.file === selectedFile ? ' selected' : '';
-
-    var actions = '';
-    if (isStaged) {
-      actions = '<button class="diff-file-action" data-file="' + escAttr(f.file) + '" data-action="unstage" title="Unstage">\u2212</button>';
-    } else {
-      actions =
-        '<button class="diff-file-action" data-file="' + escAttr(f.file) + '" data-action="stage" title="Stage">+</button>' +
-        '<button class="diff-file-action" data-file="' + escAttr(f.file) + '" data-action="discard" title="Discard">\u2715</button>';
-    }
-
-    return (
-      '<div class="diff-file' + sel + '" data-file="' + escAttr(f.file) + '" data-staged="' + isStaged + '">' +
-        '<span class="diff-file-status ' + statusClass + '">' + statusLabel + '</span>' +
-        '<span class="diff-file-name" title="' + escAttr(f.file) + '">' + escHtml(basename(f.file)) + '</span>' +
-        '<span class="diff-file-path" title="' + escAttr(f.file) + '">' + escHtml(dirname(f.file)) + '</span>' +
-        '<span class="diff-file-actions">' + actions + '</span>' +
-      '</div>'
-    );
-  }
-
-  async function showFileDiff(file, staged) {
-    var result;
-    currentDiffStaged = !!staged;
-    selectedLineKeys = new Set();
-    if (diffMode === 'branch' && baseBranch) {
-      result = await window.klaus.git.branchDiff(currentWorktreePath, baseBranch, file);
-    } else {
-      result = await window.klaus.git.diff(currentWorktreePath, file, staged);
-    }
-    if (result.error || !result.diff) {
-      // For untracked files, try to show file content
-      if (!result.diff) {
-        var fileResult = await window.klaus.fs.readFile(currentWorktreePath + '/' + file);
-        if (fileResult.content) {
-          var lang = detectLang(file);
-          var highlighted = null;
-          if (typeof hljs !== 'undefined') {
-            try {
-              highlighted = lang
-                ? hljs.highlight(fileResult.content, { language: lang, ignoreIllegals: true })
-                : hljs.highlightAuto(fileResult.content);
-            } catch (e) {}
-          }
-          var hLines = null;
-          if (highlighted) {
-            hLines = splitHighlightedLines(highlighted.value);
-            try { hLines = hLines.map(enhanceLine); } catch (e) {}
-          }
-          var contentLines = fileResult.content.split('\n');
-          diffViewEl.innerHTML = renderViewFullFileLink(file) + '<div class="diff-line diff-header">New file: ' + escHtml(file) + '</div>' +
-            contentLines.map(function (line, idx) {
-              return '<div class="diff-line diff-add"><span class="diff-prefix">+</span><span class="diff-code">' +
-                (hLines ? hLines[idx] : escHtml(line)) + '</span></div>';
-            }).join('');
-          bindViewFullFileLink(file);
-          return;
-        }
-      }
-      diffViewEl.innerHTML = '<div class="diff-empty">No diff available</div>';
-      return;
-    }
-    currentRawDiff = result.diff;
-    var diffHtml = diffViewMode === 'split' ? renderDiffSplit(result.diff) : renderDiff(result.diff);
-    diffViewEl.innerHTML = renderViewFullFileLink(file) + diffHtml;
-    bindViewFullFileLink(file);
-    bindViewModeToggle(file);
-    bindInlineComments(file);
-    bindExplainButtons(file);
-    bindPartialStaging(file);
-  }
-
-  function renderViewFullFileLink(file) {
-    var unifiedActive = diffViewMode === 'unified' ? ' active' : '';
-    var splitActive = diffViewMode === 'split' ? ' active' : '';
-    var isMd = window.MarkdownPreview && window.MarkdownPreview.isMarkdownPath(file);
-    var previewLink = isMd
-      ? '<a href="#" class="js-preview-md" title="Render markdown">Preview</a>'
-      : '';
-    return '<div class="diff-view-full-file">'
-      + '<a href="#" class="js-view-full-file">View full file</a>'
-      + '<a href="#" class="js-edit-full-file">Edit</a>'
-      + previewLink
-      + ' <span class="diff-view-full-path">' + escHtml(file) + '</span>'
-      + '<div class="diff-view-mode-toggle" role="group" aria-label="Diff view mode">'
-        + '<button type="button" class="diff-view-mode-btn js-view-mode-unified' + unifiedActive + '" title="Unified view">Unified</button>'
-        + '<button type="button" class="diff-view-mode-btn js-view-mode-split' + splitActive + '" title="Side-by-side view">Split</button>'
-      + '</div>'
-      + '</div>';
-  }
-
-  // Replace the diff view body with the rendered markdown for `file`. The
-  // header stays put — its Preview link flips to "Show diff" so the user
-  // can return to the diff. Reads the current working-tree file (matches
-  // what Edit / View full file would show).
-  async function showMarkdownPreview(file) {
-    if (!window.MarkdownPreview) return;
-    var fullPath = currentWorktreePath + '/' + file;
-    var fileResult = await window.klaus.fs.readFile(fullPath);
-    var src = (fileResult && fileResult.content) || '';
-    diffViewEl.innerHTML =
-      renderViewFullFileLinkInPreviewMode(file) +
-      '<div class="diff-md-preview file-md-preview"></div>';
-    var previewEl = diffViewEl.querySelector('.diff-md-preview');
-    previewEl.innerHTML = window.MarkdownPreview.render(src);
-    window.MarkdownPreview.attachLinkInterceptor(previewEl);
-    bindPreviewHeader(file);
-  }
-
-  function renderViewFullFileLinkInPreviewMode(file) {
-    return '<div class="diff-view-full-file">'
-      + '<a href="#" class="js-view-full-file">View full file</a>'
-      + '<a href="#" class="js-edit-full-file">Edit</a>'
-      + '<a href="#" class="js-show-diff" title="Back to diff">Show diff</a>'
-      + ' <span class="diff-view-full-path">' + escHtml(file) + '</span>'
-      + '</div>';
-  }
-
-  function bindPreviewHeader(file) {
-    bindViewFullFileLink(file);
-    var back = diffViewEl.querySelector('.js-show-diff');
-    if (back) {
-      back.addEventListener('click', function (e) {
-        e.preventDefault();
-        showFileDiff(file, currentDiffStaged);
-      });
-    }
-  }
-
-  function bindViewModeToggle(file) {
-    var unifiedBtn = diffViewEl.querySelector('.js-view-mode-unified');
-    var splitBtn = diffViewEl.querySelector('.js-view-mode-split');
-    function setMode(mode) {
-      if (diffViewMode === mode) return;
-      diffViewMode = mode;
-      try { localStorage.setItem('diffViewMode', mode); } catch (_) {}
-      selectedLineKeys = new Set();
-      if (file && selectedFile === file) showFileDiff(file, currentDiffStaged);
-    }
-    if (unifiedBtn) unifiedBtn.addEventListener('click', function () { setMode('unified'); });
-    if (splitBtn) splitBtn.addEventListener('click', function () { setMode('split'); });
-  }
-
-  function bindViewFullFileLink(file) {
-    var link = diffViewEl.querySelector('.js-view-full-file');
-    if (link) {
-      link.addEventListener('click', function (e) {
-        e.preventDefault();
-        var fullPath = currentWorktreePath + '/' + file;
-        if (typeof window.openFileViewer === 'function') {
-          window.openFileViewer(fullPath, file);
-        }
-      });
-    }
-    var editLink = diffViewEl.querySelector('.js-edit-full-file');
-    if (editLink) {
-      editLink.addEventListener('click', function (e) {
-        e.preventDefault();
-        var fullPath = currentWorktreePath + '/' + file;
-        if (typeof window.openFileViewer === 'function') {
-          window.openFileViewer(fullPath, file);
-        }
-      });
-    }
-    var previewLink = diffViewEl.querySelector('.js-preview-md');
-    if (previewLink) {
-      previewLink.addEventListener('click', function (e) {
-        e.preventDefault();
-        showMarkdownPreview(file);
-      });
-    }
-  }
-
-  function bindInlineComments(file) {
-    diffViewEl.querySelectorAll('.diff-line.diff-add, .diff-line.diff-del, .diff-line.diff-context').forEach(function (lineEl) {
-      lineEl.addEventListener('click', function () {
-        // Don't trigger comment if user is selecting text
-        var sel = window.getSelection();
-        if (sel && !sel.isCollapsed) return;
-        if (!commentCallback) return;
-        // Remove any existing inline comment
-        var existing = diffViewEl.querySelector('.inline-comment');
-        if (existing) existing.remove();
-
-        var wrap = document.createElement('div');
-        wrap.className = 'inline-comment';
-        wrap.innerHTML = '<input type="text" placeholder="Comment for the agent..." class="inline-comment-input" />';
-        lineEl.after(wrap);
-
-        var inp = wrap.querySelector('input');
-        inp.focus();
-        inp.addEventListener('keydown', function (e) {
-          if (e.key === 'Enter') {
-            var text = inp.value.trim();
-            if (text && commentCallback) commentCallback('Regarding ' + file + ': ' + text);
-            wrap.remove();
-          }
-          if (e.key === 'Escape') wrap.remove();
-        });
-      });
-    });
-  }
-
-  function bindExplainButtons(file) {
-    diffViewEl.querySelectorAll('.diff-explain-btn').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var hunkIndex = parseInt(btn.dataset.hunkIndex, 10);
-        var hunk = currentParsedHunks[hunkIndex];
-        if (!hunk) return;
-
-        var existing = diffViewEl.querySelector('.diff-explanation');
-        if (existing) existing.remove();
-
-        runExplainStream({
-          file: file,
-          text: hunk.lines.join('\n'),
-          insertAfter: btn.closest('.diff-hunk'),
-          onClose: function () {},
-        });
-      });
-    });
-  }
-
-  // D6: Partial-hunk staging
-  // Build a unified patch from a subset of selected lines within currentParsedHunks.
-  //   Stage   (pre=HEAD, post=working; apply forward): unselected - → context, unselected + → drop
-  //   Unstage (pre=HEAD, post=index;   apply with -R): unselected + → context, unselected - → drop
-  // The post-image of the patch must match the state we apply against (working tree for
-  // stage, index for unstage -R), which is why the rules are swapped.
-  function buildPartialPatch(file, lineKeys, reverse) {
-    if (!currentRawDiff || !currentParsedHunks.length) return null;
-
-    // Extract file header: everything from the start of currentRawDiff up to the first @@.
-    var rawLines = currentRawDiff.split('\n');
-    var headerLines = [];
-    for (var i = 0; i < rawLines.length; i++) {
-      if (rawLines[i].startsWith('@@')) break;
-      headerLines.push(rawLines[i]);
-    }
-    // Guard: no diff --git header means we synthesize one so git apply knows the path.
-    var hasGitHeader = headerLines.some(function (l) { return l.startsWith('diff --git'); });
-    if (!hasGitHeader) {
-      headerLines = ['diff --git a/' + file + ' b/' + file, '--- a/' + file, '+++ b/' + file];
-    }
-
-    var patchHunks = [];
-    for (var h = 0; h < currentParsedHunks.length; h++) {
-      var hunk = currentParsedHunks[h];
-      var header = hunk.lines[0];
-      var body = hunk.lines.slice(1);
-
-      // Does this hunk contain any selected lines? If not, skip.
-      var anySelected = false;
-      for (var k = 1; k <= body.length; k++) {
-        if (lineKeys.has(h + ':' + k)) { anySelected = true; break; }
-      }
-      if (!anySelected) continue;
-
-      // Transform body lines
-      var outLines = [];
-      var lastKept = false;
-      for (var b = 0; b < body.length; b++) {
-        var bodyLine = body[b];
-        var key = h + ':' + (b + 1);
-        var selected = lineKeys.has(key);
-
-        if (bodyLine.startsWith('+')) {
-          if (selected) { outLines.push(bodyLine); lastKept = true; }
-          else if (reverse) { outLines.push(' ' + bodyLine.substring(1)); lastKept = true; } // unstage: + → context
-          else { lastKept = false; } // stage: unselected + → drop
-        } else if (bodyLine.startsWith('-')) {
-          if (selected) { outLines.push(bodyLine); lastKept = true; }
-          else if (reverse) { lastKept = false; } // unstage: unselected - → drop
-          else { outLines.push(' ' + bodyLine.substring(1)); lastKept = true; } // stage: - → context
-        } else if (bodyLine.startsWith('\\')) {
-          // "\ No newline at end of file" applies to the previous line
-          if (lastKept) outLines.push(bodyLine);
-        } else {
-          outLines.push(bodyLine); // context
-          lastKept = true;
-        }
-      }
-
-      // Recompute @@ header: old_count = context + '-' lines; new_count = context + '+' lines.
-      var hm = header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/);
-      if (!hm) continue;
-      var oldStart = parseInt(hm[1], 10);
-      var newStart = parseInt(hm[2], 10);
-      var trailing = hm[3] || '';
-      var oldCount = 0, newCount = 0;
-      for (var o = 0; o < outLines.length; o++) {
-        var c = outLines[o].charAt(0);
-        if (c === ' ') { oldCount++; newCount++; }
-        else if (c === '-') { oldCount++; }
-        else if (c === '+') { newCount++; }
-      }
-      // Skip hunks that became no-ops (all context) — can happen if all selections dropped.
-      var hasChange = outLines.some(function (l) {
-        return l.charAt(0) === '+' || l.charAt(0) === '-';
-      });
-      if (!hasChange) continue;
-
-      var newHeader = '@@ -' + oldStart + ',' + oldCount + ' +' + newStart + ',' + newCount + ' @@' + trailing;
-      patchHunks.push(newHeader);
-      patchHunks = patchHunks.concat(outLines);
-    }
-
-    if (patchHunks.length === 0) return null;
-
-    return headerLines.concat(patchHunks).join('\n') + '\n';
-  }
-
-  async function applyPartialPatch(file, lineKeys, reverse) {
-    var patch = buildPartialPatch(file, lineKeys, reverse);
-    if (!patch) {
-      window.toast.error('Nothing to ' + (reverse ? 'unstage' : 'stage') + '.');
-      return;
-    }
-    var result = await window.klaus.git.applyPatch(currentWorktreePath, patch, reverse);
-    if (result.error) {
-      window.toast.error((reverse ? 'Unstage' : 'Stage') + ' failed:\n' + result.error);
-      return;
-    }
-    selectedLineKeys = new Set();
-    await refresh();
-  }
-
-  function bindPartialStaging(file) {
-    if (diffMode !== 'working') return;
-
-    // Checkbox selection
-    diffViewEl.querySelectorAll('.diff-stage-check').forEach(function (cb) {
-      cb.addEventListener('click', function (e) {
-        e.stopPropagation(); // don't trigger bindInlineComments click-to-comment
-      });
-      cb.addEventListener('change', function () {
-        var key = cb.dataset.lineKey;
-        if (cb.checked) selectedLineKeys.add(key);
-        else selectedLineKeys.delete(key);
-        updatePartialActionBar(file);
-      });
-    });
-
-    // "Stage hunk" / "Unstage hunk" buttons
-    diffViewEl.querySelectorAll('.diff-stage-hunk-btn').forEach(function (btn) {
-      btn.addEventListener('click', async function (e) {
-        e.stopPropagation();
-        var hi = parseInt(btn.dataset.hunkIndex, 10);
-        var hunk = currentParsedHunks[hi];
-        if (!hunk) return;
-        // Select every +/- line in this hunk.
-        var keys = new Set();
-        for (var b = 0; b < hunk.lines.length - 1; b++) {
-          var line = hunk.lines[b + 1];
-          if (line.startsWith('+') || line.startsWith('-')) {
-            keys.add(hi + ':' + (b + 1));
-          }
-        }
-        btn.disabled = true;
-        btn.textContent = '...';
-        await applyPartialPatch(file, keys, currentDiffStaged);
-      });
-    });
-
-    updatePartialActionBar(file);
-  }
-
-  function updatePartialActionBar(file) {
-    var existing = document.getElementById('diff-partial-action-bar');
-    if (existing) existing.remove();
-    if (selectedLineKeys.size === 0) {
-      refreshPaused = false;
-      return;
-    }
-    // Keep auto-refresh from wiping the selection.
-    refreshPaused = true;
-
-    var verb = currentDiffStaged ? 'Unstage' : 'Stage';
-    var bar = document.createElement('div');
-    bar.id = 'diff-partial-action-bar';
-    bar.innerHTML =
-      '<span class="partial-count">' + selectedLineKeys.size + ' line' + (selectedLineKeys.size === 1 ? '' : 's') + ' selected</span>' +
-      '<button class="partial-cancel" type="button">Cancel</button>' +
-      '<button class="partial-apply" type="button">' + verb + ' selected</button>';
-
-    // Prefer inserting after the diff-view element inside the diff panel, stuck to bottom
-    var diffContent = document.getElementById('diff-content');
-    (diffContent || diffViewEl).appendChild(bar);
-
-    bar.querySelector('.partial-cancel').addEventListener('click', function () {
-      selectedLineKeys = new Set();
-      diffViewEl.querySelectorAll('.diff-stage-check').forEach(function (cb) { cb.checked = false; });
-      updatePartialActionBar(file);
-    });
-    bar.querySelector('.partial-apply').addEventListener('click', async function () {
-      bar.querySelector('.partial-apply').disabled = true;
-      bar.querySelector('.partial-apply').textContent = '...';
-      await applyPartialPatch(file, selectedLineKeys, currentDiffStaged);
-    });
-  }
-
-  // Parse hunks from raw diff text + bulk-highlight code lines. Shared by
-  // unified and split renderers. Populates currentParsedHunks as a side effect.
-  function parseAndHighlight(diffText) {
-    var lines = diffText.split('\n');
-    var hunks = [];
-    var currentHunk = [];
-    var hunkStart = -1;
-    for (var i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('@@')) {
-        if (currentHunk.length > 0) hunks.push({ start: hunkStart, lines: currentHunk.slice() });
-        currentHunk = [lines[i]];
-        hunkStart = i;
-      } else if (hunkStart >= 0) {
-        if (lines[i].startsWith('diff ')) {
-          hunks.push({ start: hunkStart, lines: currentHunk.slice() });
-          currentHunk = [];
-          hunkStart = -1;
-        } else {
-          currentHunk.push(lines[i]);
-        }
-      }
-    }
-    if (currentHunk.length > 0) hunks.push({ start: hunkStart, lines: currentHunk.slice() });
-
-    var lang = detectLang(selectedFile);
-    var codeLines = [];
-    var lineMap = [];
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (line.startsWith('+') && !line.startsWith('+++')) {
-        codeLines.push(line.substring(1));
-        lineMap.push({ idx: i, prefix: '+', type: 'add' });
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
-        codeLines.push(line.substring(1));
-        lineMap.push({ idx: i, prefix: '-', type: 'del' });
-      } else if (!line.startsWith('@@') && !line.startsWith('diff ') &&
-                 !line.startsWith('index ') && !line.startsWith('new file') &&
-                 !line.startsWith('deleted file') && !line.startsWith('+++') &&
-                 !line.startsWith('---')) {
-        codeLines.push(line.length > 0 ? line.substring(1) : '');
-        lineMap.push({ idx: i, prefix: ' ', type: 'context' });
-      }
-    }
-
-    var highlightedLines = {};
-    if (typeof hljs !== 'undefined' && codeLines.length > 0) {
-      var codeBlock = codeLines.join('\n');
-      try {
-        var result = lang
-          ? hljs.highlight(codeBlock, { language: lang, ignoreIllegals: true })
-          : hljs.highlightAuto(codeBlock);
-        var hLines = splitHighlightedLines(result.value);
-        try { hLines = hLines.map(enhanceLine); } catch (_) {}
-        for (var j = 0; j < lineMap.length && j < hLines.length; j++) {
-          highlightedLines[lineMap[j].idx] = hLines[j];
-        }
-      } catch (e) {
-        console.error('[hljs] Syntax highlighting failed:', e, e.stack);
-      }
-    }
-
-    currentParsedHunks = hunks;
-    return { lines: lines, hunks: hunks, highlightedLines: highlightedLines };
-  }
-
-  function renderDiff(diffText) {
-    var parsed = parseAndHighlight(diffText);
-    var lines = parsed.lines;
-    var hunks = parsed.hunks;
-    var highlightedLines = parsed.highlightedLines;
-
-    // Partial-staging UI only shown in working mode (not branch diff)
-    var allowStaging = diffMode === 'working';
-    var stageVerb = currentDiffStaged ? 'Unstage' : 'Stage';
-
-    var html = '';
-    var oldLn = 0, newLn = 0; // running line counters driven by @@ headers
-    var currentHunkIdx = -1;
-    var lineInHunk = 0;
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      var cls = 'diff-line';
-
-      if (line.startsWith('+++') || line.startsWith('---')) {
-        cls += ' diff-meta';
-        html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
-      } else if (line.startsWith('@@')) {
-        cls += ' diff-hunk';
-        var hm = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-        if (hm) { oldLn = parseInt(hm[1], 10) - 1; newLn = parseInt(hm[2], 10) - 1; }
-        var hi = hunks.findIndex(function (h) { return h.start === i; });
-        currentHunkIdx = hi;
-        lineInHunk = 0;
-        if (hi >= 0) {
-          var stageBtn = allowStaging
-            ? '<button class="diff-stage-hunk-btn" data-hunk-index="' + hi + '" title="' + stageVerb + ' this hunk">' + stageVerb + ' hunk</button>'
-            : '';
-          html += '<div class="' + cls + '" data-hunk-index="' + hi + '">' +
-            '<span class="diff-hunk-text">' + escHtml(line) + '</span>' +
-            '<button class="diff-explain-btn" data-hunk-index="' + hi + '" title="Explain this change">Explain</button>' +
-            stageBtn +
-            '</div>';
-        } else {
-          html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
-        }
-      } else if (line.startsWith('+') && !line.startsWith('+++')) {
-        newLn++;
-        lineInHunk++;
-        cls += ' diff-add';
-        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
-      } else if (line.startsWith('-') && !line.startsWith('---')) {
-        oldLn++;
-        lineInHunk++;
-        cls += ' diff-del';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT"><span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.substring(1))) + '</span></div>';
-      } else if (line.startsWith('diff ')) {
-        cls += ' diff-header';
-        html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
-      } else if (line.startsWith('index ') || line.startsWith('new file') || line.startsWith('deleted file')) {
-        cls += ' diff-meta';
-        html += '<div class="' + cls + '">' + escHtml(line) + '</div>';
-      } else {
-        oldLn++; newLn++;
-        if (currentHunkIdx >= 0) lineInHunk++;
-        cls += ' diff-context';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
-      }
-    }
-
-    return html;
-  }
-
-  // H1: Side-by-side split view. Reuses parseAndHighlight so hunks + hljs pipeline
-  // match the unified renderer exactly. Pairs consecutive - with + into rows; pure
-  // adds/dels get a blank slot on the opposite side. D6 checkboxes live in the
-  // pane that owns the line (LEFT for -, RIGHT for +).
-  function renderDiffSplit(diffText) {
-    var parsed = parseAndHighlight(diffText);
-    var lines = parsed.lines;
-    var hunks = parsed.hunks;
-    var highlightedLines = parsed.highlightedLines;
-
-    var allowStaging = diffMode === 'working';
-    var stageVerb = currentDiffStaged ? 'Unstage' : 'Stage';
-
-    var html = '';
-
-    // File meta (everything before the first @@ of the first hunk) rendered
-    // full-width above the grid so paths, diff header, new/deleted markers,
-    // and binary-file notices stay visible.
-    var firstHunkLineIdx = hunks.length > 0 ? hunks[0].start : lines.length;
-    for (var i = 0; i < firstHunkLineIdx; i++) {
-      var meta = lines[i];
-      if (!meta) continue;
-      if (meta.startsWith('diff ')) {
-        html += '<div class="diff-split-meta diff-header">' + escHtml(meta) + '</div>';
-      } else {
-        html += '<div class="diff-split-meta diff-meta">' + escHtml(meta) + '</div>';
-      }
-    }
-
-    hunks.forEach(function (hunk, hi) {
-      var header = hunk.lines[0];
-      var hm = header.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-      var oldLn = hm ? parseInt(hm[1], 10) - 1 : 0;
-      var newLn = hm ? parseInt(hm[2], 10) - 1 : 0;
-
-      var stageBtn = allowStaging
-        ? '<button class="diff-stage-hunk-btn" data-hunk-index="' + hi + '" title="' + stageVerb + ' this hunk">' + stageVerb + ' hunk</button>'
-        : '';
-      html += '<div class="diff-line diff-hunk diff-split-hunk-header" data-hunk-index="' + hi + '">'
-        + '<span class="diff-hunk-text">' + escHtml(header) + '</span>'
-        + '<button class="diff-explain-btn" data-hunk-index="' + hi + '" title="Explain this change">Explain</button>'
-        + stageBtn
-        + '</div>';
-
-      var body = hunk.lines.slice(1);
-      var bodyStartIdx = hunk.start + 1; // index into `lines` for body[0]
-      var b = 0;
-
-      function paneAdd(info) {
-        var cls = 'diff-line diff-split-right diff-add';
-        var code = highlightedLines[info.idx] || escHtml(info.text);
-        return '<div class="' + cls + '" data-new-ln="' + info.newLn + '" data-side="RIGHT">'
-          + '<span class="diff-ln-gutter">' + info.newLn + '</span>'
-          + '<span class="diff-prefix">+</span>'
-          + '<span class="diff-code">' + code + '</span>'
-          + '</div>';
-      }
-      function paneDel(info) {
-        var cls = 'diff-line diff-split-left diff-del';
-        var code = highlightedLines[info.idx] || escHtml(info.text);
-        return '<div class="' + cls + '" data-old-ln="' + info.oldLn + '" data-side="LEFT">'
-          + '<span class="diff-ln-gutter">' + info.oldLn + '</span>'
-          + '<span class="diff-prefix">-</span>'
-          + '<span class="diff-code">' + code + '</span>'
-          + '</div>';
-      }
-      function paneBlank(side) {
-        return '<div class="diff-line diff-blank diff-split-' + side + '"></div>';
-      }
-      function paneContext(info, side) {
-        var cls = 'diff-line diff-split-' + side + ' diff-context';
-        var code = highlightedLines[info.idx] || escHtml(info.text);
-        var lnAttr = side === 'left'
-          ? 'data-old-ln="' + info.oldLn + '"'
-          : 'data-new-ln="' + info.newLn + '" data-side="RIGHT"';
-        var lnVal = side === 'left' ? info.oldLn : info.newLn;
-        return '<div class="' + cls + '" ' + lnAttr + '>'
-          + '<span class="diff-ln-gutter">' + lnVal + '</span>'
-          + '<span class="diff-prefix"> </span>'
-          + '<span class="diff-code">' + code + '</span>'
-          + '</div>';
-      }
-
-      while (b < body.length) {
-        var line = body[b];
-        if (line.startsWith('\\')) { b++; continue; } // no-newline marker — skip in split view
-        if (line.startsWith(' ') || line === '') {
-          oldLn++; newLn++;
-          var ctxInfo = { idx: bodyStartIdx + b, oldLn: oldLn, newLn: newLn, text: line.length > 0 ? line.substring(1) : '' };
-          html += paneContext(ctxInfo, 'left') + paneContext(ctxInfo, 'right');
-          b++;
-        } else {
-          // Line keys use body index (b+1) to match buildPartialPatch, which
-          // is body-index-based. Counting content lines instead would drift
-          // whenever a `\ No newline` marker sits inside the hunk body.
-          var dels = [];
-          while (b < body.length && body[b].startsWith('-')) {
-            oldLn++;
-            dels.push({ idx: bodyStartIdx + b, oldLn: oldLn, key: hi + ':' + (b + 1), text: body[b].substring(1) });
-            b++;
-          }
-          while (b < body.length && body[b].startsWith('\\')) b++;
-          var adds = [];
-          while (b < body.length && body[b].startsWith('+')) {
-            newLn++;
-            adds.push({ idx: bodyStartIdx + b, newLn: newLn, key: hi + ':' + (b + 1), text: body[b].substring(1) });
-            b++;
-          }
-          while (b < body.length && body[b].startsWith('\\')) b++;
-          var rowCount = Math.max(dels.length, adds.length);
-          for (var k = 0; k < rowCount; k++) {
-            html += (dels[k] ? paneDel(dels[k]) : paneBlank('left'));
-            html += (adds[k] ? paneAdd(adds[k]) : paneBlank('right'));
-          }
-        }
-      }
-    });
-
-    return '<div class="diff-split-grid">' + html + '</div>';
-  }
-
-  function toggleCommitArea() {
-    var visible = commitAreaEl.style.display !== 'none';
-    commitAreaEl.style.display = visible ? 'none' : 'flex';
-    if (!visible) {
-      commitInput.focus();
-      // Fresh open = fresh review state for whatever is staged now. A review
-      // still in flight from the previous open keeps the button disabled —
-      // re-enabling here allowed double doCommit races.
-      commitFlowGen++;
-      precommitCleared = false;
-      clearPrecommitFindings();
-      var b = document.getElementById('btn-do-commit');
-      if (b) { b.textContent = precommitPending ? 'Reviewing changes…' : 'Commit'; b.disabled = precommitPending; }
-    }
-  }
-
-  // ---- Pre-commit silent-failure review (app commit flow) ----
-  // First Commit click runs the review (skippable); findings render above
-  // the message box and the button re-arms as "Commit anyway" — the user
-  // decides fix-first vs commit. Pref `preCommitReview` (default on) gates it.
-  var precommitCleared = false;
-  var precommitPending = false;
-  // Bumped whenever the commit area is (re)opened: a review that resolves
-  // after the user closed/reopened must not act on the stale flow.
-  var commitFlowGen = 0;
-
-  function clearPrecommitFindings() {
-    var box = document.getElementById('precommit-findings');
-    if (box) box.remove();
-  }
-
-  function renderPrecommitFindings(text, count) {
-    clearPrecommitFindings();
-    var box = document.createElement('div');
-    box.id = 'precommit-findings';
-    box.innerHTML =
-      '<div class="precommit-findings-head">Pre-commit review found ' + count + ' issue' + (count === 1 ? '' : 's')
-        + ' in the staged changes — fix them, or commit anyway.'
-        + '<button type="button" class="precommit-findings-close" title="Dismiss">&times;</button></div>'
-      + '<pre class="precommit-findings-body"></pre>';
-    box.querySelector('.precommit-findings-body').textContent = text;
-    box.querySelector('.precommit-findings-close').addEventListener('click', clearPrecommitFindings);
-    commitAreaEl.insertBefore(box, commitAreaEl.firstChild);
-  }
-
-  // Returns true → proceed with the commit now; false → findings rendered,
-  // stop and let the user decide. Degrades to "proceed" on any infra error —
-  // the review must never make committing impossible.
-  async function runPrecommitReview(btn) {
-    var prefs;
-    try {
-      prefs = (await window.klaus.ui.getPreferences()) || {};
-    } catch (e) {
-      // Can't read the pref → fail toward OFF: the review is a billed agent
-      // run the user may have opted out of.
-      window.toast.warn('Could not read preferences — committing without the pre-commit review');
-      return true;
-    }
-    if (prefs.preCommitReview === false) return true;
-
-    // Review with the agent of the task on this worktree (default otherwise).
-    var agent = prefs.defaultProvider || 'claude';
-    try {
-      AppState.tasks.forEach(function (t) {
-        if (t && t.worktreePath === currentWorktreePath && t.mode && t.mode !== 'shell') agent = t.mode;
-      });
-    } catch (e) { /* keep default */ }
-
-    btn.textContent = 'Reviewing changes…';
-    var skip = document.createElement('button');
-    skip.type = 'button';
-    skip.id = 'precommit-skip';
-    skip.textContent = 'Skip review';
-    skip.addEventListener('click', function () {
-      window.klaus.task.precommitReviewCancel(currentWorktreePath);
-    });
-    if (btn.parentNode) btn.parentNode.insertBefore(skip, btn.nextSibling);
-
-    var res;
-    try {
-      res = await window.klaus.task.precommitReview(currentWorktreePath, agent);
-    } catch (e) {
-      res = { error: (e && e.message) || String(e) };
-    }
-    if (skip.parentNode) skip.remove();
-
-    if (!res || res.cancelled) return true; // skipped — user's call
-    if (res.error) {
-      window.toast.warn('Pre-commit review unavailable (' + res.error + ') — committing without it');
-      return true;
-    }
-    if (res.skipped || !res.findingsCount) {
-      if (!res.skipped) window.toast.success('Pre-commit review passed — silent failures, secrets, debug leftovers, landmines + lint all clean');
-      return true;
-    }
-    renderPrecommitFindings(res.text, res.findingsCount);
-    return false; // caller arms "Commit anyway" (after staleness checks)
-  }
-
-  async function doCommit() {
-    var msg = commitInput.value.trim();
-    if (!msg) {
-      showDiffStatus('Commit aborted: empty message', 'error');
-      return;
-    }
-    var btn = document.getElementById('btn-do-commit');
-    if (precommitPending) return; // a review is already running for this panel
-    btn.disabled = true;
-
-    if (!precommitCleared) {
-      var gen = commitFlowGen;
-      precommitPending = true;
-      var proceed;
-      try {
-        proceed = await runPrecommitReview(btn);
-      } finally {
-        precommitPending = false;
-      }
-      if (gen !== commitFlowGen) {
-        // The commit area was closed/reopened mid-review — this flow is
-        // stale; the fresh open starts from scratch.
-        btn.disabled = false;
-        btn.textContent = 'Commit';
-        return;
-      }
-      if (!proceed) {
-        precommitCleared = true; // informed decision: next click commits
-        btn.disabled = false;
-        btn.textContent = 'Commit anyway';
-        return;
-      }
-    }
-    clearPrecommitFindings();
-
-    btn.disabled = true;
-    btn.textContent = 'Committing...';
-    var result = await window.klaus.git.commit(currentWorktreePath, msg);
-    btn.disabled = false;
-    btn.textContent = 'Commit';
-    precommitCleared = false;
-    if (!result || result.error) {
-      var errMsg = (result && result.error) || 'unknown failure';
-      showDiffStatus('Commit failed: ' + errMsg, 'error');
-      window.toast.error('Commit failed: ' + errMsg);
-      return;
-    }
-    // Show the subject line in the banner so the user sees what landed.
-    var subject = msg.split('\n')[0].trim();
-    showDiffStatus('Committed: ' + (subject.length > 80 ? subject.slice(0, 77) + '...' : subject), 'success');
-    commitInput.value = '';
-    commitAreaEl.style.display = 'none';
-    await refresh();
-    try { await updateAheadBehind(); } catch (_) {}
-  }
-
-  // In-flight request id + unsubscribe handles for the sparkle button. When
-  // the button is toggled off mid-stream we cancel the subprocess main-side
-  // AND detach the IPC listeners so a late chunk doesn't keep typing after.
-  let commitMsgRequestId = null;
-  let commitMsgUnsubChunk = null;
-  let commitMsgUnsubDone = null;
-
-  function resetCommitMsgState() {
-    if (commitMsgUnsubChunk) { try { commitMsgUnsubChunk(); } catch (_) {} commitMsgUnsubChunk = null; }
-    if (commitMsgUnsubDone)  { try { commitMsgUnsubDone();  } catch (_) {} commitMsgUnsubDone  = null; }
-    commitMsgRequestId = null;
-  }
-
-  async function generateCommitMessageWithClaude() {
-    var btn = document.getElementById('btn-claude-commit-msg');
-    // Toggle behavior: second click while streaming cancels.
-    if (commitMsgRequestId) {
-      try { await window.klaus.ai.commitMessageCancel(commitMsgRequestId); } catch (_) {}
-      resetCommitMsgState();
-      btn.textContent = '✨';
-      btn.disabled = false;
-      return;
-    }
-    if (!currentWorktreePath) return;
-
-    // Check if an agent is already in flight for this worktree (e.g. user
-    // clicked sparkle, navigated to a task to test something, came back).
-    var existing = await window.klaus.agents.findByDedupeKey('commit-message:' + currentWorktreePath);
-    if (existing) {
-      attachToCommitMessageAgent(existing);
-      return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = '…';
-
-    var requestId = 'ccm-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
-    commitMsgRequestId = requestId;
-    // Start fresh — Claude replaces whatever the user had typed. If they'd
-    // entered something they wanted to keep they wouldn't have clicked this.
-    commitInput.value = '';
-
-    bindCommitMessageStreaming(requestId, btn);
-
-    var start = await window.klaus.ai.commitMessageStart(requestId, currentWorktreePath);
-    if (start && start.error) {
-      resetCommitMsgState();
-      btn.textContent = '✨';
-      btn.disabled = false;
-      window.toast.error(start.error);
-    }
-  }
-
-  // Subscribe to an in-flight or completed commit-message agent and stream
-  // its output into the commit input. Used by the initial click and by
-  // rehydrateCommitMessage when the user returns to the diff panel.
-  function attachToCommitMessageAgent(agent) {
-    var btn = document.getElementById('btn-claude-commit-msg');
-    commitInput.value = agent.text || '';
-    if (agent.status !== 'running') {
-      // Already finished — just paint the result, normalize fences/whitespace.
-      var cleaned = (commitInput.value || '').trim();
-      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
-      commitInput.value = cleaned.trim();
-      if (agent.status === 'error' && agent.error) {
-        window.toast && window.toast.error('Commit message failed: ' + agent.error);
-      }
-      return;
-    }
-    if (btn) { btn.disabled = true; btn.textContent = '…'; }
-    commitMsgRequestId = agent.id;
-    bindCommitMessageStreaming(agent.id, btn);
-  }
-
-  function bindCommitMessageStreaming(requestId, btn) {
-    commitMsgUnsubChunk = window.klaus.ai.onCommitMessageChunk(requestId, function (chunk) {
-      if (commitMsgRequestId !== requestId) return;
-      commitInput.value += chunk;
-    });
-    commitMsgUnsubDone = window.klaus.ai.onCommitMessageDone(requestId, function (msg) {
-      if (commitMsgRequestId !== requestId) return;
-      resetCommitMsgState();
-      if (btn) { btn.textContent = '✨'; btn.disabled = false; }
-      if (msg && msg.error) {
-        window.toast.error('Could not generate commit message: ' + msg.error);
-        return;
-      }
-      var cleaned = (commitInput.value || '').trim();
-      cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
-      commitInput.value = cleaned.trim();
-      commitInput.focus();
-    });
-  }
-
-  // On panel mount or worktree switch, rehydrate any in-flight commit-message
-  // agent for this worktree. Lets the user kick off generation, navigate to
-  // verify something, and return to find the message waiting.
-  async function rehydrateCommitMessage() {
-    if (!currentWorktreePath || commitMsgRequestId) return;
-    var existing = await window.klaus.agents.findByDedupeKey('commit-message:' + currentWorktreePath);
-    if (existing) attachToCommitMessageAgent(existing);
-  }
-
-  // Tiny ephemeral status banner inside the diff panel. Used for operations
-  // (push, commit) where we want the user to see what happened without
-  // hijacking focus with a modal alert. Auto-hides after a few seconds.
-  function showDiffStatus(text, kind) {
-    if (!panelEl) return;
-    var existing = panelEl.querySelector('.diff-status-banner');
-    if (existing) existing.remove();
-    var el = document.createElement('div');
-    el.className = 'diff-status-banner diff-status-' + (kind || 'info');
-    el.textContent = text;
-    panelEl.appendChild(el);
-    setTimeout(function () {
-      if (el && el.parentElement) el.parentElement.removeChild(el);
-    }, 6000);
-  }
-
-  async function pushChanges() {
-    var btn = document.getElementById('btn-push');
-    btn.disabled = true;
-    btn.textContent = 'Pushing...';
-    var result = await window.klaus.git.push(currentWorktreePath);
-    btn.disabled = false;
-    if (result.error) {
-      btn.textContent = 'Failed';
-      setTimeout(function () { btn.textContent = 'Push'; }, 2000);
-      showDiffStatus('Push failed: ' + result.error, 'error');
-      window.toast.error('Push failed: ' + result.error);
-      return;
-    }
-    btn.textContent = 'Pushed!';
-    setTimeout(function () { btn.textContent = 'Push'; }, 2000);
-    // git's push status summary lives on stderr even on success. Pull out the
-    // most informative line (the "To ...refs..." summary is typically last).
-    var lines = (result.output || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-    var summary;
-    if (/everything up-to-date/i.test(result.output || '')) {
-      summary = 'Nothing to push — ' + (result.branch || 'branch') + ' already up to date';
-    } else {
-      summary = 'Pushed ' + (result.branch || 'branch');
-      var toLine = lines.find(function (l) { return l.startsWith('To '); });
-      if (toLine) summary += ' · ' + toLine;
-      var refLine = lines.find(function (l) { return /^\s*[a-f0-9]+\.\.[a-f0-9]+/.test(l) || /->/.test(l); });
-      if (refLine && !toLine) summary += ' · ' + refLine;
-    }
-    showDiffStatus(summary, 'success');
-    btn.title = result.output || '';
-    // Refresh ahead/behind + dirty indicators post-push.
-    try { await updateAheadBehind(); } catch (_) {}
-  }
-
-  async function createPR() {
-    var title = prompt('PR title:');
-    if (!title) return;
-    var body = prompt('PR description (optional):') || '';
-    var btn = document.getElementById('btn-create-pr');
-    btn.disabled = true;
-    btn.textContent = 'Creating...';
-    var result = await window.klaus.git.createPR(currentWorktreePath, title, body);
-    btn.disabled = false;
-    btn.textContent = 'PR';
-    if (result.error) {
-      window.toast.error('PR creation failed: ' + result.error);
-      return;
-    }
-    if (result.url) {
-      window.klaus.gh.openExternal(result.url);
-    }
-    // Refresh PR panel so it picks up the new PR
-    if (window.PRPanel) window.PRPanel.loadPR();
-  }
-
-  async function stageAll() {
-    var unstaged = currentFiles.filter(function (f) { return !f.staged; }).map(function (f) { return f.file; });
-    if (unstaged.length > 0) {
-      await window.klaus.git.stage(currentWorktreePath, unstaged);
-      await refresh();
-    }
-  }
-
-  async function unstageAll() {
-    var staged = currentFiles.filter(function (f) { return f.staged; }).map(function (f) { return f.file; });
-    if (staged.length > 0) {
-      await window.klaus.git.unstage(currentWorktreePath, staged);
-      await refresh();
-    }
-  }
-
-  function setCommentCallback(fn) {
-    commentCallback = fn;
-  }
-
-  // Feature 13: Keyboard shortcut to send selected diff/hunk to Claude
-  document.addEventListener('keydown', function (e) {
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'E') {
-      e.preventDefault();
-      if (!commentCallback) return;
-
-      // Try selected text first
-      var sel = window.getSelection();
-      var selectedText = sel && !sel.isCollapsed ? sel.toString().trim() : '';
-
-      if (!selectedText && currentParsedHunks.length > 0) {
-        // Fall back to all hunks of the selected file
-        selectedText = currentParsedHunks.map(function (h) { return h.lines.join('\n'); }).join('\n');
-      }
-
-      if (!selectedText || !selectedFile) return;
-
-      var prompt = 'Regarding ' + selectedFile + ':\n```\n' + selectedText + '\n```\nPlease review this code change.';
-      commentCallback(prompt);
-    }
-  });
-
-  function getStatusClass(status) {
-    var s = status.trim();
-    if (s.startsWith('M')) return 'modified';
-    if (s.startsWith('A') || s === '??') return 'added';
-    if (s.startsWith('D')) return 'deleted';
-    if (s.startsWith('R')) return 'renamed';
-    return '';
-  }
-
-  function getStatusLabel(status) {
-    var s = status.trim();
-    if (s === '??') return 'U';
-    return s.replace(/\s/g, '').charAt(0) || '?';
-  }
-
-  // Post-process a single highlighted line to add VS Code-like coloring
-  // for patterns hljs doesn't tokenize: function calls, decorators, self/cls, CONSTANTS
-  function enhanceLine(html) {
-    // We need to only modify text that's NOT inside an existing span tag.
-    // Strategy: split on tags, enhance only the text segments.
-    var parts = html.split(/(<[^>]+>)/);
-    var inSpan = 0;
-    for (var i = 0; i < parts.length; i++) {
-      var part = parts[i];
-      if (part.startsWith('<span')) { inSpan++; continue; }
-      if (part === '</span>') { inSpan--; continue; }
-      if (part.startsWith('<')) continue; // other tags
-      if (inSpan > 0) continue; // inside an hljs span, skip
-
-      // Enhance plain text segments
-      // object.method( — color object as module, method as call
-      part = part.replace(/\b([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)(\()/g,
-        '<span class="hljs-module">$1</span>.<span class="hljs-call">$2</span>$3');
-      // Remaining function calls: word followed by ( that we didn't already catch
-      part = part.replace(/\b([a-zA-Z_]\w*)(\()/g, function(m, name, paren) {
-        // Don't re-wrap spans or things we just wrapped
-        if (name === 'span' || name === 'class') return m;
-        return '<span class="hljs-call">' + name + '</span>' + paren;
-      });
-      // self/cls keyword
-      part = part.replace(/\b(self|cls)\b/g, '<span class="hljs-self">$1</span>');
-      // CONSTANT_NAMES (all caps with underscores, 2+ chars)
-      part = part.replace(/\b([A-Z][A-Z0-9_]{1,})\b/g, '<span class="hljs-constant">$1</span>');
-      // Decorators
-      part = part.replace(/(@[a-zA-Z_]\w*(?:\.[a-zA-Z_]\w*)*)/g, '<span class="hljs-decorator">$1</span>');
-
-      parts[i] = part;
-    }
-    return parts.join('');
-  }
-
-  // Split hljs-highlighted HTML by newlines, carrying open <span> tags
-  // across line boundaries so each line is self-contained.
-  function splitHighlightedLines(html) {
-    var rawLines = html.split('\n');
-    var result = [];
-    var openSpans = []; // stack of open span tags (full tag strings)
-
-    for (var i = 0; i < rawLines.length; i++) {
-      var line = rawLines[i];
-
-      // Prepend any spans that were open from previous lines
-      var prefix = openSpans.join('');
-
-      // Parse this line to track span opens/closes
-      var spanOpenRe = /<span[^>]*>/g;
-      var spanCloseRe = /<\/span>/g;
-      var match;
-
-      // Collect all opens and closes in order
-      var events = [];
-      while ((match = spanOpenRe.exec(line)) !== null) {
-        events.push({ pos: match.index, type: 'open', tag: match[0] });
-      }
-      while ((match = spanCloseRe.exec(line)) !== null) {
-        events.push({ pos: match.index, type: 'close' });
-      }
-      events.sort(function (a, b) { return a.pos - b.pos; });
-
-      for (var j = 0; j < events.length; j++) {
-        if (events[j].type === 'open') {
-          openSpans.push(events[j].tag);
-        } else {
-          openSpans.pop();
-        }
-      }
-
-      // Close any spans still open at end of this line, for valid HTML
-      var suffix = '';
-      for (var k = 0; k < openSpans.length; k++) {
-        suffix += '</span>';
-      }
-
-      result.push(prefix + line + suffix);
-    }
-
-    return result;
-  }
-
-  var EXT_TO_LANG = {
-    js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
-    py: 'python', rb: 'ruby', go: 'go', rs: 'rust', java: 'java',
-    c: 'c', h: 'c', cpp: 'cpp', hpp: 'cpp', cc: 'cpp',
-    cs: 'csharp', swift: 'swift', kt: 'kotlin', scala: 'scala',
-    php: 'php', sh: 'bash', bash: 'bash', zsh: 'bash',
-    html: 'xml', htm: 'xml', xml: 'xml', svg: 'xml',
-    css: 'css', scss: 'scss', less: 'less',
-    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'ini',
-    md: 'markdown', sql: 'sql', r: 'r',
-    lua: 'lua', perl: 'perl', pl: 'perl',
-    dockerfile: 'dockerfile', makefile: 'makefile',
   };
 
-  function detectLang(filename) {
-    if (!filename) return null;
-    var name = filename.split('/').pop().toLowerCase();
-    // Handle special filenames
-    if (name === 'dockerfile') return 'dockerfile';
-    if (name === 'makefile' || name === 'gnumakefile') return 'makefile';
-    var ext = name.split('.').pop();
-    return EXT_TO_LANG[ext] || null;
-  }
-
-  function basename(p) { return p.split('/').pop(); }
-  function dirname(p) {
-    var parts = p.split('/');
-    parts.pop();
-    return parts.length > 0 ? parts.join('/') + '/' : '';
-  }
-
-  function escHtml(s) {
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
-
-  function escAttr(s) {
-    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;');
-  }
-
-  async function showFile(file) {
-    if (!file || !currentWorktreePath) return;
-    selectedFile = file;
-    // Highlight the file in the list
-    fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
-      el.classList.toggle('selected', el.dataset.file === file);
-    });
-    await showFileDiff(file, false);
-  }
-
-  function getSelectedFile() {
-    return selectedFile;
-  }
-
-  // D1: Ahead/behind counts
-  async function updateAheadBehind() {
-    if (!currentWorktreePath) return;
-    var el = document.getElementById('ahead-behind');
-    var result = await window.klaus.git.aheadBehind(currentWorktreePath);
-    var parts = [];
-    if (result.ahead > 0) parts.push('\u2191' + result.ahead);
-    if (result.behind > 0) parts.push('\u2193' + result.behind);
-    el.textContent = parts.join(' ');
-    el.title = (result.ahead || 0) + ' ahead, ' + (result.behind || 0) + ' behind';
-  }
-
-  // D2: Branch checkout (integrated into mode toggle)
-  function addCheckoutToBranchSelect() {
-    var branchLabel = fileListEl.querySelector('.diff-branch-label');
-    if (!branchLabel || diffMode !== 'working') return;
-
-    branchLabel.style.cursor = 'pointer';
-    branchLabel.title = 'Click to switch branch';
-    branchLabel.addEventListener('click', async function () {
-      if (branchList.length === 0) {
-        var result = await window.klaus.git.branches(currentWorktreePath);
-        branchList = result.branches || [];
-        remoteList = result.remotes || [];
-      }
-
-      var allBranches = branchList.concat(remoteList);
-      var choice = prompt('Switch to branch:\n\n' + allBranches.join('\n'));
-      if (!choice || !choice.trim()) return;
-
-      var res = await window.klaus.git.checkout(currentWorktreePath, choice.trim());
-      if (res.error) {
-        window.toast.error('Checkout failed: ' + res.error);
-      } else {
-        refresh();
-        updateAheadBehind();
-      }
-    });
-  }
-
-  // D7: Conflict detection
-  async function checkConflicts() {
-    if (!currentWorktreePath) return;
-    var result = await window.klaus.git.conflicts(currentWorktreePath);
-    if (result.files && result.files.length > 0) {
-      var conflictBanner = fileListEl.querySelector('.conflict-banner');
-      if (!conflictBanner) {
-        conflictBanner = document.createElement('div');
-        conflictBanner.className = 'conflict-banner';
-        fileListEl.insertBefore(conflictBanner, fileListEl.firstChild);
-      }
-      conflictBanner.innerHTML = '\u26A0 ' + result.files.length + ' conflicted file' + (result.files.length > 1 ? 's' : '') +
-        ' \u2014 <span class="conflict-files">' + result.files.map(escHtml).join(', ') + '</span>' +
-        ' <button class="conflict-resolve-btn">Resolve</button>';
-      conflictBanner.querySelector('.conflict-resolve-btn').addEventListener('click', function () {
-        if (window.ConflictPanel && currentWorktreePath) {
-          window.ConflictPanel.show(currentWorktreePath);
-        }
-      });
-    }
-  }
-
-  return { init: init, show: show, hide: hide, isVisible: isVisible, refresh: refresh, updateWorktree: updateWorktree, setCommentCallback: setCommentCallback, showFile: showFile, getSelectedFile: getSelectedFile, updateAheadBehind: updateAheadBehind };
-})();
+})(window.DiffPanel);
