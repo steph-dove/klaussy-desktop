@@ -4,7 +4,12 @@
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
   <title>Klaussy — Review</title>
-  <link rel="stylesheet" href="styles.css">
+  <!-- styles.css was split into ordered partials; load order preserves the cascade. -->
+  <link rel="stylesheet" href="styles/01-base.css">
+  <link rel="stylesheet" href="styles/02-toolbar-diff.css">
+  <link rel="stylesheet" href="styles/03-pr.css">
+  <link rel="stylesheet" href="styles/04-editor.css">
+  <link rel="stylesheet" href="styles/05-pr-review-surface.css">
 </head>
 <body class="pr-review-popout">
   <div id="pr-review-root"></div>
