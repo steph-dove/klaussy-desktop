@@ -16,6 +16,27 @@ window.PrReview = window.PrReview || {};
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   };
 
+  // Actionable banner for a gh/GraphQL failure: a plain-language summary plus
+  // the exact `gh` command to fix it (with a Copy button, wired via delegation
+  // in mount()). Used by the Conversation tab and anywhere else a gh call's
+  // error needs to be shown without breaking the surface.
+  PR.renderGhErrorBanner = function (summary, fix) {
+    if (!summary) return '';
+    var fixBlock = fix
+      ? '<div class="pr-gh-error-fix">'
+          + '<code class="pr-gh-error-cmd">' + PR.escHtml(fix) + '</code>'
+          + '<button class="pr-gh-error-copy" type="button" data-copy="' + PR.escHtml(fix) + '">Copy</button>'
+        + '</div>'
+      : '';
+    return '<div class="pr-gh-error-banner">'
+      + '<div class="pr-gh-error-head">'
+        + '<span class="pr-gh-error-icon">⚠</span>'
+        + '<span class="pr-gh-error-summary">' + PR.escHtml(summary) + '</span>'
+      + '</div>'
+      + fixBlock
+    + '</div>';
+  };
+
   PR.hostEl = null;
   PR.isPopout = false;
   PR.unsubState = null;
@@ -182,6 +203,17 @@ window.PrReview = window.PrReview || {};
     PR.hostEl = options.host;
     PR.isPopout = !!options.isPopout;
     PR.hostEl.classList.add('pr-review-host');
+    // Delegated "Copy" for gh-error fix commands. Bound on hostEl (not its
+    // children) so it survives the innerHTML rewrites every render does.
+    PR.hostEl.addEventListener('click', function (e) {
+      var btn = e.target && e.target.closest && e.target.closest('.pr-gh-error-copy');
+      if (!btn) return;
+      navigator.clipboard.writeText(btn.getAttribute('data-copy') || '').then(function () {
+        var prev = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(function () { btn.textContent = prev; }, 1200);
+      }).catch(function () {});
+    });
     PR.renderLoading();
     PR.initSelectionExplain();
     PR.setupImplementFocusRefit();

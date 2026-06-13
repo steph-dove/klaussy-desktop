@@ -15,6 +15,7 @@ const fs = require('fs');
 const { execFile, execFileSync } = require('child_process');
 const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
+const { classifyGhError } = require('../util/gh-error');
 const { instances } = require('./instances');
 
 const prReview = {
@@ -148,51 +149,59 @@ async function fetchThreadsForActive() {
     + '  }'
     + '}';
 
-  try {
-    const out = await new Promise((resolve, reject) => {
-      execFile('gh', [
-        'api', 'graphql',
-        '-f', 'query=' + query,
-        '-f', 'owner=' + owner,
-        '-f', 'repo=' + repo,
-        '-F', 'number=' + number,
-      ], { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
-        if (err) { err.stderr = stderr; err.stdout = stdout; return reject(err); }
-        resolve(stdout);
-      });
+  const ghArgs = [
+    'api', 'graphql',
+    '-f', 'query=' + query,
+    '-f', 'owner=' + owner,
+    '-f', 'repo=' + repo,
+    '-F', 'number=' + number,
+  ];
+  // One round trip. Resolves to { data } on success or { errorRaw } on any
+  // failure (gh writes GraphQL error JSON to stdout even on non-zero exit, so
+  // we dig it out of both stdout and stderr).
+  const runOnce = () => new Promise((resolve) => {
+    execFile('gh', ghArgs, { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
+      const fromBody = (s) => {
+        try { const p = JSON.parse(String(s)); if (p && p.errors && p.errors.length) return p.errors.map(e => e.message).join('; '); } catch (_) {}
+        return null;
+      };
+      if (err) {
+        return resolve({ errorRaw: fromBody(stdout) || (stderr || '').toString().trim() || err.message });
+      }
+      const bodyErr = fromBody(stdout);
+      if (bodyErr) return resolve({ errorRaw: bodyErr });
+      try { return resolve({ data: JSON.parse(stdout).data }); }
+      catch (_) { return resolve({ errorRaw: 'gh returned non-JSON: ' + String(stdout).slice(0, 200) }); }
     });
-    const parsed = JSON.parse(out);
-    if (parsed.errors && parsed.errors.length) {
-      if (stale()) return;
-      prReview.active.threadsError = parsed.errors.map(e => e.message).join('; ');
-      broadcastPrReview();
-      return;
-    }
-    const pr = parsed.data && parsed.data.repository && parsed.data.repository.pullRequest;
-    const threads = (pr && pr.reviewThreads && pr.reviewThreads.nodes) || [];
-    const issueComments = (pr && pr.comments && pr.comments.nodes) || [];
-    const reviews = (pr && pr.reviews && pr.reviews.nodes) || [];
-    // User may have navigated away while we were fetching; bail if the review
-    // behind us was swapped for a different PR.
+  });
+
+  const target = owner + '/' + repo;
+  let res = await runOnce();
+  // Auto-retry once on transient failures (network blip, rate limit). Auth /
+  // scope / not-found errors won't fix themselves, so don't waste a round trip.
+  if (res.errorRaw && classifyGhError(res.errorRaw, { target }).retryable) {
+    await new Promise((r) => setTimeout(r, 900));
     if (stale()) return;
-    prReview.active.threads = threads;
-    prReview.active.issueComments = issueComments;
-    prReview.active.reviews = reviews;
-    prReview.active.threadsError = null;
-    broadcastPrReview();
-  } catch (err) {
-    if (stale()) return;
-    // gh api writes error JSON to stdout on non-zero exit
-    let msg = (err.stderr || err.message || '').trim();
-    if (err.stdout) {
-      try {
-        const parsed = JSON.parse(err.stdout.toString());
-        if (parsed.errors) msg = parsed.errors.map(e => e.message).join('; ');
-      } catch (_) {}
-    }
-    prReview.active.threadsError = msg;
-    broadcastPrReview();
+    res = await runOnce();
   }
+  if (stale()) return;
+
+  if (res.errorRaw) {
+    const cls = classifyGhError(res.errorRaw, { target });
+    prReview.active.threadsError = cls.summary;
+    prReview.active.threadsErrorFix = cls.fix;
+    prReview.active.threadsErrorRaw = res.errorRaw;
+    broadcastPrReview();
+    return;
+  }
+  const pr = res.data && res.data.repository && res.data.repository.pullRequest;
+  prReview.active.threads = (pr && pr.reviewThreads && pr.reviewThreads.nodes) || [];
+  prReview.active.issueComments = (pr && pr.comments && pr.comments.nodes) || [];
+  prReview.active.reviews = (pr && pr.reviews && pr.reviews.nodes) || [];
+  prReview.active.threadsError = null;
+  prReview.active.threadsErrorFix = null;
+  prReview.active.threadsErrorRaw = null;
+  broadcastPrReview();
 }
 
 async function reloadActivePrReviewMeta() {
