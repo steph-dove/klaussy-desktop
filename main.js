@@ -45,6 +45,7 @@ require('./main/ipc/git');
 require('./main/ipc/tasks');
 require('./main/ipc/repo');
 require('./main/ipc/claude-stream-ipc');
+require('./main/ipc/pr-review-terminal');
 require('./main/ipc/agents');
 require('./main/ipc/pr-review');
 require('./main/ipc/ollama');
