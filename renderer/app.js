@@ -1921,7 +1921,7 @@
         });
       }},
       { sep: true },
-      { label: 'Search', shortcut: '\u2318F', action: function () { openSearch(id); }},
+      { label: 'Search', shortcut: '\u2318F', action: function () { SearchBar.open(id); }},
       { label: 'Clear', shortcut: '\u2318K', action: function () { task.terminal.clear(); }},
       { sep: true },
       { label: 'Zoom In', shortcut: '\u2318+', action: zoomIn },
@@ -2047,7 +2047,7 @@
     if (AppState.activeTaskId) {
       var task = tasks.get(AppState.activeTaskId);
       if (task) {
-        commands.push({ label: 'Search in Terminal', action: function () { openSearch(AppState.activeTaskId); } });
+        commands.push({ label: 'Search in Terminal', action: function () { SearchBar.open(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); btnDiff.classList.add('active'); } });
         commands.push({ label: 'Pop Out', action: function () { window.klaus.task.popOut(AppState.activeTaskId); } });
