@@ -447,6 +447,7 @@
 .diff-file-name {
   flex-shrink: 0;
   color: var(--text);
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -458,6 +459,28 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Per-file churn: the +/- counts and a proportional add:del bar (used by the
+   PR-review file list; harmless where unused). */
+.diff-file-stats {
+  display: flex;
+  gap: 6px;
+  flex: none;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.diff-file-bar {
+  display: inline-flex;
+  width: 34px;
+  height: 9px;
+  flex: none;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--border);
+  gap: 1px;
+}
+.diff-file-bar-add { background: var(--diff-add-fg, #3fb950); min-width: 0; }
+.diff-file-bar-del { background: var(--diff-del-fg, #f0584f); min-width: 0; }
 
 .diff-file-actions {
   display: flex;
@@ -528,10 +551,22 @@
 }
 
 .diff-line {
-  padding: 0 8px;
+  padding: 0 8px 0 0;
   min-height: 18px;
   display: flex;
   align-items: baseline;
+  border-left: 2px solid transparent;
+}
+
+/* Full-width add/del highlighting when the diff scrolls horizontally: size
+   each unified line to its own content (floored at 100%) so the background
+   covers the whole line, not just the viewport width. Scoped to DIRECT
+   children so the split-view grid (.diff-split-grid > .diff-line) and inline
+   review threads are left to their own layout. */
+#diff-view > .diff-line,
+.pr-review-diff-pre > .diff-line {
+  width: max-content;
+  min-width: 100%;
 }
 
 .diff-prefix {
@@ -540,6 +575,26 @@
   flex-shrink: 0;
   text-align: center;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Two-column line-number gutter (old | new) shared by both diff surfaces.
+   Non-selectable so text selections (and the selection-to-comment / explain
+   mapping) only ever grab .diff-code. */
+.diff-gutter {
+  flex: none;
+  width: 42px;
+  padding-right: 8px;
+  text-align: right;
+  color: var(--text-dim);
+  opacity: 0.6;
+  user-select: none;
+  -webkit-user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.diff-gutter-new {
+  border-right: 1px solid var(--border);
+  margin-right: 8px;
 }
 
 .diff-code {
@@ -552,6 +607,7 @@
 
 .diff-line.diff-add {
   background: var(--diff-add-bg, rgba(35, 134, 54, 0.15));
+  border-left-color: var(--diff-add-fg, #3fb950);
 }
 
 .diff-line.diff-add .diff-prefix {
@@ -560,6 +616,7 @@
 
 .diff-line.diff-del {
   background: var(--diff-del-bg, rgba(218, 54, 51, 0.15));
+  border-left-color: var(--diff-del-fg, #f0584f);
 }
 
 .diff-line.diff-del .diff-prefix {
@@ -611,7 +668,7 @@
 }
 
 .diff-line.diff-context {
-  opacity: 0.6;
+  opacity: 0.82;
 }
 
 .diff-line.diff-context .diff-prefix {

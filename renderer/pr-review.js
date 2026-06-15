@@ -683,7 +683,12 @@ window.PrReview = window.PrReview || {};
     var codeLines = Array.from(diffPre.querySelectorAll('.diff-line.diff-add, .diff-line.diff-del, .diff-line.diff-context'));
     if (codeLines.length < hunkLines.length) return null;
 
-    var normCode = codeLines.map(function (el) { return PR.stripDiffPrefix(el.textContent).trim(); });
+    // Read the code span (gutter + prefix are separate, non-selectable spans),
+    // so line numbers and the +/- marker never pollute the match text.
+    var normCode = codeLines.map(function (el) {
+      var code = el.querySelector('.diff-code');
+      return (code ? code.textContent : PR.stripDiffPrefix(el.textContent)).trim();
+    });
 
     for (var i = 0; i <= normCode.length - hunkLines.length; i++) {
       var ok = true;
@@ -1219,13 +1224,27 @@ window.PrReview = window.PrReview || {};
       var threadBadge = openThreads > 0
         ? '<span class="pr-file-threads" title="' + openThreads + ' open thread' + (openThreads === 1 ? '' : 's') + '">\u{1F4AC}' + openThreads + '</span>'
         : '';
-      return '<div class="pr-review-file' + isSelected + '" data-file="' + PR.escHtml(f.path) + '">'
-        + '<span class="pr-review-file-path">' + PR.escHtml(f.path) + '</span>'
-        + '<span class="pr-review-file-stats">'
-          + threadBadge
-          + (f.adds ? '<span class="pr-file-add">+' + f.adds + '</span>' : '')
-          + (f.dels ? '<span class="pr-file-del">\u2212' + f.dels + '</span>' : '')
+      // Split into basename (emphasized) + directory (dimmed), like the diff
+      // panel's file rows so the two surfaces read the same.
+      var slash = f.path.lastIndexOf('/');
+      var base = slash === -1 ? f.path : f.path.slice(slash + 1);
+      var dir = slash === -1 ? '' : f.path.slice(0, slash);
+      var adds = f.adds || 0, dels = f.dels || 0;
+      var bar = (adds + dels) > 0
+        ? '<span class="diff-file-bar" title="+' + adds + ' \u2212' + dels + '">'
+            + '<span class="diff-file-bar-add" style="flex:' + adds + '"></span>'
+            + '<span class="diff-file-bar-del" style="flex:' + dels + '"></span>'
+          + '</span>'
+        : '';
+      return '<div class="diff-file pr-review-file' + isSelected + '" data-file="' + PR.escHtml(f.path) + '" title="' + PR.escHtml(f.path) + '">'
+        + '<span class="diff-file-name">' + PR.escHtml(base) + '</span>'
+        + '<span class="diff-file-path">' + PR.escHtml(dir) + '</span>'
+        + threadBadge
+        + '<span class="diff-file-stats">'
+          + (adds ? '<span class="pr-file-add">+' + adds + '</span>' : '')
+          + (dels ? '<span class="pr-file-del">\u2212' + dels + '</span>' : '')
         + '</span>'
+        + bar
       + '</div>';
     }).join('');
   };
@@ -1267,27 +1286,37 @@ window.PrReview = window.PrReview || {};
     var lines = diffText.split('\n');
     var out = '';
     var oldLn = 0, newLn = 0;
+    // Two-column line-number gutter (old | new). user-select:none in CSS keeps
+    // the numbers out of text selections (selection grabs only .diff-code).
+    function gut(o, n) {
+      return '<span class="diff-gutter diff-gutter-old">' + (o || '') + '</span>'
+        + '<span class="diff-gutter diff-gutter-new">' + (n || '') + '</span>';
+    }
+    function meta(line) { return '<div class="diff-line diff-meta">' + gut() + '<span class="diff-code">' + PR.escHtml(line) + '</span></div>'; }
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       if (line.startsWith('+++') || line.startsWith('---')) {
-        out += '<div class="diff-line diff-meta">' + PR.escHtml(line) + '</div>';
+        out += meta(line);
       } else if (line.startsWith('@@')) {
         var hm = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
         if (hm) { oldLn = parseInt(hm[1], 10) - 1; newLn = parseInt(hm[2], 10) - 1; }
-        out += '<div class="diff-line diff-hunk">' + PR.escHtml(line) + '</div>';
+        out += '<div class="diff-line diff-hunk">' + gut() + '<span class="diff-hunk-text">' + PR.escHtml(line) + '</span></div>';
       } else if (line.startsWith('+') && !line.startsWith('+++')) {
         newLn++;
-        out += '<div class="diff-line diff-add" data-side="RIGHT" data-line="' + newLn + '">' + PR.escHtml(line) + '</div>';
+        out += '<div class="diff-line diff-add" data-side="RIGHT" data-line="' + newLn + '" data-new-ln="' + newLn + '">'
+          + gut('', newLn) + '<span class="diff-prefix">+</span><span class="diff-code">' + PR.escHtml(line.substring(1)) + '</span></div>';
       } else if (line.startsWith('-') && !line.startsWith('---')) {
         oldLn++;
-        out += '<div class="diff-line diff-del" data-side="LEFT" data-line="' + oldLn + '">' + PR.escHtml(line) + '</div>';
+        out += '<div class="diff-line diff-del" data-side="LEFT" data-line="' + oldLn + '" data-old-ln="' + oldLn + '">'
+          + gut(oldLn, '') + '<span class="diff-prefix">−</span><span class="diff-code">' + PR.escHtml(line.substring(1)) + '</span></div>';
       } else if (line.startsWith('diff ')) {
-        out += '<div class="diff-line diff-header">' + PR.escHtml(line) + '</div>';
+        out += '<div class="diff-line diff-header">' + gut() + '<span class="diff-code">' + PR.escHtml(line) + '</span></div>';
       } else if (line.startsWith('index ') || line.startsWith('new file') || line.startsWith('deleted file')) {
-        out += '<div class="diff-line diff-meta">' + PR.escHtml(line) + '</div>';
+        out += meta(line);
       } else {
         oldLn++; newLn++;
-        out += '<div class="diff-line diff-context" data-side="RIGHT" data-line="' + newLn + '">' + PR.escHtml(line) + '</div>';
+        out += '<div class="diff-line diff-context" data-side="RIGHT" data-line="' + newLn + '" data-new-ln="' + newLn + '" data-old-ln="' + oldLn + '">'
+          + gut(oldLn, newLn) + '<span class="diff-prefix"> </span><span class="diff-code">' + PR.escHtml(line.substring(1)) + '</span></div>';
       }
     }
     return out;
