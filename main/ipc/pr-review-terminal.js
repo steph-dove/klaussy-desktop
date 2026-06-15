@@ -52,7 +52,7 @@ function notifyImplementAttention(payload) {
 // Implement a single finding (or "all findings" via one big prompt) by
 // running an interactive `claude` inside a node-pty in the PR's worktree.
 // The renderer mounts an xterm.js for the user to answer any prompts
-// (Bash, MCP, etc.); Edit/Write/MultiEdit on the worktree path are
+// (Bash, MCP, etc.); Edit/Write on the worktree path are
 // pre-allowed via a per-worktree settings.local.json so the common
 // case doesn't drown the user in Y/N prompts.
 //

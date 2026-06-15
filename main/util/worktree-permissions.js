@@ -6,7 +6,7 @@
 // The compromise lives in each worktree's .claude/settings.local.json:
 //
 //   permissions:
-//     allow: [ Edit(<wt>/**), Write(<wt>/**), MultiEdit(<wt>/**), Read(<wt>/**) ]
+//     allow: [ Read(<wt>/**), Edit(<wt>/**), Write(<wt>/**) ]
 //     deny:  [ Read(<wt>/**/.env), Edit(<wt>/**/.env), ...
 //              for each secret glob × file-touching tool ]
 //
@@ -51,7 +51,14 @@ const SECRET_GLOBS = [
   '**/id_ed25519',
 ];
 
-const TOUCH_TOOLS = ['Read', 'Edit', 'Write', 'MultiEdit'];
+// File-touching tools to scope (allow inside the worktree, deny on secrets).
+// NOTE: no 'MultiEdit' — Claude Code removed that tool, so a `MultiEdit(...)`
+// rule now logs "matches no known tool" on every session AND silently no-ops
+// (its secret-file deny guard stops protecting anything). Edit + Write cover
+// what MultiEdit used to. STALE_TOOLS lists names to scrub from existing
+// settings files written by older Klaussy versions.
+const TOUCH_TOOLS = ['Read', 'Edit', 'Write'];
+const STALE_TOOLS = ['MultiEdit'];
 
 // Bash command families an implement run is expected to use — pre-approved so
 // the agent doesn't stop to ask for routine review/test/build/install/commit
@@ -164,7 +171,7 @@ async function askRepoConsent(worktreePath) {
     message: 'Allow Klaussy to manage Claude permissions for this repo?',
     detail:
       `Klaussy will write ${path.join(worktreePath, '.claude', 'settings.local.json')} with rules that:\n\n` +
-      `  • Allow Read / Edit / Write / MultiEdit inside this repo\n` +
+      `  • Allow Read / Edit / Write inside this repo\n` +
       `  • Deny .env, .envrc, credentials, .npmrc, *.pem, *.key, etc.\n` +
       `  • Add .claude/settings.local.json to .gitignore\n\n` +
       `Without this, Claude will prompt Y/N for every file change in the embedded terminal.\n\n` +
@@ -288,6 +295,16 @@ function applyWorktreePermissionsToSettings(worktreePath) {
   if (!Array.isArray(existing.permissions.deny)) existing.permissions.deny = [];
 
   let changed = false;
+  // Migration: scrub rules referencing tools Claude Code no longer knows
+  // (e.g. MultiEdit). Older Klaussy versions wrote them; left in place they
+  // warn on every session and no-op the secret guards. Removing them lets the
+  // valid Edit/Write rules below take over.
+  const isStale = (rule) => STALE_TOOLS.some((t) => String(rule).startsWith(t + '('));
+  for (const list of [existing.permissions.allow, existing.permissions.deny]) {
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (isStale(list[i])) { list.splice(i, 1); changed = true; }
+    }
+  }
   for (const r of allow) {
     if (!existing.permissions.allow.includes(r)) {
       existing.permissions.allow.push(r);
