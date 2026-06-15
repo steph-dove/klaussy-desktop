@@ -420,6 +420,7 @@ window.App = window.App || {};
       var sw = await window.klaus.gh.switchAccount(det.username);
       if (sw && sw.error) return;
       accountHint.textContent = 'Switched to ' + det.username;
+      accountHint.classList.remove('pr-picker-account-hint-error');
       if (accountSelect) accountSelect.value = det.username;
     }
 
@@ -435,7 +436,15 @@ window.App = window.App || {};
         urlInput.disabled = false;
         startBtn.textContent = 'Start review';
         updateStartEnabled();
-        window.toast.error('Failed to load PR:\n' + result.error);
+        if (result.errorSummary) {
+          // Account/auth failure (e.g. wrong gh account for a work-org repo).
+          // Surface it next to the account switcher so the fix is right there.
+          accountHint.textContent = result.errorSummary;
+          accountHint.classList.add('pr-picker-account-hint-error');
+          window.toast.error(result.errorSummary + (result.errorFix ? '\n\n' + result.errorFix : ''));
+        } else {
+          window.toast.error('Failed to load PR:\n' + result.error);
+        }
         return;
       }
       close();
@@ -503,13 +512,20 @@ window.App = window.App || {};
 
       var result = await window.klaus.pr.list();
       if (result.error) {
-        // No active project is the most common case here; treat it as an info
-        // hint rather than a hard error so the user can still paste a URL.
+        // Both "no active project" and "the active gh account can't see this
+        // repo" are soft states, not errors — the user can switch accounts
+        // above or paste a URL. Only a genuinely unexpected failure is red.
         var msg = result.error || '';
         var isNoProject = /no active project/i.test(msg);
-        var cls = isNoProject ? 'pr-picker-empty' : 'pr-picker-error';
+        var isAccess = /^(not-found|auth|sso|scope)$/.test(result.errorKind || '');
+        var soft = isNoProject || isAccess;
+        var text = isNoProject
+          ? 'Add a project to list its open PRs, or paste a URL above to review any PR you have access to.'
+          : isAccess
+            ? (result.errorSummary || msg) + ' Switch accounts above, or paste a URL.'
+            : msg;
         listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-          + '<div class="' + AppUtils.escAttr(cls) + '">' + (isNoProject ? 'Add a project to list its open PRs, or paste a URL above to review any PR you have access to.' : AppUtils.escHtml(msg)) + '</div>';
+          + '<div class="' + (soft ? 'pr-picker-empty' : 'pr-picker-error') + '">' + AppUtils.escHtml(text) + '</div>';
         return;
       }
       if (!result.prs || result.prs.length === 0) {
