@@ -220,7 +220,7 @@
       return true;
     }
     if (res.skipped || !res.findingsCount) {
-      if (!res.skipped) window.toast.success('Pre-commit review passed — silent failures, secrets, debug leftovers, landmines + lint all clean');
+      if (!res.skipped) window.toast.success('Pre-commit review passed — silent failures, secrets, debug leftovers, landmines, comments + lint all clean');
       return true;
     }
     DP.renderPrecommitFindings(res.text, res.findingsCount);
