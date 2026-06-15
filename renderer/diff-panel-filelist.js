@@ -575,13 +575,19 @@
     var oldLn = 0, newLn = 0; // running line counters driven by @@ headers
     var currentHunkIdx = -1;
     var lineInHunk = 0;
+    // Two-column line-number gutter (old | new). Non-selectable in CSS so it
+    // stays out of selection-to-comment mapping (which reads data-*-ln, not text).
+    function gut(o, n) {
+      return '<span class="diff-gutter diff-gutter-old">' + (o || '') + '</span>'
+        + '<span class="diff-gutter diff-gutter-new">' + (n || '') + '</span>';
+    }
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i];
       var cls = 'diff-line';
 
       if (line.startsWith('+++') || line.startsWith('---')) {
         cls += ' diff-meta';
-        html += '<div class="' + cls + '">' + DP.escHtml(line) + '</div>';
+        html += '<div class="' + cls + '">' + gut() + '<span class="diff-code">' + DP.escHtml(line) + '</span></div>';
       } else if (line.startsWith('@@')) {
         cls += ' diff-hunk';
         var hm = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
@@ -594,34 +600,35 @@
             ? '<button class="diff-stage-hunk-btn" data-hunk-index="' + hi + '" title="' + stageVerb + ' this hunk">' + stageVerb + ' hunk</button>'
             : '';
           html += '<div class="' + cls + '" data-hunk-index="' + hi + '">' +
+            gut() +
             '<span class="diff-hunk-text">' + DP.escHtml(line) + '</span>' +
             '<button class="diff-explain-btn" data-hunk-index="' + hi + '" title="Explain this change">Explain</button>' +
             stageBtn +
             '</div>';
         } else {
-          html += '<div class="' + cls + '">' + DP.escHtml(line) + '</div>';
+          html += '<div class="' + cls + '">' + gut() + '<span class="diff-hunk-text">' + DP.escHtml(line) + '</span></div>';
         }
       } else if (line.startsWith('+') && !line.startsWith('+++')) {
         newLn++;
         lineInHunk++;
         cls += ' diff-add';
-        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || DP.escHtml(line.substring(1))) + '</span></div>';
+        html += '<div class="' + cls + '" data-new-ln="' + newLn + '" data-side="RIGHT">' + gut('', newLn) + '<span class="diff-prefix">+</span><span class="diff-code">' + (highlightedLines[i] || DP.escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('-') && !line.startsWith('---')) {
         oldLn++;
         lineInHunk++;
         cls += ' diff-del';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT"><span class="diff-prefix">-</span><span class="diff-code">' + (highlightedLines[i] || DP.escHtml(line.substring(1))) + '</span></div>';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-side="LEFT">' + gut(oldLn, '') + '<span class="diff-prefix">−</span><span class="diff-code">' + (highlightedLines[i] || DP.escHtml(line.substring(1))) + '</span></div>';
       } else if (line.startsWith('diff ')) {
         cls += ' diff-header';
-        html += '<div class="' + cls + '">' + DP.escHtml(line) + '</div>';
+        html += '<div class="' + cls + '">' + gut() + '<span class="diff-code">' + DP.escHtml(line) + '</span></div>';
       } else if (line.startsWith('index ') || line.startsWith('new file') || line.startsWith('deleted file')) {
         cls += ' diff-meta';
-        html += '<div class="' + cls + '">' + DP.escHtml(line) + '</div>';
+        html += '<div class="' + cls + '">' + gut() + '<span class="diff-code">' + DP.escHtml(line) + '</span></div>';
       } else {
         oldLn++; newLn++;
         if (currentHunkIdx >= 0) lineInHunk++;
         cls += ' diff-context';
-        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT"><span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || DP.escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
+        html += '<div class="' + cls + '" data-old-ln="' + oldLn + '" data-new-ln="' + newLn + '" data-side="RIGHT">' + gut(oldLn, newLn) + '<span class="diff-prefix"> </span><span class="diff-code">' + (highlightedLines[i] || DP.escHtml(line.length > 0 ? line.substring(1) : '')) + '</span></div>';
       }
     }
 

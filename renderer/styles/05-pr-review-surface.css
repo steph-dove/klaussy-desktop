@@ -2276,32 +2276,8 @@ body.pr-review-popout #pr-review-root {
   border-right: 1px solid var(--border);
   background: var(--surface);
 }
-.pr-review-file {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px;
-  font-size: 12px;
-  cursor: pointer;
-  border-bottom: 1px solid var(--border);
-  gap: 8px;
-}
-.pr-review-file:hover { background: var(--surface-hover); }
-.pr-review-file.selected { background: var(--surface-hover); border-left: 2px solid var(--accent); padding-left: 8px; }
-.pr-review-file-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
-}
-.pr-review-file-stats {
-  display: flex;
-  gap: 4px;
-  font-variant-numeric: tabular-nums;
-  font-size: 10px;
-  flex-shrink: 0;
-}
+/* The PR-review file row now uses the shared .diff-file styling (it carries
+   both classes); only the +/- count colors remain surface-specific. */
 .pr-file-add { color: var(--diff-add-fg, #7ce27c); }
 .pr-file-del { color: var(--diff-del-fg, #e27c7c); }
 
