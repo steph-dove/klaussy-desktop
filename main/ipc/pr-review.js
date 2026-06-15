@@ -21,6 +21,7 @@ const {
 } = require('../state/pr-review');
 const { ghJson, ghText } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
+const { humanizeComment } = require('../util/humanize-comment');
 const { bucketFromState, normalizeCheckRun, normalizeStatus } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
 
@@ -429,7 +430,7 @@ ipcMain.handle('pr-reply-to-comment', async (_event, { worktreePath, prNumber, c
     ghExec(['api', '-X', 'POST',
       'repos/' + repo + '/pulls/' + prNumber + '/comments',
       '-F', 'in_reply_to=' + commentId,
-      '-f', 'body=' + body,
+      '-f', 'body=' + humanizeComment(body),
     ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
     return { ok: true };
   } catch (err) {
@@ -487,7 +488,7 @@ ipcMain.handle('pr-add-review-comment', async (_event, { worktreePath, prNumber,
     const args = [
       'api', '--method', 'POST',
       `repos/${repo}/pulls/${prNumber}/comments`,
-      '-f', 'body=' + body,
+      '-f', 'body=' + humanizeComment(body),
       '-f', 'path=' + filePath,
       '-F', 'line=' + line,
       '-f', 'side=' + (side || 'RIGHT'),
@@ -662,7 +663,7 @@ ipcMain.handle('pr-unresolve-thread', (_event, { worktreePath, threadId }) => {
 
 ipcMain.handle('pr-add-comment', async (_event, { worktreePath, prNumber, body }) => {
   try {
-    ghExec(['pr', 'comment', String(prNumber), '--body', body], {
+    ghExec(['pr', 'comment', String(prNumber), '--body', humanizeComment(body)], {
       cwd: worktreePath, stdio: 'pipe', timeout: 15000
     });
     return { ok: true };
@@ -674,7 +675,7 @@ ipcMain.handle('pr-add-comment', async (_event, { worktreePath, prNumber, body }
 ipcMain.handle('pr-review', async (_event, { worktreePath, prNumber, event, body }) => {
   try {
     const args = ['pr', 'review', String(prNumber), '--' + event];
-    if (body) args.push('--body', body);
+    if (body) args.push('--body', humanizeComment(body));
     ghExec(args, { cwd: worktreePath, stdio: 'pipe', timeout: 15000 });
     return { ok: true };
   } catch (err) {

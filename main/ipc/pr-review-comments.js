@@ -7,6 +7,7 @@ const { ipcMain } = require('electron');
 const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
+const { humanizeComment } = require('../util/humanize-comment');
 const {
   prReview, currentRepoPath, sanitizePrReview, broadcastPrReview, fetchThreadsForActive,
 } = require('../state/pr-review');
@@ -22,6 +23,7 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
+  body = humanizeComment(body); // strip agent tells + filler before posting
   const endpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
   const cwd = currentRepoPath() || require('os').homedir();
   // `spawn` is imported at the top of the file.
@@ -65,6 +67,7 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   if (!id) return { error: 'Missing or invalid comment id' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
+  body = humanizeComment(body);
   const endpoint = `repos/${baseOwner}/${baseRepo}/issues/comments/${id}`;
   const cwd = currentRepoPath() || require('os').homedir();
   // `spawn` is imported at the top of the file.
@@ -102,6 +105,7 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
   if (!id) return { error: 'Missing or invalid comment id' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
+  body = humanizeComment(body);
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/comments/${id}`;
   const cwd = currentRepoPath() || require('os').homedir();
   // `spawn` is imported at the top of the file.
@@ -158,6 +162,7 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
   if (!parentId) return { error: 'Missing or invalid parent comment id' };
   if (!body || !body.trim()) return { error: 'Reply body is empty' };
 
+  body = humanizeComment(body);
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/comments/${parentId}/replies`;
   const cwd = currentRepoPath() || require('os').homedir();
   // `spawn` is imported at the top of the file.
@@ -205,11 +210,11 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
 
   const payload = {
     event,
-    body: body || '',
+    body: humanizeComment(body || ''),
     comments: inlineComments.map((c) => {
       const out = {
         path: c.path,
-        body: c.body,
+        body: humanizeComment(c.body),
         side: c.side || 'RIGHT',
       };
       // GitHub requires `line` always; `start_line` only for multi-line.
@@ -285,7 +290,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
         }
         resolve({ ok: true });
       });
-      proc.stdin.write(JSON.stringify({ body: draft.body }));
+      proc.stdin.write(JSON.stringify({ body: humanizeComment(draft.body) }));
       proc.stdin.end();
     });
     if (res.error) issueCommentFailures.push(res.error);
