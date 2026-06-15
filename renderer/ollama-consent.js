@@ -29,6 +29,9 @@ window.OllamaConsent = (function () {
   var resolvers = [];
   // Whether the full pipeline has finished successfully this session.
   var readyInSession = false;
+  // Guards the auto (already-accepted) setup path so frequent openIfNeeded
+  // calls don't spawn parallel runSetup runs.
+  var setupInFlight = false;
 
   function show(pane) {
     consentPane.style.display = pane === 'consent' ? 'block' : 'none';
@@ -79,9 +82,15 @@ window.OllamaConsent = (function () {
     copy.forEach(function (r) { try { r(value); } catch {} });
   }
 
-  async function runSetup() {
+  // opts.silentError: on failure, resolve waiters with { ok:false } and close
+  // instead of popping the error pane. Used by the already-accepted auto path
+  // so a transient server-start failure doesn't nag on every editor open.
+  async function runSetup(opts) {
+    opts = opts || {};
     resetSteps();
-    show('progress');
+    // silentProgress: run without the blocking modal (used for the quick
+    // already-accepted server restart, which needs no download).
+    if (!opts.silentProgress) show('progress');
 
     // Subscribe to progress BEFORE starting so we don't drop the first event.
     var unsub = window.klaus.ai.ollama.onSetupProgress(function (p) {
@@ -113,6 +122,11 @@ window.OllamaConsent = (function () {
       return;
     }
 
+    if (opts.silentError) {
+      hide();
+      resolveAll({ ok: false, error: (result && result.error) || 'setup failed' });
+      return;
+    }
     errorMessage.textContent = (result && result.error) || 'Unknown error';
     show('error');
   }
@@ -128,12 +142,29 @@ window.OllamaConsent = (function () {
     if (state === 'ready') { readyInSession = true; return { ok: true }; }
     if (state === 'declined') return { ok: false, declined: true };
 
-    // 'needs-install', 'needs-server', 'needs-model' all show the consent
-    // pane first — even when only the model is missing, it's a material
-    // download (~1GB) and we should ask before doing it.
-    show('consent');
+    var waiter = new Promise(function (resolve) { resolvers.push(resolve); });
 
-    return new Promise(function (resolve) { resolvers.push(resolve); });
+    // Already accepted in a prior session — don't re-ask. Just (re)run setup:
+    // a fresh launch is almost always needs-server (the server isn't kept
+    // alive across restarts), so this silently restarts it. Guarded so the
+    // frequent openIfNeeded calls (every editor open) don't spawn parallel
+    // setups; failures stay silent so we don't nag.
+    if (status && status.consent === 'accepted') {
+      if (!setupInFlight) {
+        setupInFlight = true;
+        // needs-server just restarts an installed server (no download) — do it
+        // with no modal at all. needs-model/needs-install do real work, so show
+        // progress (but still no consent gate, and errors stay silent).
+        var quiet = state === 'needs-server';
+        runSetup({ silentError: true, silentProgress: quiet }).finally(function () { setupInFlight = false; });
+      }
+      return waiter;
+    }
+
+    // First time (no saved consent): 'needs-install' / 'needs-server' /
+    // 'needs-model' all ask first — even a model-only fetch is a ~1GB download.
+    show('consent');
+    return waiter;
   }
 
   if (overlay) {
