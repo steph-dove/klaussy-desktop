@@ -9,7 +9,7 @@
 // inside a node-pty so the user can answer prompts in an inline xterm.
 // To keep the noise down for the common case (claude wants to edit files
 // in the PR worktree), it writes a per-worktree settings.local.json that
-// pre-allows Edit/Write/MultiEdit on that worktree's path before launch.
+// pre-allows Edit/Write on that worktree's path before launch.
 // Bash and any non-edit tools still prompt.
 //
 // The renderer needs structured progress (tool-use chips, final summary,
