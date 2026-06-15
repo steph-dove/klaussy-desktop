@@ -2776,6 +2776,13 @@ body.pr-review-popout #pr-review-root {
   opacity: 0.7;
   font-size: 11px;
 }
+.pr-picker-account-hint.pr-picker-account-hint-error {
+  opacity: 1;
+  color: var(--error);
+  max-width: 60%;
+  text-align: right;
+  line-height: 1.35;
+}
 .pr-picker-url-row {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);

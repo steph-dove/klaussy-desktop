@@ -20,6 +20,7 @@ const {
   ensureWorktreeForActivePr,
 } = require('../state/pr-review');
 const { ghJson, ghText } = require('../util/gh-json');
+const { classifyGhError } = require('../util/gh-error');
 const { bucketFromState, normalizeCheckRun, normalizeStatus } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
 
@@ -41,7 +42,12 @@ ipcMain.handle('pr-list', async () => {
     ], cwd);
     return { prs };
   } catch (err) {
-    return { error: (err.stderr || err.message || '').trim() };
+    // Classify so the picker can render an access failure (the active gh
+    // account can't see this project's repo) as a soft hint rather than a
+    // scary GraphQL error — the recent list still works regardless.
+    const raw = (err.stderr || err.message || '').trim();
+    const cls = classifyGhError(raw, {});
+    return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
   }
 });
 
@@ -114,7 +120,14 @@ ipcMain.handle('pr-load', async (event, { number, url }) => {
 
     return { ok: true };
   } catch (err) {
-    return { error: (err.stderr || err.message || '').trim() };
+    const raw = (err.stderr || err.message || '').trim();
+    // "Could not resolve to a Repository" almost always means the active gh
+    // account can't see the repo (wrong account for a work/org PR). Classify so
+    // the picker can show an account-aware, actionable message + fix instead of
+    // the raw GraphQL error.
+    const m = (url || '').match(/[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/pull\/\d+/);
+    const cls = classifyGhError(raw, { target: m ? m[1] + '/' + m[2] : null });
+    return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
   }
 });
 
