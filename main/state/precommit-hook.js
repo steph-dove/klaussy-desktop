@@ -168,7 +168,7 @@ function tryNext() {
   }, 200000);
   sock.on('connect', () => {
     connected = true;
-    console.error('[klaussy] ' + gateName + ' running — silent failures · secrets · debug leftovers · landmines · lint (your agent is reading the '
+    console.error('[klaussy] ' + gateName + ' running — silent failures · secrets · debug leftovers · landmines · comments · lint (your agent is reading the '
       + (kind === 'pre-push' ? 'push range' : 'staged diff') + ')…');
     sock.write(JSON.stringify({ cwd, kind, localSha, remoteSha }) + '\\n');
   });

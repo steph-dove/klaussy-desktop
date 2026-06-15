@@ -39,12 +39,14 @@ const NO_ISSUES_TOKEN = 'NO_SILENT_FAILURES';
 const inflight = new Map(); // key -> { promise, requestId }
 const procMap = new Map();  // requestId -> child proc (spawnClaudeStream contract)
 
-// Agent-agnostic prompt — four lenses, condensed from the silent-failure-
+// Agent-agnostic prompt — five lenses, condensed from the silent-failure-
 // hunter reviewer we use on this codebase itself. Deliberately excludes
-// style/perf/architecture so it stays fast and findings stay actionable.
-// (Lint is handled separately by the repo's real linter, not by the agent.)
+// perf/architecture so it stays fast and findings stay actionable. (Lint is
+// handled separately by the repo's real linter, not by the agent.) Comment
+// hygiene (lens 5) is the one style-ish lens, included by request to keep the
+// codebase free of excessive/narrating comments.
 function checkPrompt(contextLine) {
-  return `You are a pre-commit reviewer. ${contextLine} Apply exactly these four lenses to the CHANGED lines and their immediate context — nothing else.
+  return `You are a pre-commit reviewer. ${contextLine} Apply exactly these five lenses to the CHANGED lines and their immediate context — nothing else.
 
 LENS 1 — Silent failures (your primary lens):
 - Empty or swallowing catch blocks (caught errors not rethrown, surfaced, or meaningfully handled)
@@ -69,7 +71,13 @@ LENS 4 — Blatant correctness landmines (Severity: High ONLY — if you are not
 - Conditions that are always true/false, inverted comparisons, assignment-in-condition
 - Off-by-default boolean confusion (e.g. flag checked with the opposite sense of every other use in the file)
 
-Explicitly NOT in scope: style, naming, formatting, performance, architecture, test coverage, lint-level nits, anything outside the diff. Do not suggest refactors.
+LENS 5 — Excessive comments (Severity: Low):
+- Comments on ADDED lines that restate what the code plainly does ("// increment i", "// loop over the items", "// set x to 5"), narrate obvious steps, or just echo the function/variable name.
+- Multi-line block comments where a single short line (or no comment) would carry the same information.
+- Changelog / narration / "AI-tell" comments ("// Now we handle the case where…", "// This function will…", "// Added to fix the bug").
+For each, the fix is: delete it (or condense to a short one-liner). Keep ONLY short comments that explain WHY — non-obvious intent, gotchas, links, or invariants. Do NOT flag: docstrings/JSDoc on public APIs, license/file headers, or genuinely clarifying "why" comments.
+
+Explicitly NOT in scope: naming, formatting, performance, architecture, test coverage, lint-level nits, anything outside the diff. Do not suggest refactors. (Comment hygiene IS in scope — that is lens 5.)
 
 Be precise and skeptical, but only report real issues — a deliberate, well-signposted degradation (comment explains it, user is notified elsewhere) is NOT a finding.
 
@@ -78,7 +86,7 @@ Output contract (the tooling parses this):
 - Otherwise output the literal marker <FINDINGS> on its own line, then each finding as:
 
 **[Severity: High | Medium | Low]**
-**[Lens: Silent failure | Secrets | Debug leftover | Correctness]**
+**[Lens: Silent failure | Secrets | Debug leftover | Correctness | Excessive comments]**
 **[Location: file_path:line]**
 What is wrong, why it matters, and the minimal fix.
 
