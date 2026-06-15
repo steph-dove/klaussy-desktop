@@ -16,9 +16,21 @@
 <body>
   <!-- Main app -->
   <div id="app" style="display: none;">
-    <!-- Per-window accent strip (color set via Preferences → Window) -->
-    <div id="window-color-bar"></div>
+    <!-- Per-window accent strip (color set via Preferences → Window). On the
+         macOS custom title bar it also carries the Klaussy brand + active
+         session branch (see #titlebar-content). -->
+    <div id="window-color-bar">
+      <div id="titlebar-content">
+        <span id="titlebar-branch" hidden></span>
+      </div>
+    </div>
     <div id="sidebar">
+      <!-- Klaussy brand, pinned at the very top of the sidebar above the
+           token graph. -->
+      <div id="sidebar-brand">
+        <img class="sidebar-brand-logo" src="../icon.png" alt="" aria-hidden="true">
+        <span class="sidebar-brand-name">Klaussy</span>
+      </div>
       <!-- Token-spend leaderboard: today's running total + a daily chart
            with selectable range. Lives at the top of the sidebar above the
            main header row. Rendered by renderer/token-tile.js. -->
