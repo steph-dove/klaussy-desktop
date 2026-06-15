@@ -10,6 +10,7 @@
 
 const { ipcMain } = require('electron');
 const ollama = require('../state/ollama');
+const { loadConfig } = require('../util/config');
 
 // Tracks in-flight requests so the cancel handler can find the AbortController.
 const inFlight = new Map();
@@ -76,7 +77,10 @@ ipcMain.handle('ollama-complete-cancel', (_event, { requestId }) => {
 let _setupInFlight = false;
 
 ipcMain.handle('ollama-setup-status', async () => {
-  return { state: await ollama.getSetupState() };
+  // Include the saved consent so the renderer can skip re-asking once the user
+  // has accepted: a fresh launch usually reports needs-server (the server isn't
+  // auto-started), which must NOT re-trigger the consent prompt.
+  return { state: await ollama.getSetupState(), consent: loadConfig().ollamaConsent || null };
 });
 
 ipcMain.handle('ollama-setup-decline', () => {
