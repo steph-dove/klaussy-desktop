@@ -52,6 +52,58 @@ ipcMain.handle('pr-list', async () => {
   }
 });
 
+// Account-scoped review dashboard for the picker: the up-to-5 most recently
+// pushed repos the ACTIVE gh account can see (own + collaborator + org member),
+// each with its 5 most recent open PRs. Independent of the current project, so
+// switching gh accounts surfaces that account's repos+PRs instead of failing on
+// a repo the active account can't access.
+ipcMain.handle('pr-recent-repos', async () => {
+  const cwd = currentRepoPath() || require('os').homedir();
+  let repos;
+  try {
+    // Pull more than 5 so we can skip repos with no open PRs and still fill up
+    // to 5 with reviewable ones. sort=pushed = most recently active first.
+    const raw = await ghJson([
+      'api', '/user/repos?sort=pushed&per_page=12&affiliation=owner,collaborator,organization_member',
+    ], cwd);
+    repos = (Array.isArray(raw) ? raw : []).map((r) => r.full_name).filter(Boolean);
+  } catch (err) {
+    const msg = (err.stderr || err.message || '').trim();
+    const cls = classifyGhError(msg, {});
+    return { error: msg, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
+  }
+
+  const withPrs = await Promise.all(repos.map(async (full) => {
+    try {
+      const prs = await ghJson([
+        'pr', 'list', '-R', full, '--state', 'open', '--limit', '5',
+        '--json', 'number,title,author,state,url,updatedAt,isDraft',
+      ], cwd);
+      return { repo: full, prs: prs || [] };
+    } catch {
+      return { repo: full, prs: [] }; // a single repo's failure shouldn't sink the list
+    }
+  }));
+  return { repos: withPrs.filter((r) => r.prs.length > 0).slice(0, 5) };
+});
+
+// Open PRs the ACTIVE gh account authored, most recently opened first, across
+// every repo it can see. Lets the picker offer a quick "jump back to a PR you
+// opened" section.
+ipcMain.handle('pr-authored', async () => {
+  const cwd = currentRepoPath() || require('os').homedir();
+  try {
+    const prs = await ghJson([
+      'search', 'prs', '--author=@me', '--state', 'open', '--sort', 'created', '--limit', '8',
+      '--json', 'number,title,url,state,repository,createdAt,isDraft',
+    ], cwd);
+    return { prs: prs || [] };
+  } catch (err) {
+    const msg = (err.stderr || err.message || '').trim();
+    return { error: msg, errorKind: classifyGhError(msg, {}).kind };
+  }
+});
+
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   // gh just needs a valid cwd (any git repo or non-repo dir works for a
   // URL-targeted call). Falling back to homedir lets reviewers use Klaussy
