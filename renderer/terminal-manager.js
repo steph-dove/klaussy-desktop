@@ -895,7 +895,7 @@ window.TerminalManager = (function () {
     var result;
     try {
       result = src.branch
-        ? await window.klaus.task.attachWorktree(src.worktreePath, providerId)
+        ? await window.klaus.task.attachWorktree(src.worktreePath, providerId, src.repoPath, src.branch)
         : await window.klaus.task.openFolder(src.worktreePath, providerId);
     } catch (err) {
       window.toast.error('Failed to start ' + providerId + ': ' + (err && err.message || err));

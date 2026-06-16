@@ -91,7 +91,7 @@ contextBridge.exposeInMainWorld('klaus', {
       return () => ipcRenderer.removeListener('precommit-event', listener);
     },
     checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
-    attachWorktree: (worktreePath, mode) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode }),
+    attachWorktree: (worktreePath, mode, repoPath, branch) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode, repoPath, branch }),
     openFolder: (folderPath, mode) => ipcRenderer.invoke('open-folder', { folderPath, mode }),
     list: () => ipcRenderer.invoke('list-tasks'),
     kill: (id) => ipcRenderer.invoke('kill-task', { id }),

@@ -106,6 +106,77 @@ async function freshenBranchFromOrigin(repoPath, branch) {
   return { warning: null, info };
 }
 
+// A worktree's directory can vanish (manual delete, cleaned tmp, git gc) while
+// git still has it registered and its branch still exists. Find the configured
+// repo that registers `worktreePath` and the branch it tracks, so a missing
+// worktree can be recreated on open instead of failing. Returns null if no
+// configured repo claims it.
+function findRegisteringWorktree(worktreePath) {
+  const config = loadConfig();
+  const repos = [];
+  const seen = new Set();
+  for (const p of [...(config.projects || []), ...(config.repoPath ? [{ path: config.repoPath }] : [])]) {
+    if (p && p.path && !seen.has(p.path)) { seen.add(p.path); repos.push(p.path); }
+  }
+  for (const repoPath of repos) {
+    let out;
+    try {
+      out = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath, stdio: 'pipe' }).toString();
+    } catch { continue; }
+    let cur = {};
+    for (const line of out.split('\n').concat([''])) {
+      if (line.startsWith('worktree ')) cur = { path: line.slice(9) };
+      else if (line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
+      else if (line === '') {
+        if (cur.path === worktreePath) return { repoPath, branch: cur.branch || null };
+        cur = {};
+      }
+    }
+  }
+  return null;
+}
+
+// Recreate a worktree that git tracks but that's gone from disk: prune the
+// stale registration (which frees the branch), then re-add it at the same path
+// from its branch. Returns { ok } or { error } with an actionable message.
+function recreateMissingWorktree(repoPath, worktreePath, branch) {
+  if (!repoPath || !branch) {
+    return { error: 'Worktree directory is missing and its repo/branch could not be determined:\n' + worktreePath };
+  }
+  try {
+    execFileSync('git', ['rev-parse', '--verify', 'refs/heads/' + branch], { cwd: repoPath, stdio: 'pipe' });
+  } catch {
+    return { error: 'Cannot reopen "' + branch + '": its working directory and branch are both gone.' };
+  }
+  try { execFileSync('git', ['worktree', 'prune'], { cwd: repoPath, stdio: 'pipe' }); } catch { /* nothing to prune */ }
+  try {
+    fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
+    execFileSync('git', ['worktree', 'add', worktreePath, branch], { cwd: repoPath, stdio: 'pipe' });
+  } catch (err) {
+    // Branch already checked out elsewhere, or path still registered — force it.
+    try {
+      execFileSync('git', ['worktree', 'add', '--force', worktreePath, branch], { cwd: repoPath, stdio: 'pipe' });
+    } catch (err2) {
+      const msg = (err2.stderr ? err2.stderr.toString() : err2.message).trim().split('\n')[0];
+      return { error: 'Failed to recreate worktree for "' + branch + '": ' + msg };
+    }
+  }
+  return { ok: true };
+}
+
+// Ensure `worktreePath` exists on disk, recreating it from its branch if git
+// still tracks it but the directory is gone. `repoPath`/`branch` are hints from
+// the caller; falls back to discovering them from git's worktree registry.
+function ensureWorktreeOnDisk(worktreePath, repoPath, branch) {
+  if (fs.existsSync(worktreePath)) return { ok: true };
+  let repo = repoPath, br = branch;
+  if (!repo || !br) {
+    const found = findRegisteringWorktree(worktreePath);
+    if (found) { repo = repo || found.repoPath; br = br || found.branch; }
+  }
+  return recreateMissingWorktree(repo, worktreePath, br);
+}
+
 ipcMain.handle('list-saved-sessions', () => {
   const config = loadConfig();
   // Backfill repoPath for sessions saved before it was tracked, so the sidebar
@@ -117,11 +188,11 @@ ipcMain.handle('list-saved-sessions', () => {
   }));
 });
 
-ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branch, mode }) => {
-  // Verify the worktree still exists
-  if (!fs.existsSync(worktreePath)) {
-    return { error: 'Worktree no longer exists: ' + worktreePath };
-  }
+ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branch, mode, repoPath }) => {
+  // The worktree directory may have been deleted since the session was saved.
+  // Recreate it from its branch so the session stays resumable.
+  const ensured = ensureWorktreeOnDisk(worktreePath, repoPath, branch);
+  if (ensured.error) return { error: ensured.error };
   const resumeMode = mode || 'claude';
   // Only Claude tracks an exact session id to resume; other providers resume
   // their latest session in the worktree via their native flag (handled by the
@@ -723,18 +794,24 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
 });
 
 // Attach to an existing worktree directory
-ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode }) => {
+ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode, repoPath, branch }) => {
+  // The directory may have been deleted while git still tracks the worktree.
+  // Recreate it from its branch so worktrees in any repo stay openable, rather
+  // than failing with a misleading "not a git repository".
+  const ensured = ensureWorktreeOnDisk(worktreePath, repoPath, branch);
+  if (ensured.error) return { error: ensured.error };
+
   // Validate it's a git worktree / repo
   try {
-    execSync('git rev-parse --git-dir', { cwd: worktreePath, stdio: 'pipe' });
+    execFileSync('git', ['rev-parse', '--git-dir'], { cwd: worktreePath, stdio: 'pipe' });
   } catch {
-    return { error: 'Selected directory is not a git repository or worktree.' };
+    return { error: 'Selected directory is not a git repository or worktree:\n' + worktreePath };
   }
 
-  // Get branch name for display
-  let branch = '';
+  // Resolve the checked-out branch for display (authoritative over the hint).
+  let resolvedBranch = branch || '';
   try {
-    branch = execSync('git rev-parse --abbrev-ref HEAD', {
+    resolvedBranch = execSync('git rev-parse --abbrev-ref HEAD', {
       cwd: worktreePath,
       stdio: 'pipe',
     }).toString().trim();
@@ -742,7 +819,7 @@ ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode }) => {
 
   const name = path.basename(worktreePath);
   try {
-    return spawnInWorktree(name, worktreePath, branch, mode || 'claude');
+    return spawnInWorktree(name, worktreePath, resolvedBranch, mode || 'claude');
   } catch (err) {
     console.error('[attach-worktree] spawnInWorktree failed:', err);
     return { error: 'Failed to start terminal: ' + (err && err.message || err) };
