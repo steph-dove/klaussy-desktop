@@ -16,7 +16,54 @@ const { execFile, execFileSync } = require('child_process');
 const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { classifyGhError } = require('../util/gh-error');
+const { clearGhTokenCache } = require('../util/exec');
 const { instances } = require('./instances');
+
+// Reviewing a PR for a repo only the non-active gh account can see requires
+// that account to be globally active — the embedded agent terminals and git
+// run gh themselves with the ambient account. So we switch on review-open and
+// restore the prior account on review-close, instead of leaving it flipped.
+let _savedGhAccount = null;
+
+function activeGhAccountNow() {
+  try {
+    const out = execFileSync('gh', ['auth', 'status'], { stdio: 'pipe', timeout: 5000 }).toString();
+    const lines = out.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/Logged in to \S+ (?:account|as) ([A-Za-z0-9-]+)/);
+      if (!m) continue;
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        if (/Active account:\s*true/i.test(lines[j])) return m[1];
+        if (/Logged in to/.test(lines[j])) break;
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Make `account` the active gh account for the review session, remembering the
+// account that was active before (once) so restoreGhAfterReview can put it back.
+function switchGhForReview(account) {
+  if (!account) return;
+  const current = activeGhAccountNow();
+  if (current === account) return;
+  if (_savedGhAccount === null) _savedGhAccount = current;
+  try {
+    execFileSync('gh', ['auth', 'switch', '-u', account], { stdio: 'pipe', timeout: 5000 });
+    clearGhTokenCache();
+  } catch (_) {}
+}
+
+// Restore the pre-review active account when the review session ends.
+function restoreGhAfterReview() {
+  if (_savedGhAccount === null) return;
+  const restoreTo = _savedGhAccount;
+  _savedGhAccount = null;
+  try {
+    execFileSync('gh', ['auth', 'switch', '-u', restoreTo], { stdio: 'pipe', timeout: 5000 });
+    clearGhTokenCache();
+  } catch (_) {}
+}
 
 const prReview = {
   active: null, // { repo, number, meta, diff, popout: BrowserWindow|null, ... }
@@ -502,4 +549,6 @@ module.exports = {
   findWorktreeForBranch,
   findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr,
+  switchGhForReview,
+  restoreGhAfterReview,
 };

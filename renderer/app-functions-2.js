@@ -395,6 +395,10 @@ window.App = window.App || {};
     var recentEl = overlay.querySelector('.pr-picker-recent');
     var listEl = overlay.querySelector('.pr-picker-list');
     var authoredEl = overlay.querySelector('.pr-picker-authored');
+    // The account the picker is browsing as. Lists run under this account's
+    // token (no global switch); only opening a review (pr.load) switches the
+    // global active account. Defaults to whatever gh account is active.
+    var selectedAccount = null;
 
     function updateStartEnabled() { startBtn.disabled = !urlInput.value.trim(); }
     urlInput.addEventListener('input', function () {
@@ -411,17 +415,16 @@ window.App = window.App || {};
       return { owner: m[1], repo: m[2].replace(/\.git$/, ''), number: parseInt(m[3], 10) };
     }
 
-    // Before loading, check whether the currently-active gh account can see
-    // this PR. If a different logged-in account has access, silently switch.
+    // Pick the gh account to open a pasted URL under: if a different logged-in
+    // account can see the repo, target that one. Does NOT switch the global
+    // account \u2014 pr.load switches (and restores on close).
     async function ensureAccountCanSeeUrl(url) {
       var parsed = parsePrUrl(url);
       if (!parsed) return;
       var det = await window.klaus.gh.detectAccountForRepo(parsed.owner, parsed.repo, parsed.number);
       if (!det || det.error || !det.username) return;
-      if (det.active) return;
-      var sw = await window.klaus.gh.switchAccount(det.username);
-      if (sw && sw.error) return;
-      accountHint.textContent = 'Switched to ' + det.username;
+      selectedAccount = det.username;
+      accountHint.textContent = 'Will use ' + det.username;
       accountHint.classList.remove('pr-picker-account-hint-error');
       if (accountSelect) accountSelect.value = det.username;
     }
@@ -433,7 +436,7 @@ window.App = window.App || {};
       urlInput.disabled = true;
       startBtn.disabled = true;
       startBtn.textContent = 'Loading\u2026';
-      var result = await window.klaus.pr.load({ url: url });
+      var result = await window.klaus.pr.load({ url: url, account: selectedAccount });
       if (result.error) {
         urlInput.disabled = false;
         startBtn.textContent = 'Start review';
@@ -468,8 +471,14 @@ window.App = window.App || {};
         if (row) row.style.display = 'none';
         return;
       }
+      // Keep the user's chosen account selected across re-populates (e.g. after
+      // a sign-in); otherwise default to whichever account gh has active.
+      var active = accounts.find(function (a) { return a.active; });
+      if (!selectedAccount || !accounts.some(function (a) { return a.username === selectedAccount; })) {
+        selectedAccount = active ? active.username : (accounts[0] && accounts[0].username) || null;
+      }
       accountSelect.innerHTML = accounts.map(function (a) {
-        var sel = a.active ? ' selected' : '';
+        var sel = a.username === selectedAccount ? ' selected' : '';
         var suffix = a.active ? ' (active)' : '';
         if (a.valid === false) suffix = ' (needs sign-in)';
         return '<option value="' + AppUtils.escAttr(a.username) + '"' + sel + ' data-valid="' + (a.valid === false ? 'false' : 'true') + '">'
@@ -501,7 +510,7 @@ window.App = window.App || {};
           row.addEventListener('click', async function () {
             row.style.opacity = '0.5';
             try { await ensureAccountCanSeeUrl(row.dataset.url); } catch (_) {}
-            var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
+            var loadResult = await window.klaus.pr.load({ url: row.dataset.url, account: selectedAccount });
             if (loadResult.error) {
               window.toast.error('Failed to load PR:\n' + loadResult.error);
               row.style.opacity = '1';
@@ -515,7 +524,7 @@ window.App = window.App || {};
       // "Opened by you" — the active account's own open PRs across all repos,
       // most recently opened first. Fire-and-forget; hidden when there are none.
       authoredEl.innerHTML = '';
-      window.klaus.pr.authored().then(function (r) {
+      window.klaus.pr.authored(selectedAccount).then(function (r) {
         var prs = (r && r.prs) || [];
         if (!prs.length) { authoredEl.style.display = 'none'; return; }
         authoredEl.style.display = '';
@@ -533,7 +542,7 @@ window.App = window.App || {};
         authoredEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
           row.addEventListener('click', async function () {
             row.style.opacity = '0.5';
-            var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
+            var loadResult = await window.klaus.pr.load({ url: row.dataset.url, account: selectedAccount });
             if (loadResult.error) {
               window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
               row.style.opacity = '1';
@@ -547,7 +556,7 @@ window.App = window.App || {};
       // Account-scoped: the active account's most recently active repos and
       // their recent open PRs — not the single "current project" (which fails
       // whenever the active account can't see that repo).
-      var result = await window.klaus.pr.recentRepos();
+      var result = await window.klaus.pr.recentRepos(selectedAccount);
       if (result.error) {
         var isAccess = /^(not-found|auth|sso|scope)$/.test(result.errorKind || '');
         var text = isAccess
@@ -582,7 +591,7 @@ window.App = window.App || {};
       listEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
         row.addEventListener('click', async function () {
           row.style.opacity = '0.5';
-          var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
+          var loadResult = await window.klaus.pr.load({ url: row.dataset.url, account: selectedAccount });
           if (loadResult.error) {
             window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
             row.style.opacity = '1';
@@ -597,45 +606,32 @@ window.App = window.App || {};
     accountSelect.addEventListener('change', async function () {
       var target = accountSelect.value;
       if (!target) return;
-      accountHint.textContent = 'Switching…';
-      accountSelect.disabled = true;
-      var sw = await window.klaus.gh.switchAccount(target);
-      accountSelect.disabled = false;
-      // needsLogin = main saw the target's token was already invalid and
-      // refused to switch into it. Drive the in-app login flow instead of
-      // surfacing a confusing error.
-      if (sw && sw.needsLogin) {
-        accountHint.textContent = 'Re-authenticating ' + target + '…';
+      selectedAccount = target;
+      accountHint.textContent = '';
+      accountHint.classList.remove('pr-picker-account-hint-error');
+      // Browsing only — do NOT switch gh's global active account. We list as
+      // `target` via its token (recentRepos/authored accept the account). The
+      // global switch happens later, only when a review is actually opened.
+      var opt = accountSelect.options[accountSelect.selectedIndex];
+      var needsSignIn = opt && opt.dataset.valid === 'false';
+      if (needsSignIn) {
+        // No usable token for this account → can't list as it; sign in first.
+        accountHint.textContent = 'Signing in to ' + target + '…';
         Dialogs.showGhLogin({
           onSuccess: async function () {
             accountHint.textContent = 'Signed in';
             await populateAccountSelect();
             await refreshLists();
           },
-          // Reset the dropdown + hint if the user dismisses the login modal
-          // — otherwise the hint lies about an in-progress operation that
-          // never completes.
-          onCancel: async function () {
-            accountHint.textContent = '';
-            await populateAccountSelect();
-          },
+          onCancel: async function () { accountHint.textContent = ''; await populateAccountSelect(); },
         });
         return;
       }
-      if (sw && sw.error) {
-        accountHint.textContent = 'Switch failed: ' + sw.error;
-        await populateAccountSelect();
-        return;
-      }
-      accountHint.textContent = 'Switched to ' + target;
-      await populateAccountSelect();
       var listed = (await refreshLists()) || {};
-      // Switched fine, but this account still can't pull the current project's
-      // PRs — gh believed its token was valid, but it's stale or lacks access.
-      // Since the user explicitly chose this account, drive a fresh sign-in for
-      // it, then re-pull. onSuccess re-runs refreshLists directly (not this
-      // handler), so a still-failing account just leaves the soft hint — no loop.
-      if (/^(auth|not-found|sso|scope)$/.test(listed.listErrorKind || '')) {
+      // Token looked valid to gh but the API rejected it (expired) — offer a
+      // re-sign-in. onSuccess re-lists directly, so a still-failing account just
+      // leaves the soft hint (no loop).
+      if (listed.listErrorKind === 'auth') {
         accountHint.textContent = 'Signing in to ' + target + '…';
         Dialogs.showGhLogin({
           onSuccess: async function () {
