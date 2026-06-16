@@ -206,7 +206,15 @@ window.PrReview = window.PrReview || {};
     // Delegated "Copy" for gh-error fix commands. Bound on hostEl (not its
     // children) so it survives the innerHTML rewrites every render does.
     PR.hostEl.addEventListener('click', function (e) {
-      var btn = e.target && e.target.closest && e.target.closest('.pr-gh-error-copy');
+      if (!e.target || !e.target.closest) return;
+      // Reddit-style collapse: clicking a comment's gutter rail folds it.
+      var rail = e.target.closest('.pr-conv-collapse');
+      if (rail) {
+        var item = rail.closest('.pr-conv-item');
+        if (item) item.classList.toggle('collapsed');
+        return;
+      }
+      var btn = e.target.closest('.pr-gh-error-copy');
       if (!btn) return;
       navigator.clipboard.writeText(btn.getAttribute('data-copy') || '').then(function () {
         var prev = btn.textContent;

@@ -15,6 +15,12 @@
   <div id="pr-review-root"></div>
   <script src="utils.js"></script>
   <script src="toast.js"></script>
+  <!-- Markdown rendering for comment bodies (markdown-it + DOMPurify are UMD;
+       load before any AMD loader so they register as window globals). -->
+  <script src="../node_modules/markdown-it/dist/markdown-it.min.js"></script>
+  <script src="../node_modules/dompurify/dist/purify.min.js"></script>
+  <script src="hljs-bundle.js"></script>
+  <script src="markdown-preview.js"></script>
   <script src="finding-parser.js"></script>
   <script src="pr-review.js"></script>
   <script src="pr-review-findings.js"></script>
