@@ -9,7 +9,7 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
+const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
 const {
@@ -17,7 +17,7 @@ const {
   broadcastPrReview, sanitizePrReview, currentRepoPath, parseBaseFromUrl,
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
-  ensureWorktreeForActivePr,
+  ensureWorktreeForActivePr, switchGhForReview, restoreGhAfterReview,
 } = require('../state/pr-review');
 const { ghJson, ghText } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
@@ -57,15 +57,18 @@ ipcMain.handle('pr-list', async () => {
 // each with its 5 most recent open PRs. Independent of the current project, so
 // switching gh accounts surfaces that account's repos+PRs instead of failing on
 // a repo the active account can't access.
-ipcMain.handle('pr-recent-repos', async () => {
+ipcMain.handle('pr-recent-repos', async (_event, { account } = {}) => {
   const cwd = currentRepoPath() || require('os').homedir();
+  // Run as the picker's selected account via a token, so browsing the lists
+  // never flips gh's global active account (only opening a review does).
+  const env = ghEnvForAccount(account);
   let repos;
   try {
     // Pull more than 5 so we can skip repos with no open PRs and still fill up
     // to 5 with reviewable ones. sort=pushed = most recently active first.
     const raw = await ghJson([
       'api', '/user/repos?sort=pushed&per_page=12&affiliation=owner,collaborator,organization_member',
-    ], cwd);
+    ], cwd, env);
     repos = (Array.isArray(raw) ? raw : []).map((r) => r.full_name).filter(Boolean);
   } catch (err) {
     const msg = (err.stderr || err.message || '').trim();
@@ -78,7 +81,7 @@ ipcMain.handle('pr-recent-repos', async () => {
       const prs = await ghJson([
         'pr', 'list', '-R', full, '--state', 'open', '--limit', '5',
         '--json', 'number,title,author,state,url,updatedAt,isDraft',
-      ], cwd);
+      ], cwd, env);
       return { repo: full, prs: prs || [] };
     } catch {
       return { repo: full, prs: [] }; // a single repo's failure shouldn't sink the list
@@ -90,13 +93,13 @@ ipcMain.handle('pr-recent-repos', async () => {
 // Open PRs the ACTIVE gh account authored, most recently opened first, across
 // every repo it can see. Lets the picker offer a quick "jump back to a PR you
 // opened" section.
-ipcMain.handle('pr-authored', async () => {
+ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
   const cwd = currentRepoPath() || require('os').homedir();
   try {
     const prs = await ghJson([
       'search', 'prs', '--author=@me', '--state', 'open', '--sort', 'created', '--limit', '8',
       '--json', 'number,title,url,state,repository,createdAt,isDraft',
-    ], cwd);
+    ], cwd, ghEnvForAccount(account));
     return { prs: prs || [] };
   } catch (err) {
     const msg = (err.stderr || err.message || '').trim();
@@ -120,13 +123,17 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   }
 });
 
-ipcMain.handle('pr-load', async (event, { number, url }) => {
+ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   // URL-form calls don't need an active project — gh derives the repo from
   // the URL. The number-only form (used by the picker's "open in current
   // project" list) does, since gh resolves it against the cwd's origin.
   if (!url && !currentRepoPath()) {
     return { error: 'Add a project to look up PRs by number, or paste a full PR URL.' };
   }
+  // Opening a review: make the chosen account globally active for the session
+  // (the agent terminals + git need the ambient account). The prior account is
+  // remembered and restored when the review closes.
+  if (account) switchGhForReview(account);
   const cwd = currentRepoPath() || require('os').homedir();
   const target = url || String(number);
   try {
@@ -150,6 +157,7 @@ ipcMain.handle('pr-load', async (event, { number, url }) => {
     }
     prReview.active = {
       repo, number: meta.number, meta, diff,
+      account: account || null, // gh account this review is being run under
       baseOwner: base ? base.owner : null,
       baseRepo: base ? base.name : null,
       threads: null, // null = loading, [] = loaded-empty
@@ -299,6 +307,7 @@ ipcMain.handle('pr-checkout-locally', async () => {
     prReview.active.popout.close();
   }
   prReview.active = null;
+  restoreGhAfterReview();
   broadcastPrReview();
 
   for (const win of BrowserWindow.getAllWindows()) {
@@ -383,6 +392,7 @@ ipcMain.handle('pr-review-close', () => {
     prReview.active.popout.close();
   }
   prReview.active = null;
+  restoreGhAfterReview();
   broadcastPrReview();
   return { ok: true };
 });

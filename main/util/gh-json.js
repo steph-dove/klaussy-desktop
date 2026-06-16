@@ -1,11 +1,21 @@
 // Thin promise wrappers around the `gh` CLI, shared by the PR-review IPC
 // modules. ghJson parses stdout as JSON; ghText returns it raw. Both attach
-// stderr to the rejected error so callers can surface gh's message.
+// stderr to the rejected error so callers can surface gh's message. An optional
+// `extraEnv` (e.g. { GH_TOKEN } from ghEnvForAccount) runs the command as a
+// specific account without flipping gh's global active account.
 const { execFile } = require('child_process');
 
-function ghJson(args, cwd) {
+function runGh(args, cwd, extraEnv) {
+  const env = extraEnv && Object.keys(extraEnv).length
+    ? { ...process.env, ...extraEnv } : undefined;
+  const opts = { cwd, maxBuffer: 50 * 1024 * 1024 };
+  if (env) opts.env = env;
+  return opts;
+}
+
+function ghJson(args, cwd, extraEnv) {
   return new Promise((resolve, reject) => {
-    execFile('gh', args, { cwd, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('gh', args, runGh(args, cwd, extraEnv), (err, stdout, stderr) => {
       if (err) {
         err.stderr = stderr;
         return reject(err);
@@ -16,9 +26,9 @@ function ghJson(args, cwd) {
   });
 }
 
-function ghText(args, cwd) {
+function ghText(args, cwd, extraEnv) {
   return new Promise((resolve, reject) => {
-    execFile('gh', args, { cwd, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('gh', args, runGh(args, cwd, extraEnv), (err, stdout, stderr) => {
       if (err) { err.stderr = stderr; return reject(err); }
       resolve(stdout);
     });

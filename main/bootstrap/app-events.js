@@ -322,6 +322,9 @@ function install() {
     // shutdownAndSave already awaited in before-quit; keep idempotent call here
     // for the window-all-closed path.
     shutdownAndSave();
+    // If a review left a non-default gh account active, restore the user's
+    // original active account on quit so the terminal/git aren't left switched.
+    try { require('../state/pr-review').restoreGhAfterReview(); } catch (_) {}
   });
 }
 

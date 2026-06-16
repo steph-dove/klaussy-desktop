@@ -86,6 +86,30 @@ async function ghExecP(args, opts) {
   });
 }
 
+// Resolve a gh token for a specific logged-in account (by username), so a
+// caller can run a gh command AS that account without `gh auth switch` flipping
+// the global active account. Returns { GH_TOKEN } or {} if no token. Cached
+// (keyed distinctly from the repo-owner cache).
+function ghEnvForAccount(username) {
+  if (!username) return {};
+  const key = 'acct:' + username;
+  const cached = ghTokenCache.get(key);
+  if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
+    return cached.token ? { GH_TOKEN: cached.token } : {};
+  }
+  try {
+    const token = execFileSync('gh', ['auth', 'token', '--user', username], {
+      stdio: 'pipe', timeout: 5000,
+    }).toString().trim();
+    if (token) {
+      ghTokenCache.set(key, { token, at: Date.now() });
+      return { GH_TOKEN: token };
+    }
+  } catch {}
+  ghTokenCache.set(key, { token: null, at: Date.now() });
+  return {};
+}
+
 function clearGhTokenCache() { ghTokenCache.clear(); }
 
 // Process `items` in parallel with at most `cap` in flight at once. Used by
@@ -129,6 +153,7 @@ module.exports = {
   STDERR_CAP_BYTES,
   appendStderr,
   ghEnvForRepo,
+  ghEnvForAccount,
   ghExec,
   ghExecP,
   clearGhTokenCache,
