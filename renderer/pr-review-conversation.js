@@ -12,11 +12,47 @@
     return joined.length > 140 ? joined.slice(0, 140) + '\u2026' : joined;
   };
 
-  // Minimal markdown rendering: preserve newlines + escape everything. Real
-  // markdown (code fences, links) can land with G4's composer.
+  // Render comment bodies as full markdown (markdown-it + hljs + DOMPurify via
+  // MarkdownPreview), wrapped in .pr-conv-md for scoped prose styling. Falls
+  // back to escaped plain text if the markdown libs aren't loaded.
   PR.renderCommentBody = function(body) {
     if (!body) return '';
+    if (window.MarkdownPreview && window.MarkdownPreview.render) {
+      return '<div class="pr-conv-md">' + window.MarkdownPreview.render(body, { breaks: true }) + '</div>';
+    }
     return PR.escHtml(body).replace(/\n/g, '<br>');
+  };
+
+  // The timeline gutter dot: a colored initial avatar (reusing the sidebar's
+  // iconColor palette) so every item has a visual anchor. opts lets AI findings
+  // override the color/letter/class to read as the distinct Klaussy marker.
+  PR.avatarHtml = function(login, opts) {
+    opts = opts || {};
+    var name = login || '?';
+    var color = opts.color || ((window.AppUtils && AppUtils.iconColor) ? AppUtils.iconColor(name) : 'var(--surface-hover)');
+    var letter = opts.letter || name.charAt(0).toUpperCase();
+    var cls = 'pr-conv-avatar' + (opts.cls ? ' ' + opts.cls : '');
+    return '<span class="' + cls + '" style="background:' + color + '" title="' + PR.escHtml(name) + '">'
+      + PR.escHtml(letter) + '</span>';
+  };
+
+  // Reddit-style gutter: the avatar sits on top of a collapse rail that runs
+  // the full height of the comment (and any nested replies, since the item is a
+  // flex row and the gutter stretches to match the content column). Clicking
+  // the rail folds the comment — see the delegated handler in pr-review.js.
+  PR.gutterHtml = function(avatar) {
+    return '<div class="pr-conv-gutter">'
+      + avatar
+      + '<button class="pr-conv-collapse" type="button" title="Collapse thread" aria-label="Collapse thread"></button>'
+    + '</div>';
+  };
+
+  // Agent-posted review findings are issue comments whose body carries the
+  // Klaussy signature — detect heuristically so they get the accent marker.
+  PR.isAiFinding = function(body) {
+    // Match the unambiguous parts so any hyphen variant in "AI-generated" or
+    // markdown emphasis around it doesn't break detection.
+    return /via\s*Klaussy|generated\s+review\s+finding/i.test(body || '');
   };
 
   PR.bindThreadControls = function() {
@@ -65,7 +101,11 @@
         + (s.implementDraft ? 'Implement again' : 'Implement')
         + '</button>';
 
-    var actions = '<div class="pr-conv-claude-actions">' + investigateBtn + implementBtn + '</div>';
+    // Reply sits inline with Investigate/Implement on the thread's last comment.
+    var replyBtn = (ctx.showReply && ctx.replyParentId)
+      ? '<button class="pr-conv-reply-btn" type="button" data-reply-to="' + ctx.replyParentId + '">Reply</button>'
+      : '';
+    var actions = '<div class="pr-conv-claude-actions">' + investigateBtn + implementBtn + replyBtn + '</div>';
 
     var investigatePanel = '';
     if (s.investigateId || s.investigateResult || s.investigateError) {
@@ -147,12 +187,15 @@
     var when = meta.createdAt ? new Date(meta.createdAt).toLocaleString() : '';
 
     var body = '<div class="pr-conv-item pr-conv-description">'
-      + '<div class="pr-conv-head">'
-        + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
-        + '<span class="pr-conv-kind">opened this pull request</span>'
-        + (when ? '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>' : '')
+      + PR.avatarHtml(author)
+      + '<div class="pr-conv-main">'
+        + '<div class="pr-conv-head">'
+          + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
+          + '<span class="pr-conv-kind">opened this pull request</span>'
+          + (when ? '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>' : '')
+        + '</div>'
+        + '<div class="pr-conv-body">' + (meta.body ? PR.renderCommentBody(meta.body) : '<em class="pr-conv-empty">No description provided.</em>') + '</div>'
       + '</div>'
-      + '<div class="pr-conv-body">' + (meta.body ? PR.renderCommentBody(meta.body) : '<em class="pr-conv-empty">No description provided.</em>') + '</div>'
     + '</div>';
 
     // When the threads/comments fetch failed, don't imply the PR is empty —
@@ -241,19 +284,26 @@
     var claudeBlock = (dbid != null && !isEditing)
       ? PR.renderConvClaudeBlock({ dbid: dbid, kind: 'issue', body: displayBody || '' })
       : '';
-    return '<div class="pr-conv-item pr-conv-comment">'
-      + '<div class="pr-conv-head">'
-        + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
-        + '<span class="pr-conv-kind">commented</span>'
-        + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
-        + (mine && !isEditing && dbid != null
-            ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit">✎</button>'
-            : '')
+    var aiFinding = PR.isAiFinding(displayBody);
+    var avatar = aiFinding
+      ? PR.avatarHtml('Klaussy', { color: 'var(--accent)', letter: 'K', cls: 'pr-conv-avatar-ai' })
+      : PR.avatarHtml(author);
+    return '<div class="pr-conv-item pr-conv-comment' + (aiFinding ? ' pr-conv-ai-finding' : '') + '">'
+      + avatar
+      + '<div class="pr-conv-main">'
+        + '<div class="pr-conv-head">'
+          + '<span class="pr-conv-author">' + PR.escHtml(aiFinding ? 'Klaussy' : author) + '</span>'
+          + '<span class="pr-conv-kind">' + (aiFinding ? 'review finding' : 'commented') + '</span>'
+          + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
+          + (mine && !isEditing && dbid != null && !aiFinding
+              ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit">✎</button>'
+              : '')
+        + '</div>'
+        + (isEditing
+            ? PR.renderCommentEditor(dbid, 'issue', displayBody)
+            : '<div class="pr-conv-body">' + PR.renderCommentBody(displayBody) + '</div>')
+        + claudeBlock
       + '</div>'
-      + (isEditing
-          ? PR.renderCommentEditor(dbid, 'issue', displayBody)
-          : '<div class="pr-conv-body">' + PR.renderCommentBody(displayBody) + '</div>')
-      + claudeBlock
     + '</div>';
   };
 
@@ -288,14 +338,17 @@
     var bodyHtml = r.body && r.body.trim() ? '<div class="pr-conv-body">' + PR.renderCommentBody(r.body) + '</div>' : '';
 
     return '<div class="pr-conv-item pr-conv-review">'
-      + '<div class="pr-conv-head">'
-        + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
-        + '<span class="' + stateCls + '">' + PR.escHtml(stateLabel) + '</span>'
-        + (threads.length > 0 ? '<span class="pr-conv-inline-count">' + threads.length + ' inline</span>' : '')
-        + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
+      + PR.avatarHtml(author)
+      + '<div class="pr-conv-main">'
+        + '<div class="pr-conv-head">'
+          + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
+          + '<span class="' + stateCls + '">' + PR.escHtml(stateLabel) + '</span>'
+          + (threads.length > 0 ? '<span class="pr-conv-inline-count">' + threads.length + ' inline</span>' : '')
+          + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
+        + '</div>'
+        + bodyHtml
+        + threadsHtml
       + '</div>'
-      + bodyHtml
-      + threadsHtml
     + '</div>';
   };
 
@@ -331,6 +384,7 @@
             path: threadPath,
             hunk: threadHunk,
             replyParentId: replyParentId,
+            showReply: i === comments.length - 1,
           })
         : '';
       return '<div class="pr-conv-thread-comment' + (i === 0 ? ' first' : '') + '">'
@@ -348,10 +402,8 @@
       + '</div>';
     }).join('');
 
-    var replyBtn = replyParentId
-      ? '<button class="pr-conv-reply-btn" type="button" data-reply-to="' + replyParentId + '">Reply</button>'
-      : '';
-
+    // Reply now lives inline with Investigate/Implement on the last comment
+    // (see renderConvClaudeBlock's showReply), so no separate thread-bottom row.
     return '<div class="pr-conv-inline pr-conv-thread' + resolvedCls + outdatedCls + '">'
       + (path ? '<div class="pr-conv-inline-path">' + PR.escHtml(path)
           + (thread.isResolved ? ' <span class="pr-inline-thread-badge resolved">resolved</span>' : '')
@@ -359,7 +411,6 @@
         + '</div>' : '')
       + (first.diffHunk ? '<pre class="pr-conv-inline-hunk">' + PR.escHtml(PR.lastLinesOfHunk(first.diffHunk, 4)) + '</pre>' : '')
       + '<div class="pr-conv-thread-comments">' + commentsHtml + '</div>'
-      + (replyBtn ? '<div class="pr-conv-inline-actions">' + replyBtn + '</div>' : '')
     + '</div>';
   };
 
