@@ -3,18 +3,25 @@ window.ThemeManager = (function () {
   var presets = {
     dark: {
       name: 'Dark',
-      // Neutral charcoal — no blue/purple tint, with distinct elevation steps
-      // (bg → sidebar → surface → hover) so panels/cards separate cleanly.
-      // Inputs sit recessed below bg; the accent is a calm blue, not a loud
-      // purple.
-      bg: '#161616', sidebarBg: '#1d1d1d', border: '#343434',
-      accent: '#4a9eff', accentHover: '#62acff',
-      text: '#ececec', textMuted: '#9b9b9b', textDim: '#6b6b6b',
-      surface: '#242424', surfaceHover: '#2e2e2e',
-      inputBg: '#111111', success: '#3fb950', error: '#f0584f',
+      // Polished dark — soft, faintly-cool near-black with a clean elevation
+      // ladder (bg → sidebar → surface → hover) so panels/cards separate
+      // without hard lines. Inputs sit recessed below bg; calm blue accent.
+      bg: '#0e0e13', sidebarBg: '#16161d', border: '#272730',
+      accent: '#4a9eff', accentHover: '#6cb2ff',
+      text: '#e8e8ee', textMuted: '#9a9aa6', textDim: '#64646f',
+      surface: '#1c1c24', surfaceHover: '#26262f',
+      inputBg: '#0a0a0e', success: '#46c463', error: '#f0584f',
       // termFg softer than the UI text — pure white in a full terminal is
       // fatiguing.
-      termBg: '#161616', termFg: '#cccccc', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
+      termBg: '#0d0d12', termFg: '#d2d2da', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
+      // Slightly desaturated ANSI palette so agent output reads as calm and
+      // cohesive instead of harsh primary colors.
+      termAnsi: {
+        black: '#2a2a33', red: '#f0796f', green: '#6ece8a', yellow: '#e3c179',
+        blue: '#6cb2ff', magenta: '#c699f0', cyan: '#5fcfd0', white: '#c8c8d2',
+        brightBlack: '#52525e', brightRed: '#ff8b80', brightGreen: '#88dc9e', brightYellow: '#f0d089',
+        brightBlue: '#88c2ff', brightMagenta: '#d4b0ff', brightCyan: '#7fdede', brightWhite: '#f0f0f5',
+      },
     },
     midnight: {
       name: 'Midnight',

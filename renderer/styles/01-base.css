@@ -1,26 +1,26 @@
 /* CSS Custom Properties for theming (Phase 5) */
 :root {
-  /* Default dark — neutral charcoal. Mirrors the `dark` preset in theme.js;
-     keep the two in sync. Elevation ladder: bg 161616 → sidebar 1d1d1d →
-     surface 242424 → hover 2e2e2e, with a visible 343434 border so panels
-     read as distinct. Inputs recessed at 111111. Calm blue accent. */
-  --bg: #161616;
-  --sidebar-bg: #1d1d1d;
-  --border: #343434;
-  --border-strong: #444444;
+  /* Default dark — soft cool near-black. Mirrors the `dark` preset in
+     theme.js; keep the two in sync. Elevation ladder: bg 0e0e13 → sidebar
+     16161d → surface 1c1c24 → hover 26262f, with a 272730 border so panels
+     read as distinct without hard lines. Inputs recessed at 0a0a0e. */
+  --bg: #0e0e13;
+  --sidebar-bg: #16161d;
+  --border: #272730;
+  --border-strong: #3a3a44;
   --accent: #4a9eff;
-  --accent-hover: #62acff;
+  --accent-hover: #6cb2ff;
   --accent-dim: rgba(74, 158, 255, 0.16);
-  --text: #ececec;
-  --text-muted: #9b9b9b;
-  --text-dim: #6b6b6b;
-  --surface: #242424;
-  --surface-hover: #2e2e2e;
-  --input-bg: #111111;
-  --success: #3fb950;
+  --text: #e8e8ee;
+  --text-muted: #9a9aa6;
+  --text-dim: #64646f;
+  --surface: #1c1c24;
+  --surface-hover: #26262f;
+  --input-bg: #0a0a0e;
+  --success: #46c463;
   --error: #f0584f;
-  --term-bg: #161616;
-  --term-fg: #cccccc;
+  --term-bg: #0d0d12;
+  --term-fg: #d2d2da;
   --term-cursor: #4a9eff;
   --term-selection: rgba(74, 158, 255, 0.26);
 
@@ -1148,7 +1148,8 @@ body.custom-titlebar #titlebar-content {
 }
 
 .task-item.active {
-  background: var(--surface-hover);
+  background: var(--accent-dim);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .task-item .status-dot {
@@ -1756,7 +1757,7 @@ body.task-branchless #ahead-behind {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #555;
+  color: var(--text-dim);
 }
 
 #empty-state p {
@@ -1765,7 +1766,8 @@ body.task-branchless #ahead-behind {
 
 #empty-state .sub {
   font-size: 13px;
-  color: #444;
+  color: var(--text-dim);
+  opacity: 0.75;
 }
 
 #empty-state-no-project {
@@ -1826,6 +1828,10 @@ body.task-branchless #ahead-behind {
 }
 .terminal-body > .xterm {
   height: 100%;
+  /* Inner breathing room around the conversation. FitAddon reads the .xterm
+     element's own padding and subtracts it from the row/col math, so this is
+     safe — never pad .terminal-body (the measured wrapper) instead. */
+  padding: 6px 14px 6px 16px;
 }
 
 /* Resume button in sidebar task item */
@@ -2274,8 +2280,9 @@ body.task-branchless #ahead-behind {
 #terminals.columns-view {
   display: flex;
   flex-direction: row;
-  gap: 2px;
-  background: var(--border);
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg);
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -2289,8 +2296,17 @@ body.task-branchless #ahead-behind {
   display: flex;
   flex-direction: column;
   padding: 0;
-  background: var(--bg);
+  background: var(--term-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   overflow: hidden;
+}
+
+/* Focused pane gets an accent ring so it's obvious which terminal has input. */
+#terminals.columns-view .terminal-container.active,
+#terminals.grid-view .terminal-container.active {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 #terminals.columns-view .terminal-container .grid-label {
@@ -2307,8 +2323,9 @@ body.task-branchless #ahead-behind {
   display: grid;
   grid-template-columns: 1fr;
   grid-auto-rows: 1fr;
-  gap: 2px;
-  background: var(--border);
+  gap: 8px;
+  padding: 8px;
+  background: var(--bg);
   position: absolute;
   inset: 0;
   overflow: auto;
@@ -2320,7 +2337,9 @@ body.task-branchless #ahead-behind {
   display: flex;
   flex-direction: column;
   padding: 0;
-  background: var(--bg);
+  background: var(--term-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -2341,10 +2360,10 @@ body.task-branchless #ahead-behind {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 4px 6px;
+  gap: 10px;
+  padding: 7px 10px 7px 14px;
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
   color: var(--text-muted);
   background: var(--sidebar-bg);
