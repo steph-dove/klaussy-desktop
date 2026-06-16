@@ -217,7 +217,7 @@ window.App = window.App || {};
     item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
       e.stopPropagation();
       var result;
-      try { result = await window.klaus.task.attachWorktree(wt.path, App.defaultAgent()); }
+      try { result = await window.klaus.task.attachWorktree(wt.path, App.defaultAgent(), wt.repoPath, wt.branch); }
       catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
       if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
       if (!result) { window.toast.error('Open failed: no response from main process'); return; }
@@ -228,7 +228,7 @@ window.App = window.App || {};
     item.querySelector('.worktree-open-shell').addEventListener('click', async function (e) {
       e.stopPropagation();
       var result;
-      try { result = await window.klaus.task.attachWorktree(wt.path, 'shell'); }
+      try { result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch); }
       catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
       if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
       if (!result) { window.toast.error('Open failed: no response from main process'); return; }
@@ -316,7 +316,7 @@ window.App = window.App || {};
         var result;
         try {
           if (s.mode === 'shell') {
-            result = await window.klaus.task.attachWorktree(s.worktreePath, 'shell');
+            result = await window.klaus.task.attachWorktree(s.worktreePath, 'shell', s.repoPath, s.branch);
           } else {
             result = await window.klaus.session.resume(s);
           }
@@ -350,7 +350,7 @@ window.App = window.App || {};
         btn.disabled = true;
         btn.textContent = '...';
         var result;
-        try { result = await window.klaus.task.attachWorktree(s.worktreePath, 'claude'); }
+        try { result = await window.klaus.task.attachWorktree(s.worktreePath, 'claude', s.repoPath, s.branch); }
         catch (err) {
           window.toast.error('Open failed: ' + (err && err.message || err));
           btn.disabled = false;
@@ -685,7 +685,7 @@ window.App = window.App || {};
     // Shell entries attach a plain shell — same special-case as the sidebar's
     // saved-session Resume path.
     if (resumeMode === 'shell') {
-      return window.klaus.task.attachWorktree(wt.path, 'shell');
+      return window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
     }
     var sessionId = saved && saved.sessionId;
     if (!sessionId) {
@@ -697,6 +697,7 @@ window.App = window.App || {};
       worktreePath: wt.path,
       branch: wt.branch || sessionName,
       mode: resumeMode,
+      repoPath: wt.repoPath || (saved && saved.repoPath) || null,
     });
   };
 
