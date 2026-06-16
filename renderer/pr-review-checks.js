@@ -186,31 +186,58 @@
     });
   };
 
+  // Split an annotation message into its error head and the trailing stack
+  // frames (lines starting with ›, ❯, >, or "at "). Frames collapse behind a
+  // toggle so the actual error stays scannable.
+  PR.splitAnnotationMessage = function(message) {
+    var lines = String(message || '').split('\n');
+    function isFrame(l) { return /^\s*(?:[›❯>]|at\s)/.test(l); }
+    var i = 0;
+    while (i < lines.length && !isFrame(lines[i])) i++;
+    var head = lines.slice(0, i).join('\n').trim();
+    var frameLines = lines.slice(i);
+    var frameCount = frameLines.filter(isFrame).length;
+    if (!head) return { head: String(message || '').trim(), frames: '', frameCount: 0 };
+    return { head: head, frames: frameLines.join('\n').trim(), frameCount: frameCount };
+  };
+
   PR.annotationsPanelHtml = function(state) {
     if (!state || (state.data == null && !state.error)) {
-      return '<div class="pr-check-annotations-body">Loading annotations…</div>';
+      return '<div class="pr-check-annotations-body"><div class="pr-annotations-loading">Loading annotations…</div></div>';
     }
     if (state.error) {
-      return '<div class="pr-check-annotations-body diff-error">Failed to load annotations: '
-        + PR.escHtml(state.error) + '</div>';
+      return '<div class="pr-check-annotations-body"><div class="pr-annotations-error">Failed to load annotations: '
+        + PR.escHtml(state.error) + '</div></div>';
     }
     var ann = state.data || [];
     if (ann.length === 0) {
-      return '<div class="pr-check-annotations-body pr-check-annotations-empty">No annotations from this check.</div>';
+      return '<div class="pr-check-annotations-body"><div class="pr-annotations-empty">No annotations from this check.</div></div>';
     }
-    return '<div class="pr-check-annotations-body">' + ann.map(function (a) {
-      var levelClass = 'pr-annotation-' + (a.level || 'notice').replace(/[^a-z]/gi, '');
+    var head = '<div class="pr-annotations-head">' + ann.length + ' annotation' + (ann.length === 1 ? '' : 's') + '</div>';
+    var items = ann.map(function (a) {
+      var level = (a.level || 'notice').toLowerCase();
+      var levelClass = 'pr-annotation-' + level.replace(/[^a-z]/g, '');
       var loc = a.path ? PR.escHtml(a.path) + (a.startLine ? ':' + a.startLine : '') : '';
+      var split = PR.splitAnnotationMessage(a.message);
+      var stack = split.frames
+        ? '<details class="pr-annotation-stack"><summary>' + split.frameCount + ' stack frame'
+          + (split.frameCount === 1 ? '' : 's') + '</summary><pre>' + PR.escHtml(split.frames) + '</pre></details>'
+        : '';
+      var raw = a.rawDetails
+        ? '<details class="pr-annotation-stack"><summary>details</summary><pre>' + PR.escHtml(a.rawDetails) + '</pre></details>'
+        : '';
       return '<div class="pr-annotation ' + levelClass + '">'
         + '<div class="pr-annotation-head">'
-          + '<span class="pr-annotation-level">' + PR.escHtml(a.level || 'notice') + '</span>'
+          + '<span class="pr-annotation-level">' + PR.escHtml(level) + '</span>'
           + (loc ? '<span class="pr-annotation-loc">' + loc + '</span>' : '')
           + (a.title ? '<span class="pr-annotation-title">' + PR.escHtml(a.title) + '</span>' : '')
         + '</div>'
-        + '<div class="pr-annotation-msg">' + PR.escHtml(a.message || '') + '</div>'
-        + (a.rawDetails ? '<pre class="pr-annotation-raw">' + PR.escHtml(a.rawDetails) + '</pre>' : '')
+        + (split.head ? '<div class="pr-annotation-msg">' + PR.escHtml(split.head) + '</div>' : '')
+        + stack
+        + raw
       + '</div>';
-    }).join('') + '</div>';
+    }).join('');
+    return '<div class="pr-check-annotations-body">' + head + items + '</div>';
   };
 
   // Insert (or replace) the annotations panel for this checkId. Looks up
@@ -223,7 +250,13 @@
     panel.className = 'pr-check-annotations-panel';
     panel.dataset.checkId = checkId;
     panel.innerHTML = PR.annotationsPanelHtml(PR.openAnnotations[checkId]);
-    if (!existing) row.insertAdjacentElement('afterend', panel);
+    if (!existing) {
+      // Keep the stacking order parent card → debug → annotations: if a debug
+      // panel is open for this row, mount annotations after it; else after the row.
+      var debugPanel = PR.hostEl.querySelector('.pr-check-debug-panel[data-check-id="' + checkId + '"]');
+      var anchor = (debugPanel && debugPanel.previousElementSibling === row) ? debugPanel : row;
+      anchor.insertAdjacentElement('afterend', panel);
+    }
     return panel;
   };
 
@@ -247,29 +280,31 @@
   // repaintChecksTab() blows away the tab DOM.
   PR.restoreOpenAnnotations = function() {
     Object.keys(PR.openAnnotations).forEach(function (checkId) {
-      var btn = PR.hostEl.querySelector('.pr-check-annotations-btn[data-check-id="' + checkId + '"]');
-      if (!btn) return; // row no longer in the rendered set (e.g., check passed after rerun)
-      var row = btn.closest('.pr-check-row');
-      if (row) PR.mountAnnotationsPanel(row, checkId);
+      var row = PR.hostEl.querySelector('.pr-check-row[data-check-id="' + checkId + '"]');
+      if (!row) return; // row no longer in the rendered set (e.g., check passed after rerun)
+      row.classList.add('expanded');
+      PR.mountAnnotationsPanel(row, checkId);
     });
   };
 
-  // Click handler: toggle the panel for this row. Fetches lazily on first
-  // expand; subsequent expands reuse the cached annotations so polling
-  // repaints don't refetch. Lookup is by data-check-id, not nextElementSibling,
-  // so an in-the-way Debug panel doesn't confuse the close path.
-  PR.toggleAnnotations = function(btn) {
-    var row = btn.closest('.pr-check-row');
+  // Toggle the annotations panel for a failing check's row. Accepts the row
+  // itself (row-click) or any element inside it. Fetches lazily on first
+  // expand; subsequent expands reuse the cached annotations.
+  PR.toggleAnnotations = function(rowOrEl) {
+    var row = rowOrEl.classList && rowOrEl.classList.contains('pr-check-row')
+      ? rowOrEl : (rowOrEl.closest && rowOrEl.closest('.pr-check-row'));
     if (!row) return;
-    var checkId = btn.dataset.checkId;
+    var checkId = row.dataset.checkId;
     if (!checkId) return;
     if (PR.openAnnotations[checkId]) {
       delete PR.openAnnotations[checkId];
+      row.classList.remove('expanded');
       var existing = PR.hostEl.querySelector('.pr-check-annotations-panel[data-check-id="' + checkId + '"]');
       if (existing) existing.remove();
       return;
     }
     PR.openAnnotations[checkId] = { data: null, error: null };
+    row.classList.add('expanded');
     PR.mountAnnotationsPanel(row, checkId);
     PR.fetchAnnotations(checkId);
   };
@@ -534,6 +569,8 @@
       var e = PR.openDebugChecks[checkId];
       if (e && e.state === 'running' && e.requestId) {
         try { window.klaus.pr.debugCheckCancel(e.requestId); } catch (_) {}
+      } else if (e && (e.state === 'done' || e.state === 'error')) {
+        PR.cacheDebug(checkId, e);
       }
       if (e && e.statusTimer) clearInterval(e.statusTimer);
       delete PR.openDebugChecks[checkId];
@@ -554,24 +591,88 @@
     });
   };
 
+  // A signature of the check's CI output. Changes when the job reruns or its
+  // conclusion/timing changes, so a cached debug invalidates exactly when the
+  // underlying CI output changes — but survives identical re-fetches.
+  PR.checkCiSig = function(checkId) {
+    var checks = (PR.currentChecks && PR.currentChecks.checks) || [];
+    for (var i = 0; i < checks.length; i++) {
+      if (String(checks[i].id) === String(checkId)) {
+        var c = checks[i];
+        return [c.state || '', c.conclusion || '', c.completedAt || '', c.runId || ''].join(' ');
+      }
+    }
+    return '';
+  };
+
+  // Snapshot a completed/errored analysis into the durable cache, tagged with
+  // the current CI signature.
+  PR.cacheDebug = function(checkId, entry) {
+    PR.debugCache[checkId] = {
+      ciSig: PR.checkCiSig(checkId),
+      accumulated: entry.accumulated || '',
+      state: entry.state,
+      durationSec: entry.durationSec,
+      error: entry.error || null,
+      checkName: entry.checkName || '',
+      checkLink: entry.checkLink || '',
+      chatMessages: (entry.chatMessages || []).slice(),
+    };
+  };
+
+  // Build a live openDebugChecks entry from a cached analysis (no stream).
+  PR.rehydrateDebug = function(cached) {
+    return {
+      requestId: null,
+      checkName: cached.checkName,
+      checkLink: cached.checkLink,
+      startedAt: Date.now(),
+      accumulated: cached.accumulated,
+      state: cached.state,
+      error: cached.error,
+      durationSec: cached.durationSec,
+      statusTimer: null,
+      openTaskState: 'idle',
+      openTaskError: null,
+      chatMessages: (cached.chatMessages || []).slice(),
+      chatStreaming: '',
+      chatRequestId: null,
+      chatError: null,
+    };
+  };
+
   PR.startDebugCheck = function(btn) {
     var row = btn.closest('.pr-check-row');
     if (!row) return;
     var checkId = btn.dataset.checkId;
     if (!checkId) return;
 
-    // Toggle: re-clicking on an existing entry closes it (and cancels if
-    // still running). Single source of truth is the cache, not the DOM.
+    // Toggle off: stash a completed analysis so re-opening restores it (no
+    // re-run); cancel + drop an in-flight one.
     if (PR.openDebugChecks[checkId]) {
       var prev = PR.openDebugChecks[checkId];
       if (prev.state === 'running' && prev.requestId) {
         try { window.klaus.pr.debugCheckCancel(prev.requestId); } catch (_) {}
+      } else if (prev.state === 'done' || prev.state === 'error') {
+        PR.cacheDebug(checkId, prev);
       }
       if (prev.statusTimer) clearInterval(prev.statusTimer);
       delete PR.openDebugChecks[checkId];
       var existingPanel = PR.hostEl.querySelector('.pr-check-debug-panel[data-check-id="' + checkId + '"]');
       if (existingPanel) existingPanel.remove();
       return;
+    }
+
+    // Re-open a cached analysis when the check's CI output is unchanged — no
+    // re-run, no extra spend. A changed signature (rerun) drops the stale cache.
+    var cached = PR.debugCache[checkId];
+    if (cached) {
+      if (cached.ciSig === PR.checkCiSig(checkId)) {
+        PR.openDebugChecks[checkId] = PR.rehydrateDebug(cached);
+        PR.mountDebugPanel(row, checkId);
+        return;
+      }
+      delete PR.debugCache[checkId];
     }
 
     var requestId = 'dbg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -638,6 +739,9 @@
         entry.state = 'done';
         entry.durationSec = +((Date.now() - entry.startedAt) / 1000).toFixed(1);
       }
+      // Cache the finished analysis so it survives a close/reopen (cancelled
+      // runs aren't worth keeping).
+      if (entry.state === 'done' || entry.state === 'error') PR.cacheDebug(checkId, entry);
       PR.paintDebugPanel(checkId);
     });
 

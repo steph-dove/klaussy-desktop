@@ -216,35 +216,49 @@ body.pr-review-popout #pr-review-root {
   gap: 6px;
   max-height: none;
 }
+/* Checks list: a flat row per check (status, name/meta, right-aligned action
+   links). Failing checks are expandable — the chevron rotates and the
+   annotations panel mounts inline beneath the row. */
 .pr-check-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  gap: 10px;
+  display: flex;
   align-items: center;
-  padding: 10px 12px;
+  gap: 10px;
+  padding: 11px 14px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-left-width: 3px;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   transition: background 0.1s;
 }
+.pr-check-row.pr-check-expandable,
 .pr-check-row[data-link] { cursor: pointer; }
-.pr-check-row[data-link]:hover { background: var(--surface-hover); }
+.pr-check-row:hover { background: var(--surface-hover); }
 .pr-check-pass    { border-left-color: #2ea043; }
 .pr-check-fail    { border-left-color: #f85149; }
 .pr-check-pending { border-left-color: #d29922; }
 .pr-check-cancel, .pr-check-skipping { border-left-color: var(--text-muted); }
-.pr-check-icon {
-  font-size: 14px;
-  font-weight: 700;
+
+.pr-check-chevron {
+  flex: none;
+  width: 10px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: transform 0.12s ease;
 }
+.pr-check-row.expanded .pr-check-chevron { transform: rotate(90deg); }
+.pr-check-row.expanded { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.pr-check-chevron-hidden { visibility: hidden; }
+
+.pr-check-icon { flex: none; font-size: 14px; font-weight: 700; }
 .pr-check-pass    .pr-check-icon { color: #2ea043; }
 .pr-check-fail    .pr-check-icon { color: #f85149; }
 .pr-check-pending .pr-check-icon { color: #d29922; }
 .pr-check-cancel  .pr-check-icon,
 .pr-check-skipping .pr-check-icon { color: var(--text-muted); }
-.pr-check-labels { min-width: 0; }
+
+.pr-check-labels { flex: 1; min-width: 0; }
 .pr-check-name {
   color: var(--text);
   font-weight: 600;
@@ -252,7 +266,7 @@ body.pr-review-popout #pr-review-root {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.pr-check-workflow, .pr-check-desc {
+.pr-check-sub {
   color: var(--text-dim);
   font-size: 11px;
   margin-top: 2px;
@@ -260,6 +274,8 @@ body.pr-review-popout #pr-review-root {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.pr-check-meta { flex: none; display: flex; align-items: center; gap: 10px; }
+.pr-check-dur { color: var(--text-muted); font-size: 11px; }
 .pr-check-state {
   font-size: 10px;
   font-weight: 600;
@@ -267,30 +283,54 @@ body.pr-review-popout #pr-review-root {
   text-transform: uppercase;
   color: var(--text-dim);
 }
-.pr-check-arrow { color: var(--text-muted); }
 
-.pr-check-debug-btn {
-  padding: 3px 10px;
-  background: transparent;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  font-size: 11px;
+/* Flat action links — Fix is the accent primary, others a muted accent
+   (matching the conversation's action links). */
+.pr-check-actions { flex: none; display: flex; align-items: center; gap: 14px; }
+.pr-check-actions button {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
-  font-family: inherit;
+  color: color-mix(in srgb, var(--accent) 55%, var(--text-muted));
 }
-.pr-check-debug-btn:hover { background: var(--accent); color: #fff; }
-.pr-check-debug-btn:disabled { opacity: 0.7; cursor: wait; }
+.pr-check-actions button:hover { color: var(--accent); text-decoration: underline; }
+.pr-check-actions button:disabled { opacity: 0.7; cursor: wait; text-decoration: none; }
+.pr-check-fix-btn { color: var(--accent); }
+.pr-check-fix-btn:hover { color: var(--accent-hover); }
+.pr-check-actions .pr-check-action-cancel { color: color-mix(in srgb, #f85149 75%, var(--text-muted)); border: none; background: none; }
+.pr-check-actions .pr-check-action-cancel:hover { color: #f85149; background: none; }
+.pr-check-open { color: var(--text-muted); font-size: 13px; }
+.pr-check-open:hover { color: var(--accent); text-decoration: none; }
 
+/* Debug output attaches to its check row (accent left edge signals the AI
+   debug) so it visibly belongs to the check whether the row is collapsed or
+   expanded. */
+.pr-check-row:has(+ .pr-check-debug-panel),
+.pr-check-row:has(+ .pr-check-annotations-panel) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
 .pr-check-debug-panel {
-  margin: 0 0 6px 0;
+  margin: 0 0 8px 0;
   padding: 0;
   background: var(--surface);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-top: none;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+/* When debug sits above annotations, square its bottom so they read as one
+   stacked unit (parent card → debug → annotations). */
+.pr-check-debug-panel:has(+ .pr-check-annotations-panel) {
+  margin-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .pr-check-debug-head {
   display: flex;
@@ -326,19 +366,7 @@ body.pr-review-popout #pr-review-root {
 
 /* Fix button: primary-styled (filled) so it reads as the recommended action
  * for a failing check, while Debug stays as the secondary read-only inspector. */
-.pr-check-fix-btn {
-  padding: 3px 10px;
-  background: var(--accent);
-  color: #fff;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-}
-.pr-check-fix-btn:hover { filter: brightness(1.08); }
-.pr-check-fix-btn:disabled { opacity: 0.7; cursor: wait; }
+/* .pr-check-fix-btn now styled as a flat action link above. */
 
 .pr-check-fix-panel {
   margin: 0 0 6px 0;
