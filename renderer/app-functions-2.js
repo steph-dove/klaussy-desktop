@@ -377,6 +377,7 @@ window.App = window.App || {};
         + '</div>'
         + '<div class="pr-picker-recent"></div>'
         + '<div class="pr-picker-list"><div class="pr-picker-loading">Loading open PRs\u2026</div></div>'
+        + '<div class="pr-picker-authored"></div>'
         + '<div class="pr-picker-footer"><button class="pr-picker-cancel">Cancel</button></div>'
       + '</div>';
     document.body.appendChild(overlay);
@@ -393,6 +394,7 @@ window.App = window.App || {};
     var accountHint = overlay.querySelector('.pr-picker-account-hint');
     var recentEl = overlay.querySelector('.pr-picker-recent');
     var listEl = overlay.querySelector('.pr-picker-list');
+    var authoredEl = overlay.querySelector('.pr-picker-authored');
 
     function updateStartEnabled() { startBtn.disabled = !urlInput.value.trim(); }
     urlInput.addEventListener('input', function () {
@@ -510,52 +512,86 @@ window.App = window.App || {};
         });
       });
 
-      var result = await window.klaus.pr.list();
+      // "Opened by you" — the active account's own open PRs across all repos,
+      // most recently opened first. Fire-and-forget; hidden when there are none.
+      authoredEl.innerHTML = '';
+      window.klaus.pr.authored().then(function (r) {
+        var prs = (r && r.prs) || [];
+        if (!prs.length) { authoredEl.style.display = 'none'; return; }
+        authoredEl.style.display = '';
+        authoredEl.innerHTML = '<div class="pr-picker-section-head">Opened by you</div>'
+          + prs.map(function (pr) {
+            var stateLabel = pr.isDraft ? 'draft' : (pr.state || 'open').toLowerCase();
+            var repo = (pr.repository && pr.repository.nameWithOwner) || '';
+            return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(pr.url || '') + '">'
+              + '<span class="pr-picker-num">#' + AppUtils.escHtml(pr.number) + '</span>'
+              + '<span class="pr-picker-title">' + AppUtils.escHtml(pr.title || '') + '</span>'
+              + '<span class="pr-picker-author">' + AppUtils.escHtml(repo) + '</span>'
+              + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
+            + '</div>';
+          }).join('');
+        authoredEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
+          row.addEventListener('click', async function () {
+            row.style.opacity = '0.5';
+            var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
+            if (loadResult.error) {
+              window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
+              row.style.opacity = '1';
+              return;
+            }
+            close();
+          });
+        });
+      });
+
+      // Account-scoped: the active account's most recently active repos and
+      // their recent open PRs — not the single "current project" (which fails
+      // whenever the active account can't see that repo).
+      var result = await window.klaus.pr.recentRepos();
       if (result.error) {
-        // Both "no active project" and "the active gh account can't see this
-        // repo" are soft states, not errors — the user can switch accounts
-        // above or paste a URL. Only a genuinely unexpected failure is red.
-        var msg = result.error || '';
-        var isNoProject = /no active project/i.test(msg);
         var isAccess = /^(not-found|auth|sso|scope)$/.test(result.errorKind || '');
-        var soft = isNoProject || isAccess;
-        var text = isNoProject
-          ? 'Add a project to list its open PRs, or paste a URL above to review any PR you have access to.'
-          : isAccess
-            ? (result.errorSummary || msg) + ' Switch accounts above, or paste a URL.'
-            : msg;
-        listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-          + '<div class="' + (soft ? 'pr-picker-empty' : 'pr-picker-error') + '">' + AppUtils.escHtml(text) + '</div>';
-        return;
+        var text = isAccess
+          ? (result.errorSummary || result.error) + ' Switch accounts above, or paste a URL.'
+          : (result.error || '');
+        listEl.innerHTML = '<div class="pr-picker-section-head">Recent pull requests</div>'
+          + '<div class="' + (isAccess ? 'pr-picker-empty' : 'pr-picker-error') + '">' + AppUtils.escHtml(text) + '</div>';
+        // Let the account-switch handler know the active account couldn't list
+        // for access reasons, so it can offer to (re)sign in to that account.
+        return { listErrorKind: isAccess ? (result.errorKind || 'unknown') : null };
       }
-      if (!result.prs || result.prs.length === 0) {
-        listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-          + '<div class="pr-picker-empty">No open PRs in this repo.</div>';
-        return;
+      var repos = result.repos || [];
+      if (repos.length === 0) {
+        listEl.innerHTML = '<div class="pr-picker-section-head">Recent pull requests</div>'
+          + '<div class="pr-picker-empty">No open PRs in your recently active repos. Paste a URL above to review any PR.</div>';
+        return {};
       }
-      listEl.innerHTML = '<div class="pr-picker-section-head">Open in current project</div>'
-        + result.prs.map(function (pr) {
-          var author = (pr.author && (pr.author.login || pr.author.name)) || '';
-          var stateLabel = pr.isDraft ? 'draft' : (pr.state || '').toLowerCase();
-          return '<div class="pr-picker-item" data-number="' + AppUtils.escAttr(String(pr.number)) + '">'
-            + '<span class="pr-picker-num">#' + AppUtils.escHtml(pr.number) + '</span>'
-            + '<span class="pr-picker-title">' + AppUtils.escHtml(pr.title || '') + '</span>'
-            + '<span class="pr-picker-author">' + AppUtils.escHtml(author) + '</span>'
-            + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
-          + '</div>';
+      listEl.innerHTML = '<div class="pr-picker-section-head">Recent pull requests</div>'
+        + repos.map(function (r) {
+          return '<div class="pr-picker-repo">' + AppUtils.escHtml(r.repo) + '</div>'
+            + r.prs.map(function (pr) {
+              var author = (pr.author && (pr.author.login || pr.author.name)) || '';
+              var stateLabel = pr.isDraft ? 'draft' : (pr.state || 'open').toLowerCase();
+              return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(pr.url || '') + '">'
+                + '<span class="pr-picker-num">#' + AppUtils.escHtml(pr.number) + '</span>'
+                + '<span class="pr-picker-title">' + AppUtils.escHtml(pr.title || '') + '</span>'
+                + '<span class="pr-picker-author">' + AppUtils.escHtml(author) + '</span>'
+                + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
+              + '</div>';
+            }).join('');
         }).join('');
-      listEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
+      listEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
         row.addEventListener('click', async function () {
           row.style.opacity = '0.5';
-          var loadResult = await window.klaus.pr.load({ number: parseInt(row.dataset.number, 10) });
+          var loadResult = await window.klaus.pr.load({ url: row.dataset.url });
           if (loadResult.error) {
-            window.toast.error('Failed to load PR:\n' + loadResult.error);
+            window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
             row.style.opacity = '1';
             return;
           }
           close();
         });
       });
+      return {};
     }
 
     accountSelect.addEventListener('change', async function () {
@@ -593,7 +629,23 @@ window.App = window.App || {};
       }
       accountHint.textContent = 'Switched to ' + target;
       await populateAccountSelect();
-      await refreshLists();
+      var listed = (await refreshLists()) || {};
+      // Switched fine, but this account still can't pull the current project's
+      // PRs — gh believed its token was valid, but it's stale or lacks access.
+      // Since the user explicitly chose this account, drive a fresh sign-in for
+      // it, then re-pull. onSuccess re-runs refreshLists directly (not this
+      // handler), so a still-failing account just leaves the soft hint — no loop.
+      if (/^(auth|not-found|sso|scope)$/.test(listed.listErrorKind || '')) {
+        accountHint.textContent = 'Signing in to ' + target + '…';
+        Dialogs.showGhLogin({
+          onSuccess: async function () {
+            accountHint.textContent = 'Signed in';
+            await populateAccountSelect();
+            await refreshLists();
+          },
+          onCancel: async function () { accountHint.textContent = ''; await populateAccountSelect(); },
+        });
+      }
     });
 
     await populateAccountSelect();

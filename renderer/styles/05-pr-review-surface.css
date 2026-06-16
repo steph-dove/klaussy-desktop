@@ -2827,6 +2827,15 @@ body.pr-review-popout #pr-review-root {
   background: var(--bg);
 }
 
+/* Repo subheader within the recent-PRs list (owner/name above its PR rows). */
+.pr-picker-repo {
+  padding: 7px 16px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: var(--text);
+}
+
 .pr-picker-recent { border-bottom: 1px solid var(--border); }
 .pr-picker-recent:empty { display: none; }
 .pr-picker-list {

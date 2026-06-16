@@ -261,6 +261,8 @@ contextBridge.exposeInMainWorld('klaus', {
     lookupUrl: (url) => ipcRenderer.invoke('pr-lookup-url', { url }),
     load: ({ number, url }) => ipcRenderer.invoke('pr-load', { number, url }),
     recent: () => ipcRenderer.invoke('pr-recent'),
+    recentRepos: () => ipcRenderer.invoke('pr-recent-repos'),
+    authored: () => ipcRenderer.invoke('pr-authored'),
     reviewState: () => ipcRenderer.invoke('pr-review-state'),
     reviewClose: () => ipcRenderer.invoke('pr-review-close'),
     refreshThreads: () => ipcRenderer.invoke('pr-refresh-threads'),
