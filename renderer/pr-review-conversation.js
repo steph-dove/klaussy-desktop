@@ -543,19 +543,17 @@
     function renderRowHtml(c) {
       var b = bucketOf(c);
       var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
-      var linkAttr = c.link ? ' data-link="' + PR.escHtml(c.link) + '"' : '';
+      // Failing checks with an id can expand their file:line annotations inline
+      // \u2014 the whole row is the toggle (chevron rotates), so no separate button.
+      var expandable = b === 'fail' && c.id != null && c.id !== '';
       var debugBtn = (b === 'fail' && c.link)
         ? '<button class="pr-check-debug-btn" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(c.id ? String(c.id) : '') + '" title="Use the agent to diagnose this failure">Debug</button>'
         : '';
       // Primary action for failing checks: spawn Claude in the PR worktree
       // with edit tools, then surface the resulting diff for the user to
-      // review and push. Debug stays as the read-only inspector for cases
-      // where you want analysis without auto-edit.
+      // review and push.
       var fixBtn = (b === 'fail' && c.link && c.id)
         ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(String(c.id)) + '" title="Have the agent edit, commit, and push a fix">Fix</button>'
-        : '';
-      var annotationsBtn = (b === 'fail' && c.id)
-        ? '<button class="pr-check-annotations-btn" type="button" data-check-id="' + PR.escHtml(String(c.id)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Show file:line annotations">Annotations</button>'
         : '';
       var rerunBtn = (b === 'fail' && c.runId)
         ? '<button class="pr-check-action-btn pr-check-action-rerun" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Rerun failed jobs in this workflow run">Rerun</button>'
@@ -566,24 +564,25 @@
       var watchBtn = (b === 'pending' && c.runId)
         ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Stream the workflow log live">Watch log</button>'
         : '';
+      var openBtn = c.link
+        ? '<button class="pr-check-open" type="button" data-link="' + PR.escHtml(c.link) + '" title="Open on GitHub">\u2197</button>'
+        : '';
       var dur = formatDur(c.startedAt, c.completedAt);
       var durHtml = dur ? '<span class="pr-check-dur">' + dur + '</span>' : '';
-      return '<div class="pr-check-row pr-check-' + b + '"' + linkAttr + '>'
+      var sub = [c.workflow, c.description].filter(Boolean).map(PR.escHtml).join(' \u00B7 ');
+      var chevron = '<span class="pr-check-chevron' + (expandable ? '' : ' pr-check-chevron-hidden') + '">\u203A</span>';
+      var attrs = ' class="pr-check-row pr-check-' + b + (expandable ? ' pr-check-expandable' : '') + '"';
+      if (c.link) attrs += ' data-link="' + PR.escHtml(c.link) + '"';
+      if (expandable) attrs += ' data-check-id="' + PR.escHtml(String(c.id)) + '"';
+      return '<div' + attrs + '>'
+        + chevron
         + '<span class="pr-check-icon">' + icon + '</span>'
         + '<div class="pr-check-labels">'
           + '<div class="pr-check-name">' + PR.escHtml(c.name || '(unnamed)') + '</div>'
-          + (c.workflow ? '<div class="pr-check-workflow">' + PR.escHtml(c.workflow) + '</div>' : '')
-          + (c.description ? '<div class="pr-check-desc">' + PR.escHtml(c.description) + '</div>' : '')
+          + (sub ? '<div class="pr-check-sub">' + sub + '</div>' : '')
         + '</div>'
-        + durHtml
-        + '<span class="pr-check-state">' + PR.escHtml((c.state || b).toLowerCase()) + '</span>'
-        + watchBtn
-        + rerunBtn
-        + cancelBtn
-        + annotationsBtn
-        + debugBtn
-        + fixBtn
-        + (c.link ? '<span class="pr-check-arrow">\u2197</span>' : '')
+        + '<div class="pr-check-meta">' + durHtml + '<span class="pr-check-state">' + PR.escHtml((c.state || b).toLowerCase()) + '</span></div>'
+        + '<div class="pr-check-actions">' + watchBtn + rerunBtn + cancelBtn + debugBtn + fixBtn + openBtn + '</div>'
       + '</div>';
     }
 
@@ -663,14 +662,23 @@
     if (dispatchBtn) {
       dispatchBtn.addEventListener('click', function () { PR.openWorkflowDispatchModal(); });
     }
-    PR.hostEl.querySelectorAll('.pr-check-row[data-link]').forEach(function (row) {
+    PR.hostEl.querySelectorAll('.pr-check-row').forEach(function (row) {
       row.addEventListener('click', function (e) {
-        // Don't open the run URL when the user clicks an inline action btn.
-        if (e.target.closest('.pr-check-debug-btn')) return;
-        if (e.target.closest('.pr-check-fix-btn')) return;
-        if (e.target.closest('.pr-check-annotations-btn')) return;
-        if (e.target.closest('.pr-check-action-btn')) return;
+        // Inline action buttons handle their own clicks.
+        if (e.target.closest('button')) return;
+        // Failing checks expand their annotations; everything else opens the run.
+        if (row.classList.contains('pr-check-expandable') && row.dataset.checkId) {
+          PR.toggleAnnotations(row);
+          return;
+        }
         var url = row.dataset.link;
+        if (url) window.klaus.gh.openExternal(url);
+      });
+    });
+    PR.hostEl.querySelectorAll('.pr-check-open').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var url = btn.dataset.link;
         if (url) window.klaus.gh.openExternal(url);
       });
     });
@@ -684,12 +692,6 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         PR.startFixCheck(btn);
-      });
-    });
-    PR.hostEl.querySelectorAll('.pr-check-annotations-btn').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        PR.toggleAnnotations(btn);
       });
     });
     PR.hostEl.querySelectorAll('.pr-check-action-rerun').forEach(function (btn) {

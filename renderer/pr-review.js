@@ -133,6 +133,12 @@ window.PrReview = window.PrReview || {};
   // it in place — letting the same stream survive across panel remounts.
   PR.openDebugChecks = Object.create(null);
 
+  // Durable cache of COMPLETED debug analyses, keyed by checkId, each tagged
+  // with the check's CI-output signature. Survives closing the panel and tab
+  // switches so re-opening restores the analysis instantly (no re-run) — as
+  // long as the CI output hasn't changed (a rerun invalidates it). Reset per PR.
+  PR.debugCache = Object.create(null);
+
   // Local-changes panel state (Review tab). Refreshed on tab show and after
   // each implement/commit/push. Stays null until the first fetch completes.
   // Shape: { worktreePath, branch, files:[{status,file}], diff, unpushed:[{hash,short,subject}], headRefOid }
@@ -316,6 +322,7 @@ window.PrReview = window.PrReview || {};
         if (e && e.statusTimer) clearInterval(e.statusTimer);
       });
       PR.openDebugChecks = Object.create(null);
+      PR.debugCache = Object.create(null);
       PR.openAnnotations = Object.create(null);
       PR.lastChecksSignature = '';
       // Stop any in-flight checks polling so it doesn't repaint with the

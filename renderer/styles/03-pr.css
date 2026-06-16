@@ -655,49 +655,81 @@
 .pr-check-action-btn.pr-check-action-cancel { color: #f85149; border-color: rgba(248, 81, 73, 0.3); }
 .pr-check-action-btn.pr-check-action-cancel:hover { background: rgba(248, 81, 73, 0.1); border-color: rgba(248, 81, 73, 0.5); }
 
+/* Annotations expand inline beneath a failing check — attached to the row,
+   indented past the chevron/icon, continuing the red fail accent. */
 .pr-check-annotations-panel {
-  margin: 4px 0 8px 0;
-  padding: 8px 12px;
+  margin: 0 0 8px 0;
+  padding: 10px 14px 12px 32px;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-elev);
+  border-top: none;
+  border-left-width: 3px;
+  border-left-color: #f85149;
+  border-radius: 0 0 var(--radius-md, 8px) var(--radius-md, 8px);
+  background: var(--bg);
   font-size: 12px;
 }
-.pr-check-annotations-empty { color: var(--text-dim); font-style: italic; }
-.pr-annotation {
-  padding: 6px 0;
-  border-bottom: 1px solid var(--border);
+.pr-annotations-head {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
 }
-.pr-annotation:last-child { border-bottom: none; }
+.pr-annotations-loading,
+.pr-annotations-empty { color: var(--text-dim); font-style: italic; }
+.pr-annotations-error { color: var(--error); }
+.pr-annotation {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.pr-annotation:first-of-type { border-top: none; padding-top: 0; }
 .pr-annotation-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 3px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
 }
 .pr-annotation-level {
   display: inline-block;
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.3px;
   text-transform: uppercase;
   background: rgba(128, 128, 128, 0.15);
   color: var(--text-dim);
 }
-.pr-annotation-failure .pr-annotation-level { color: #f85149; background: rgba(248, 81, 73, 0.12); }
-.pr-annotation-warning .pr-annotation-level { color: #d29922; background: rgba(210, 153, 34, 0.12); }
-.pr-annotation-loc { font-family: var(--font-mono, monospace); font-size: 11px; color: var(--text-dim); }
-.pr-annotation-title { color: var(--text); font-weight: 500; }
-.pr-annotation-msg { color: var(--text); white-space: pre-wrap; }
-.pr-annotation-raw {
-  font-family: var(--font-mono, monospace);
+.pr-annotation-failure .pr-annotation-level { color: #f85149; background: rgba(248, 81, 73, 0.14); }
+.pr-annotation-warning .pr-annotation-level { color: #d29922; background: rgba(210, 153, 34, 0.14); }
+.pr-annotation-loc { font-family: 'SF Mono', Menlo, monospace; font-size: 11px; color: var(--accent); }
+.pr-annotation-title { color: var(--text); font-weight: 600; }
+.pr-annotation-msg { color: var(--text); white-space: pre-wrap; line-height: 1.55; }
+.pr-annotation-stack { margin-top: 8px; }
+.pr-annotation-stack > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
   font-size: 11px;
+  font-weight: 600;
   color: var(--text-dim);
-  background: var(--bg);
-  padding: 6px 8px;
-  margin-top: 4px;
-  border-radius: 3px;
-  white-space: pre-wrap;
+}
+.pr-annotation-stack > summary::-webkit-details-marker { display: none; }
+.pr-annotation-stack > summary::before { content: '▸ '; }
+.pr-annotation-stack[open] > summary::before { content: '▾ '; }
+.pr-annotation-stack > summary:hover { color: var(--accent); }
+.pr-annotation-stack pre {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--input-bg);
+  border-radius: var(--radius-sm, 6px);
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre;
   overflow-x: auto;
 }
 
