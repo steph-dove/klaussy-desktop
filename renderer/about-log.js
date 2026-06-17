@@ -505,7 +505,7 @@ window.Dialogs = (function () {
       ];
       // Source repo is private — issues live in the public mirror so the
       // first batch of devs can file without source-repo access.
-      var url = 'https://github.com/steph-dove/klausify-desktop-feedback/issues/new'
+      var url = 'https://github.com/steph-dove/klaussy-desktop-feedback/issues/new'
         + '?labels=feedback'
         + '&title=' + encodeURIComponent('[feedback] ')
         + '&body=' + encodeURIComponent(lines.join('\n'));
@@ -514,7 +514,7 @@ window.Dialogs = (function () {
   }
 
   // Browse Claude skills + slash commands installed on the user's machine
-  // (user-level + every klausify project). Click a row to preview the file
+  // (user-level + every klaussy project). Click a row to preview the file
   // contents in-app; an explicit "Open in editor" button kicks out to the
   // user's default editor when they actually want to edit.
   function showSkills() {
@@ -600,7 +600,7 @@ window.Dialogs = (function () {
   }
 
   // Inline create-form rendered into the preview pane. Lets the user pick
-  // type (skill / command), scope (user or any klausify project), and a
+  // type (skill / command), scope (user or any klaussy project), and a
   // name; on success refreshes the list and opens the new file for editing.
   function openCreateForm(pane, onCreated) {
     Promise.all([

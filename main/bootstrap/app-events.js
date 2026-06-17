@@ -53,7 +53,7 @@ function fixSpawnPath() {
     path.join(homedir, '.cargo/bin'),
     '/Applications/Cursor.app/Contents/Resources/app/bin',
   ];
-  // macOS `pip install --user` drops console scripts (conventions, klausify)
+  // macOS `pip install --user` drops console scripts (conventions, klaussy)
   // into ~/Library/Python/<X.Y>/bin — NOT ~/.local/bin. Without this, a
   // pip-user fallback install "succeeds" but the CLI is invisible to spawns
   // (spawn ENOENT). The minor version varies, so enumerate what exists.
@@ -272,8 +272,8 @@ function install() {
     createWindow();
     if (!process.env.KLAUSSY_E2E) checkExternalCLIs();
 
-    // First-run: auto-install the repo-analysis CLIs (conventions-cli +
-    // klausify) from PyPI if missing, so repo intelligence works out of the
+    // First-run: auto-install the repo-analysis CLIs (klaussy-repo-conventions
+    // + klaussy-agents) from PyPI if missing, so repo intelligence works out of the
     // box. Background, after the window exists so its toasts are visible;
     // never blocks startup.
     if (!process.env.KLAUSSY_E2E) {

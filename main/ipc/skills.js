@@ -47,7 +47,7 @@ function listInstalledPlugins() {
 
 // List Claude skills + slash commands from disk so users can discover what
 // they have installed without leaving Klaussy. Walks user-level skills + a
-// source per klausify project (most users keep skills per-repo, so showing
+// source per klaussy project (most users keep skills per-repo, so showing
 // just the active project would hide most of what they have).
 ipcMain.handle('list-skills', async () => {
   const homedir = require('os').homedir();

@@ -1,5 +1,5 @@
 {
-  "name": "klaus-desktop",
+  "name": "klaussy-desktop",
   "productName": "Klaussy",
   "version": "0.3.8",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
@@ -15,7 +15,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/steph-dove/klausify-desktop.git"
+    "url": "https://github.com/steph-dove/klaussy-desktop.git"
   },
   "scripts": {
     "start": "electron .",
@@ -187,7 +187,7 @@
     "publish": {
       "provider": "github",
       "owner": "steph-dove",
-      "repo": "klausify-desktop-feedback",
+      "repo": "klaussy-desktop-feedback",
       "releaseType": "release"
     }
   }

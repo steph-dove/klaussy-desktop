@@ -324,7 +324,7 @@ ipcMain.handle('gh-list-recent-repos', async () => {
   // Repos on disk beyond config.projects — same crawl as the Discovered
   // dropdown section (common dev dirs, org subdirs, scan roots). Matched by
   // origin URL (read from .git/config, no subprocess) rather than directory
-  // name, so renamed clones (e.g. klausify cloned as "klaus") still count.
+  // name, so renamed clones (e.g. klaussy-agents cloned as "klaussy") still count.
   let discoveredRemotes = [];
   try {
     const discovered = await discoverReposOnDisk();

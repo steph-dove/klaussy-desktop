@@ -343,7 +343,7 @@
     });
   };
 
-  // Whether repo-intel (conventions + import graph from conventions-cli) is
+  // Whether repo-intel (conventions + import graph from klaussy-repo-conventions) is
   // cached for this PR's repo — surfaced as a chip so the user knows the
   // review prompt is conventions-aware. null = unknown / no worktree yet.
   PR.repoIntelState = { path: null, available: null };
@@ -372,7 +372,7 @@
 
   PR.repoIntelChip = function() {
     return PR.repoIntelState.available
-      ? '<span class="pr-ai-conventions-chip" title="This repo’s conventions, rules, and import graph (conventions-cli) are injected into the review prompt">conventions-aware</span>'
+      ? '<span class="pr-ai-conventions-chip" title="This repo’s conventions, rules, and import graph (klaussy-repo-conventions) are injected into the review prompt">conventions-aware</span>'
       : '';
   };
 

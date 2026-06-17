@@ -58,11 +58,11 @@ test('runConfigMigrations v0->v1 folds legacy prReviews and drops the key', asyn
     const legacy = {
       repoPath: '/x',
       prReviews: {
-        'steph-dove/klausify#42': {
+        'steph-dove/klaussy-agents#42': {
           savedAt: '2025-01-01T00:00:00Z',
           review: 'This is the old review text.',
         },
-        'steph-dove/klausify#43': {
+        'steph-dove/klaussy-agents#43': {
           savedAt: '2025-01-02T00:00:00Z',
           review: 'Another one.',
         },
@@ -82,8 +82,8 @@ test('runConfigMigrations v0->v1 folds legacy prReviews and drops the key', asyn
     const cacheDir = path.join(dir, 'pr-review-cache');
     assert.equal(fs.existsSync(cacheDir), true);
     const entries = fs.readdirSync(cacheDir).sort();
-    assert.deepEqual(entries, ['steph-dove-klausify-42.json', 'steph-dove-klausify-43.json']);
-    const body = JSON.parse(fs.readFileSync(path.join(cacheDir, 'steph-dove-klausify-42.json'), 'utf8'));
+    assert.deepEqual(entries, ['steph-dove-klaussy-agents-42.json', 'steph-dove-klaussy-agents-43.json']);
+    const body = JSON.parse(fs.readFileSync(path.join(cacheDir, 'steph-dove-klaussy-agents-42.json'), 'utf8'));
     assert.equal(body.savedAt, '2025-01-01T00:00:00Z');
     assert.equal(body.finalText, 'This is the old review text.');
   } finally { restore(); }
@@ -98,17 +98,17 @@ test('runConfigMigrations v0->v1 does not clobber existing new-format cache', as
     // A pre-existing new-format entry — the migration must preserve it.
     const existing = { savedAt: '2026-01-01', finalText: 'NEW FORMAT', findingState: 'open' };
     fs.writeFileSync(
-      path.join(cacheDir, 'steph-dove-klausify-42.json'),
+      path.join(cacheDir, 'steph-dove-klaussy-agents-42.json'),
       JSON.stringify(existing, null, 2),
     );
     fs.writeFileSync(file, JSON.stringify({
       prReviews: {
-        'steph-dove/klausify#42': { savedAt: '2020-01-01', review: 'STALE' },
+        'steph-dove/klaussy-agents#42': { savedAt: '2020-01-01', review: 'STALE' },
       },
     }));
     config.runConfigMigrations();
     await waitForFlush();
-    const body = JSON.parse(fs.readFileSync(path.join(cacheDir, 'steph-dove-klausify-42.json'), 'utf8'));
+    const body = JSON.parse(fs.readFileSync(path.join(cacheDir, 'steph-dove-klaussy-agents-42.json'), 'utf8'));
     assert.equal(body.finalText, 'NEW FORMAT');  // the new cache won
     assert.equal(body.findingState, 'open');     // extra field preserved
   } finally { restore(); }

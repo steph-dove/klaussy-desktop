@@ -156,7 +156,7 @@ async function fetchThreadsForActive() {
   const epoch = ++_threadsFetchEpoch;
   // gh api graphql doesn't need to run inside the target repo — owner/repo
   // are passed as query variables. Falling back to homedir means reviewers
-  // without an active klausify project still get threads + comments.
+  // without an active klaussy project still get threads + comments.
   const cwd = currentRepoPath() || require('os').homedir();
   if (!prReview.active.baseOwner || !prReview.active.baseRepo) {
     prReview.active.threadsError = 'Could not parse base repo from PR url';
@@ -267,7 +267,7 @@ async function reloadActivePrReviewMeta() {
   } catch (_) { /* non-fatal */ }
 }
 
-// Walk the user's klausify projects and return the first whose `origin`
+// Walk the user's klaussy projects and return the first whose `origin`
 // remote points at <owner>/<repo> (GitHub URL, either SSH or HTTPS form).
 // Returns null when no project matches — the caller surfaces an explicit
 // "add this repo as a project" error.
