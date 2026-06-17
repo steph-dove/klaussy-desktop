@@ -177,14 +177,14 @@ window.App = window.App || {};
   });
 
   // ---- Repo-intel notifications ----
-  // conventions-cli runs in the background at session create; without these
-  // toasts there is zero visible evidence it happened (artifacts land in the
-  // BASE repo, which worktrees don't show).
+  // klaussy-repo-conventions runs in the background at session create; without
+  // these toasts there is zero visible evidence it happened (artifacts land in
+  // the BASE repo, which worktrees don't show).
   if (window.klaus.task.onRepoIntelEvent) {
     window.klaus.task.onRepoIntelEvent(function (ev) {
       if (!ev) return;
-      // Tool auto-install lifecycle (conventions-cli + klausify from PyPI) —
-      // these events carry no repoPath.
+      // Tool auto-install lifecycle (klaussy-repo-conventions + klaussy-agents
+      // from PyPI) — these events carry no repoPath.
       if (ev.type === 'tools-installing') {
         window.toast.info('Installing repo-analysis tools (' + (ev.missing || []).join(', ') + ') via ' + (ev.installer || 'pipx') + '…');
         return;
@@ -194,14 +194,14 @@ window.App = window.App || {};
         return;
       }
       if (ev.type === 'tools-failed') {
-        window.toast.warn('Could not auto-install ' + (ev.missing || []).join(', ') + ' (' + (ev.reason || 'unknown') + '). Install manually: ' + (ev.manual || 'pipx install conventions-cli klausify'));
+        window.toast.warn('Could not auto-install ' + (ev.missing || []).join(', ') + ' (' + (ev.reason || 'unknown') + '). Install manually: ' + (ev.manual || 'pipx install klaussy-repo-conventions klaussy-agents'));
         return;
       }
       if (!ev.repoPath) return;
       var repoName = ev.repoPath.split('/').filter(Boolean).pop();
       if (ev.type === 'started') {
         window.toast.info(repoName + (ev.enriching
-          ? ': graphing the repo and building conventions-aware skills (klausify init + Claude enrichment — may take a few minutes)…'
+          ? ': graphing the repo and building conventions-aware skills (klaussy init + Claude enrichment — may take a few minutes)…'
           : ': graphing the repo and extracting conventions…'));
       } else if (ev.type === 'generated') {
         if (ev.enrichFailed) {
@@ -217,8 +217,8 @@ window.App = window.App || {};
         var why = ev.error || '';
         // A raw "spawn conventions ENOENT" is meaningless to users — the CLI
         // isn't on PATH yet. Translate it into something actionable.
-        if (/ENOENT/i.test(why)) why = 'analysis tools not found on PATH — they may still be installing, or run: pipx install conventions-cli klausify';
-        else if (!why) why = 'is klausify/conventions installed?';
+        if (/ENOENT/i.test(why)) why = 'analysis tools not found on PATH — they may still be installing, or run: pipx install klaussy-repo-conventions klaussy-agents';
+        else if (!why) why = 'is klaussy/conventions installed?';
         window.toast.warn(repoName + ': repo analysis unavailable (' + why + ') — agents run without repo intelligence');
       }
     });

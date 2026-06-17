@@ -16,7 +16,7 @@ on:
         type: boolean
         default: true
       release_tag:
-        description: 'If set (e.g. v0.2.7), upload the built artifacts to that release on klausify-desktop-feedback. Requires the FEEDBACK_REPO_TOKEN secret. Leave blank to only upload to GitHub Actions artifacts.'
+        description: 'If set (e.g. v0.2.7), upload the built artifacts to that release on klaussy-desktop-feedback. Requires the FEEDBACK_REPO_TOKEN secret. Leave blank to only upload to GitHub Actions artifacts.'
         type: string
         default: ''
 
@@ -111,12 +111,12 @@ jobs:
           retention-days: 14
 
       # When release_tag is set, attach the built artifacts directly to the
-      # release on klausify-desktop-feedback so the auto-updater (which polls
+      # release on klaussy-desktop-feedback so the auto-updater (which polls
       # that repo, not this one) and end users get a download link without a
       # manual "trigger CI → grab artifacts → re-upload" step.
       #
       # Auth: GITHUB_TOKEN can't write to a different repo. A fine-scoped PAT
-      # stored as FEEDBACK_REPO_TOKEN (contents:write on klausify-desktop-feedback,
+      # stored as FEEDBACK_REPO_TOKEN (contents:write on klaussy-desktop-feedback,
       # nothing else) is required. Without it the step is skipped.
       - name: Upload artifacts to feedback release
         if: ${{ always() && inputs.release_tag != '' }}
@@ -136,5 +136,5 @@ jobs:
             exit 0
           fi
           gh release upload "${{ inputs.release_tag }}" "${files[@]}" \
-            --repo steph-dove/klausify-desktop-feedback \
+            --repo steph-dove/klaussy-desktop-feedback \
             --clobber

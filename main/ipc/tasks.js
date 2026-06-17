@@ -328,7 +328,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     return { error: 'Could not create the worktree location ' + worktreeDir + ': ' + e.message };
   }
 
-  // Create the worktree (matching klausify CLI: git worktree add ../<repo>-<branch> -b <branch>)
+  // Create the worktree (matching klaussy CLI: git worktree add ../<repo>-<branch> -b <branch>)
   let reusedBranchWarning = null;
   const cleanupSessionDir = () => {
     // We created ~/klaussy/sessions/<session>/ above; don't leave an empty

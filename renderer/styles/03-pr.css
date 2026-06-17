@@ -1355,7 +1355,7 @@
   border-color: var(--accent);
 }
 
-/* "conventions-aware" chip — shown when repo intel (conventions-cli output)
+/* "conventions-aware" chip — shown when repo intel (klaussy-repo-conventions output)
    is cached and being injected into the review prompt. */
 .pr-ai-conventions-chip {
   flex-shrink: 0;

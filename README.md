@@ -46,8 +46,8 @@ npm install -g @anthropic-ai/claude-code && claude
 ## Install (dev mode)
 
 ```bash
-git clone https://github.com/steph-dove/klausify-desktop.git
-cd klausify-desktop
+git clone https://github.com/steph-dove/klaussy-desktop.git
+cd klaussy-desktop
 npm install
 npm start
 ```
@@ -114,7 +114,7 @@ Cmd+K → "How to use Klaussy") inside the app.
 ## Reporting bugs
 
 File issues on the public feedback tracker:
-[steph-dove/klausify-desktop-feedback](https://github.com/steph-dove/klausify-desktop-feedback/issues).
+[steph-dove/klaussy-desktop-feedback](https://github.com/steph-dove/klaussy-desktop-feedback/issues).
 The source repo is private; this is where bug reports + feature requests land.
 
 In-app: **View → Send feedback…** opens a pre-filled issue with version info.
