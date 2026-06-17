@@ -1,7 +1,7 @@
 // Repo intelligence: conventions + import-graph context for agent prompts.
 //
 // On session create we analyze the BASE repo:
-//   1. `conventions discover --format json` (steph-dove/conventions) →
+//   1. `conventions discover --format json` (steph-dove/klaussy-repo-conventions) →
 //      .conventions/conventions.raw.json with the import graph (fan-in/out,
 //      cycles, clusters, endpoint chains). Pure static analysis.
 //   2. `klaussy init --repo <base> -b <default>` (steph-dove/klaussy-agents) →
