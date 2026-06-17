@@ -1,4 +1,4 @@
-# klausify-desktop — Full-Codebase Review
+# klaussy-desktop — Full-Codebase Review
 
 > **Status (post-fix):** Batches 1 and 2 have been applied in this working tree.
 > See the **Post-fix status** section at the bottom for the list of what landed,
@@ -619,7 +619,7 @@ const args = ['grep', '-n', '--no-color', '-I', '-r', '-F', cap, query];
   "private": true,
   "license": "UNLICENSED",
   "engines": { "node": ">=18" },
-  "repository": { "type": "git", "url": "https://github.com/steph-dove/klausify-desktop.git" },
+  "repository": { "type": "git", "url": "https://github.com/steph-dove/klaussy-desktop.git" },
   ```
 
 ### C-3 (Medium): `postinstall` silently swallows every failure
@@ -643,7 +643,7 @@ const args = ['grep', '-n', '--no-color', '-I', '-r', '-F', cap, query];
 
 ### C-7 (Warn): Unrelated Swift/Xcode project `Klaussy/` lives inside this Electron repo
 - The `Klaussy/` directory (a separate Swift app with its own `.git`) sits at the repo root. It IS gitignored (`.gitignore` lines 1-2), so it doesn't pollute `git status` — but a new contributor `ls`-ing the repo will see it and be confused. It's also an easy target for "why is there Swift in my Electron repo" head-scratching during code review.
-- **Fix:** move it out of the Electron repo tree. If it truly belongs co-located, add a one-line `README.md` inside it explaining what it is and that it's unrelated to `klausify-desktop`.
+- **Fix:** move it out of the Electron repo tree. If it truly belongs co-located, add a one-line `README.md` inside it explaining what it is and that it's unrelated to `klaussy-desktop`.
 
 ### C-8 (Medium): `diff-panel.js` uses `let` while every other renderer module uses `var`
 **[Location: `renderer/diff-panel.js:1-16`]**
