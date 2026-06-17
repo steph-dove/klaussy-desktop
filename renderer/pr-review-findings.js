@@ -34,6 +34,30 @@
     return { path: pm[1], line: parseInt(pm[2], 10), endLine: endLine, snippet: snippet };
   };
 
+  // Extract `[Category: Correctness]` (0–2 bold asterisks, like the others).
+  PR.parseCategory = function(text) {
+    if (!text) return '';
+    var m = text.match(/\*{0,2}\[Category:\s*([^\]|]+?)(?:\s*\|[^\]]*)?\]\*{0,2}/i);
+    return m ? m[1].trim() : '';
+  };
+
+  // Strip the bracketed metadata header lines ([Severity]/[Location]/[Category])
+  // and a standalone Comment: label from a finding's prose — those now render as
+  // the severity dot, category tag, and location label, not inline brackets.
+  PR.stripFindingHeaders = function(text) {
+    if (!text) return text;
+    return text
+      // [Severity]/[Location]/[Category] brackets, with their surrounding bold
+      // markers. Non-anchored + [\s\S] so a bracket the agent split across
+      // lines is still removed whole.
+      .replace(/\*{0,2}\[(?:Severity|Location|Category)\s*:[\s\S]*?\]\*{0,2}/gi, '')
+      .replace(/^[^\S\n]*\*{0,2}Comment\*{0,2}\s*:\s*\*{0,2}[^\S\n]*$/gim, '')
+      // Orphaned bold markers left on their own line.
+      .replace(/^[^\S\n]*\*{1,3}[^\S\n]*$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  };
+
   // Pull the first fenced-code block out of a finding — a more reliable
   // snippet for line-verification than the short inline location hint,
   // because the template tells Claude to quote up to 10 lines of the code.

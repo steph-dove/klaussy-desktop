@@ -12,15 +12,47 @@
     return joined.length > 140 ? joined.slice(0, 140) + '\u2026' : joined;
   };
 
-  // Render comment bodies as full markdown (markdown-it + hljs + DOMPurify via
-  // MarkdownPreview), wrapped in .pr-conv-md for scoped prose styling. Falls
-  // back to escaped plain text if the markdown libs aren't loaded.
-  PR.renderCommentBody = function(body) {
-    if (!body) return '';
+  PR.renderMarkdownBody = function(body) {
     if (window.MarkdownPreview && window.MarkdownPreview.render) {
       return '<div class="pr-conv-md">' + window.MarkdownPreview.render(body, { breaks: true }) + '</div>';
     }
     return PR.escHtml(body).replace(/\n/g, '<br>');
+  };
+
+  // Render comment bodies as full markdown (markdown-it + hljs + DOMPurify via
+  // MarkdownPreview), wrapped in .pr-conv-md for scoped prose styling. A posted
+  // review finding still carries its [Severity:]/[Location:]/[Category:]
+  // metadata — render that with the same severity-dot / category-tag / location
+  // treatment as the Review tab instead of dumping the brackets.
+  PR.renderCommentBody = function(body) {
+    if (!body) return '';
+    if (/\*{0,2}\[Severity\s*:/i.test(body)) return PR.renderFindingComment(body);
+    return PR.renderMarkdownBody(body);
+  };
+
+  PR.renderFindingComment = function(body) {
+    var sev = (PR.severityOf ? PR.severityOf(body) : '').toLowerCase();
+    var category = PR.parseCategory ? PR.parseCategory(body) : '';
+    var loc = PR.parseLocation ? PR.parseLocation(body) : null;
+    var sevKey = sev ? sev.replace(/\s+/g, '-') : 'note';
+    var sevLabel = (PR.SEV_LABELS && PR.SEV_LABELS[sev])
+      || (sev ? sev.charAt(0).toUpperCase() + sev.slice(1) : '');
+    var dot = sev
+      ? '<span class="pr-ai-finding-sev pr-ai-finding-sev-' + sevKey + '">'
+          + '<span class="pr-ai-finding-dot"></span>' + PR.escHtml(sevLabel) + '</span>'
+      : '';
+    var cat = category ? '<span class="pr-ai-finding-cat">' + PR.escHtml(category) + '</span>' : '';
+    var header = (dot || cat)
+      ? '<div class="pr-ai-finding-head-row"><span class="pr-ai-finding-head-left">' + dot + cat + '</span></div>'
+      : '';
+    var locText = loc ? loc.path + ':' + loc.line + (loc.endLine ? '-' + loc.endLine : '') : '';
+    var locDesc = loc && loc.snippet ? loc.snippet.replace(/^[\s,;]+/, '').trim() : '';
+    var locLabel = locText
+      ? '<div class="pr-ai-finding-loc-label"' + (locDesc ? ' title="' + PR.escHtml(locText + ' — ' + locDesc) + '"' : '') + '>'
+          + '<span class="pr-ai-finding-loc-path">' + PR.escHtml(locText) + '</span></div>'
+      : '';
+    var clean = PR.stripFindingHeaders ? PR.stripFindingHeaders(body) : body;
+    return '<div class="pr-conv-finding">' + header + locLabel + PR.renderMarkdownBody(clean) + '</div>';
   };
 
   // The timeline gutter dot: a colored initial avatar (reusing the sidebar's
