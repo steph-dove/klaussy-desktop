@@ -919,7 +919,37 @@
       }
     });
     PR.reviewTerminal = { terminal: terminal, fitAddon: fitAddon, hasContent: false };
+    PR.reviewTerminalDark = PR.termBgIsDark(theme && theme.background);
     return PR.reviewTerminal;
+  };
+
+  // Relative-luminance check on the terminal background, so we know whether a
+  // theme change flipped light<->dark.
+  PR.termBgIsDark = function(bg) {
+    var m = /^#?([0-9a-fA-F]{6})$/.exec((bg || '').trim().replace(/^#/, ''));
+    if (!m) return true;
+    var n = parseInt(m[1], 16);
+    var r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) < 128;
+  };
+
+  // Re-apply the terminal theme when the app theme changes so the PR terminal
+  // matches. The agent CLI detects light/dark from the terminal background at
+  // startup, so when light<->dark actually flips we restart the chat to let it
+  // re-render in the new theme (a same-darkness swap just retints the xterm).
+  PR.onAppThemeChanged = function() {
+    if (!PR.reviewTerminal || !(window.ThemeManager && ThemeManager.getTerminalTheme)) return;
+    var theme = ThemeManager.getTerminalTheme();
+    var nowDark = PR.termBgIsDark(theme && theme.background);
+    var flipped = PR.reviewTerminalDark != null && PR.reviewTerminalDark !== nowDark;
+    PR.reviewTerminalDark = nowDark;
+    try {
+      PR.reviewTerminal.terminal.options.theme = theme;
+      PR.reviewTerminal.terminal.refresh(0, PR.reviewTerminal.terminal.rows - 1);
+    } catch (_) {}
+    if (flipped && PR.activeTab === 'terminal' && PR.ensureChatSession) {
+      PR.ensureChatSession(true); // restart so the CLI re-detects the new background
+    }
   };
 
   PR.disposeReviewTerminal = function() {

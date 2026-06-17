@@ -228,6 +228,9 @@ window.PrReview = window.PrReview || {};
         setTimeout(function () { btn.textContent = prev; }, 1200);
       }).catch(function () {});
     });
+    // Keep the Terminal-tab xterm matching the app theme on live theme switches.
+    PR.themeChangeHandler = function () { if (PR.onAppThemeChanged) PR.onAppThemeChanged(); };
+    window.addEventListener('theme-changed', PR.themeChangeHandler);
     PR.renderLoading();
     PR.initSelectionExplain();
     PR.setupImplementFocusRefit();
@@ -266,6 +269,7 @@ window.PrReview = window.PrReview || {};
 
   PR.unmount = function() {
     if (PR.unsubState) { try { PR.unsubState(); } catch (_) {} PR.unsubState = null; }
+    if (PR.themeChangeHandler) { window.removeEventListener('theme-changed', PR.themeChangeHandler); PR.themeChangeHandler = null; }
     PR.teardownSelectionExplain();
     PR.teardownImplementFocusRefit();
     PR.implReattachCheckedPr = null;
