@@ -295,31 +295,28 @@
   // location chip. Legacy (marker/text) findings render their own bracketed
   // headers inside the prose, so this returns nothing for them to avoid
   // doubling up.
+  // Header for every finding (structured or markdown): a color-coded severity
+  // dot + label, a category tag, and (structured) the title. Location is NOT
+  // here — it renders de-bracketed above the code snippet.
   PR.renderFindingHeader = function(f) {
-    if (!f.structured) return '';
     var sev = (f.severity || '').toLowerCase();
-    var sevLabel = PR.SEV_LABELS[sev] || (f.severity ? f.severity : 'Note');
-    var chip = '<span class="pr-ai-finding-chip pr-ai-finding-chip-' + (sev ? sev.replace(/\s+/g, '-') : 'note') + '">'
-      + PR.escHtml(sevLabel) + '</span>';
-    var cat = f.category
-      ? '<span class="pr-ai-finding-cat">' + PR.escHtml(f.category) + '</span>'
+    var category = f.category || (f.structured ? '' : PR.parseCategory(f.text));
+    if (!sev && !category && !f.title) return '';
+    var sevKey = sev ? sev.replace(/\s+/g, '-') : 'note';
+    var sevLabel = PR.SEV_LABELS[sev] || (f.severity || 'Note');
+    var dot = sev
+      ? '<span class="pr-ai-finding-sev pr-ai-finding-sev-' + sevKey + '">'
+          + '<span class="pr-ai-finding-dot"></span>' + PR.escHtml(sevLabel)
+        + '</span>'
+      : '';
+    var cat = category
+      ? '<span class="pr-ai-finding-cat">' + PR.escHtml(category) + '</span>'
       : '';
     var title = f.title
       ? '<span class="pr-ai-finding-title-text">' + PR.escHtml(f.title) + '</span>'
       : '';
-    var locChip = '';
-    if (f.path && f.line) {
-      var verified = f.postMode === 'inline' && f.locationVerified;
-      locChip = '<span class="pr-ai-finding-loc' + (verified ? ' verified' : '') + '"'
-        + ' title="' + PR.escHtml(verified ? 'Will post as an inline comment here' : 'Location not verified yet — may post as a general comment') + '">'
-        + PR.escHtml(f.path.split('/').pop()) + ':' + f.line
-      + '</span>';
-    } else if (f.path) {
-      locChip = '<span class="pr-ai-finding-loc">' + PR.escHtml(f.path.split('/').pop()) + '</span>';
-    }
     return '<div class="pr-ai-finding-head-row">'
-      + '<span class="pr-ai-finding-head-left">' + chip + cat + title + '</span>'
-      + locChip
+      + '<span class="pr-ai-finding-head-left">' + dot + cat + title + '</span>'
     + '</div>';
   };
 
@@ -476,22 +473,54 @@
         preText = '';
         postText = displayText;
       }
+      // The bracketed metadata now renders as the dot/tag/location label, so
+      // strip it from the prose. Run the full strip on BOTH chunks — the
+      // metadata (and its orphan `**` markers) can land before OR after the
+      // Comment: marker depending on how the agent formatted the block.
+      postText = postText.replace(/^\s*\*{0,2}Comment\*{0,2}\s*:[^\S\n]*\n?/i, '');
+      preText = PR.stripFindingHeaders(preText);
+      postText = PR.stripFindingHeaders(postText);
+
+      // The de-bracketed location, shown above the code snippet it describes.
+      var loc = PR.parseLocation(f.text);
+      var locText = '';
+      if (f.verifiedSnippet && f.verifiedSnippet.text) {
+        var vs = f.verifiedSnippet;
+        locText = vs.path + ':' + vs.startLine
+          + (vs.endLine && vs.endLine !== vs.startLine ? '-' + vs.endLine : '');
+      } else if (loc) {
+        locText = loc.path + ':' + loc.line + (loc.endLine ? '-' + loc.endLine : '');
+      } else if (f.path && f.line) {
+        locText = f.path + ':' + f.line;
+      }
+      // The descriptive tail ("…, the restart path in handleEnd") is context for
+      // the agent, not the reader — keep it only as a hover title, show just the
+      // clean path:line.
+      var locDesc = (loc && loc.snippet ? loc.snippet : '').replace(/^[\s,;]+/, '').trim();
+      var locTitle = locDesc ? ' title="' + PR.escHtml(locText + ' — ' + locDesc) + '"' : '';
+      var locHeadHtml = locText
+        ? '<div class="pr-ai-finding-loc-label"' + locTitle + '>'
+            + '<span class="pr-ai-finding-loc-path">' + PR.escHtml(locText) + '</span>'
+          + '</div>'
+        : '';
 
       var originalSnippetHtml = '';
       if (f.verifiedSnippet && f.verifiedSnippet.text) {
-        var vs = f.verifiedSnippet;
-        var label = PR.escHtml(vs.path)
-          + ':' + vs.startLine
-          + (vs.endLine && vs.endLine !== vs.startLine ? '-' + vs.endLine : '');
-        originalSnippetHtml = '<div class="pr-ai-finding-original">'
-          + '<div class="pr-ai-finding-original-head">Original code at ' + label + '</div>'
-          + '<pre class="pr-ai-finding-original-code"><code>' + PR.escHtml(vs.text) + '</code></pre>'
+        // Location label sits above the code box it describes.
+        originalSnippetHtml = '<div class="pr-ai-finding-original-wrap">'
+          + locHeadHtml
+          + '<div class="pr-ai-finding-original">'
+            + '<pre class="pr-ai-finding-original-code"><code>' + PR.escHtml(f.verifiedSnippet.text) + '</code></pre>'
+          + '</div>'
         + '</div>';
         // Drop redundant fenced code block(s) from pre-Comment text — those
         // are Claude's pasted "original code" which we now show verbatim
         // from the file. Don't touch postText: a Suggested change block
         // there is intentional.
         preText = preText.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
+      } else if (locHeadHtml) {
+        // No verified snippet — still surface the location above the body.
+        originalSnippetHtml = locHeadHtml;
       }
 
       bodyHtml = PR.renderFindingHeader(f)

@@ -6467,30 +6467,47 @@ body.task-branchless .file-viewer-blame-btn {
 }
 .pr-ai-finding-head-row + .pr-ai-finding-body { padding-top: 8px; }
 
-.pr-ai-finding-chip {
+/* Severity as a color-coded dot + label. */
+.pr-ai-finding-sev {
   flex: none;
-  font-size: 10.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
   font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 2px 8px;
-  border-radius: 999px;
-  line-height: 1.4;
-  border: 1px solid transparent;
+  letter-spacing: 0.02em;
 }
-.pr-ai-finding-chip-blocker { color: var(--sev-blocker); background: rgba(240, 88, 79, 0.14); border-color: rgba(240, 88, 79, 0.35); }
-.pr-ai-finding-chip-high    { color: var(--sev-high);    background: rgba(240, 88, 79, 0.12); border-color: rgba(240, 88, 79, 0.30); }
-.pr-ai-finding-chip-medium  { color: var(--sev-medium);  background: rgba(210, 153, 34, 0.14); border-color: rgba(210, 153, 34, 0.34); }
-.pr-ai-finding-chip-low     { color: var(--sev-low);     background: rgba(68, 147, 248, 0.14); border-color: rgba(68, 147, 248, 0.32); }
-.pr-ai-finding-chip-warn    { color: var(--sev-warn);    background: rgba(210, 153, 34, 0.12); border-color: rgba(210, 153, 34, 0.30); }
-.pr-ai-finding-chip-nit,
-.pr-ai-finding-chip-note    { color: var(--text-muted);  background: rgba(128, 128, 128, 0.14); border-color: rgba(128, 128, 128, 0.30); }
+.pr-ai-finding-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-muted);
+}
+.pr-ai-finding-sev-blocker { color: var(--sev-blocker); }
+.pr-ai-finding-sev-blocker .pr-ai-finding-dot { background: var(--sev-blocker); box-shadow: 0 0 0 3px rgba(240, 88, 79, 0.18); }
+.pr-ai-finding-sev-high    { color: var(--sev-high); }
+.pr-ai-finding-sev-high .pr-ai-finding-dot    { background: var(--sev-high); }
+.pr-ai-finding-sev-medium  { color: var(--sev-medium); }
+.pr-ai-finding-sev-medium .pr-ai-finding-dot  { background: var(--sev-medium); }
+.pr-ai-finding-sev-low     { color: var(--sev-low); }
+.pr-ai-finding-sev-low .pr-ai-finding-dot     { background: var(--sev-low); }
+.pr-ai-finding-sev-warn    { color: var(--sev-warn); }
+.pr-ai-finding-sev-warn .pr-ai-finding-dot    { background: var(--sev-warn); }
+.pr-ai-finding-sev-nit,
+.pr-ai-finding-sev-note    { color: var(--text-muted); }
 
+/* Category as a subtle tag pill. */
 .pr-ai-finding-cat {
   flex: none;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 9px;
 }
 .pr-ai-finding-title-text {
   font-size: 13px;
@@ -6501,21 +6518,33 @@ body.task-branchless .file-viewer-blame-btn {
   text-overflow: ellipsis;
   min-width: 0;
 }
-.pr-ai-finding-loc {
-  flex: none;
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  color: var(--text-muted);
-  background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 1px 7px;
+
+/* De-bracketed location, shown above the code snippet it describes. */
+.pr-ai-finding-original-wrap { margin: 12px 0; }
+.pr-ai-finding-loc-label {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 6px;
 }
-.pr-ai-finding-loc.verified {
+.pr-ai-finding-original-wrap .pr-ai-finding-original { margin: 0; }
+.pr-ai-finding-loc-path {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  font-weight: 600;
   color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-dim);
 }
+.pr-ai-finding-loc-desc {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* Same finding treatment when a posted finding renders inside a conversation
+   comment — drop the card padding so it sits flush in the comment body. */
+.pr-conv-finding .pr-ai-finding-head-row { padding: 0 0 8px 0; }
+.pr-conv-finding .pr-ai-finding-loc-label { margin: 0 0 8px 0; }
+.pr-conv-finding > .pr-conv-md { margin-top: 0; }
 
 /* Tighten the structured body: severity/title now live in the header, so the
    body is just the comment prose (+ original code + suggestion). */
