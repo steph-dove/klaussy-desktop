@@ -21,8 +21,8 @@ on most modern x86_64 Linux. The deb is Debian/Ubuntu-specific.
 - **Optional**: snap (for the Ollama install path), gh CLI, claude CLI.
 
 ```bash
-git clone https://github.com/steph-dove/klausify-desktop.git
-cd klausify-desktop
+git clone https://github.com/steph-dove/klaussy-desktop.git
+cd klaussy-desktop
 npm ci
 npm run rebuild     # rebuilds node-pty against Electron's ABI
 npm start           # `electron .` — should open the main window

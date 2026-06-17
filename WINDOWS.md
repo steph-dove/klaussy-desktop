@@ -18,8 +18,8 @@ PATH layout.
   they're missing.
 
 ```powershell
-git clone https://github.com/steph-dove/klausify-desktop.git
-cd klausify-desktop
+git clone https://github.com/steph-dove/klaussy-desktop.git
+cd klaussy-desktop
 npm ci
 npm run rebuild     # rebuilds node-pty against Electron's ABI
 npm start           # `electron .` — should open the main window

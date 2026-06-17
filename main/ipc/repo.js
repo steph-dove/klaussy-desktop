@@ -438,7 +438,7 @@ module.exports = { discoverReposOnDisk };
 // parent directory the new worktree gets created under. Ordered:
 //   1. Alongside this repo's existing worktrees (most common parent), if any
 //      — marked recommended.
-//   2. The repo's parent dir (the klausify sibling default).
+//   2. The repo's parent dir (the klaussy sibling default).
 //   3. A tidy dedicated "<repo>-worktrees" folder next to the repo.
 // Recent base paths are surfaced separately by the renderer (recent-paths-get).
 ipcMain.handle('suggest-worktree-locations', async (_event, { repoPath }) => {

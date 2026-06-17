@@ -110,7 +110,7 @@ ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   // gh just needs a valid cwd (any git repo or non-repo dir works for a
   // URL-targeted call). Falling back to homedir lets reviewers use Klaussy
-  // without first adding a klausify project.
+  // without first adding a klaussy project.
   const cwd = currentRepoPath() || require('os').homedir();
   try {
     const meta = await ghJson([

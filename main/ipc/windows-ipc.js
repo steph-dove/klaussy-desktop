@@ -194,7 +194,7 @@ ipcMain.handle('get-preferences', () => {
     // Pre-commit silent-failure review (app commit flow + git hook). On by
     // default; explicit false opts out.
     preCommitReview: config.preCommitReview !== false,
-    // Klausify CLAUDE.md enrichment runs the Claude CLI = API spend on the
+    // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
   };
