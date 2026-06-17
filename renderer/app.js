@@ -348,24 +348,7 @@ window.App = window.App || {};
   // needs to force a re-evaluation without a full task switch.
   Events.on('task:switched', function (detail) {
     window.BranchlessUI.apply(detail && detail.task);
-    updateTitleBranch(detail && detail.task);
   });
-
-  // Reflect the active session's branch in the top title bar (macOS). Hidden
-  // for branchless (Open Folder) tasks, which have no branch.
-  function updateTitleBranch(task) {
-    var el = document.getElementById('titlebar-branch');
-    if (!el) return;
-    var branch = task && task.branch;
-    if (branch) {
-      el.textContent = branch;
-      el.title = branch;
-      el.hidden = false;
-    } else {
-      el.textContent = '';
-      el.hidden = true;
-    }
-  }
 
   // ---- Diff Panel Resize ----
   (function () {

@@ -16,14 +16,10 @@
 <body>
   <!-- Main app -->
   <div id="app" style="display: none;">
-    <!-- Per-window accent strip (color set via Preferences → Window). On the
-         macOS custom title bar it also carries the Klaussy brand + active
-         session branch (see #titlebar-content). -->
-    <div id="window-color-bar">
-      <div id="titlebar-content">
-        <span id="titlebar-branch" hidden></span>
-      </div>
-    </div>
+    <!-- Per-window accent strip (color set via Preferences → Window). Stays a
+         plain draggable strip on the macOS custom title bar — the active branch
+         shows in each terminal's header, not here. -->
+    <div id="window-color-bar"></div>
     <div id="sidebar">
       <!-- Klaussy brand, pinned at the very top of the sidebar above the
            token graph. -->
