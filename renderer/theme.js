@@ -88,10 +88,10 @@ window.ThemeManager = (function () {
         brightBlue: '#0969da', brightMagenta: '#8b57ce', brightCyan: '#0e8585', brightWhite: '#48484a',
       },
       diffText: '#24292f',
-      // Brighter add/del foreground so the file-list stat bars + counts don't
-      // read as muddy-dark on the light background.
-      diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#2da44e',
-      diffDelBg: 'rgba(218, 54, 51, 0.1)', diffDelFg: '#e5484d',
+      // Soft, muted add/del foreground — not muddy-dark, not neon — so the
+      // file-list stat bars + counts sit calmly on the light background.
+      diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#4f9e6b',
+      diffDelBg: 'rgba(218, 54, 51, 0.1)', diffDelFg: '#d0665e',
       diffHunkBg: '#ddf4ff', diffHunkFg: '#0969da',
       lightSyntax: true,
     },
