@@ -451,6 +451,10 @@ window.TerminalManager = (function () {
 
     Sidebar.renderItem(taskEntry);
     emptyState.style.display = 'none';
+    // Default to side-by-side once more than one task is open (grid for 3+).
+    // switchToTask only marks the active container, so it keeps this layout.
+    if (tasks.size >= 3) setLayout('grid');
+    else if (tasks.size === 2) setLayout('columns');
     switchToTask(id);
   }
 
