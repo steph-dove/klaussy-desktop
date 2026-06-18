@@ -55,4 +55,27 @@ function normalizeStatus(s) {
   };
 }
 
-module.exports = { bucketFromState, normalizeCheckRun, normalizeStatus };
+// Parse the stdout of `gh api .../check-runs --paginate --jq '.check_runs[]'`
+// into normalized check objects. The `--jq '.check_runs[]'` filter makes gh
+// emit one check-run object per line (JSONL), merged across all pages.
+//
+// This avoids gh's plain `--paginate` behavior on this object-returning
+// endpoint: it concatenates one full JSON object per page ({...}{...}), which
+// JSON.parse rejects ("Unexpected non-whitespace character after JSON") the
+// moment a commit has more than one page of check runs (>30). A malformed line
+// is skipped and recorded in `errors` rather than discarding every check.
+function parseCheckRunsJsonl(stdout) {
+  const checks = [];
+  const errors = [];
+  for (const line of String(stdout || '').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      checks.push(normalizeCheckRun(JSON.parse(line)));
+    } catch (e) {
+      errors.push('check-runs parse: ' + (e.message || String(e)));
+    }
+  }
+  return { checks, errors };
+}
+
+module.exports = { bucketFromState, normalizeCheckRun, normalizeStatus, parseCheckRunsJsonl };

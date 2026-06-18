@@ -22,7 +22,7 @@ const {
 const { ghJson, ghText } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
 const { humanizeComment } = require('../util/humanize-comment');
-const { bucketFromState, normalizeCheckRun, normalizeStatus } = require('../util/check-normalize');
+const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
 
 
@@ -606,19 +606,22 @@ ipcMain.handle('pr-checks', async (_event, { worktreePath, prNumber }) => {
       });
     }
     const [runsRes, statusRes] = await Promise.all([
-      run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate']),
+      // `--jq '.check_runs[]'` → one check-run per line (JSONL), merged across
+      // pages; plain `--paginate` concatenates a JSON object per page, which
+      // JSON.parse can't read once a commit has >30 check runs. See
+      // parseCheckRunsJsonl.
+      run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate', '--jq', '.check_runs[]']),
       run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/status`]),
     ]);
 
     const checks = [];
     const parseErrors = [];
     if (!runsRes.err) {
-      try {
-        const parsed = JSON.parse(runsRes.stdout);
-        (parsed.check_runs || []).forEach((r) => checks.push(normalizeCheckRun(r)));
-      } catch (e) {
-        parseErrors.push('check-runs parse: ' + (e.message || String(e)));
-        console.error('[pr-checks] check-runs parse error:', e.message,
+      const { checks: runChecks, errors } = parseCheckRunsJsonl(runsRes.stdout);
+      runChecks.forEach((c) => checks.push(c));
+      if (errors.length) {
+        parseErrors.push(...errors);
+        console.error('[pr-checks] check-runs parse errors:', errors.join('; '),
           '— first 200 chars of stdout:', String(runsRes.stdout || '').slice(0, 200));
       }
     }

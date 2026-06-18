@@ -8,7 +8,7 @@ const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { prReview, currentRepoPath, ensureWorktreeForActivePr } = require('../state/pr-review');
-const { bucketFromState, normalizeCheckRun, normalizeStatus } = require('../util/check-normalize');
+const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
 
 // G6: CI checks scoped to the PR review surface. `gh pr checks -R …`
 // mangles the repo name in its GraphQL query on some gh versions. Using
@@ -35,20 +35,22 @@ ipcMain.handle('pr-review-checks', async () => {
     });
   }
   const [runsRes, statusRes] = await Promise.all([
-    run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate']),
+    // `--jq '.check_runs[]'` → one check-run per line (JSONL), merged across
+    // pages; plain `--paginate` concatenates a JSON object per page, which
+    // JSON.parse can't read once a commit has >30 check runs. See
+    // parseCheckRunsJsonl.
+    run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate', '--jq', '.check_runs[]']),
     run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/status`]),
   ]);
 
   const checks = [];
   const parseErrors = [];
   if (!runsRes.err) {
-    try {
-      const parsed = JSON.parse(runsRes.stdout);
-      const runs = parsed.check_runs || [];
-      runs.forEach((r) => checks.push(normalizeCheckRun(r)));
-    } catch (e) {
-      parseErrors.push('check-runs parse: ' + (e.message || String(e)));
-      console.error('[pr-review-checks] check-runs parse error:', e.message,
+    const { checks: runChecks, errors } = parseCheckRunsJsonl(runsRes.stdout);
+    runChecks.forEach((c) => checks.push(c));
+    if (errors.length) {
+      parseErrors.push(...errors);
+      console.error('[pr-review-checks] check-runs parse errors:', errors.join('; '),
         '— first 200 chars of stdout:', String(runsRes.stdout || '').slice(0, 200));
     }
   }
@@ -168,14 +170,20 @@ ipcMain.handle('pr-review-workflows-list', async () => {
   if (!baseOwner || !baseRepo) return { workflows: [], error: 'Could not determine base repo' };
   const cwd = currentRepoPath() || require('os').homedir();
   try {
+    // `--jq '.workflows[]'` → one workflow per line (JSONL), merged across
+    // pages; plain `--paginate` concatenates a JSON object per page, which
+    // JSON.parse can't read once a repo has >30 workflows.
     const { stdout } = await execFileP(
-      'gh', ['api', `repos/${baseOwner}/${baseRepo}/actions/workflows`, '--paginate'],
+      'gh', ['api', `repos/${baseOwner}/${baseRepo}/actions/workflows`, '--paginate', '--jq', '.workflows[]'],
       { cwd, maxBuffer: 4 * 1024 * 1024, timeout: 15000 },
     );
-    const parsed = JSON.parse(stdout);
-    const list = (parsed.workflows || []).filter((w) => w.state === 'active').map((w) => ({
-      id: w.id, name: w.name, path: w.path, state: w.state,
-    }));
+    const list = [];
+    for (const line of String(stdout || '').split('\n')) {
+      if (!line.trim()) continue;
+      let w;
+      try { w = JSON.parse(line); } catch { continue; }
+      if (w.state === 'active') list.push({ id: w.id, name: w.name, path: w.path, state: w.state });
+    }
     return { workflows: list };
   } catch (err) {
     return { workflows: [], error: err.stderr ? err.stderr.toString() : err.message };
