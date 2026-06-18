@@ -27,49 +27,88 @@ const { installAppMenu } = require('./menu');
 
 let isQuitting = false;
 
-// macOS apps launched from Finder/Dock get a minimal PATH from launchd
-// (~/usr/bin:/bin:/usr/sbin:/sbin), missing brew + the user's local bin
-// dirs where gh + claude usually live. Spawning them then errors with
-// ENOENT. Prepend the well-known locations so the installed .app can find
-// them regardless of how it was launched.
-//
-// On Windows the system PATH is composed from the registry (HKLM + HKCU
-// "Path" values) and is comprehensive enough that GUI launches see the
-// same PATH as a fresh shell — no fix-up needed. We no-op there to avoid
-// pasting POSIX paths onto a `;`-separated PATH string.
-function fixSpawnPath() {
-  if (process.platform === 'win32') return;
+// GUI-launched apps don't inherit a shell's PATH, so a pip/pipx-installed CLI
+// (klaussy, conventions, plus gh/claude) is invisible to spawns and errors
+// with ENOENT until we prepend the well-known install dirs. This bites every
+// platform, not just macOS:
+//   - macOS: Finder/Dock launches get a minimal launchd PATH (/usr/bin:/bin:
+//     /usr/sbin:/sbin), missing brew + the user's local bin dirs.
+//   - Windows: GUI launches inherit the registry PATH, which does NOT include
+//     pipx's default bin dir (%USERPROFILE%\.local\bin) or pip --user's
+//     Scripts dir unless `pipx ensurepath` ran AND the user re-logged in.
+//   - Linux: a .desktop/AppImage launch inherits a minimal PATH that may omit
+//     ~/.local/bin (where pipx + pip --user land).
+// Returns the per-platform list of dirs to put on PATH. Adding a dir that
+// doesn't exist is a harmless no-op, so we don't stat them here.
+function spawnPathCandidates() {
   const homedir = require('os').homedir();
-  // Mac and Linux candidates intermixed — adding paths that don't exist on
-  // a given platform is a harmless no-op. Avoiding two near-identical lists.
-  const candidates = [
+  if (process.platform === 'win32') {
+    const out = [
+      // pipx's default bin dir is ~/.local/bin on EVERY OS, Windows included.
+      path.join(homedir, '.local', 'bin'),
+    ];
+    // pip --user console scripts: %APPDATA%\Python\Python3X\Scripts. The minor
+    // version varies, so enumerate what exists.
+    if (process.env.APPDATA) {
+      const pyRoot = path.join(process.env.APPDATA, 'Python');
+      try {
+        for (const e of fs.readdirSync(pyRoot, { withFileTypes: true })) {
+          if (e.isDirectory()) out.push(path.join(pyRoot, e.name, 'Scripts'));
+        }
+      } catch { /* nothing pip-user installed */ }
+    }
+    return out;
+  }
+  // macOS + Linux intermixed — a path that doesn't exist on one is harmless.
+  const out = [
     '/opt/homebrew/bin',          // Apple Silicon brew (mac)
     '/opt/homebrew/sbin',
     '/usr/local/bin',             // Intel brew + manual installs (mac/linux)
     '/usr/local/sbin',
     '/snap/bin',                  // snap-installed CLIs (Ubuntu/snap distros)
-    path.join(homedir, '.local/bin'),
+    path.join(homedir, '.local/bin'),   // pipx + pip --user (linux, mac)
     path.join(homedir, 'bin'),
     path.join(homedir, '.cargo/bin'),
     '/Applications/Cursor.app/Contents/Resources/app/bin',
   ];
-  // macOS `pip install --user` drops console scripts (conventions, klaussy)
-  // into ~/Library/Python/<X.Y>/bin — NOT ~/.local/bin. Without this, a
-  // pip-user fallback install "succeeds" but the CLI is invisible to spawns
-  // (spawn ENOENT). The minor version varies, so enumerate what exists.
+  // macOS `pip install --user` drops console scripts into
+  // ~/Library/Python/<X.Y>/bin — NOT ~/.local/bin. Without this a pip-user
+  // fallback install "succeeds" but the CLI is invisible (spawn ENOENT).
   if (process.platform === 'darwin') {
     try {
       const pyRoot = path.join(homedir, 'Library', 'Python');
-      for (const e of require('fs').readdirSync(pyRoot, { withFileTypes: true })) {
-        if (e.isDirectory()) candidates.push(path.join(pyRoot, e.name, 'bin'));
+      for (const e of fs.readdirSync(pyRoot, { withFileTypes: true })) {
+        if (e.isDirectory()) out.push(path.join(pyRoot, e.name, 'bin'));
       }
     } catch { /* no ~/Library/Python — nothing pip-user installed */ }
   }
-  const have = (process.env.PATH || '').split(':').filter(Boolean);
-  const want = candidates.filter((p) => !have.includes(p));
-  if (want.length) {
-    process.env.PATH = want.concat(have).join(':');
-  }
+  return out;
+}
+
+// Prepend dirs to process.env.PATH (de-duped, OS-correct separator). Prepend
+// — not append — so our known-good install dir wins over a stale shim earlier
+// on PATH.
+function prependToSpawnPath(dirs) {
+  const sep = path.delimiter;
+  const have = (process.env.PATH || '').split(sep).filter(Boolean);
+  const want = dirs.filter((d) => d && !have.includes(d));
+  if (want.length) process.env.PATH = want.concat(have).join(sep);
+}
+
+function fixSpawnPath() {
+  prependToSpawnPath(spawnPathCandidates());
+}
+
+// Ask pipx where it actually exposes app shims — honors a custom PIPX_BIN_DIR
+// the static candidate list can't know about. Best-effort; null if pipx is
+// absent or the query fails.
+function pipxBinDir() {
+  try {
+    const out = execFileSync('pipx', ['environment', '--value', 'PIPX_BIN_DIR'], {
+      stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
+    }).toString().trim();
+    return out || null;
+  } catch { return null; }
 }
 
 // Refresh process.env.PATH from the OS's authoritative source — used after
@@ -83,6 +122,9 @@ function fixSpawnPath() {
 //                  what GUI launches start from anyway).
 function refreshSpawnPath() {
   fixSpawnPath();
+  // pipx may expose shims under a custom PIPX_BIN_DIR the static list misses.
+  const px = pipxBinDir();
+  if (px) prependToSpawnPath([px]);
   try {
     if (process.platform === 'win32') {
       const out1 = execSync('reg query "HKCU\\Environment" /v Path', { stdio: ['ignore', 'pipe', 'pipe'], timeout: 3000 }).toString();

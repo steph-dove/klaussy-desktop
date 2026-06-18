@@ -1,6 +1,6 @@
 // All 8 Claude streaming IPC surfaces plus the explain-diff helpers and
-// the PR_REVIEW_TEMPLATE constant. Each start-handler spawns a claude
-// stream via spawnClaudeStream (from state/claude-streaming.js) and each
+// the review-prompt builder (buildReviewPrompt). Each start-handler spawns a
+// claude stream via spawnClaudeStream (from state/claude-streaming.js) and each
 // cancel handler is a thin makeClaudeCancelHandler over the matching
 // proc map.
 
@@ -13,7 +13,7 @@ const { prReview, ensureWorktreeForActivePr, currentRepoPath } = require('../sta
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
 const { getRepoIntelBlock, ensureRepoIntel } = require('../state/repo-intel');
-const { PR_REVIEW_TEMPLATE, explainPrompt } = require('../state/review-prompts');
+const { buildReviewPrompt, explainPrompt } = require('../state/review-prompts');
 
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
@@ -381,7 +381,8 @@ ipcMain.handle('inline-complete-start', (event, { requestId, worktreePath, befor
 ipcMain.handle('inline-complete-cancel', makeClaudeCancelHandler(inlineCompleteProcs));
 
 // G7: AI review in the PR review surface. Ensures a worktree (auto-cloning
-// if needed) and spawns claude with the PR_REVIEW_TEMPLATE, streaming
+// if needed) and spawns claude with the review prompt (repo-aware skill when
+// present, built-in template otherwise), streaming
 // stream-json events back to the renderer. Mirrors F6's protocol so the
 // renderer can reuse the same chunk parser.
 ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {}) => {
@@ -402,9 +403,15 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {})
   // Function replacements: the intel block is arbitrary repo content — a
   // string replacement would interpret `$&`/`$'`/`$$` in it as patterns and
   // silently mangle the prompt.
-  const prompt = PR_REVIEW_TEMPLATE
-    .replace(/\{\{BASE_BRANCH\}\}/g, () => baseRef)
-    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(ensured.worktreePath, reviewProvider));
+  // Prefer the repo's own conventions-aware review skill (.claude/skills/
+  // <repo>-review) when present; buildReviewPrompt falls back to the built-in
+  // template otherwise. repoIntelFor also kicks off generation, so a repo
+  // without a skill yet gets one built for the next run.
+  const prompt = buildReviewPrompt({
+    worktreePath: ensured.worktreePath,
+    baseRef,
+    repoSpecificChecks: repoIntelFor(ensured.worktreePath, reviewProvider),
+  });
 
   spawnClaudeStream({
     requestId, procMap: reviewSurfaceAiProcs, channelPrefix: 'pr-review-ai',
@@ -688,11 +695,14 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
   if (!requestId) return { error: 'Missing requestId' };
   if (aiReviewProcs.has(requestId)) return { error: 'Review already in flight for ' + requestId };
 
-  // Function replacements — see pr-review-ai-start for why.
+  // Prefer the repo's conventions-aware review skill when present; fall back to
+  // the built-in template. See pr-review-ai-start for the repo-aware rationale.
   const reviewAgent = pickProvider(provider, defaultAgentProvider());
-  const prompt = PR_REVIEW_TEMPLATE
-    .replace(/\{\{BASE_BRANCH\}\}/g, () => baseBranch || 'main')
-    .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoIntelFor(worktreePath, reviewAgent));
+  const prompt = buildReviewPrompt({
+    worktreePath,
+    baseRef: baseBranch || 'main',
+    repoSpecificChecks: repoIntelFor(worktreePath, reviewAgent),
+  });
 
   // stream-json gives us a JSONL event per assistant/tool/result block so we
   // can surface progress in the UI instead of a 15-minute silent spinner.
