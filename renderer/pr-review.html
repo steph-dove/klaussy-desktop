@@ -13,6 +13,11 @@
 </head>
 <body class="pr-review-popout">
   <div id="pr-review-root"></div>
+  <!-- Theme must load + init here too: this popout is a separate window with
+       its own document, so it has to read the shared theme from config and
+       apply the CSS variables itself. Without it the popout falls back to the
+       dark defaults in 01-base.css regardless of the main window's theme. -->
+  <script src="theme.js"></script>
   <script src="utils.js"></script>
   <script src="toast.js"></script>
   <!-- Markdown rendering for comment bodies (markdown-it + DOMPurify are UMD;
@@ -29,6 +34,11 @@
   <script src="pr-review-conversation.js"></script>
   <script src="pr-review-checks.js"></script>
   <script>
+    // Read the shared theme from config and apply it before/while mounting so
+    // the popout matches the main window (init() is async but applies the CSS
+    // variables as soon as it resolves; pr-review.js also listens for the
+    // 'theme-changed' event it dispatches).
+    if (window.ThemeManager && ThemeManager.init) ThemeManager.init();
     // Host is the window itself; no other renderer modules are loaded here.
     window.PrReview.mount({
       host: document.getElementById('pr-review-root'),
