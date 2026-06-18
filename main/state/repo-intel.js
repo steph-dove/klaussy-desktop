@@ -76,6 +76,51 @@ function artifactsMtime(repoPath) {
   return Math.max(mtimeOf(a.claudeMd), mtimeOf(a.rawJson), mtimeOf(a.rulesDir));
 }
 
+// Claude Code's recognized hook events. The pre-rename klausify scaffold wrote
+// a `.claude/settings.json` with a `hooks.PreCommit` block (shape
+// {command, description}) that isn't a real Claude Code hook event — so every
+// time an agent loads such a repo, the claude CLI flags the unexpected
+// property. We can't fix it by re-running `klaussy init` (it skips existing
+// files without --force, which would also clobber a handcrafted CLAUDE.md and
+// custom permissions), so we surgically strip the stray events instead.
+const VALID_HOOK_EVENTS = new Set([
+  'PreToolUse', 'PostToolUse', 'UserPromptSubmit', 'Notification',
+  'Stop', 'SubagentStop', 'PreCompact', 'SessionStart', 'SessionEnd',
+]);
+
+// Remove unrecognized hook events from a repo's .claude/settings.json, in
+// place. Best-effort and idempotent: no settings file, valid JSON we can't
+// parse, or no stray events → no write. Returns the list of events removed.
+function repairClaudeSettings(repoPath) {
+  const file = path.join(repoPath, '.claude', 'settings.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(file, 'utf-8');
+  } catch {
+    return []; // no settings.json — nothing to repair
+  }
+  let cfg;
+  try {
+    cfg = JSON.parse(raw);
+  } catch {
+    return []; // malformed JSON — don't risk rewriting it
+  }
+  if (!cfg || typeof cfg !== 'object' || !cfg.hooks || typeof cfg.hooks !== 'object') return [];
+  const stray = Object.keys(cfg.hooks).filter((k) => !VALID_HOOK_EVENTS.has(k));
+  if (!stray.length) return [];
+  for (const k of stray) delete cfg.hooks[k];
+  if (!Object.keys(cfg.hooks).length) delete cfg.hooks; // don't leave an empty hooks:{}
+  try {
+    const nl = raw.endsWith('\n') ? '\n' : ''; // preserve trailing newline
+    fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + nl);
+    console.log('[repo-intel] repaired .claude/settings.json in', repoPath,
+      '— removed invalid hook event(s):', stray.join(', '));
+  } catch (e) {
+    console.warn('[repo-intel] settings repair failed for', repoPath + ':', e.message);
+  }
+  return stray;
+}
+
 // klaussy CLI — command `klaussy` (PyPI `klaussy-agents`). We memoize BOTH
 // which binary is on PATH and its version: the version doubles as the
 // regeneration stamp ("redo when there is a new version"), and the resolved
@@ -297,6 +342,10 @@ function syncIntelIntoWorktree(worktreePath) {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.cpSync(src, dst, { recursive: true });
     }
+    // Heal a stale klausify-era settings.json — whether just copied from a
+    // not-yet-repaired base or already present in this worktree (the copy loop
+    // skips existing files, so an old bad one would otherwise survive).
+    repairClaudeSettings(worktreePath);
   } catch (e) {
     console.warn('[repo-intel] worktree sync failed for', worktreePath, e.message);
   }
@@ -497,6 +546,10 @@ function ensureRepoIntel(repoOrWorktreePath) {
       const cli = await getKlaussyCli();
       const currentVersion = cli.version || '';
       const a = artifactPaths(base);
+      // Heal a stale klausify-era settings.json on the base repo every run
+      // (cache hit or full regen) — klaussy init won't, since it skips existing
+      // files. Cheap and idempotent: a clean settings.json is a no-op.
+      repairClaudeSettings(base);
       const srcMtime = artifactsMtime(base);
       const cached = memCache.get(base) || readDiskCache(base);
       const stampedVersion = cached ? (cached.cliVersion || '') : null;
