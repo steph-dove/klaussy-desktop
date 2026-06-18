@@ -29,12 +29,13 @@ test('create-task spawns a worktree on a new branch', async ({ mainWindow }) => 
   await mainWindow.waitForLoadState('networkidle');
 
   const repo = buildBaseRepo();
-  // create-task places the worktree as a sibling of the repo, so the
-  // parent dir is what we'll need to clean up at the end.
-  const baseDir = path.dirname(repo);
+  // Default layout (see create-task in main/ipc/tasks.js): one folder per
+  // session holding each repo's worktree — ~/klaussy/sessions/<session>/<repo>.
+  // The session name is the sanitized task name (unchanged for 'feature-x').
   const repoBasename = path.basename(repo);
   const taskName = 'feature-x';
-  const expectedWorktree = path.join(baseDir, repoBasename + '-' + taskName);
+  const sessionDir = path.join(os.homedir(), 'klaussy', 'sessions', taskName);
+  const expectedWorktree = path.join(sessionDir, repoBasename);
 
   let taskId = null;
   try {
@@ -60,10 +61,11 @@ test('create-task spawns a worktree on a new branch', async ({ mainWindow }) => 
     if (taskId != null) {
       await mainWindow.evaluate((id) => window.klaus.task.kill(id), taskId).catch(() => {});
     }
-    // git worktree remove + delete branch so the parent repo can be rmRf'd.
+    // git worktree remove + delete branch, then drop the temp repo and the
+    // session folder (which holds the worktree under ~/klaussy/sessions).
     try { execFileSync('git', ['worktree', 'remove', '--force', expectedWorktree], { cwd: repo, stdio: 'pipe' }); } catch {}
     try { execFileSync('git', ['branch', '-D', taskName], { cwd: repo, stdio: 'pipe' }); } catch {}
     fs.rmSync(repo, { recursive: true, force: true });
-    fs.rmSync(expectedWorktree, { recursive: true, force: true });
+    fs.rmSync(sessionDir, { recursive: true, force: true });
   }
 });
