@@ -1,7 +1,7 @@
 {
   "name": "klaussy-desktop",
   "productName": "Klaussy",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
   "author": {
