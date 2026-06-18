@@ -27,10 +27,12 @@ let nextId = 1;
 
 let _isQuitting = () => false;
 let _startCIPolling = () => {};
+let _stopCIPolling = () => {};
 
-function setDeps({ isQuitting, startCIPolling } = {}) {
+function setDeps({ isQuitting, startCIPolling, stopCIPolling } = {}) {
   if (isQuitting) _isQuitting = isQuitting;
   if (startCIPolling) _startCIPolling = startCIPolling;
+  if (stopCIPolling) _stopCIPolling = stopCIPolling;
 }
 
 // Subscription-based PTY broadcast. Previously every onData chunk was sent to
@@ -435,8 +437,53 @@ function convertInstanceToShell(inst) {
   }
 }
 
+// A window is closing while other windows stay open. Tasks that ONLY this
+// window was rendering would otherwise leak: their PTYs keep running with no
+// window able to show them again (the sole reattach path is an app restart),
+// and their worktrees stay flagged "active" — so the user can't reopen the
+// session from another window ("Every worktree in this session is already
+// open."). Kill those orphaned PTYs so the worktrees free up. A task still
+// rendered by another live window (or a popout) is left running, untouched.
+//
+// MUST run on the window's 'close' (not 'closed'): ownership is read from the
+// terminal subscription set, and the per-channel auto-cleanup removes this
+// window's webContents the instant it is destroyed.
+function reclaimOrphanedTasks(closingWc) {
+  for (const [id, inst] of instances) {
+    const subs = terminalSubscribers.get(`terminal-data-${id}`);
+    // Only reclaim tasks this window actually rendered.
+    if (!subs || !subs.has(closingWc)) continue;
+    // Leave it running if any OTHER live window — or a popout — still shows it.
+    let otherViewer = false;
+    for (const wc of subs) {
+      if (wc !== closingWc && !wc.isDestroyed()) { otherViewer = true; break; }
+    }
+    if (!otherViewer) {
+      for (const w of inst.popoutWindows) {
+        if (!w.isDestroyed()) { otherViewer = true; break; }
+      }
+    }
+    if (otherViewer) continue;
+
+    // Same teardown as kill-task: flag killed BEFORE kill() so the onExit
+    // handler skips the Claude→shell auto-convert (which would spawn an orphan
+    // PTY with no instances entry that nothing could ever stop).
+    inst.killed = true;
+    clearIdleTimer(inst);
+    _stopCIPolling(id);
+    try { inst.pty.kill(); } catch {}
+    for (const sub of (inst.subTerminals || [])) {
+      try { sub.pty.kill(); } catch {}
+    }
+    inst.alive = false;
+    // Never touch the worktree/branch on disk — only stop the process.
+    instances.delete(id);
+  }
+}
+
 module.exports = {
   instances,
+  reclaimOrphanedTasks,
   subscribeTerminalChannel,
   unsubscribeTerminalChannel,
   sendToTerminalSubscribers,

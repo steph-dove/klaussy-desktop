@@ -11,7 +11,7 @@ const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const lspManager = require('../../lsp-manager');
 const { loadConfig, saveConfig, flushSaveConfig, runConfigMigrations } = require('../util/config');
 const {
-  allWindows, getMainWindow, createWindow,
+  allWindows, getMainWindow, createWindow, setWindowCloseHook,
 } = require('../state/windows');
 const instancesModule = require('../state/instances');
 const {
@@ -20,7 +20,7 @@ const {
   detectClaudeSessionId, findLatestSessionId,
 } = instancesModule;
 const { getProvider, isAgentMode, allProviders, binFor } = require('../state/ai-providers');
-const { startAutoFetch, startCIPolling } = require('../state/ci-poll');
+const { startAutoFetch, startCIPolling, stopCIPolling } = require('../state/ci-poll');
 const prReviewModule = require('../state/pr-review');
 require('../ipc/tasks');
 const { installAppMenu } = require('./menu');
@@ -278,6 +278,21 @@ function install() {
   instancesModule.setDeps({
     isQuitting: () => isQuitting,
     startCIPolling,
+    stopCIPolling,
+  });
+
+  // Closing a window while others stay open: kill the tasks only that window
+  // was rendering so their worktrees stop reading as "active" (otherwise the
+  // session can't be reopened from another window — "Every worktree in this
+  // session is already open."). Skipped when quitting or closing the LAST
+  // window — those paths run shutdownAndSave, which persists live sessions for
+  // resume; reclaiming first would delete them before they're saved. (The
+  // closing window is still in allWindows during 'close', so size <= 1 means
+  // it's the last one.)
+  setWindowCloseHook((win) => {
+    if (isQuitting || allWindows.size <= 1) return;
+    if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) return;
+    instancesModule.reclaimOrphanedTasks(win.webContents);
   });
 
   // Terminal subscribe/unsubscribe — tiny IPC relay into state/instances.
