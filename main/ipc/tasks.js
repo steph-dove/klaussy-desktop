@@ -12,6 +12,7 @@ const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree } = require('../util/git-repo');
+const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
@@ -670,8 +671,9 @@ function currentClaudeSessionModel(worktreePath, sessionId, spawnedAtMs) {
   try {
     const home = process.env.HOME || os.homedir();
     if (!home || !worktreePath) return null;
-    // Same encoding listSessionFiles (state/instances.js) uses.
-    const projectDir = path.join(home, '.claude', 'projects', worktreePath.replace(/\//g, '-'));
+    // Same encoding listSessionFiles (state/instances.js) uses — every
+    // non-alphanumeric char becomes '-' (see util/claude-paths).
+    const projectDir = claudeProjectDir(worktreePath);
     if (sessionId) {
       const exact = path.join(projectDir, sessionId + '.jsonl');
       if (fs.existsSync(exact)) {

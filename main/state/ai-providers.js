@@ -26,6 +26,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { claudeProjectDir } = require('../util/claude-paths');
 
 function home() {
   return process.env.HOME || os.homedir();
@@ -140,7 +141,11 @@ const PROVIDERS = {
     },
     sessionDir(worktreePath) {
       if (!worktreePath) return null;
-      return path.join(home(), '.claude', 'projects', worktreePath.replace(/\//g, '-'));
+      // Claude replaces every non-alphanumeric char with '-' (not just '/') —
+      // see util/claude-paths. A '/'-only encoding misses PR-checkout
+      // worktrees under "Application Support" (space), so the implement-PTY
+      // tail never finds the session file and the run never marks "done".
+      return claudeProjectDir(worktreePath);
     },
 
     parseStreamLine(obj) {

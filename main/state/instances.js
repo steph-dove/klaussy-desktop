@@ -16,6 +16,7 @@ const { Notification } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { baseRepoForWorktree } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
+const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const { allWindows, getMainWindow } = require('./windows');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-providers');
@@ -78,9 +79,10 @@ function sendToTerminalSubscribers(channel, ...args) {
 function listSessionFiles(worktreePath) {
   const home = process.env.HOME || require('os').homedir();
   if (!home || !worktreePath) return [];
-  const claudeDir = path.join(home, '.claude', 'projects');
-  const encodedPath = worktreePath.replace(/\//g, '-');
-  const projectDir = path.join(claudeDir, encodedPath);
+  // Claude encodes the cwd by replacing every non-alphanumeric char with '-'
+  // (not just '/'); see util/claude-paths. Needed for worktrees with spaces
+  // (PR checkouts under "Application Support").
+  const projectDir = claudeProjectDir(worktreePath);
   try {
     if (!fs.existsSync(projectDir)) return [];
     return fs.readdirSync(projectDir)
