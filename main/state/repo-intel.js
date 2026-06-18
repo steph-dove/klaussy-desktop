@@ -76,15 +76,20 @@ function artifactsMtime(repoPath) {
   return Math.max(mtimeOf(a.claudeMd), mtimeOf(a.rawJson), mtimeOf(a.rulesDir));
 }
 
-// klaussy CLI — command `klaussy` (PyPI `klaussy-agents`); older installs
-// expose the legacy `klausify` command, so probe the new name first and fall
-// back. We memoize BOTH which binary is on PATH and its version: the version
-// doubles as the regeneration stamp ("redo when there is a new version"), and
-// the resolved binary keeps the version probe and the `init` spawn in sync. A
-// null result (neither installed / transient spawn failure / probe raced the
-// PATH fix) is cached only briefly so an install mid-run is picked up.
+// klaussy CLI — command `klaussy` (PyPI `klaussy-agents`). We memoize BOTH
+// which binary is on PATH and its version: the version doubles as the
+// regeneration stamp ("redo when there is a new version"), and the resolved
+// binary keeps the version probe and the `init` spawn in sync. A null result
+// (not installed / transient spawn failure / probe raced the PATH fix) is
+// cached only briefly so an install mid-run is picked up.
+//
+// The pre-rename `klausify` command is deliberately NOT probed as a fallback:
+// an existing machine that still has klausify 0.2.x must upgrade to
+// klaussy-agents (its new prompt templates are the whole point of the
+// rename), so we ignore klausify here and let ensureReviewTools install the
+// new package instead of silently running the stale CLI.
 const KLAUSSY_VERSION_NULL_TTL_MS = 60 * 1000;
-const AGENT_BINS = ['klaussy', 'klausify']; // new name first, legacy fallback
+const AGENT_BINS = ['klaussy']; // klaussy-agents — no legacy klausify fallback
 let klaussyCli = { bin: null, version: null, at: 0, promise: null };
 function getKlaussyCli() {
   if (klaussyCli.promise) return klaussyCli.promise;
@@ -96,7 +101,7 @@ function getKlaussyCli() {
         const r = await execFileP(bin, ['--version'], { timeout: 15000 });
         const v = String(r.stdout).trim() || null;
         if (v) { klaussyCli = { bin, version: v, at: Date.now(), promise: null }; return klaussyCli; }
-      } catch { /* try the legacy name */ }
+      } catch { /* not on PATH — fall through to the null result */ }
     }
     klaussyCli = { bin: null, version: null, at: Date.now(), promise: null };
     return klaussyCli;
@@ -125,15 +130,21 @@ function notifyWindows(payload) {
 // both tools are available afterward.
 let toolsPromise = null;
 // Command name (what we run / detect) vs PyPI package name (what we install)
-// — they differ for both tools. `legacyCmd`/`legacyPkg` are the pre-rename
-// names: detection accepts either binary, and install falls back to the old
-// package while the renamed ones propagate on PyPI. Presence is checked with
-// `--help`: the `conventions` CLI has no `--version` flag, but all support
-// `--help` and exit 0. (`conventions` is the command for old and new packages
-// alike, so it needs no legacyCmd.)
+// — they differ for klaussy-agents (command `klaussy`). Presence is checked
+// with `--help`: the `conventions` CLI has no `--version` flag, but all
+// support `--help` and exit 0.
+//
+// Detection keys on the NEW command only. A machine that still has the
+// pre-rename `klausify` command is treated as MISSING so it upgrades to
+// klaussy-agents (and its new prompt templates) instead of being stuck on
+// the legacy CLI. The `conventions` command is shared by the old
+// `conventions-cli` and the new `klaussy-repo-conventions` (same command,
+// same 1.4.x), so an existing `conventions` already satisfies it; we only
+// install the new dist on machines that lack the command, since reinstalling
+// over it would just collide on the pipx symlink for no behavior change.
 const TOOLS = [
-  { cmd: 'conventions', pkg: 'klaussy-repo-conventions', legacyPkg: 'conventions-cli' },
-  { cmd: 'klaussy', pkg: 'klaussy-agents', legacyCmd: 'klausify', legacyPkg: 'klausify' },
+  { cmd: 'conventions', pkg: 'klaussy-repo-conventions' },
+  { cmd: 'klaussy', pkg: 'klaussy-agents' },
 ];
 
 async function toolPresent(cmd) {
@@ -143,13 +154,6 @@ async function toolPresent(cmd) {
   } catch {
     return false;
   }
-}
-
-// A tool counts as available if either its new or legacy command is on PATH.
-async function toolAvailable(t) {
-  if (await toolPresent(t.cmd)) return true;
-  if (t.legacyCmd && (await toolPresent(t.legacyCmd))) return true;
-  return false;
 }
 
 async function pickInstaller() {
@@ -170,7 +174,7 @@ function ensureReviewTools() {
   if (toolsPromise) return toolsPromise;
   toolsPromise = (async () => {
     const missing = [];
-    for (const t of TOOLS) if (!(await toolAvailable(t))) missing.push(t);
+    for (const t of TOOLS) if (!(await toolPresent(t.cmd))) missing.push(t);
     if (!missing.length) return true;
     const pkgs = missing.map((t) => t.pkg);
     const manual = 'pipx install ' + pkgs.join(' ');
@@ -184,26 +188,20 @@ function ensureReviewTools() {
 
     notifyWindows({ type: 'tools-installing', missing: pkgs, installer: installer.kind });
     console.log('[repo-intel] installing', pkgs.join(', '), 'via', installer.kind);
-    try {
-      // Separate installs so one failure doesn't abort the others; each tool
-      // falls back to its legacy package name when the renamed one isn't on
-      // PyPI yet.
-      const installOne = (pkg) => installer.kind === 'pipx'
-        ? execFileP('pipx', ['install', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 })
-        : execFileP(installer.py, ['-m', 'pip', 'install', '--user', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
-      for (const t of missing) {
-        try {
-          await installOne(t.pkg);
-        } catch (e) {
-          if (!t.legacyPkg) throw e;
-          await installOne(t.legacyPkg);
-        }
+    // Separate installs so one tool's failure doesn't abort the others — the
+    // post-install availability re-check below owns the overall verdict.
+    const installOne = (pkg) => installer.kind === 'pipx'
+      ? execFileP('pipx', ['install', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 })
+      : execFileP(installer.py, ['-m', 'pip', 'install', '--user', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
+    const failures = [];
+    for (const t of missing) {
+      try {
+        await installOne(t.pkg);
+      } catch (err) {
+        const first = ((err && err.stderr ? String(err.stderr) : '') || (err && err.message) || '').trim().split('\n').pop();
+        console.warn('[repo-intel] install failed for', t.pkg + ':', first);
+        failures.push(first);
       }
-    } catch (err) {
-      const first = ((err && err.stderr ? String(err.stderr) : '') || (err && err.message) || '').trim().split('\n').pop();
-      console.warn('[repo-intel] tool install failed:', first);
-      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: first, manual });
-      return false;
     }
 
     // New binaries land in ~/.local/bin (pipx) or the pip user bin — make
@@ -212,12 +210,15 @@ function ensureReviewTools() {
     // Drop the cached "missing" klaussy CLI so the next ensure re-probes.
     klaussyCli = { bin: null, version: null, at: 0, promise: null };
 
-    const ok = (await Promise.all(missing.map((t) => toolAvailable(t)))).every(Boolean);
+    const ok = (await Promise.all(missing.map((t) => toolPresent(t.cmd)))).every(Boolean);
     if (ok) {
       console.log('[repo-intel] installed', pkgs.join(', '));
       notifyWindows({ type: 'tools-installed', installed: pkgs });
     } else {
-      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: 'installed but not on PATH',
+      // Prefer a real install error over the generic PATH message: a 404/pip
+      // failure is more actionable than "installed but not on PATH".
+      const reason = failures.length ? failures[failures.length - 1] : 'installed but not on PATH';
+      notifyWindows({ type: 'tools-failed', missing: pkgs, reason,
         manual: 'restart Klaussy, or run: ' + manual });
     }
     return ok;
