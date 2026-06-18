@@ -14,6 +14,13 @@ const lspManager = require('../../lsp-manager');
 let _mainWindow = null;
 const allWindows = new Set();
 
+// Invoked on every BrowserWindow's 'close'. Wired up by bootstrap/app-events
+// (which can see both the window set and the instances module without a require
+// cycle — state modules don't import each other). Defaults to a no-op so
+// createWindow works before install() runs.
+let _onWindowClose = () => {};
+function setWindowCloseHook(fn) { _onWindowClose = fn || (() => {}); }
+
 function getMainWindow() { return _mainWindow; }
 function setMainWindow(win) { _mainWindow = win; }
 
@@ -65,6 +72,11 @@ function createWindow(opts) {
     win.loadFile(url);
   }
   allWindows.add(win);
+  // 'close' (not 'closed'): the hook reads terminal subscriptions to decide
+  // which tasks this window owned, and those are torn down once it's destroyed.
+  win.on('close', () => {
+    try { _onWindowClose(win); } catch (e) { console.error('[window close hook]', e); }
+  });
   win.on('closed', () => { allWindows.delete(win); });
 
   if (!_mainWindow || _mainWindow.isDestroyed()) {
@@ -78,6 +90,7 @@ module.exports = {
   allWindows,
   getMainWindow,
   setMainWindow,
+  setWindowCloseHook,
   hardenWindow,
   createWindow,
 };
