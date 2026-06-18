@@ -7,7 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
-const { app, ipcMain, BrowserWindow, webContents } = require('electron');
+const { app, ipcMain, BrowserWindow, webContents, nativeTheme } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
@@ -397,6 +397,19 @@ ipcMain.handle('pr-review-close', () => {
   return { ok: true };
 });
 
+// Background colors mirror the renderer/theme.js preset bg values so the
+// popout's first paint matches the active theme instead of flashing the dark
+// brand color before the CSS variables apply. 'system' resolves via the OS.
+const THEME_BG = {
+  dark: '#0e0e13', midnight: '#0d1117', monokai: '#272822', nord: '#2e3440',
+  solarized: '#002b36', rose: '#191724', light: '#ffffff',
+};
+function popoutBackgroundColor() {
+  const preset = (loadConfig().theme || {}).preset || 'dark';
+  if (preset === 'system') return nativeTheme.shouldUseDarkColors ? THEME_BG.dark : THEME_BG.light;
+  return THEME_BG[preset] || THEME_BG.dark;
+}
+
 ipcMain.handle('pop-out-pr-review', () => {
   if (!prReview.active) return { error: 'No active PR review' };
   if (prReview.active.popout && !prReview.active.popout.isDestroyed()) {
@@ -409,7 +422,7 @@ ipcMain.handle('pop-out-pr-review', () => {
     height: 800,
     title: `Review \u2014 #${prReview.active.number} ${prReview.active.meta.title || ''}`,
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
-    backgroundColor: '#1a1a2e',
+    backgroundColor: popoutBackgroundColor(),
     webPreferences: {
       preload: path.join(__dirname, '..', '..', 'preload.js'),
       contextIsolation: true,
