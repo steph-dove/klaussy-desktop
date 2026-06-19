@@ -138,14 +138,23 @@ function buildFailingCheckContext({ checkLink, checkName, checkRunId, cwd, baseO
 // prompt with PR description + diff + log tail, and streams claude's analysis
 // back to the renderer. Same chunk/done event protocol as Explain so the
 // renderer can reuse the same UX.
-ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName, checkRunId }) => {
+ipcMain.handle('pr-debug-check-start', async (event, { requestId, checkLink, checkName, checkRunId }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
   if (!prReview.active) return { error: 'No active PR review' };
   const { meta, baseOwner, baseRepo, diff } = prReview.active;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
 
-  const cwd = currentRepoPath() || require('os').homedir();
+  // Diagnose in the PR's own worktree — NOT currentRepoPath(), which is
+  // whatever project/session happens to be active in the app and is usually a
+  // different repo entirely. Without this the agent can't read the PR's files
+  // and is forced to reason from the pasted log/diff alone (the exact failure
+  // we're fixing). ensureWorktreeForActivePr is reuse-first, so this attaches
+  // to a worktree already materialized by Fix / AI Review when one exists, and
+  // also points .github/workflows lookup at the PR's copy of the YAML.
+  const ensured = await ensureWorktreeForActivePr();
+  if (ensured.error) return { error: ensured.error };
+  const cwd = ensured.worktreePath;
   const ctx = buildFailingCheckContext({ checkLink, checkName, checkRunId, cwd, baseOwner, baseRepo, diff });
   if (ctx.error) return { error: ctx.error };
 
@@ -182,6 +191,7 @@ ipcMain.handle('pr-debug-check-start', (event, { requestId, checkLink, checkName
         baseOwner, baseRepo,
         checkLink,
         checkName: checkName || '',
+        worktreePath: ensured.worktreePath,
       },
     },
   });
