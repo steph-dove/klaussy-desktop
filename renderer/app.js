@@ -669,6 +669,16 @@ window.App = window.App || {};
       App.modalBaseSelect.classList.remove('modal-field-invalid');
       if (App.modalError) App.modalError.textContent = '';
     });
+    // Searchable dropdown over the base-branch picker (branch lists get long).
+    // It mirrors the select's `hidden` toggle, so it stays invisible until
+    // branches load.
+    if (window.SearchableSelect) {
+      window.SearchableSelect.enhance(App.modalBaseSelect, {
+        className: 'ss-base-branch',
+        placeholder: 'Base branch',
+        searchPlaceholder: 'Search branches…',
+      });
+    }
   }
 
   // Discovery promises, cached per modal-open so toggling a dropdown doesn't
