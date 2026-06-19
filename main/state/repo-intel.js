@@ -202,10 +202,17 @@ async function toolPresent(cmd) {
 }
 
 async function pickInstaller() {
+  // Prefer isolated installers (pipx, uv): each tool gets its own venv, so they
+  // are immune to PEP 668 "externally-managed-environment" rejections that a
+  // Homebrew/Debian system Python raises against `pip install`.
   try {
     await execFileP('pipx', ['--version'], { timeout: 10000 });
     return { kind: 'pipx' };
   } catch { /* no pipx */ }
+  try {
+    await execFileP('uv', ['--version'], { timeout: 10000 });
+    return { kind: 'uv' };
+  } catch { /* no uv */ }
   for (const py of ['python3', 'python']) {
     try {
       await execFileP(py, ['-m', 'pip', '--version'], { timeout: 10000 });
@@ -215,29 +222,96 @@ async function pickInstaller() {
   return null;
 }
 
+// Bootstrap pipx itself when the machine has Python but no isolated installer.
+// Done silently in the background (no manual hand-off): Homebrew first (cleanest
+// on macOS / Linuxbrew, no PEP 668), otherwise `pip install --user pipx` with
+// the externally-managed escape hatch. Wires PATH via `pipx ensurepath` +
+// refreshSpawnPath so the freshly-installed pipx is usable this session.
+// Returns true only if `pipx` is callable afterwards.
+async function bootstrapPipx(py) {
+  const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+  console.log('[repo-intel] no pipx/uv found — bootstrapping pipx in the background');
+  let installed = false;
+  try {
+    await execFileP('brew', ['--version'], { timeout: 10000 });
+    await execFileP('brew', ['install', 'pipx'], BIG);
+    installed = true;
+  } catch { /* no brew, or brew install failed — try pip below */ }
+  if (!installed && py) {
+    try {
+      await execFileP(py, ['-m', 'pip', 'install', '--user', 'pipx'], BIG);
+      installed = true;
+    } catch (err) {
+      const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
+      if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
+        try {
+          await execFileP(py, ['-m', 'pip', 'install', '--user', '--break-system-packages', 'pipx'], BIG);
+          installed = true;
+        } catch { /* give up on pip bootstrap */ }
+      }
+    }
+  }
+  if (!installed) return false;
+  // Wire the new pipx onto PATH for this session.
+  try { await execFileP(py || 'python3', ['-m', 'pipx', 'ensurepath'], { timeout: 30000 }); } catch {}
+  try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+  try { await execFileP('pipx', ['--version'], { timeout: 10000 }); return true; }
+  catch { return false; }
+}
+
 function ensureReviewTools() {
   if (toolsPromise) return toolsPromise;
   toolsPromise = (async () => {
+    // GUI launches start with a minimal PATH, so pipx/uv/python may be invisible
+    // even though they're installed. Refresh PATH from the user's shell first so
+    // both tool detection and installer selection can see them.
+    try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+
     const missing = [];
     for (const t of TOOLS) if (!(await toolPresent(t.cmd))) missing.push(t);
     if (!missing.length) return true;
     const pkgs = missing.map((t) => t.pkg);
-    const manual = 'pipx install ' + pkgs.join(' ');
 
-    const installer = await pickInstaller();
+    let installer = await pickInstaller();
     if (!installer) {
-      console.warn('[repo-intel] cannot auto-install', pkgs.join(', '), '— no pipx or pip found');
-      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: 'no pipx or pip available', manual });
+      // Nothing we can do automatically. Report it (without handing the user a
+      // command to run) and clear the memo so a later trigger can retry once an
+      // installer is present.
+      console.warn('[repo-intel] cannot auto-install', pkgs.join(', '), '— no pipx, uv, or pip found');
+      notifyWindows({ type: 'tools-failed', missing: pkgs, reason: 'no Python installer (pipx/uv/pip) available' });
+      toolsPromise = null;
       return false;
+    }
+    // Only bare pip available (no isolated installer) — bootstrap pipx for the
+    // user in the background and prefer it, so the tools land in clean venvs
+    // instead of leaning on pip's PEP 668 escape hatch. Falls back to pip if the
+    // bootstrap doesn't take.
+    if (installer.kind === 'pip' && await bootstrapPipx(installer.py)) {
+      console.log('[repo-intel] bootstrapped pipx');
+      installer = { kind: 'pipx' };
     }
 
     notifyWindows({ type: 'tools-installing', missing: pkgs, installer: installer.kind });
     console.log('[repo-intel] installing', pkgs.join(', '), 'via', installer.kind);
     // Separate installs so one tool's failure doesn't abort the others — the
     // post-install availability re-check below owns the overall verdict.
-    const installOne = (pkg) => installer.kind === 'pipx'
-      ? execFileP('pipx', ['install', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 })
-      : execFileP(installer.py, ['-m', 'pip', 'install', '--user', pkg], { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 });
+    const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+    const installOne = async (pkg) => {
+      if (installer.kind === 'pipx') return execFileP('pipx', ['install', pkg], BIG);
+      if (installer.kind === 'uv') return execFileP('uv', ['tool', 'install', pkg], BIG);
+      // pip --user. An externally-managed Python (PEP 668, e.g. Homebrew) refuses
+      // the plain install; retry once with --break-system-packages — the
+      // documented escape hatch, safe here since --user can't touch system pkgs.
+      try {
+        return await execFileP(installer.py, ['-m', 'pip', 'install', '--user', pkg], BIG);
+      } catch (err) {
+        const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
+        if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
+          return execFileP(installer.py, ['-m', 'pip', 'install', '--user', '--break-system-packages', pkg], BIG);
+        }
+        throw err;
+      }
+    };
     const failures = [];
     for (const t of missing) {
       try {
@@ -260,11 +334,12 @@ function ensureReviewTools() {
       console.log('[repo-intel] installed', pkgs.join(', '));
       notifyWindows({ type: 'tools-installed', installed: pkgs });
     } else {
-      // Prefer a real install error over the generic PATH message: a 404/pip
-      // failure is more actionable than "installed but not on PATH".
+      // Don't hand the user a manual command — just surface that the background
+      // install didn't take, and clear the memo so the next trigger retries.
       const reason = failures.length ? failures[failures.length - 1] : 'installed but not on PATH';
-      notifyWindows({ type: 'tools-failed', missing: pkgs, reason,
-        manual: 'restart Klaussy, or run: ' + manual });
+      console.warn('[repo-intel] auto-install incomplete:', reason);
+      notifyWindows({ type: 'tools-failed', missing: pkgs, reason });
+      toolsPromise = null;
     }
     return ok;
   })();

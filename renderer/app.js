@@ -194,7 +194,7 @@ window.App = window.App || {};
         return;
       }
       if (ev.type === 'tools-failed') {
-        window.toast.warn('Could not auto-install ' + (ev.missing || []).join(', ') + ' (' + (ev.reason || 'unknown') + '). Install manually: ' + (ev.manual || 'pipx install klaussy-repo-conventions klaussy-agents'));
+        window.toast.warn('Repo-analysis tools (' + (ev.missing || []).join(', ') + ') couldn’t be installed automatically (' + (ev.reason || 'unknown') + '). Klaussy will retry in the background.');
         return;
       }
       if (!ev.repoPath) return;
