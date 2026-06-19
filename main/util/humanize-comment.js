@@ -7,6 +7,8 @@
 //
 // Returns the humanized string; passes non-strings through unchanged.
 
+const { execFileSync } = require('child_process');
+
 // Sentence-initial filler openers. Stripped only at the start of the text or a
 // line (so we don't cut mid-sentence), and the following word is re-capitalized.
 const OPENERS = '(?:It\'?s worth noting that|It\'?s important to note that'
@@ -36,7 +38,9 @@ function scrubProse(s) {
   return s;
 }
 
-function humanizeComment(input) {
+// Built-in JS port of the scrubber — the fallback when the canonical CLI
+// isn't reachable.
+function humanizeCommentJs(input) {
   if (typeof input !== 'string' || !input) return input;
   // Preserve fenced and inline code: only the even segments are prose.
   const fenceParts = input.split(/(```[\s\S]*?```)/g);
@@ -48,4 +52,25 @@ function humanizeComment(input) {
   return fenceParts.join('').replace(/\n{3,}/g, '\n\n').trim();
 }
 
-module.exports = { humanizeComment };
+// Humanize an outbound comment body just before posting. Prefers the canonical
+// `klaussy humanize` CLI — it's the source of truth, kept in lockstep with
+// klaussy-agents, so its scrubbing rules stay current as users upgrade. Falls
+// back to the built-in JS port when klaussy isn't installed / on PATH / errors.
+// Runs at the app's post chokepoint, so it applies regardless of which agent
+// wrote the comment.
+function humanizeComment(input) {
+  if (typeof input !== 'string' || !input) return input;
+  try {
+    const out = execFileSync('klaussy', ['humanize'], {
+      input,
+      encoding: 'utf-8',
+      timeout: 15000,
+      maxBuffer: 8 * 1024 * 1024,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    if (typeof out === 'string' && out.length) return out.replace(/\n{3,}/g, '\n\n').trim();
+  } catch { /* CLI missing / offline / error — use the built-in port */ }
+  return humanizeCommentJs(input);
+}
+
+module.exports = { humanizeComment, humanizeCommentJs };
