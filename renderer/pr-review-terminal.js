@@ -259,7 +259,7 @@
           PR.localBanner = { kind: 'error', text: r.error };
           PR.repaintAiReviewTab();
         } else {
-          PR.localBanner = { kind: 'ok', text: 'Pushed to ' + (r && r.target ? r.target : 'PR branch') + '.' };
+          PR.localBanner = { kind: 'ok', text: (r && r.rebased ? 'Rebased onto the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' };
           PR.refreshLocalChanges();
         }
       });
