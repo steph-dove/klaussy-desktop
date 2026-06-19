@@ -940,23 +940,57 @@ ipcMain.handle('pr-review-push-local', async (_event, args) => {
   }
   const authedUrl = `https://oauth2:${token}@github.com/${headOwner}/${headRepoName}.git`;
   const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
+  const target = `${headOwner}/${headRepoName}:${headBranch}`;
+
+  // HEAD:refs/heads/<branch> — pushes the worktree's current commit to the PR
+  // branch on the head fork. Non-force, so GitHub rejects it if the branch has
+  // advanced upstream (force-pushed by the author, or pushed from another
+  // worktree). We recover from that below rather than dead-ending on the raw
+  // git hint.
+  const doPush = () => execFileP(
+    'git', ['push', authedUrl, `HEAD:refs/heads/${headBranch}`],
+    { cwd: wt.worktreePath, timeout: 60000 },
+  );
+  const isNonFastForward = (s) => /non-fast-forward|\[rejected\]|fetch first|behind its remote/i.test(s || '');
 
   try {
-    // HEAD:refs/heads/<branch> — pushes the worktree's current commit to the
-    // PR branch on the head fork. Non-force: GitHub will reject if the PR
-    // has been advanced upstream (force-pushed by the author). The user can
-    // re-fetch via the existing "Pull updates" button to recover.
-    const { stderr } = await execFileP(
-      'git', ['push', authedUrl, `HEAD:refs/heads/${headBranch}`],
-      { cwd: wt.worktreePath, timeout: 60000 },
-    );
-    return {
-      ok: true,
-      target: `${headOwner}/${headRepoName}:${headBranch}`,
-      output: scrub((stderr || '').trim()),
-    };
+    const { stderr } = await doPush();
+    return { ok: true, target, output: scrub((stderr || '').trim()) };
   } catch (err) {
     const raw = err.stderr ? err.stderr.toString() : err.message;
-    return { error: scrub(raw) };
+    if (!isNonFastForward(raw)) return { error: scrub(raw) };
+
+    // Non-fast-forward: the remote PR branch is ahead of our local copy.
+    // Auto-recover by replaying our local commits onto the latest remote tip
+    // (fetch the branch, rebase onto FETCH_HEAD), then retry the push once.
+    // Non-destructive: a conflicting rebase is aborted so the worktree is left
+    // exactly as it was, and we report so the user can resolve it by hand.
+    try {
+      await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wt.worktreePath, timeout: 60000 });
+    } catch (fe) {
+      const fmsg = scrub(fe.stderr ? fe.stderr.toString() : fe.message);
+      return { error: 'Push rejected — the remote branch advanced — and the follow-up fetch failed:\n\n' + fmsg };
+    }
+    try {
+      await execFileP('git', ['rebase', 'FETCH_HEAD'], { cwd: wt.worktreePath, timeout: 60000 });
+    } catch (re) {
+      // Abort any in-progress rebase to restore the pre-rebase state. Ignore
+      // the abort's own error (e.g. the rebase never started because the tree
+      // had uncommitted changes — nothing to abort).
+      try { await execFileP('git', ['rebase', '--abort'], { cwd: wt.worktreePath, timeout: 30000 }); } catch (_) {}
+      const rmsg = scrub(re.stderr ? re.stderr.toString() : re.message);
+      return {
+        error: 'The remote PR branch advanced past your local commits. Auto-rebasing onto the '
+          + 'latest remote commit failed (likely a merge conflict or uncommitted changes). '
+          + 'Resolve it in the worktree, then push again.\n\n' + rmsg,
+      };
+    }
+    try {
+      const { stderr } = await doPush();
+      return { ok: true, rebased: true, target, output: scrub((stderr || '').trim()) };
+    } catch (e2) {
+      const raw2 = scrub(e2.stderr ? e2.stderr.toString() : e2.message);
+      return { error: 'Rebased onto the latest remote commit, but the retry push still failed:\n\n' + raw2 };
+    }
   }
 });
