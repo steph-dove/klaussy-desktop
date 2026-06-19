@@ -69,3 +69,39 @@ test('create-task spawns a worktree on a new branch', async ({ mainWindow }) => 
     fs.rmSync(sessionDir, { recursive: true, force: true });
   }
 });
+
+test('create-task preserves the session name casing in the branch', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  const repo = buildBaseRepo();
+  // Mixed-case name: the branch (and session folder) must keep the exact
+  // casing the user typed — "FEAT-Bar", never lowercased to "feat-bar".
+  const repoBasename = path.basename(repo);
+  const taskName = 'FEAT-Bar';
+  const sessionDir = path.join(os.homedir(), 'klaussy', 'sessions', taskName);
+  const expectedWorktree = path.join(sessionDir, repoBasename);
+
+  let taskId = null;
+  try {
+    const result = await mainWindow.evaluate(
+      ({ name, repoPath }) => window.klaus.task.create(name, repoPath, 'shell'),
+      { name: taskName, repoPath: repo },
+    );
+
+    expect(result.error, `create-task error: ${result.error}`).toBeFalsy();
+    expect(result.branch).toBe(taskName);
+    expect(result.worktreePath).toBe(expectedWorktree);
+    taskId = result.id;
+
+    // Real git branch keeps the casing too (not just the returned value).
+    expect(gitOut(expectedWorktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe(taskName);
+  } finally {
+    if (taskId != null) {
+      await mainWindow.evaluate((id) => window.klaus.task.kill(id), taskId).catch(() => {});
+    }
+    try { execFileSync('git', ['worktree', 'remove', '--force', expectedWorktree], { cwd: repo, stdio: 'pipe' }); } catch {}
+    try { execFileSync('git', ['branch', '-D', taskName], { cwd: repo, stdio: 'pipe' }); } catch {}
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+  }
+});

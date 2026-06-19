@@ -256,7 +256,9 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     return { error: 'Active project is not a git repository. Remove and re-add the project to initialize git.' };
   }
 
-  const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  // Preserve the case the user typed: the branch (and session folder) must
+  // match the session name's casing, e.g. "FEAT" → branch "FEAT", not "feat".
+  const sanitized = name.replace(/[^a-zA-Z0-9_-]/g, '-');
   const branch = sanitized;
 
   // Default layout: one folder per session holding every repo's worktree —
@@ -742,7 +744,8 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
     return { error: 'Not a git repository: ' + repoPath };
   }
 
-  const sanitized = branch.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  // Preserve case so the session folder matches the branch's casing.
+  const sanitized = branch.replace(/[^a-zA-Z0-9_-]/g, '-');
   const repoBasename = path.basename(repoPath);
   // Same session-folder layout as create-task: ~/klaussy/sessions/<session>/<repo>.
   const worktreeDir = basePath || path.join(os.homedir(), 'klaussy', 'sessions', sanitized);
@@ -1153,7 +1156,8 @@ ipcMain.handle('duplicate-task', async (_event, { id }) => {
   if (!repoPath) return { error: 'No repo configured' };
 
   const baseName = inst.name + '-copy';
-  const sanitized = baseName.replace(/[^a-zA-Z0-9_-]/g, '-').toLowerCase();
+  // Preserve case so the duplicate's branch/folder match the session name.
+  const sanitized = baseName.replace(/[^a-zA-Z0-9_-]/g, '-');
   const branch = `task/${sanitized}`;
   const worktreeDir = getWorktreeDir(repoPath);
   const worktreePath = path.join(worktreeDir, sanitized);
