@@ -71,8 +71,8 @@ contextBridge.exposeInMainWorld('klaus', {
 
   // ---- task: Task lifecycle, notify, notes, transcripts, dirty-worktree aggregator ----
   task: {
-    create: (name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback) =>
-      ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback }),
+    create: (name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos) =>
+      ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos }),
     listBranches: (repoPath) => ipcRenderer.invoke('list-branches', { repoPath }),
     currentModel: (worktreePath, mode, taskId) => ipcRenderer.invoke('agent-current-model', { worktreePath, mode, taskId }),
     deleteSession: (worktreePaths) => ipcRenderer.invoke('delete-session', { worktreePaths }),

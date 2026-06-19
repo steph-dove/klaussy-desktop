@@ -309,7 +309,65 @@ ipcMain.handle('dismiss-saved-session', (_event, { worktreePath, sessionId }) =>
   return { ok: true };
 });
 
-ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase, baseBranchFallback }) => {
+// Seed an agent's native memory file with multi-repo session context so every
+// agent we support (Claude / Codex / Gemini / Copilot / future Cursor) starts
+// aware of its sibling repos. Each repo in a session shares one branch name and
+// lives in its own worktree under ~/klaussy/sessions/<session>/<repo>. Writing
+// the agent's own memory file (per the provider's `memoryFile`) means the agent
+// is aware from turn one without us consuming its first prompt. The file is
+// git-excluded so it never lands in a commit. No-op for single-repo sessions,
+// shell mode, or providers without a memory file.
+const SESSION_CTX_START = '<!-- klaussy:session-context (auto-generated; safe to delete) -->';
+const SESSION_CTX_END = '<!-- /klaussy:session-context -->';
+
+function seedSessionMemory({ worktreePath, memoryFile, sessionName, branch, thisRepo, siblings }) {
+  if (!memoryFile || !siblings || !siblings.length) return;
+  const block = [
+    SESSION_CTX_START,
+    `# Klaussy session: ${sessionName}`,
+    '',
+    `This worktree is one repo in a multi-repo session. Every repo in the session is checked out on the **same branch** (\`${branch}\`), each in its own worktree:`,
+    '',
+    `- **${thisRepo}** (this worktree): \`${worktreePath}\``,
+    ...siblings.map((s) => `- **${s.name}**: \`${s.worktreePath}\``),
+    '',
+    `If a change belongs to one of the OTHER repos above, make it there — in that repo's existing worktree, on the existing \`${branch}\` branch. Do not create a new branch or worktree for it, and do not make those edits inside this repo.`,
+    SESSION_CTX_END,
+    '',
+  ].join('\n');
+
+  const filePath = path.join(worktreePath, memoryFile);
+  try {
+    let existing = '';
+    try { existing = fs.readFileSync(filePath, 'utf-8'); } catch { /* new file */ }
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(esc(SESSION_CTX_START) + '[\\s\\S]*?' + esc(SESSION_CTX_END) + '\\n?');
+    const next = re.test(existing)
+      ? existing.replace(re, block)                                  // refresh our block in place
+      : (existing ? existing.replace(/\s*$/, '') + '\n\n' + block : block); // append / create
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, next);
+  } catch (e) {
+    console.warn('[session-memory] failed to seed', memoryFile + ':', e.message);
+    return;
+  }
+  // Keep it out of commits via the worktree's local exclude. (Covers a freshly
+  // created untracked file; a pre-existing tracked memory file stays tracked,
+  // but the markers keep our block identifiable/removable.)
+  try {
+    let common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: worktreePath, stdio: 'pipe' }).toString().trim();
+    if (!path.isAbsolute(common)) common = path.resolve(worktreePath, common);
+    const excludePath = path.join(common, 'info', 'exclude');
+    let ex = '';
+    try { ex = fs.readFileSync(excludePath, 'utf-8'); } catch { /* no exclude yet */ }
+    if (!ex.split('\n').includes(memoryFile)) {
+      fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+      fs.appendFileSync(excludePath, (ex && !ex.endsWith('\n') ? '\n' : '') + memoryFile + '\n');
+    }
+  } catch { /* best-effort */ }
+}
+
+ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase, baseBranchFallback, sessionRepos }) => {
   // Validate repoPath is a git repo
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
@@ -461,6 +519,26 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   try { require('../state/repo-intel').syncIntelIntoWorktree(worktreePath); } catch (e) {
     console.warn('[repo-intel] pre-spawn sync failed:', e.message);
   }
+
+  // Multi-repo session: make this agent aware of its sibling repos (same branch,
+  // their own worktrees) via its native memory file. Sibling worktree paths use
+  // the same layout as this one. No-op for single-repo sessions.
+  try {
+    const siblings = (sessionRepos || [])
+      .map((p) => path.basename(p))
+      .filter((b, i, arr) => b && b !== repoBasename && arr.indexOf(b) === i)
+      .map((b) => ({
+        name: b,
+        worktreePath: basePath ? path.join(worktreeDir, b + '-' + sanitized) : path.join(worktreeDir, b),
+      }));
+    if (siblings.length) {
+      const prov = getProvider(mode || 'claude');
+      seedSessionMemory({
+        worktreePath, memoryFile: prov && prov.memoryFile,
+        sessionName: sanitized, branch, thisRepo: repoBasename, siblings,
+      });
+    }
+  } catch (e) { console.warn('[session-memory] seed skipped:', e.message); }
 
   const warning = [fallbackWarning, freshenWarning, reusedBranchWarning].filter(Boolean).join(' ') || null;
   const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
