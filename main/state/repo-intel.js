@@ -425,6 +425,39 @@ function defaultBranchOf(repoPath) {
   return 'main';
 }
 
+// The agent bootstrap klaussy generates is scaffolding, not source — it
+// shouldn't land in users' commits/PRs. Every time we make it, add it to the
+// repo's LOCAL .git/info/exclude (per-clone, never touches the team's tracked
+// .gitignore). Note: info/exclude only keeps UNTRACKED files out — a file a
+// repo already committed (e.g. a hand-authored CLAUDE.md) stays tracked; we
+// don't forcibly `git rm --cached` it, since staging deletions of the user's
+// committed files would be destructive. For a worktree this writes to the
+// shared common git dir, so the base repo and every sibling worktree inherit it.
+const BOOTSTRAP_EXCLUDE_MARKER = '# klaussy: agent bootstrap (generated, not committed)';
+const BOOTSTRAP_EXCLUDES = [
+  '.claude/', '.codex/', '.cursor/', '.gemini/',
+  '.github/skills/', '.github/hooks/',   // leave .github/workflows alone
+  '.conventions/',
+  'CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'GEMINI.md',
+];
+function excludeBootstrapArtifacts(repoOrWorktreePath) {
+  try {
+    let common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoOrWorktreePath, stdio: 'pipe',
+    }).toString().trim();
+    if (!path.isAbsolute(common)) common = path.resolve(repoOrWorktreePath, common);
+    const excludePath = path.join(common, 'info', 'exclude');
+    let existing = '';
+    try { existing = fs.readFileSync(excludePath, 'utf-8'); } catch { /* no exclude yet */ }
+    if (existing.includes(BOOTSTRAP_EXCLUDE_MARKER)) return; // idempotent
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    const block = '\n' + BOOTSTRAP_EXCLUDE_MARKER + '\n' + BOOTSTRAP_EXCLUDES.join('\n') + '\n';
+    fs.appendFileSync(excludePath, (existing && !existing.endsWith('\n') ? '\n' : '') + block);
+  } catch (e) {
+    console.warn('[repo-intel] bootstrap exclude failed for', repoOrWorktreePath + ':', (e && e.message) || e);
+  }
+}
+
 // Copy the base repo's intel artifacts into a worktree that lacks them.
 // Worktrees only materialize COMMITTED files; until the user commits
 // CLAUDE.md & co., interactive agents in the worktree would see nothing
@@ -494,6 +527,8 @@ function syncIntelIntoWorktree(worktreePath) {
     // not-yet-repaired base or already present in this worktree (the copy loop
     // skips existing files, so an old bad one would otherwise survive).
     repairClaudeSettings(worktreePath);
+    // Keep the freshly-synced bootstrap out of commits.
+    excludeBootstrapArtifacts(worktreePath);
   } catch (e) {
     console.warn('[repo-intel] worktree sync failed for', worktreePath, e.message);
   }
@@ -503,6 +538,9 @@ function syncIntelIntoWorktree(worktreePath) {
 // base repo — sessions are usually created BEFORE the analysis finishes.
 function syncIntelIntoActiveWorktrees(base) {
   try {
+    // Ignore the bootstrap we just generated in the base repo itself (covers
+    // the no-worktree case; worktree syncs below hit the shared exclude too).
+    excludeBootstrapArtifacts(base);
     const { instances } = require('./instances');
     for (const [, inst] of instances) {
       if (inst && inst.worktreePath && baseFor(inst.worktreePath) === base) {
