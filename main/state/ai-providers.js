@@ -113,6 +113,10 @@ const PROVIDERS = {
   claude: {
     id: 'claude',
     displayName: 'Claude Code',
+    // Native memory file this agent reads on startup, used to seed multi-repo
+    // session context (sibling repos + shared branch). CLAUDE.local.md is
+    // Claude's gitignored-by-convention local memory.
+    memoryFile: 'CLAUDE.local.md',
     shortLabel: 'cc',
     defaultBin: 'claude',
     configPathKey: 'claudePath',
@@ -203,6 +207,7 @@ const PROVIDERS = {
   codex: {
     id: 'codex',
     displayName: 'OpenAI Codex',
+    memoryFile: 'AGENTS.md', // Codex reads the cross-tool AGENTS.md standard
     shortLabel: 'cx',
     defaultBin: 'codex',
     configPathKey: 'codexPath',
@@ -382,6 +387,7 @@ const PROVIDERS = {
   gemini: {
     id: 'gemini',
     displayName: 'Gemini CLI',
+    memoryFile: 'GEMINI.md', // Gemini CLI reads GEMINI.md
     shortLabel: 'gm',
     defaultBin: 'gemini',
     configPathKey: 'geminiPath',
@@ -482,6 +488,7 @@ const PROVIDERS = {
   copilot: {
     id: 'copilot',
     displayName: 'GitHub Copilot',
+    memoryFile: 'AGENTS.md', // Copilot CLI reads AGENTS.md
     shortLabel: 'cp',
     defaultBin: 'copilot',
     configPathKey: 'copilotPath',

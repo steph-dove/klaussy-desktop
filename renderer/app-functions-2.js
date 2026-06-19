@@ -742,6 +742,9 @@ window.App = window.App || {};
     // inputs aren't locked meanwhile — live reads after the await could hand
     // secondary repos a different name/base/agent than the primary task got.
     var fanoutRepos = App.activeTab === 'new' ? App.selectedAdditionalRepos() : [];
+    // Every repo in this session (primary + "also create in"), so each agent can
+    // be seeded with awareness of its siblings (same branch, own worktrees).
+    var sessionRepoPaths = [AppState.repoPath].concat(fanoutRepos.map(function (r) { return r.path; })).filter(Boolean);
     // Existing-session resume: filled in by the 'existing' branch below.
     var fanoutResume = [];
     var fanoutSavedList = [];
@@ -795,6 +798,8 @@ window.App = window.App || {};
           null,
           undefined,
           App.selectedBaseBranch || null,
+          undefined,
+          sessionRepoPaths,
         );
       } else if (App.baseBranchUserPicked && App.selectedBaseBranch) {
         // No name, but the user *deliberately* picked a branch: check it out
@@ -952,7 +957,7 @@ window.App = window.App || {};
           // and create-task still has baseBranchFallback as the last resort.
           var repoBase = repo.baseBranch || fanoutBase || null;
           var call = fanoutName
-            ? window.klaus.task.create(fanoutName, repo.path, fanoutMode, fanoutBasePath, undefined, repoBase, true)
+            ? window.klaus.task.create(fanoutName, repo.path, fanoutMode, fanoutBasePath, undefined, repoBase, true, sessionRepoPaths)
             : window.klaus.task.checkoutBranch(repo.path, repoBase || fanoutBase, fanoutMode, fanoutBasePath);
           return call.then(function (res) {
             // Everything in here counts as this repo's outcome — a throw from

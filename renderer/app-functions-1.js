@@ -426,9 +426,19 @@ window.App = window.App || {};
 
   App.renderBaseBranchSelect = function() {
     if (!App.modalBaseSelect) return;
-    if (!App.baseBranchData.length) {
+    // Show the picker whenever a source repo is selected. Only hide it when
+    // there's genuinely no repo to branch from. Previously we hid it whenever
+    // baseBranchData was empty — which also covered the brief window before
+    // branches load and transient listBranches errors, leaving a pre-populated
+    // repo with no visible base-branch picker.
+    if (!AppState.repoPath) {
       App.modalBaseSelect.hidden = true;
       App.modalBaseSelect.innerHTML = '';
+      return;
+    }
+    if (!App.baseBranchData.length) {
+      App.modalBaseSelect.innerHTML = '<option value="">Loading branches…</option>';
+      App.modalBaseSelect.hidden = false;
       return;
     }
     App.modalBaseSelect.innerHTML = App.baseBranchData.map(function (b) {
@@ -461,6 +471,7 @@ window.App = window.App || {};
     if (result.error || !result.branches) {
       App.baseBranchData = [];
       App.baseBranchDefault = '';
+      App.renderBaseBranchSelect(); // keep the control in sync (placeholder, not hidden)
       return;
     }
 
