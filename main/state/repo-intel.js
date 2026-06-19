@@ -458,6 +458,45 @@ function excludeBootstrapArtifacts(repoOrWorktreePath) {
   }
 }
 
+// Make the base repo's env files available in a worktree so nobody has to copy
+// `.env` around. Worktrees only contain COMMITTED files, and env files are
+// gitignored, so they're missing — which is why agents (and dev servers/tests
+// that load ./.env) can't find them. We SYMLINK rather than copy: the base repo
+// stays the single source of truth, edits propagate, and nothing drifts.
+// Covers monorepo subdir env files (src/server/.env, etc.) via `git ls-files
+// --ignored`. Skips node_modules, committed example files, and anything the
+// worktree already has (e.g. a manual copy). Falls back to a copy if symlinks
+// aren't permitted (Windows without privilege). The symlinks are gitignored by
+// the repo's own .gitignore, so they never get committed.
+function linkEnvFilesIntoWorktree(base, worktreePath) {
+  let listed = '';
+  try {
+    listed = execFileSync('git', ['-C', base, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z'], {
+      maxBuffer: 8 * 1024 * 1024,
+    }).toString();
+  } catch { return; }
+  const rels = listed.split('\0').filter(Boolean).filter((p) =>
+    /(^|\/)\.env(\.|$)/.test(p)
+    && !/(^|\/)node_modules\//.test(p)
+    && !/\.(example|sample|template|dist)$/i.test(p));
+  for (const rel of rels) {
+    const src = path.join(base, rel);
+    const dst = path.join(worktreePath, rel);
+    try { if (!fs.statSync(src).isFile()) continue; } catch { continue; }
+    // lstat (not existsSync) so a pre-existing symlink/file — including a manual
+    // copy — is respected and never clobbered.
+    try { fs.lstatSync(dst); continue; } catch { /* missing — create it */ }
+    try {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.symlinkSync(src, dst);
+    } catch {
+      try { fs.copyFileSync(src, dst); } catch (e) {
+        console.warn('[repo-intel] env link/copy failed for', rel + ':', (e && e.message) || e);
+      }
+    }
+  }
+}
+
 // Copy the base repo's intel artifacts into a worktree that lacks them.
 // Worktrees only materialize COMMITTED files; until the user commits
 // CLAUDE.md & co., interactive agents in the worktree would see nothing
@@ -529,6 +568,8 @@ function syncIntelIntoWorktree(worktreePath) {
     repairClaudeSettings(worktreePath);
     // Keep the freshly-synced bootstrap out of commits.
     excludeBootstrapArtifacts(worktreePath);
+    // Symlink the base repo's env files in so nobody has to copy .env around.
+    linkEnvFilesIntoWorktree(base, worktreePath);
   } catch (e) {
     console.warn('[repo-intel] worktree sync failed for', worktreePath, e.message);
   }
