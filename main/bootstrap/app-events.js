@@ -335,9 +335,14 @@ function install() {
     // never blocks startup.
     if (!process.env.KLAUSSY_E2E) {
       setTimeout(() => {
-        try { require('../state/repo-intel').ensureReviewTools(); } catch (e) {
-          console.warn('[repo-intel] ensureReviewTools at boot failed:', e.message);
-        }
+        const repoIntel = require('../state/repo-intel');
+        // Install if missing, then (daily-gated) upgrade to latest so users keep
+        // getting new skills. Upgrade after install so a fresh machine doesn't
+        // do both at once.
+        Promise.resolve()
+          .then(() => repoIntel.ensureReviewTools())
+          .then(() => repoIntel.upgradeReviewToolsIfDue())
+          .catch((e) => console.warn('[repo-intel] tool install/upgrade at boot failed:', e.message));
       }, 3000);
     }
 

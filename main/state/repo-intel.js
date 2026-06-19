@@ -35,7 +35,7 @@ const { execFileSync } = require('child_process');
 const { app } = require('electron');
 const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree } = require('../util/git-repo');
-const { loadConfig } = require('../util/config');
+const { loadConfig, saveConfig } = require('../util/config');
 
 const inflight = new Map();  // base repo path -> Promise
 const memCache = new Map();  // base repo path -> { block, srcMtime, cliVersion }
@@ -344,6 +344,55 @@ function ensureReviewTools() {
     return ok;
   })();
   return toolsPromise;
+}
+
+// Once a day, upgrade the analysis CLIs to their latest release so users keep
+// getting new skills/templates. ensureRepoIntel is version-gated, so a CLI
+// version bump makes the next intel run regenerate each repo's skills. Daily
+// gate (config.reviewToolsCheckedAt) keeps this off the every-boot hot path;
+// best-effort and fully background — never blocks or surfaces failures.
+const TOOLS_UPGRADE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+async function upgradeReviewToolsIfDue() {
+  try {
+    const cfg = loadConfig();
+    if (Date.now() - (cfg.reviewToolsCheckedAt || 0) < TOOLS_UPGRADE_INTERVAL_MS) return;
+    try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+    const installer = await pickInstaller();
+    if (!installer) return;
+    const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+    for (const t of TOOLS) {
+      const pkg = t.pkg;
+      try {
+        if (installer.kind === 'pipx') {
+          await execFileP('pipx', ['upgrade', pkg], BIG);
+        } else if (installer.kind === 'uv') {
+          await execFileP('uv', ['tool', 'upgrade', pkg], BIG);
+        } else {
+          try {
+            await execFileP(installer.py, ['-m', 'pip', 'install', '--user', '-U', pkg], BIG);
+          } catch (err) {
+            const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
+            if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
+              await execFileP(installer.py, ['-m', 'pip', 'install', '--user', '-U', '--break-system-packages', pkg], BIG);
+            }
+          }
+        }
+      } catch (e) {
+        // A single tool failing to upgrade (already latest, offline, etc.) is fine.
+        console.warn('[repo-intel] upgrade skipped for', pkg + ':', (e && e.message) || e);
+      }
+    }
+    const c2 = loadConfig();
+    c2.reviewToolsCheckedAt = Date.now();
+    saveConfig(c2);
+    // A new CLI version invalidates the cached intel — bust the version cache so
+    // the next ensureRepoIntel regenerates skills with the upgraded templates.
+    klaussyCli = { bin: null, version: null, at: 0, promise: null };
+    try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+    console.log('[repo-intel] checked analysis tools for upgrades');
+  } catch (e) {
+    console.warn('[repo-intel] upgrade check failed:', (e && e.message) || e);
+  }
 }
 
 // Resolve a worktree (or repo) path to its primary checkout — intel belongs
@@ -868,4 +917,4 @@ function getRepoIntelBlock(repoOrWorktreePath, agentMode) {
   return full;
 }
 
-module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureReviewTools };
+module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureReviewTools, upgradeReviewToolsIfDue };
