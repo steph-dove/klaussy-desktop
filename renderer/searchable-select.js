@@ -201,13 +201,20 @@ window.SearchableSelect = (function () {
       if (!popover.hidden && !wrap.contains(e.target)) close();
     });
 
+    // Mirror the select's own `hidden` attribute onto the wrapper: some callers
+    // toggle `select.hidden` to show/hide the entire control (e.g. the base
+    // branch picker, hidden until branches load).
+    function syncHidden() { wrap.hidden = select.hidden; }
+    syncHidden();
+
     // External re-population (innerHTML rewrite) → refresh label, and rebuild
-    // the list if the popover is currently open.
+    // the list if the popover is currently open. Also catches `hidden` toggles.
     var mo = new MutationObserver(function () {
+      syncHidden();
       syncLabel();
       if (!popover.hidden) buildList();
     });
-    mo.observe(select, { childList: true, subtree: true });
+    mo.observe(select, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'] });
 
     // Other code may set the value and dispatch 'change' — keep our label honest.
     select.addEventListener('change', syncLabel);
