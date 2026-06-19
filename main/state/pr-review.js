@@ -388,6 +388,28 @@ function resolveBaseShaForWorktree(worktreePath, authedUrl, baseRefName) {
   }
 }
 
+// Last-ditch base branch when the PR metadata didn't report one (rare — only
+// on a failed `gh pr view`). A bare 'main' guess silently diffs a repo whose
+// default is `dev` or `master` against a branch that doesn't exist, so instead
+// try the conventional defaults in order — dev, then main, then master — and
+// return the first that actually resolves in the worktree, preferring a local
+// branch over its origin/ tracking ref. Returns '' if none exist so the caller
+// can keep its own final fallback.
+function resolveFallbackBaseBranch(worktreePath) {
+  if (!worktreePath) return '';
+  for (const name of ['dev', 'main', 'master']) {
+    for (const ref of [name, `origin/${name}`]) {
+      try {
+        execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], {
+          cwd: worktreePath, stdio: 'pipe',
+        });
+        return ref;
+      } catch (_) { /* not this ref — try the next */ }
+    }
+  }
+  return '';
+}
+
 // Shared helper: ensure a worktree exists for prReview.active's PR head and
 // return its path. Used by G5 (which then spawns a task) and G7 (which runs
 // the AI review there).
@@ -548,6 +570,7 @@ module.exports = {
   findProjectForRepo,
   findWorktreeForBranch,
   findWorktreeForBranchAcrossClones,
+  resolveFallbackBaseBranch,
   ensureWorktreeForActivePr,
   switchGhForReview,
   restoreGhAfterReview,
