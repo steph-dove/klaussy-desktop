@@ -13,7 +13,12 @@ const worktreeWatchers = new Map(); // worktreePath -> { watcher, subscribers: M
 // Path patterns we ignore — high-churn build output and git internals that don't
 // affect our UI. .git/index and .git/HEAD are NOT ignored: they signal git state
 // changes we want to reflect (commits, stages made from the terminal, etc.).
-const WATCH_IGNORE_RE = /(^|\/)(node_modules|dist|build|out|\.next|\.nuxt|__pycache__|\.pytest_cache|\.mypy_cache|\.turbo|target|\.DS_Store)(\/|$)|^\.git\/(objects|logs|refs|packed-refs|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG|info)/;
+// `.git/*.lock` (esp. index.lock) is pure git-internal churn: read-only git
+// commands the UI runs in reaction to a change (status/diff/ls-files) take and
+// drop the index lock, which would re-fire the watcher → reload → git → … an
+// infinite loop. Lock files are NEVER a meaningful UI signal, so drop them.
+// `.git/index` itself stays watched so real terminal commits/stages refresh.
+const WATCH_IGNORE_RE = /(^|\/)(node_modules|dist|build|out|\.next|\.nuxt|__pycache__|\.pytest_cache|\.mypy_cache|\.turbo|target|\.DS_Store)(\/|$)|^\.git\/(objects|logs|refs|packed-refs|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG|info)|^\.git\/.*\.lock$/;
 
 // Set KLAUSSY_WATCH_DEBUG=1 to log every change that survives the ignore filter
 // — the fastest way to find what's churning behind an "infinite reload".
