@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { humanizeComment } = require('../../main/util/humanize-comment');
+// Test the built-in JS port directly: it's deterministic and present
+// everywhere, whereas humanizeComment() prefers the klaussy CLI (absent in CI,
+// its rules owned by klaussy-agents).
+const { humanizeCommentJs: humanizeComment } = require('../../main/util/humanize-comment');
 
 test('normalizes em and en dashes in prose', () => {
   assert.equal(humanizeComment('Leaks a connection — wrap it.'), 'Leaks a connection, wrap it.');
