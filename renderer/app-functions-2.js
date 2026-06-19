@@ -844,6 +844,28 @@ window.App = window.App || {};
     App.modalCreate.disabled = false;
     App.syncCreateButtonLabel();
 
+    // The worktree already exists on disk (commonly a session we created but
+    // never persisted). Rather than dead-ending, ask whether to open it, then
+    // resume it in place.
+    if (result && result.exists) {
+      var openExisting = window.confirm(
+        'A session named "' + name + '" already exists:\n\n' + result.worktreePath +
+        '\n\nOpen the existing session instead?'
+      );
+      if (!openExisting) {
+        App.modalError.textContent = 'Session "' + name + '" already exists. Pick a different name, or open it from the Existing Session tab.';
+        return;
+      }
+      result = await window.klaus.session.resume({
+        sessionId: result.sessionId || null,
+        name: result.name || name,
+        worktreePath: result.worktreePath,
+        branch: result.branch,
+        mode: App.selectedMode,
+        repoPath: result.repoPath,
+      });
+    }
+
     // User declined the agent's worktree-trust prompt — close quietly.
     if (result && result.cancelled) { App.hideModal(); return; }
     if (!result || result.error) {

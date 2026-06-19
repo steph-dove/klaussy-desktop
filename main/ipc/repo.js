@@ -325,7 +325,13 @@ ipcMain.handle('discover-worktrees', async () => {
       for (const e of entries) {
         if (!e.isDirectory()) continue;
         const wt = path.join(sdir, e.name);
-        if (known.has(wt) || hidden.has(wt)) continue;
+        // Deliberately do NOT skip `hidden` here. The hide feature is for
+        // decluttering ad-hoc worktrees, but a managed session worktree that
+        // still exists on disk must stay discoverable — otherwise it's a phantom:
+        // invisible in "Existing Session" yet blocking re-create with "already
+        // exists". (known.has guards against double-listing one the config pass
+        // already surfaced.)
+        if (known.has(wt)) continue;
         if (!fs.existsSync(path.join(wt, '.git'))) continue;
         let branch = '';
         try {

@@ -178,18 +178,79 @@ function ensureWorktreeOnDisk(worktreePath, repoPath, branch) {
   return recreateMissingWorktree(repo, worktreePath, br);
 }
 
+// Scan the sessions root for worktrees on disk. saveSessions() only persists
+// CURRENTLY-ACTIVE instances and replaces the whole savedSessions array, so a
+// session whose terminal was closed (or that existed across a restart) silently
+// drops out of config — and then can't be found in "Existing Session" and
+// collides on re-create. The filesystem is the source of truth, so we discover
+// from it. Layout: ~/klaussy/sessions/<session>/<repo>.
+function discoverDiskSessions() {
+  const root = path.join(os.homedir(), 'klaussy', 'sessions');
+  const out = [];
+  let names = [];
+  try {
+    names = fs.readdirSync(root, { withFileTypes: true })
+      .filter((d) => d.isDirectory()).map((d) => d.name);
+  } catch { return out; } // no sessions root yet
+  for (const name of names) {
+    const sessionDir = path.join(root, name);
+    let repos = [];
+    try {
+      repos = fs.readdirSync(sessionDir, { withFileTypes: true })
+        .filter((d) => d.isDirectory()).map((d) => d.name);
+    } catch { continue; }
+    for (const repo of repos) {
+      const worktreePath = path.join(sessionDir, repo);
+      // A real worktree has a .git file (linked worktree) or dir. Skip stray dirs.
+      if (!fs.existsSync(path.join(worktreePath, '.git'))) continue;
+      let branch = name;
+      try {
+        branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+          cwd: worktreePath, stdio: 'pipe',
+        }).toString().trim() || name;
+      } catch { /* detached / not resolvable — keep the session name */ }
+      out.push({
+        name,
+        worktreePath,
+        branch,
+        repoPath: baseRepoForWorktree(worktreePath) || null,
+        sessionId: findLatestSessionId(worktreePath) || null,
+        mode: 'claude', // unknown without a save; resume defaults to Claude
+        savedAt: null,
+        discovered: true,
+      });
+    }
+  }
+  return out;
+}
+
 ipcMain.handle('list-saved-sessions', () => {
   const config = loadConfig();
   // Backfill repoPath for sessions saved before it was tracked, so the sidebar
   // repo-filter can group them. Best-effort: only resolves if the worktree
   // still exists.
-  return (config.savedSessions || []).map(s => ({
+  const saved = (config.savedSessions || []).map(s => ({
     ...s,
     repoPath: s.repoPath || baseRepoForWorktree(s.worktreePath),
   }));
+  // Merge in any on-disk session the config doesn't know about (deduped by
+  // worktree path — saved entries win, since they carry the exact sessionId).
+  const seen = new Set(saved.map((s) => s.worktreePath));
+  const disk = discoverDiskSessions().filter((d) => !seen.has(d.worktreePath));
+  return saved.concat(disk);
 });
 
 ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branch, mode, repoPath }) => {
+  // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
+  // exactly what made it a phantom (undiscoverable yet blocking re-create), so
+  // resuming it should clear that state.
+  try {
+    const cfg = loadConfig();
+    if (Array.isArray(cfg.hiddenWorktrees) && cfg.hiddenWorktrees.includes(worktreePath)) {
+      cfg.hiddenWorktrees = cfg.hiddenWorktrees.filter((p) => p !== worktreePath);
+      saveConfig(cfg);
+    }
+  } catch { /* best-effort un-hide */ }
   // The worktree directory may have been deleted since the session was saved.
   // Recreate it from its branch so the session stays resumable.
   const ensured = ensureWorktreeOnDisk(worktreePath, repoPath, branch);
@@ -271,7 +332,24 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     : path.join(worktreeDir, repoBasename);
 
   if (fs.existsSync(worktreePath)) {
-    return { error: 'Worktree directory already exists: ' + worktreePath };
+    // The worktree already exists on disk — often a session we created but
+    // never persisted to savedSessions (saveSessions only snapshots active
+    // instances). Don't dead-end: hand the renderer enough to offer "open the
+    // existing one" and resume it.
+    let existingBranch = branch;
+    try {
+      existingBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: worktreePath, stdio: 'pipe',
+      }).toString().trim() || branch;
+    } catch { /* not a worktree / detached — fall back to the derived name */ }
+    return {
+      exists: true,
+      worktreePath,
+      branch: existingBranch,
+      name: sanitized,
+      repoPath: baseRepoForWorktree(worktreePath) || repoPath,
+      sessionId: findLatestSessionId(worktreePath) || null,
+    };
   }
 
   // Resolve the base. Caller can pass an explicit branch (chosen from the
