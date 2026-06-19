@@ -385,22 +385,41 @@ function syncIntelIntoWorktree(worktreePath) {
   try {
     const base = baseFor(worktreePath);
     if (!base || base === worktreePath) return;
-    const entries = [
-      ['CLAUDE.md'],
-      ['.claude', 'rules'],
-      ['.claude', 'skills'],
-      // hooks MUST travel with settings.json: klaussy's settings register
-      // PreToolUse hooks by relative path (.claude/hooks/*.py); a worktree
-      // with the settings but not the scripts blocks EVERY Read/Bash call
-      // (missing hook exits 2 = deny).
-      ['.claude', 'hooks'],
-      ['.claude', 'settings.json'],
-    ];
+    // klaussy init scaffolds each supported agent under its own root
+    // (.claude / .codex / .cursor / .gemini / .github), with skills, slash
+    // commands, rules, and hooks inside. Sync every agent's equivalents so the
+    // worktree the agent actually runs in has them — whichever agent the user
+    // picks. Skills/commands not synced here are simply missing from the
+    // terminal (the original bug: commands lived only in the base repo).
+    const AGENT_ROOTS = ['.claude', '.codex', '.cursor', '.gemini', '.github'];
+    // hooks MUST travel with settings.json: settings register PreToolUse hooks
+    // by relative path; a worktree with the settings but not the scripts blocks
+    // every Read/Bash call (missing hook exits 2 = deny).
+    const AGENT_SUBS = ['skills', 'commands', 'rules', 'hooks'];
+    const entries = [['CLAUDE.md'], ['.claude', 'settings.json']];
+    for (const root of AGENT_ROOTS) {
+      for (const sub of AGENT_SUBS) entries.push([root, sub]);
+    }
+    // Recursively copy any child of src that's missing in dst. Used for the
+    // .claude/* directories so skills/commands ADDED to the base after the
+    // worktree was created still land — a directory-level existence check
+    // would skip the whole dir and strand every new skill/command. Never
+    // overwrites an existing worktree file (preserves local edits).
+    const copyMissing = (src, dst) => {
+      if (fs.statSync(src).isDirectory()) {
+        fs.mkdirSync(dst, { recursive: true });
+        for (const child of fs.readdirSync(src)) copyMissing(path.join(src, child), path.join(dst, child));
+      } else if (!fs.existsSync(dst)) {
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.cpSync(src, dst);
+      }
+    };
     for (const segs of entries) {
       const src = path.join(base, ...segs);
       const dst = path.join(worktreePath, ...segs);
       if (!fs.existsSync(src)) continue;
-      if (segs[0] === 'CLAUDE.md') {
+      const leaf = segs[segs.length - 1];
+      if (leaf === 'CLAUDE.md') {
         try {
           if (fs.readFileSync(src, 'utf-8') === CLAUDE_MD_PLACEHOLDER) continue;
         } catch { continue; }
@@ -411,11 +430,16 @@ function syncIntelIntoWorktree(worktreePath) {
             if (fs.readFileSync(dst, 'utf-8') !== CLAUDE_MD_PLACEHOLDER) continue;
           } catch { continue; }
         }
-      } else if (fs.existsSync(dst)) {
-        continue;
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.cpSync(src, dst);
+      } else if (leaf === 'settings.json') {
+        if (fs.existsSync(dst)) continue; // never clobber a worktree's settings
+        fs.mkdirSync(path.dirname(dst), { recursive: true });
+        fs.cpSync(src, dst);
+      } else {
+        // .claude/{rules,skills,commands,hooks}: merge in missing children.
+        copyMissing(src, dst);
       }
-      fs.mkdirSync(path.dirname(dst), { recursive: true });
-      fs.cpSync(src, dst, { recursive: true });
     }
     // Heal a stale klausify-era settings.json — whether just copied from a
     // not-yet-repaired base or already present in this worktree (the copy loop

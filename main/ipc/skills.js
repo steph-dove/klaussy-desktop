@@ -51,8 +51,14 @@ function listInstalledPlugins() {
 // just the active project would hide most of what they have).
 ipcMain.handle('list-skills', async () => {
   const homedir = require('os').homedir();
+  // klaussy scaffolds skills/commands under each agent's own root. Scan them
+  // all so the list reflects whatever agent(s) the user works with — the same
+  // skill scaffolded for several agents is deduped to one row below.
+  const AGENT_ROOTS = ['.claude', '.codex', '.cursor', '.gemini', '.github'];
+  const skillsDirsFor = (root) => AGENT_ROOTS.map((a) => path.join(root, a, 'skills'));
+  const cmdsDirsFor = (root) => AGENT_ROOTS.map((a) => path.join(root, a, 'commands'));
   const sources = [
-    { kind: 'user', label: 'user', skillsDir: path.join(homedir, '.claude', 'skills'), cmdsDir: path.join(homedir, '.claude', 'commands') },
+    { kind: 'user', label: 'user', skillsDirs: skillsDirsFor(homedir), cmdsDirs: cmdsDirsFor(homedir) },
   ];
   const config = loadConfig();
   const projects = config.projects || [];
@@ -61,8 +67,8 @@ ipcMain.handle('list-skills', async () => {
     sources.push({
       kind: 'project',
       label: p.name || path.basename(p.path),
-      skillsDir: path.join(p.path, '.claude', 'skills'),
-      cmdsDir: path.join(p.path, '.claude', 'commands'),
+      skillsDirs: skillsDirsFor(p.path),
+      cmdsDirs: cmdsDirsFor(p.path),
     });
   }
   // Belt-and-suspenders: include the currently-active repo even if it
@@ -72,8 +78,8 @@ ipcMain.handle('list-skills', async () => {
     sources.push({
       kind: 'project',
       label: path.basename(active),
-      skillsDir: path.join(active, '.claude', 'skills'),
-      cmdsDir: path.join(active, '.claude', 'commands'),
+      skillsDirs: skillsDirsFor(active),
+      cmdsDirs: cmdsDirsFor(active),
     });
   }
   // Plugins: this is where most installed skills/commands actually live.
@@ -84,8 +90,8 @@ ipcMain.handle('list-skills', async () => {
       kind: 'plugin',
       label: pl.pluginName,
       pluginName: pl.pluginName,
-      skillsDir: path.join(pl.dir, 'skills'),
-      cmdsDir: path.join(pl.dir, 'commands'),
+      skillsDirs: [path.join(pl.dir, 'skills')],
+      cmdsDirs: [path.join(pl.dir, 'commands')],
     });
   }
 
@@ -110,52 +116,65 @@ ipcMain.handle('list-skills', async () => {
   const commands = [];
 
   for (const src of sources) {
-    // Skills: each subdirectory of skillsDir is a skill; SKILL.md inside.
-    try {
-      const entries = fs.readdirSync(src.skillsDir, { withFileTypes: true });
-      for (const ent of entries) {
-        if (!ent.isDirectory()) continue;
-        const skillFile = path.join(src.skillsDir, ent.name, 'SKILL.md');
-        if (!fs.existsSync(skillFile)) continue;
-        const text = fs.readFileSync(skillFile, 'utf8');
-        const fm = parseFrontmatter(text);
-        const base = fm.name || ent.name;
-        skills.push({
-          name: src.pluginName ? src.pluginName + ':' + base : base,
-          description: fm.description || '',
-          source: src.label,
-          kind: src.kind,
-          // What the user types to invoke it in a Claude terminal.
-          insert: '/' + (src.pluginName ? src.pluginName + ':' + base : base),
-          path: skillFile,
-        });
-      }
-    } catch (_) { /* dir doesn't exist — fine */ }
+    // Skills: each subdirectory of a skills dir is a skill; SKILL.md inside.
+    // Dedupe by name within a source — the same skill is scaffolded into every
+    // agent's root, so we'd otherwise show it once per agent.
+    const seenSkills = new Set();
+    for (const skillsDir of src.skillsDirs) {
+      try {
+        const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+        for (const ent of entries) {
+          if (!ent.isDirectory()) continue;
+          const skillFile = path.join(skillsDir, ent.name, 'SKILL.md');
+          if (!fs.existsSync(skillFile)) continue;
+          const text = fs.readFileSync(skillFile, 'utf8');
+          const fm = parseFrontmatter(text);
+          const base = fm.name || ent.name;
+          const name = src.pluginName ? src.pluginName + ':' + base : base;
+          if (seenSkills.has(name)) continue;
+          seenSkills.add(name);
+          skills.push({
+            name,
+            description: fm.description || '',
+            source: src.label,
+            kind: src.kind,
+            // What the user types to invoke it in a terminal.
+            insert: '/' + name,
+            path: skillFile,
+          });
+        }
+      } catch (_) { /* dir doesn't exist — fine */ }
+    }
 
-    // Slash commands: <name>.md files in commands dir.
-    try {
-      const entries = fs.readdirSync(src.cmdsDir, { withFileTypes: true });
-      for (const ent of entries) {
-        if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
-        const file = path.join(src.cmdsDir, ent.name);
-        const text = fs.readFileSync(file, 'utf8');
-        const fm = parseFrontmatter(text);
-        // Body after frontmatter for a fallback description.
-        let body = text.replace(/^---[\s\S]*?\n---\s*/, '').trim();
-        const cmdBase = ent.name.replace(/\.md$/, '');
-        // Plugin commands are namespaced `/<plugin>:<command>` by the CLI;
-        // user/project commands are just `/<command>`.
-        const slash = '/' + (src.pluginName ? src.pluginName + ':' + cmdBase : cmdBase);
-        commands.push({
-          name: slash,
-          description: fm.description || body.split('\n')[0].slice(0, 160),
-          source: src.label,
-          kind: src.kind,
-          insert: slash,
-          path: file,
-        });
-      }
-    } catch (_) {}
+    // Slash commands: <name>.md files in a commands dir (deduped likewise).
+    const seenCmds = new Set();
+    for (const cmdsDir of src.cmdsDirs) {
+      try {
+        const entries = fs.readdirSync(cmdsDir, { withFileTypes: true });
+        for (const ent of entries) {
+          if (!ent.isFile() || !ent.name.endsWith('.md')) continue;
+          const file = path.join(cmdsDir, ent.name);
+          const text = fs.readFileSync(file, 'utf8');
+          const fm = parseFrontmatter(text);
+          // Body after frontmatter for a fallback description.
+          let body = text.replace(/^---[\s\S]*?\n---\s*/, '').trim();
+          const cmdBase = ent.name.replace(/\.md$/, '');
+          // Plugin commands are namespaced `/<plugin>:<command>` by the CLI;
+          // user/project commands are just `/<command>`.
+          const slash = '/' + (src.pluginName ? src.pluginName + ':' + cmdBase : cmdBase);
+          if (seenCmds.has(slash)) continue;
+          seenCmds.add(slash);
+          commands.push({
+            name: slash,
+            description: fm.description || body.split('\n')[0].slice(0, 160),
+            source: src.label,
+            kind: src.kind,
+            insert: slash,
+            path: file,
+          });
+        }
+      } catch (_) {}
+    }
   }
 
   // Sort: user → plugin → project, then alphabetically by source label, then

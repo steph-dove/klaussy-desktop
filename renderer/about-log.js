@@ -531,6 +531,9 @@ window.Dialogs = (function () {
           + '<button class="skills-close" type="button" title="Close">&times;</button>'
         + '</div>'
       + '</div>'
+      + '<div class="skills-search-row">'
+        + '<input type="text" class="skills-search" placeholder="Search skills &amp; commands\u2026" autocomplete="off" spellcheck="false" />'
+      + '</div>'
       + '<div class="skills-body">'
         + '<div class="skills-list-pane"><div class="skills-loading">Reading ~/.claude\u2026</div></div>'
         + '<div class="skills-preview-pane"><div class="skills-preview-empty">Select a skill or command on the left to preview.</div></div>'
@@ -543,6 +546,16 @@ window.Dialogs = (function () {
 
     var listPane = dialog.querySelector('.skills-list-pane');
     var previewPane = dialog.querySelector('.skills-preview-pane');
+    var searchInput = dialog.querySelector('.skills-search');
+    var lastResult = null; // cache so search filters without re-reading disk
+
+    function matchesQuery(s, q) {
+      if (!q) return true;
+      return ((s.name || '') + ' ' + (s.description || '') + ' ' + (s.source || ''))
+        .toLowerCase().indexOf(q) !== -1;
+    }
+
+    searchInput.addEventListener('input', function () { if (lastResult) renderList(lastResult); });
 
     function refreshAndSelect(targetPath) {
       window.klaus.skills.listSkills().then(function (r) { renderList(r, targetPath); });
@@ -555,14 +568,22 @@ window.Dialogs = (function () {
     });
 
     function renderList(result, autoSelectPath) {
-      var skills = (result && result.skills) || [];
-      var commands = (result && result.commands) || [];
-      if (skills.length === 0 && commands.length === 0) {
+      if (result) lastResult = result;
+      var rawSkills = (result && result.skills) || [];
+      var rawCommands = (result && result.commands) || [];
+      if (rawSkills.length === 0 && rawCommands.length === 0) {
         listPane.innerHTML =
           '<div class="skills-empty">'
             + '<p>No skills or slash commands yet.</p>'
             + '<p class="skills-empty-hint">Click <strong>+ New</strong> above to create one, or drop files into ~/.claude/skills/ or ~/.claude/commands/ and reopen.</p>'
           + '</div>';
+        return;
+      }
+      var q = (searchInput.value || '').trim().toLowerCase();
+      var skills = rawSkills.filter(function (s) { return matchesQuery(s, q); });
+      var commands = rawCommands.filter(function (s) { return matchesQuery(s, q); });
+      if (skills.length === 0 && commands.length === 0) {
+        listPane.innerHTML = '<div class="skills-empty"><p>No skills or commands match “' + escHtml(q) + '”.</p></div>';
         return;
       }
       var html = '';
