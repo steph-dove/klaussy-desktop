@@ -375,9 +375,13 @@ window.App = window.App || {};
           + '<input type="text" class="pr-picker-url" placeholder="Paste a GitHub PR URL" />'
           + '<button class="pr-picker-start" type="button" disabled>Start review</button>'
         + '</div>'
+        + '<div class="pr-picker-search-row">'
+          + '<input type="text" class="pr-picker-search" placeholder="Search loaded PRs by title, number, author or repo\u2026" autocomplete="off" spellcheck="false" />'
+        + '</div>'
         + '<div class="pr-picker-recent"></div>'
         + '<div class="pr-picker-list"><div class="pr-picker-loading">Loading open PRs\u2026</div></div>'
         + '<div class="pr-picker-authored"></div>'
+        + '<div class="pr-picker-no-matches" hidden>No loaded PRs match your search.</div>'
         + '<div class="pr-picker-footer"><button class="pr-picker-cancel">Cancel</button></div>'
       + '</div>';
     document.body.appendChild(overlay);
@@ -395,6 +399,54 @@ window.App = window.App || {};
     var recentEl = overlay.querySelector('.pr-picker-recent');
     var listEl = overlay.querySelector('.pr-picker-list');
     var authoredEl = overlay.querySelector('.pr-picker-authored');
+    var searchEl = overlay.querySelector('.pr-picker-search');
+    var noMatchesEl = overlay.querySelector('.pr-picker-no-matches');
+
+    // Client-side filter over whatever PRs are currently rendered across the
+    // three sections. Each row's textContent already carries number, title,
+    // author and (for the grouped list) repo, so a substring test covers them.
+    // Group/section headers hide when nothing under them survives.
+    function applyPrFilter() {
+      var q = (searchEl.value || '').trim().toLowerCase();
+      var anyVisible = false;
+      [recentEl, listEl, authoredEl].forEach(function (container) {
+        if (!container) return;
+        container.querySelectorAll('.pr-picker-item').forEach(function (item) {
+          var match = !q || item.textContent.toLowerCase().indexOf(q) !== -1;
+          item.style.display = match ? '' : 'none';
+          if (match) anyVisible = true;
+        });
+        // Per-repo subheadings inside the grouped list.
+        container.querySelectorAll('.pr-picker-repo').forEach(function (label) {
+          var n = label.nextElementSibling, vis = false;
+          while (n && !n.classList.contains('pr-picker-repo') && !n.classList.contains('pr-picker-section-head')) {
+            if (n.classList.contains('pr-picker-item') && n.style.display !== 'none') { vis = true; break; }
+            n = n.nextElementSibling;
+          }
+          label.style.display = vis ? '' : 'none';
+        });
+        // Section heading ("Recently reviewed" etc.) hides when its section has
+        // no surviving rows.
+        var head = container.querySelector('.pr-picker-section-head');
+        if (head) {
+          var hasVisible = Array.prototype.some.call(
+            container.querySelectorAll('.pr-picker-item'),
+            function (it) { return it.style.display !== 'none'; });
+          head.style.display = (!q || hasVisible) ? '' : 'none';
+        }
+      });
+      // Only call out "no matches" once the user has actually typed something.
+      noMatchesEl.hidden = !q || anyVisible;
+    }
+
+    searchEl.addEventListener('input', applyPrFilter);
+    // Sections fill in asynchronously and re-render on account switch; re-apply
+    // the active filter whenever their contents change. Watching childList only
+    // (not attributes) means our own display toggles don't retrigger this.
+    var filterObserver = new MutationObserver(applyPrFilter);
+    [recentEl, listEl, authoredEl].forEach(function (el) {
+      filterObserver.observe(el, { childList: true, subtree: true });
+    });
     // The account the picker is browsing as. Lists run under this account's
     // token (no global switch); only opening a review (pr.load) switches the
     // global active account. Defaults to whatever gh account is active.

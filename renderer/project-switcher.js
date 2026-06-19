@@ -16,6 +16,14 @@ window.ProjectSwitcher = (function () {
   var sessionSelect = document.getElementById('session-select');
   var taskList = document.getElementById('task-list');
 
+  // Searchable dropdowns over the native selects (the selects stay the source
+  // of truth; refresh() keeps rebuilding their <option>s and the enhancer
+  // mirrors them). No-op if the enhancer failed to load.
+  if (window.SearchableSelect) {
+    window.SearchableSelect.enhance(repoSelect, { searchPlaceholder: 'Search repos…' });
+    window.SearchableSelect.enhance(sessionSelect, { searchPlaceholder: 'Search sessions…' });
+  }
+
   function basename(p) {
     if (!p) return '';
     var parts = p.replace(/\/+$/, '').split('/');

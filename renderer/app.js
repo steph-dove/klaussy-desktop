@@ -587,6 +587,14 @@ window.App = window.App || {};
   App.modalCreate = document.getElementById('modal-create');
   App.modalCancel = document.getElementById('modal-cancel');
   App.existingSessionSelect = document.getElementById('existing-session-select');
+  // Searchable dropdown over the resume-session picker (the select stays the
+  // source of truth; populateExistingSessions keeps rewriting its <option>s).
+  if (window.SearchableSelect) {
+    window.SearchableSelect.enhance(App.existingSessionSelect, {
+      placeholder: 'Pick a session…',
+      searchPlaceholder: 'Search sessions…',
+    });
+  }
   App.modalRepoRow = document.getElementById('modal-repo-row');
   App.modalRepoPathEl = document.getElementById('modal-repo-path');
   App.modalRepoBrowseBtn = document.getElementById('btn-modal-repo-browse');
