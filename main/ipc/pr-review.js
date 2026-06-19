@@ -797,6 +797,9 @@ ipcMain.handle('pr-review-local-state', async (_event, args) => {
   const hint = args && args.worktreeHint;
   const wt = activePrWorktree(hint);
   if (!wt) return { worktreePath: null };
+  // Ignore agent scratch up front so it never shows in the file list and is
+  // already excluded by the time the user commits.
+  ensureWorktreeScratchIgnored(wt.worktreePath);
   const { meta } = prReview.active;
   const headRefOid = meta && meta.headRefOid;
 
@@ -892,6 +895,29 @@ ipcMain.handle('pr-review-local-state', async (_event, args) => {
   };
 });
 
+// Keep agent scratch artifacts (e.g. the `.pr-diff*.txt` diff dumps a review /
+// debug / resolve agent may leave behind) out of `git add -A` so they're never
+// swept into a commit or push to the PR branch. We append to the worktree's
+// local, uncommitted `.git/info/exclude` rather than the repo's tracked
+// `.gitignore`, so the user's repo is left untouched. Idempotent + best-effort:
+// a failure here must never block a commit.
+const AGENT_SCRATCH_IGNORES = ['.pr-diff*'];
+function ensureWorktreeScratchIgnored(worktreePath) {
+  try {
+    let common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: worktreePath, stdio: 'pipe',
+    }).toString().trim();
+    if (!path.isAbsolute(common)) common = path.resolve(worktreePath, common);
+    const excludePath = path.join(common, 'info', 'exclude');
+    let existing = '';
+    try { existing = fs.readFileSync(excludePath, 'utf-8'); } catch (_) { /* no file yet */ }
+    const marker = '# klaussy: agent scratch artifacts (never committed)';
+    if (existing.includes(marker)) return;
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    fs.appendFileSync(excludePath, '\n' + marker + '\n' + AGENT_SCRATCH_IGNORES.join('\n') + '\n');
+  } catch (_) { /* best-effort */ }
+}
+
 ipcMain.handle('pr-review-commit-local', async (_event, { message, worktreeHint }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   if (!message || !message.trim()) return { error: 'Commit message required' };
@@ -899,6 +925,8 @@ ipcMain.handle('pr-review-commit-local', async (_event, { message, worktreeHint 
   if (!wt) return { error: 'No worktree for this PR yet' };
 
   try {
+    // Ignore agent scratch before staging so `git add -A` can't sweep it in.
+    ensureWorktreeScratchIgnored(wt.worktreePath);
     await execFileP('git', ['add', '-A'], { cwd: wt.worktreePath });
   } catch (err) {
     return { error: 'git add failed: ' + (err.stderr || err.message) };
@@ -942,6 +970,9 @@ ipcMain.handle('pr-review-push-local', async (_event, args) => {
   const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
   const target = `${headOwner}/${headRepoName}:${headBranch}`;
 
+  const wtCwd = wt.worktreePath;
+  const stashRequested = !!(args && args.stash);
+
   // HEAD:refs/heads/<branch> — pushes the worktree's current commit to the PR
   // branch on the head fork. Non-force, so GitHub rejects it if the branch has
   // advanced upstream (force-pushed by the author, or pushed from another
@@ -949,48 +980,158 @@ ipcMain.handle('pr-review-push-local', async (_event, args) => {
   // git hint.
   const doPush = () => execFileP(
     'git', ['push', authedUrl, `HEAD:refs/heads/${headBranch}`],
-    { cwd: wt.worktreePath, timeout: 60000 },
+    { cwd: wtCwd, timeout: 60000 },
   );
   const isNonFastForward = (s) => /non-fast-forward|\[rejected\]|fetch first|behind its remote/i.test(s || '');
+  // git's "tree is dirty" phrasings — distinguishes an uncommitted-changes block
+  // (offer Stash) from a real merge conflict (offer the agent).
+  const looksLikeDirtyTree = (s) => /unstaged|uncommitted|untracked working tree|would be overwritten|cannot rebase|commit your changes or stash|please commit/i.test(s || '');
+
+  // Happy path: a plain push when nothing diverged. Skipped when the caller
+  // explicitly asked to stash (Stash button) — that means "set my changes
+  // aside, integrate the remote, push, restore", so we go straight to recovery.
+  if (!stashRequested) {
+    try {
+      const { stderr } = await doPush();
+      return { ok: true, target, output: scrub((stderr || '').trim()) };
+    } catch (err) {
+      const raw = err.stderr ? err.stderr.toString() : err.message;
+      if (!isNonFastForward(raw)) return { error: scrub(raw) };
+      // fall through to recovery
+    }
+  }
+
+  // Recovery: integrate the latest remote (fetch + rebase), then retry the push
+  // once. When asked to stash, set aside any uncommitted changes first so the
+  // rebase isn't blocked, and restore them afterwards.
+  let stashed = false;
+  if (stashRequested) {
+    try {
+      const { stdout } = await execFileP('git', ['stash', 'push', '-m', 'klaussy: auto-stash before integrating remote'], { cwd: wtCwd, timeout: 30000 });
+      stashed = !/No local changes to save/i.test(stdout || '');
+    } catch (se) {
+      return { error: 'Could not stash local changes: ' + scrub(se.stderr ? se.stderr.toString() : se.message) };
+    }
+  }
+  // Restore our stash (if any). The push has already happened by the time this
+  // runs, so a conflicting pop is non-fatal — surface it as a warning suffix.
+  const popStash = async () => {
+    if (!stashed) return '';
+    try {
+      await execFileP('git', ['stash', 'pop'], { cwd: wtCwd, timeout: 30000 });
+      return '';
+    } catch (_) {
+      return ' (Your stashed changes were restored but produced conflicts — resolve them in the worktree.)';
+    }
+  };
+
+  try {
+    await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wtCwd, timeout: 60000 });
+  } catch (fe) {
+    await popStash();
+    return { error: 'Could not fetch the latest remote branch:\n\n' + scrub(fe.stderr ? fe.stderr.toString() : fe.message) };
+  }
+
+  try {
+    await execFileP('git', ['rebase', 'FETCH_HEAD'], { cwd: wtCwd, timeout: 60000 });
+  } catch (re) {
+    // Abort the failed rebase to restore the pre-rebase state, then restore the
+    // stash. Ignore the abort's own error (e.g. the rebase never started).
+    try { await execFileP('git', ['rebase', '--abort'], { cwd: wtCwd, timeout: 30000 }); } catch (_) {}
+    const popWarn = await popStash();
+    const rmsg = scrub(re.stderr ? re.stderr.toString() : re.message);
+    const dirty = looksLikeDirtyTree(rmsg);
+    return {
+      kind: dirty ? 'dirty-tree' : 'conflict',
+      // Offer Stash only for a dirty tree we haven't already stashed for.
+      canStash: dirty && !stashRequested,
+      canResolve: true,
+      error: (dirty
+        ? 'Uncommitted changes in the worktree are blocking integration of the latest remote commit. Stash them and retry, or let the agent resolve it.'
+        : 'Integrating the latest remote commit hit merge conflicts. Let the agent resolve them and push, or resolve manually in the worktree.')
+        + popWarn + '\n\n' + rmsg,
+    };
+  }
 
   try {
     const { stderr } = await doPush();
-    return { ok: true, target, output: scrub((stderr || '').trim()) };
-  } catch (err) {
-    const raw = err.stderr ? err.stderr.toString() : err.message;
-    if (!isNonFastForward(raw)) return { error: scrub(raw) };
-
-    // Non-fast-forward: the remote PR branch is ahead of our local copy.
-    // Auto-recover by replaying our local commits onto the latest remote tip
-    // (fetch the branch, rebase onto FETCH_HEAD), then retry the push once.
-    // Non-destructive: a conflicting rebase is aborted so the worktree is left
-    // exactly as it was, and we report so the user can resolve it by hand.
-    try {
-      await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wt.worktreePath, timeout: 60000 });
-    } catch (fe) {
-      const fmsg = scrub(fe.stderr ? fe.stderr.toString() : fe.message);
-      return { error: 'Push rejected — the remote branch advanced — and the follow-up fetch failed:\n\n' + fmsg };
-    }
-    try {
-      await execFileP('git', ['rebase', 'FETCH_HEAD'], { cwd: wt.worktreePath, timeout: 60000 });
-    } catch (re) {
-      // Abort any in-progress rebase to restore the pre-rebase state. Ignore
-      // the abort's own error (e.g. the rebase never started because the tree
-      // had uncommitted changes — nothing to abort).
-      try { await execFileP('git', ['rebase', '--abort'], { cwd: wt.worktreePath, timeout: 30000 }); } catch (_) {}
-      const rmsg = scrub(re.stderr ? re.stderr.toString() : re.message);
-      return {
-        error: 'The remote PR branch advanced past your local commits. Auto-rebasing onto the '
-          + 'latest remote commit failed (likely a merge conflict or uncommitted changes). '
-          + 'Resolve it in the worktree, then push again.\n\n' + rmsg,
-      };
-    }
-    try {
-      const { stderr } = await doPush();
-      return { ok: true, rebased: true, target, output: scrub((stderr || '').trim()) };
-    } catch (e2) {
-      const raw2 = scrub(e2.stderr ? e2.stderr.toString() : e2.message);
-      return { error: 'Rebased onto the latest remote commit, but the retry push still failed:\n\n' + raw2 };
-    }
+    const popWarn = await popStash();
+    return { ok: true, rebased: true, stashed, target, output: scrub((stderr || '').trim()) + popWarn };
+  } catch (e2) {
+    await popStash();
+    return { error: 'Integrated the latest remote commit, but the retry push still failed:\n\n' + scrub(e2.stderr ? e2.stderr.toString() : e2.message) };
   }
+});
+
+// Hand the "remote advanced + can't auto-rebase" situation to an agent: spawn
+// (or reuse) a Claude task in the PR's worktree and paste a prompt telling it
+// to integrate the remote, resolve the merge conflicts, commit, and push. Then
+// drop out of review mode and focus the task so the user can watch it work —
+// same takeover the Check out / Implement buttons use.
+ipcMain.handle('pr-review-resolve-conflicts', async (_event, args) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  const { meta, number } = prReview.active;
+  const wt = activePrWorktree(args && args.worktreeHint);
+  if (!wt) return { error: 'No worktree for this PR yet' };
+  // Ignore agent scratch so the agent's own `git add` + commit can't sweep it in.
+  ensureWorktreeScratchIgnored(wt.worktreePath);
+
+  const headOwner = meta && meta.headRepositoryOwner && meta.headRepositoryOwner.login;
+  const headRepoName = meta && meta.headRepository && meta.headRepository.name;
+  const headBranch = meta && meta.headRefName;
+  if (!headBranch) return { error: 'PR head branch missing from metadata.' };
+  const headRepoSlug = (headOwner && headRepoName) ? `${headOwner}/${headRepoName}` : '';
+
+  // Reuse an alive Claude task already on this worktree before spawning a new
+  // one (matches pr-debug-check-open-task / pr-checkout-locally).
+  let target = null;
+  for (const inst of instances.values()) {
+    if (inst.worktreePath === wt.worktreePath && inst.alive && inst.mode === 'claude') { target = inst; break; }
+  }
+  let payload;
+  if (target) {
+    payload = { id: target.id, name: target.name, worktreePath: target.worktreePath, branch: target.branch, mode: target.mode };
+  } else {
+    const result = spawnInWorktree(wt.branch, wt.worktreePath, wt.branch, 'claude', null, null, number);
+    if (result && result.error) return { error: result.error };
+    target = instances.get(result.id);
+    payload = result;
+  }
+  if (!target || !target.pty) return { error: 'Failed to spawn a task on the worktree.' };
+
+  const pushHint = headRepoSlug
+    ? `\`git push https://github.com/${headRepoSlug}.git HEAD:${headBranch}\` (or \`gh\`)`
+    : `the PR's head fork`;
+  const BP_START = '\x1b[200~';
+  const BP_END = '\x1b[201~';
+  const text =
+    `The push to the PR branch \`${headBranch}\`${headRepoSlug ? ` on \`${headRepoSlug}\`` : ''} was rejected because the remote has advanced past this worktree. Please get my commits integrated and pushed:\n\n`
+    + `1. Fetch the latest PR branch and rebase this worktree's commits onto it (\`git fetch origin ${headBranch}\` then \`git rebase FETCH_HEAD\`; a merge is fine if you prefer).\n`
+    + `2. Resolve any merge conflicts — keep both my local changes and the incoming remote changes where they don't truly conflict.\n`
+    + `3. Commit the resolution.\n`
+    + `4. Push the result to ${pushHint}.\n\n`
+    + `Keep it focused: only integrate the remote and resolve conflicts — no unrelated changes.\n`;
+
+  // Paste after a short delay so claude has rendered its prompt (mirrors
+  // pr-debug-check-open-task). The pty ref is captured now, so the takeover
+  // below doesn't affect it.
+  setTimeout(() => {
+    try {
+      target.pty.write(BP_START + text + BP_END);
+    } catch (err) {
+      console.error('[pr-review-resolve-conflicts] pty.write failed:', (err && err.message) || String(err));
+    }
+  }, 1500);
+
+  // Exit review mode and focus the task, like pr-checkout-locally.
+  if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
+    prReview.active.popout.close();
+  }
+  prReview.active = null;
+  restoreGhAfterReview();
+  broadcastPrReview();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('pr-checkout-ready', payload);
+  }
+  return { ok: true, task: payload };
 });

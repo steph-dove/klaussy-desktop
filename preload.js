@@ -413,7 +413,8 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('pr-review-read-file', { worktreePath, relPath }),
     localState: (worktreeHint) => ipcRenderer.invoke('pr-review-local-state', { worktreeHint }),
     commitLocal: (message, worktreeHint) => ipcRenderer.invoke('pr-review-commit-local', { message, worktreeHint }),
-    pushLocal: (worktreeHint) => ipcRenderer.invoke('pr-review-push-local', { worktreeHint }),
+    pushLocal: (worktreeHint, opts) => ipcRenderer.invoke('pr-review-push-local', { worktreeHint, stash: !!(opts && opts.stash) }),
+    resolveConflicts: (worktreeHint) => ipcRenderer.invoke('pr-review-resolve-conflicts', { worktreeHint }),
     cacheGetByPr: (owner, repo, number) =>
       ipcRenderer.invoke('pr-review-cache-get-by-pr', { owner, repo, number }),
     cacheSaveByPr: (owner, repo, number, data) =>

@@ -129,8 +129,18 @@
 
     var bannerHtml = '';
     if (PR.localBanner) {
+      var actionsHtml = (PR.localBanner.actions && PR.localBanner.actions.length)
+        ? '<div class="pr-local-banner-actions">'
+            + PR.localBanner.actions.map(function (a) {
+                return '<button class="pr-review-btn pr-local-banner-btn" type="button"'
+                  + ' data-action="' + PR.escHtml(a.id) + '"' + (PR.localBusy ? ' disabled' : '') + '>'
+                  + PR.escHtml(a.label) + '</button>';
+              }).join('')
+          + '</div>'
+        : '';
       bannerHtml = '<div class="pr-local-banner ' + PR.localBanner.kind + '">'
-        + PR.escHtml(PR.localBanner.text)
+        + '<div class="pr-local-banner-text">' + PR.escHtml(PR.localBanner.text) + '</div>'
+        + actionsHtml
       + '</div>';
     }
 
@@ -249,20 +259,56 @@
     });
 
     var pushBtn = section.querySelector('.pr-local-push-btn');
-    if (pushBtn) pushBtn.addEventListener('click', function () {
-      PR.localBusy = 'pushing';
-      PR.localBanner = null;
-      PR.repaintAiReviewTab();
-      window.klaus.pr.pushLocal(PR.aiReview.worktreePath || null).then(function (r) {
-        PR.localBusy = null;
-        if (r && r.error) {
-          PR.localBanner = { kind: 'error', text: r.error };
-          PR.repaintAiReviewTab();
-        } else {
-          PR.localBanner = { kind: 'ok', text: (r && r.rebased ? 'Rebased onto the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' };
-          PR.refreshLocalChanges();
-        }
+    if (pushBtn) pushBtn.addEventListener('click', function () { PR.doPushLocal({}); });
+
+    // Recovery actions surfaced in the error banner after a failed auto-rebase.
+    var bannerBtns = section.querySelectorAll('.pr-local-banner-btn');
+    Array.prototype.forEach.call(bannerBtns, function (b) {
+      b.addEventListener('click', function () {
+        var action = b.dataset.action;
+        if (action === 'stash') PR.doPushLocal({ stash: true });
+        else if (action === 'resolve') PR.resolveConflicts();
       });
+    });
+  };
+
+  // Push the worktree's commits to the PR branch. opts.stash makes main set
+  // aside uncommitted changes, integrate the remote (fetch + rebase), push,
+  // then restore them. On a non-fast-forward that can't auto-resolve, main
+  // returns canStash/canResolve flags and we render them as banner actions.
+  PR.doPushLocal = function (opts) {
+    opts = opts || {};
+    PR.localBusy = 'pushing';
+    PR.localBanner = null;
+    PR.repaintAiReviewTab();
+    window.klaus.pr.pushLocal(PR.aiReview.worktreePath || null, opts).then(function (r) {
+      PR.localBusy = null;
+      if (r && r.error) {
+        var actions = [];
+        if (r.canStash) actions.push({ id: 'stash', label: 'Stash, pull & retry' });
+        if (r.canResolve) actions.push({ id: 'resolve', label: 'Resolve with agent' });
+        PR.localBanner = { kind: 'error', text: r.error, actions: actions };
+        PR.repaintAiReviewTab();
+      } else {
+        PR.localBanner = { kind: 'ok', text: (r && r.rebased ? 'Integrated the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' };
+        PR.refreshLocalChanges();
+      }
+    });
+  };
+
+  // Hand a non-fast-forward / conflict situation to a Claude agent in the
+  // worktree. Main spawns/reuses the task, pastes a resolve+commit+push prompt,
+  // then exits review mode and focuses the task (via pr-checkout-ready), so on
+  // success there's nothing left to paint here.
+  PR.resolveConflicts = function () {
+    PR.localBusy = 'pushing';
+    PR.repaintAiReviewTab();
+    window.klaus.pr.resolveConflicts(PR.aiReview.worktreePath || null).then(function (r) {
+      PR.localBusy = null;
+      if (r && r.error) {
+        PR.localBanner = { kind: 'error', text: r.error };
+        PR.repaintAiReviewTab();
+      }
     });
   };
 

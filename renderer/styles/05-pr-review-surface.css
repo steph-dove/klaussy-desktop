@@ -1024,6 +1024,8 @@ body.pr-review-popout #pr-review-root {
 }
 .pr-local-banner.ok { background: rgba(124, 226, 124, 0.15); color: var(--diff-add-fg, #7ce27c); }
 .pr-local-banner.error { background: rgba(226, 124, 124, 0.15); color: var(--diff-del-fg, #e27c7c); }
+.pr-local-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.pr-local-banner-btn { font-size: 11px; padding: 3px 10px; }
 
 .pr-local-file-list {
   list-style: none;

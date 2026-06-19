@@ -218,7 +218,7 @@ Always launch Agents 1-4. Additionally:
 - **Agent 5 (Agentic & Evals)** — include it only if the diff touches AI / agent / eval code: changes under \`**/skills/**\`, \`**/agents/**\`, \`**/.claude/**\`, MCP server files (\`mcp_*\`, \`.mcp.json\`), eval suites (\`**/evals/**\`, \`eval_*\`, \`*.eval.*\`), or imports of \`anthropic\` / \`openai\` / \`langchain\` / \`langgraph\` / \`mcp\` / \`@anthropic-ai/sdk\`. Skip it otherwise (nothing to review).
 - **Agent 6 (Design Decision)** — include it only if Phase 1 detected an ADR, RFC, or design doc; pass it the doc's full text. Skip it otherwise.
 
-**Important:** Each agent returns its findings as text. Agents must NOT write any files.
+**Important — do not pollute the working copy.** Pass the diff, changed-file contents, and commit log to each agent **inline in its prompt**. Do NOT write them to files inside the repo/worktree (scratch like \`.pr-diff*.txt\` ends up in \`git status\`, gets swept into commits, and pollutes the PR). If the diff is genuinely too large to paste inline, write it to a path under the system temp directory (e.g. \`$TMPDIR\`) — never inside the working copy — and pass that path. Each agent returns its findings as text; neither you nor the agents may write any files into the repository.
 
 ---
 
