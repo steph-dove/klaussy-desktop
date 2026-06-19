@@ -1,0 +1,195 @@
+/* Searchable dropdown (SearchableSelect) — a custom trigger + popover that
+ * replaces the visual of a native <select> while the select itself stays in the
+ * DOM as the hidden source of truth. Also styles the PR picker's search box. */
+
+.searchable-select {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+/* The native select is kept for state/events but never shown. */
+.searchable-select .ss-native {
+  display: none;
+}
+
+.ss-trigger {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--input-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+}
+
+.ss-trigger .ss-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-trigger.ss-placeholder .ss-label {
+  color: var(--text-muted, var(--text-dim, var(--text)));
+  opacity: 0.85;
+}
+
+.ss-trigger .ss-caret {
+  flex-shrink: 0;
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.searchable-select.ss-open .ss-trigger,
+.ss-trigger:focus {
+  border-color: var(--accent);
+}
+
+/* Mirror native validation styling onto the trigger. */
+.ss-native.modal-field-invalid + .ss-trigger {
+  border-color: var(--error);
+}
+
+/* Setting display on the popover would otherwise override the [hidden]
+ * attribute's UA display:none, leaving it permanently open. */
+.ss-popover[hidden] {
+  display: none;
+}
+
+.ss-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+  background: var(--surface, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+
+.ss-search-row {
+  padding: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ss-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+
+.ss-search:focus {
+  border-color: var(--accent);
+}
+
+.ss-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.ss-group {
+  padding: 6px 8px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, var(--text-dim, var(--text)));
+  opacity: 0.8;
+}
+
+.ss-item {
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ss-item.ss-active {
+  background: var(--surface-hover, rgba(127, 127, 127, 0.15));
+}
+
+.ss-item.ss-selected {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ss-item.ss-disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ss-empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  text-align: center;
+  color: var(--text-muted, var(--text-dim, var(--text)));
+  opacity: 0.8;
+}
+
+/* Sidebar repo/session filters: keep the compact 11px monospace look. */
+#project-switcher .searchable-select {
+  flex: 1;
+}
+
+/* New Session modal "resume existing session" picker: larger dashed box to
+ * match the original select. */
+#existing-session-row .searchable-select {
+  flex: 1;
+}
+#existing-session-row .ss-trigger {
+  border-style: dashed;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+}
+
+/* ── PR picker search box ─────────────────────────────────────────────── */
+.pr-picker-search-row {
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.pr-picker-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  background: var(--input-bg, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+}
+.pr-picker-search:focus { border-color: var(--accent); }
+.pr-picker-no-matches {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted, var(--text-dim, var(--text)));
+  opacity: 0.8;
+}
