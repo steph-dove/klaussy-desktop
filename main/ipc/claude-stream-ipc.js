@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { execFile, execFileSync } = require('child_process');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { isAgentMode } = require('../state/ai-providers');
-const { prReview, ensureWorktreeForActivePr, currentRepoPath } = require('../state/pr-review');
+const { prReview, ensureWorktreeForActivePr, currentRepoPath, resolveFallbackBaseBranch } = require('../state/pr-review');
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
 const { getRepoIntelBlock, ensureRepoIntel } = require('../state/repo-intel');
@@ -404,7 +404,13 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {})
   if (ensured.error) return { error: ensured.error };
   const reviewProvider = pickProvider(provider, defaultAgentProvider());
 
-  const baseBranch = (prReview.active.meta && prReview.active.meta.baseRefName) || 'main';
+  // Prefer the PR's declared base; when gh didn't report one, fall back to the
+  // first conventional default that actually exists (dev → main → master)
+  // rather than blindly assuming 'main'. 'main' stays as the last resort so
+  // baseRef is never empty.
+  const baseBranch = (prReview.active.meta && prReview.active.meta.baseRefName)
+    || resolveFallbackBaseBranch(ensured.worktreePath)
+    || 'main';
   // Diff against the PR's true fork point (merge-base SHA), not the local base
   // branch ref — the local ref is often stale, which pulls commits that aren't
   // in the PR into `<base>...HEAD`. Fall back to the branch name if the SHA
