@@ -195,9 +195,9 @@ ipcMain.handle('get-preferences', () => {
     // Pre-commit silent-failure review (app commit flow + git hook). On by
     // default; explicit false opts out.
     preCommitReview: config.preCommitReview !== false,
-    // Auto-strip verbose/narrating comments from staged code before commit.
-    // Modifies files, so OFF by default — opt in explicitly.
-    stripComments: config.stripComments === true,
+    // Keep comments concise (≤2 sentences; docstrings ≤5) before commit.
+    // On by default — only an explicit false opts out.
+    stripComments: config.stripComments !== false,
     // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
@@ -235,9 +235,10 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   }
   if (prefs.preCommitReview !== undefined) {
     config.preCommitReview = !!prefs.preCommitReview;
-    // Opting out removes installed git hooks — UNLESS comment-strip still needs
-    // them. Opting back in re-installs on the next session create.
-    if (!config.preCommitReview && !config.stripComments) {
+    // Opting out removes installed git hooks — UNLESS comment cleanup still
+    // needs them (it's on unless explicitly false). Opting back in re-installs
+    // on the next session create.
+    if (!config.preCommitReview && config.stripComments === false) {
       try {
         require('../state/precommit-hook').uninstallAllHooks();
       } catch (e) {

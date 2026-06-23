@@ -371,14 +371,16 @@ function runCheck({ worktreePath, provider, range, kind }) {
   return combined;
 }
 
-// ---- Verbose-comment auto-strip (opt-in: config.stripComments) --------------
+// ---- Concise-comment pass (on by default; config.stripComments === false off)
 // The review's LENS 5 flags excessive/narrating comments but only REPORTS them,
-// so the user has to keep telling the agent to clean up. With stripComments on,
-// we run a focused edit pass FIRST that deletes them and re-stages, so the
-// commit lands clean. Safety: only touches staged code files that have NO
-// unstaged changes (so re-staging can't sweep in partial-stage edits); the
-// prompt forbids code changes; and the review pass still runs afterward as a
-// backstop. Best-effort — any failure leaves the diff untouched.
+// so the user has to keep telling the agent to clean up. Instead we run a
+// focused edit pass FIRST that enforces concise comments — regular comments ≤2
+// sentences (ideally 1), docstrings ≤5, deleting ones that only restate the
+// code — and re-stages, so the commit lands clean. Safety: only touches staged
+// code files that have NO unstaged changes (so re-staging can't sweep in
+// partial-stage edits); the prompt forbids code changes; and the review pass
+// still runs afterward as a backstop. Best-effort — failure leaves the diff
+// untouched.
 const STRIP_CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|kt|rb|php|c|h|cc|cpp|hpp|cs|swift|scala|sh|bash|lua|vue|svelte)$/;
 
 function eligibleStripFiles(worktreePath) {
@@ -399,22 +401,21 @@ function eligibleStripFiles(worktreePath) {
 }
 
 function stripPrompt(files, diff) {
-  return `You are a pre-commit comment cleaner. Edit the staged files IN PLACE to remove verbose, redundant comments that were ADDED in this change. This is a mechanical cleanup, not a review.
+  return `You are a pre-commit comment editor. Edit the staged files IN PLACE so every comment that was ADDED in this change is concise. This is a mechanical cleanup, not a review.
 
-REMOVE (delete the comment, or condense a multi-line one to a short single line):
-- Comments that restate what the code plainly does ("// increment i", "// loop over the items", "// set x to 5")
-- Step-by-step narration of obvious code, or comments that just echo a function/variable name
-- Changelog / "AI-tell" narration ("// Now we handle the case where…", "// This function will…", "// Added to fix the bug")
+THE RULE: regular comments may be at most TWO sentences (aim for ONE); docstrings may be at most FIVE. Always as short as possible. Apply it like this:
+- A regular comment longer than two sentences → tighten to one or two sentences keeping only the non-obvious WHY (intent, gotcha, invariant, link). Drop narration and restated mechanics.
+- A comment that only restates what the code plainly does, narrates obvious steps, echoes a name, or is changelog/"AI-tell" filler ("// Now we handle…", "// This function will…", "// Added to fix the bug", "// increment i") → delete it entirely; it carries nothing worth one sentence.
+- A docstring / JSDoc / public-API doc comment → condense to AT MOST five sentences and as short as possible: keep params, returns, and the why; cut narration and the obvious. Don't pad to five — shorter is better.
+- A comment already within its limit and genuinely useful → leave it as is.
 
-KEEP — never touch these:
-- Comments that explain WHY (non-obvious intent, gotchas, invariants, links / ticket refs)
-- Docstrings, JSDoc, and public-API doc comments
+KEEP — never touch or shorten these:
 - License or file-header comments
 - Functional comments: shebang (#!), eslint-disable, @ts-ignore / @ts-expect-error, prettier-ignore, // @flow, # noqa, # type:, and similar pragmas; TODO/FIXME that carry real content
 
 HARD RULES:
-- Remove ONLY comments. Never change, move, rename, or reformat any code.
-- Only remove comments on lines ADDED in the change below — leave pre-existing comments alone.
+- Only edit comments. Never change, move, rename, or reformat any code.
+- Only touch comments on lines ADDED in the change below — leave pre-existing comments alone.
 - Edit ONLY these files: ${files.join(', ')}
 - Do not run git, tests, or any other commands.
 
@@ -422,7 +423,7 @@ Staged change for context (added lines start with +):
 
 ${diff}
 
-When done, print one short line per file describing what you removed, or "no verbose comments" if there was nothing to clean.`;
+When done, print one short line per file describing what you condensed or removed, or "comments already concise" if there was nothing to do.`;
 }
 
 // Run the edit pass, then re-stage exactly the files the pass modified.
@@ -496,8 +497,9 @@ function stripStagedComments({ worktreePath, provider }) {
 // (and the commit) see the tidied diff.
 async function runStagedCheck({ worktreePath, provider }) {
   let cfg = {};
-  try { cfg = loadConfig(); } catch { /* default off */ }
-  if (cfg.stripComments) {
+  try { cfg = loadConfig(); } catch { /* defaults below */ }
+  // On by default — only an explicit false opts out.
+  if (cfg.stripComments !== false) {
     try { await stripStagedComments({ worktreePath, provider }); } catch { /* never block the commit */ }
   }
   // Strip can be enabled without the review; in that case there's nothing to
