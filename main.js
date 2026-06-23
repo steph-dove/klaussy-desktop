@@ -18,6 +18,14 @@
 //
 // See SPLIT_PLAN.md for the full module layout and shared-state contract.
 
+// MUST be first — before any module reads userData (logging file, config,
+// license). Isolates a dev build's userData from the installed app and enforces
+// a single instance per build; a losing second instance exits here.
+const { acquirePrimaryOrExit } = require('./main/bootstrap/single-instance');
+if (!acquirePrimaryOrExit()) {
+  process.exit(0);
+}
+
 require('./main/util/logging');
 const pathGate = require('./main/util/path-gate');
 const { loadConfig } = require('./main/util/config');
