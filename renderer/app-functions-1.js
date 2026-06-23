@@ -692,22 +692,36 @@ window.App = window.App || {};
   // else a fresh spawn — resume-session handles a null sessionId gracefully.
   App.resumeSessionWorktree = async function(wt, sessionName, savedList, mode) {
     var saved = (savedList || []).find(function (s) { return s && s.worktreePath === wt.path; });
-    var resumeMode = (saved && saved.mode) || mode;
+    var savedMode = saved && saved.mode;
+    // Default to the agent that started the session (native resume). The picker
+    // only overrides it when the user deliberately chose an agent for this open
+    // — otherwise the default-provider pre-selection would silently force a
+    // handoff. When target != savedMode, main distills the prior session into a
+    // brief and seeds the new agent (originalMode tells it which agent's
+    // transcript to read).
+    var target = (App.shellUserPicked && mode) ? mode : (savedMode || mode || 'claude');
     // Shell entries attach a plain shell — same special-case as the sidebar's
     // saved-session Resume path.
-    if (resumeMode === 'shell') {
+    if (target === 'shell') {
       return window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
     }
     var sessionId = saved && saved.sessionId;
     if (!sessionId) {
       try { sessionId = await window.klaus.session.getLatest(wt.path); } catch (e) { sessionId = null; }
     }
+    // Cross-agent handoff summarization runs in main and can take a few seconds;
+    // let the user know why the resume isn't instant.
+    if (savedMode && target !== savedMode && window.toast && window.toast.info) {
+      var nm = (window.AppUtils && AppUtils.modeDisplayName) || function (m) { return m; };
+      window.toast.info('Summarizing the ' + nm(savedMode) + ' session to hand off to ' + nm(target) + '…');
+    }
     return window.klaus.session.resume({
       sessionId: sessionId || null,
       name: sessionName,
       worktreePath: wt.path,
       branch: wt.branch || sessionName,
-      mode: resumeMode,
+      mode: target,
+      originalMode: savedMode || null,
       repoPath: wt.repoPath || (saved && saved.repoPath) || null,
     });
   };

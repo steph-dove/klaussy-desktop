@@ -22,6 +22,7 @@ const { allWindows, getMainWindow } = require('./windows');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
+const { stageInitialPrompt } = require('../util/agent-prompt');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -276,7 +277,7 @@ function clearIdleTimer(inst) {
 
 // ---- PTY lifecycle ----
 
-function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber) {
+function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber, initialPrompt) {
   const id = nextId++;
   const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
@@ -287,6 +288,8 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   const config = loadConfig();
   let agentCmd;
   let session = { release: () => {} };
+  let promptFile = null;  // staged-prompt tempfile (cross-agent handoff), removed on exit
+  let needsEnter = false; // codex-style TUIs pre-fill but wait for an Enter
   if (mode === 'shell') {
     agentCmd = null;
   } else {
@@ -301,6 +304,15 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     if (!session.ok) return { cancelled: true };
     const model = (config.agentModel || {})[provider.id] || '';
     agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model });
+    // Cross-agent resume handoff: seed the incoming agent with a brief distilled
+    // from the prior (different-agent) session, passed at spawn rather than
+    // typed in (see util/agent-prompt + state/session-handoff).
+    if (initialPrompt) {
+      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`);
+      agentCmd = staged.agentCmd;
+      promptFile = staged.promptFile;
+      needsEnter = staged.needsEnter;
+    }
   }
 
   const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
@@ -311,6 +323,15 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     cwd: worktreePath,
     env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
+
+  // codex pre-fills its positional handoff prompt but waits for an Enter to
+  // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is
+  // up, with a retry for a slow boot; harmless for agents that already ran it.
+  if (needsEnter) {
+    const sendEnter = () => { try { if (instances.get(id)) ptyProc.write('\r'); } catch { /* gone */ } };
+    setTimeout(sendEnter, 3500);
+    setTimeout(sendEnter, 8000);
+  }
 
   // The base repo this worktree belongs to — used to group/filter worktrees by
   // repository in the sidebar. Derived from the worktree's common git dir so it
@@ -386,6 +407,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   ptyProc.onExit(({ exitCode }) => {
     clearIdleTimer(instance);
     session.release(); // free the concurrency slot (Codex token-rotation guard)
+    if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
     // If this was a Claude session, auto-convert to shell in-place — but
     // only for natural exits. An explicit kill-task sets `killed`, and
     // restart-task sets `restarting`; neither should spawn a shell we'd

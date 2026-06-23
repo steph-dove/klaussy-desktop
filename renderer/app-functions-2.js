@@ -121,6 +121,7 @@ window.App = window.App || {};
     App.openNewWindowCheck.checked = openTaskCount >= 3;
     App.activeTab = 'new';
     App.selectedMode = AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode || 'claude';
+    App.shellUserPicked = false; // reset: a fresh open hasn't deliberately picked an agent yet
     App.modalTabs.forEach(function (t) { t.classList.toggle('active', t.dataset.tab === 'new'); });
     App.tabContents.forEach(function (c) { c.classList.toggle('active', c.id === 'tab-new'); });
     App.shellOptions.forEach(function (b) { b.classList.toggle('active', b.dataset.shell === App.selectedMode); });
