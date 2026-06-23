@@ -7,6 +7,7 @@
 const { ipcMain, BrowserWindow } = require('electron');
 const { prReview, ensureWorktreeForActivePr } = require('../state/pr-review');
 const { pickProvider, agentForWorktree, repoIntelFor } = require('../state/agent-select');
+const { ensureWorktreeBootstrap } = require('../state/repo-intel');
 const { getOrAskRepoConsent, applyWorktreePermissions } = require('../util/worktree-permissions');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
@@ -69,6 +70,10 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
 
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
+  // Give the PR worktree the base repo's skills/slash-commands/rules/CLAUDE.md
+  // so the implement agent can find them (it's a freshly cloned worktree, not a
+  // normal session, so it doesn't get this otherwise).
+  ensureWorktreeBootstrap(ensured.worktreePath);
   // Stash the worktree on the active PR so 'pr-review-implement-active' can
   // match a backgrounded run to this PR (e.g. when a fresh pop-out asks).
   if (prReview.active) prReview.active.worktreePath = ensured.worktreePath;
@@ -304,6 +309,9 @@ ipcMain.handle('pr-review-tchat-start', async (event, { provider } = {}) => {
   if (!prReview.active) return { error: 'No active PR review' };
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
+  // Sync the base repo's skills/slash-commands/rules/CLAUDE.md into the PR
+  // worktree so the chat agent can find them (same gap as the implement path).
+  ensureWorktreeBootstrap(ensured.worktreePath);
   if (prReview.active) prReview.active.worktreePath = ensured.worktreePath;
 
   const chatProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
