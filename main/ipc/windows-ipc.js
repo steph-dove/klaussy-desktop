@@ -182,6 +182,7 @@ ipcMain.handle('get-preferences', () => {
     claudePath: config.claudePath || '',
     codexPath: config.codexPath || '',
     geminiPath: config.geminiPath || '',
+    antigravityPath: config.antigravityPath || '',
     copilotPath: config.copilotPath || '',
     // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
     defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
@@ -209,6 +210,7 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.claudePath !== undefined) config.claudePath = prefs.claudePath;
   if (prefs.codexPath !== undefined) config.codexPath = prefs.codexPath;
   if (prefs.geminiPath !== undefined) config.geminiPath = prefs.geminiPath;
+  if (prefs.antigravityPath !== undefined) config.antigravityPath = prefs.antigravityPath;
   if (prefs.copilotPath !== undefined) config.copilotPath = prefs.copilotPath;
   if (prefs.defaultProvider !== undefined) {
     config.defaultProvider = prefs.defaultProvider;

@@ -41,6 +41,7 @@
     claude: { input: claudePath, infoEl: document.getElementById('agent-info-claude'), prefKey: 'claudePath' },
     codex: { input: document.getElementById('pref-codex-path'), infoEl: document.getElementById('agent-info-codex'), prefKey: 'codexPath' },
     gemini: { input: document.getElementById('pref-gemini-path'), infoEl: document.getElementById('agent-info-gemini'), prefKey: 'geminiPath' },
+    antigravity: { input: document.getElementById('pref-antigravity-path'), infoEl: document.getElementById('agent-info-antigravity'), prefKey: 'antigravityPath' },
     copilot: { input: document.getElementById('pref-copilot-path'), infoEl: document.getElementById('agent-info-copilot'), prefKey: 'copilotPath' },
   };
 

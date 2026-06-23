@@ -577,13 +577,22 @@ ipcMain.handle('check-dependencies', async () => {
 // Each script is idempotent — guarded with `command -v` (or `Get-Command`)
 // so re-running it after a partial install just fills in the missing pieces.
 
-// The bundle installs Node, gh, Ollama, and the user's chosen agent CLI
-// (`agent`: { displayName, bin, installCommand, loginCommand }).
-function installScriptMac(agent) {
+// The bundle installs Node, gh, Ollama, and EVERY agent CLI (`agents`: array of
+// { displayName, bin, installCommand, loginCommand }) — so whichever agent the
+// user picks later already works, with no extra setup. Each agent install is
+// guarded (skip if already present) and non-fatal (a single failure doesn't
+// abort the rest under `set -e`).
+function installScriptMac(agents) {
+  const names = agents.map((a) => a.displayName).join(', ');
+  const installs = agents.map((a) => `if ! command -v ${a.bin} >/dev/null 2>&1; then
+  echo "→ ${a.displayName}: ${a.installCommand}"
+  ${a.installCommand} || echo "⚠ ${a.displayName} install failed — retry it later."
+fi`).join('\n\n');
+  const logins = agents.map((a) => `echo "       • ${a.displayName}: ${a.loginCommand}"`).join('\n');
   return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, ${agent.displayName}, Ollama — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
 echo
 
 if ! command -v brew >/dev/null 2>&1; then
@@ -605,26 +614,33 @@ brew install node gh ollama
 export PATH="$(brew --prefix 2>/dev/null)/bin:$PATH"
 hash -r
 
-if ! command -v ${agent.bin} >/dev/null 2>&1; then
-  echo "→ ${agent.installCommand}"
-  ${agent.installCommand}
-fi
+${installs}
 
 echo
 echo "✓ All requirements installed."
 echo
 echo "Next steps:"
 echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
-echo "  2. Run '${agent.loginCommand}' once to sign in to ${agent.displayName}"
+echo "  2. Sign in to the agent(s) you'll use — run each once:"
+${logins}
 echo
 read -p "Press Enter to close this window…"
 `;
 }
 
-function installScriptWin(agent) {
+function installScriptWin(agents) {
+  const names = agents.map((a) => a.displayName).join(', ');
+  // Per-agent: skip if already on PATH; a failure is caught so it can't abort
+  // the rest (ErrorActionPreference is 'Stop').
+  const installs = agents.map((a) => `if (-not (Test-Cmd ${a.bin})) {
+  Write-Host '→ ${a.displayName}'
+  try { ${a.installCommand} } catch { Write-Host "⚠ ${a.displayName} install failed: $_" }
+  Sync-Path
+}`).join('\n\n');
+  const logins = agents.map((a) => `Write-Host '       • ${a.displayName}: ${a.loginCommand}'`).join('\n');
   return `$ErrorActionPreference = 'Stop'
 Write-Host 'Installing Klaussy requirements…'
-Write-Host '(Node, GitHub CLI, ${agent.displayName}, Ollama — ~2 GB total, mostly Ollama)'
+Write-Host '(Node, GitHub CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)'
 Write-Host ''
 
 function Test-Cmd($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
@@ -645,27 +661,38 @@ winget install --id Ollama.Ollama  -e --accept-source-agreements --accept-packag
 
 Sync-Path
 
-if (-not (Test-Cmd ${agent.bin})) {
-  Write-Host '→ ${agent.installCommand}'
-  ${agent.installCommand}
-}
+${installs}
 
 Write-Host ''
 Write-Host '✓ All requirements installed.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:'
 Write-Host '  1. Run ''gh auth login'' to authenticate GitHub (or use Klaussy''s Sign in button)'
-Write-Host '  2. Run ''${agent.loginCommand}'' once to sign in to ${agent.displayName}'
+Write-Host '  2. Sign in to the agent(s) you''ll use — run each once:'
+${logins}
 Write-Host ''
 Read-Host 'Press Enter to close this window'
 `;
 }
 
-function installScriptLinux(agent) {
+function installScriptLinux(agents) {
+  const names = agents.map((a) => a.displayName).join(', ');
+  // Per-agent: npm-global writes into the apt-installed system node_modules, so
+  // it needs root; a script installer (e.g. Antigravity's curl|bash) installs
+  // into the user's home (~/.local/bin) and must NOT run under sudo, or it lands
+  // in root's home and stays off the user's PATH. Guarded + non-fatal.
+  const installs = agents.map((a) => {
+    const line = a.installCommand.startsWith('npm ') ? `sudo ${a.installCommand}` : a.installCommand;
+    return `if ! command -v ${a.bin} >/dev/null 2>&1; then
+  echo "→ ${a.displayName}: ${line}"
+  ${line} || echo "⚠ ${a.displayName} install failed — retry it later."
+fi`;
+  }).join('\n\n');
+  const logins = agents.map((a) => `echo "       • ${a.displayName}: ${a.loginCommand}"`).join('\n');
   return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, ${agent.displayName}, Ollama — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
 echo "(sudo password may be required)"
 echo
 
@@ -674,8 +701,7 @@ sudo apt update
 sudo apt install -y nodejs npm gh
 hash -r
 
-echo "→ sudo ${agent.installCommand}"
-sudo ${agent.installCommand}
+${installs}
 hash -r
 
 if ! command -v ollama >/dev/null 2>&1; then
@@ -688,24 +714,31 @@ echo "✓ All requirements installed."
 echo
 echo "Next steps:"
 echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
-echo "  2. Run '${agent.loginCommand}' once to sign in to ${agent.displayName}"
+echo "  2. Sign in to the agent(s) you'll use — run each once:"
+${logins}
 echo
 read -p "Press Enter to close this window…"
 `;
 }
 
-// Resolve the agent the installer should set up — the user's current default.
-function installerAgentInfo() {
-  const config = loadConfig();
-  const id = config.defaultProvider || config.defaultMode || 'claude';
-  const provider = getProvider(id) || getProvider('claude');
-  const auth = authMetaFor(provider.id) || {};
-  return {
-    displayName: provider.displayName,
-    bin: provider.defaultBin,
-    installCommand: installCommandFor(provider.id), // "npm install -g <pkg>"
-    loginCommand: auth.loginCommand || provider.defaultBin,
-  };
+// Resolve EVERY agent CLI the installer should set up. We install them all on
+// first run — regardless of the user's current default — so switching agents
+// later needs no extra setup. Agents with no known install command are skipped.
+function installerAgentsInfo() {
+  return allProviders()
+    .map((p) => {
+      const auth = authMetaFor(p.id) || {};
+      return {
+        displayName: p.displayName,
+        bin: p.defaultBin,
+        // Tailored to this host's OS — npm providers get "npm install -g <pkg>";
+        // script installers (e.g. Antigravity) get the curl|bash form on
+        // mac/Linux and the PowerShell irm|iex form on Windows.
+        installCommand: installCommandFor(p.id, process.platform),
+        loginCommand: auth.loginCommand || p.defaultBin,
+      };
+    })
+    .filter((a) => a.installCommand);
 }
 
 // Pick the first terminal emulator that exists on the user's PATH. Linux
@@ -726,12 +759,12 @@ ipcMain.handle('install-requirements', async () => {
   const platform = process.platform;
   const tmpDir = os.tmpdir();
   const stamp = Date.now();
-  const agent = installerAgentInfo(); // installs the user's current default agent
+  const agents = installerAgentsInfo(); // installs every agent CLI, not just the default
 
   try {
     if (platform === 'darwin') {
       const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
-      fs.writeFileSync(scriptPath, installScriptMac(agent), { mode: 0o755 });
+      fs.writeFileSync(scriptPath, installScriptMac(agents), { mode: 0o755 });
       // osascript opens Terminal.app and runs the script in a new tab; the
       // script's trailing `read` keeps the window open for output review.
       spawn('osascript', [
@@ -743,7 +776,7 @@ ipcMain.handle('install-requirements', async () => {
 
     if (platform === 'win32') {
       const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.ps1`);
-      fs.writeFileSync(scriptPath, installScriptWin(agent));
+      fs.writeFileSync(scriptPath, installScriptWin(agents));
       // -NoExit so the window stays open after the script finishes; the
       // empty title argument is required by `start` when the next arg is
       // quoted-looking.
@@ -760,7 +793,7 @@ ipcMain.handle('install-requirements', async () => {
       return { error: 'No terminal emulator found. Install one of: gnome-terminal, konsole, xterm.' };
     }
     const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
-    fs.writeFileSync(scriptPath, installScriptLinux(agent), { mode: 0o755 });
+    fs.writeFileSync(scriptPath, installScriptLinux(agents), { mode: 0o755 });
     // gnome-terminal uses `--`, the rest use `-e`. xterm/konsole/xfce4 all
     // accept `-e <command>`; gnome-terminal needs `-- bash <script>`.
     const args = term === 'gnome-terminal' ? ['--', 'bash', scriptPath] : ['-e', `bash ${scriptPath}`];
