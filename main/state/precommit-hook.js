@@ -450,7 +450,7 @@ function reallyStartServer(sock) {
         const cwd = typeof req.cwd === 'string' ? req.cwd : null;
         const config = loadConfig();
         const provider = config.defaultProvider || config.defaultMode || 'claude';
-        if (config.preCommitReview === false && !config.stripComments) {
+        if (config.preCommitReview === false && config.stripComments === false) {
           reply = { skipped: true, reason: 'disabled' };
         } else if (!cwd || !fs.existsSync(cwd)) {
           reply = { skipped: true, reason: 'unknown cwd' };
@@ -544,9 +544,10 @@ function installOneHook(hooksDir, hookName, repoPath) {
 function installHookForRepo(repoPath) {
   try {
     const config = loadConfig();
-    // Install when EITHER the review or the verbose-comment strip is enabled —
-    // both run through the same pre-commit hook + socket server.
-    if (config.preCommitReview === false && !config.stripComments) return;
+    // Install when EITHER the review or the comment cleanup is enabled — both
+    // run through the same pre-commit hook + socket server. Comment cleanup is
+    // on by default, so only an explicit false on both opts out entirely.
+    if (config.preCommitReview === false && config.stripComments === false) return;
     startPrecommitServer();
 
     const hooksDir = commonHooksDir(repoPath);

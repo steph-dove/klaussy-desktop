@@ -55,7 +55,7 @@
   defaultMode.value = prefs.defaultProvider || prefs.defaultMode || 'claude';
   autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
   document.getElementById('pref-precommit-review').checked = prefs.preCommitReview !== false;
-  document.getElementById('pref-strip-comments').checked = prefs.stripComments === true;
+  document.getElementById('pref-strip-comments').checked = prefs.stripComments !== false;
   document.getElementById('pref-repo-intel-enrich').checked = prefs.repoIntelEnrich === true;
 
   // Theme dropdown
