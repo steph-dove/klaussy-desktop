@@ -622,6 +622,10 @@ window.App = window.App || {};
   App.shellOptions.forEach(function (btn) {
     btn.addEventListener('click', function () {
       App.selectedMode = btn.dataset.shell;
+      // Record a deliberate pick so resuming an existing session can override
+      // its original agent (triggering a cross-agent handoff) only when the
+      // user actually chose a different one — not just from the default.
+      App.shellUserPicked = true;
       App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
     });
   });
@@ -866,8 +870,21 @@ window.App = window.App || {};
   App.btnNewTask.addEventListener('click', App.showModal);
   App.modalCreate.addEventListener('click', App.submitModal);
   App.modalCancel.addEventListener('click', App.hideModal);
+  // Backdrop-dismiss, but only when BOTH the press and the release land on the
+  // overlay itself. Tracking just the click target wrongly dismisses when a
+  // child popover closes on mousedown (SearchableSelect hides its list, so the
+  // trailing click resolves to the backdrop) or when a text-selection drag ends
+  // on the backdrop. Requiring the mousedown to have started on the overlay too
+  // means only a genuine backdrop click closes the modal.
+  var modalMouseDownTarget = null;
+  App.modalOverlay.addEventListener('mousedown', function (e) {
+    modalMouseDownTarget = e.target;
+  });
   App.modalOverlay.addEventListener('click', function (e) {
-    if (e.target === App.modalOverlay) App.hideModal();
+    if (e.target === App.modalOverlay && modalMouseDownTarget === App.modalOverlay) {
+      App.hideModal();
+    }
+    modalMouseDownTarget = null;
   });
   App.modalInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter') App.submitModal();

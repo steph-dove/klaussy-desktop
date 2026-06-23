@@ -519,6 +519,9 @@ const PROVIDERS = {
     versionArgs: ['--version'],
     perWorktreeSessions: false,
     supportsExactResume: false,
+    // `-i`/`--prompt-interactive` runs an initial prompt then stays interactive
+    // (agy 1.0.10 --help) — used to seed a cross-agent resume handoff brief.
+    interactivePromptFlag: '-i',
 
     // agy normally establishes folder trust interactively. We surface that as a
     // per-(worktree, agent) consent prompt (see util/agent-consent.js); only on

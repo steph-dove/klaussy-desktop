@@ -23,6 +23,8 @@ const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
+const { buildHandoffSeed } = require('../state/session-handoff');
+const { stageInitialPrompt } = require('../util/agent-prompt');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
 
@@ -240,7 +242,7 @@ ipcMain.handle('list-saved-sessions', () => {
   return saved.concat(disk);
 });
 
-ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branch, mode, repoPath }) => {
+ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath, branch, mode, originalMode, repoPath }) => {
   // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
   // exactly what made it a phantom (undiscoverable yet blocking re-create), so
   // resuming it should clear that state.
@@ -256,9 +258,31 @@ ipcMain.handle('resume-session', (_event, { sessionId, name, worktreePath, branc
   const ensured = ensureWorktreeOnDisk(worktreePath, repoPath, branch);
   if (ensured.error) return { error: ensured.error };
   const resumeMode = mode || 'claude';
-  // Only Claude tracks an exact session id to resume; other providers resume
-  // their latest session in the worktree via their native flag (handled by the
-  // registry's buildInteractiveCmd), so we don't pass a stale sessionId.
+  const startedBy = originalMode || resumeMode;
+
+  // Cross-agent resume: the user picked a different agent than the one that
+  // started this session. Native resume can't carry state across agents, so
+  // distill the prior session into a handoff brief and seed the new agent with
+  // it as its first prompt (see state/session-handoff). No stale session id —
+  // the incoming agent has no transcript of its own here.
+  if (isAgentMode(resumeMode) && isAgentMode(startedBy) && resumeMode !== startedBy) {
+    let seed = '';
+    try {
+      seed = await buildHandoffSeed({ worktreePath, originalMode: startedBy, sessionId });
+    } catch (err) {
+      console.warn('[resume-session] handoff seed failed:', err && err.message);
+    }
+    try {
+      return spawnInWorktree(name, worktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined);
+    } catch (err) {
+      console.error('[resume-session] handoff spawn failed:', err);
+      return { error: 'Failed to start terminal: ' + (err && err.message || err) };
+    }
+  }
+
+  // Same-agent resume. Only Claude tracks an exact session id; other providers
+  // resume their latest session in the worktree via their native flag (handled
+  // by the registry's buildInteractiveCmd), so we don't pass a stale sessionId.
   const provider = getProvider(resumeMode);
   const exactId = provider && provider.supportsExactResume ? sessionId : null;
   try {
@@ -1078,27 +1102,13 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     if (!session.ok) return { cancelled: true };
     const model = (config.agentModel || {})[provider.id] || '';
     let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model });
-    // Seed an initial prompt (Plan/Debug/Review) as the agent's first
-    // positional argument rather than typing it in after boot. Passing it at
-    // spawn avoids racing the TUI's startup and keeps multi-line prompts intact
-    // (typing a multi-line string submits it line-by-line). Mirrors
-    // pr-implement-pty: stage the prompt in a tempfile and expand it via
-    // $(cat …) so quotes/backticks/newlines need no shell escaping.
-    if (initialPrompt && initialPrompt.trim()) {
-      try {
-        const dir = path.join(os.tmpdir(), 'klaussy-action-prompts');
-        fs.mkdirSync(dir, { recursive: true });
-        promptFile = path.join(dir, `${taskId}-${subId}-${crypto.randomBytes(4).toString('hex')}.txt`);
-        fs.writeFileSync(promptFile, initialPrompt);
-        const promptFlag = provider.interactivePromptFlag ? `${provider.interactivePromptFlag} ` : '';
-        const quoted = `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
-        agentCmd = `${agentCmd} ${promptFlag}${quoted}`;
-        needsEnter = !!provider.needsEnterToSubmit;
-      } catch (err) {
-        console.warn('[add-sub-terminal] failed to stage prompt:', err.message);
-        promptFile = null;
-      }
-    }
+    // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
+    // in after boot — shared staging with the cross-agent session-resume
+    // handoff (see util/agent-prompt).
+    const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`);
+    agentCmd = staged.agentCmd;
+    promptFile = staged.promptFile;
+    needsEnter = staged.needsEnter;
     args = shellRunCmdArgs(userShell, agentCmd);
   } else {
     args = shellLoginArgs(userShell);
