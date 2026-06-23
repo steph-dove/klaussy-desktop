@@ -195,6 +195,9 @@ ipcMain.handle('get-preferences', () => {
     // Pre-commit silent-failure review (app commit flow + git hook). On by
     // default; explicit false opts out.
     preCommitReview: config.preCommitReview !== false,
+    // Auto-strip verbose/narrating comments from staged code before commit.
+    // Modifies files, so OFF by default — opt in explicitly.
+    stripComments: config.stripComments === true,
     // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
@@ -232,12 +235,32 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   }
   if (prefs.preCommitReview !== undefined) {
     config.preCommitReview = !!prefs.preCommitReview;
-    // Opting out removes installed git hooks; opting back in re-installs on
-    // the next session create.
-    if (!config.preCommitReview) {
+    // Opting out removes installed git hooks — UNLESS comment-strip still needs
+    // them. Opting back in re-installs on the next session create.
+    if (!config.preCommitReview && !config.stripComments) {
       try {
         require('../state/precommit-hook').uninstallAllHooks();
       } catch (e) {
+        console.warn('[precommit-hook] uninstall failed:', e.message);
+      }
+    }
+  }
+  if (prefs.stripComments !== undefined) {
+    config.stripComments = !!prefs.stripComments;
+    if (config.stripComments) {
+      // Enabling strip needs the same hook the review uses. Re-arm the server
+      // and re-install for repos we already track so it works without waiting
+      // for the next session create.
+      try {
+        const hook = require('../state/precommit-hook');
+        hook.startPrecommitServer();
+        for (const repo of (config.precommitHookRepos || [])) hook.installHookForRepo(repo);
+      } catch (e) {
+        console.warn('[precommit-hook] strip re-arm failed:', e.message);
+      }
+    } else if (config.preCommitReview === false) {
+      // Both off now → remove the hooks.
+      try { require('../state/precommit-hook').uninstallAllHooks(); } catch (e) {
         console.warn('[precommit-hook] uninstall failed:', e.message);
       }
     }
