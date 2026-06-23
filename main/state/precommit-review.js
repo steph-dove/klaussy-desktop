@@ -413,8 +413,14 @@ KEEP — never touch or shorten these:
 - License or file-header comments
 - Functional comments: shebang (#!), eslint-disable, @ts-ignore / @ts-expect-error, prettier-ignore, // @flow, # noqa, # type:, and similar pragmas; TODO/FIXME that carry real content
 
+NOT A COMMENT — never touch these, no matter how long or prose-like they look:
+- String and template literals: anything inside quotes or backticks. This includes multi-line PROMPT / instruction strings, SQL, HTML, regexes, and message text. A long prompt template is DATA the program uses at runtime, not a verbose comment — leave every character of it. The "//", "#", or "*" inside a string or a URL is not a comment marker.
+- Commented-out code: a comment whose body is itself valid code. Leave it; it may be intentional. (You shorten prose comments, not code.)
+- Anything that is actual code.
+If you are not 100% certain a line is a natural-language source comment, leave it untouched.
+
 HARD RULES:
-- Only edit comments. Never change, move, rename, or reformat any code.
+- Only edit real source-code comments (the parts the language's parser treats as comments). Never change, move, rename, or reformat any code, string, or literal.
 - Only touch comments on lines ADDED in the change below — leave pre-existing comments alone.
 - Edit ONLY these files: ${files.join(', ')}
 - Do not run git, tests, or any other commands.
