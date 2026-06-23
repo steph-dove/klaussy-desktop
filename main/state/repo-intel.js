@@ -996,4 +996,23 @@ function getRepoIntelBlock(repoOrWorktreePath, agentMode) {
   return full;
 }
 
-module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureReviewTools, upgradeReviewToolsIfDue };
+// Ensure a worktree that Klaussy didn't create through the normal session path
+// (e.g. a PR-review worktree, which is cloned/fetched separately and never
+// enters the `instances` map that syncIntelIntoActiveWorktrees iterates) still
+// gets the agent bootstrap that lives only in the base repo: skills, slash
+// commands, rules, hooks, CLAUDE.md, settings. Without this the review agent
+// can't find project skills/commands — a worktree contains only committed
+// files. Kicks generation for next time and copies whatever exists now.
+// Best-effort: never throws, never blocks the caller's spawn.
+function ensureWorktreeBootstrap(worktreePath) {
+  // Generate/refresh the base repo's artifacts in the background (cache-hit
+  // fast; first run may install CLIs, so don't await it on the spawn path).
+  try {
+    const p = ensureRepoIntel(worktreePath);
+    if (p && typeof p.catch === 'function') p.catch((e) => console.warn('[repo-intel] bootstrap ensure failed:', e && e.message));
+  } catch (e) { console.warn('[repo-intel] bootstrap ensure failed:', e && e.message); }
+  // Copy whatever bootstrap already exists in the base repo into this worktree.
+  try { syncIntelIntoWorktree(worktreePath); } catch (e) { console.warn('[repo-intel] bootstrap sync failed:', e && e.message); }
+}
+
+module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureReviewTools, upgradeReviewToolsIfDue };
