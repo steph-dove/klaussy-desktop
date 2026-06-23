@@ -1,6 +1,6 @@
 // AI CLI provider registry — the single source of truth for the per-tool
 // differences between the coding agents Klaussy can drive (Claude Code,
-// OpenAI Codex, Gemini CLI, GitHub Copilot CLI).
+// OpenAI Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI).
 //
 // Every place that used to hardcode `config.claudePath || 'claude'` and the
 // `claude --resume <id>` / `claude -p` shapes now asks this registry instead.
@@ -485,6 +485,90 @@ const PROVIDERS = {
     findNewSession() { return null; },
   },
 
+  // Antigravity CLI (`agy`) — Google's successor to Gemini CLI (Gemini CLI was
+  // retired 2026-06-18 for free/individual users). Built in Go, installed via a
+  // curl script (NOT npm — see INSTALL_COMMANDS). VERIFIED against `agy --help`
+  // (agy 1.0.10, darwin_arm64):
+  //   - default invocation is interactive; `--version` prints the bare version
+  //   - `-p`/`--print`/`--prompt "<prompt>"` runs one non-interactive prompt →
+  //     PLAIN TEXT only (there is NO `--output-format`/json/stream-json flag).
+  //     `--print-timeout` (default 5m) bounds the wait.
+  //   - `--continue`/`-c` resumes the most recent conversation; `--conversation
+  //     <ID>` resumes a specific one (so resume IS supported — earlier issue #7
+  //     is fixed as of 1.0.10).
+  //   - `--model "<name>"` pins a model; `agy models` lists the names (BUT both
+  //     `agy models` and `-p` require an interactive Google sign-in first, so the
+  //     model list couldn't be enumerated headless — see MODELS below).
+  //   - `--dangerously-skip-permissions` auto-approves all tool prompts.
+  //   - config/sessions live in ~/.gemini/antigravity-cli/ (conversations/ holds
+  //     resumable transcripts); shared settings/trust at ~/.gemini/settings.json
+  //     + ~/.gemini/trustedFolders.json. CONFIRMED on a real install.
+  // STILL UNVERIFIED (need an authenticated session): the exact `-p` stdout
+  // capture on a non-TTY pipe (the old #76 drop — 1.0.10 did print to a pipe in
+  // testing, but only the pre-auth prompt), the conversations/ file format (for
+  // exact-resume detection + token tailing), and the repo memory filename.
+  antigravity: {
+    id: 'antigravity',
+    // VERIFY: repo memory file unconfirmed. agy shares Gemini's ~/.gemini home,
+    // so we assume it reads GEMINI.md until verified on a real install.
+    memoryFile: 'GEMINI.md',
+    shortLabel: 'ag',
+    displayName: 'Antigravity CLI',
+    defaultBin: 'agy',
+    configPathKey: 'antigravityPath',
+    versionArgs: ['--version'],
+    perWorktreeSessions: false,
+    supportsExactResume: false,
+
+    // agy normally establishes folder trust interactively. We surface that as a
+    // per-(worktree, agent) consent prompt (see util/agent-consent.js); only on
+    // consent do we pass `--dangerously-skip-permissions` so it can read/write
+    // without per-tool confirmations. Without consent the agent isn't spawned.
+    worktreeConsent: {
+      prompt: 'Antigravity needs permission to read and write files in this folder to work here.',
+      allowLabel: 'Allow read & write',
+    },
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, trust, model } = {}) {
+      // Model names contain spaces/parens (e.g. "Gemini 3.5 Flash (Low)"), so
+      // quote them — buildInteractiveCmd returns a shell string.
+      let base = bin;
+      if (trust) base += ' --dangerously-skip-permissions';
+      if (model) base += ` --model ${JSON.stringify(model)}`;
+      // `--conversation <ID>` resumes an exact conversation; `--continue`
+      // resumes the most recent. We don't yet auto-detect new conversation IDs
+      // (supportsExactResume:false — the conversations/ format is unverified),
+      // so resumeSessionId is only honored when a caller threads one through;
+      // the common path is resumeLatest → --continue (mirrors copilot/gemini).
+      if (resumeSessionId) return `${base} --conversation ${resumeSessionId}`;
+      if (resumeLatest) return `${base} --continue`;
+      return base;
+    },
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, trust, model } = {}) {
+      // Always plain-text passthrough — agy has no JSON/stream output mode
+      // (confirmed: no --output-format flag in `agy --help`). args is passed to
+      // spawn() directly, so the spaced model name needs no quoting.
+      const args = [];
+      if (trust || allowEdits) args.push('--dangerously-skip-permissions');
+      if (model) args.push('--model', model);
+      args.push('-p', prompt);
+      return { args, outputMode: 'passthrough' };
+    },
+    sessionDir() {
+      // CONFIRMED on a real install: agy's home is ~/.gemini/antigravity-cli/.
+      // Resumable transcripts live in its conversations/ subdir, but the file
+      // format isn't verified yet, so no tail is wired (see snapshotSessions).
+      return path.join(home(), '.gemini', 'antigravity-cli');
+    },
+    // agy emits plain text (no JSON lines), so there is nothing to parse for the
+    // stream/usage surfaces. No-ops keep the provider contract intact and let
+    // the implement PTY degrade gracefully (no tail attached) instead of crashing.
+    parseStreamLine() { return []; },
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
+
   copilot: {
     id: 'copilot',
     displayName: 'GitHub Copilot',
@@ -570,11 +654,26 @@ const NPM_PACKAGES = {
   copilot: '@github/copilot',
 };
 
+// Non-npm install commands, per platform, for CLIs that don't ship as npm
+// packages. Antigravity installs via Google's official script: a curl|bash
+// one-liner on macOS/Linux (the script self-detects platform/arch) and an
+// `irm | iex` PowerShell one-liner on Windows — the bash form can't run in
+// PowerShell. Both URLs verified to serve real scripts (install.sh =
+// application/x-sh, install.ps1 = PowerShell). Keys are process.platform values.
+const INSTALL_COMMANDS = {
+  antigravity: {
+    darwin: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    linux: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    win32: 'irm https://antigravity.google/cli/install.ps1 | iex',
+  },
+};
+
 // Short, button-friendly names (vs the fuller displayName).
 const SHORT_NAMES = {
   claude: 'Claude',
   codex: 'Codex',
   gemini: 'Gemini',
+  antigravity: 'Antigravity',
   copilot: 'Copilot',
 };
 
@@ -588,7 +687,7 @@ const SHORT_NAMES = {
 //   copilot — Default-only: its `--model` slugs couldn't be verified here (the
 //             account's Copilot subscription/policy blocks runs), so we don't
 //             ship slugs that might error. Fill in once it can run + verify.
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', copilot: '--model' };
+const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -608,13 +707,27 @@ const MODELS = {
     { id: 'gemini-3-flash-preview', label: '3 Flash (preview)' },
     { id: 'gemini-3-pro-preview', label: '3 Pro (preview)' },
   ],
+  // VERIFY: agy's `--model` takes display names with spaces (e.g.
+  // "Gemini 3.5 Flash (Low)"); the full list comes from `agy models`, which
+  // requires an interactive Google sign-in — so it couldn't be enumerated
+  // headless here. Default-only until an authed run lists them, so we don't ship
+  // names that would error (same rationale as copilot).
+  antigravity: [{ id: '', label: 'Default' }],
   copilot: [{ id: '', label: 'Default' }],
 };
 function modelsFor(id) { return MODELS[id] || [{ id: '', label: 'Default' }]; }
 function modelFlagFor(id) { return MODEL_FLAGS[id] || '--model'; }
 
-function installCommandFor(id) {
-  return NPM_PACKAGES[id] ? `npm install -g ${NPM_PACKAGES[id]}` : null;
+// One-line install command for a provider, tailored to `platform` (defaults to
+// the host). npm packages install the same way everywhere; the non-npm script
+// installers (INSTALL_COMMANDS) differ per OS, so callers that generate
+// platform-specific scripts pass the target platform explicitly.
+function installCommandFor(id, platform = process.platform) {
+  if (NPM_PACKAGES[id]) return `npm install -g ${NPM_PACKAGES[id]}`;
+  const cmd = INSTALL_COMMANDS[id];
+  if (!cmd) return null;
+  if (typeof cmd === 'string') return cmd;
+  return cmd[platform] || cmd.linux || null;
 }
 
 // Auth/sign-in probing for the Setup Check. `statusArgs` is a non-interactive
@@ -627,6 +740,9 @@ const AUTH_CHECKS = {
   claude:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'claude' },
   codex:   { statusArgs: ['login', 'status'], notAuthedPattern: /not logged in/i, loginCommand: 'codex login' },
   gemini:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'gemini' },
+  // agy signs in interactively on first run; `/logout` clears creds. No verified
+  // quiet status probe yet, so auth state is reported as unknown (not false).
+  antigravity: { statusArgs: null, notAuthedPattern: null, loginCommand: 'agy' },
   copilot: { statusArgs: null, notAuthedPattern: null, loginCommand: 'copilot' },
 };
 
