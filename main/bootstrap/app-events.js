@@ -24,6 +24,7 @@ const { startAutoFetch, startCIPolling, stopCIPolling } = require('../state/ci-p
 const prReviewModule = require('../state/pr-review');
 require('../ipc/tasks');
 const { installAppMenu } = require('./menu');
+const { installSecondInstanceFocus } = require('./single-instance');
 
 let isQuitting = false;
 
@@ -304,6 +305,10 @@ function install() {
     if (typeof channel !== 'string') return;
     unsubscribeTerminalChannel(channel, event.sender);
   });
+
+  // A second launch of this build focuses the running window instead of
+  // starting a rival process (the lock itself is acquired in main.js).
+  installSecondInstanceFocus(getMainWindow, allWindows);
 
   runConfigMigrations();
   fixSpawnPath();
