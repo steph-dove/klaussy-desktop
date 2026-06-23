@@ -359,6 +359,12 @@
       <div class="field-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
 
       <div class="field">
+        <label>Strip verbose comments before commit</label>
+        <input type="checkbox" id="pref-strip-comments" />
+      </div>
+      <div class="field-hint">When the agent leaves redundant, narrating, or "AI-tell" comments, Klaussy removes them from the staged code right before the commit (and re-stages) — so you don't have to keep asking it to clean up. It only touches comments on the lines you're committing, never your code, and keeps real "why" comments, docstrings, license headers, and pragmas (eslint-disable, @ts-ignore, TODOs). Runs through the same pre-commit hook. Off by default since it edits files.</div>
+
+      <div class="field">
         <label>Enrich CLAUDE.md with your agent</label>
         <input type="checkbox" id="pref-repo-intel-enrich" />
       </div>

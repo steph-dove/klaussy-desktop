@@ -450,21 +450,27 @@ function reallyStartServer(sock) {
         const cwd = typeof req.cwd === 'string' ? req.cwd : null;
         const config = loadConfig();
         const provider = config.defaultProvider || config.defaultMode || 'claude';
-        if (config.preCommitReview === false) {
+        if (config.preCommitReview === false && !config.stripComments) {
           reply = { skipped: true, reason: 'disabled' };
         } else if (!cwd || !fs.existsSync(cwd)) {
           reply = { skipped: true, reason: 'unknown cwd' };
         } else if (req.kind === 'pre-push') {
-          const range = pushRange(cwd, req.localSha, req.remoteSha);
-          if (!range) {
-            reply = { skipped: true, reason: 'no reviewable range' };
+          // Comment-stripping is a staged (pre-commit) concern only; a push with
+          // review off has nothing to do here.
+          if (config.preCommitReview === false) {
+            reply = { skipped: true, reason: 'review disabled' };
           } else {
-            const seen = allCommitsReviewed(cwd, range);
-            if (seen.all) {
-              reply = { skipped: true, allReviewed: true, commitCount: seen.count };
+            const range = pushRange(cwd, req.localSha, req.remoteSha);
+            if (!range) {
+              reply = { skipped: true, reason: 'no reviewable range' };
             } else {
-              const { runRangeCheck } = require('./precommit-review');
-              reply = await runRangeCheck({ worktreePath: cwd, provider, range });
+              const seen = allCommitsReviewed(cwd, range);
+              if (seen.all) {
+                reply = { skipped: true, allReviewed: true, commitCount: seen.count };
+              } else {
+                const { runRangeCheck } = require('./precommit-review');
+                reply = await runRangeCheck({ worktreePath: cwd, provider, range });
+              }
             }
           }
         } else {
@@ -538,7 +544,9 @@ function installOneHook(hooksDir, hookName, repoPath) {
 function installHookForRepo(repoPath) {
   try {
     const config = loadConfig();
-    if (config.preCommitReview === false) return;
+    // Install when EITHER the review or the verbose-comment strip is enabled —
+    // both run through the same pre-commit hook + socket server.
+    if (config.preCommitReview === false && !config.stripComments) return;
     startPrecommitServer();
 
     const hooksDir = commonHooksDir(repoPath);

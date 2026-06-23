@@ -19,6 +19,7 @@ const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const { spawnClaudeStream } = require('./claude-streaming');
 const { getRepoIntelBlock } = require('./repo-intel');
+const { loadConfig } = require('../util/config');
 
 // Live progress to every window — users should SEE reviews running (and
 // passing), not infer them from a pause.
@@ -370,8 +371,138 @@ function runCheck({ worktreePath, provider, range, kind }) {
   return combined;
 }
 
-// Staged-diff gate (Commit button + pre-commit hook).
-function runStagedCheck({ worktreePath, provider }) {
+// ---- Verbose-comment auto-strip (opt-in: config.stripComments) --------------
+// The review's LENS 5 flags excessive/narrating comments but only REPORTS them,
+// so the user has to keep telling the agent to clean up. With stripComments on,
+// we run a focused edit pass FIRST that deletes them and re-stages, so the
+// commit lands clean. Safety: only touches staged code files that have NO
+// unstaged changes (so re-staging can't sweep in partial-stage edits); the
+// prompt forbids code changes; and the review pass still runs afterward as a
+// backstop. Best-effort — any failure leaves the diff untouched.
+const STRIP_CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|kt|rb|php|c|h|cc|cpp|hpp|cs|swift|scala|sh|bash|lua|vue|svelte)$/;
+
+function eligibleStripFiles(worktreePath) {
+  let staged;
+  try {
+    staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
+      cwd: worktreePath, stdio: 'pipe',
+    }).toString().split('\n').filter(Boolean);
+  } catch { return []; }
+  let unstaged = new Set();
+  try {
+    unstaged = new Set(execFileSync('git', ['diff', '--name-only'], {
+      cwd: worktreePath, stdio: 'pipe',
+    }).toString().split('\n').filter(Boolean));
+  } catch { /* none */ }
+  return staged.filter((f) =>
+    STRIP_CODE_EXT.test(f) && !unstaged.has(f) && fs.existsSync(path.join(worktreePath, f)));
+}
+
+function stripPrompt(files, diff) {
+  return `You are a pre-commit comment cleaner. Edit the staged files IN PLACE to remove verbose, redundant comments that were ADDED in this change. This is a mechanical cleanup, not a review.
+
+REMOVE (delete the comment, or condense a multi-line one to a short single line):
+- Comments that restate what the code plainly does ("// increment i", "// loop over the items", "// set x to 5")
+- Step-by-step narration of obvious code, or comments that just echo a function/variable name
+- Changelog / "AI-tell" narration ("// Now we handle the case where…", "// This function will…", "// Added to fix the bug")
+
+KEEP — never touch these:
+- Comments that explain WHY (non-obvious intent, gotchas, invariants, links / ticket refs)
+- Docstrings, JSDoc, and public-API doc comments
+- License or file-header comments
+- Functional comments: shebang (#!), eslint-disable, @ts-ignore / @ts-expect-error, prettier-ignore, // @flow, # noqa, # type:, and similar pragmas; TODO/FIXME that carry real content
+
+HARD RULES:
+- Remove ONLY comments. Never change, move, rename, or reformat any code.
+- Only remove comments on lines ADDED in the change below — leave pre-existing comments alone.
+- Edit ONLY these files: ${files.join(', ')}
+- Do not run git, tests, or any other commands.
+
+Staged change for context (added lines start with +):
+
+${diff}
+
+When done, print one short line per file describing what you removed, or "no verbose comments" if there was nothing to clean.`;
+}
+
+// Run the edit pass, then re-stage exactly the files the pass modified.
+// Resolves to { stripped: <fileCount> } — never rejects.
+function stripStagedComments({ worktreePath, provider }) {
+  return new Promise((resolve) => {
+    const files = eligibleStripFiles(worktreePath);
+    if (!files.length) return resolve({ stripped: 0 });
+    const d = diffFor(worktreePath, null);
+    if (d.empty || d.error || !d.diff) return resolve({ stripped: 0 });
+
+    const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+    let text = '';
+    let settled = false;
+    const finish = (val) => { if (settled) return; settled = true; resolve(val); };
+    const timer = setTimeout(() => finish({ stripped: 0, timedOut: true }), CHECK_TIMEOUT_MS);
+
+    const restageChanged = () => {
+      let changed = 0;
+      for (const f of files) {
+        // `git diff --quiet` exits 1 when the working file differs from the
+        // index — i.e. the pass actually edited it. Re-stage only those.
+        try {
+          execFileSync('git', ['diff', '--quiet', '--', f], { cwd: worktreePath, stdio: 'pipe' });
+        } catch {
+          try { execFileSync('git', ['add', '--', f], { cwd: worktreePath, stdio: 'pipe' }); changed++; } catch {}
+        }
+      }
+      return changed;
+    };
+
+    const sender = {
+      isDestroyed: () => false,
+      once: () => {},
+      send: (channel, payload) => {
+        if (channel.startsWith('comment-strip-chunk-')) {
+          if (typeof payload === 'string') text += payload;
+        } else if (channel.startsWith('comment-strip-done-')) {
+          clearTimeout(timer);
+          if (payload && (payload.error || payload.cancelled)) return finish({ stripped: 0 });
+          const changed = restageChanged();
+          if (changed) notifyWindows({ type: 'comments-stripped', worktreePath, count: changed });
+          finish({ stripped: changed, summary: text.trim() });
+        }
+      },
+    };
+
+    try {
+      const started = spawnClaudeStream({
+        requestId,
+        procMap,
+        channelPrefix: 'comment-strip',
+        sender,
+        cwd: worktreePath,
+        prompt: stripPrompt(files, d.diff),
+        streamJson: false,
+        provider: provider || 'claude',
+        allowEdits: true,            // the whole point — it edits the staged files
+        promptConsent: false,        // never pop a dialog from a hook context
+      });
+      if (started === null) { clearTimeout(timer); finish({ stripped: 0 }); }
+    } catch (e) {
+      clearTimeout(timer);
+      finish({ stripped: 0, error: e.message });
+    }
+  });
+}
+
+// Staged-diff gate (Commit button + pre-commit hook). When stripComments is on,
+// clean verbose comments out of the staged code BEFORE reviewing, so the review
+// (and the commit) see the tidied diff.
+async function runStagedCheck({ worktreePath, provider }) {
+  let cfg = {};
+  try { cfg = loadConfig(); } catch { /* default off */ }
+  if (cfg.stripComments) {
+    try { await stripStagedComments({ worktreePath, provider }); } catch { /* never block the commit */ }
+  }
+  // Strip can be enabled without the review; in that case there's nothing to
+  // report (the strip already tidied the diff), so skip the review pass.
+  if (cfg.preCommitReview === false) return { skipped: true, reason: 'review disabled' };
   return runCheck({ worktreePath, provider, range: null, kind: 'commit' });
 }
 
