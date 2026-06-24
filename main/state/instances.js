@@ -14,7 +14,7 @@ const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { baseRepoForWorktree } = require('../util/git-repo');
+const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
@@ -303,7 +303,8 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     session = beginSession(provider.id);
     if (!session.ok) return { cancelled: true };
     const model = (config.agentModel || {})[provider.id] || '';
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model });
+    const sessionDirs = sessionSiblingWorktrees(worktreePath);
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs });
     // Cross-agent resume handoff: seed the incoming agent with a brief distilled
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).
