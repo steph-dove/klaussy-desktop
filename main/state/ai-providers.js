@@ -109,6 +109,18 @@ function claudeUsage(u) {
 //   { kind: 'end_turn' }
 // parseStreamLine(obj) returns an array of those (possibly empty).
 
+// Shell-quoted extra workspace directories for a multi-repo session. Passing
+// these through each agent's add-directory flag lets the agent READ and EDIT its
+// sibling worktrees, not just its own cwd — without them the agents treat sibling
+// repos as outside their workspace and refuse cross-repo changes ("I can't change
+// that, it's in another repo"). buildInteractiveCmd returns a shell string, so
+// each path is JSON.stringify-quoted like model names elsewhere. [] when none.
+function quotedSessionDirs(sessionDirs) {
+  return (Array.isArray(sessionDirs) ? sessionDirs : [])
+    .filter((d) => typeof d === 'string' && d)
+    .map((d) => JSON.stringify(d));
+}
+
 const PROVIDERS = {
   claude: {
     id: 'claude',
@@ -126,9 +138,12 @@ const PROVIDERS = {
     perWorktreeSessions: true,
     supportsExactResume: true,
 
-    buildInteractiveCmd(bin, { resumeSessionId, model } = {}) {
+    buildInteractiveCmd(bin, { resumeSessionId, model, sessionDirs } = {}) {
       let base = resumeSessionId ? `${bin} --resume ${resumeSessionId}` : bin;
       if (model) base += ` --model ${model}`; // alias (opus/sonnet/haiku) or full id
+      // Grant access to sibling session worktrees so cross-repo edits work.
+      const dirs = quotedSessionDirs(sessionDirs);
+      if (dirs.length) base += ` --add-dir ${dirs.join(' ')}`;
       return base;
     },
     // Headless one-shot. mode 'text' → caller wants the clean final answer on
@@ -226,12 +241,15 @@ const PROVIDERS = {
     // PTY sends Enter once the TUI is up. VERIFIED: codex-cli 0.135.0.
     needsEnterToSubmit: true,
 
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model } = {}) {
-      // `-m` is a top-level flag, so it goes before the `resume` subcommand.
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs } = {}) {
+      // `-m` and `--add-dir` are top-level flags, so they go before the `resume`
+      // subcommand. Sibling session worktrees are added so cross-repo edits work.
       const m = model ? ` -m ${model}` : '';
-      if (resumeSessionId) return `${bin}${m} resume ${resumeSessionId}`;
-      if (resumeLatest) return `${bin}${m} resume --last`;
-      return `${bin}${m}`;
+      const dirs = quotedSessionDirs(sessionDirs).map((d) => ` --add-dir ${d}`).join('');
+      const top = `${bin}${m}${dirs}`;
+      if (resumeSessionId) return `${top} resume ${resumeSessionId}`;
+      if (resumeLatest) return `${top} resume --last`;
+      return top;
     },
     buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
       // `codex exec --json` always emits JSONL (no clean-text plain mode). For
@@ -411,10 +429,12 @@ const PROVIDERS = {
       prompt: 'Gemini needs to trust this folder and read/write its files to work here.',
       allowLabel: 'Allow read & write',
     },
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, trust, model } = {}) {
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, trust, model, sessionDirs } = {}) {
       var base = bin;
       if (trust) base += ' --skip-trust --approval-mode auto_edit';
       if (model) base += ` -m ${model}`; // pin a specific Gemini model/version
+      // Add sibling session worktrees to the workspace so cross-repo edits work.
+      for (const d of quotedSessionDirs(sessionDirs)) base += ` --include-directories ${d}`;
       if (resumeSessionId) return `${base} --resume ${resumeSessionId}`;
       if (resumeLatest) return `${base} --resume latest`;
       return base;
@@ -531,12 +551,14 @@ const PROVIDERS = {
       prompt: 'Antigravity needs permission to read and write files in this folder to work here.',
       allowLabel: 'Allow read & write',
     },
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, trust, model } = {}) {
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, trust, model, sessionDirs } = {}) {
       // Model names contain spaces/parens (e.g. "Gemini 3.5 Flash (Low)"), so
       // quote them — buildInteractiveCmd returns a shell string.
       let base = bin;
       if (trust) base += ' --dangerously-skip-permissions';
       if (model) base += ` --model ${JSON.stringify(model)}`;
+      // Add sibling session worktrees to the workspace so cross-repo edits work.
+      for (const d of quotedSessionDirs(sessionDirs)) base += ` --add-dir ${d}`;
       // `--conversation <ID>` resumes an exact conversation; `--continue`
       // resumes the most recent. We don't yet auto-detect new conversation IDs
       // (supportsExactResume:false — the conversations/ format is unverified),

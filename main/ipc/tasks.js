@@ -11,7 +11,7 @@ const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { execFileP } = require('../util/exec');
-const { baseRepoForWorktree } = require('../util/git-repo');
+const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
@@ -1101,7 +1101,8 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     session = beginSession(provider.id);
     if (!session.ok) return { cancelled: true };
     const model = (config.agentModel || {})[provider.id] || '';
-    let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model });
+    const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
+    let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model, sessionDirs });
     // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
     // in after boot — shared staging with the cross-agent session-resume
     // handoff (see util/agent-prompt).
