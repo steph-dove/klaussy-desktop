@@ -475,10 +475,16 @@ function linkEnvFilesIntoWorktree(base, worktreePath) {
       maxBuffer: 8 * 1024 * 1024,
     }).toString();
   } catch { return; }
+  // Match common env-file conventions by basename: `.env`, `.env.<x>`, the
+  // direnv `.envrc`, and suffix forms like `secrets.env` / `local.env`. Skip
+  // the obvious non-secret templates.
+  const isEnvName = (p) => {
+    const b = p.split('/').pop();
+    if (/\.(example|sample|template|dist)$/i.test(b)) return false;
+    return b === '.env' || b.startsWith('.env.') || b === '.envrc' || /\.env$/.test(b);
+  };
   const rels = listed.split('\0').filter(Boolean).filter((p) =>
-    /(^|\/)\.env(\.|$)/.test(p)
-    && !/(^|\/)node_modules\//.test(p)
-    && !/\.(example|sample|template|dist)$/i.test(p));
+    isEnvName(p) && !/(^|\/)node_modules\//.test(p));
   for (const rel of rels) {
     const src = path.join(base, rel);
     const dst = path.join(worktreePath, rel);
@@ -494,6 +500,20 @@ function linkEnvFilesIntoWorktree(base, worktreePath) {
         console.warn('[repo-intel] env link/copy failed for', rel + ':', (e && e.message) || e);
       }
     }
+  }
+}
+
+// Symlink the base repo's env files into a worktree, resolving the base
+// itself. Decoupled from intel generation so spawn paths can call it directly
+// and env is present the moment the agent starts — even if repo-intel is
+// uninstalled, mid-generation, or backed off after a failure. Idempotent and
+// best-effort. (The bigger syncIntelIntoWorktree below also calls it.)
+function ensureEnvLinks(worktreePath) {
+  try {
+    const base = baseFor(worktreePath);
+    if (base && base !== worktreePath) linkEnvFilesIntoWorktree(base, worktreePath);
+  } catch (e) {
+    console.warn('[repo-intel] env link failed for', worktreePath + ':', (e && e.message) || e);
   }
 }
 
@@ -1013,6 +1033,8 @@ function ensureWorktreeBootstrap(worktreePath) {
   } catch (e) { console.warn('[repo-intel] bootstrap ensure failed:', e && e.message); }
   // Copy whatever bootstrap already exists in the base repo into this worktree.
   try { syncIntelIntoWorktree(worktreePath); } catch (e) { console.warn('[repo-intel] bootstrap sync failed:', e && e.message); }
+  // Independent env-link pass too, so env is present even if the sync above bailed.
+  ensureEnvLinks(worktreePath);
 }
 
-module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureReviewTools, upgradeReviewToolsIfDue };
+module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureEnvLinks, ensureReviewTools, upgradeReviewToolsIfDue };
