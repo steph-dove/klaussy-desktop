@@ -7,11 +7,18 @@
 //   - git pre-push hook (the whole push range remoteSha..localSha; catches
 //     cross-commit issues and anything that bypassed pre-commit)
 //
-// Four lenses (silent failures · secrets · debug leftovers · correctness
-// landmines) + the repo's real linter, with a visible per-lens scorecard on
-// every result. The diff is INLINED into the prompt (capped) so every
-// provider behaves identically in headless text mode; the repo-intel block
-// rides along so findings respect house conventions.
+// Five lenses (silent failures · secrets · debug leftovers · correctness
+// landmines · excessive comments) + the repo's real linter, with a visible
+// per-lens scorecard on every result. The diff is INLINED into the prompt
+// (capped) so every provider behaves identically in headless text mode; the
+// repo-intel block rides along so findings respect house conventions.
+//
+// Canonical source: the lens body and the concise-comment cleanup rules are
+// authored in the klaussy-agents <repo>-precommit skill (.claude/skills/
+// <repo>-precommit/). When that skill is in the worktree we use it verbatim
+// (findRepoPrecommitSkill); the inline PRECOMMIT_LENS_BODY / COMMENT_CLEANUP_RULES
+// are the offline fallback. Same prefer-skill-else-builtin pattern as
+// review-prompts.js. The machine output contract stays desktop-owned.
 
 const crypto = require('crypto');
 const fs = require('fs');
@@ -40,14 +47,13 @@ const NO_ISSUES_TOKEN = 'NO_SILENT_FAILURES';
 const inflight = new Map(); // key -> { promise, requestId }
 const procMap = new Map();  // requestId -> child proc (spawnClaudeStream contract)
 
-// Agent-agnostic prompt — five lenses, condensed from the silent-failure-
-// hunter reviewer we use on this codebase itself. Deliberately excludes
-// perf/architecture so it stays fast and findings stay actionable. (Lint is
-// handled separately by the repo's real linter, not by the agent.) Comment
-// hygiene (lens 5) is the one style-ish lens, included by request to keep the
-// codebase free of excessive/narrating comments.
-function checkPrompt(contextLine) {
-  return `You are a pre-commit reviewer. ${contextLine} Apply exactly these five lenses to the CHANGED lines and their immediate context — nothing else.
+// The five-lens body is authored canonically in the klaussy-agents
+// <repo>-precommit skill (.claude/skills/<repo>-precommit/SKILL.md). When that
+// skill is present in the worktree we use it verbatim (findRepoPrecommitSkill);
+// this inline copy is the offline fallback — keep the two in sync. The output
+// contract below is desktop-owned (the tooling parses its markers) and is
+// appended to whichever lens body we use.
+const PRECOMMIT_LENS_BODY = `Apply exactly these five lenses to the CHANGED lines and their immediate context — nothing else.
 
 LENS 1 — Silent failures (your primary lens):
 - Empty or swallowing catch blocks (caught errors not rethrown, surfaced, or meaningfully handled)
@@ -80,9 +86,11 @@ For each, the fix is: delete it (or condense to a short one-liner). Keep ONLY sh
 
 Explicitly NOT in scope: naming, formatting, performance, architecture, test coverage, lint-level nits, anything outside the diff. Do not suggest refactors. (Comment hygiene IS in scope — that is lens 5.)
 
-Be precise and skeptical, but only report real issues — a deliberate, well-signposted degradation (comment explains it, user is notified elsewhere) is NOT a finding.
+Be precise and skeptical, but only report real issues — a deliberate, well-signposted degradation (comment explains it, user is notified elsewhere) is NOT a finding.`;
 
-Output contract (the tooling parses this):
+// Desktop-owned machine contract. Appended after the lens body (skill or
+// fallback) and explicitly supersedes any output format the skill body suggests.
+const PRECOMMIT_OUTPUT_CONTRACT = `Regardless of any output format mentioned above, follow this contract exactly (the tooling parses it):
 - If there are NO findings, output exactly: ${NO_ISSUES_TOKEN}
 - Otherwise output the literal marker <FINDINGS> on its own line, then each finding as:
 
@@ -92,6 +100,39 @@ Output contract (the tooling parses this):
 What is wrong, why it matters, and the minimal fix.
 
 then the literal marker </FINDINGS> on its own line. Nothing after it. Keep each finding under 6 lines.`;
+
+function checkPrompt(contextLine, lensBody) {
+  return `You are a pre-commit reviewer. ${contextLine}
+
+${lensBody || PRECOMMIT_LENS_BODY}
+
+${PRECOMMIT_OUTPUT_CONTRACT}`;
+}
+
+// Load the repo's canonical pre-commit skill (klaussy-agents installs it at
+// .claude/skills/<repo>-precommit/). Returns { lensBody, cleanupBody } with the
+// SKILL.md frontmatter stripped, or null when the skill isn't present (the
+// offline-fallback path). Mirrors review-prompts.js:findRepoReviewSkill — match
+// by the `-precommit` suffix rather than reconstructing the sanitized repo name.
+function findRepoPrecommitSkill(worktreePath) {
+  if (!worktreePath) return null;
+  try {
+    const skillsDir = path.join(worktreePath, '.claude', 'skills');
+    for (const e of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+      if (!e.isDirectory() || !e.name.endsWith('-precommit')) continue;
+      const skillMd = path.join(skillsDir, e.name, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+      const lensBody = fs.readFileSync(skillMd, 'utf-8')
+        .replace(/^---\n[\s\S]*?\n---\n+/, '').trim();
+      if (!lensBody) continue;
+      let cleanupBody = null;
+      try {
+        cleanupBody = fs.readFileSync(path.join(skillsDir, e.name, 'comment-cleanup.md'), 'utf-8').trim() || null;
+      } catch { /* aux file optional — strip pass uses its inline fallback */ }
+      return { lensBody, cleanupBody };
+    }
+  } catch { /* no .claude/skills — repo not klaussy-initialized */ }
+  return null;
 }
 
 // { diff } | { empty: true } | { error } — a git failure must NOT read as
@@ -234,7 +275,8 @@ function runCheck({ worktreePath, provider, range, kind }) {
   const contextLine = range
     ? 'Review ONLY the branch diff below — the full set of changes about to be PUSHED.'
     : 'Review ONLY the staged diff below, which is about to be committed.';
-  const prompt = checkPrompt(contextLine)
+  const skill = findRepoPrecommitSkill(worktreePath);
+  const prompt = checkPrompt(contextLine, skill && skill.lensBody)
     + '\n\n## Diff under review\n\n```diff\n' + d.diff + '\n```\n'
     + (intel ? '\n' + intel + '\n' : '');
 
@@ -383,27 +425,36 @@ function runCheck({ worktreePath, provider, range, kind }) {
 // untouched.
 const STRIP_CODE_EXT = /\.(js|jsx|ts|tsx|mjs|cjs|py|go|rs|java|kt|rb|php|c|h|cc|cpp|hpp|cs|swift|scala|sh|bash|lua|vue|svelte)$/;
 
+// { eligible, skippedUnstaged }: staged code files we can safely tidy vs. those
+// bypassed because they also have unstaged changes (re-staging would sweep in
+// partial edits). The caller surfaces skippedUnstaged so they don't slip the gate
+// silently.
 function eligibleStripFiles(worktreePath) {
   let staged;
   try {
     staged = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACMR'], {
       cwd: worktreePath, stdio: 'pipe',
     }).toString().split('\n').filter(Boolean);
-  } catch { return []; }
+  } catch { return { eligible: [], skippedUnstaged: [] }; }
   let unstaged = new Set();
   try {
     unstaged = new Set(execFileSync('git', ['diff', '--name-only'], {
       cwd: worktreePath, stdio: 'pipe',
     }).toString().split('\n').filter(Boolean));
   } catch { /* none */ }
-  return staged.filter((f) =>
-    STRIP_CODE_EXT.test(f) && !unstaged.has(f) && fs.existsSync(path.join(worktreePath, f)));
+  const codeFiles = staged.filter((f) =>
+    STRIP_CODE_EXT.test(f) && fs.existsSync(path.join(worktreePath, f)));
+  return {
+    eligible: codeFiles.filter((f) => !unstaged.has(f)),
+    skippedUnstaged: codeFiles.filter((f) => unstaged.has(f)),
+  };
 }
 
-function stripPrompt(files, diff) {
-  return `You are a pre-commit comment editor. Edit the staged files IN PLACE so every comment that was ADDED in this change is concise. This is a mechanical cleanup, not a review.
-
-THE RULE: regular comments may be at most TWO sentences (aim for ONE); docstrings may be at most FIVE. Always as short as possible. Apply it like this:
+// Canonical cleanup rules live in the <repo>-precommit skill's comment-cleanup.md
+// aux file; this inline copy is the offline fallback — keep them in sync. The
+// mechanical wrapper (file list, "don't run git", diff, summary line) is
+// desktop-owned and lives in stripPrompt below, not in this rules block.
+const COMMENT_CLEANUP_RULES = `THE RULE: regular comments may be at most TWO sentences (aim for ONE); docstrings may be at most FIVE. Always as short as possible. Apply it like this:
 - A regular comment longer than two sentences → tighten to one or two sentences keeping only the non-obvious WHY (intent, gotcha, invariant, link). Drop narration and restated mechanics.
 - A comment that only restates what the code plainly does, narrates obvious steps, echoes a name, or is changelog/"AI-tell" filler ("// Now we handle…", "// This function will…", "// Added to fix the bug", "// increment i") → delete it entirely; it carries nothing worth one sentence.
 - A docstring / JSDoc / public-API doc comment → condense to AT MOST five sentences and as short as possible: keep params, returns, and the why; cut narration and the obvious. Don't pad to five — shorter is better.
@@ -417,7 +468,12 @@ NOT A COMMENT — never touch these, no matter how long or prose-like they look:
 - String and template literals: anything inside quotes or backticks. This includes multi-line PROMPT / instruction strings, SQL, HTML, regexes, and message text. A long prompt template is DATA the program uses at runtime, not a verbose comment — leave every character of it. The "//", "#", or "*" inside a string or a URL is not a comment marker.
 - Commented-out code: a comment whose body is itself valid code. Leave it; it may be intentional. (You shorten prose comments, not code.)
 - Anything that is actual code.
-If you are not 100% certain a line is a natural-language source comment, leave it untouched.
+If you are not 100% certain a line is a natural-language source comment, leave it untouched.`;
+
+function stripPrompt(files, diff, cleanupRules) {
+  return `You are a pre-commit comment editor. Edit the staged files IN PLACE so every comment that was ADDED in this change is concise. This is a mechanical cleanup, not a review.
+
+${cleanupRules || COMMENT_CLEANUP_RULES}
 
 HARD RULES:
 - Only edit real source-code comments (the parts the language's parser treats as comments). Never change, move, rename, or reformat any code, string, or literal.
@@ -436,10 +492,17 @@ When done, print one short line per file describing what you condensed or remove
 // Resolves to { stripped: <fileCount> } — never rejects.
 function stripStagedComments({ worktreePath, provider }) {
   return new Promise((resolve) => {
-    const files = eligibleStripFiles(worktreePath);
-    if (!files.length) return resolve({ stripped: 0 });
+    const { eligible: files, skippedUnstaged } = eligibleStripFiles(worktreePath);
+    // Files with unstaged edits bypass the pass (re-staging would sweep in partial
+    // edits). Surface that instead of dropping it silently — the committer should
+    // know those files weren't tidied and may still carry verbose comments.
+    if (skippedUnstaged.length) {
+      notifyWindows({ type: 'comments-skipped', worktreePath, wtName: path.basename(worktreePath), count: skippedUnstaged.length, files: skippedUnstaged });
+    }
+    if (!files.length) return resolve({ stripped: 0, skippedUnstaged: skippedUnstaged.length });
     const d = diffFor(worktreePath, null);
-    if (d.empty || d.error || !d.diff) return resolve({ stripped: 0 });
+    if (d.empty || d.error || !d.diff) return resolve({ stripped: 0, skippedUnstaged: skippedUnstaged.length });
+    const skill = findRepoPrecommitSkill(worktreePath);
 
     const requestId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
     let text = '';
@@ -471,8 +534,8 @@ function stripStagedComments({ worktreePath, provider }) {
           clearTimeout(timer);
           if (payload && (payload.error || payload.cancelled)) return finish({ stripped: 0 });
           const changed = restageChanged();
-          if (changed) notifyWindows({ type: 'comments-stripped', worktreePath, count: changed });
-          finish({ stripped: changed, summary: text.trim() });
+          if (changed) notifyWindows({ type: 'comments-stripped', worktreePath, wtName: path.basename(worktreePath), count: changed });
+          finish({ stripped: changed, skippedUnstaged: skippedUnstaged.length, summary: text.trim() });
         }
       },
     };
@@ -484,7 +547,7 @@ function stripStagedComments({ worktreePath, provider }) {
         channelPrefix: 'comment-strip',
         sender,
         cwd: worktreePath,
-        prompt: stripPrompt(files, d.diff),
+        prompt: stripPrompt(files, d.diff, skill && skill.cleanupBody),
         streamJson: false,
         provider: provider || 'claude',
         allowEdits: true,            // the whole point — it edits the staged files

@@ -240,6 +240,10 @@ window.App = window.App || {};
         window.toast.warn('🛡 ' + ev.wtName + ': ' + gate + ' found ' + ev.findingsCount + ' issue' + (ev.findingsCount === 1 ? '' : 's') + ' — see the terminal or commit panel');
       } else if (ev.type === 'error') {
         window.toast.warn('🛡 ' + ev.wtName + ': ' + gate + ' could not run (' + (ev.error || 'unknown') + ') — proceeded unreviewed');
+      } else if (ev.type === 'comments-stripped') {
+        window.toast.info('🛡 ' + ev.wtName + ': tidied verbose comments in ' + ev.count + ' file' + (ev.count === 1 ? '' : 's') + ' before review');
+      } else if (ev.type === 'comments-skipped') {
+        window.toast.warn('🛡 ' + ev.wtName + ': skipped comment cleanup on ' + ev.count + ' file' + (ev.count === 1 ? '' : 's') + ' with unstaged edits — stage them fully to tidy');
       }
     });
   }
