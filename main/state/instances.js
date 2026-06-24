@@ -339,6 +339,18 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   // non-git folders).
   const repoPath = baseRepoForWorktree(worktreePath);
 
+  // Symlink the base repo's env files (.env, .envrc, …) into this worktree NOW,
+  // synchronously and independently of repo-intel generation. Worktrees hold
+  // only committed files, so gitignored env files are missing — and the agent
+  // (and dev servers/tests) can't find them. Doing it here, not as a side
+  // effect of the async intel pipeline, means env is present the instant the
+  // agent starts even if repo-intel is uninstalled, slow, or backed off.
+  try {
+    require('./repo-intel').ensureEnvLinks(worktreePath);
+  } catch (e) {
+    console.warn('[repo-intel] env link failed:', e.message);
+  }
+
   // Kick off repo-intel generation for the base repo (conventions + import
   // graph for agent prompts). Fire-and-forget: cheap when fresh, never blocks
   // the spawn, degrades silently if the conventions CLI is missing. Lazy
