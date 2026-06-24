@@ -121,6 +121,58 @@ function repairClaudeSettings(repoPath) {
   return stray;
 }
 
+// The command strings a hook entry runs (each klaussy hook runs a unique script).
+function hookCommands(entry) {
+  const out = new Set();
+  for (const h of (entry && entry.hooks) || []) {
+    if (h && typeof h.command === 'string') out.add(h.command);
+  }
+  return out;
+}
+
+// Merge klaussy-managed hook entries from a base .claude/settings.json into a
+// worktree's already-existing one, keyed on each hook's command string. Adds
+// only entries the worktree is missing — never removes or rewrites its own
+// hooks, permissions, or other settings — so a worktree created BEFORE the base
+// gained a hook (e.g. the pre-plan guidance hook) starts registering it without
+// clobbering local edits. Best-effort: any parse/IO error leaves dst untouched.
+function mergeMissingHooksIntoWorktree(srcPath, dstPath) {
+  let src, dst, dstRaw;
+  try {
+    src = JSON.parse(fs.readFileSync(srcPath, 'utf-8'));
+    dstRaw = fs.readFileSync(dstPath, 'utf-8');
+    dst = JSON.parse(dstRaw);
+  } catch {
+    return; // missing/malformed on either side — don't risk a rewrite
+  }
+  const srcHooks = src && typeof src.hooks === 'object' ? src.hooks : null;
+  if (!srcHooks || !dst || typeof dst !== 'object') return;
+  const dstHooks = (dst.hooks && typeof dst.hooks === 'object') ? dst.hooks : (dst.hooks = {});
+  let added = 0;
+  for (const [event, entries] of Object.entries(srcHooks)) {
+    if (!Array.isArray(entries)) continue;
+    const dstList = Array.isArray(dstHooks[event]) ? dstHooks[event] : (dstHooks[event] = []);
+    const present = new Set();
+    for (const e of dstList) for (const c of hookCommands(e)) present.add(c);
+    for (const e of entries) {
+      const cmds = [...hookCommands(e)];
+      if (cmds.length && cmds.every((c) => !present.has(c))) {
+        dstList.push(e);
+        for (const c of cmds) present.add(c);
+        added++;
+      }
+    }
+  }
+  if (!added) return;
+  try {
+    const nl = dstRaw.endsWith('\n') ? '\n' : '';
+    fs.writeFileSync(dstPath, JSON.stringify(dst, null, 2) + nl);
+    console.log('[repo-intel] merged', added, 'missing hook(s) into', dstPath);
+  } catch (e) {
+    console.warn('[repo-intel] hook merge failed for', dstPath + ':', e.message);
+  }
+}
+
 // klaussy CLI — command `klaussy` (PyPI `klaussy-agents`). We memoize BOTH
 // which binary is on PATH and its version: the version doubles as the
 // regeneration stamp ("redo when there is a new version"), and the resolved
@@ -574,7 +626,14 @@ function syncIntelIntoWorktree(worktreePath) {
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         fs.cpSync(src, dst);
       } else if (leaf === 'settings.json') {
-        if (fs.existsSync(dst)) continue; // never clobber a worktree's settings
+        if (fs.existsSync(dst)) {
+          // Never clobber a worktree's settings, but merge in any klaussy-managed
+          // hooks it's missing (e.g. a hook the base gained after this worktree
+          // was created) so they actually register here. Add-only; local edits
+          // and custom hooks are preserved.
+          mergeMissingHooksIntoWorktree(src, dst);
+          continue;
+        }
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         fs.cpSync(src, dst);
       } else {
@@ -898,6 +957,10 @@ function ensureRepoIntel(repoOrWorktreePath) {
             }
           } catch { /* deleted mid-run — leave whatever exists */ }
         }
+        // klaussy's hook scaffold is version-gated (like its skills): the
+        // force-less `init` above re-installs hooks whenever the CLI version
+        // changed, so an already-initialized repo picks up newly-added hooks
+        // (e.g. pre-plan guidance) automatically on upgrade — no --force needed.
         // klaussy-repo-conventions swallows enrichment failures (claude missing /
         // unauthenticated / timeout) into a stdout warning and exits 0 —
         // detect it so we don't stamp the run as complete and toast success
