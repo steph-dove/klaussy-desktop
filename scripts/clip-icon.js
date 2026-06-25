@@ -62,7 +62,9 @@ app.whenReady().then(() => {
             ctx.closePath();
             
             ctx.clip();
-            ctx.drawImage(img, 0, 0, size, size);
+            const scale = 1.06; // Zoom in by 6% to push the outer border outside the clipping path
+            const offset = (size * (scale - 1)) / 2;
+            ctx.drawImage(img, -offset, -offset, size * scale, size * scale);
             
             resolve(canvas.toDataURL('image/png'));
           };
