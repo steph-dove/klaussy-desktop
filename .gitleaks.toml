@@ -1,0 +1,16 @@
+# gitleaks config: the full default ruleset, plus a surgical allowlist for the
+# one known-safe false positive. test/util/logging.test.js deliberately contains
+# FAKE GitHub tokens (`ghp_abcdefghij1234567890abcde`, etc.) — they're fixtures
+# that verify scrubLogMsg() redacts tokens from logs. The regex below matches
+# only that placeholder shape, so real secrets anywhere (including in that file)
+# are still caught.
+title = "klaussy-desktop gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake test-fixture tokens used by the log-scrubbing tests"
+regexes = [
+  '''gh[a-z]_abcdefghij1234567890abcde''',
+]
