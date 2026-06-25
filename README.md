@@ -6,8 +6,6 @@
 
 Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop runs multi-agent, multi-repository AI coding sessions in a unified, tabbed light-themed workspace. It spawns isolated Git worktrees per task, enabling you to run multiple agents in parallel without juggling branches, staging mess, or local workspace clutter.
 
-![Klaussy Desktop Mockup](./docs/klaussy_desktop_mockup.jpg)
-
 ---
 
 ## 🚀 Key Highlights
