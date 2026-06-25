@@ -5,7 +5,7 @@ const { execFileSync } = require('child_process');
 const options = [
   {
     name: 'option-a-loom',
-    src: '/Users/stephaniedover/.gemini/antigravity-cli/brain/b2900144-3a33-4375-a846-940e92cdeacf/neon_loom_icon_1782414522095.jpg'
+    src: '/Users/stephaniedover/.gemini/antigravity-cli/brain/b2900144-3a33-4375-a846-940e92cdeacf/neon_loom_frameless_1782416432288.jpg'
   },
   {
     name: 'option-b-prism',
