@@ -27,6 +27,26 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 
 ---
 
+## 📸 In Action
+
+**Multi-agent, multi-repo workspace** — run agents side by side, each in its own worktree, with a live file tree and editor.
+
+![Multi-agent, multi-repo workspace](./docs/klaussy_multi_agent_workspace.png)
+
+**Conventions-aware PR review** — paste a pull request and get a structured AI review: findings ranked by severity, suggested changes, and one-click Implement / Add to PR.
+
+![AI-powered PR review with structured findings](./docs/klaussy_pr_ai_review.png)
+
+**CI debugging built in** — when a check fails, Klaussy pulls the logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
+
+![Agent-assisted CI failure debugging](./docs/klaussy_ci_debug.png)
+
+**Inline CI annotations** — failures and warnings are surfaced with their stack frames right in the CI View tab.
+
+![Inline CI annotations and failure stack frames](./docs/klaussy_ci_annotations.png)
+
+---
+
 ## 📦 Download & Install
 
 Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux. Free to try; $99 lifetime access unlocks an access key for all platforms.
