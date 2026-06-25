@@ -220,6 +220,11 @@ window.PrReview = window.PrReview || {};
         if (item) item.classList.toggle('collapsed');
         return;
       }
+      var resolveBtn = e.target.closest('.pr-conv-thread-resolve-btn');
+      if (resolveBtn) {
+        PR.toggleThreadResolved(resolveBtn);
+        return;
+      }
       var btn = e.target.closest('.pr-gh-error-copy');
       if (!btn) return;
       navigator.clipboard.writeText(btn.getAttribute('data-copy') || '').then(function () {

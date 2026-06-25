@@ -273,6 +273,8 @@ contextBridge.exposeInMainWorld('klaus', {
     addIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),
     replyToReviewComment: (inReplyTo, body) =>
       ipcRenderer.invoke('pr-reply-to-review-comment', { inReplyTo, body }),
+    reviewResolveThread: (threadId, resolve) =>
+      ipcRenderer.invoke('pr-review-resolve-thread', { threadId, resolve }),
     editIssueComment: (commentId, body) =>
       ipcRenderer.invoke('pr-edit-issue-comment', { commentId, body }),
     editReviewComment: (commentId, body) =>

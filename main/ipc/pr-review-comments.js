@@ -195,6 +195,31 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
   });
 });
 
+// Resolve / unresolve a review thread from the review surface. Keyed by the
+// global GraphQL thread id, so it needs no worktree/PR context beyond an active
+// review (which scopes the gh account). Re-fetches threads on success so the
+// conversation re-renders with the new resolved state.
+ipcMain.handle('pr-review-resolve-thread', async (_event, { threadId, resolve }) => {
+  if (!prReview.active) return { error: 'No active PR review' };
+  if (!threadId) return { error: 'Missing thread id' };
+  const mutation = resolve
+    ? 'mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }'
+    : 'mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }';
+  const cwd = currentRepoPath() || require('os').homedir();
+  try {
+    ghExec([
+      'api', 'graphql',
+      '-f', 'query=' + mutation,
+      '-F', 'id=' + threadId,
+    ], { cwd, stdio: 'pipe', timeout: 15000 });
+  } catch (err) {
+    return { error: err.stderr ? err.stderr.toString() : err.message };
+  }
+  // Re-broadcast updated threads so the Conversation tab reflects the change.
+  try { await fetchThreadsForActive(); } catch (_) {}
+  return { ok: true };
+});
+
 ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   const { baseOwner, baseRepo, number } = prReview.active;

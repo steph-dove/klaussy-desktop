@@ -112,6 +112,31 @@
   transform: none;
 }
 
+/* Secondary action: open the current PR in the full review window. Outlined
+   so it doesn't compete with the accent "Review with Claude" button. */
+.pr-open-review-btn {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.pr-open-review-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.pr-open-review-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .pr-body {
   margin-top: 8px;
   font-size: 12px;
