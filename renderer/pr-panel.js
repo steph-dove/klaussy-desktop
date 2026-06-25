@@ -375,6 +375,7 @@ window.PRPanel = (function () {
     if (pr.url) {
       html += '<div class="pr-url">';
       html += '<a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on GitHub</a>';
+      html += ' <button type="button" class="pr-open-review-btn" title="Open this PR in the full PR review window">Open in PR Review</button>';
       html += ' <button type="button" class="pr-ai-review-btn" title="Ask Claude for a structured review of the whole PR">Review with Claude</button>';
       html += '</div>';
     }
@@ -395,6 +396,23 @@ window.PRPanel = (function () {
     var aiBtn = prInfoEl.querySelector('.pr-ai-review-btn');
     if (aiBtn) {
       aiBtn.addEventListener('click', runAiReview);
+    }
+    var openReviewBtn = prInfoEl.querySelector('.pr-open-review-btn');
+    if (openReviewBtn) {
+      openReviewBtn.addEventListener('click', async function () {
+        openReviewBtn.disabled = true;
+        var orig = openReviewBtn.textContent;
+        openReviewBtn.textContent = 'Opening…';
+        // URL form needs no active project — gh derives the repo from the URL.
+        // The full review surface mounts via the pr-review-state broadcast that
+        // pr.load triggers; no extra wiring needed here.
+        var res = await window.klaus.pr.load({ number: pr.number, url: pr.url });
+        if (res && res.error) {
+          window.toast.error('Couldn\'t open PR review:\n' + (res.errorSummary || res.error));
+          openReviewBtn.disabled = false;
+          openReviewBtn.textContent = orig;
+        }
+      });
     }
   }
 

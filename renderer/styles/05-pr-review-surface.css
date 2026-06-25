@@ -2263,6 +2263,40 @@ body.pr-review-popout #pr-review-root {
   display: flex;
   flex-direction: column;
 }
+/* Resolve / unresolve control under each inline review thread. */
+.pr-conv-thread-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.pr-conv-thread-resolve-btn {
+  padding: 3px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.pr-conv-thread-resolve-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.pr-conv-thread-resolve-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+/* Resolved threads: keep the button subdued so "Unresolve" doesn't shout. */
+.pr-conv-thread.resolved .pr-conv-thread-resolve-btn {
+  color: var(--text-dim);
+  border-color: var(--text-dim);
+}
+.pr-conv-thread.resolved .pr-conv-thread-resolve-btn:hover {
+  background: var(--text-dim);
+  color: var(--bg, #fff);
+}
 /* Replies nest under the originator by indentation only — no divider lines. */
 .pr-conv-thread-comment {
   padding: 10px 0 0;

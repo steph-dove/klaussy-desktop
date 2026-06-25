@@ -443,7 +443,32 @@
         + '</div>' : '')
       + (first.diffHunk ? '<pre class="pr-conv-inline-hunk">' + PR.escHtml(PR.lastLinesOfHunk(first.diffHunk, 4)) + '</pre>' : '')
       + '<div class="pr-conv-thread-comments">' + commentsHtml + '</div>'
+      + (thread.id
+          ? '<div class="pr-conv-thread-foot">'
+              + '<button type="button" class="pr-conv-thread-resolve-btn" data-thread-id="' + PR.escHtml(thread.id) + '" data-resolved="' + (thread.isResolved ? '1' : '0') + '">'
+                + (thread.isResolved ? 'Unresolve' : 'Resolve') + '</button>'
+            + '</div>'
+          : '')
     + '</div>';
+  };
+
+  // Resolve / unresolve a review thread from the Conversation tab. On success
+  // the main process re-broadcasts threads, which re-renders this tab with the
+  // new state — so there's no manual DOM toggle here, just optimistic UI on
+  // the button while the mutation is in flight.
+  PR.toggleThreadResolved = async function(btn) {
+    var threadId = btn.getAttribute('data-thread-id');
+    var wasResolved = btn.getAttribute('data-resolved') === '1';
+    if (!threadId) return;
+    btn.disabled = true;
+    var orig = btn.textContent;
+    btn.textContent = '…';
+    var res = await window.klaus.pr.reviewResolveThread(threadId, !wasResolved);
+    if (res && res.error) {
+      btn.disabled = false;
+      btn.textContent = orig;
+      window.toast.error('Failed to ' + (wasResolved ? 'unresolve' : 'resolve') + ' thread: ' + res.error);
+    }
   };
 
   PR.reviewStateLabel = function(state) {
