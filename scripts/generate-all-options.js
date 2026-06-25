@@ -32,18 +32,23 @@ for (const option of options) {
 
   // 1. Generate PNGs: icon.png (512x512), icon-1024.png (1024x1024), icon-2048.png (2048x2048), icon-square-1024.png, icon-square-2048.png
   // First convert src to a temp 2048x2048 png to work with
-  const tempPng = path.join(outDir, 'temp-source.png');
-  execFileSync('sips', ['-s', 'format', 'png', option.src, '--out', tempPng]);
-  execFileSync('sips', ['-z', '2048', '2048', tempPng]);
+  const tempPngRaw = path.join(outDir, 'temp-source-raw.png');
+  execFileSync('sips', ['-s', 'format', 'png', option.src, '--out', tempPngRaw]);
+  execFileSync('sips', ['-z', '2048', '2048', tempPngRaw]);
 
-  // Generate target PNGs
+  // Clip the corners using Electron's browser-based canvas for standard (rounded) icons
+  console.log(`Clipping corners for ${option.name}...`);
+  const tempPng = path.join(outDir, 'temp-source.png');
+  execFileSync('npx', ['electron', path.resolve(__dirname, 'clip-icon.js'), tempPngRaw, tempPng, '0.223']);
+
+  // Generate target standard PNGs (with transparent clipped corners)
   execFileSync('sips', ['-z', '512', '512', tempPng, '--out', path.join(outDir, 'icon.png')]);
   execFileSync('sips', ['-z', '1024', '1024', tempPng, '--out', path.join(outDir, 'icon-1024.png')]);
   execFileSync('sips', ['-z', '2048', '2048', tempPng, '--out', path.join(outDir, 'icon-2048.png')]);
   
-  // Copy the same images to the square versions
-  fs.copyFileSync(path.join(outDir, 'icon-1024.png'), path.join(outDir, 'icon-square-1024.png'));
-  fs.copyFileSync(path.join(outDir, 'icon-2048.png'), path.join(outDir, 'icon-square-2048.png'));
+  // Generate square standard PNGs (without clipped corners)
+  execFileSync('sips', ['-z', '1024', '1024', tempPngRaw, '--out', path.join(outDir, 'icon-square-1024.png')]);
+  execFileSync('sips', ['-z', '2048', '2048', tempPngRaw, '--out', path.join(outDir, 'icon-square-2048.png')]);
 
   // 2. Generate icon.ico using png-to-ico
   console.log(`Generating ICO for ${option.name}...`);
@@ -92,9 +97,10 @@ for (const option of options) {
   // Run iconutil
   execFileSync('iconutil', ['-c', 'icns', iconsetDir]);
   
-  // Cleanup iconset directory & tempPng
+  // Cleanup iconset directory & temp files
   fs.rmSync(iconsetDir, { recursive: true, force: true });
   fs.unlinkSync(tempPng);
+  fs.unlinkSync(tempPngRaw);
 
   console.log(`Successfully generated assets for ${option.name}`);
 }
