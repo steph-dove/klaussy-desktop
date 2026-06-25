@@ -1103,21 +1103,34 @@ window.App = window.App || {};
   // sidebar's `+` New Task button. The modal's source-repo Browse/drag/
   // recents flow lets the user pick a repo from inside the modal even
   // before any project has been added.
-  App.emptyAddProj = document.getElementById('empty-state-add-project');
+  // Modern Empty State Dashboard Card click handlers
+  var cardNewSession = document.getElementById('card-new-session');
+  var cardOpenFolder = document.getElementById('card-open-folder');
+  var cardReviewPr = document.getElementById('card-review-pr');
+  var cardManageSessions = document.getElementById('card-manage-sessions');
 
-  if (App.emptyAddProj) {
-    App.emptyAddProj.addEventListener('click', function () {
+  if (cardNewSession) {
+    cardNewSession.addEventListener('click', function () {
       App.btnNewTask.click();
     });
   }
-  ['empty-state-open-folder', 'empty-state-open-folder-np'].forEach(function (linkId) {
-    var link = document.getElementById(linkId);
-    if (!link) return;
-    link.addEventListener('click', function (e) {
-      e.preventDefault();
+  if (cardOpenFolder) {
+    cardOpenFolder.addEventListener('click', function () {
       App.openFolderAsTask(App.defaultAgent());
     });
-  });
+  }
+  if (cardReviewPr) {
+    cardReviewPr.addEventListener('click', function () {
+      var btnReview = document.getElementById('btn-review-pr');
+      if (btnReview) btnReview.click();
+    });
+  }
+  if (cardManageSessions) {
+    cardManageSessions.addEventListener('click', function () {
+      var btnManage = document.getElementById('btn-manage-sessions');
+      if (btnManage) btnManage.click();
+    });
+  }
   // Empty state stays in sync with project changes — the project-switcher
   // module dispatches `klaussy:project-changed` when projects change so we
   // can re-run the no-project check without polling.

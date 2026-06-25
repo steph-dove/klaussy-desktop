@@ -389,8 +389,8 @@
     if (!PR.aiReview.requestId && !PR.aiReview.finalText && !PR.aiReview.error && !PR.aiReview.cancelled) {
       return localBlock
         + '<div class="pr-ai-empty">'
-          + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
           + PR.repoIntelChip()
+          + '<button class="pr-review-btn pr-ai-run" type="button">Run review</button>'
           + '<div class="pr-ai-empty-hint">Spawns the selected agent in a worktree to review the PR end to end. ~1\u20133 min for an average PR.</div>'
         + '</div>';
     }

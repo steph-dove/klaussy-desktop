@@ -148,7 +148,7 @@ window.PRPanel = (function () {
     var result = await window.klaus.pr.forBranch(currentWorktreePath);
 
     if (result.error) {
-      prInfoEl.innerHTML = '<div class="pr-error">' + escHtml(result.error) + '</div>';
+      renderPRError(result);
       return;
     }
 
@@ -193,6 +193,39 @@ window.PRPanel = (function () {
 
     // Load cached AI review (non-blocking; renders if present)
     loadCachedAiReview(worktreeAtRequest, prNumber);
+  }
+
+  // Render a PR-load failure. Access/auth failures (wrong gh account for this
+  // repo, expired token, missing scope, un-authorized SSO org) get actionable
+  // controls — switch accounts or sign in — wired to the same gh dialogs the
+  // PR picker uses, then a reload. Everything else is a plain error line.
+  function renderPRError(result) {
+    var ACCESS = { 'not-found': 1, auth: 1, sso: 1, scope: 1 };
+    // Prefer the main process's classification, but fall back to sniffing the
+    // message so the switch/sign-in controls still appear if errorKind is
+    // missing (e.g. an older main build that returned a flat access string).
+    var isAccess = !!ACCESS[result.errorKind]
+      || /cannot access this repository|could not resolve|authenticated with the correct|not logged in|bad credentials|http 40[13]|single sign-on|\bsso\b|requires.*scope|missing.*scope/i.test(result.error || result.errorSummary || '');
+    if (!isAccess) {
+      prInfoEl.innerHTML = '<div class="pr-error">' + escHtml(result.error) + '</div>';
+      return;
+    }
+    prInfoEl.innerHTML = '<div class="pr-error pr-access-error">'
+      + '<div class="pr-access-error-summary">' + escHtml(result.errorSummary || result.error) + '</div>'
+      + (result.errorFix ? '<div class="pr-access-error-fix">' + escHtml(result.errorFix) + '</div>' : '')
+      + '<div class="pr-access-error-actions">'
+        + '<button type="button" class="pr-access-btn pr-access-switch">Switch account</button>'
+        + '<button type="button" class="pr-access-btn pr-access-login">Sign in to GitHub</button>'
+        + '<button type="button" class="pr-access-btn pr-access-retry">Retry</button>'
+      + '</div>'
+    + '</div>';
+    prInfoEl.querySelector('.pr-access-switch').addEventListener('click', function () {
+      window.Dialogs.showGhAccounts({ onChange: function () { loadPR(); } });
+    });
+    prInfoEl.querySelector('.pr-access-login').addEventListener('click', function () {
+      window.Dialogs.showGhLogin({ onSuccess: function () { loadPR(); } });
+    });
+    prInfoEl.querySelector('.pr-access-retry').addEventListener('click', function () { loadPR(); });
   }
 
   async function loadCachedAiReview(worktreeAtRequest, prNumber) {
