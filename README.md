@@ -1,8 +1,10 @@
 # Klaussy Desktop 💻🤖
 
-**The agent-first IDE — run a fleet of coding agents across git worktrees, and review their work before it ships.**
+**The agent-first IDE that reviews its own code before you commit.**
 
-Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop spawns isolated Git worktrees and coding-agent sessions per task. It enables you to run multiple agents in parallel without juggling branches, staging mess, or local workspace clutter.
+> **The desktop is the face. The [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents) engine is the spine.** While other orchestrators give you a worktree grid, Klaussy brings the conventions, custom skills, and active git-level guardrails that actually keep agents aligned with your codebase.
+
+Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop runs multi-agent, multi-repository AI coding sessions in a unified, tabbed light-themed workspace. It spawns isolated Git worktrees per task, enabling you to run multiple agents in parallel without juggling branches, staging mess, or local workspace clutter.
 
 ![Klaussy Desktop Mockup](./docs/klaussy_desktop_mockup.jpg)
 
@@ -27,9 +29,9 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 
 ## 📦 Download & Install
 
-Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux:
+Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux. Free to try; $99 lifetime access unlocks an access key for all platforms.
 
-➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest)**
+➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
 
 *   **macOS:** signed + notarized using Apple Developer ID. Drag `Klaussy.app` to `/Applications`.
 *   **Windows:** signed with an EV Code Signing certificate. Run the installer.
