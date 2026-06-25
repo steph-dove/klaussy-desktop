@@ -29,4 +29,4 @@ jobs:
           ./gitleaks version
 
       - name: Scan history
-        run: ./gitleaks detect --source . --redact --no-banner --verbose
+        run: ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --verbose
