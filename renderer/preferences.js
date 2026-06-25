@@ -10,6 +10,10 @@
     { id: 'nord', name: 'Nord' },
     { id: 'solarized', name: 'Solarized' },
     { id: 'rose', name: 'Rose Pine' },
+    { id: 'synthwave', name: 'Synthwave \'84' },
+    { id: 'gruvbox', name: 'Gruvbox' },
+    { id: 'catppuccin', name: 'Catppuccin' },
+    { id: 'tokyo', name: 'Tokyo Night' },
     { id: 'light', name: 'Light' },
   ];
 
