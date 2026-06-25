@@ -934,7 +934,11 @@ window.Dialogs = (function () {
   }
 
   // ---- GitHub accounts ----
-  function showGhAccounts() {
+  // opts.onChange (optional) fires after a successful account switch or
+  // re-auth, so a caller showing stale data (e.g. a PR view that failed for
+  // the wrong account) can reload without waiting for the dialog to close.
+  function showGhAccounts(opts) {
+    opts = opts || {};
     var overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
     var dialog = document.createElement('div');
@@ -1004,7 +1008,7 @@ window.Dialogs = (function () {
             var username = btn.dataset.username;
             var action = btn.dataset.action;
             if (action === 'reauth') {
-              showGhLogin({ onSuccess: refresh });
+              showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
               return;
             }
             btn.disabled = true;
@@ -1015,7 +1019,7 @@ window.Dialogs = (function () {
             // target's token is stale \u2014 route to the login modal instead
             // of toasting a confusing error.
             if (result && result.needsLogin) {
-              showGhLogin({ onSuccess: refresh });
+              showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
               return;
             }
             if (result && result.error) {
@@ -1024,6 +1028,7 @@ window.Dialogs = (function () {
               return;
             }
             refresh();
+            if (opts.onChange) try { opts.onChange(); } catch (_) {}
           });
         });
       });

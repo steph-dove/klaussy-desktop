@@ -549,10 +549,13 @@ ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
     if (msg.includes('no pull requests found')) {
       return { pr: null };
     }
-    if (msg.includes('Could not resolve')) {
-      return { pr: null, error: 'Cannot access this repository. Check that `gh` is authenticated with the correct GitHub account.' };
-    }
-    return { pr: null, error: msg };
+    // Classify so the PR tab can offer an actionable fix — switch gh accounts
+    // or sign in — instead of a dead-end "check that gh is authenticated"
+    // string. Access failures (wrong account for this repo, expired token,
+    // missing scope, un-authorized SSO org) all carry an errorKind the
+    // renderer keys its switch/login affordances off of.
+    const cls = classifyGhError(msg, {});
+    return { pr: null, error: cls.summary, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
   }
 });
 

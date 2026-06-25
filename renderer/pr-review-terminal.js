@@ -893,7 +893,7 @@
     PR.bindAiReviewTab();
     // Update tab count badge as findings change.
     var tabBtn = PR.hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
-    if (tabBtn) tabBtn.innerHTML = 'Review' + PR.renderAiReviewTabCount();
+    if (tabBtn) tabBtn.innerHTML = 'AI Review' + PR.renderAiReviewTabCount();
   };
 
   // Repaint just the Terminal tab body — used while the implement run's
@@ -912,7 +912,7 @@
   PR.repaintTerminalTabBadge = function() {
     if (!PR.hostEl) return;
     var tabBtn = PR.hostEl.querySelector('.pr-review-tab[data-tab="terminal"]');
-    if (tabBtn) tabBtn.innerHTML = 'Terminal' + PR.renderTerminalTabBadge();
+    if (tabBtn) tabBtn.innerHTML = 'Terminal View' + PR.renderTerminalTabBadge();
   };
 
   // Called by implement-run lifecycle callbacks. Keeps Review tab cards
