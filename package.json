@@ -8,7 +8,7 @@
     "name": "steph-dove",
     "email": "doverstephaniem@gmail.com"
   },
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN LICENSE",
   "private": true,
   "engines": {
     "node": ">=18"
