@@ -496,6 +496,47 @@
   color: var(--error);
 }
 
+/* Access/auth failure with switch-account / sign-in affordances. */
+.pr-access-error {
+  text-align: left;
+  color: var(--text);
+}
+
+.pr-access-error-summary {
+  color: var(--error);
+  margin-bottom: 6px;
+}
+
+.pr-access-error-fix {
+  font-family: var(--mono, monospace);
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  margin-bottom: 10px;
+}
+
+.pr-access-error-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pr-access-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  font-family: inherit;
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.pr-access-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* CI checks (F2) */
 #pr-checks:empty {
   display: none;

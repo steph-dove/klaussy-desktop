@@ -97,12 +97,29 @@ window.App = window.App || {};
   // Helps first-runs — without a project, "Click + to create a new task"
   // is a dead end since task creation needs a repo.
   App.updateEmptyState = function() {
-    var defaultEl = document.getElementById('empty-state-default');
-    var noProjEl = document.getElementById('empty-state-no-project');
-    if (!defaultEl || !noProjEl) return;
+    var titleEl = document.getElementById('empty-dashboard-title');
+    var subEl = document.getElementById('empty-dashboard-subtitle');
+    var cardTitleEl = document.getElementById('card-new-session-title');
+    var cardDescEl = document.getElementById('card-new-session-desc');
+    
+    if (!titleEl || !subEl) return;
+    
     var noProject = !AppState.repoPath;
-    defaultEl.style.display = noProject ? 'none' : '';
-    noProjEl.style.display = noProject ? '' : 'none';
+    if (noProject) {
+      titleEl.textContent = 'Welcome to Klaussy';
+      subEl.textContent = 'Create or attach a git worktree to get started — pick a repo, name a branch, and Klaussy spawns an agent session.';
+      if (cardTitleEl && cardDescEl) {
+        cardTitleEl.textContent = 'Add a Worktree';
+        cardDescEl.textContent = 'Attach a local git repository to start managing worktrees.';
+      }
+    } else {
+      titleEl.textContent = 'Klaussy Workspace';
+      subEl.textContent = 'Choose an action to start building or reviewing code.';
+      if (cardTitleEl && cardDescEl) {
+        cardTitleEl.textContent = 'New Git Session';
+        cardDescEl.textContent = 'Scaffold a git worktree and spawn an autonomous developer agent.';
+      }
+    }
   };
 
   App.showApp = async function() {

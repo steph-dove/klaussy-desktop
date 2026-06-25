@@ -67,6 +67,21 @@
     const todayStr = todayKey();
     const nowHour = new Date().getHours();
     const ns = 'http://www.w3.org/2000/svg';
+
+    // Inject beautiful linear gradients
+    const defs = document.createElementNS(ns, 'defs');
+    defs.innerHTML = `
+      <linearGradient id="token-bar-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--accent)"/>
+        <stop offset="100%" stop-color="color-mix(in srgb, var(--accent) 30%, transparent)"/>
+      </linearGradient>
+      <linearGradient id="token-bar-today-grad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="var(--accent-hover)"/>
+        <stop offset="100%" stop-color="var(--accent)"/>
+      </linearGradient>
+    `;
+    chart.appendChild(defs);
+
     for (let i = 0; i < series.length; i++) {
       const p = series[i];
       const h = (p.tokens / max) * usableH;
@@ -77,10 +92,13 @@
       r.setAttribute('y', y.toFixed(2));
       r.setAttribute('width', barW.toFixed(2));
       r.setAttribute('height', Math.max(0.5, h).toFixed(2));
-      r.setAttribute('rx', '0.5');
+      r.setAttribute('rx', Math.min(1.5, barW / 2).toFixed(2));
+      
       // Hourly series highlight the current hour; daily series highlight today.
       const highlight = (p.hour != null) ? (p.hour === nowHour) : (p.day === todayStr);
       r.setAttribute('class', highlight ? 'token-tile-bar is-today' : 'token-tile-bar');
+      r.setAttribute('fill', highlight ? 'url(#token-bar-today-grad)' : 'url(#token-bar-grad)');
+      
       const title = document.createElementNS(ns, 'title');
       title.textContent = `${p.day}: ${fmt(p.tokens)} tokens`;
       r.appendChild(title);
