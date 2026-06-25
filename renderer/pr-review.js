@@ -422,11 +422,11 @@ window.PrReview = window.PrReview || {};
         + '</div>'
       + '</div>'
       + '<div class="pr-review-tabs">'
-        + '<button class="pr-review-tab' + (PR.activeTab === 'files' ? ' active' : '') + '" data-tab="files">Files <span class="pr-tab-count">' + files.length + '</span></button>'
+        + '<button class="pr-review-tab' + (PR.activeTab === 'files' ? ' active' : '') + '" data-tab="files">Changes <span class="pr-tab-count">' + files.length + '</span></button>'
         + '<button class="pr-review-tab' + (PR.activeTab === 'conversation' ? ' active' : '') + '" data-tab="conversation">Conversation' + PR.renderConversationCount(state) + '</button>'
-        + '<button class="pr-review-tab' + (PR.activeTab === 'checks' ? ' active' : '') + '" data-tab="checks">Checks' + PR.renderChecksTabCount() + '</button>'
-        + '<button class="pr-review-tab' + (PR.activeTab === 'ai-review' ? ' active' : '') + '" data-tab="ai-review">Review' + PR.renderAiReviewTabCount() + '</button>'
-        + '<button class="pr-review-tab' + (PR.activeTab === 'terminal' ? ' active' : '') + '" data-tab="terminal">Terminal' + PR.renderTerminalTabBadge() + '</button>'
+        + '<button class="pr-review-tab' + (PR.activeTab === 'checks' ? ' active' : '') + '" data-tab="checks">CI View' + PR.renderChecksTabCount() + '</button>'
+        + '<button class="pr-review-tab' + (PR.activeTab === 'ai-review' ? ' active' : '') + '" data-tab="ai-review">AI Review' + PR.renderAiReviewTabCount() + '</button>'
+        + '<button class="pr-review-tab' + (PR.activeTab === 'terminal' ? ' active' : '') + '" data-tab="terminal">Terminal View' + PR.renderTerminalTabBadge() + '</button>'
       + '</div>'
       + '<div class="pr-review-body' + (PR.activeTab !== 'files' ? ' one-col' : '') + '">'
         + (PR.activeTab === 'files'
@@ -1476,7 +1476,7 @@ window.PrReview = window.PrReview || {};
     PR.repaintAiReviewTab();
     // Tab badge was set to 0 in the new-PR reset; rerender meta to update it.
     var tabBtn = PR.hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
-    if (tabBtn) tabBtn.innerHTML = 'Review' + PR.renderAiReviewTabCount();
+    if (tabBtn) tabBtn.innerHTML = 'AI Review' + PR.renderAiReviewTabCount();
     // After cached findings settle, rebind any chat agents still running
     // for those findings (user sent a chat message, navigated away, came back).
     PR.rehydrateChatAgents();

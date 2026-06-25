@@ -2,8 +2,11 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
   <title>Klaussy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="../node_modules/highlight.js/styles/vs2015.min.css">
   <!-- styles.css was split into ordered partials; load order preserves the cascade. -->
@@ -64,11 +67,39 @@
       <div id="sidebar-header">
         <h1>Klaussy</h1>
         <div class="header-buttons">
-          <button id="btn-diff" title="Toggle diff panel">&#916;</button>
-          <button id="btn-layout" title="Cycle layout: single / columns / grid">&#9638;</button>
-          <button id="btn-review-pr" title="Review a Pull Request…">PR</button>
-          <button id="btn-open-folder" title="Open a folder (no git required)"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M1.75 1h3.5c.412 0 .807.164 1.098.455L7.44 2.544a.25.25 0 0 0 .177.073h6.633c.966 0 1.75.784 1.75 1.75v8.883A1.75 1.75 0 0 1 14.25 15H1.75A1.75 1.75 0 0 1 0 13.25V2.75C0 1.784.784 1 1.75 1zm0 1.5a.25.25 0 0 0-.25.25v10.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V4.367a.25.25 0 0 0-.25-.25H7.617a1.75 1.75 0 0 1-1.237-.513L5.293 2.517a.25.25 0 0 0-.177-.073H1.75z"/></svg></button>
-          <button id="btn-new-task" title="New Task">+</button>
+          <button id="btn-diff" title="Toggle diff panel">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="4" cy="4" r="2.5"></circle>
+              <circle cx="12" cy="12" r="2.5"></circle>
+              <line x1="4" y1="6.5" x2="4" y2="12"></line>
+              <path d="M4 8.5h4a2 2 0 0 0 2-2V4"></path>
+            </svg>
+          </button>
+          <button id="btn-layout" title="Cycle layout: single / columns / grid">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="2" y="2" width="12" height="12" rx="1.5"></rect>
+            </svg>
+          </button>
+          <button id="btn-review-pr" title="Review a Pull Request…">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="4" cy="4" r="2.5"></circle>
+              <circle cx="4" cy="12" r="2.5"></circle>
+              <line x1="4" y1="6.5" x2="4" y2="9.5"></line>
+              <circle cx="12" cy="4" r="2.5"></circle>
+              <line x1="12" y1="6.5" x2="12" y2="12"></line>
+            </svg>
+          </button>
+          <button id="btn-open-folder" title="Open a folder (no git required)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M1.5 2.75a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .177.073l1.586 1.586c.047.047.11.073.177.073h7.06a.25.25 0 0 1 .25.25v8.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25v-10.25z"></path>
+            </svg>
+          </button>
+          <button id="btn-new-task" title="New Task">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="8" y1="2.5" x2="8" y2="13.5"></line>
+              <line x1="2.5" y1="8" x2="13.5" y2="8"></line>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -104,9 +135,24 @@
       <div id="task-list"></div>
 
       <div id="sidebar-footer">
-        <button id="btn-new-window" title="New Window">&#8862;</button>
-        <button id="btn-theme" title="Change theme">&#9681;</button>
-        <button id="btn-prefs" title="Preferences"><svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/><path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.902 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291a1.873 1.873 0 0 0-1.116-2.693l-.318-.094c-.835-.246-.835-1.428 0-1.674l.319-.094a1.873 1.873 0 0 0 1.115-2.692l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.116l.094-.318z"/></svg></button>
+        <button id="btn-new-window" title="New Window">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="2" width="9" height="9" rx="1.5"></rect>
+            <path d="M5 14h9V5a1 1 0 0 0-1-1"></path>
+          </svg>
+        </button>
+        <button id="btn-theme" title="Change theme">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="8" r="7"></circle>
+            <path fill="currentColor" d="M8 1a7 7 0 0 1 0 14V1z"></path>
+          </svg>
+        </button>
+        <button id="btn-prefs" title="Preferences">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="8" cy="8" r="2.5"></circle>
+            <path d="M9.8 1.4a.8.8 0 0 1 .5.7l.2.9a.8.8 0 0 0 .6.6l.9.2a.8.8 0 0 1 .7.5l.4.8a.8.8 0 0 1-.2.8l-.7.7a.8.8 0 0 0 0 .9l.7.7a.8.8 0 0 1 .2.8l-.4.8a.8.8 0 0 1-.7.5l-.9.2a.8.8 0 0 0-.6.6l-.2.9a.8.8 0 0 1-.5.7l-.8.4a.8.8 0 0 1 .9-.2l.7.7a.8.8 0 0 0 .9 0l.7-.7a.8.8 0 0 1 .8-.2l.8.4z"></path>
+          </svg>
+        </button>
         <button id="btn-sidebar-toggle" title="Toggle sidebar">
           <span id="sidebar-toggle-icon">&#9664;</span>
           <span id="sidebar-toggle-label">Hide</span>
@@ -117,17 +163,84 @@
     <div id="main-panel">
       <div id="terminal-area">
         <div id="empty-state">
-          <div id="empty-state-default">
-            <p>Click <strong>+</strong> to start a new session</p>
-            <p class="sub">A session creates a git worktree in each selected repo and spawns an agent in it.</p>
-            <p class="sub" style="margin-top:14px;">No git? <a href="#" id="empty-state-open-folder" class="empty-state-link">Open a folder</a> to run an agent in any directory.</p>
-          </div>
-          <div id="empty-state-no-project" style="display:none;">
-            <p><strong>Welcome to Klaussy.</strong></p>
-            <p class="sub">Create or attach a git worktree to get started — pick a repo, name a branch, and Klaussy spawns an agent session in it.</p>
-            <button id="empty-state-add-project" class="empty-state-cta" type="button">Add a worktree</button>
-            <p class="sub" style="margin-top:18px;">Or <a href="#" id="empty-state-open-folder-np" class="empty-state-link">open any folder</a> to run an agent without git.</p>
-            <p class="sub" style="margin-top:18px;">Or paste a GitHub PR URL into <strong>PR</strong> in the sidebar to review one without a local clone.</p>
+          <div class="empty-state-glow"></div>
+          <div class="empty-dashboard">
+            <div class="empty-dashboard-header">
+              <img class="empty-dashboard-logo" src="../icon.png" alt="" aria-hidden="true">
+              <h2 id="empty-dashboard-title">Welcome to Klaussy</h2>
+              <p id="empty-dashboard-subtitle" class="sub">Choose an action to start building or reviewing code.</p>
+            </div>
+            
+            <div class="empty-dashboard-grid">
+              <div class="dashboard-card" id="card-new-session">
+                <div class="card-icon">
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="4" cy="4" r="2.5"></circle>
+                    <circle cx="12" cy="12" r="2.5"></circle>
+                    <line x1="4" y1="6.5" x2="4" y2="12"></line>
+                    <path d="M4 8.5h4a2 2 0 0 0 2-2V4"></path>
+                  </svg>
+                </div>
+                <div class="card-content">
+                  <h3 id="card-new-session-title">New Git Session</h3>
+                  <p id="card-new-session-desc">Scaffold a git worktree and spawn a developer agent.</p>
+                </div>
+                <div class="card-arrow">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
+                </div>
+              </div>
+
+              <div class="dashboard-card" id="card-open-folder">
+                <div class="card-icon">
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1.5 2.75a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .177.073l1.586 1.586c.047.047.11.073.177.073h7.06a.25.25 0 0 1 .25.25v8.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25v-10.25z"></path>
+                  </svg>
+                </div>
+                <div class="card-content">
+                  <h3>Open Local Folder</h3>
+                  <p>Run an agent in any directory without git worktree management.</p>
+                </div>
+                <div class="card-arrow">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
+                </div>
+              </div>
+
+              <div class="dashboard-card" id="card-review-pr">
+                <div class="card-icon">
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="4" cy="4" r="2.5"></circle>
+                    <circle cx="4" cy="12" r="2.5"></circle>
+                    <line x1="4" y1="6.5" x2="4" y2="9.5"></line>
+                    <circle cx="12" cy="4" r="2.5"></circle>
+                    <line x1="12" y1="6.5" x2="12" y2="12"></line>
+                  </svg>
+                </div>
+                <div class="card-content">
+                  <h3>Review Pull Request</h3>
+                  <p>Paste a GitHub PR URL to run automated agentic code reviews.</p>
+                </div>
+                <div class="card-arrow">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
+                </div>
+              </div>
+
+              <div class="dashboard-card" id="card-manage-sessions">
+                <div class="card-icon">
+                  <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="2.5" y1="12" x2="13.5" y2="12"></line>
+                    <line x1="2.5" y1="8" x2="13.5" y2="8"></line>
+                    <line x1="2.5" y1="4" x2="13.5" y2="4"></line>
+                  </svg>
+                </div>
+                <div class="card-content">
+                  <h3>Manage Sessions</h3>
+                  <p>Review active/inactive sessions, delete worktrees, and branches.</p>
+                </div>
+                <div class="card-arrow">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div id="terminals"></div>
