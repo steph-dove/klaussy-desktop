@@ -68,6 +68,66 @@ window.ThemeManager = (function () {
       inputBg: '#191724', success: '#9ccfd8', error: '#eb6f92',
       termBg: '#191724', termFg: '#e0def4', termCursor: '#c4a7e7', termSelection: '#c4a7e744',
     },
+    synthwave: {
+      name: 'Synthwave \'84',
+      bg: '#2b213a', sidebarBg: '#241b2f', border: '#372948',
+      accent: '#ff7edb', accentHover: '#f97e72',
+      text: '#f0eff5', textMuted: '#b6b1cf', textDim: '#706b8c',
+      surface: '#372948', surfaceHover: '#423257',
+      inputBg: '#1e1628', success: '#36f9f6', error: '#fe4450',
+      termBg: '#261e35', termFg: '#f0eff5', termCursor: '#ff7edb', termSelection: 'rgba(255, 126, 219, 0.25)',
+      termAnsi: {
+        black: '#1e1628', red: '#fe4450', green: '#72f1b8', yellow: '#fede5d',
+        blue: '#36f9f6', magenta: '#ff7edb', cyan: '#01cdfe', white: '#f0eff5',
+        brightBlack: '#524366', brightRed: '#ff6b75', brightGreen: '#90f7ca', brightYellow: '#ffe27a',
+        brightBlue: '#73fbfd', brightMagenta: '#ff9ee2', brightCyan: '#38dbff', brightWhite: '#ffffff',
+      }
+    },
+    gruvbox: {
+      name: 'Gruvbox',
+      bg: '#282828', sidebarBg: '#1d2021', border: '#3c3836',
+      accent: '#fe8019', accentHover: '#d65d0e',
+      text: '#ebdbb2', textMuted: '#a89984', textDim: '#928374',
+      surface: '#3c3836', surfaceHover: '#504945',
+      inputBg: '#282828', success: '#b8bb26', error: '#fb4934',
+      termBg: '#282828', termFg: '#ebdbb2', termCursor: '#fe8019', termSelection: 'rgba(254, 128, 25, 0.25)',
+      termAnsi: {
+        black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921',
+        blue: '#458588', magenta: '#b16286', cyan: '#689d6a', white: '#a89984',
+        brightBlack: '#928374', brightRed: '#fb4934', brightGreen: '#b8bb26', brightYellow: '#fabd2f',
+        brightBlue: '#83a598', brightMagenta: '#d3869b', brightCyan: '#8ec07c', brightWhite: '#ebdbb2',
+      }
+    },
+    catppuccin: {
+      name: 'Catppuccin',
+      bg: '#1e1e2e', sidebarBg: '#11111b', border: '#313244',
+      accent: '#cba6f7', accentHover: '#f5c2e7',
+      text: '#cdd6f4', textMuted: '#a6adc8', textDim: '#6c7086',
+      surface: '#313244', surfaceHover: '#45475a',
+      inputBg: '#1e1e2e', success: '#a6e3a1', error: '#f38ba8',
+      termBg: '#1e1e2e', termFg: '#cdd6f4', termCursor: '#f5e0dc', termSelection: 'rgba(203, 166, 247, 0.25)',
+      termAnsi: {
+        black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
+        blue: '#89b4fa', magenta: '#cba6f7', cyan: '#94e2d5', white: '#bac2de',
+        brightBlack: '#585b70', brightRed: '#f38ba8', brightGreen: '#a6e3a1', brightYellow: '#f9e2af',
+        brightBlue: '#89b4fa', brightMagenta: '#cba6f7', brightCyan: '#94e2d5', brightWhite: '#a6adc8',
+      }
+    },
+    tokyo: {
+      name: 'Tokyo Night',
+      bg: '#1a1b26', sidebarBg: '#16161e', border: '#24283b',
+      accent: '#7aa2f7', accentHover: '#89ddff',
+      text: '#a9b1d6', textMuted: '#787c99', textDim: '#565f89',
+      surface: '#24283b', surfaceHover: '#2f3549',
+      inputBg: '#1a1b26', success: '#9ece6a', error: '#f7768e',
+      termBg: '#1a1b26', termFg: '#a9b1d6', termCursor: '#c0caf5', termSelection: 'rgba(122, 162, 247, 0.25)',
+      termAnsi: {
+        black: '#15161e', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
+        blue: '#7aa2f7', magenta: '#bb9af7', cyan: '#7dcfff', white: '#a9b1d6',
+        brightBlack: '#414868', brightRed: '#f7768e', brightGreen: '#9ece6a', brightYellow: '#e0af68',
+        brightBlue: '#7aa2f7', brightMagenta: '#bb9af7', brightCyan: '#7dcfff', brightWhite: '#c0caf5',
+      }
+    },
     light: {
       name: 'Light',
       bg: '#ffffff', sidebarBg: '#f5f5f7', border: '#d1d1d6',
