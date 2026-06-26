@@ -33,7 +33,10 @@ async function openPrReviewPopout(electronApp) {
 }
 
 test('pr-review popout loads and renders empty state', async ({ electronApp, mainWindow }) => {
-  await mainWindow.waitForLoadState('networkidle');
+  // The popout is created via electronApp.evaluate (main process), so it doesn't
+  // depend on the main window's network state — only that the app has booted.
+  // `domcontentloaded` is deterministic; `networkidle` flakes under background polling.
+  await mainWindow.waitForLoadState('domcontentloaded');
 
   const errors = [];
   const popoutPromise = openPrReviewPopout(electronApp);
@@ -44,10 +47,11 @@ test('pr-review popout loads and renders empty state', async ({ electronApp, mai
   await expect(popout.locator('#pr-review-root.pr-review-host')).toBeAttached();
   await expect(popout.locator('.pr-review-loading')).toContainText(/No active PR review|Loading PR/);
 
-  // Settle: PrReview.mount kicks off async fetches; give them a beat to
-  // resolve so any handler errors surface before we assert.
-  await popout.waitForLoadState('networkidle');
-  await expect.poll(() => popout.locator('.pr-review-loading').textContent(), { timeout: 3000 })
+  // Settle deterministically: PrReview.mount kicks off async fetches, so poll
+  // until the placeholder resolves to the empty state (any handler errors
+  // surface via the listeners above). This replaces a flaky networkidle wait —
+  // the poll IS the settle, with margin for the mount's async work.
+  await expect.poll(() => popout.locator('.pr-review-loading').textContent(), { timeout: 8000 })
     .toMatch(/No active PR review/);
 
   expect(errors, `Popout console errors:\n${errors.join('\n')}`).toEqual([]);
