@@ -230,7 +230,7 @@ try { msg = fs.readFileSync(msgFile, 'utf8'); } catch { process.exit(0); }
 // "Generated with <tool>" / 🤖 promo lines. Remove them so commits read as the
 // human's own work. Human co-author trailers are preserved — only lines that
 // name an AI agent/tool (or its bot email) are dropped.
-const AGENT = /(claude|anthropic|codex|openai|chatgpt|\\bgpt\\b|gemini|google\\s+ai|antigravity|\\bagy\\b|copilot|cursor|llm\\b|\\bai\\s+assistant\\b)/i;
+const AGENT = /(claude|anthropic|codex|openai|chatgpt|\\bgpt\\b|gemini|google\\s+ai|antigravity|\\bagy\\b|copilot|cursor|\\bcline\\b|llm\\b|\\bai\\s+assistant\\b)/i;
 const stripLine = (l) => {
   const t = l.trim();
   if (/^co-authored-by:/i.test(t) && AGENT.test(t)) return true;

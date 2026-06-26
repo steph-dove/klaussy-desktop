@@ -30,6 +30,8 @@ if (!Array.isArray(AGENT_PROVIDERS) || AGENT_PROVIDERS.length === 0) {
     { id: 'gemini', displayName: 'Gemini CLI', shortLabel: 'gm', defaultBin: 'gemini' },
     { id: 'antigravity', displayName: 'Antigravity CLI', shortLabel: 'ag', defaultBin: 'agy' },
     { id: 'copilot', displayName: 'GitHub Copilot', shortLabel: 'cp', defaultBin: 'copilot' },
+    { id: 'cursor', displayName: 'Cursor CLI', shortLabel: 'cu', defaultBin: 'cursor-agent' },
+    { id: 'cline', displayName: 'Cline CLI', shortLabel: 'cl', defaultBin: 'cline' },
   ];
 }
 

@@ -1,6 +1,7 @@
 // AI CLI provider registry — the single source of truth for the per-tool
 // differences between the coding agents Klaussy can drive (Claude Code,
-// OpenAI Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI).
+// OpenAI Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI, Cursor CLI,
+// Cline CLI).
 //
 // Every place that used to hardcode `config.claudePath || 'claude'` and the
 // `claude --resume <id>` / `claude -p` shapes now asks this registry instead.
@@ -666,6 +667,191 @@ const PROVIDERS = {
     snapshotSessions() { return new Set(); },
     findNewSession() { return null; },
   },
+
+  // Cursor CLI (`cursor-agent`) — Cursor's headless/interactive coding agent,
+  // installed via Cursor's curl script (NOT npm — see INSTALL_COMMANDS). The
+  // binary laid down on PATH is `cursor-agent` (docs examples sometimes shorten
+  // it to `agent`; `cursor-agent` is the unambiguous installed name, and the
+  // user can override it via the Cursor Path preference). Grounded against the
+  // Cursor CLI docs (cursor.com/docs/cli, 2026-06):
+  //   - bare `cursor-agent` is interactive; `--version` prints the version.
+  //   - `-p`/`--print "<prompt>"` runs one non-interactive prompt. Pair with
+  //     `--output-format text|json|stream-json`; default is human text.
+  //     stream-json emits Claude-shaped NDJSON (type:assistant/tool_call/result).
+  //   - `--resume [chatId]` resumes a specific chat; `--continue` resumes the
+  //     most recent. `cursor-agent ls` lists chats.
+  //   - `--model <name>` pins a model; `-f`/`--force` (alias `--yolo`)
+  //     auto-approves edits/commands.
+  //   - chats/config live under ~/.cursor/. The on-disk chat file format is
+  //     unverified, so no session tail is wired yet (stubs below).
+  cursor: {
+    id: 'cursor',
+    // VERIFY: Cursor reads `.cursor/rules/*.mdc` and the legacy root
+    // `.cursorrules` file. We seed `.cursorrules` (always read, no frontmatter
+    // required) with the multi-repo session context.
+    memoryFile: '.cursorrules',
+    shortLabel: 'cu',
+    displayName: 'Cursor CLI',
+    defaultBin: 'cursor-agent',
+    configPathKey: 'cursorPath',
+    versionArgs: ['--version'],
+    perWorktreeSessions: false,
+    supportsExactResume: false,
+
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model } = {}) {
+      // Model names may contain spaces, so quote them (this returns a shell
+      // string). cursor-agent prompts per action interactively, so no trust flag
+      // is forced here — the user approves in the TUI (mirrors claude/codex).
+      let base = bin;
+      if (model) base += ` --model ${JSON.stringify(model)}`;
+      if (resumeSessionId) return `${base} --resume ${resumeSessionId}`;
+      if (resumeLatest) return `${base} --continue`;
+      return base;
+    },
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+      // `-p` non-interactive. text → clean stdout (passthrough); stream → NDJSON
+      // we translate into Claude-shaped events. `--force` auto-approves writes
+      // for the autonomous-edit surfaces. args is passed to spawn() directly.
+      const args = ['-p', prompt];
+      if (model) args.push('--model', model);
+      if (allowEdits) args.push('--force');
+      if (mode === 'stream') args.push('--output-format', 'stream-json');
+      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+    },
+    sessionDir() {
+      return path.join(home(), '.cursor');
+    },
+    // Cursor's stream-json mirrors Claude's message shape: {type:'assistant',
+    // message:{content:[{type:'text',text}|{type:'tool_use',name,input}]}} and a
+    // terminal {type:'result',...}. The token-usage fields on the result event
+    // are not yet documented, so usage extraction is best-effort. VERIFY against
+    // a real `--output-format stream-json` capture before trusting it.
+    parseStreamLine(obj) {
+      const events = [];
+      if (!obj || typeof obj !== 'object') return events;
+      const msg = obj.message;
+      if (msg && Array.isArray(msg.content)) {
+        for (const block of msg.content) {
+          if (!block) continue;
+          if (block.type === 'tool_use' && block.name) {
+            const inp = block.input || {};
+            const hint = inp.file_path || inp.command || inp.pattern || '';
+            events.push({ kind: 'tool', name: block.name, hint: typeof hint === 'string' ? hint : '' });
+          } else if (block.type === 'text' && block.text) {
+            events.push({ kind: 'text', text: block.text });
+          }
+        }
+      }
+      if (obj.type === 'result') {
+        const u = obj.usage;
+        if (u) events.push({
+          kind: 'usage',
+          usage: {
+            inputTokens: u.input_tokens || 0,
+            cacheCreationInputTokens: u.cache_creation_input_tokens || 0,
+            cacheReadInputTokens: u.cache_read_input_tokens || 0,
+            outputTokens: u.output_tokens || 0,
+            totalTokens: u.total_tokens || ((u.input_tokens || 0) + (u.output_tokens || 0)),
+          },
+        });
+        events.push({ kind: 'end_turn' });
+      }
+      return events;
+    },
+    // VERIFY: Cursor chat file format undocumented. Stubs so the implement PTY
+    // degrades gracefully (no tail attached) instead of crashing.
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
+
+  // Cline CLI (`cline`) — the terminal surface of the Cline coding agent,
+  // installed via npm (`cline`; see NPM_PACKAGES). It shares the same agent core
+  // as the Cline VS Code extension/SDK. Grounded against the Cline CLI docs
+  // (docs.cline.bot, 2026-06):
+  //   - bare `cline` enters interactive/TUI mode in a TTY (`-i`/`--tui` force
+  //     it); `-V`/`--version` prints the version.
+  //   - `cline "<prompt>"` runs a one-shot task; `--json` makes it
+  //     non-interactive and streams structured NDJSON events.
+  //   - `--yolo`/`-y` auto-approves tools (limited toolset).
+  //   - `-m`/`--model <id>` selects a model; `--id <id>` resumes an existing
+  //     session by id. There is no documented "continue latest" flag.
+  //   - data/config live under ~/.cline/ (settings at ~/.cline/data/settings).
+  //     The on-disk task file format is unverified, so no session tail is wired.
+  cline: {
+    id: 'cline',
+    // VERIFY: Cline reads a `.clinerules` file or `.clinerules/` directory for
+    // project rules. We seed the single-file `.clinerules` with the multi-repo
+    // session context.
+    memoryFile: '.clinerules',
+    shortLabel: 'cl',
+    displayName: 'Cline CLI',
+    defaultBin: 'cline',
+    configPathKey: 'clinePath',
+    versionArgs: ['--version'],
+    perWorktreeSessions: false,
+    supportsExactResume: false,
+
+    buildInteractiveCmd(bin, { resumeSessionId, model } = {}) {
+      // Cline's TUI handles tool approvals interactively, so no auto-approve flag
+      // is forced here. `--id <id>` resumes a specific session; there is no
+      // continue-latest flag, so resumeLatest falls through to a fresh session.
+      let base = bin;
+      if (model) base += ` --model ${JSON.stringify(model)}`;
+      if (resumeSessionId) return `${base} --id ${resumeSessionId}`;
+      return base;
+    },
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+      // `--json` → NDJSON we translate into Claude-shaped events; otherwise the
+      // task prints clean text we pass through. `--yolo` auto-approves tools for
+      // the autonomous-edit surfaces. The prompt is the trailing positional arg.
+      const args = [];
+      if (model) args.push('--model', model);
+      if (allowEdits) args.push('--yolo');
+      if (mode === 'stream') args.push('--json');
+      args.push(prompt);
+      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+    },
+    sessionDir() {
+      return path.join(home(), '.cline');
+    },
+    // VERIFIED partial (cline --json README example): NDJSON lines shaped
+    // {type:'agent_event', event:{text}}. The tool-call / token-usage / turn-end
+    // event shapes are not yet documented, so this is best-effort. VERIFY against
+    // a real `--json` capture before trusting it.
+    parseStreamLine(obj) {
+      const events = [];
+      if (!obj || typeof obj !== 'object') return events;
+      if (obj.type === 'agent_event' && obj.event) {
+        const ev = obj.event;
+        if (ev.text) events.push({ kind: 'text', text: String(ev.text) });
+        else if (ev.tool || ev.tool_name) {
+          events.push({ kind: 'tool', name: ev.tool || ev.tool_name, hint: ev.path || ev.command || '' });
+        }
+      }
+      if (obj.usage) {
+        const u = obj.usage;
+        events.push({
+          kind: 'usage',
+          usage: {
+            inputTokens: u.input_tokens || u.tokens_in || 0,
+            cacheCreationInputTokens: 0,
+            cacheReadInputTokens: 0,
+            outputTokens: u.output_tokens || u.tokens_out || 0,
+            totalTokens: u.total_tokens || 0,
+          },
+        });
+      }
+      return events;
+    },
+    // VERIFY: Cline task file format undocumented. Stubs so the implement PTY
+    // degrades gracefully (no tail attached) instead of crashing.
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
 };
 
 const PROVIDER_IDS = Object.keys(PROVIDERS);
@@ -677,6 +863,7 @@ const NPM_PACKAGES = {
   codex: '@openai/codex',
   gemini: '@google/gemini-cli',
   copilot: '@github/copilot',
+  cline: 'cline',
 };
 
 // Non-npm install commands, per platform, for CLIs that don't ship as npm
@@ -691,7 +878,29 @@ const INSTALL_COMMANDS = {
     linux: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     win32: 'irm https://antigravity.google/cli/install.ps1 | iex',
   },
+  // Cursor's CLI installs via its official script on macOS/Linux/WSL; there's no
+  // native PowerShell installer, so win32 falls back to the bash one-liner (runs
+  // under Git Bash/WSL). The script self-detects platform/arch.
+  cursor: {
+    darwin: 'curl https://cursor.com/install -fsS | bash',
+    linux: 'curl https://cursor.com/install -fsS | bash',
+  },
 };
+
+// Per-provider documentation / "get started" pages, surfaced when a user picks
+// an agent whose CLI isn't installed yet (so the "set it up" prompt can link
+// straight to the right install/usage docs). Keep these pointed at the CLI docs,
+// not the IDE/marketing home, so the install command on the page matches ours.
+const DOCS_URLS = {
+  claude: 'https://docs.claude.com/en/docs/claude-code/overview',
+  codex: 'https://github.com/openai/codex',
+  gemini: 'https://github.com/google-gemini/gemini-cli',
+  antigravity: 'https://antigravity.google',
+  copilot: 'https://github.com/github/copilot-cli',
+  cursor: 'https://cursor.com/docs/cli',
+  cline: 'https://docs.cline.bot/cli-reference/overview',
+};
+function docsUrlFor(id) { return DOCS_URLS[id] || null; }
 
 // Short, button-friendly names (vs the fuller displayName).
 const SHORT_NAMES = {
@@ -700,6 +909,8 @@ const SHORT_NAMES = {
   gemini: 'Gemini',
   antigravity: 'Antigravity',
   copilot: 'Copilot',
+  cursor: 'Cursor',
+  cline: 'Cline',
 };
 
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
@@ -712,7 +923,7 @@ const SHORT_NAMES = {
 //   copilot — Default-only: its `--model` slugs couldn't be verified here (the
 //             account's Copilot subscription/policy blocks runs), so we don't
 //             ship slugs that might error. Fill in once it can run + verify.
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model' };
+const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -739,6 +950,11 @@ const MODELS = {
   // names that would error (same rationale as copilot).
   antigravity: [{ id: '', label: 'Default' }],
   copilot: [{ id: '', label: 'Default' }],
+  // VERIFY: Cursor's `--model` slugs (e.g. 'auto', 'sonnet-4.5', 'gpt-5') and
+  // Cline's depend on the user's configured provider/subscription and shift
+  // over time, so we ship Default-only rather than slugs that might error.
+  cursor: [{ id: '', label: 'Default' }],
+  cline: [{ id: '', label: 'Default' }],
 };
 function modelsFor(id) { return MODELS[id] || [{ id: '', label: 'Default' }]; }
 function modelFlagFor(id) { return MODEL_FLAGS[id] || '--model'; }
@@ -769,6 +985,10 @@ const AUTH_CHECKS = {
   // quiet status probe yet, so auth state is reported as unknown (not false).
   antigravity: { statusArgs: null, notAuthedPattern: null, loginCommand: 'agy' },
   copilot: { statusArgs: null, notAuthedPattern: null, loginCommand: 'copilot' },
+  // cursor-agent signs in via `cursor-agent login`; cline authenticates through
+  // its provider config. No verified quiet status probe for either yet.
+  cursor: { statusArgs: null, notAuthedPattern: null, loginCommand: 'cursor-agent login' },
+  cline: { statusArgs: null, notAuthedPattern: null, loginCommand: 'cline' },
 };
 
 function authMetaFor(id) {
@@ -808,6 +1028,7 @@ function allProviders() {
       configPathKey: p.configPathKey,
       npmPackage: NPM_PACKAGES[p.id] || null,
       installCommand: installCommandFor(p.id),
+      docsUrl: docsUrlFor(p.id),
       models: modelsFor(p.id),
       modelFlag: modelFlagFor(p.id),
     };
@@ -836,6 +1057,7 @@ module.exports = {
   shortLabelFor,
   displayNameFor,
   installCommandFor,
+  docsUrlFor,
   authMetaFor,
   modelsFor,
   modelFlagFor,

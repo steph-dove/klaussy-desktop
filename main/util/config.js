@@ -1,6 +1,6 @@
 // Persistent config living at userData/config.json: repo path, project list,
 // UI prefs, notify toggles, per-agent CLI paths (claudePath / codexPath /
-// geminiPath / antigravityPath / copilotPath), defaultProvider, theme, and (historically) a
+// geminiPath / antigravityPath / copilotPath / cursorPath / clinePath), defaultProvider, theme, and (historically) a
 // PR-review cache that has since moved to its own file-per-PR store.
 //
 // saveConfig has ~64 call sites (prefs changes, PR cache writes, notify pref
@@ -136,7 +136,7 @@ const migrations = [
   },
 
   // v1 → v2: multi-agent support. `defaultMode` ('claude' | 'shell') becomes
-  // `defaultProvider`, which now also accepts 'codex' | 'gemini' | 'antigravity' | 'copilot'.
+  // `defaultProvider`, which now also accepts 'codex' | 'gemini' | 'antigravity' | 'copilot' | 'cursor' | 'cline'.
   // We keep `defaultMode` in place for one release so a downgrade still reads
   // a sane value; the new code prefers `defaultProvider`.
   function v1_to_v2(config) {

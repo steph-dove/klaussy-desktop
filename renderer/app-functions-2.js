@@ -758,6 +758,11 @@ window.App = window.App || {};
     var fanoutMode = App.selectedMode;
     var openInNewWindow = App.openNewWindowCheck.checked;
 
+    // Don't create a session for an agent whose CLI isn't installed — guide the
+    // user to set it up first (the modal handles the "Re-check" loop). Returns
+    // true for installed agents and 'shell', so this is a no-op in the happy path.
+    if (window.agentSetup && !(await window.agentSetup.checkAndPrompt(App.selectedMode))) return;
+
     var result;
 
     if (App.activeTab === 'new') {
