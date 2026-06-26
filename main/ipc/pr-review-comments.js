@@ -4,6 +4,7 @@
 // ipcMain.handle side effects.
 
 const { ipcMain } = require('electron');
+const log = require('electron-log');
 const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
@@ -256,6 +257,13 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/reviews`;
   // `spawn` is imported at the top of the file.
 
+  // Diagnostic: log each comment's anchor (path/line/side, not the body) so a
+  // position-resolution failure can be matched against the PR diff.
+  log.info('[pr-submit-review] POST', endpoint, 'event=' + event,
+    'anchors=' + JSON.stringify(payload.comments.map((c) => ({
+      path: c.path, line: c.line, start_line: c.start_line, side: c.side,
+    }))));
+
   const reviewResult = await new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
@@ -274,6 +282,14 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
             const parsed = JSON.parse(stdoutBuf);
             if (parsed.message) msg = parsed.message + (parsed.errors ? ': ' + JSON.stringify(parsed.errors) : '');
           } catch (_) {}
+        }
+        log.warn('[pr-submit-review] failed code=' + code,
+          'stderr=' + stderrBuf.trim(), 'stdout=' + stdoutBuf.trim());
+        // GitHub blocks approve / request-changes on your own PR. Surface the
+        // actionable version rather than its cryptic 422 string, in case the
+        // UI gate didn't catch it (e.g. author/user not yet known on submit).
+        if (/own pull request/i.test(msg)) {
+          msg = 'GitHub doesn’t allow Approve or Request changes on your own PR. Use “Comment” to submit your feedback.';
         }
         resolve({ error: msg || ('gh exited with code ' + code) });
         return;

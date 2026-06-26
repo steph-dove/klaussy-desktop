@@ -2906,6 +2906,9 @@ body.pr-review-popout #pr-review-root {
 .pr-submit-event input { margin: 0; }
 .pr-submit-event-label { color: var(--text); font-weight: 600; }
 .pr-submit-event-hint { color: var(--text-muted); font-size: 11px; text-align: right; }
+/* Approve / Request changes when it's your own PR — GitHub forbids both. */
+.pr-submit-event.disabled { opacity: 0.45; cursor: not-allowed; }
+.pr-submit-event.disabled:hover { background: none; }
 .pr-submit-actions {
   display: flex;
   justify-content: flex-end;
