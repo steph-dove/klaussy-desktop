@@ -2,6 +2,8 @@
 
 **The agent-first IDE that reviews its own code before you commit.**
 
+[![GitHub stars](https://img.shields.io/github/stars/steph-dove/klaussy-desktop.svg?style=social)](https://github.com/steph-dove/klaussy-desktop/stargazers)
+
 > **The desktop is the face. The [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents) engine is the spine.** While other orchestrators give you a worktree grid, Klaussy brings the conventions, custom skills, and active git-level guardrails that actually keep agents aligned with your codebase.
 
 Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop runs multi-agent, multi-repository AI coding sessions in a unified, tabbed light-themed workspace. It spawns isolated Git worktrees per task, enabling you to run multiple agents in parallel without juggling branches, staging mess, or local workspace clutter.
@@ -49,7 +51,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 
 Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux. Free for individual use — no account or access key required.
 
-➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
+➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest)** &nbsp;|&nbsp; **[★ Star this Repo](https://github.com/steph-dove/klaussy-desktop)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
 
 *   **macOS:** signed + notarized using Apple Developer ID. Drag `Klaussy.app` to `/Applications`.
 *   **Windows:** signed with an EV Code Signing certificate. Run the installer.
