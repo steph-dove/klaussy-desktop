@@ -2,7 +2,7 @@
 
 **The agent-first IDE that reviews its own code before you commit.**
 
-[![GitHub stars](https://img.shields.io/github/stars/steph-dove/klaussy-desktop.svg?style=social)](https://github.com/steph-dove/klaussy-desktop/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/steph-dove/klaussy-desktop?style=social)](https://github.com/steph-dove/klaussy-desktop/stargazers)
 
 > **The desktop is the face. The [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents) engine is the spine.** While other orchestrators give you a worktree grid, Klaussy brings the conventions, custom skills, and active git-level guardrails that actually keep agents aligned with your codebase.
 
