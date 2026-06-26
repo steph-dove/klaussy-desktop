@@ -47,7 +47,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 
 ## 📦 Download & Install
 
-Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux. Free to try; $99 lifetime access unlocks an access key for all platforms.
+Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux. Free for individual use — no account or access key required.
 
 ➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
 

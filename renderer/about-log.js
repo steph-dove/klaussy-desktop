@@ -60,7 +60,6 @@ window.Dialogs = (function () {
         '<div class="about-actions">' +
           '<button class="about-howto" type="button">How to use</button>' +
           '<button class="about-licenses" type="button">Licenses</button>' +
-          '<button class="about-manage-license" type="button">Manage License</button>' +
           '<button class="about-discord" type="button">Join Discord</button>' +
           '<button class="about-close" type="button">Close</button>' +
         '</div>';
@@ -73,13 +72,6 @@ window.Dialogs = (function () {
       if (licBtn) licBtn.addEventListener('click', function () {
         overlay.remove();
         showLicenses();
-      });
-      var mgrBtn = dialog.querySelector('.about-manage-license');
-      if (mgrBtn) mgrBtn.addEventListener('click', function () {
-        overlay.remove();
-        if (window.LicenseActivation && typeof window.LicenseActivation.open === 'function') {
-          window.LicenseActivation.open();
-        }
       });
       var discBtn = dialog.querySelector('.about-discord');
       if (discBtn) discBtn.addEventListener('click', function () {

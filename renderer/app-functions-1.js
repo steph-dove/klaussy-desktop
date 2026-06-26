@@ -170,11 +170,9 @@ window.App = window.App || {};
     } else {
       App.loadExistingTasks();
     }
-    // Commercial licence gate — dismissable, shows only on unactivated
-    // packaged builds. Dev (`electron .`) is bypassed by main/state/license.
-    if (window.LicenseActivation && typeof window.LicenseActivation.openIfNeeded === 'function') {
-      window.LicenseActivation.openIfNeeded();
-    }
+    // Klaussy is free for individual use — no access-key gate. The license
+    // backend (main/state/license.js) stays in place, dormant, for a possible
+    // future paid/team tier.
   };
 
   App.loadExistingTasks = async function() {
