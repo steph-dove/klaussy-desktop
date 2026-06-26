@@ -1000,10 +1000,24 @@
     });
   };
 
+  // GitHub forbids APPROVE / REQUEST_CHANGES on your own PR — only a plain
+  // COMMENT review is allowed. True when the active PR's author is the
+  // signed-in gh user (author known from meta; user from the once-per-mount
+  // currentUser fetch). Defaults to false if either is unknown, so we never
+  // wrongly hide the options for someone else's PR.
+  PR.isOwnPullRequest = function() {
+    var meta = (PR.lastState && PR.lastState.meta) || {};
+    var author = meta.author && meta.author.login;
+    return !!(author && PR.currentUserLogin && author === PR.currentUserLogin);
+  };
+
   PR.openSubmitReviewDialog = function() {
     if (PR.pendingComments.length === 0) {
       if (!confirm('No pending comments. Submit review anyway (summary only)?')) return;
     }
+    var ownPr = PR.isOwnPullRequest();
+    var selfDisabled = ownPr ? ' disabled' : '';
+    var selfHint = ownPr ? 'GitHub doesn’t allow this on your own PR' : '';
     var overlay = document.createElement('div');
     overlay.className = 'pr-submit-overlay';
     overlay.innerHTML =
@@ -1014,8 +1028,8 @@
         + '<textarea class="pr-submit-body" placeholder="Overall summary (optional)" rows="4"></textarea>'
         + '<div class="pr-submit-events">'
           + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="COMMENT" checked /> <span class="pr-submit-event-label">Comment</span><span class="pr-submit-event-hint">Submit without approval</span></label>'
-          + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="APPROVE" /> <span class="pr-submit-event-label">Approve</span><span class="pr-submit-event-hint">Submit feedback and approve</span></label>'
-          + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="REQUEST_CHANGES" /> <span class="pr-submit-event-label">Request changes</span><span class="pr-submit-event-hint">Submit feedback that must be addressed</span></label>'
+          + '<label class="pr-submit-event' + (ownPr ? ' disabled' : '') + '"><input type="radio" name="pr-event" value="APPROVE"' + selfDisabled + ' /> <span class="pr-submit-event-label">Approve</span><span class="pr-submit-event-hint">' + (ownPr ? selfHint : 'Submit feedback and approve') + '</span></label>'
+          + '<label class="pr-submit-event' + (ownPr ? ' disabled' : '') + '"><input type="radio" name="pr-event" value="REQUEST_CHANGES"' + selfDisabled + ' /> <span class="pr-submit-event-label">Request changes</span><span class="pr-submit-event-hint">' + (ownPr ? selfHint : 'Submit feedback that must be addressed') + '</span></label>'
         + '</div>'
         + '<div class="pr-submit-actions">'
           + '<button class="pr-submit-cancel" type="button">Cancel</button>'
