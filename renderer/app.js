@@ -631,6 +631,9 @@ window.App = window.App || {};
       // user actually chose a different one — not just from the default.
       App.shellUserPicked = true;
       App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
+      // If they picked an agent whose CLI isn't installed, offer to set it up
+      // now instead of letting the eventual spawn fail with "command not found".
+      if (window.agentSetup) window.agentSetup.checkAndPrompt(App.selectedMode);
     });
   });
 

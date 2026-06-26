@@ -327,6 +327,18 @@
       </div>
       <div class="claude-info" id="agent-info-copilot"></div>
 
+      <div class="field field-full">
+        <label>Cursor Path</label>
+        <input type="text" id="pref-cursor-path" placeholder="cursor-agent (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-cursor"></div>
+
+      <div class="field field-full">
+        <label>Cline Path</label>
+        <input type="text" id="pref-cline-path" placeholder="cline (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-cline"></div>
+
       <div class="field-hint">Leave a path empty to use that CLI from your PATH. Each new task uses the default agent below; you can switch per task in the New Task dialog.</div>
 
       <div class="field">
@@ -337,6 +349,8 @@
           <option value="gemini">Gemini</option>
           <option value="antigravity">Antigravity</option>
           <option value="copilot">Copilot</option>
+          <option value="cursor">Cursor</option>
+          <option value="cline">Cline</option>
           <option value="shell">Shell</option>
         </select>
       </div>

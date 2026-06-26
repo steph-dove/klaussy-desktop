@@ -9,7 +9,7 @@ const { loadConfig, saveConfig } = require('../util/config');
 const { getLogBuffer } = require('../util/logging');
 const { allWindows, hardenWindow, getMainWindow } = require('../state/windows');
 const { startAutoFetch } = require('../state/ci-poll');
-const { allProviders, getProvider, binFor } = require('../state/ai-providers');
+const { allProviders, getProvider, binFor, installCommandFor, docsUrlFor, authMetaFor } = require('../state/ai-providers');
 
 // Synchronous provider-list handed to the sandboxed preload (which can't
 // require local files). Registered on require, before any window/preload runs.
@@ -184,6 +184,8 @@ ipcMain.handle('get-preferences', () => {
     geminiPath: config.geminiPath || '',
     antigravityPath: config.antigravityPath || '',
     copilotPath: config.copilotPath || '',
+    cursorPath: config.cursorPath || '',
+    clinePath: config.clinePath || '',
     // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
     defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
     defaultMode: config.defaultProvider || config.defaultMode || 'claude',
@@ -215,6 +217,8 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.geminiPath !== undefined) config.geminiPath = prefs.geminiPath;
   if (prefs.antigravityPath !== undefined) config.antigravityPath = prefs.antigravityPath;
   if (prefs.copilotPath !== undefined) config.copilotPath = prefs.copilotPath;
+  if (prefs.cursorPath !== undefined) config.cursorPath = prefs.cursorPath;
+  if (prefs.clinePath !== undefined) config.clinePath = prefs.clinePath;
   if (prefs.defaultProvider !== undefined) {
     config.defaultProvider = prefs.defaultProvider;
     config.defaultMode = prefs.defaultProvider; // keep legacy key in sync
@@ -284,13 +288,23 @@ ipcMain.handle('get-claude-info', async () => {
   return { path: info.path, version: info.version };
 });
 
-// Per-provider version probe for the preferences UI. { provider } in,
-// { id, displayName, path, version } out (version='not found' on failure).
+// Per-provider version probe for the preferences UI and the "agent not
+// installed" setup prompt. { provider } in, { id, displayName, path, version,
+// installed, installCommand, docsUrl, loginCommand } out (version='not found'
+// and installed=false on failure). The install/docs fields let the renderer
+// guide the user to set up an agent they picked but don't have yet.
 ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
   const config = loadConfig();
-  const info = probeAgent(provider, config);
-  if (!info) return { id: provider, path: '', version: 'not found' };
-  return info;
+  const prov = getProvider(provider);
+  const info = probeAgent(provider, config)
+    || { id: provider, displayName: (prov && prov.displayName) || provider, path: '', version: 'not found' };
+  return {
+    ...info,
+    installed: info.version !== 'not found',
+    installCommand: installCommandFor(provider) || null,
+    docsUrl: docsUrlFor(provider) || null,
+    loginCommand: (authMetaFor(provider) || {}).loginCommand || null,
+  };
 });
 
 module.exports = { openPreferencesWindow };
