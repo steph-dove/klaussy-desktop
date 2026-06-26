@@ -1,4 +1,4 @@
-# Klaussy Desktop 💻🤖
+# <img src="brand-mark.png" width="32" height="32" align="center" alt="Klaussy Logo"> Klaussy Desktop 💻🤖
 
 **The agent-first IDE that reviews its own code before you commit.**
 
