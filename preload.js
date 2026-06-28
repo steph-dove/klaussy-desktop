@@ -608,14 +608,6 @@ contextBridge.exposeInMainWorld('klaus', {
     },
   },
 
-  // ---- license: one-time-purchase activation (Paddle-backed) ----
-  license: {
-    status: () => ipcRenderer.invoke('license-status'),
-    activate: (key) => ipcRenderer.invoke('license-activate', { key }),
-    deactivate: () => ipcRenderer.invoke('license-deactivate'),
-    openCheckout: () => ipcRenderer.invoke('license-open-checkout'),
-  },
-
   // ---- tokenUsage: sidebar leaderboard data ----
   tokenUsage: {
     // spec = { kind: 'preset', preset: '7d'|'14d'|'30d'|'6m'|'1y'|'all' }
