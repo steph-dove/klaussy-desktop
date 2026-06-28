@@ -72,9 +72,16 @@ function writeExecutable(binDir, name, body) {
 // after spawn) catches the marker, short enough that passthrough AI-stream
 // tests (which don't kill the process) see the stream complete, not leak.
 function writeFakeAgent(binDir, name = 'claude') {
+  // Emit for ~30s (then exit as a backstop). Long-lived on purpose: in CI the
+  // create()+subscribe round-trip can outlast a short agent, so by the time a
+  // terminal test listens a quick agent has already exited and converted to a
+  // shell — its output gone (PTY data isn't replayed to late subscribers). A
+  // long emit window makes subscription lateness harmless. Cleanup is external:
+  // terminal tests kill the task (SIGTERM ends sleep), and the app teardown
+  // (app.close) reaps it for passthrough AI-stream tests that don't kill it.
   return writeExecutable(binDir, name, `#!/bin/sh
 i=0
-while [ "$i" -lt 11 ]; do
+while [ "$i" -lt 100 ]; do
   printf 'FAKE-AGENT-READY ${name}\\n'
   if [ -n "$FAKE_AGENT_OUTPUT" ]; then printf '%s\\n' "$FAKE_AGENT_OUTPUT"; fi
   i=$((i + 1))
