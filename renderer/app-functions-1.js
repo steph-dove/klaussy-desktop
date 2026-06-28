@@ -170,9 +170,7 @@ window.App = window.App || {};
     } else {
       App.loadExistingTasks();
     }
-    // Klaussy is free for individual use — no access-key gate. The license
-    // backend (main/state/license.js) stays in place, dormant, for a possible
-    // future paid/team tier.
+    // Klaussy is free — no access-key gate.
   };
 
   App.loadExistingTasks = async function() {
