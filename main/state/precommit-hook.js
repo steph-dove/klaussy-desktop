@@ -432,6 +432,137 @@ function registerCleanupOnce() {
   process.on('exit', cleanup);
 }
 
+function writeExitPlanModeBin() {
+  const binDir = path.join(KLAUSSY_DIR, 'bin');
+  try { fs.mkdirSync(binDir, { recursive: true }); } catch (e) {}
+  
+  const scriptPath = path.join(binDir, 'ExitPlanMode');
+  const scriptContent = `#!/usr/bin/env node
+// Klaussy ExitPlanMode CLI — written by Klaussy; edits will be overwritten.
+const net = require('net');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+function findPlanFile() {
+  const files = fs.readdirSync(process.cwd());
+  const jsonPlan = files.find(f => f.toLowerCase().includes('plan') && f.endsWith('.json'));
+  if (jsonPlan) return path.resolve(jsonPlan);
+  const mdPlan = files.find(f => f.toLowerCase().includes('plan') && f.endsWith('.md'));
+  if (mdPlan) return path.resolve(mdPlan);
+  const plainPlan = files.find(f => f.toLowerCase().includes('plan'));
+  if (plainPlan) return path.resolve(plainPlan);
+  return null;
+}
+
+function parsePlan(filePath) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  if (filePath.endsWith('.json')) {
+    try {
+      const data = JSON.parse(content);
+      return {
+        raw: content,
+        files: Array.isArray(data.files) ? data.files : [],
+        packages: Array.isArray(data.packages) ? data.packages : [],
+        rationale: data.rationale || ''
+      };
+    } catch (e) {}
+  }
+  const files = [];
+  const lines = content.split('\\n');
+  const fileRegex = /(?:^|\\s)(?:'|")?([a-zA-Z0-9_\\-\\/]+\\.[a-zA-Z0-9_]{1,6})(?:'|")?/g;
+  for (const line of lines) {
+    let match;
+    while ((match = fileRegex.exec(line)) !== null) {
+      const file = match[1];
+      if (file && !file.includes('//') && !files.includes(file) && !file.startsWith('http')) {
+        files.push(file);
+      }
+    }
+  }
+  return {
+    raw: content,
+    files: files,
+    packages: [],
+    rationale: 'Text plan parsed from ' + path.basename(filePath)
+  };
+}
+
+const KDIR = path.join(os.homedir(), '.klaussy');
+const candidates = [];
+function addSock(s) { if (s && typeof s === 'string' && candidates.indexOf(s) === -1) candidates.push(s); }
+addSock(process.env.KLAUSSY_REVIEW_SOCK);
+try {
+  const dir = path.join(KDIR, 'sockets');
+  for (const f of fs.readdirSync(dir)) {
+    if (f.slice(-5) !== '.json') continue;
+    try { addSock(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')).socket); } catch (e) {}
+  }
+} catch (e) {}
+
+if (!candidates.length) {
+  console.error('[klaussy] Klaussy Desktop app is not running. Plan approval is skipped.');
+  process.exit(0);
+}
+
+const planPath = findPlanFile();
+if (!planPath) {
+  console.error('[klaussy] Error: No plan file found (e.g. plan.json or plan.md).');
+  console.error('Please write your plan to a file with "plan" in the name before calling ExitPlanMode.');
+  process.exit(1);
+}
+
+let planData;
+try {
+  planData = parsePlan(planPath);
+} catch (e) {
+  console.error('[klaussy] Error reading plan file:', e.message);
+  process.exit(1);
+}
+
+let idx = 0;
+function tryNext() {
+  if (idx >= candidates.length) {
+    console.error('[klaussy] Klaussy Desktop app is not responding. Plan approval skipped.');
+    process.exit(0);
+  }
+  const target = candidates[idx++];
+  let sock;
+  try { sock = net.connect(target); } catch (e) { return tryNext(); }
+  sock.setEncoding('utf8');
+  let buf = '';
+  sock.on('connect', () => {
+    console.error('[klaussy] Requesting plan approval from Klaussy Desktop...');
+    sock.write(JSON.stringify({
+      kind: 'plan-approval',
+      cwd: process.cwd(),
+      plan: planData
+    }) + '\\n');
+  });
+  sock.on('data', (d) => { buf += d; });
+  sock.on('end', () => {
+    let res;
+    try { res = JSON.parse(buf); } catch (e) { process.exit(0); }
+    if (res.approved) {
+      console.error('[klaussy] Plan APPROVED by user. Proceeding to implementation.');
+      process.exit(0);
+    } else {
+      console.error('[klaussy] Plan REJECTED by user. Implementation aborted.');
+      process.exit(1);
+    }
+  });
+  sock.on('error', () => { tryNext(); });
+}
+tryNext();
+`;
+
+  try {
+    fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+  } catch (e) {
+    console.warn('[plan-gate] could not write ExitPlanMode script:', e.message);
+  }
+}
+
 function reallyStartServer(sock) {
   if (server) return;
   try { fs.rmSync(sock, { force: true }); } catch {}
@@ -448,38 +579,47 @@ function reallyStartServer(sock) {
       try {
         const req = JSON.parse(buf.slice(0, nl));
         const cwd = typeof req.cwd === 'string' ? req.cwd : null;
-        const config = loadConfig();
-        const provider = config.defaultProvider || config.defaultMode || 'claude';
-        if (config.preCommitReview === false && config.stripComments === false) {
-          reply = { skipped: true, reason: 'disabled' };
-        } else if (!cwd || !fs.existsSync(cwd)) {
-          reply = { skipped: true, reason: 'unknown cwd' };
-        } else if (req.kind === 'pre-push') {
-          // Comment-stripping is a staged (pre-commit) concern only; a push with
-          // review off has nothing to do here.
-          if (config.preCommitReview === false) {
-            reply = { skipped: true, reason: 'review disabled' };
+        if (req.kind === 'plan-approval') {
+          if (!cwd || !fs.existsSync(cwd)) {
+            reply = { error: 'unknown cwd' };
           } else {
-            const range = pushRange(cwd, req.localSha, req.remoteSha);
-            if (!range) {
-              reply = { skipped: true, reason: 'no reviewable range' };
-            } else {
-              const seen = allCommitsReviewed(cwd, range);
-              if (seen.all) {
-                reply = { skipped: true, allReviewed: true, commitCount: seen.count };
-              } else {
-                const { runRangeCheck } = require('./precommit-review');
-                reply = await runRangeCheck({ worktreePath: cwd, provider, range });
-              }
-            }
+            const { handlePlanApprovalRequest } = require('./plan-gate');
+            reply = await handlePlanApprovalRequest(cwd, req.plan, conn);
           }
         } else {
-          const { runStagedCheck } = require('./precommit-review');
-          reply = await runStagedCheck({ worktreePath: cwd, provider });
-          // Clean staged review → passmark, so the commit that follows gets
-          // recorded and the eventual push can skip re-reviewing it.
-          if (reply && !reply.error && !reply.skipped && !reply.cancelled && !reply.findingsCount) {
-            leaveReviewPassmark(cwd);
+          const config = loadConfig();
+          const provider = config.defaultProvider || config.defaultMode || 'claude';
+          if (config.preCommitReview === false && config.stripComments === false) {
+            reply = { skipped: true, reason: 'disabled' };
+          } else if (!cwd || !fs.existsSync(cwd)) {
+            reply = { skipped: true, reason: 'unknown cwd' };
+          } else if (req.kind === 'pre-push') {
+            // Comment-stripping is a staged (pre-commit) concern only; a push with
+            // review off has nothing to do here.
+            if (config.preCommitReview === false) {
+              reply = { skipped: true, reason: 'review disabled' };
+            } else {
+              const range = pushRange(cwd, req.localSha, req.remoteSha);
+              if (!range) {
+                reply = { skipped: true, reason: 'no reviewable range' };
+              } else {
+                const seen = allCommitsReviewed(cwd, range);
+                if (seen.all) {
+                  reply = { skipped: true, allReviewed: true, commitCount: seen.count };
+                } else {
+                  const { runRangeCheck } = require('./precommit-review');
+                  reply = await runRangeCheck({ worktreePath: cwd, provider, range });
+                }
+              }
+            }
+          } else {
+            const { runStagedCheck } = require('./precommit-review');
+            reply = await runStagedCheck({ worktreePath: cwd, provider });
+            // Clean staged review → passmark, so the commit that follows gets
+            // recorded and the eventual push can skip re-reviewing it.
+            if (reply && !reply.error && !reply.skipped && !reply.cancelled && !reply.findingsCount) {
+              leaveReviewPassmark(cwd);
+            }
           }
         }
       } catch (e) {
@@ -508,6 +648,7 @@ function reallyStartServer(sock) {
       fs.writeFileSync(META_PATH, JSON.stringify({ socket: sock, pid: process.pid }));
       fs.writeFileSync(CLIENT_PATH, CLIENT_SCRIPT);
       fs.writeFileSync(COMMITMSG_CLIENT_PATH, COMMITMSG_CLIENT_SCRIPT);
+      writeExitPlanModeBin();
     } catch (e) {
       console.warn('[precommit-hook] could not write client/meta:', e.message);
     }
