@@ -1,31 +1,36 @@
-// Agent flow with a FAKE agent CLI. Points the Claude provider path at a fake
-// script (via set-preferences, read at spawn time by binFor), creates a task
-// in 'claude' mode, and confirms the agent's output reaches the terminal-data
-// stream. Proves the agent-spawn UI path without a real Claude CLI.
+// Agent flow with a FAKE agent CLI. Seeds claudePath in config.json BEFORE
+// launch (configSeed) so the Claude provider resolves to the fake script at
+// spawn time. Seeding (not set-preferences-at-runtime) is deliberate: the
+// config write from set-preferences can lose a race with task.create reading
+// config, which in CI left the instance falling back to a plain shell (the
+// `claude` default isn't installed there). Creating a 'claude' task then
+// streams the fake's output through the terminal-data pipeline.
 
-const fs = require('fs');
-const path = require('path');
 const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const { execFileSync } = require('child_process');
 const { test, expect } = require('./fixtures');
-const { buildRepo, makeBinDir, writeFakeAgent, rm } = require('./helpers');
+const { buildRepo, writeFakeAgent, rm } = require('./helpers');
+
+// Written at collection time so the (static) configSeed can reference its
+// absolute path. Cleaned up after the file's tests run.
+const BIN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-fakebin-agentflow-'));
+const FAKE_AGENT = writeFakeAgent(BIN_DIR, 'claude');
+test.use({ configSeed: { claudePath: FAKE_AGENT, defaultProvider: 'claude' } });
+
+test.afterAll(() => rm(BIN_DIR));
 
 test('agent task spawns the configured CLI and streams its output to the terminal', async ({ mainWindow }) => {
   await mainWindow.waitForLoadState('networkidle');
 
   const repo = buildRepo({ 'README.md': '# agent\n' }, 'agent-base');
-  const binDir = makeBinDir();
-  const fakeAgent = writeFakeAgent(binDir, 'claude');
-
-  const taskName = 'agent-x';
+  const taskName = `agent-x-${process.pid}-${Date.now()}`;
   const sessionDir = path.join(os.homedir(), 'klaussy', 'sessions', taskName);
   const expectedWorktree = path.join(sessionDir, path.basename(repo));
 
   let taskId = null;
   try {
-    // binFor() reads config at spawn time, so setting the pref now is enough.
-    await mainWindow.evaluate((p) => window.klaus.ui.setPreferences({ claudePath: p }), fakeAgent);
-
     const result = await mainWindow.evaluate(
       ({ name, repoPath }) => window.klaus.task.create(name, repoPath, 'claude'),
       { name: taskName, repoPath: repo },
@@ -39,7 +44,7 @@ test('agent task spawns the configured CLI and streams its output to the termina
         buf += data;
         if (buf.includes('FAKE-AGENT-READY')) { unsub(); resolve(buf); }
       });
-      setTimeout(() => { unsub(); resolve(buf); }, 10000);
+      setTimeout(() => { unsub(); resolve(buf); }, 12000);
     }), taskId);
 
     expect(output, `agent terminal output:\n${output}`).toContain('FAKE-AGENT-READY claude');
@@ -49,6 +54,6 @@ test('agent task spawns the configured CLI and streams its output to the termina
     }
     try { execFileSync('git', ['worktree', 'remove', '--force', expectedWorktree], { cwd: repo, stdio: 'pipe' }); } catch {}
     try { execFileSync('git', ['branch', '-D', taskName], { cwd: repo, stdio: 'pipe' }); } catch {}
-    rm(repo); rm(binDir); rm(sessionDir);
+    rm(repo); rm(sessionDir);
   }
 });
