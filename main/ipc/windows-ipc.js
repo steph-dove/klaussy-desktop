@@ -186,6 +186,7 @@ ipcMain.handle('get-preferences', () => {
     copilotPath: config.copilotPath || '',
     cursorPath: config.cursorPath || '',
     clinePath: config.clinePath || '',
+    aiderPath: config.aiderPath || '',
     // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
     defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
     defaultMode: config.defaultProvider || config.defaultMode || 'claude',
@@ -219,6 +220,7 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.copilotPath !== undefined) config.copilotPath = prefs.copilotPath;
   if (prefs.cursorPath !== undefined) config.cursorPath = prefs.cursorPath;
   if (prefs.clinePath !== undefined) config.clinePath = prefs.clinePath;
+  if (prefs.aiderPath !== undefined) config.aiderPath = prefs.aiderPath;
   if (prefs.defaultProvider !== undefined) {
     config.defaultProvider = prefs.defaultProvider;
     config.defaultMode = prefs.defaultProvider; // keep legacy key in sync

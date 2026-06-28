@@ -339,6 +339,12 @@
       </div>
       <div class="claude-info" id="agent-info-cline"></div>
 
+      <div class="field field-full">
+        <label>Aider Path (for Ollama)</label>
+        <input type="text" id="pref-aider-path" placeholder="aider (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-ollama"></div>
+
       <div class="field-hint">Leave a path empty to use that CLI from your PATH. Each new task uses the default agent below; you can switch per task in the New Task dialog.</div>
 
       <div class="field">
@@ -351,6 +357,7 @@
           <option value="copilot">Copilot</option>
           <option value="cursor">Cursor</option>
           <option value="cline">Cline</option>
+          <option value="ollama">Ollama (via Aider)</option>
           <option value="shell">Shell</option>
         </select>
       </div>

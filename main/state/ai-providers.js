@@ -852,6 +852,36 @@ const PROVIDERS = {
     snapshotSessions() { return new Set(); },
     findNewSession() { return null; },
   },
+
+  ollama: {
+    id: 'ollama',
+    displayName: 'Ollama (via Aider)',
+    memoryFile: 'AGENTS.md',
+    shortLabel: 'ol',
+    defaultBin: 'aider',
+    configPathKey: 'aiderPath',
+    versionArgs: ['--version'],
+    perWorktreeSessions: false,
+    supportsExactResume: false,
+
+    buildInteractiveCmd(bin, { resumeSessionId, model } = {}) {
+      const m = model || 'qwen2.5-coder:7b';
+      return `${bin} --model ollama/${m}`;
+    },
+    buildHeadlessRun(bin, { prompt, mode, model } = {}) {
+      const m = model || 'qwen2.5-coder:7b';
+      const args = ['--model', `ollama/${m}`, '--message', prompt];
+      return { args, outputMode: 'passthrough' };
+    },
+    sessionDir() {
+      return path.join(home(), '.aider');
+    },
+    parseStreamLine() { return []; },
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
 };
 
 const PROVIDER_IDS = Object.keys(PROVIDERS);
@@ -885,6 +915,11 @@ const INSTALL_COMMANDS = {
     darwin: 'curl https://cursor.com/install -fsS | bash',
     linux: 'curl https://cursor.com/install -fsS | bash',
   },
+  ollama: {
+    darwin: 'pipx install aider-chat',
+    linux: 'pipx install aider-chat',
+    win32: 'pipx install aider-chat',
+  },
 };
 
 // Per-provider documentation / "get started" pages, surfaced when a user picks
@@ -899,6 +934,7 @@ const DOCS_URLS = {
   copilot: 'https://github.com/github/copilot-cli',
   cursor: 'https://cursor.com/docs/cli',
   cline: 'https://docs.cline.bot/cli-reference/overview',
+  ollama: 'https://aider.chat',
 };
 function docsUrlFor(id) { return DOCS_URLS[id] || null; }
 
@@ -911,6 +947,7 @@ const SHORT_NAMES = {
   copilot: 'Copilot',
   cursor: 'Cursor',
   cline: 'Cline',
+  ollama: 'Ollama',
 };
 
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
@@ -923,7 +960,7 @@ const SHORT_NAMES = {
 //   copilot — Default-only: its `--model` slugs couldn't be verified here (the
 //             account's Copilot subscription/policy blocks runs), so we don't
 //             ship slugs that might error. Fill in once it can run + verify.
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model' };
+const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', ollama: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -955,6 +992,13 @@ const MODELS = {
   // over time, so we ship Default-only rather than slugs that might error.
   cursor: [{ id: '', label: 'Default' }],
   cline: [{ id: '', label: 'Default' }],
+  ollama: [
+    { id: '', label: 'Default (qwen2.5-coder)' },
+    { id: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B' },
+    { id: 'qwen2.5-coder:1.5b', label: 'Qwen 2.5 Coder 1.5B' },
+    { id: 'deepseek-coder:6.7b', label: 'DeepSeek Coder 6.7B' },
+    { id: 'llama3.1', label: 'Llama 3.1' },
+  ],
 };
 function modelsFor(id) { return MODELS[id] || [{ id: '', label: 'Default' }]; }
 function modelFlagFor(id) { return MODEL_FLAGS[id] || '--model'; }
@@ -989,6 +1033,7 @@ const AUTH_CHECKS = {
   // its provider config. No verified quiet status probe for either yet.
   cursor: { statusArgs: null, notAuthedPattern: null, loginCommand: 'cursor-agent login' },
   cline: { statusArgs: null, notAuthedPattern: null, loginCommand: 'cline' },
+  ollama:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'ollama serve' },
 };
 
 function authMetaFor(id) {

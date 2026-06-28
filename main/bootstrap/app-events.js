@@ -21,6 +21,7 @@ const {
 } = instancesModule;
 const { getProvider, isAgentMode, allProviders, binFor } = require('../state/ai-providers');
 const { startAutoFetch, startCIPolling, stopCIPolling } = require('../state/ci-poll');
+const { startPrMonitor } = require('../state/pr-monitor');
 const prReviewModule = require('../state/pr-review');
 require('../ipc/tasks');
 const { installAppMenu } = require('./menu');
@@ -362,6 +363,8 @@ function install() {
 
     // Start auto-fetch background interval
     startAutoFetch();
+    // Start pull-request background monitoring & auto-fixing
+    startPrMonitor();
   });
 
   app.on('window-all-closed', () => {
