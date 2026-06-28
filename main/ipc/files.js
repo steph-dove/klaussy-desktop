@@ -264,6 +264,53 @@ ipcMain.handle('write-env-file', async (_event, { worktreePath, filename, conten
   }
 });
 
+// Plan tab: locate a markdown doc at the worktree root and return its contents
+// in one round-trip. The plan variant mirrors the discovery precedence of the
+// ExitPlanMode CLI (main/state/precommit-hook.js → findPlanFile): a root .md
+// file whose name contains the keyword. We prefer the conventional names so a
+// repo with several matches resolves deterministically, then fall back to the
+// shortest matching name. Root-only (the hook uses cwd), so there's no
+// recursive walk and no path-traversal surface to gate.
+function findRootDoc(worktreePath, keywordRe, preferred) {
+  let entries;
+  try {
+    entries = fs.readdirSync(worktreePath, { withFileTypes: true });
+  } catch (err) {
+    return { error: err.message };
+  }
+  const names = entries
+    .filter((e) => e.isFile() && keywordRe.test(e.name) && /\.md$/i.test(e.name))
+    .map((e) => e.name);
+  if (names.length === 0) return { error: 'not found' };
+  const lower = names.map((n) => n.toLowerCase());
+  let chosen = null;
+  for (const p of preferred) {
+    const i = lower.indexOf(p);
+    if (i !== -1) { chosen = names[i]; break; }
+  }
+  // Stable tiebreak when no conventional name matched: shortest, then
+  // lexicographic — so the resolved file doesn't flap between reloads.
+  if (!chosen) {
+    chosen = names.slice().sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
+  }
+  try {
+    const abs = path.join(worktreePath, chosen);
+    return { name: chosen, path: abs, content: fs.readFileSync(abs, 'utf-8') };
+  } catch (err) {
+    return { error: err.message };
+  }
+}
+
+ipcMain.handle('find-plan-file', async (_event, { worktreePath }) => {
+  if (!worktreePath) return { error: 'no worktreePath' };
+  return findRootDoc(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
+});
+
+ipcMain.handle('find-design-file', async (_event, { worktreePath }) => {
+  if (!worktreePath) return { error: 'no worktreePath' };
+  return findRootDoc(worktreePath, /design/i, ['design.md', 'design_doc.md', 'design-doc.md']);
+});
+
 // ---- H3: Worktree file watcher for instant diff refresh ----
 
 ipcMain.handle('watch-worktree', (event, { worktreePath }) => {

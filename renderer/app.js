@@ -168,7 +168,7 @@ window.App = window.App || {};
   // ---- Init Diff Panel (Phase 1) & PR Panel ----
   DiffPanel.init();
   PRPanel.init();
-  EnvPanel.init();
+  PlanPanel.init();
   ConflictPanel.init();
   DiffPanel.setCommentCallback(function (text) {
     if (AppState.activeTaskId) {
@@ -510,7 +510,7 @@ window.App = window.App || {};
     else if (tab === 'history') App.loadHistory(wt);
     else if (tab === 'stash') App.loadStash(wt);
     else if (tab === 'search') App.doProjectSearch(wt);
-    else if (tab === 'env') { EnvPanel.setWorktree(wt); EnvPanel.load(); }
+    else if (tab === 'plan') { PlanPanel.setWorktree(wt); PlanPanel.load(); }
   };
 
   App.escHtml = AppUtils.escHtml;

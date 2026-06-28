@@ -5925,10 +5925,254 @@ body.task-branchless .file-viewer-blame-btn {
   font-size: 11px;
 }
 
-#env-tab-content {
+#plan-tab-content {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+#plan-tab-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--sidebar-bg);
+  flex-shrink: 0;
+}
+
+#plan-tab-header h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+#btn-refresh-plan {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+#btn-refresh-plan:hover {
+  color: var(--accent);
+}
+
+#plan-tab-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+#plan-markdown-view {
+  /* Keep .file-md-preview's typography (h1/h2 rules, code blocks) but override
+     its viewer-only `display:none` + flex layout — this panel has no
+     preview-mode ancestor to flip it visible. */
+  display: block;
+  padding: 16px;
+}
+
+.plan-empty {
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.plan-loading {
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.plan-loading::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: plan-spin 0.7s linear infinite;
+}
+@keyframes plan-spin { to { transform: rotate(360deg); } }
+
+.plan-empty small { color: var(--text-dim); opacity: 0.85; }
+
+/* ---- Plan / Design source switcher ---- */
+
+.plan-source-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.plan-source-switch[hidden] { display: none; }
+.plan-source-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+.plan-source-btn:hover { color: var(--text); }
+.plan-source-btn.active { background: var(--surface); color: var(--text); }
+
+/* ---- Plan progress summary ---- */
+
+.plan-summary {
+  margin: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.plan-summary[hidden] { display: none; }
+
+/* Collapsed: keep the one-line counts header, hide the bar + phases. */
+.plan-summary.is-collapsed { padding: 10px 16px; }
+.plan-summary.is-collapsed .plan-summary-counts { margin-bottom: 0; }
+.plan-summary.is-collapsed .plan-progressbar,
+.plan-summary.is-collapsed .plan-phases { display: none; }
+
+.plan-summary-counts {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+.plan-caret {
+  align-self: center;
+  width: 0;
+  height: 0;
+  margin-right: 2px;
+  border-left: 5px solid var(--text-dim);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+.plan-summary:not(.is-collapsed) .plan-caret { transform: rotate(90deg); }
+.plan-summary-counts:hover .plan-caret { border-left-color: var(--text); }
+.plan-count-done,
+.plan-count-total {
+  font-size: 19px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.plan-count-sep,
+.plan-count-label { font-size: 12px; color: var(--text-dim); }
+.plan-count-pct {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-progressbar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.plan-progressbar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.plan-phases {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.plan-phases:empty { display: none; }
+.plan-phase {
+  display: grid;
+  grid-template-columns: 1fr auto 72px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s;
+}
+.plan-phase:hover { background: var(--surface-hover); }
+.plan-phase-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.plan-phase-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.plan-phase-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--input-bg);
+  overflow: hidden;
+}
+.plan-phase-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease;
+}
+.plan-phase[data-pct="100"] .plan-phase-fill { background: var(--success); }
+.plan-phase[data-pct="100"] .plan-phase-count { color: var(--success); }
+.plan-phase[data-pct="100"] .plan-phase-name::after {
+  content: "\2713";
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--success);
+}
+.plan-phase[data-pct="0"] .plan-phase-name { color: var(--text-muted); }
+
+/* Read-only task lines in the rendered plan body */
+#plan-markdown-view li.plan-task { list-style: none; }
+#plan-markdown-view li.plan-task > input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--accent);
+  vertical-align: middle;
+}
+#plan-markdown-view li.plan-task.is-done {
+  color: var(--text-dim);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-dim);
 }
 
 /* ---- Sub-terminal Tabs (Feature 5) ---- */

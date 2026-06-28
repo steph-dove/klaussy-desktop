@@ -1442,4 +1442,10 @@ ipcMain.handle('set-task-note', async (_event, { taskName, note }) => {
   saveConfig(config);
   return { ok: true };
 });
+
+ipcMain.handle('respond-plan-approval', async (_event, { requestId, approved }) => {
+  const { respondToPlanApproval } = require('../state/plan-gate');
+  return respondToPlanApproval(requestId, approved);
+});
+
 module.exports = {};

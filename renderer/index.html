@@ -262,13 +262,13 @@
           </div>
         </div>
         <div id="diff-tabs">
+          <button class="diff-tab" data-tab="plan">Plan</button>
           <button class="diff-tab active" data-tab="changes">Changes</button>
           <button class="diff-tab" data-tab="pr">PR</button>
           <button class="diff-tab" data-tab="files">Files</button>
           <button class="diff-tab" data-tab="search">Search</button>
           <button class="diff-tab" data-tab="history">History</button>
           <button class="diff-tab" data-tab="stash">Stash</button>
-          <button class="diff-tab" data-tab="env">Env</button>
         </div>
 
         <!-- Changes tab content -->
@@ -375,13 +375,35 @@
           <div id="stash-list"></div>
         </div>
 
-        <!-- Env tab content (Feature 12) -->
-        <div id="env-tab-content" style="display: none;">
-          <div id="env-file-selector"></div>
-          <div id="env-editor"></div>
-          <div id="env-footer">
-            <button id="btn-env-save" class="env-save-btn">Save</button>
-            <span id="env-status"></span>
+        <!-- Plan tab content -->
+        <div id="plan-tab-content" style="display: none;">
+          <div id="plan-tab-header">
+            <div id="plan-source-switch" class="plan-source-switch" hidden>
+              <button class="plan-source-btn active" type="button" data-source="plan">Plan</button>
+              <button class="plan-source-btn" type="button" data-source="design">Design</button>
+            </div>
+            <h3 id="plan-tab-title">Current Plan Progress</h3>
+            <button id="btn-refresh-plan" title="Refresh">&#8635;</button>
+          </div>
+          <div id="plan-tab-body">
+            <!-- Populated by PlanPanel when a plan with task checkboxes loads. -->
+            <div id="plan-progress-summary" class="plan-summary" hidden>
+              <div class="plan-summary-overall">
+                <button type="button" class="plan-summary-counts" id="plan-summary-toggle" aria-expanded="true" title="Collapse / expand progress">
+                  <span class="plan-caret" aria-hidden="true"></span>
+                  <span class="plan-count-done">0</span>
+                  <span class="plan-count-sep">of</span>
+                  <span class="plan-count-total">0</span>
+                  <span class="plan-count-label">tasks</span>
+                  <span class="plan-count-pct">0%</span>
+                </button>
+                <div class="plan-progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                  <div class="plan-progressbar-fill" style="width:0%"></div>
+                </div>
+              </div>
+              <ul class="plan-phases"></ul>
+            </div>
+            <div id="plan-markdown-view" class="markdown-body file-md-preview"></div>
           </div>
         </div>
 
@@ -548,6 +570,28 @@
   </div>
 
 
+  <!-- Plan Approval Modal (Option B) -->
+  <div id="plan-approval-overlay" class="klaus-modal-overlay" style="display: none;">
+    <div id="plan-approval-modal" class="klaus-modal klaus-modal-wide">
+      <h3 id="plan-approval-title">Plan Approval Required</h3>
+      <p class="plan-approval-sub" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">An agent is requesting approval to proceed with the following implementation plan:</p>
+      
+      <div id="plan-approval-content" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); padding: 12px; border-radius: 4px; background: var(--bg-card); font-family: var(--font-mono); font-size: 13px; white-space: pre-wrap; margin-bottom: 12px;"></div>
+      
+      <div id="plan-approval-checklist-container" style="margin-bottom: 16px;">
+        <h4 style="margin: 0 0 8px 0; font-size: 14px;">Files to modify/create:</h4>
+        <div id="plan-approval-checklist" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
+      </div>
+
+      <div id="plan-approval-error" class="klaus-error" style="color: var(--danger); margin-bottom: 12px;"></div>
+      <div class="klaus-modal-actions">
+        <button id="plan-approval-reject" class="klaus-btn klaus-btn-secondary" type="button">Reject Plan</button>
+        <button id="plan-approval-approve" class="klaus-btn klaus-btn-primary" type="button">Approve Plan</button>
+      </div>
+    </div>
+  </div>
+
+
   <!-- Ollama Consent + Install Modal -->
   <div id="ollama-consent-overlay" class="klaus-modal-overlay" style="display: none;">
     <div id="ollama-consent-modal" class="klaus-modal">
@@ -670,7 +714,7 @@
   <script src="diff-panel-filelist.js"></script>
   <script src="diff-panel-diff.js"></script>
   <script src="pr-panel.js"></script>
-  <script src="env-panel.js"></script>
+  <script src="plan-panel.js"></script>
   <script src="conflict-panel.js"></script>
   <script src="file-browser.js"></script>
   <script src="history-panel.js"></script>
@@ -691,6 +735,7 @@
   <script src="token-tile.js"></script>
   <script src="terminal-manager.js"></script>
   <script src="plan-modal.js"></script>
+  <script src="plan-approval.js"></script>
   <script src="ollama-consent.js"></script>
   <script src="pr-review.js"></script>
   <script src="pr-review-findings.js"></script>

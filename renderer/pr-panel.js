@@ -52,7 +52,7 @@ window.PRPanel = (function () {
     });
 
     // Tab switching
-    var allTabContents = ['changes-tab-content', 'pr-tab-content', 'files-tab-content', 'search-tab-content', 'history-tab-content', 'stash-tab-content', 'env-tab-content'];
+    var allTabContents = ['changes-tab-content', 'pr-tab-content', 'files-tab-content', 'search-tab-content', 'history-tab-content', 'stash-tab-content', 'plan-tab-content'];
     document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
@@ -74,8 +74,8 @@ window.PRPanel = (function () {
         if (target === 'stash') {
           window.dispatchEvent(new CustomEvent('load-stash'));
         }
-        if (target === 'env') {
-          window.dispatchEvent(new CustomEvent('load-env'));
+        if (target === 'plan') {
+          window.dispatchEvent(new CustomEvent('load-plan'));
         }
       });
     });

@@ -93,6 +93,12 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.on('precommit-event', listener);
       return () => ipcRenderer.removeListener('precommit-event', listener);
     },
+    onPlanApprovalEvent: (callback) => {
+      const listener = (_event, data) => callback(data);
+      ipcRenderer.on('plan-approval-event', listener);
+      return () => ipcRenderer.removeListener('plan-approval-event', listener);
+    },
+    respondPlanApproval: (requestId, approved) => ipcRenderer.invoke('respond-plan-approval', { requestId, approved }),
     checkoutBranch: (repoPath, branch, mode, basePath, envVars) => ipcRenderer.invoke('checkout-branch', { repoPath, branch, mode, basePath, envVars }),
     attachWorktree: (worktreePath, mode, repoPath, branch) => ipcRenderer.invoke('attach-worktree', { worktreePath, mode, repoPath, branch }),
     openFolder: (folderPath, mode) => ipcRenderer.invoke('open-folder', { folderPath, mode }),
@@ -634,6 +640,8 @@ contextBridge.exposeInMainWorld('klaus', {
     revealInFolder: (filePath) => ipcRenderer.invoke('reveal-in-folder', { filePath }),
     copyToClipboard: (text) => ipcRenderer.invoke('clipboard-write-text', { text }),
     listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
+    findPlanFile: (worktreePath) => ipcRenderer.invoke('find-plan-file', { worktreePath }),
+    findDesignFile: (worktreePath) => ipcRenderer.invoke('find-design-file', { worktreePath }),
     readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
       ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),
     searchFiles: (worktreePath, query, maxPerFile) =>

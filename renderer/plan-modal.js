@@ -111,7 +111,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 5 — Approval gate',
     '',
-    'Still in plan mode. Write the chosen plan to the plan file, and call ExitPlanMode to request approval. Do NOT edit any files until the user approves. Once approved, plan mode exits automatically and Phase 6 begins.',
+    'Still in plan mode. Write the chosen plan to the plan file, and output the complete plan in your chat response so the user can see it immediately. To prevent blocking or proceeding without review, you MUST end your turn here by calling no other tools (do NOT run the terminal command `ExitPlanMode` or make any edits yet). Ask the user to confirm the plan in the chat. Once the user replies to approve, run the terminal command `ExitPlanMode` in your next turn to register the plan with the desktop app, and then proceed to Phase 6.',
     '',
     '## Phase 6 — Implementation',
     '',

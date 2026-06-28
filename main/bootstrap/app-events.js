@@ -45,6 +45,7 @@ function spawnPathCandidates() {
   const homedir = require('os').homedir();
   if (process.platform === 'win32') {
     const out = [
+      path.join(homedir, '.klaussy', 'bin'),
       // pipx's default bin dir is ~/.local/bin on EVERY OS, Windows included.
       path.join(homedir, '.local', 'bin'),
     ];
@@ -62,6 +63,7 @@ function spawnPathCandidates() {
   }
   // macOS + Linux intermixed — a path that doesn't exist on one is harmless.
   const out = [
+    path.join(homedir, '.klaussy', 'bin'),
     '/opt/homebrew/bin',          // Apple Silicon brew (mac)
     '/opt/homebrew/sbin',
     '/usr/local/bin',             // Intel brew + manual installs (mac/linux)
