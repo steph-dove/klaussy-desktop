@@ -234,6 +234,57 @@
       return;
     }
     var btn = document.getElementById('btn-do-commit');
+    
+    if (DP.currentSessionName) {
+      var wts = DP.getSessionWorktrees();
+      var committedCount = 0;
+      var errors = [];
+      
+      btn.disabled = true;
+      btn.textContent = 'Committing...';
+      
+      for (var i = 0; i < wts.length; i++) {
+        var wt = wts[i];
+        try {
+          var status = await window.klaus.git.status(wt.path);
+          var hasStaged = status && status.files && status.files.some(function(f) { return f.staged; });
+          if (hasStaged) {
+            var result = await window.klaus.git.commit(wt.path, msg);
+            if (result && result.error) {
+              errors.push(wt.name + ': ' + result.error);
+            } else {
+              committedCount++;
+            }
+          }
+        } catch (e) {
+          errors.push(wt.name + ': ' + (e.message || e));
+        }
+      }
+      
+      btn.disabled = false;
+      btn.textContent = 'Commit';
+      
+      if (errors.length > 0) {
+        var errMsgs = errors.join('; ');
+        DP.showDiffStatus('Commit failed: ' + errMsgs, 'error');
+        window.toast.error('Commit failed: ' + errMsgs);
+        return;
+      }
+      
+      if (committedCount === 0) {
+        DP.showDiffStatus('Nothing committed: no repositories have staged changes', 'error');
+        window.toast.error('Nothing committed: no repositories have staged changes');
+        return;
+      }
+      
+      DP.showDiffStatus('Committed successfully across ' + committedCount + ' repositories', 'success');
+      DP.commitInput.value = '';
+      DP.commitAreaEl.style.display = 'none';
+      await DP.refresh();
+      try { await DP.updateAheadBehind(); } catch (_) {}
+      return;
+    }
+
     if (DP.precommitPending) return; // a review is already running for this panel
     btn.disabled = true;
 
@@ -407,34 +458,58 @@
     var btn = document.getElementById('btn-push');
     btn.disabled = true;
     btn.textContent = 'Pushing...';
-    var result = await window.klaus.git.push(DP.currentWorktreePath);
-    btn.disabled = false;
-    if (result.error) {
-      btn.textContent = 'Failed';
+    
+    if (DP.currentSessionName) {
+      var wts = DP.getSessionWorktrees();
+      var paths = wts.map(function(w) { return w.path; });
+      var results = await Promise.all(paths.map(async function(p) {
+        try {
+          return await window.klaus.git.push(p);
+        } catch (e) {
+          return { error: e.message || e };
+        }
+      }));
+      btn.disabled = false;
+      var errors = results.filter(function(r) { return r && r.error; });
+      if (errors.length > 0) {
+        btn.textContent = 'Failed';
+        setTimeout(function () { btn.textContent = 'Push'; }, 2000);
+        var errMsgs = errors.map(function(e) { return e.error; }).join('; ');
+        DP.showDiffStatus('Push failed: ' + errMsgs, 'error');
+        window.toast.error('Push failed: ' + errMsgs);
+        return;
+      }
+      btn.textContent = 'Pushed!';
       setTimeout(function () { btn.textContent = 'Push'; }, 2000);
-      DP.showDiffStatus('Push failed: ' + result.error, 'error');
-      window.toast.error('Push failed: ' + result.error);
-      return;
-    }
-    btn.textContent = 'Pushed!';
-    setTimeout(function () { btn.textContent = 'Push'; }, 2000);
-    // git's push status summary lives on stderr even on success. Pull out the
-    // most informative line (the "To ...refs..." summary is typically last).
-    var lines = (result.output || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-    var summary;
-    if (/everything up-to-date/i.test(result.output || '')) {
-      summary = 'Nothing to push — ' + (result.branch || 'branch') + ' already up to date';
+      DP.showDiffStatus('Pushed all repositories in session', 'success');
+      try { await DP.updateAheadBehind(); } catch (_) {}
     } else {
-      summary = 'Pushed ' + (result.branch || 'branch');
-      var toLine = lines.find(function (l) { return l.startsWith('To '); });
-      if (toLine) summary += ' · ' + toLine;
-      var refLine = lines.find(function (l) { return /^\s*[a-f0-9]+\.\.[a-f0-9]+/.test(l) || /->/.test(l); });
-      if (refLine && !toLine) summary += ' · ' + refLine;
+      var result = await window.klaus.git.push(DP.currentWorktreePath);
+      btn.disabled = false;
+      if (result.error) {
+        btn.textContent = 'Failed';
+        setTimeout(function () { btn.textContent = 'Push'; }, 2000);
+        DP.showDiffStatus('Push failed: ' + result.error, 'error');
+        window.toast.error('Push failed: ' + result.error);
+        return;
+      }
+      btn.textContent = 'Pushed!';
+      setTimeout(function () { btn.textContent = 'Push'; }, 2000);
+      var lines = (result.output || '').split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+      var summary;
+      if (/everything up-to-date/i.test(result.output || '')) {
+        summary = 'Nothing to push — ' + (result.branch || 'branch') + ' already up to date';
+      } else {
+        summary = 'Pushed ' + (result.branch || 'branch');
+        var toLine = lines.find(function (l) { return l.startsWith('To '); });
+        if (toLine) summary += ' · ' + toLine;
+        var refLine = lines.find(function (l) { return /^\s*[a-f0-9]+\.\.[a-f0-9]+/.test(l) || /->/.test(l); });
+        if (refLine && !toLine) summary += ' · ' + refLine;
+      }
+      DP.showDiffStatus(summary, 'success');
+      btn.title = result.output || '';
+      try { await DP.updateAheadBehind(); } catch (_) {}
     }
-    DP.showDiffStatus(summary, 'success');
-    btn.title = result.output || '';
-    // Refresh ahead/behind + dirty indicators post-push.
-    try { await DP.updateAheadBehind(); } catch (_) {}
   };
 
   DP.createPR = async function() {
@@ -444,17 +519,38 @@
     var btn = document.getElementById('btn-create-pr');
     btn.disabled = true;
     btn.textContent = 'Creating...';
-    var result = await window.klaus.git.createPR(DP.currentWorktreePath, title, body);
-    btn.disabled = false;
-    btn.textContent = 'PR';
-    if (result.error) {
-      window.toast.error('PR creation failed: ' + result.error);
-      return;
+    
+    if (DP.currentSessionName && DP.viewScope === 'session') {
+      var wts = DP.getSessionWorktrees();
+      var results = await Promise.all(wts.map(async function(wt) {
+        try {
+          return await window.klaus.git.createPR(wt.path, title, body);
+        } catch (e) {
+          return { error: e.message || e };
+        }
+      }));
+      btn.disabled = false;
+      btn.textContent = 'PR';
+      var errors = results.filter(function(r) { return r && r.error; });
+      if (errors.length > 0) {
+        var errMsgs = errors.map(function(e) { return e.error; }).join('; ');
+        window.toast.error('PR creation failed: ' + errMsgs);
+        return;
+      }
+      window.toast.success('Successfully created PRs for all repositories in session');
+    } else {
+      var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
+      var result = await window.klaus.git.createPR(path, title, body);
+      btn.disabled = false;
+      btn.textContent = 'PR';
+      if (result.error) {
+        window.toast.error('PR creation failed: ' + result.error);
+        return;
+      }
+      if (result.url) {
+        window.klaus.gh.openExternal(result.url);
+      }
     }
-    if (result.url) {
-      window.klaus.gh.openExternal(result.url);
-    }
-    // Refresh PR panel so it picks up the new PR
     if (window.PRPanel) window.PRPanel.loadPR();
   };
 
@@ -655,14 +751,34 @@
 
   // D1: Ahead/behind counts
   DP.updateAheadBehind = async function() {
-    if (!DP.currentWorktreePath) return;
+    if (!DP.currentWorktreePath && !DP.currentSessionName) return;
     var el = document.getElementById('ahead-behind');
-    var result = await window.klaus.git.aheadBehind(DP.currentWorktreePath);
-    var parts = [];
-    if (result.ahead > 0) parts.push('\u2191' + result.ahead);
-    if (result.behind > 0) parts.push('\u2193' + result.behind);
-    el.textContent = parts.join(' ');
-    el.title = (result.ahead || 0) + ' ahead, ' + (result.behind || 0) + ' behind';
+    if (!el) return;
+    if (DP.currentSessionName) {
+      var wts = DP.getSessionWorktrees();
+      var totalAhead = 0;
+      var totalBehind = 0;
+      for (var i = 0; i < wts.length; i++) {
+        var wt = wts[i];
+        try {
+          var result = await window.klaus.git.aheadBehind(wt.path);
+          totalAhead += (result.ahead || 0);
+          totalBehind += (result.behind || 0);
+        } catch (_) {}
+      }
+      var parts = [];
+      if (totalAhead > 0) parts.push('\u2191' + totalAhead);
+      if (totalBehind > 0) parts.push('\u2193' + totalBehind);
+      el.textContent = parts.join(' ');
+      el.title = totalAhead + ' ahead, ' + totalBehind + ' behind across session';
+    } else {
+      var result = await window.klaus.git.aheadBehind(DP.currentWorktreePath);
+      var parts = [];
+      if (result.ahead > 0) parts.push('\u2191' + result.ahead);
+      if (result.behind > 0) parts.push('\u2193' + result.behind);
+      el.textContent = parts.join(' ');
+      el.title = (result.ahead || 0) + ' ahead, ' + (result.behind || 0) + ' behind';
+    }
   };
 
   // D2: Branch checkout (integrated into mode toggle)

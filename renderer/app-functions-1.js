@@ -197,73 +197,28 @@ window.App = window.App || {};
   App.loadWorktreeList = async function(skipPaths) {
     var skip = skipPaths || [];
     var worktrees = await window.klaus.repo.listWorktrees();
+    var added = false;
     worktrees.forEach(function (wt) {
       if (skip.indexOf(wt.path) !== -1) return;
-      App.addWorktreeToSidebar(wt);
+      var exists = AppState.inactiveWorktrees.find(function(x) { return x.path === wt.path; });
+      if (!exists) {
+        AppState.inactiveWorktrees.push(wt);
+        added = true;
+      }
     });
+    if (added && window.Sidebar && window.Sidebar.rebuild) {
+      window.Sidebar.rebuild();
+    }
   };
 
   App.addWorktreeToSidebar = function(wt) {
-    // Don't add if already in sidebar (as a worktree item or active task)
-    var existing = App.taskList.querySelector('.worktree-item[data-path="' + CSS.escape(wt.path) + '"]');
-    if (existing) return;
-
-    var item = document.createElement('div');
-    item.className = 'task-item worktree-item';
-    item.dataset.path = wt.path;
-    item.dataset.repo = wt.repoPath || '';
-    item.dataset.branch = wt.branch || '';
-
-    var iconColor = AppUtils.iconColor(wt.name);
-    var iconLetter = (wt.name || '?').charAt(0).toUpperCase();
-    item.innerHTML =
-      '<span class="status-dot idle"></span>' +
-      '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + App.escHtml(wt.name) + '">' + iconLetter + '</span>' +
-      '<div class="saved-session-info">' +
-        '<span class="task-name" title="' + App.escHtml(wt.path) + '">' + App.escHtml(wt.name) + '</span>' +
-        '<span class="saved-session-detail">' + App.escHtml(wt.branch) + '</span>' +
-      '</div>' +
-      '<div class="saved-session-actions">' +
-        '<button class="worktree-open-claude" title="Open with ' + App.escHtml(AppUtils.modeDisplayName(App.defaultAgent())) + '">' + App.escHtml(AppUtils.modeShortLabel(App.defaultAgent())) + '</button>' +
-        '<button class="worktree-open-shell" title="Open shell">sh</button>' +
-        '<button class="worktree-remove" title="Remove worktree">\u00d7</button>' +
-      '</div>';
-
-    item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
-      e.stopPropagation();
-      var result;
-      try { result = await window.klaus.task.attachWorktree(wt.path, App.defaultAgent(), wt.repoPath, wt.branch); }
-      catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
-      if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
-      if (!result) { window.toast.error('Open failed: no response from main process'); return; }
-      App.addTaskToUI(result);
-      App.switchToTask(result.id);
-    });
-
-    item.querySelector('.worktree-open-shell').addEventListener('click', async function (e) {
-      e.stopPropagation();
-      var result;
-      try { result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch); }
-      catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
-      if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
-      if (!result) { window.toast.error('Open failed: no response from main process'); return; }
-      App.addTaskToUI(result);
-      App.switchToTask(result.id);
-    });
-
-    item.querySelector('.worktree-remove').addEventListener('click', async function (e) {
-      e.stopPropagation();
-      await window.klaus.repo.hideWorktree(wt.path);
-      item.remove();
-    });
-
-    item.addEventListener('click', function () {
-      if (AppState.sidebarCollapsed) {
-        item.querySelector('.worktree-open-claude').click();
+    var exists = AppState.inactiveWorktrees.find(function(x) { return x.path === wt.path; });
+    if (!exists) {
+      AppState.inactiveWorktrees.push(wt);
+      if (window.Sidebar && window.Sidebar.rebuild) {
+        window.Sidebar.rebuild();
       }
-    });
-
-    App.taskList.appendChild(item);
+    }
   };
 
   // Worktree rows render their quick-open button's label/title from the default
@@ -291,116 +246,25 @@ window.App = window.App || {};
     });
     if (sessions.length === 0) return;
 
-    sessions.forEach(function (s, idx) {
-      var item = document.createElement('div');
-      item.className = 'task-item saved-session';
-      item.dataset.idx = idx;
-      item.dataset.repo = s.repoPath || '';
-      item.dataset.branch = s.branch || '';
-
-      var age = App.formatAge(s.savedAt);
-      var pathShort = s.worktreePath ? s.worktreePath.split('/').slice(-2).join('/') : '';
-
-      var modeLabel = s.mode === 'shell' ? 'SH' : AppUtils.modeShortLabel(s.mode);
-      var modeTitle = s.mode === 'shell'
-        ? 'Previous shell session'
-        : 'Previous ' + AppUtils.modeDisplayName(s.mode) + ' session';
-      var sIconColor = AppUtils.iconColor(s.name);
-      var sIconLetter = (s.name || '?').charAt(0).toUpperCase();
-      item.innerHTML =
-        '<span class="status-dot saved"></span>' +
-        '<span class="collapsed-icon" style="background:' + sIconColor + '" title="' + App.escHtml(s.name) + '">' + sIconLetter + '</span>' +
-        '<span class="task-mode" title="' + modeTitle + '">' + modeLabel + '</span>' +
-        '<div class="saved-session-info">' +
-          '<span class="task-name" title="' + App.escHtml(s.worktreePath || '') + '">' + App.escHtml(s.name) + '</span>' +
-          '<span class="saved-session-detail">' + App.escHtml(s.branch || pathShort) + ' &middot; ' + App.escHtml(age) + '</span>' +
-        '</div>' +
-        '<div class="saved-session-actions">' +
-          (s.mode === 'shell'
-            ? '<button class="saved-session-resume" title="Open shell">Open</button>'
-            : '<button class="saved-session-resume" title="Resume conversation">Resume</button>' +
-              '<button class="saved-session-new" title="New session on this worktree">New</button>') +
-          '<button class="saved-session-dismiss" title="Dismiss">&times;</button>' +
-        '</div>';
-
-      item.querySelector('.saved-session-resume').addEventListener('click', async function (e) {
-        e.stopPropagation();
-        var btn = e.target;
-        btn.disabled = true;
-        btn.textContent = '...';
-        var result;
-        try {
-          if (s.mode === 'shell') {
-            result = await window.klaus.task.attachWorktree(s.worktreePath, 'shell', s.repoPath, s.branch);
-          } else {
-            result = await window.klaus.session.resume(s);
-          }
-        } catch (err) {
-          window.toast.error('Resume failed: ' + (err && err.message || err));
-          btn.disabled = false;
-          btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume';
-          return;
-        }
-        if (result && result.cancelled) { // user declined the trust prompt
-          btn.disabled = false;
-          btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume';
-          return;
-        }
-        if (!result || result.error) {
-          window.toast.error('Resume failed: ' + ((result && result.error) || 'no response from main process'));
-          btn.textContent = 'Err';
-          setTimeout(function () { btn.textContent = s.mode === 'shell' ? 'Open' : 'Resume'; btn.disabled = false; }, 2000);
-          return;
-        }
-        item.remove();
-        App.addTaskToUI(result);
-        App.switchToTask(result.id);
-        App.restoreUIState(result);
-      });
-
-      var newBtn = item.querySelector('.saved-session-new');
-      if (newBtn) newBtn.addEventListener('click', async function (e) {
-        e.stopPropagation();
-        var btn = e.target;
-        btn.disabled = true;
-        btn.textContent = '...';
-        var result;
-        try { result = await window.klaus.task.attachWorktree(s.worktreePath, 'claude', s.repoPath, s.branch); }
-        catch (err) {
-          window.toast.error('Open failed: ' + (err && err.message || err));
-          btn.disabled = false;
-          btn.textContent = 'New';
-          return;
-        }
-        if (!result || result.error) {
-          window.toast.error('Open failed: ' + ((result && result.error) || 'no response from main process'));
-          btn.textContent = 'Err';
-          setTimeout(function () { btn.textContent = 'New'; btn.disabled = false; }, 2000);
-          return;
-        }
-        item.remove();
-        App.addTaskToUI(result);
-        App.switchToTask(result.id);
-      });
-
-      item.addEventListener('click', function () {
-        if (AppState.sidebarCollapsed) {
-          item.querySelector('.saved-session-resume').click();
-        }
-      });
-
-      item.querySelector('.saved-session-dismiss').addEventListener('click', function (e) {
-        e.stopPropagation();
-        item.remove();
-        // Persist removal by stable identity (worktreePath + sessionId) rather
-        // than the captured `idx` — splice-by-idx silently removed the wrong
-        // row after any earlier dismiss shifted the array, and the removal
-        // was only persisted when ALL rows had been dismissed.
-        window.klaus.session.dismissSaved(s);
-      });
-
-      App.taskList.appendChild(item);
+    sessions.forEach(function (s) {
+      var exists = AppState.inactiveWorktrees.find(function(x) { return x.path === s.worktreePath; });
+      if (!exists) {
+        AppState.inactiveWorktrees.push({
+          path: s.worktreePath,
+          worktreePath: s.worktreePath,
+          repoPath: s.repoPath,
+          branch: s.branch,
+          name: s.name,
+          isSavedSession: true,
+          mode: s.mode,
+          savedAt: s.savedAt,
+          sessionId: s.sessionId
+        });
+      }
     });
+    if (window.Sidebar && window.Sidebar.rebuild) {
+      window.Sidebar.rebuild();
+    }
   };
 
   App.restoreUIState = async function(task) {
