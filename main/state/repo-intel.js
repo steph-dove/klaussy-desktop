@@ -672,44 +672,134 @@ function syncIntelIntoActiveWorktrees(base) {
   }
 }
 
-// Condense the raw.json graph rules into a few prompt lines. Defensive
-// per-entry: a malformed graph field degrades to "no graph section", never
-// to "no block".
-function graphSummary(rawJsonPath) {
-  let data;
-  try {
-    data = JSON.parse(fs.readFileSync(rawJsonPath, 'utf-8'));
-  } catch {
-    return null;
+function loadStructuredIntel(basePath) {
+  const a = artifactPaths(basePath);
+  let claudeMd = '';
+  if (fs.existsSync(a.claudeMd)) {
+    let md = fs.readFileSync(a.claudeMd, 'utf-8').trim();
+    if (md && md !== CLAUDE_MD_PLACEHOLDER.trim()) {
+      if (md.length > CLAUDE_MD_CAP) md = md.slice(0, CLAUDE_MD_CAP) + '\n…(truncated — full file at CLAUDE.md)';
+      claudeMd = md;
+    }
   }
+
+  const rules = [];
+  if (fs.existsSync(a.rulesDir)) {
+    for (const f of fs.readdirSync(a.rulesDir).filter((x) => x.endsWith('.md')).sort()) {
+      try {
+        const content = fs.readFileSync(path.join(a.rulesDir, f), 'utf-8').trim();
+        rules.push({ file: f, content });
+      } catch {
+        continue;
+      }
+    }
+  }
+
+  let graphRules = [];
+  try {
+    if (fs.existsSync(a.rawJson)) {
+      const data = JSON.parse(fs.readFileSync(a.rawJson, 'utf-8'));
+      graphRules = Array.isArray(data.rules) ? data.rules : [];
+    }
+  } catch (e) {
+    console.warn('[repo-intel] failed to load rawJson:', e.message);
+  }
+
+  return { claudeMd, rules, graphRules };
+}
+
+function ruleMatchesTouchedPaths(ruleFileName, touchedPaths) {
+  if (!touchedPaths || touchedPaths.length === 0) return true;
+  const ruleName = ruleFileName.replace(/\.md$/i, '').toLowerCase();
+  for (const p of touchedPaths) {
+    const norm = p.toLowerCase().replace(/\\/g, '/');
+    const segments = norm.split('/');
+    if (segments.includes(ruleName) || norm.includes('/' + ruleName) || norm.startsWith(ruleName)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function filterGraphSummary(graphRules, touchedPaths) {
+  if (!graphRules || graphRules.length === 0) return null;
   const lines = [];
   const fanList = (list) => list
     .map((e) => (Array.isArray(e) && e.length >= 2 ? `${e[0]} (${e[1]})` : null))
     .filter(Boolean)
     .join(', ');
+
+  const hasTouchedPaths = touchedPaths && touchedPaths.length > 0;
+
   try {
-    for (const r of (Array.isArray(data.rules) ? data.rules : [])) {
+    for (const r of graphRules) {
       if (!r || typeof r.id !== 'string') continue;
       if (/\.import_graph$/.test(r.id)) {
-        if (r.description) lines.push('- ' + r.description);
+        let statsPrinted = false;
         const s = r.stats || {};
+        
         if (Array.isArray(s.top_fan_in) && s.top_fan_in.length) {
-          const t = fanList(s.top_fan_in);
-          if (t) lines.push('- Most-depended-on files (fan-in — changes here have wide blast radius): ' + t);
+          const filteredFanIn = hasTouchedPaths
+            ? s.top_fan_in.filter(([file]) => {
+                const normFile = file.toLowerCase().replace(/\\/g, '/');
+                return touchedPaths.some(p => {
+                  const normP = p.toLowerCase().replace(/\\/g, '/');
+                  return normP.endsWith(normFile) || normFile.endsWith(normP);
+                });
+              })
+            : s.top_fan_in;
+
+          if (filteredFanIn.length) {
+            const t = fanList(filteredFanIn);
+            if (t) {
+              lines.push('- Most-depended-on files (fan-in — changes here have wide blast radius): ' + t);
+              statsPrinted = true;
+            }
+          }
         }
+
         if (Array.isArray(s.top_fan_out) && s.top_fan_out.length) {
-          const t = fanList(s.top_fan_out);
-          if (t) lines.push('- Widest-reaching files (fan-out): ' + t);
+          const filteredFanOut = hasTouchedPaths
+            ? s.top_fan_out.filter(([file]) => {
+                const normFile = file.toLowerCase().replace(/\\/g, '/');
+                return touchedPaths.some(p => {
+                  const normP = p.toLowerCase().replace(/\\/g, '/');
+                  return normP.endsWith(normFile) || normFile.endsWith(normP);
+                });
+              })
+            : s.top_fan_out;
+
+          if (filteredFanOut.length) {
+            const t = fanList(filteredFanOut);
+            if (t) {
+              lines.push('- Widest-reaching files (fan-out): ' + t);
+              statsPrinted = true;
+            }
+          }
         }
+
         if (s.cycle_count) {
           lines.push(`- WARNING: ${s.cycle_count} circular dependency chain(s) exist — do not introduce new edges into them.`);
+          statsPrinted = true;
+        }
+
+        if (statsPrinted && r.description) {
+          lines.unshift('- ' + r.description);
         }
       } else if (/endpoint_chains|service_dependencies|\.data_flow\./.test(r.id) && r.description) {
-        lines.push('- ' + r.description);
+        if (hasTouchedPaths) {
+          const matches = touchedPaths.some(p => {
+            const baseName = p.split('/').pop().replace(/\.[^.]+$/, '');
+            return r.description.toLowerCase().includes(baseName.toLowerCase()) || r.id.toLowerCase().includes(baseName.toLowerCase());
+          });
+          if (matches) lines.push('- ' + r.description);
+        } else {
+          lines.push('- ' + r.description);
+        }
       }
     }
   } catch (e) {
-    console.warn('[repo-intel] graph summary failed:', e.message);
+    console.warn('[repo-intel] graph summary filtering failed:', e.message);
     if (!lines.length) return null;
   }
   if (!lines.length) return null;
@@ -717,71 +807,58 @@ function graphSummary(rawJsonPath) {
     + '\n\nWhen reviewing or planning changes to a high fan-in file, consider its dependents — regressions there ripple widest.';
 }
 
-// Build (or rebuild) the prompt block from on-disk artifacts and refresh both
-// cache layers. Synchronous — a handful of small file reads. Caches the
-// empty result too (srcMtime-stamped) so repos without artifacts don't pay
-// the filesystem walk on every prompt build, while still rebuilding the
-// moment artifacts appear.
+function assembleBlock(intel, touchedPaths = []) {
+  const parts = [];
+
+  if (intel.claudeMd) {
+    parts.push('### Repository conventions (CLAUDE.md)\n\n' + intel.claudeMd);
+  }
+
+  if (intel.rules && intel.rules.length > 0) {
+    const chunks = [];
+    let budget = RULES_CAP;
+    const filteredRules = intel.rules.filter(r => ruleMatchesTouchedPaths(r.file, touchedPaths));
+
+    for (const r of filteredRules) {
+      if (r.content.length > budget) {
+        chunks.push(`- Additional path-scoped rules in .claude/rules/${r.file} (read it when touching matching paths)`);
+        continue;
+      }
+      budget -= r.content.length;
+      chunks.push(`#### .claude/rules/${r.file}\n\n${r.content}`);
+    }
+    if (chunks.length) parts.push('### Path-scoped rules\n\n' + chunks.join('\n\n'));
+  }
+
+  const graph = filterGraphSummary(intel.graphRules, touchedPaths);
+  if (graph) parts.push(graph);
+
+  return parts.length
+    ? '## Repository intelligence\n\n'
+      + 'Auto-generated from this repository (klaussy-agents / klaussy-repo-conventions). Treat these conventions, rules, and graph facts as ground truth for this codebase; flag violations of them explicitly.\n\n'
+      + parts.join('\n\n')
+    : '';
+}
+
 function buildBlock(basePath, cliVersion) {
   try {
-    const a = artifactPaths(basePath);
     const srcMtime = artifactsMtime(basePath);
-    const parts = [];
+    const intel = loadStructuredIntel(basePath);
+    const block = assembleBlock(intel);
 
-    if (fs.existsSync(a.claudeMd)) {
-      let md = fs.readFileSync(a.claudeMd, 'utf-8').trim();
-      if (md && md !== CLAUDE_MD_PLACEHOLDER.trim()) {
-        if (md.length > CLAUDE_MD_CAP) md = md.slice(0, CLAUDE_MD_CAP) + '\n…(truncated — full file at CLAUDE.md)';
-        parts.push('### Repository conventions (CLAUDE.md)\n\n' + md);
-      }
-    }
-
-    if (fs.existsSync(a.rulesDir)) {
-      const chunks = [];
-      let budget = RULES_CAP;
-      for (const f of fs.readdirSync(a.rulesDir).filter((x) => x.endsWith('.md')).sort()) {
-        let t;
-        try { t = fs.readFileSync(path.join(a.rulesDir, f), 'utf-8').trim(); } catch { continue; }
-        if (t.length > budget) {
-          chunks.push(`- Additional path-scoped rules in .claude/rules/${f} (read it when touching matching paths)`);
-          continue;
-        }
-        budget -= t.length;
-        chunks.push(`#### .claude/rules/${f}\n\n${t}`);
-      }
-      if (chunks.length) parts.push('### Path-scoped rules\n\n' + chunks.join('\n\n'));
-    }
-
-    const graph = graphSummary(a.rawJson);
-    if (graph) parts.push(graph);
-
-    const block = parts.length
-      ? '## Repository intelligence\n\n'
-        + 'Auto-generated from this repository (klaussy-agents / klaussy-repo-conventions). Treat these conventions, rules, and graph facts as ground truth for this codebase; flag violations of them explicitly.\n\n'
-        + parts.join('\n\n')
-      : '';
-
-    // Version-stamp semantics: undefined = preserve the existing stamp
-    // (rebuilds from getRepoIntelBlock); explicit string — INCLUDING '' —
-    // sets it. '' marks "no completed run" so interim/failed builds can't
-    // masquerade as finished generations (a falsy-fallback here used to
-    // resurrect stale stamps and break both the retry and the
-    // uninstall-detection paths).
     const ver = cliVersion !== undefined
       ? cliVersion
       : ((memCache.get(basePath) || {}).cliVersion || '');
-    memCache.set(basePath, { block, srcMtime, cliVersion: ver });
+    memCache.set(basePath, { block, intel, srcMtime, cliVersion: ver });
     try {
       const f = cacheFileFor(basePath);
       if (block) {
         fs.mkdirSync(path.dirname(f), { recursive: true });
         fs.writeFileSync(f, '<!-- src-mtime:' + srcMtime + ' cli:' + ver + ' -->\n' + block);
       } else {
-        // Artifacts gone → the disk cache must go too, or it resurrects
-        // deleted intel on the next cold read.
         fs.rmSync(f, { force: true });
       }
-    } catch { /* disk cache is best-effort; memory cache is enough */ }
+    } catch {}
     return block;
   } catch (e) {
     console.warn('[repo-intel] block build failed for', basePath, e.message);
@@ -794,9 +871,6 @@ function readDiskCache(basePath) {
     const f = cacheFileFor(basePath);
     if (!fs.existsSync(f)) return null;
     const raw = fs.readFileSync(f, 'utf-8');
-    // `cli:` is optional: pre-klaussy cache files lack it. Their block still
-    // loads; the '' stamp means the repo upgrades (one regen with klaussy)
-    // on next touch — intended for the migration.
     const m = raw.match(/^<!-- src-mtime:([\d.]+)(?: cli:([^>]*))? -->\n/);
     if (!m) return null;
     return { block: raw.slice(m[0].length), srcMtime: Number(m[1]), cliVersion: (m[2] || '').trim() };
@@ -1044,7 +1118,10 @@ function slimFromBlock(block) {
 // graph-only block is returned — token saving, see slimFromBlock. Other
 // agents (codex/gemini/copilot don't read CLAUDE.md) and unsynced paths get
 // the full block.
-function getRepoIntelBlock(repoOrWorktreePath, agentMode) {
+//
+// `touchedPaths`: optional list of files touched in the current PR or task.
+// If provided, we generate a minimized block tailored to these paths.
+function getRepoIntelBlock(repoOrWorktreePath, agentMode, touchedPaths = []) {
   let base;
   try {
     base = baseFor(repoOrWorktreePath);
@@ -1054,29 +1131,35 @@ function getRepoIntelBlock(repoOrWorktreePath, agentMode) {
   if (!base) return '';
   const srcMtime = artifactsMtime(base);
 
-  let full;
-  const hit = memCache.get(base);
-  if (hit && hit.srcMtime >= srcMtime) {
-    full = hit.block;
-  } else {
+  let hit = memCache.get(base);
+  if (!hit || hit.srcMtime < srcMtime) {
     const disk = readDiskCache(base);
     if (disk && disk.srcMtime >= srcMtime) {
-      memCache.set(base, disk);
-      full = disk.block;
+      const intel = loadStructuredIntel(base);
+      hit = { block: disk.block, intel, srcMtime, cliVersion: disk.cliVersion };
+      memCache.set(base, hit);
     } else {
-      full = buildBlock(base);
+      buildBlock(base);
+      hit = memCache.get(base);
     }
   }
-  if (!full) return '';
+
+  if (!hit) return '';
+
+  const block = (touchedPaths && touchedPaths.length > 0 && hit.intel)
+    ? assembleBlock(hit.intel, touchedPaths)
+    : hit.block;
+
+  if (!block) return '';
 
   if (agentMode === 'claude') {
     try {
       if (fs.existsSync(path.join(repoOrWorktreePath, 'CLAUDE.md'))) {
-        return slimFromBlock(full);
+        return slimFromBlock(block);
       }
     } catch { /* fall through to full */ }
   }
-  return full;
+  return block;
 }
 
 // Ensure a worktree that Klaussy didn't create through the normal session path

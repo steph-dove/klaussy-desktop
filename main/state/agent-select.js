@@ -6,6 +6,57 @@ const { isAgentMode } = require('./ai-providers');
 const { instances } = require('./instances');
 const { loadConfig } = require('../util/config');
 const { getRepoIntelBlock, ensureRepoIntel } = require('./repo-intel');
+const { prReview } = require('./pr-review');
+const { execFileSync } = require('child_process');
+
+function parseChangedFilesFromDiff(diff) {
+  const files = new Set();
+  if (!diff) return [];
+  const lines = diff.split('\n');
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      const parts = line.split(' ');
+      if (parts.length >= 4) {
+        const file = parts[3].slice(2); // strip 'b/'
+        files.add(file);
+      }
+    }
+  }
+  return [...files];
+}
+
+function getTouchedPaths(worktreePath) {
+  const paths = new Set();
+  try {
+    const status = execFileSync('git', ['status', '--porcelain'], { cwd: worktreePath, stdio: 'pipe', timeout: 5000 }).toString();
+    for (const line of status.split('\n')) {
+      if (line.length > 3) {
+        const p = line.slice(3).trim();
+        if (p) paths.add(p);
+      }
+    }
+    let base = 'main';
+    try {
+      base = execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], { cwd: worktreePath, stdio: 'pipe', timeout: 2000 }).toString().trim().replace(/^origin\//, '');
+    } catch {
+      for (const b of ['main', 'master', 'dev']) {
+        try {
+          execFileSync('git', ['rev-parse', '--verify', b], { cwd: worktreePath, stdio: 'pipe', timeout: 1000 });
+          base = b;
+          break;
+        } catch {}
+      }
+    }
+    const diffNames = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], { cwd: worktreePath, stdio: 'pipe', timeout: 5000 }).toString();
+    for (const file of diffNames.split('\n')) {
+      const trimmed = file.trim();
+      if (trimmed) paths.add(trimmed);
+    }
+  } catch (e) {
+    console.warn('[repo-intel] failed to get touched paths via git:', e.message);
+  }
+  return [...paths];
+}
 
 // Repo-intel block formatted for template substitution: surrounded by
 // newlines when present, empty when not — the templates' {{REPO_SPECIFIC_CHECKS}}
@@ -17,7 +68,14 @@ const { getRepoIntelBlock, ensureRepoIntel } = require('./repo-intel');
 function repoIntelFor(worktreePath, agentMode) {
   try {
     ensureRepoIntel(worktreePath);
-    const block = getRepoIntelBlock(worktreePath, agentMode);
+    let touchedPaths = [];
+    if (prReview.active && prReview.active.diff) {
+      touchedPaths = parseChangedFilesFromDiff(prReview.active.diff);
+    }
+    if (touchedPaths.length === 0 && worktreePath) {
+      touchedPaths = getTouchedPaths(worktreePath);
+    }
+    const block = getRepoIntelBlock(worktreePath, agentMode, touchedPaths);
     return block ? '\n' + block + '\n' : '';
   } catch (e) {
     console.warn('[repo-intel] substitution failed:', e.message);
