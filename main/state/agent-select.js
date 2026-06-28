@@ -110,4 +110,6 @@ function agentForWorktree(worktreePath) {
   return defaultAgentProvider();
 }
 
-module.exports = { repoIntelFor, defaultAgentProvider, pickProvider, agentForWorktree };
+module.exports = { repoIntelFor, defaultAgentProvider, pickProvider, agentForWorktree,
+  // Exported for unit testing of the touched-paths diff parser (Item 4).
+  parseChangedFilesFromDiff };

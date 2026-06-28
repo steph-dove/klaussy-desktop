@@ -1183,4 +1183,6 @@ function ensureWorktreeBootstrap(worktreePath) {
   ensureEnvLinks(worktreePath);
 }
 
-module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureEnvLinks, ensureReviewTools, upgradeReviewToolsIfDue };
+module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureEnvLinks, ensureReviewTools, upgradeReviewToolsIfDue,
+  // Exported for unit testing of the prompt-minimization logic (Item 4).
+  loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock };
