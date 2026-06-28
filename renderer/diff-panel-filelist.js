@@ -18,16 +18,54 @@
       return;
     }
 
-    if (staged.length > 0) {
-      html += '<div class="diff-section-header"><span>Staged (' + staged.length + ')</span>';
-      html += '<button class="diff-section-btn js-unstage-all" title="Unstage all">Unstage All</button></div>';
-      staged.forEach(function (f) { html += DP.renderFileItem(f, true); });
-    }
+    if (DP.currentSessionName && DP.viewScope === 'session') {
+      // Group staged by repo
+      if (staged.length > 0) {
+        html += '<div class="diff-section-header"><span>Staged (' + staged.length + ')</span>';
+        html += '<button class="diff-section-btn js-unstage-all" title="Unstage all">Unstage All</button></div>';
+        
+        var groupedStaged = {};
+        staged.forEach(function(f) {
+          var repo = f.repoName || 'Workspace';
+          if (!groupedStaged[repo]) groupedStaged[repo] = [];
+          groupedStaged[repo].push(f);
+        });
+        
+        Object.keys(groupedStaged).forEach(function(repo) {
+          html += '<div class="diff-repo-header">&#128193; ' + DP.escHtml(repo) + '</div>';
+          groupedStaged[repo].forEach(function (f) { html += DP.renderFileItem(f, true); });
+        });
+      }
 
-    if (unstaged.length > 0) {
-      html += '<div class="diff-section-header"><span>Changes (' + unstaged.length + ')</span>';
-      html += '<button class="diff-section-btn js-stage-all" title="Stage all">Stage All</button></div>';
-      unstaged.forEach(function (f) { html += DP.renderFileItem(f, false); });
+      // Group unstaged by repo
+      if (unstaged.length > 0) {
+        html += '<div class="diff-section-header"><span>Changes (' + unstaged.length + ')</span>';
+        html += '<button class="diff-section-btn js-stage-all" title="Stage all">Stage All</button></div>';
+        
+        var groupedUnstaged = {};
+        unstaged.forEach(function(f) {
+          var repo = f.repoName || 'Workspace';
+          if (!groupedUnstaged[repo]) groupedUnstaged[repo] = [];
+          groupedUnstaged[repo].push(f);
+        });
+        
+        Object.keys(groupedUnstaged).forEach(function(repo) {
+          html += '<div class="diff-repo-header">&#128193; ' + DP.escHtml(repo) + '</div>';
+          groupedUnstaged[repo].forEach(function (f) { html += DP.renderFileItem(f, false); });
+        });
+      }
+    } else {
+      if (staged.length > 0) {
+        html += '<div class="diff-section-header"><span>Staged (' + staged.length + ')</span>';
+        html += '<button class="diff-section-btn js-unstage-all" title="Unstage all">Unstage All</button></div>';
+        staged.forEach(function (f) { html += DP.renderFileItem(f, true); });
+      }
+
+      if (unstaged.length > 0) {
+        html += '<div class="diff-section-header"><span>Changes (' + unstaged.length + ')</span>';
+        html += '<button class="diff-section-btn js-stage-all" title="Stage all">Stage All</button></div>';
+        unstaged.forEach(function (f) { html += DP.renderFileItem(f, false); });
+      }
     }
 
     DP.fileListEl.innerHTML = html;
@@ -44,14 +82,16 @@
     // Bind file clicks and action buttons
     DP.fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
       var file = el.dataset.file;
+      var uniqueKey = el.dataset.uniquekey || file;
       var isStaged = el.dataset.staged === 'true';
+      var wtPath = el.dataset.worktreepath || DP.currentWorktreePath;
 
       el.addEventListener('click', function (e) {
         if (e.target.closest('.diff-file-action')) return;
-        DP.selectedFile = file;
+        DP.selectedFile = uniqueKey;
         DP.fileListEl.querySelectorAll('.diff-file').forEach(function (f) { f.classList.remove('selected'); });
         el.classList.add('selected');
-        DP.showFileDiff(file, isStaged);
+        DP.showFileDiff(file, isStaged, wtPath);
       });
 
       el.addEventListener('dblclick', function (e) {
@@ -62,7 +102,7 @@
         var fab = document.getElementById('explain-selection-btn');
         if (fab) fab.style.display = 'none';
         DP.refreshPaused = true;
-        var fullPath = DP.currentWorktreePath + '/' + file;
+        var fullPath = wtPath + '/' + file;
         setTimeout(function () {
           if (typeof window.openFileViewer === 'function') {
             window.openFileViewer(fullPath, file);
@@ -77,17 +117,18 @@
         e.stopPropagation();
         var file = btn.dataset.file;
         var action = btn.dataset.action;
+        var wtPath = btn.closest('.diff-file').dataset.worktreepath || DP.currentWorktreePath;
         if (action === 'stage') {
-          await window.klaus.git.stage(DP.currentWorktreePath, [file]);
+          await window.klaus.git.stage(wtPath, [file]);
         } else if (action === 'unstage') {
-          await window.klaus.git.unstage(DP.currentWorktreePath, [file]);
+          await window.klaus.git.unstage(wtPath, [file]);
         } else if (action === 'discard') {
           // Use a visible confirmation
           btn.textContent = '?';
           btn.title = 'Click again to confirm discard';
           btn.dataset.action = 'discard-confirm';
         } else if (action === 'discard-confirm') {
-          await window.klaus.git.discard(DP.currentWorktreePath, [file]);
+          await window.klaus.git.discard(wtPath, [file]);
         }
         if (action !== 'discard') await DP.refresh();
       });
@@ -97,7 +138,8 @@
   DP.renderFileItem = function(f, isStaged) {
     var statusClass = DP.getStatusClass(f.status);
     var statusLabel = DP.getStatusLabel(f.status);
-    var sel = f.file === DP.selectedFile ? ' selected' : '';
+    var uniqueKey = f.uniqueKey || f.file;
+    var sel = uniqueKey === DP.selectedFile ? ' selected' : '';
 
     var actions = '';
     if (isStaged) {
@@ -108,21 +150,22 @@
         '<button class="diff-file-action" data-file="' + DP.escAttr(f.file) + '" data-action="discard" title="Discard">\u2715</button>';
     }
 
-    return ('<div class="diff-file' + sel + '" data-file="' + DP.escAttr(f.file) + '" data-staged="' + isStaged + '">' +
+    return ('<div class="diff-file' + sel + '" data-file="' + DP.escAttr(f.file) + '" data-uniquekey="' + DP.escAttr(uniqueKey) + '" data-staged="' + isStaged + '" data-worktreepath="' + DP.escAttr(f.worktreePath || '') + '">' +
       '<span class="diff-file-status ' + statusClass + '">' + statusLabel + '</span>' +
       '<span class="diff-file-name" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.basename(f.file)) + '</span>' +
       '<span class="diff-file-path" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.dirname(f.file)) + '</span>' +
       '<span class="diff-file-actions">' + actions + '</span>' + '</div>');
   };
 
-  DP.showFileDiff = async function(file, staged) {
+  DP.showFileDiff = async function(file, staged, wtPath) {
     var result;
     DP.currentDiffStaged = !!staged;
     DP.selectedLineKeys = new Set();
+    var path = wtPath || DP.currentWorktreePath;
     if (DP.diffMode === 'branch' && DP.baseBranch) {
-      result = await window.klaus.git.branchDiff(DP.currentWorktreePath, DP.baseBranch, file);
+      result = await window.klaus.git.branchDiff(path, DP.baseBranch, file);
     } else {
-      result = await window.klaus.git.diff(DP.currentWorktreePath, file, staged);
+      result = await window.klaus.git.diff(path, file, staged);
     }
     if (result.error || !result.diff) {
       // For untracked files, try to show file content

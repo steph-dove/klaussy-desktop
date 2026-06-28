@@ -55,7 +55,13 @@ window.DiffPanel = window.DiffPanel || {};
     document.getElementById('btn-fetch').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
-      var result = await window.klaus.git.fetch(DP.currentWorktreePath);
+      if (DP.currentSessionName && DP.viewScope === 'session') {
+        var paths = DP.getSessionWorktrees().map(function(w) { return w.path; });
+        await Promise.all(paths.map(function(p) { return window.klaus.git.fetch(p); }));
+      } else {
+        var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
+        await window.klaus.git.fetch(path);
+      }
       this.disabled = false;
       this.textContent = 'Fetch';
       DP.updateAheadBehind();
@@ -64,7 +70,13 @@ window.DiffPanel = window.DiffPanel || {};
     document.getElementById('btn-pull').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
-      var result = await window.klaus.git.pull(DP.currentWorktreePath);
+      if (DP.currentSessionName && DP.viewScope === 'session') {
+        var paths = DP.getSessionWorktrees().map(function(w) { return w.path; });
+        await Promise.all(paths.map(function(p) { return window.klaus.git.pull(p); }));
+      } else {
+        var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
+        await window.klaus.git.pull(path);
+      }
       this.disabled = false;
       this.textContent = 'Pull';
       DP.updateAheadBehind();
@@ -451,6 +463,22 @@ window.DiffPanel = window.DiffPanel || {};
   DP.updateWorktree = function(worktreePath) {
     var changed = DP.currentWorktreePath !== worktreePath;
     DP.currentWorktreePath = worktreePath;
+
+    var sessionName = null;
+    if (window.Sidebar && window.Sidebar.getSessionName) {
+      var allTasks = Array.from(AppState.tasks.values());
+      var task = allTasks.find(function(t) { return t.worktreePath === worktreePath; });
+      if (task) {
+        sessionName = window.Sidebar.getSessionName(task);
+      }
+      if (!sessionName) {
+        var wt = (AppState.inactiveWorktrees || []).find(function(x) { return x.path === worktreePath; });
+        if (wt) sessionName = window.Sidebar.getSessionName(wt);
+      }
+    }
+    
+    DP.currentSessionName = sessionName;
+    DP.viewScope = 'repo'; // Reset to repo scope!
     if (changed) {
       DP.selectedFile = null;
       DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
@@ -472,19 +500,139 @@ window.DiffPanel = window.DiffPanel || {};
     }
   };
 
+  DP.updateSession = function(sessionName) {
+    if (DP.unsubscribeWatcher) {
+      DP.unsubscribeWatcher();
+      DP.unsubscribeWatcher = null;
+    }
+    DP.currentSessionName = sessionName;
+    DP.currentWorktreePath = null;
+    DP.viewScope = 'session'; // Default to session scope!
+    DP.selectedFile = null;
+    DP.diffMode = 'working';
+    DP.baseBranch = null;
+    DP.branchList = [];
+    DP.remoteList = [];
+    DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+    DP.refreshPaused = false;
+    DP.refresh();
+    DP.updateAheadBehind();
+  };
+
+  DP.getSessionWorktrees = function() {
+    if (!DP.currentSessionName) return [];
+    var worktrees = [];
+    var seen = new Set();
+    AppState.tasks.forEach(function(t) {
+      if (window.Sidebar && window.Sidebar.getSessionName(t) === DP.currentSessionName) {
+        if (!seen.has(t.worktreePath)) {
+          seen.add(t.worktreePath);
+          worktrees.push({ path: t.worktreePath, name: t.name, repoPath: t.repoPath, branch: t.branch });
+        }
+      }
+    });
+    AppState.inactiveWorktrees.forEach(function(wt) {
+      if (window.Sidebar && window.Sidebar.getSessionName(wt) === DP.currentSessionName) {
+        if (!seen.has(wt.path)) {
+          seen.add(wt.path);
+          worktrees.push({ path: wt.path, name: wt.name, repoPath: wt.repoPath, branch: wt.branch });
+        }
+      }
+    });
+    return worktrees;
+  };
+
+  DP.refreshSessionDiff = async function() {
+    var wts = DP.getSessionWorktrees();
+    var results = await Promise.all(wts.map(async function(wt) {
+      try {
+        var status = await window.klaus.git.status(wt.path);
+        return { wt: wt, status: status };
+      } catch (e) {
+        return { wt: wt, error: e.message || e };
+      }
+    }));
+
+    var mergedFiles = [];
+    var anyError = null;
+    results.forEach(function(r) {
+      if (r.error) {
+        anyError = r.error;
+      } else if (r.status && r.status.files) {
+        r.status.files.forEach(function(f) {
+          mergedFiles.push({
+            file: f.file,
+            staged: f.staged,
+            status: f.status,
+            worktreePath: r.wt.path,
+            repoName: r.wt.name,
+            uniqueKey: r.wt.name + '/' + f.file
+          });
+        });
+      }
+    });
+
+    if (anyError && mergedFiles.length === 0) {
+      DP.fileListEl.innerHTML = '<div class="diff-error">' + DP.escHtml(anyError) + '</div>';
+      return;
+    }
+
+    DP.currentFiles = mergedFiles;
+    DP.renderFileList(mergedFiles, '');
+
+    if (DP.selectedFile) {
+      const still = DP.currentFiles.find(function (f) { return f.uniqueKey === DP.selectedFile; });
+      if (still) {
+        await DP.showFileDiff(still.file, still.staged, still.worktreePath);
+      } else {
+        DP.selectedFile = null;
+        DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
+      }
+    }
+  };
+
+  DP.getActiveWorktreePath = function() {
+    var taskId = AppState.activeTaskId || AppState.focusedTaskId;
+    if (taskId) {
+      var t = AppState.tasks.get(taskId);
+      if (t && t.worktreePath) return t.worktreePath;
+    }
+    var wts = DP.getSessionWorktrees();
+    if (wts.length > 0) return wts[0].path;
+    return DP.currentWorktreePath;
+  };
+
+  DP.updateButtonStates = function() {
+    var isAllRepos = DP.currentSessionName && DP.viewScope === 'session';
+    var fetchBtn = document.getElementById('btn-fetch');
+    var pullBtn = document.getElementById('btn-pull');
+    var commitBtn = document.getElementById('btn-commit');
+    var pushBtn = document.getElementById('btn-push');
+    var prBtn = document.getElementById('btn-create-pr');
+    
+    if (fetchBtn) fetchBtn.title = isAllRepos ? 'Fetch all repos in session' : 'Fetch';
+    if (pullBtn) pullBtn.title = isAllRepos ? 'Pull all repos in session' : 'Pull';
+    if (commitBtn) commitBtn.title = isAllRepos ? 'Commit all' : 'Commit';
+    if (pushBtn) pushBtn.title = isAllRepos ? 'Push all' : 'Push';
+    if (prBtn) prBtn.title = isAllRepos ? 'PR all' : 'PR';
+  };
+
   DP.refresh = async function() {
-    if (!DP.currentWorktreePath) return;
+    if (!DP.currentWorktreePath && !DP.currentSessionName) return;
     if (DP.refreshPaused) return;
-    // Don't refresh if an explanation is being shown
     if (DP.diffViewEl && DP.diffViewEl.querySelector('.diff-explanation')) return;
 
-    // The staged set may have changed (stage/unstage/hunk ops all land
-    // here) — a prior "Commit anyway" clearance must not certify a diff it
-    // never reviewed. Findings stay visible for reference; the flag resets.
     if (DP.precommitCleared && !DP.precommitPending) {
       DP.precommitCleared = false;
       var cb = document.getElementById('btn-do-commit');
       if (cb && cb.textContent === 'Commit anyway') cb.textContent = 'Commit';
+    }
+
+    DP.updateButtonStates();
+
+    if (DP.currentSessionName && DP.viewScope === 'session') {
+      await DP.refreshSessionDiff();
+      return;
     }
 
     if (DP.diffMode === 'branch') {
@@ -492,7 +640,10 @@ window.DiffPanel = window.DiffPanel || {};
       return;
     }
 
-    const result = await window.klaus.git.status(DP.currentWorktreePath);
+    var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
+    if (!path) return;
+
+    const result = await window.klaus.git.status(path);
     if (result.error) {
       DP.fileListEl.innerHTML = '<div class="diff-error">' + DP.escHtml(result.error) + '</div>';
       return;
@@ -503,7 +654,7 @@ window.DiffPanel = window.DiffPanel || {};
     if (DP.selectedFile) {
       const still = DP.currentFiles.find(function (f) { return f.file === DP.selectedFile; });
       if (still) {
-        await DP.showFileDiff(DP.selectedFile, still.staged);
+        await DP.showFileDiff(DP.selectedFile, still.staged, path);
       } else {
         DP.selectedFile = null;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
@@ -536,32 +687,51 @@ window.DiffPanel = window.DiffPanel || {};
   };
 
   DP.renderModeToggle = function(branchName) {
-    var workingActive = DP.diffMode === 'working' ? ' active' : '';
-    var branchActive = DP.diffMode === 'branch' ? ' active' : '';
+    var html = '';
 
-    var html = '<div class="diff-mode-bar">';
-    html += '<div class="diff-mode-toggle">';
-    html += '<button class="diff-mode-btn js-mode-working' + workingActive + '">Working</button>';
-    html += '<button class="diff-mode-btn js-mode-branch' + branchActive + '">Branch</button>';
-    html += '</div>';
-
-    if (DP.diffMode === 'branch') {
-      html += '<select class="diff-base-select js-base-select">';
-      var allBranches = DP.branchList.concat(DP.remoteList);
-      for (var i = 0; i < allBranches.length; i++) {
-        var b = allBranches[i];
-        var sel = b === DP.baseBranch ? ' selected' : '';
-        var isRemote = DP.remoteList.indexOf(b) >= 0 && DP.branchList.indexOf(b) < 0;
-        html += '<option value="' + DP.escAttr(b) + '"' + sel + '>' + DP.escHtml(b) + '</option>';
+    if (DP.currentSessionName) {
+      // Session active: Render a single premium "Repo" vs "Session" scope toggle!
+      var branchActive = DP.viewScope === 'repo' ? ' active' : '';
+      var sessionActive = DP.viewScope === 'session' ? ' active' : '';
+      
+      html += '<div class="diff-mode-bar">';
+      html += '<div class="diff-mode-toggle" style="width: 100%;">';
+      html += '<button class="diff-mode-btn js-scope-repo' + branchActive + '" style="flex: 1; text-align: center;">Repo</button>';
+      html += '<button class="diff-mode-btn js-scope-session' + sessionActive + '" style="flex: 1; text-align: center;">Session</button>';
+      html += '</div>';
+      if (branchName && DP.viewScope === 'repo') {
+        html += '<span class="diff-branch-label" style="margin-left: 8px;">on <strong>' + DP.escHtml(branchName) + '</strong></span>';
       }
-      html += '</select>';
+      html += '</div>';
     } else {
-      if (branchName) {
-        html += '<span class="diff-branch-label">on <strong>' + DP.escHtml(branchName) + '</strong></span>';
+      // Standalone mode: Render the standard "Working" vs "Branch" mode toggle
+      var workingActive = DP.diffMode === 'working' ? ' active' : '';
+      var branchActive = DP.diffMode === 'branch' ? ' active' : '';
+
+      html += '<div class="diff-mode-bar">';
+      html += '<div class="diff-mode-toggle">';
+      html += '<button class="diff-mode-btn js-mode-working' + workingActive + '">Working</button>';
+      html += '<button class="diff-mode-btn js-mode-branch' + branchActive + '">Branch</button>';
+      html += '</div>';
+
+      if (DP.diffMode === 'branch') {
+        html += '<select class="diff-base-select js-base-select">';
+        var allBranches = DP.branchList.concat(DP.remoteList);
+        for (var i = 0; i < allBranches.length; i++) {
+          var b = allBranches[i];
+          var sel = b === DP.baseBranch ? ' selected' : '';
+          var isRemote = DP.remoteList.indexOf(b) >= 0 && DP.branchList.indexOf(b) < 0;
+          html += '<option value="' + DP.escAttr(b) + '"' + sel + '>' + DP.escHtml(b) + '</option>';
+        }
+        html += '</select>';
+      } else {
+        if (branchName) {
+          html += '<span class="diff-branch-label">on <strong>' + DP.escHtml(branchName) + '</strong></span>';
+        }
       }
+      html += '</div>';
     }
 
-    html += '</div>';
     return html;
   };
 
@@ -569,6 +739,8 @@ window.DiffPanel = window.DiffPanel || {};
     var workingBtn = DP.fileListEl.querySelector('.js-mode-working');
     var branchBtn = DP.fileListEl.querySelector('.js-mode-branch');
     var selectEl = DP.fileListEl.querySelector('.js-base-select');
+    var repoScopeBtn = DP.fileListEl.querySelector('.js-scope-repo');
+    var sessionScopeBtn = DP.fileListEl.querySelector('.js-scope-session');
 
     if (workingBtn) {
       workingBtn.addEventListener('click', function () {
@@ -592,7 +764,8 @@ window.DiffPanel = window.DiffPanel || {};
 
         // Fetch branches if not cached
         if (DP.branchList.length === 0) {
-          var result = await window.klaus.git.branches(DP.currentWorktreePath);
+          var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
+          var result = await window.klaus.git.branches(path);
           DP.branchList = result.branches || [];
           DP.remoteList = result.remotes || [];
         }
@@ -616,6 +789,24 @@ window.DiffPanel = window.DiffPanel || {};
         DP.baseBranch = selectEl.value;
         DP.selectedFile = null;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
+        DP.refresh();
+      });
+    }
+
+    if (repoScopeBtn) {
+      repoScopeBtn.addEventListener('click', function() {
+        if (DP.viewScope === 'repo') return;
+        DP.viewScope = 'repo';
+        DP.selectedFile = null;
+        DP.refresh();
+      });
+    }
+
+    if (sessionScopeBtn) {
+      sessionScopeBtn.addEventListener('click', function() {
+        if (DP.viewScope === 'session') return;
+        DP.viewScope = 'session';
+        DP.selectedFile = null;
         DP.refresh();
       });
     }

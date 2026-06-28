@@ -316,13 +316,23 @@ window.App = window.App || {};
       DiffPanel.hide();
       App.btnDiff.classList.remove('active');
     } else {
-      var task = App.tasks.get(AppState.activeTaskId);
-      if (task) {
-        DiffPanel.show(task.worktreePath);
-        PRPanel.setWorktree(task.worktreePath);
-
+      if (AppState.activeSessionName) {
+        DiffPanel.updateSession(AppState.activeSessionName);
+        DiffPanel.show();
+        var activePath = DiffPanel.getActiveWorktreePath();
+        if (activePath && window.PRPanel) {
+          window.PRPanel.setWorktree(activePath);
+        }
         App.btnDiff.classList.add('active');
-        if (!task.branch) App.forceFilesTab();
+      } else {
+        var task = App.tasks.get(AppState.activeTaskId);
+        if (task) {
+          DiffPanel.show(task.worktreePath);
+          PRPanel.setWorktree(task.worktreePath);
+
+          App.btnDiff.classList.add('active');
+          if (!task.branch) App.forceFilesTab();
+        }
       }
     }
   });
@@ -972,6 +982,47 @@ window.App = window.App || {};
   App.btnOpenFolder = document.getElementById('btn-open-folder');
   if (App.btnOpenFolder) {
     App.btnOpenFolder.addEventListener('click', function () { App.openFolderAsTask(App.defaultAgent()); });
+  }
+
+  // ---- Broadcast command bar logic ----
+  var broadcastInput = document.getElementById('broadcast-input');
+  var broadcastSend = document.getElementById('btn-broadcast-send');
+
+  async function sendBroadcast() {
+    var val = broadcastInput.value.trim();
+    if (!val) return;
+    broadcastInput.value = '';
+
+    var activeTasks = [];
+    AppState.tasks.forEach(function(t) {
+      if (window.Sidebar && window.Sidebar.getSessionName(t) === AppState.activeSessionName) {
+        activeTasks.push(t);
+      }
+    });
+
+    if (activeTasks.length === 0) {
+      window.toast.error('No active terminal sessions to broadcast to');
+      return;
+    }
+
+    activeTasks.forEach(function(task) {
+      window.klaus.terminal.write(task.id, val + '\r');
+    });
+
+    window.toast.success('Broadcasted command to ' + activeTasks.length + ' terminals');
+  }
+
+  if (broadcastInput && broadcastSend) {
+    broadcastInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        sendBroadcast();
+      }
+    });
+    broadcastSend.addEventListener('click', function (e) {
+      e.stopPropagation();
+      sendBroadcast();
+    });
   }
 
   App.btnRunApp = document.getElementById('btn-run-app');

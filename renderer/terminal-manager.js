@@ -973,10 +973,37 @@ window.TerminalManager = (function () {
   function switchToTask(id) {
     AppState.activeTaskId = id;
     AppState.focusedTaskId = id;
+    AppState.activeSessionName = null;
     Sidebar.hideUnreadBadge(id);
 
+    var broadcastBar = document.getElementById('broadcast-bar');
+    if (broadcastBar) {
+      broadcastBar.classList.add('hidden');
+    }
+
+    taskList.querySelectorAll('.session-group-header').forEach(function (el) {
+      el.classList.remove('active');
+    });
+
     taskList.querySelectorAll('.task-item').forEach(function (el) {
-      el.classList.toggle('active', Number(el.dataset.id) === id);
+      var isActive = Number(el.dataset.id) === id;
+      el.classList.toggle('active', isActive);
+      if (isActive) {
+        var itemsContainer = el.closest('.session-group-items');
+        if (itemsContainer && itemsContainer.classList.contains('collapsed')) {
+          itemsContainer.classList.remove('collapsed');
+          var groupEl = itemsContainer.closest('.session-group');
+          var header = groupEl && groupEl.querySelector('.session-group-header');
+          if (header) {
+            header.classList.remove('collapsed');
+            var chevron = header.querySelector('.session-group-chevron');
+            if (chevron) chevron.innerHTML = '&#9662;';
+            if (window.Sidebar && window.Sidebar.expandSession) {
+              window.Sidebar.expandSession(groupEl.dataset.session);
+            }
+          }
+        }
+      }
     });
 
     terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {

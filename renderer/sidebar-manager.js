@@ -5,14 +5,114 @@ window.Sidebar = (function () {
 
   // ---- Sidebar item rendering ----
 
+  var collapsedSessions = new Set();
+
+  function selectSession(sessionName) {
+    taskList.querySelectorAll('.task-item, .session-group-header').forEach(function(el) {
+      el.classList.remove('active');
+    });
+    var groupEl = taskList.querySelector('.session-group[data-session="' + sessionName + '"]');
+    var header = groupEl && groupEl.querySelector('.session-group-header');
+    if (header) {
+      header.classList.add('active');
+    }
+    AppState.activeSessionName = sessionName;
+    AppState.activeTaskId = null;
+    taskList.querySelectorAll('.task-item').forEach(function(item) {
+      item.classList.remove('active');
+    });
+    var broadcastBar = document.getElementById('broadcast-bar');
+    if (broadcastBar) {
+      broadcastBar.classList.remove('hidden');
+    }
+    if (window.DiffPanel) {
+      window.DiffPanel.updateSession(sessionName);
+      window.DiffPanel.show();
+    }
+  }
+
+  function getSessionName(taskOrWt) {
+    if (!taskOrWt) return null;
+    var pathVal = taskOrWt.worktreePath || taskOrWt.path;
+    if (!pathVal) return null;
+    var segments = pathVal.split(/[\\/]/);
+    var sessionsIdx = segments.indexOf('sessions');
+    if (sessionsIdx !== -1 && sessionsIdx < segments.length - 1) {
+      if (sessionsIdx > 0 && segments[sessionsIdx - 1].toLowerCase() === 'klaussy') {
+        return segments[sessionsIdx + 1];
+      }
+    }
+    return null;
+  }
+
+  function getOrCreateSessionGroup(sessionName) {
+    var groupEl = taskList.querySelector('.session-group[data-session="' + sessionName + '"]');
+    if (!groupEl) {
+      groupEl = document.createElement('div');
+      groupEl.className = 'session-group';
+      groupEl.dataset.session = sessionName;
+
+      var header = document.createElement('div');
+      header.className = 'session-group-header';
+      
+      var isCollapsed = collapsedSessions.has(sessionName);
+      if (isCollapsed) header.classList.add('collapsed');
+
+      header.innerHTML = 
+        '<span class="session-group-chevron">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
+        '<span class="session-group-icon">&#128193;</span>' +
+        '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
+        '<span class="session-group-badge">0</span>' +
+        '<button class="session-group-close" title="Close Session">&times;</button>';
+
+      var itemsContainer = document.createElement('div');
+      itemsContainer.className = 'session-group-items';
+      if (isCollapsed) itemsContainer.classList.add('collapsed');
+
+      header.addEventListener('click', function (e) {
+        if (e.target.classList.contains('session-group-close')) return;
+        var collapsed = itemsContainer.classList.toggle('collapsed');
+        header.classList.toggle('collapsed', collapsed);
+        var chevron = header.querySelector('.session-group-chevron');
+        if (chevron) chevron.innerHTML = collapsed ? '&#9656;' : '&#9662;';
+        if (collapsed) {
+          collapsedSessions.add(sessionName);
+        } else {
+          collapsedSessions.delete(sessionName);
+        }
+      });
+
+      header.querySelector('.session-group-close').addEventListener('click', function (e) {
+        e.stopPropagation();
+        var closes = itemsContainer.querySelectorAll('.task-close, .worktree-remove');
+        closes.forEach(function (c) { c.click(); });
+      });
+
+      groupEl.appendChild(header);
+      groupEl.appendChild(itemsContainer);
+      taskList.appendChild(groupEl);
+    }
+    return groupEl;
+  }
+
+  function updateSessionGroupBadge(groupEl) {
+    var badge = groupEl.querySelector('.session-group-badge');
+    var itemsContainer = groupEl.querySelector('.session-group-items');
+    if (badge && itemsContainer) {
+      badge.textContent = itemsContainer.querySelectorAll('.task-item').length;
+    }
+  }
+
   function renderItem(task) {
+    startDirtyWatch(task);
+    rebuild();
+  }
+
+  function createTaskDOM(task) {
     var item = document.createElement('div');
     item.className = 'task-item';
     item.dataset.id = task.id;
     item.dataset.repo = task.repoPath || '';
-    // Session identity = the branch name shared by repos created together
-    // (multi-repo fan-out stamps the same branch in each). Drives the
-    // sidebar's session filter.
     item.dataset.branch = task.branch || '';
 
     var modeLabel = AppUtils.modeShortLabel(task.mode);
@@ -50,9 +150,9 @@ window.Sidebar = (function () {
       stopDirtyWatch(task);
       await window.klaus.task.kill(task.id);
       TerminalManager.removeTaskFromUI(task.id);
-      // Plain-folder tasks have no branch — re-attaching requires a git repo,
-      // so don't offer the reopen row; the user can re-launch via Open Folder.
+
       if (wt.branch) window._addWorktreeToSidebar(wt);
+      rebuild();
     });
 
     // Task notes
@@ -65,8 +165,339 @@ window.Sidebar = (function () {
       showNotePopover(noteBtn, task.name);
     });
 
-    taskList.appendChild(item);
-    startDirtyWatch(task);
+    return item;
+  }
+
+  function createWorktreeDOM(wt) {
+    var item = document.createElement('div');
+    item.className = 'task-item ' + (wt.isSavedSession ? 'saved-session' : 'worktree-item');
+    item.dataset.path = wt.path;
+    item.dataset.repo = wt.repoPath || '';
+    item.dataset.branch = wt.branch || '';
+
+    var iconColor = AppUtils.iconColor(wt.name);
+    var iconLetter = (wt.name || '?').charAt(0).toUpperCase();
+
+    if (wt.isSavedSession) {
+      var age = window.App && window.App.formatAge ? window.App.formatAge(wt.savedAt) : '';
+      var pathShort = wt.path ? wt.path.split('/').slice(-2).join('/') : '';
+      var modeLabel = wt.mode === 'shell' ? 'SH' : AppUtils.modeShortLabel(wt.mode);
+      var modeTitle = wt.mode === 'shell' ? 'Previous shell session' : 'Previous ' + AppUtils.modeDisplayName(wt.mode) + ' session';
+      
+      item.innerHTML =
+        '<span class="status-dot saved"></span>' +
+        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(wt.name) + '">' + iconLetter + '</span>' +
+        '<span class="task-mode" title="' + modeTitle + '">' + modeLabel + '</span>' +
+        '<div class="saved-session-info">' +
+          '<span class="task-name" title="' + escHtml(wt.path || '') + '">' + escHtml(wt.name) + '</span>' +
+          '<span class="saved-session-detail">' + escHtml(wt.branch || pathShort) + ' &middot; ' + escHtml(age) + '</span>' +
+        '</div>' +
+        '<div class="saved-session-actions">' +
+          (wt.mode === 'shell'
+            ? '<button class="saved-session-resume" title="Open shell">Open</button>'
+            : '<button class="saved-session-resume" title="Resume conversation">Resume</button>' +
+              '<button class="saved-session-new" title="New session on this worktree">New</button>') +
+          '<button class="saved-session-dismiss" title="Dismiss">&times;</button>' +
+        '</div>';
+
+      item.querySelector('.saved-session-resume').addEventListener('click', async function (e) {
+        e.stopPropagation();
+        var btn = e.target;
+        btn.disabled = true;
+        btn.textContent = '...';
+        var result;
+        try {
+          if (wt.mode === 'shell') {
+            result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
+          } else {
+            result = await window.klaus.session.resume(wt);
+          }
+        } catch (err) {
+          window.toast.error('Resume failed: ' + (err && err.message || err));
+          btn.disabled = false;
+          btn.textContent = wt.mode === 'shell' ? 'Open' : 'Resume';
+          return;
+        }
+        if (result && result.cancelled) {
+          btn.disabled = false;
+          btn.textContent = wt.mode === 'shell' ? 'Open' : 'Resume';
+          return;
+        }
+        if (!result || result.error) {
+          window.toast.error('Resume failed: ' + ((result && result.error) || 'no response from main process'));
+          btn.textContent = 'Err';
+          setTimeout(function () { btn.textContent = wt.mode === 'shell' ? 'Open' : 'Resume'; btn.disabled = false; }, 2000);
+          return;
+        }
+        AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
+        window.App.addTaskToUI(result);
+        window.App.switchToTask(result.id);
+        window.App.restoreUIState(result);
+      });
+
+      var newBtn = item.querySelector('.saved-session-new');
+      if (newBtn) {
+        newBtn.addEventListener('click', async function (e) {
+          e.stopPropagation();
+          var btn = e.target;
+          btn.disabled = true;
+          btn.textContent = '...';
+          var result;
+          try { result = await window.klaus.task.attachWorktree(wt.path, 'claude', wt.repoPath, wt.branch); }
+          catch (err) {
+            window.toast.error('Open failed: ' + (err && err.message || err));
+            btn.disabled = false;
+            btn.textContent = 'New';
+            return;
+          }
+          if (!result || result.error) {
+            window.toast.error('Open failed: ' + ((result && result.error) || 'no response from main process'));
+            btn.textContent = 'Err';
+            setTimeout(function () { btn.textContent = 'New'; btn.disabled = false; }, 2000);
+            return;
+          }
+          AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
+          window.App.addTaskToUI(result);
+          window.App.switchToTask(result.id);
+        });
+      }
+
+      item.querySelector('.saved-session-dismiss').addEventListener('click', async function (e) {
+        e.stopPropagation();
+        await window.klaus.session.dismissSaved(wt);
+        AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
+        rebuild();
+      });
+
+    } else {
+      item.innerHTML =
+        '<span class="status-dot idle"></span>' +
+        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(wt.name) + '">' + iconLetter + '</span>' +
+        '<div class="saved-session-info">' +
+          '<span class="task-name" title="' + escHtml(wt.path) + '">' + escHtml(wt.name) + '</span>' +
+          '<span class="saved-session-detail">' + escHtml(wt.branch) + '</span>' +
+        '</div>' +
+        '<div class="saved-session-actions">' +
+          '<button class="worktree-open-claude" title="Open with ' + escHtml(AppUtils.modeDisplayName(window.App.defaultAgent())) + '">' + escHtml(AppUtils.modeShortLabel(window.App.defaultAgent())) + '</button>' +
+          '<button class="worktree-open-shell" title="Open shell">sh</button>' +
+          '<button class="worktree-remove" title="Remove worktree">\u00d7</button>' +
+        '</div>';
+
+      item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
+        e.stopPropagation();
+        var result;
+        try { result = await window.klaus.task.attachWorktree(wt.path, window.App.defaultAgent(), wt.repoPath, wt.branch); }
+        catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
+        if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
+        if (!result) { window.toast.error('Open failed: no response from main process'); return; }
+        window.App.addTaskToUI(result);
+        window.App.switchToTask(result.id);
+      });
+
+      item.querySelector('.worktree-open-shell').addEventListener('click', async function (e) {
+        e.stopPropagation();
+        var result;
+        try { result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch); }
+        catch (err) { window.toast.error('Open failed: ' + (err && err.message || err)); return; }
+        if (result && result.error) { window.toast.error('Open failed: ' + result.error); return; }
+        if (!result) { window.toast.error('Open failed: no response from main process'); return; }
+        window.App.addTaskToUI(result);
+        window.App.switchToTask(result.id);
+      });
+
+      item.querySelector('.worktree-remove').addEventListener('click', async function (e) {
+        e.stopPropagation();
+        await window.klaus.repo.hideWorktree(wt.path);
+        AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
+        rebuild();
+      });
+    }
+
+    item.addEventListener('click', function () {
+      if (AppState.sidebarCollapsed) {
+        var btn = item.querySelector('.saved-session-resume') || item.querySelector('.worktree-open-claude');
+        if (btn) btn.click();
+      }
+    });
+
+    return item;
+  }
+
+  function createSessionGroupDOM(sessionName, activeList, inactiveList) {
+    var groupEl = document.createElement('div');
+    groupEl.className = 'session-group';
+    groupEl.dataset.session = sessionName;
+
+    var header = document.createElement('div');
+    header.className = 'session-group-header';
+    
+    var isCollapsed = collapsedSessions.has(sessionName);
+    if (isCollapsed) header.classList.add('collapsed');
+
+    var totalCount = activeList.length + inactiveList.length;
+
+    var resumeBtnHtml = '';
+    if (inactiveList.length > 0) {
+      resumeBtnHtml = '<button class="session-group-resume-btn" title="Resume All Repos in Session">&#9654; Resume All</button>';
+    }
+
+    header.innerHTML = 
+      '<span class="session-group-chevron">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
+      '<span class="session-group-icon">&#128193;</span>' +
+      '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
+      '<span class="session-group-badge">' + totalCount + '</span>' +
+      resumeBtnHtml +
+      '<button class="session-group-close" title="Close Session">&times;</button>';
+
+    var itemsContainer = document.createElement('div');
+    itemsContainer.className = 'session-group-items';
+    if (isCollapsed) itemsContainer.classList.add('collapsed');
+
+    header.addEventListener('click', function (e) {
+      if (e.target.closest('.session-group-close') || e.target.closest('.session-group-resume-btn')) return;
+      if (e.target.closest('.session-group-name') || e.target.closest('.session-group-icon') || e.target.closest('.session-group-badge')) {
+        e.stopPropagation();
+        selectSession(sessionName);
+        return;
+      }
+      var collapsed = itemsContainer.classList.toggle('collapsed');
+      header.classList.toggle('collapsed', collapsed);
+      var chevron = header.querySelector('.session-group-chevron');
+      if (chevron) chevron.innerHTML = collapsed ? '&#9656;' : '&#9662;';
+      if (collapsed) {
+        collapsedSessions.add(sessionName);
+      } else {
+        collapsedSessions.delete(sessionName);
+      }
+    });
+
+    header.querySelector('.session-group-close').addEventListener('click', function (e) {
+      e.stopPropagation();
+      var activeCloses = itemsContainer.querySelectorAll('.task-close');
+      activeCloses.forEach(function (c) { c.click(); });
+      var inactiveRemoves = itemsContainer.querySelectorAll('.worktree-remove');
+      inactiveRemoves.forEach(function (c) { c.click(); });
+    });
+
+    var resumeBtn = header.querySelector('.session-group-resume-btn');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', async function (e) {
+        e.stopPropagation();
+        resumeBtn.disabled = true;
+        resumeBtn.textContent = 'Opening...';
+        
+        for (var i = 0; i < inactiveList.length; i++) {
+          var wt = inactiveList[i];
+          try {
+            var result = await window.klaus.task.attachWorktree(wt.path, window.App.defaultAgent(), wt.repoPath, wt.branch);
+            if (result && !result.error) {
+              window.App.addTaskToUI(result);
+              if (i === 0) window.App.switchToTask(result.id);
+            }
+          } catch (err) {
+            console.error('Failed to resume worktree:', err);
+          }
+        }
+        rebuild();
+      });
+    }
+
+    activeList.forEach(function(task) {
+      var itemEl = createTaskDOM(task);
+      itemsContainer.appendChild(itemEl);
+    });
+
+    inactiveList.forEach(function(wt) {
+      var itemEl = createWorktreeDOM(wt);
+      itemsContainer.appendChild(itemEl);
+    });
+
+    groupEl.appendChild(header);
+    groupEl.appendChild(itemsContainer);
+    return groupEl;
+  }
+
+  function expandSession(sessionName) {
+    collapsedSessions.delete(sessionName);
+  }
+
+  function rebuild() {
+    taskList.innerHTML = '';
+
+    var activeTasks = Array.from(AppState.tasks.values());
+    var activePaths = activeTasks.map(function(t) { return t.worktreePath; });
+
+    var inactive = (AppState.inactiveWorktrees || []).filter(function(wt) {
+      return activePaths.indexOf(wt.path) === -1;
+    });
+
+    var sessions = {};
+
+    activeTasks.forEach(function(task) {
+      var sName = getSessionName(task);
+      if (sName) {
+        if (!sessions[sName]) sessions[sName] = { active: [], inactive: [] };
+        sessions[sName].active.push(task);
+      }
+    });
+
+    inactive.forEach(function(wt) {
+      var sName = getSessionName(wt);
+      if (sName) {
+        if (!sessions[sName]) sessions[sName] = { active: [], inactive: [] };
+        sessions[sName].inactive.push(wt);
+      }
+    });
+
+    var standaloneActive = activeTasks.filter(function(t) { return !getSessionName(t); });
+    var standaloneInactive = inactive.filter(function(wt) { return !getSessionName(wt); });
+
+    var activeSessionNames = [];
+    var inactiveSessionNames = [];
+
+    Object.keys(sessions).forEach(function(sName) {
+      if (sessions[sName].active.length > 0) {
+        activeSessionNames.push(sName);
+      } else {
+        inactiveSessionNames.push(sName);
+      }
+    });
+
+    // 1. Render Active Section
+    if (activeSessionNames.length > 0 || standaloneActive.length > 0) {
+      var activeHeader = document.createElement('div');
+      activeHeader.className = 'sidebar-section-header';
+      activeHeader.textContent = 'Active';
+      taskList.appendChild(activeHeader);
+
+      activeSessionNames.forEach(function(sName) {
+        var groupEl = createSessionGroupDOM(sName, sessions[sName].active, sessions[sName].inactive);
+        taskList.appendChild(groupEl);
+      });
+
+      standaloneActive.forEach(function(task) {
+        var itemEl = createTaskDOM(task);
+        taskList.appendChild(itemEl);
+      });
+    }
+
+    // 2. Render Inactive Section
+    if (inactiveSessionNames.length > 0 || standaloneInactive.length > 0) {
+      var inactiveHeader = document.createElement('div');
+      inactiveHeader.className = 'sidebar-section-header';
+      inactiveHeader.textContent = 'Inactive';
+      taskList.appendChild(inactiveHeader);
+
+      inactiveSessionNames.forEach(function(sName) {
+        var groupEl = createSessionGroupDOM(sName, [], sessions[sName].inactive);
+        taskList.appendChild(groupEl);
+      });
+
+      standaloneInactive.forEach(function(wt) {
+        var itemEl = createWorktreeDOM(wt);
+        taskList.appendChild(itemEl);
+      });
+    }
   }
 
   // ---- H2: Cross-task dirty indicators ----
@@ -328,12 +759,13 @@ window.Sidebar = (function () {
     e.dataTransfer.dropEffect = 'move';
     var target = e.target.closest('.task-item');
     if (!target || target === dragItem) return;
+    if (dragItem.parentNode !== target.parentNode) return;
     var rect = target.getBoundingClientRect();
     var mid = rect.top + rect.height / 2;
     if (e.clientY < mid) {
-      taskList.insertBefore(dragItem, target);
+      target.parentNode.insertBefore(dragItem, target);
     } else {
-      taskList.insertBefore(dragItem, target.nextSibling);
+      target.parentNode.insertBefore(dragItem, target.nextSibling);
     }
   });
 
@@ -360,5 +792,11 @@ window.Sidebar = (function () {
     showResumeButton: showResumeButton,
     showUnreadBadge: showUnreadBadge,
     hideUnreadBadge: hideUnreadBadge,
+    getSessionName: getSessionName,
+    getOrCreateSessionGroup: getOrCreateSessionGroup,
+    updateSessionGroupBadge: updateSessionGroupBadge,
+    expandSession: expandSession,
+    rebuild: rebuild,
+    selectSession: selectSession,
   };
 })();

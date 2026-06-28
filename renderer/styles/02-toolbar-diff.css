@@ -350,6 +350,51 @@
   color: var(--text);
 }
 
+/* Scope toggle bar */
+.diff-scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-dim, rgba(255, 255, 255, 0.02));
+}
+
+.diff-scope-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  flex-shrink: 0;
+  width: 100%;
+}
+
+.diff-scope-btn {
+  flex: 1;
+  padding: 3px 10px;
+  font-size: 11px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.diff-scope-btn:not(:last-child) {
+  border-right: 1px solid var(--border);
+}
+
+.diff-scope-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.diff-scope-btn:hover:not(.active) {
+  background: var(--surface);
+  color: var(--text);
+}
+
 .diff-base-select {
   flex: 1;
   min-width: 0;
