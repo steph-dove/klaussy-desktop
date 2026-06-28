@@ -62,30 +62,24 @@ function writeExecutable(binDir, name, body) {
   return p;
 }
 
-// Fake agent CLI. The app spawns it as `zsh -l -c '<bin> <flags>'` inside the
-// worktree; it ignores all flags and prints a recognizable banner (plus
-// anything in FAKE_AGENT_OUTPUT) so a terminal test can match output. It
-// re-emits on an interval and stays alive on purpose: a one-shot print + exit
-// races both the app (which converts the instance to a shell on agent exit)
-// and the test's terminal-data subscription (attached just after spawn), so in
-// CI the marker could be gone before anyone listens. Looping guarantees it
-// lands within the test's wait window; the test kills the task when done.
+// Fake agent CLI — a POSIX sh script, NOT node. Interactive tasks spawn the
+// agent via `zsh -l -c '<bin> <flags>'`; that login shell re-resolves PATH from
+// profile files and on CI runners drops the node injected by setup-node, so a
+// `#!/usr/bin/env node` shebang fails and the instance falls back to a plain
+// shell. /bin/sh + printf/sleep have no such dependency. It ignores all flags
+// and re-emits a recognizable banner (plus $FAKE_AGENT_OUTPUT) for ~3s, then
+// exits — long enough that a terminal test's data subscription (attached just
+// after spawn) catches the marker, short enough that passthrough AI-stream
+// tests (which don't kill the process) see the stream complete, not leak.
 function writeFakeAgent(binDir, name = 'claude') {
-  return writeExecutable(binDir, name, `#!/usr/bin/env node
-const extra = process.env.FAKE_AGENT_OUTPUT || '';
-const emit = () => {
-  process.stdout.write('FAKE-AGENT-READY ' + ${JSON.stringify(name)} + '\\n');
-  if (extra) process.stdout.write(extra + '\\n');
-};
-// Bounded lifetime: re-emit for ~3s then exit. Long enough that a terminal
-// test's data subscription (attached just after spawn) reliably catches the
-// marker; short enough that passthrough AI-stream tests (which don't kill the
-// process) see the stream complete instead of leaking a live agent. SIGTERM
-// (a task kill) exits immediately.
-emit();
-let n = 0;
-const t = setInterval(() => { emit(); if (++n >= 10) { clearInterval(t); process.exit(0); } }, 300);
-process.on('SIGTERM', () => { clearInterval(t); process.exit(0); });
+  return writeExecutable(binDir, name, `#!/bin/sh
+i=0
+while [ "$i" -lt 11 ]; do
+  printf 'FAKE-AGENT-READY ${name}\\n'
+  if [ -n "$FAKE_AGENT_OUTPUT" ]; then printf '%s\\n' "$FAKE_AGENT_OUTPUT"; fi
+  i=$((i + 1))
+  sleep 0.3
+done
 `);
 }
 
