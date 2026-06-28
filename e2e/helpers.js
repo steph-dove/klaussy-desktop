@@ -63,15 +63,29 @@ function writeExecutable(binDir, name, body) {
 }
 
 // Fake agent CLI. The app spawns it as `zsh -l -c '<bin> <flags>'` inside the
-// worktree; it ignores all flags, prints a recognizable banner (plus anything
-// in FAKE_AGENT_OUTPUT) so a terminal test can match output, then exits 0
-// (which makes the app convert the instance to a plain shell).
+// worktree; it ignores all flags and prints a recognizable banner (plus
+// anything in FAKE_AGENT_OUTPUT) so a terminal test can match output. It
+// re-emits on an interval and stays alive on purpose: a one-shot print + exit
+// races both the app (which converts the instance to a shell on agent exit)
+// and the test's terminal-data subscription (attached just after spawn), so in
+// CI the marker could be gone before anyone listens. Looping guarantees it
+// lands within the test's wait window; the test kills the task when done.
 function writeFakeAgent(binDir, name = 'claude') {
   return writeExecutable(binDir, name, `#!/usr/bin/env node
 const extra = process.env.FAKE_AGENT_OUTPUT || '';
-process.stdout.write('FAKE-AGENT-READY ' + ${JSON.stringify(name)} + '\\n');
-if (extra) process.stdout.write(extra + '\\n');
-process.exit(0);
+const emit = () => {
+  process.stdout.write('FAKE-AGENT-READY ' + ${JSON.stringify(name)} + '\\n');
+  if (extra) process.stdout.write(extra + '\\n');
+};
+// Bounded lifetime: re-emit for ~3s then exit. Long enough that a terminal
+// test's data subscription (attached just after spawn) reliably catches the
+// marker; short enough that passthrough AI-stream tests (which don't kill the
+// process) see the stream complete instead of leaking a live agent. SIGTERM
+// (a task kill) exits immediately.
+emit();
+let n = 0;
+const t = setInterval(() => { emit(); if (++n >= 10) { clearInterval(t); process.exit(0); } }, 300);
+process.on('SIGTERM', () => { clearInterval(t); process.exit(0); });
 `);
 }
 

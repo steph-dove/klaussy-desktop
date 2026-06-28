@@ -52,6 +52,16 @@ const test = base.extend({
   mainWindow: async ({ electronApp }, use) => {
     const win = await electronApp.firstWindow();
     await win.waitForLoadState('domcontentloaded');
+    // The first-run "Setup check" dialog (#deps-overlay, from about-log.js)
+    // pops async whenever gh / an agent CLI is missing — always true in CI —
+    // and as a full-screen .palette-overlay it intercepts every click, timing
+    // out otherwise-fine interactions. Tests don't exercise that dialog, so
+    // remove it on sight (now + whenever it's (re)added) for the whole suite.
+    await win.evaluate(() => {
+      const kill = () => { const o = document.getElementById('deps-overlay'); if (o) o.remove(); };
+      kill();
+      new MutationObserver(kill).observe(document.documentElement, { childList: true, subtree: true });
+    });
     await use(win);
   },
 });

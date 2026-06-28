@@ -65,13 +65,13 @@ test('Manage Sessions modal opens and closes', async ({ mainWindow }) => {
 });
 
 test('Sidebar collapse toggle flips state', async ({ mainWindow }) => {
-  const body = mainWindow.locator('body');
-  const before = await body.getAttribute('class');
-  await mainWindow.locator('#btn-sidebar-toggle').click();
-  // The toggle updates the label text between Hide/Show.
+  // toggleSidebar() flips #sidebar.collapsed and swaps the label Hide<->Show.
+  const sidebar = mainWindow.locator('#sidebar');
   const label = mainWindow.locator('#sidebar-toggle-label');
-  await expect(label).toHaveText(/show|hide/i);
   await mainWindow.locator('#btn-sidebar-toggle').click();
-  // Returns to the original class state after two toggles.
-  await expect(body).toHaveClass(new RegExp((before || '').trim().split(/\s+/).join('.*') || '.*'));
+  await expect(sidebar).toHaveClass(/collapsed/);
+  await expect(label).toHaveText('Show');
+  await mainWindow.locator('#btn-sidebar-toggle').click();
+  await expect(sidebar).not.toHaveClass(/collapsed/);
+  await expect(label).toHaveText('Hide');
 });
