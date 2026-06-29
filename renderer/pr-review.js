@@ -1302,6 +1302,62 @@ window.PrReview = window.PrReview || {};
     return files;
   };
 
+  // Build the set of lines GitHub will accept as inline-comment anchors,
+  // keyed by path then side. A line is commentable only if it appears in a
+  // diff hunk (added/deleted/context) — the same lines renderUnifiedDiff tags
+  // with data-side/data-line. AI findings verify their line against the full
+  // worktree file, which can resolve to an unchanged line that is NOT in the
+  // diff; posting that inline yields GitHub's 422 "line must be part of the
+  // diff". Callers use this index to gate inline posting and fall back to an
+  // issue comment instead. Returns { [path]: { RIGHT: Set<number>, LEFT: Set<number> } }.
+  PR.buildCommentableLineIndex = function(diffText) {
+    var index = {};
+    if (!diffText) return index;
+    var lines = diffText.split('\n');
+    var path = null, sides = null, inHunk = false, oldLn = 0, newLn = 0;
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      if (line.startsWith('diff --git ')) {
+        var m = line.match(/^diff --git a\/.* b\/(.*)$/);
+        path = m ? m[1] : null;
+        sides = path ? (index[path] = index[path] || { RIGHT: {}, LEFT: {} }) : null;
+        inHunk = false; oldLn = newLn = 0;
+      } else if (!sides) {
+        continue;
+      } else if (line.startsWith('@@')) {
+        var hm = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+        if (hm) { oldLn = parseInt(hm[1], 10) - 1; newLn = parseInt(hm[2], 10) - 1; inHunk = true; }
+      } else if (!inHunk) {
+        // File-header noise before the first hunk (index/mode/---/+++/rename…).
+        continue;
+      } else if (line.startsWith('+')) {
+        newLn++; sides.RIGHT[newLn] = true;
+      } else if (line.startsWith('-')) {
+        oldLn++; sides.LEFT[oldLn] = true;
+      } else if (line.startsWith('\\')) {
+        continue; // "\ No newline at end of file"
+      } else {
+        oldLn++; newLn++; sides.RIGHT[newLn] = true; sides.LEFT[oldLn] = true;
+      }
+    }
+    return index;
+  };
+
+  // True when (path, line, side) is a valid inline-comment anchor in `diffText`.
+  // Defaults to RIGHT (the new-file side findings resolve against). Returns true
+  // when the diff is empty/unparsed so a missing diff never blocks posting.
+  PR.isLineInDiff = function(diffText, path, line, side) {
+    if (!diffText || !path || typeof line !== 'number') return true;
+    var index = PR._commentableIndex;
+    if (!index || PR._commentableIndexSource !== diffText) {
+      index = PR._commentableIndex = PR.buildCommentableLineIndex(diffText);
+      PR._commentableIndexSource = diffText;
+    }
+    var entry = index[path];
+    if (!entry) return false;
+    return !!entry[side === 'LEFT' ? 'LEFT' : 'RIGHT'][line];
+  };
+
   // Unified-diff renderer that tags each add/del/context line with (side,
   // line) so G3 can anchor review threads by GitHub's position model
   // (LEFT=old_ln, RIGHT=new_ln). Explain lives in a floating action button
