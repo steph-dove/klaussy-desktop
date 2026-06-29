@@ -21,10 +21,7 @@ window.Sidebar = (function () {
     taskList.querySelectorAll('.task-item').forEach(function(item) {
       item.classList.remove('active');
     });
-    var broadcastBar = document.getElementById('broadcast-bar');
-    if (broadcastBar) {
-      broadcastBar.classList.remove('hidden');
-    }
+    if (window.BroadcastBar) window.BroadcastBar.update();
     if (window.DiffPanel) {
       window.DiffPanel.updateSession(sessionName);
       window.DiffPanel.show();

@@ -2887,3 +2887,59 @@ body.task-branchless #ahead-behind {
 #btn-broadcast-send:active {
   transform: scale(0.96);
 }
+
+#btn-broadcast-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+  transition: color 0.2s, transform 0.1s;
+}
+
+#btn-broadcast-close:hover {
+  color: var(--text);
+}
+
+#btn-broadcast-close:active {
+  transform: scale(0.9);
+}
+
+/* Collapsed launcher — always visible inside a session, click to expand */
+#broadcast-toggle {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(22, 22, 28, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  border-radius: 9999px;
+  padding: 8px 18px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  z-index: 1000;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+#broadcast-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  transform: translate(-50%, -2px);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+#broadcast-toggle.hidden {
+  opacity: 0;
+  transform: translate(-50%, 20px);
+  pointer-events: none;
+}
