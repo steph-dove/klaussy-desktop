@@ -1,7 +1,7 @@
 {
   "name": "klaussy-desktop",
   "productName": "Klaussy",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
   "author": {
@@ -187,7 +187,7 @@
     "publish": {
       "provider": "github",
       "owner": "steph-dove",
-      "repo": "klaussy-desktop-feedback",
+      "repo": "klaussy-desktop",
       "releaseType": "release"
     }
   }

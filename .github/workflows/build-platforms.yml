@@ -20,6 +20,12 @@ on:
         type: string
         default: ''
 
+# contents:write lets the default GITHUB_TOKEN attach artifacts to a release on
+# THIS repo (klaussy-desktop) — the canonical release home. The feedback-repo
+# upload still needs the cross-repo FEEDBACK_REPO_TOKEN PAT.
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -99,8 +105,8 @@ jobs:
           ESIGNER_CREDENTIAL_ID: ${{ inputs.sign && secrets.ESIGNER_CREDENTIAL_ID || '' }}
 
       # Best-effort upload to GH Actions artifact cache (14-day retention for
-      # ad-hoc debugging). The canonical destination is the feedback release
-      # below, so don't fail the run if this step hits storage quota.
+      # ad-hoc debugging). The canonical destination is the klaussy-desktop
+      # release below, so don't fail the run if this step hits storage quota.
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         continue-on-error: true
@@ -111,28 +117,50 @@ jobs:
           retention-days: 14
 
       # When release_tag is set, attach the built artifacts directly to the
-      # release on klaussy-desktop-feedback so the auto-updater (which polls
-      # that repo, not this one) and end users get a download link without a
-      # manual "trigger CI → grab artifacts → re-upload" step.
+      # release on klaussy-desktop (the canonical home) so the auto-updater
+      # (which, as of v0.7.0, polls this repo) and end users get a download
+      # link without a manual "trigger CI → grab artifacts → re-upload" step.
+      #
+      # Auth: the default GITHUB_TOKEN writes to this repo (see permissions
+      # block above) — no PAT needed.
+      - name: Upload artifacts to klaussy-desktop release
+        if: ${{ always() && inputs.release_tag != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # `gh release upload --clobber` so re-running the workflow on the same
+          # tag overwrites prior artifacts instead of failing.
+          mapfile -t files < <(ls dist/Klaussy-*.exe dist/Klaussy-*.AppImage dist/Klaussy-*.deb dist/latest.yml dist/latest-linux.yml 2>/dev/null || true)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::warning::No platform artifacts found in dist/; nothing to upload."
+            exit 0
+          fi
+          gh release upload "${{ inputs.release_tag }}" "${files[@]}" \
+            --repo steph-dove/klaussy-desktop \
+            --clobber
+
+      # MIGRATION BRIDGE (temporary): clients installed at v0.6.0 and earlier
+      # still poll klaussy-desktop-feedback for updates, so mirror this release
+      # there too. Once v0.7.0 (which polls klaussy-desktop) is broadly
+      # installed, this step can be deleted.
       #
       # Auth: GITHUB_TOKEN can't write to a different repo. A fine-scoped PAT
       # stored as FEEDBACK_REPO_TOKEN (contents:write on klaussy-desktop-feedback,
       # nothing else) is required. Without it the step is skipped.
-      - name: Upload artifacts to feedback release
+      - name: Mirror artifacts to feedback release (migration bridge)
         if: ${{ always() && inputs.release_tag != '' }}
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.FEEDBACK_REPO_TOKEN }}
         run: |
           if [ -z "$GH_TOKEN" ]; then
-            echo "::warning::release_tag was provided but FEEDBACK_REPO_TOKEN is not set; skipping release upload."
+            echo "::warning::release_tag was provided but FEEDBACK_REPO_TOKEN is not set; skipping feedback-repo mirror."
             exit 0
           fi
-          # `gh release upload --clobber` so re-running the workflow on the same
-          # tag overwrites prior artifacts instead of failing.
           mapfile -t files < <(ls dist/Klaussy-*.exe dist/Klaussy-*.AppImage dist/Klaussy-*.deb dist/latest.yml dist/latest-linux.yml 2>/dev/null || true)
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::warning::No platform artifacts found in dist/; nothing to upload."
+            echo "::warning::No platform artifacts found in dist/; nothing to mirror."
             exit 0
           fi
           gh release upload "${{ inputs.release_tag }}" "${files[@]}" \
