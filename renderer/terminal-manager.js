@@ -962,6 +962,7 @@ window.TerminalManager = (function () {
         switchToTask(remaining[0]);
       } else {
         emptyState.style.display = 'flex';
+        if (window.BroadcastBar) window.BroadcastBar.update();
         if (window.BranchlessUI) window.BranchlessUI.apply(null);
         if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(null);
       }
@@ -976,10 +977,7 @@ window.TerminalManager = (function () {
     AppState.activeSessionName = null;
     Sidebar.hideUnreadBadge(id);
 
-    var broadcastBar = document.getElementById('broadcast-bar');
-    if (broadcastBar) {
-      broadcastBar.classList.add('hidden');
-    }
+    if (window.BroadcastBar) window.BroadcastBar.update();
 
     taskList.querySelectorAll('.session-group-header').forEach(function (el) {
       el.classList.remove('active');

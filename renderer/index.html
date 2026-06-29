@@ -244,10 +244,15 @@
           </div>
         </div>
         <div id="terminals"></div>
+        <button id="broadcast-toggle" class="hidden" title="Broadcast a command to every agent in this session">
+          <span class="broadcast-icon">&#128362;</span>
+          <span>Broadcast</span>
+        </button>
         <div id="broadcast-bar" class="hidden">
           <span class="broadcast-icon">&#128362;</span>
           <input type="text" id="broadcast-input" placeholder="Broadcast command to all active agents in session... (Enter to send)" autocomplete="off" spellcheck="false" />
           <button id="btn-broadcast-send">Send</button>
+          <button id="btn-broadcast-close" title="Dismiss" aria-label="Dismiss">&times;</button>
         </div>
       </div>
 

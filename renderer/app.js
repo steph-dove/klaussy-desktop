@@ -987,15 +987,57 @@ window.App = window.App || {};
   // ---- Broadcast command bar logic ----
   var broadcastInput = document.getElementById('broadcast-input');
   var broadcastSend = document.getElementById('btn-broadcast-send');
+  var broadcastClose = document.getElementById('btn-broadcast-close');
+  var broadcastToggle = document.getElementById('broadcast-toggle');
+  var broadcastBar = document.getElementById('broadcast-bar');
+
+  // The session a broadcast would target: an explicitly selected session
+  // group, or the session that owns the currently focused terminal. Returns
+  // null when the user isn't inside a recognized session (e.g. a standalone
+  // local-folder task), which is also our cue to hide the broadcast UI.
+  function broadcastTargetSession() {
+    if (AppState.activeSessionName) return AppState.activeSessionName;
+    var t = AppState.activeTaskId != null ? AppState.tasks.get(AppState.activeTaskId) : null;
+    return (t && window.Sidebar) ? window.Sidebar.getSessionName(t) : null;
+  }
+
+  var broadcastExpanded = false;
+  try { broadcastExpanded = localStorage.getItem('broadcastExpanded') === '1'; } catch (e) {}
+
+  // Reconcile the collapsed pill / expanded bar against the current context
+  // and the user's persisted preference. Called whenever the active session or
+  // task changes.
+  function updateBroadcastUI() {
+    var inSession = !!broadcastTargetSession();
+    if (!inSession) {
+      if (broadcastBar) broadcastBar.classList.add('hidden');
+      if (broadcastToggle) broadcastToggle.classList.add('hidden');
+      return;
+    }
+    if (broadcastBar) broadcastBar.classList.toggle('hidden', !broadcastExpanded);
+    if (broadcastToggle) broadcastToggle.classList.toggle('hidden', broadcastExpanded);
+  }
+
+  function setBroadcastExpanded(expanded) {
+    broadcastExpanded = expanded;
+    try { localStorage.setItem('broadcastExpanded', expanded ? '1' : '0'); } catch (e) {}
+    updateBroadcastUI();
+    if (expanded && broadcastInput) broadcastInput.focus();
+  }
 
   async function sendBroadcast() {
     var val = broadcastInput.value.trim();
     if (!val) return;
-    broadcastInput.value = '';
+
+    var target = broadcastTargetSession();
+    if (!target) {
+      window.toast.error('Select a session to broadcast to');
+      return;
+    }
 
     var activeTasks = [];
     AppState.tasks.forEach(function(t) {
-      if (window.Sidebar && window.Sidebar.getSessionName(t) === AppState.activeSessionName) {
+      if (window.Sidebar && window.Sidebar.getSessionName(t) === target) {
         activeTasks.push(t);
       }
     });
@@ -1005,11 +1047,12 @@ window.App = window.App || {};
       return;
     }
 
+    broadcastInput.value = '';
     activeTasks.forEach(function(task) {
       window.klaus.terminal.write(task.id, val + '\r');
     });
 
-    window.toast.success('Broadcasted command to ' + activeTasks.length + ' terminals');
+    window.toast.success('Broadcasted command to ' + activeTasks.length + ' ' + (activeTasks.length === 1 ? 'agent' : 'agents'));
   }
 
   if (broadcastInput && broadcastSend) {
@@ -1017,6 +1060,9 @@ window.App = window.App || {};
       if (e.key === 'Enter') {
         e.preventDefault();
         sendBroadcast();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        setBroadcastExpanded(false);
       }
     });
     broadcastSend.addEventListener('click', function (e) {
@@ -1024,6 +1070,25 @@ window.App = window.App || {};
       sendBroadcast();
     });
   }
+  if (broadcastToggle) {
+    broadcastToggle.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setBroadcastExpanded(true);
+    });
+  }
+  if (broadcastClose) {
+    broadcastClose.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setBroadcastExpanded(false);
+    });
+  }
+
+  window.BroadcastBar = {
+    update: updateBroadcastUI,
+    expand: function () { setBroadcastExpanded(true); },
+    collapse: function () { setBroadcastExpanded(false); }
+  };
+  updateBroadcastUI();
 
   App.btnRunApp = document.getElementById('btn-run-app');
   if (App.btnRunApp) {
