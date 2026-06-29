@@ -274,6 +274,16 @@
     if (!PR.aiReview.worktreePath) return;
     PR.aiReview.findings.forEach(function (f) {
       if (!f.path || !f.line) return;
+      // Downgrade any inline finding whose line isn't part of the PR diff —
+      // including ones cached as inline-verified by a Klaussy version that
+      // didn't check the diff. Without this they'd 422 on submit. Cheap,
+      // synchronous, and runs before the verified-skip below.
+      if (f.postMode === 'inline' &&
+          !PR.isLineInDiff(PR.lastState && PR.lastState.diff, f.path, f.line, f.side || 'RIGHT')) {
+        f.locationVerified = false;
+        f.lineNotInDiff = true;
+        f.postMode = 'issue';
+      }
       // Re-verify cached findings missing the file snippet — happens for
       // findings cached from a Klaussy version that didn't capture the file
       // content. Skip only when fully verified.
@@ -304,9 +314,16 @@
         });
         if (f.locationRaw && f.locationRaw.snippet) candidates.push(f.locationRaw.snippet);
         var match = PR.findSnippetLineAcrossCandidates(r.content, f.line, candidates);
-        if (match) {
+        // A snippet match only proves the line exists in the *current file*;
+        // GitHub rejects inline anchors that aren't part of the PR diff (422
+        // "line must be part of the diff"). Gate inline mode on the line
+        // actually being in the diff and fall back to an issue comment otherwise.
+        var diffText = PR.lastState && PR.lastState.diff;
+        var inDiff = match && PR.isLineInDiff(diffText, f.path, match.line, f.side || 'RIGHT');
+        if (match && inDiff) {
           f.line = match.line;
           f.locationVerified = true;
+          f.lineNotInDiff = false;
           f.postMode = 'inline';
           // Capture file content at the verified location so the card can
           // render the original code in a fixed position (between headers
@@ -325,11 +342,29 @@
             endLine: startLine + snippetLines.length - 1,
             text: snippetLines.join('\n'),
           };
+        } else if (match) {
+          // The snippet resolves to a real line, but it's outside the PR diff
+          // (an unchanged line GitHub won't accept as an inline anchor). Keep
+          // the resolved line/snippet so the card can still show the code, but
+          // post as an issue comment so "Add to PR" doesn't 422.
+          f.line = match.line;
+          f.locationVerified = false;
+          f.lineNotInDiff = true;
+          f.postMode = 'issue';
+          var nStart = Math.max(1, match.line - 2);
+          var nLines = r.content.split('\n').slice(nStart - 1, match.line + 4);
+          f.verifiedSnippet = {
+            path: f.path,
+            startLine: nStart,
+            endLine: nStart + nLines.length - 1,
+            text: nLines.join('\n'),
+          };
         } else {
           // No match anywhere in the file — Claude probably hallucinated
           // the location. Fall back to issue-comment mode so "Add to PR"
           // still posts *something* useful rather than a broken inline.
           f.locationVerified = false;
+          f.lineNotInDiff = false;
           f.postMode = 'issue';
           f.verifiedSnippet = null;
         }

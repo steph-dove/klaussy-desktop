@@ -397,7 +397,9 @@
       ? (inDraft
           ? 'Draft review comment — click to remove from the pending review'
           : 'Add as draft inline comment at ' + f.path + ':' + f.line)
-      : 'No verified file/line — will post as a general PR comment';
+      : (f.lineNotInDiff
+          ? f.path + ':' + f.line + ' isn’t part of this PR’s diff — will post as a general PR comment'
+          : 'No verified file/line — will post as a general PR comment');
 
     if (f.commentStatus === 'posted') {
       commentBadge = '<span class="pr-ai-finding-comment-status posted" title="Posted to the PR">\u2713 Commented</span>';
@@ -628,7 +630,9 @@
     }
     var anchorHint = (f.locationVerified && f.path && f.line)
       ? 'Inline at ' + PR.escHtml(f.path) + ':' + f.line
-      : 'General PR comment (no verified location)';
+      : (f.lineNotInDiff
+          ? 'General PR comment (' + PR.escHtml(f.path) + ':' + f.line + ' not in diff)'
+          : 'General PR comment (no verified location)');
     return '<div class="pr-ai-finding-draft-comment pending">'
       + '<div class="pr-ai-finding-draft-head">'
         + '<span class="pr-ai-finding-draft-label">Draft PR comment</span>'

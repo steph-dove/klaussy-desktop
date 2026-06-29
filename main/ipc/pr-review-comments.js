@@ -290,6 +290,13 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
         // UI gate didn't catch it (e.g. author/user not yet known on submit).
         if (/own pull request/i.test(msg)) {
           msg = 'GitHub doesn’t allow Approve or Request changes on your own PR. Use “Comment” to submit your feedback.';
+        } else if (/must be part of the diff|line must be part|pull_request_review_thread|line could not be resolved/i.test(msg)) {
+          // One inline comment anchors to a line GitHub doesn't consider part
+          // of the diff, which fails the whole (atomic) review. Surface the
+          // anchors so the user can drop the offending draft and retry.
+          msg = 'GitHub rejected an inline comment whose line isn’t part of this PR’s diff. '
+            + 'Remove or re-anchor the draft comment(s) and submit again. Anchors: '
+            + JSON.stringify(payload.comments.map((c) => c.path + ':' + c.line));
         }
         resolve({ error: msg || ('gh exited with code ' + code) });
         return;
