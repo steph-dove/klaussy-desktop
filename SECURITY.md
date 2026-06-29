@@ -26,7 +26,7 @@ public disclosure.
 ## Supported versions
 
 Security fixes are released against the **latest version** only. Always update
-to the newest release: <https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest>.
+to the newest release: <https://github.com/steph-dove/klaussy-desktop/releases/latest>.
 
 ## Scope notes
 

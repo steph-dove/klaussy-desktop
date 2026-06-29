@@ -31,7 +31,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 
 Prebuilt, signed, and notarized binaries are available for macOS, Windows, and Linux. Free for individual use — no account or access key required.
 
-➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop-feedback/releases/latest)** &nbsp;|&nbsp; **[★ Star this Repo](https://github.com/steph-dove/klaussy-desktop)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
+➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop/releases/latest)** &nbsp;|&nbsp; **[★ Star this Repo](https://github.com/steph-dove/klaussy-desktop)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
 
 *   **macOS:** signed + notarized using Apple Developer ID. Drag `Klaussy.app` to `/Applications`.
 *   **Windows:** signed with an EV Code Signing certificate. Run the installer.
