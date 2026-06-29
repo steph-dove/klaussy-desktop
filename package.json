@@ -28,6 +28,7 @@
     "dist:intel": "electron-builder --mac --x64 --publish never && npm run rebuild",
     "dist:win": "electron-builder --win --x64 --publish never && npm run rebuild",
     "dist:linux": "electron-builder --linux --x64 --publish never && npm run rebuild",
+    "release:mac": "node scripts/release-mac.js",
     "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
