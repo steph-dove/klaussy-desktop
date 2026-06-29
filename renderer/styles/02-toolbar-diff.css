@@ -459,6 +459,22 @@
   background: var(--surface-hover);
 }
 
+/* Per-repo sub-group header, shown in the Changes tab under "Session" scope to
+   cluster a session's files by the repo they live in. Sits a level below the
+   Staged/Changes section header and above that repo's file rows. */
+.diff-repo-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px 4px 18px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-hover);
+  border-top: 1px solid var(--border);
+}
+.diff-repo-header:first-child { border-top: none; }
+
 .diff-file {
   display: flex;
   align-items: center;
