@@ -131,10 +131,25 @@ window.FindingParser = (function () {
     return v;
   }
 
+  // Whether a `suggestion` value should render as a fenced code block rather
+  // than prose. Most suggestions are a written sentence ("Guard the null case
+  // before dereferencing") and must stay prose — so this defaults to false and
+  // only fires on signals that almost never occur in an English sentence.
+  // Notably it does NOT treat a bare newline, lone `()`/`<>`/`=`, or the
+  // English words if/return/function/const as code — those produced constant
+  // false positives that boxed ordinary sentences.
   function looksLikeCode(s) {
     if (!s) return false;
-    if (/\n/.test(s)) return true;
-    return /[{};()=<>]|=>|::|\bfunction\b|\bconst\b|\breturn\b|\bif\b/.test(s);
+    if (/```/.test(s)) return true;                 // agent already fenced it
+    if (/[{}]|=>|===|!==/.test(s)) return true;     // braces, arrows, strict-eq
+    // A declaration or assignment line: `const x = …`, `foo.bar = …`.
+    if (/^\s*(const|let|var|function|class|import|export)\s/m.test(s)) return true;
+    if (/^\s*[\w$][\w$.[\]]*\s*=\s*\S/m.test(s)) return true;
+    // A control-flow statement line — caught only when the line also carries
+    // code punctuation before any sentence punctuation, so "If x is null,
+    // return early." stays prose while "if (!user) return null;" is code.
+    if (/^\s*(if|for|while|switch|else|return|throw|await)\b[^.!?\n]*[(){};=]/m.test(s)) return true;
+    return false;
   }
 
   // The text that actually posts to the PR: the prose body, then an optional
