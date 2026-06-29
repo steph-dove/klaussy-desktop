@@ -235,7 +235,11 @@ window.PlanPanel = (function () {
   // bucket. Headings with no tasks are omitted.
   function parseProgress(content) {
     var lines = String(content).split(/\r?\n/);
-    var taskRe = /^\s*[-*+]\s+\[([ xX])\]/;
+    // Recognize dash/star/plus AND numbered task lists (`1.`/`1)`), with any
+    // known status char inside the brackets: space = not started, x/X = done,
+    // and the in-progress marks agents use (-, ~, /, >, .) — restricting to
+    // these avoids matching markdown footnote/link refs like `[1]`.
+    var taskRe = /^\s*(?:[-*+]|\d+[.)])\s+\[([ xX/~>.-])\]/;
     var headingRe = /^(#{1,6})\s+(.+?)\s*#*\s*$/;
     var phases = [];
     var byName = {};
@@ -245,7 +249,7 @@ window.PlanPanel = (function () {
 
     function bucket(name) {
       if (Object.prototype.hasOwnProperty.call(byName, name)) return phases[byName[name]];
-      var p = { name: name, done: 0, total: 0 };
+      var p = { name: name, done: 0, total: 0, prog: 0 };
       byName[name] = phases.length;
       phases.push(p);
       return p;
@@ -256,14 +260,22 @@ window.PlanPanel = (function () {
       if (h) { current = h[2].trim(); return; }
       var t = line.match(taskRe);
       if (!t) return;
-      var checked = t[1].toLowerCase() === 'x';
+      var mark = t[1];
       var p = bucket(current || 'Tasks');
       p.total++;
       total++;
-      if (checked) { p.done++; done++; }
+      if (mark === 'x' || mark === 'X') { p.done++; done++; }
+      else if (mark !== ' ') { p.prog++; } // explicit in-progress marker
     });
 
     phases = phases.filter(function (p) { return p.total > 0; });
+    // Per-phase status drives the leading icon: a fully-checked phase is done,
+    // one with any checked or in-progress task is in progress, else not started.
+    phases.forEach(function (p) {
+      p.status = p.done >= p.total ? 'done'
+        : (p.done > 0 || p.prog > 0) ? 'inprogress'
+        : 'todo';
+    });
     return { done: done, total: total, phases: phases };
   }
 
@@ -292,6 +304,12 @@ window.PlanPanel = (function () {
       var li = document.createElement('li');
       li.className = 'plan-phase';
       li.setAttribute('data-pct', String(ppct));
+      li.setAttribute('data-status', ph.status);
+
+      // Leading status icon: ✓ done, spinner in-progress, gray dot not-started.
+      var icon = document.createElement('span');
+      icon.className = 'plan-phase-icon plan-phase-icon-' + ph.status;
+      icon.setAttribute('aria-hidden', 'true');
 
       var name = document.createElement('span');
       name.className = 'plan-phase-name';
@@ -308,6 +326,7 @@ window.PlanPanel = (function () {
       fill.className = 'plan-phase-fill';
       track.appendChild(fill);
 
+      li.appendChild(icon);
       li.appendChild(name);
       li.appendChild(count);
       li.appendChild(track);

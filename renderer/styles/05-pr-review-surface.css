@@ -6119,7 +6119,7 @@ body.task-branchless .file-viewer-blame-btn {
 .plan-phases:empty { display: none; }
 .plan-phase {
   display: grid;
-  grid-template-columns: 1fr auto 72px;
+  grid-template-columns: 16px 1fr auto 72px;
   align-items: center;
   gap: 10px;
   padding: 6px;
@@ -6127,6 +6127,43 @@ body.task-branchless .file-viewer-blame-btn {
   transition: background-color 0.15s;
 }
 .plan-phase:hover { background: var(--surface-hover); }
+
+/* Leading per-phase status icon: ✓ done, spinner in-progress, gray dot todo. */
+.plan-phase-icon {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.plan-phase-icon-done::before {
+  content: "\2713";
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--success);
+}
+.plan-phase-icon-todo::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  opacity: 0.55;
+}
+.plan-phase-icon-inprogress::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: plan-phase-spin 0.7s linear infinite;
+}
+@keyframes plan-phase-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .plan-phase-icon-inprogress::before { animation: none; }
+}
 .plan-phase-name {
   font-size: 12px;
   color: var(--text);
@@ -6152,15 +6189,9 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--accent);
   transition: width 0.45s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.2s ease;
 }
-.plan-phase[data-pct="100"] .plan-phase-fill { background: var(--success); }
-.plan-phase[data-pct="100"] .plan-phase-count { color: var(--success); }
-.plan-phase[data-pct="100"] .plan-phase-name::after {
-  content: "\2713";
-  margin-left: 6px;
-  font-size: 10px;
-  color: var(--success);
-}
-.plan-phase[data-pct="0"] .plan-phase-name { color: var(--text-muted); }
+.plan-phase[data-status="done"] .plan-phase-fill { background: var(--success); }
+.plan-phase[data-status="done"] .plan-phase-count { color: var(--success); }
+.plan-phase[data-status="todo"] .plan-phase-name { color: var(--text-muted); }
 
 /* Read-only task lines in the rendered plan body */
 #plan-markdown-view li.plan-task { list-style: none; }
