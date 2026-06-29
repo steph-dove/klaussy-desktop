@@ -136,6 +136,12 @@ jobs:
             echo "::warning::No platform artifacts found in dist/; nothing to upload."
             exit 0
           fi
+          # Create-if-missing: a freshly-tagged release often has no GitHub
+          # release object yet, and `gh release upload` fails with "release not
+          # found" against a non-existent release. Ensure it exists first.
+          gh release view "${{ inputs.release_tag }}" --repo steph-dove/klaussy-desktop >/dev/null 2>&1 \
+            || gh release create "${{ inputs.release_tag }}" --repo steph-dove/klaussy-desktop \
+                 --title "${{ inputs.release_tag }}" --generate-notes
           gh release upload "${{ inputs.release_tag }}" "${files[@]}" \
             --repo steph-dove/klaussy-desktop \
             --clobber
@@ -163,6 +169,13 @@ jobs:
             echo "::warning::No platform artifacts found in dist/; nothing to mirror."
             exit 0
           fi
+          # Create-if-missing on the feedback repo too — the mirror release won't
+          # exist until we make it, so creating it here is what makes the
+          # dual-publish reliable instead of silently failing.
+          gh release view "${{ inputs.release_tag }}" --repo steph-dove/klaussy-desktop-feedback >/dev/null 2>&1 \
+            || gh release create "${{ inputs.release_tag }}" --repo steph-dove/klaussy-desktop-feedback \
+                 --title "${{ inputs.release_tag }}" \
+                 --notes "Mirror of steph-dove/klaussy-desktop ${{ inputs.release_tag }} for auto-updaters on v0.6.0 and earlier."
           gh release upload "${{ inputs.release_tag }}" "${files[@]}" \
             --repo steph-dove/klaussy-desktop-feedback \
             --clobber
