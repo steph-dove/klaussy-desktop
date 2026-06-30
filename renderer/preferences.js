@@ -280,7 +280,10 @@
       if (r && r.error) ollamaModelStatus.textContent = 'Could not install model: ' + r.error;
       else if (r && r.alreadyPresent) ollamaModelStatus.textContent = 'Model installed.';
       else ollamaModelStatus.textContent = 'Model ready.';
-    }).catch(function () { if (dispose) dispose(); });
+    }).catch(function () {
+      if (dispose) dispose();
+      ollamaModelStatus.textContent = 'Could not install model.';
+    });
   }
 
   function escHtml(str) {
