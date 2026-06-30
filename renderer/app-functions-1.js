@@ -113,7 +113,7 @@ window.App = window.App || {};
         cardDescEl.textContent = 'Attach a local git repository to start managing worktrees.';
       }
     } else {
-      titleEl.textContent = 'Klaussy Workspace';
+      titleEl.textContent = 'Klaussy Desktop';
       subEl.textContent = 'Choose an action to start building or reviewing code.';
       if (cardTitleEl && cardDescEl) {
         cardTitleEl.textContent = 'New Git Session';
