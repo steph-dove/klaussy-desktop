@@ -42,10 +42,10 @@ function typeOf(def) {
   return def && def.url ? 'http' : 'stdio';
 }
 
-// Turn an add request ({ name, type, command, args, env, url, headers }) into
-// the on-disk def value. stdio carries command/args/env; http/sse carry url and
-// optional headers. Empty collections are dropped so files stay tidy.
-function serverToDef(server) {
+// Build the on-disk def. `server.env` = literal values; `server.secretRefs` =
+// env var NAMES pulled from the environment, never stored. `envRef` picks the
+// syntax: 'brace' ${VAR}, 'envcolon' ${env:VAR}; 'envvars' (codex) in codexBlock.
+function serverToDef(server, envRef) {
   const type = server.type || (server.url ? 'http' : 'stdio');
   if (type === 'http' || type === 'sse') {
     const def = { type, url: server.url || '' };
@@ -54,7 +54,12 @@ function serverToDef(server) {
   }
   const def = { command: server.command || '' };
   if (Array.isArray(server.args) && server.args.length) def.args = server.args.slice();
-  if (server.env && Object.keys(server.env).length) def.env = { ...server.env };
+  const env = { ...(server.env || {}) };
+  for (const k of (Array.isArray(server.secretRefs) ? server.secretRefs : [])) {
+    if (envRef === 'brace') env[k] = '${' + k + '}';
+    else if (envRef === 'envcolon') env[k] = '${env:' + k + '}';
+  }
+  if (Object.keys(env).length) def.env = env;
   return def;
 }
 
@@ -101,12 +106,12 @@ function jsonList(file, mapKey, agentId, scope, projectName) {
   return { servers: out };
 }
 
-function jsonAdd(file, mapKey, server) {
+function jsonAdd(file, mapKey, server, envRef) {
   const r = readJson(file);
   if (r.error) return r;
   const obj = r.obj;
   if (!obj[mapKey] || typeof obj[mapKey] !== 'object') obj[mapKey] = {};
-  obj[mapKey][server.name] = serverToDef(server);
+  obj[mapKey][server.name] = serverToDef(server, envRef);
   try {
     atomicWrite(file, JSON.stringify(obj, null, 2) + '\n');
     return { ok: true };
@@ -284,6 +289,11 @@ function codexBlock(server) {
     if (Array.isArray(server.args) && server.args.length) {
       lines.push(`args = [${server.args.map(tomlString).join(', ')}]`);
     }
+    // Codex pulls secrets from its environment by name via an allowlist — the
+    // value is never written into config.
+    if (Array.isArray(server.secretRefs) && server.secretRefs.length) {
+      lines.push(`env_vars = [${server.secretRefs.map(tomlString).join(', ')}]`);
+    }
   }
   let block = lines.join('\n') + '\n';
   if (server.env && Object.keys(server.env).length) {
@@ -417,7 +427,11 @@ function addServer({ agentId, scope = 'user', repoPath = null, server, homedir =
   if (invalid) return { error: invalid };
   const file = configFile(agentId, scope, repoPath, homedir);
   if (!file) return { error: `${displayNameFor(agentId)} has no ${scope}-scope MCP config` };
-  return cfg.format === 'toml' ? tomlAdd(file, server) : jsonAdd(file, cfg.mapKey, server);
+  // An agent that can't reference env vars must never receive a secret.
+  if (Array.isArray(server.secretRefs) && server.secretRefs.length && !cfg.envRef) {
+    return { error: `${displayNameFor(agentId)} can't read secrets from the environment` };
+  }
+  return cfg.format === 'toml' ? tomlAdd(file, server) : jsonAdd(file, cfg.mapKey, server, cfg.envRef);
 }
 
 function removeServer({ agentId, scope = 'user', repoPath = null, name, homedir = defaultHome() }) {

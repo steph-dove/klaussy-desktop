@@ -5,9 +5,9 @@
 // Most are OAuth remotes (auth:'oauth', no token); stdio servers needing secrets
 // (auth:'env') declare requiredEnv and are set via the shell profile, not config.
 //
-// Entry: { id, name, category, description, type:'stdio'|'http'|'sse',
-//   command/args | url, auth:'oauth'|'env'|'app'|'none', requiredEnv, optionalEnv,
-//   requiredArgs, docsUrl, note }.
+// Entry: { id, name, category, description, type, command/args | url, auth,
+//   requiredEnv, optionalEnv, requiredArgs, docsUrl, note }. An env var with
+//   `secret:true` is referenced from the environment, never stored.
 
 const CATEGORIES = [
   'Dev tools',
@@ -137,7 +137,7 @@ const CATALOG = [
     auth: 'env',
     requiredEnv: [
       { key: 'GRAFANA_URL', label: 'Grafana URL', placeholder: 'http://localhost:3000' },
-      { key: 'GRAFANA_SERVICE_ACCOUNT_TOKEN', label: 'Service account token', placeholder: 'glsa_...' },
+      { key: 'GRAFANA_SERVICE_ACCOUNT_TOKEN', label: 'Service account token', secret: true },
     ],
     docsUrl: 'https://github.com/grafana/mcp-grafana',
     note: 'Needs uv (uvx) installed. Use a service-account token — GRAFANA_API_KEY is deprecated.',

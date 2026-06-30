@@ -48,6 +48,7 @@ ipcMain.handle('mcp-targets', () => {
       format: cfg.format,
       verified: cfg.verified !== false,
       hasProjectScope: !!cfg.projectFile && hasRepo,
+      canSecretRef: !!cfg.envRef,
       installed: isInstalled(p.id, config),
       isDefault: p.id === defaultProvider,
     }));

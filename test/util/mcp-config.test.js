@@ -209,6 +209,36 @@ test('parseCodexServers reads inline env tables and sub-tables', () => {
 
 // ---- validation ----
 
+// ---- secrets: referenced from env, never stored ----
+
+test('secretRefs are written as env references, never values, per agent', () => {
+  const home = tmpHome();
+  const server = { name: 's', type: 'stdio', command: 'x', env: { PLAIN: 'visible' }, secretRefs: ['TOKEN'] };
+
+  mcp.addServer({ agentId: 'claude', scope: 'user', homedir: home, server });
+  assert.equal(readJson(path.join(home, '.claude.json')).mcpServers.s.env.TOKEN, '${TOKEN}', 'claude → ${TOKEN}');
+
+  mcp.addServer({ agentId: 'cursor', scope: 'user', homedir: home, server });
+  assert.equal(readJson(path.join(home, '.cursor', 'mcp.json')).mcpServers.s.env.TOKEN, '${env:TOKEN}', 'cursor → ${env:TOKEN}');
+
+  mcp.addServer({ agentId: 'codex', scope: 'user', homedir: home, server });
+  const toml = fs.readFileSync(path.join(home, '.codex', 'config.toml'), 'utf8');
+  assert.match(toml, /env_vars = \["TOKEN"\]/, 'codex → env_vars allowlist');
+  assert.doesNotMatch(toml, /TOKEN = /, 'codex never writes the token value');
+
+  // The non-secret value is written inline; no secret value ever appears.
+  assert.equal(readJson(path.join(home, '.claude.json')).mcpServers.s.env.PLAIN, 'visible');
+});
+
+test('agents that can\'t reference env vars reject a secret server', () => {
+  const home = tmpHome();
+  const server = { name: 's', type: 'stdio', command: 'x', secretRefs: ['TOKEN'] };
+  for (const agent of ['copilot', 'cline', 'antigravity']) {
+    const r = mcp.addServer({ agentId: agent, scope: 'user', homedir: home, server });
+    assert.ok(r.error, `${agent} should reject a secret server`);
+  }
+});
+
 test('validateServer rejects bad input', () => {
   assert.ok(mcp.validateServer({ type: 'stdio', command: 'x' }), 'missing name rejected');
   assert.ok(mcp.validateServer({ name: 'bad name', type: 'stdio', command: 'x' }), 'spaces in name rejected');

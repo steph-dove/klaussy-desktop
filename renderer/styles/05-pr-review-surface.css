@@ -3890,7 +3890,10 @@ body.pr-review-popout #pr-review-root {
   cursor: pointer;
 }
 .mcp-target-note { color: var(--text-muted); font-size: 11px; }
+.mcp-target-disabled { opacity: 0.45; }
 .mcp-targets-hint { color: var(--text-muted); font-size: 11px; margin: -2px 0 6px; }
+.mcp-secret-ref { display: flex; align-items: center; gap: 6px; }
+.mcp-secret-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .mcp-agent-badges { display: flex; flex-wrap: wrap; gap: 4px; }
 .mcp-form-error { min-height: 14px; }
 

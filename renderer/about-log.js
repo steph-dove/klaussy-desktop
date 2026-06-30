@@ -1440,9 +1440,10 @@ window.Dialogs = (function () {
       targets.forEach(function (t) {
         var note = !t.installed ? ' <span class="mcp-target-note">(not installed)</span>'
           : (!t.verified ? ' <span class="mcp-target-note">(unverified path)</span>' : '');
-        f += '<label class="mcp-target"><input type="checkbox" class="mcp-target-cb" data-agent="' + escHtml(t.id) + '" data-project="' + (t.hasProjectScope ? '1' : '0') + '"' + (t.isDefault ? ' checked' : '') + '> ' + escHtml(t.name) + note + '</label>';
+        f += '<label class="mcp-target"><input type="checkbox" class="mcp-target-cb" data-agent="' + escHtml(t.id) + '" data-project="' + (t.hasProjectScope ? '1' : '0') + '" data-cansecret="' + (t.canSecretRef ? '1' : '0') + '"' + (t.isDefault ? ' checked' : '') + '> ' + escHtml(t.name) + note + '</label>';
       });
       f += '</div>';
+      f += '<div class="mcp-targets-hint mcp-hidden" id="mcp-secret-note">Greyed-out agents can\'t read secrets from the environment, so they\'re excluded for this server.</div>';
       // scope
       var anyProject = targets.some(function (t) { return t.hasProjectScope; });
       f += '<div class="mcp-env-label">Scope</div><div class="mcp-scope">'
@@ -1462,9 +1463,9 @@ window.Dialogs = (function () {
       }
     }
 
-    // Build the env-var section. Secrets are never stored: declared vars become
-    // ${VAR} refs and the user sets real values in their shell profile.
-    // updateExports() refreshes the copy/paste block as vars change.
+    // Env-var section. Plain values are written inline; SECRETS (catalog
+    // `secret:true`, or a custom row's "secret" toggle) are never stored \u2014 only
+    // their name is recorded and each agent pulls the value from the environment.
     function renderEnvBox(entry) {
       entry = entry || {};
       var box = dialog.querySelector('#mcp-envbox');
@@ -1473,25 +1474,33 @@ window.Dialogs = (function () {
       if (remote) {
         box.innerHTML = '<div class="mcp-env-label">Authentication</div>'
           + '<div class="mcp-note">Remote servers sign in from your agent on first use (OAuth) \u2014 no environment setup needed here.</div>';
+        updateSecretTargets();
         return;
       }
       var reqEnv = entry.requiredEnv || [];
       var optEnv = entry.optionalEnv || [];
+      var anySecret = reqEnv.concat(optEnv).some(function (e) { return e.secret; });
       var html = '<div class="mcp-env-label">Environment variables</div>';
-      if (reqEnv.length || optEnv.length) {
-        html += '<div class="mcp-note">Stored in each selected agent\'s config file'
-          + (entry.docsUrl ? ' (<a class="mcp-docs-link" href="' + escHtml(entry.docsUrl) + '" target="_blank" rel="noreferrer">where to get these</a>)' : '') + '.</div>';
+      if (anySecret) {
+        html += '<div class="mcp-note">Secrets are referenced from your environment, never stored. Set them where your agents can read them (e.g. ~/.zshenv).</div>';
       }
       html += '<div class="mcp-var-list">';
-      reqEnv.forEach(function (e) { html += envValueRow(e, true); });
-      optEnv.forEach(function (e) { html += envValueRow(e, false); });
+      reqEnv.forEach(function (e) { html += envRow(e, true); });
+      optEnv.forEach(function (e) { html += envRow(e, false); });
       html += '<div id="mcp-custom-env"></div>';
       html += '<button class="skills-create-cancel mcp-add-env" type="button">+ Add variable</button>';
       html += '</div>';
       box.innerHTML = html;
       wireEnvBox();
+      updateSecretTargets();
 
-      function envValueRow(e, required) {
+      function envRow(e, required) {
+        var docs = entry.docsUrl ? ' <a class="mcp-docs-link" href="' + escHtml(entry.docsUrl) + '" target="_blank" rel="noreferrer">where to get this</a>' : '';
+        if (e.secret) {
+          return '<div class="mcp-field"><label>' + escHtml(e.label || e.key) + (required ? ' *' : '') + '</label>'
+            + '<div class="mcp-control mcp-secret-ref" data-env-key="' + escHtml(e.key) + '">'
+            + '<code class="mcp-envkey">' + escHtml(e.key) + '</code> <span class="mcp-var-label">referenced from your environment' + docs + '</span></div></div>';
+        }
         return '<div class="mcp-field"><label>' + escHtml(e.label || e.key) + (required ? ' *' : '') + '</label>'
           + '<div class="mcp-control">'
           + '<input class="skills-create-name mcp-in mcp-env-fixed" type="text" autocomplete="off" data-env-key="' + escHtml(e.key) + '"' + (required ? ' data-required="1"' : '') + ' spellcheck="false" placeholder="' + escHtml(e.placeholder || '') + '">'
@@ -1499,11 +1508,11 @@ window.Dialogs = (function () {
       }
     }
 
-    // Collect env values typed into the form. Required-but-empty \u2192 `missing`;
-    // bad custom key \u2192 `bad`. Values are written inline into config (the only
-    // portable channel; listing never returns them back).
+    // Split form input into literal values (`env`) and secret names to pull from
+    // the environment (`secretRefs`). Required-but-empty value \u2192 `missing`.
     function collectEnv() {
       var env = {};
+      var secretRefs = [];
       var missing = null;
       var bad = null;
       dialog.querySelectorAll('.mcp-env-fixed').forEach(function (inp) {
@@ -1511,13 +1520,15 @@ window.Dialogs = (function () {
         if (v) env[inp.dataset.envKey] = v;
         else if (inp.dataset.required) missing = inp.dataset.envKey;
       });
+      dialog.querySelectorAll('.mcp-secret-ref').forEach(function (el) { secretRefs.push(el.dataset.envKey); });
       dialog.querySelectorAll('.mcp-custom-row').forEach(function (rowEl) {
         var k = rowEl.querySelector('.mcp-env-k').value.trim();
         if (!k) return;
         if (!/^[A-Za-z0-9_]+$/.test(k)) { bad = k; return; }
-        env[k] = rowEl.querySelector('.mcp-env-v').value;
+        if (rowEl.querySelector('.mcp-env-secret').checked) secretRefs.push(k);
+        else env[k] = rowEl.querySelector('.mcp-env-v').value;
       });
-      return { env: env, missing: missing, bad: bad };
+      return { env: env, secretRefs: secretRefs, missing: missing, bad: bad };
     }
 
     function wireEnvBox() {
@@ -1530,10 +1541,31 @@ window.Dialogs = (function () {
         rowEl.innerHTML = '<label></label><div class="mcp-control mcp-custom-pair">'
           + '<input class="skills-create-name mcp-in mcp-env-k" spellcheck="false" placeholder="VAR_NAME">'
           + '<input class="skills-create-name mcp-in mcp-env-v" spellcheck="false" placeholder="value">'
+          + '<label class="mcp-secret-toggle" title="Secret \u2014 referenced from your environment, never stored"><input type="checkbox" class="mcp-env-secret"> secret</label>'
           + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove">&times;</button>'
         + '</div>';
-        rowEl.querySelector('.mcp-env-del').addEventListener('click', function () { rowEl.remove(); });
+        var valInput = rowEl.querySelector('.mcp-env-v');
+        rowEl.querySelector('.mcp-env-secret').addEventListener('change', function () {
+          valInput.classList.toggle('mcp-hidden', this.checked);
+          updateSecretTargets();
+        });
+        rowEl.querySelector('.mcp-env-del').addEventListener('click', function () { rowEl.remove(); updateSecretTargets(); });
         hostBox.appendChild(rowEl);
+      });
+    }
+
+    // When the server needs a secret, disable agents that can't reference env
+    // vars (Copilot/Cline/Antigravity) \u2014 we never store the secret for them.
+    function updateSecretTargets() {
+      var hasSecret = dialog.querySelectorAll('.mcp-secret-ref').length > 0
+        || Array.prototype.some.call(dialog.querySelectorAll('.mcp-env-secret'), function (cb) { return cb.checked; });
+      var noteEl = dialog.querySelector('#mcp-secret-note');
+      if (noteEl) noteEl.classList.toggle('mcp-hidden', !hasSecret);
+      dialog.querySelectorAll('.mcp-target-cb').forEach(function (cb) {
+        if (cb.dataset.cansecret === '1') return;
+        var label = cb.closest('.mcp-target');
+        if (hasSecret) { cb.checked = false; cb.disabled = true; if (label) label.classList.add('mcp-target-disabled'); }
+        else { cb.disabled = false; if (label) label.classList.remove('mcp-target-disabled'); }
       });
     }
 
@@ -1586,6 +1618,7 @@ window.Dialogs = (function () {
         if (built.bad) return fail('Variable name \u201c' + built.bad + '\u201d may contain only letters, numbers, underscore.');
         if (built.missing) return fail('Required variable \u201c' + built.missing + '\u201d is empty.');
         if (Object.keys(built.env).length) server.env = built.env;
+        if (built.secretRefs.length) server.secretRefs = built.secretRefs;
       }
 
       var scope = (dialog.querySelector('input[name="mcp-scope"]:checked') || {}).value || 'user';
