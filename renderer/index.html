@@ -427,6 +427,14 @@
           <div id="project-search-results"></div>
         </div>
       </div>
+
+      <!-- Slim reveal handle pinned to the app's right edge. Always visible so
+           it's obvious the changes/plan panel can be opened; rides just right of
+           #diff-panel in the flex row, so it stays at the window edge whether the
+           panel is open or closed. Click toggles the panel (same as btn-diff). -->
+      <button id="diff-reveal" title="Toggle changes / plan panel" aria-label="Toggle changes and plan panel">
+        <span id="diff-reveal-arrow">&#9664;</span>
+      </button>
     </div>
   </div>
 

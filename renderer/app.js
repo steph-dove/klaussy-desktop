@@ -11,6 +11,7 @@ window.App = window.App || {};
   App.btnNewTask = document.getElementById('btn-new-task');
   App.btnLayout = document.getElementById('btn-layout');
   App.btnDiff = document.getElementById('btn-diff');
+  App.diffReveal = document.getElementById('diff-reveal');
   App.terminalsEl = document.getElementById('terminals');
   App.emptyState = document.getElementById('empty-state');
   App.sidebar = document.getElementById('sidebar');
@@ -336,6 +337,15 @@ window.App = window.App || {};
       }
     }
   });
+
+  // The right-edge reveal handle is just a more discoverable trigger for the
+  // same toggle — defer to btn-diff so its session/task routing and active
+  // state stay in one place.
+  if (App.diffReveal) {
+    App.diffReveal.addEventListener('click', function () {
+      App.btnDiff.click();
+    });
+  }
 
   // ---- Branchless-task UI (Open Folder flow) ----
   //
