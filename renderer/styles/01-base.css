@@ -662,6 +662,40 @@ body.custom-titlebar #titlebar-content {
   display: inline-block;
 }
 
+/* Collapsed rail: drop the label and shrink the agents button to a centered
+   32px icon tile (matching the header buttons), with the count tucked into a
+   small corner badge. Without this the full-width button + "No active agents"
+   text gets crushed into the 48px rail. */
+#sidebar.collapsed #agents-bar {
+  padding: 6px 8px 0;
+}
+
+#sidebar.collapsed #agents-bar #btn-agents {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto;
+  padding: 0;
+  gap: 0;
+  justify-content: center;
+  position: relative;
+}
+
+#sidebar.collapsed .agents-bar-label {
+  display: none;
+}
+
+#sidebar.collapsed #btn-agents-badge.visible {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  line-height: 14px;
+  padding: 0 3px;
+  font-size: 9px;
+  border: 1px solid var(--sidebar-bg);
+}
+
 #agents-panel {
   position: fixed;
   top: 56px;

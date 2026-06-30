@@ -347,6 +347,7 @@ window.App = window.App || {};
     App.terminalArea.style.display = 'none';
     if (App.diffPanelEl) App.diffPanelEl.dataset.prevDisplay = App.diffPanelEl.style.display || '';
     if (App.diffPanelEl) App.diffPanelEl.style.display = 'none';
+    if (App.diffReveal) App.diffReveal.style.display = 'none';
     App.prReviewRoot.style.display = '';
     window.PrReview.mount({ host: App.prReviewRoot, isPopout: false });
     App.prReviewMounted = true;
@@ -358,6 +359,7 @@ window.App = window.App || {};
     App.prReviewRoot.style.display = 'none';
     App.terminalArea.style.display = '';
     if (App.diffPanelEl) App.diffPanelEl.style.display = App.diffPanelEl.dataset.prevDisplay || '';
+    if (App.diffReveal) App.diffReveal.style.display = '';
     App.prReviewMounted = false;
   };
 

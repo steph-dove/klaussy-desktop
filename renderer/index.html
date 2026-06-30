@@ -113,17 +113,6 @@
         </button>
       </div>
 
-      <!-- Background-agent panel: hidden until btn-agents toggles it. -->
-      <div id="agents-panel" style="display:none;">
-        <div id="agents-panel-header">
-          <span class="agents-panel-title">Agents</span>
-          <button id="btn-agents-clear" title="Clear completed">Clear</button>
-          <button id="btn-agents-close" title="Close">&times;</button>
-        </div>
-        <div id="agents-panel-list"></div>
-        <div id="agents-panel-empty">No active agents</div>
-      </div>
-
       <!-- Repo + session filters — narrow the sidebar to one base repo and/or
            one session (the branch name shared by repos created together) -->
       <div id="project-switcher">
@@ -158,6 +147,20 @@
           <span id="sidebar-toggle-label">Hide</span>
         </button>
       </div>
+    </div>
+
+    <!-- Background-agent panel: hidden until btn-agents toggles it. Kept as a
+         direct child of #app (not inside #sidebar) so its position:fixed is
+         viewport-relative — the sidebar's backdrop-filter would otherwise make
+         it the containing block and clip the panel to the collapsed rail. -->
+    <div id="agents-panel" style="display:none;">
+      <div id="agents-panel-header">
+        <span class="agents-panel-title">Agents</span>
+        <button id="btn-agents-clear" title="Clear completed">Clear</button>
+        <button id="btn-agents-close" title="Close">&times;</button>
+      </div>
+      <div id="agents-panel-list"></div>
+      <div id="agents-panel-empty">No active agents</div>
     </div>
 
     <div id="main-panel">
@@ -427,6 +430,14 @@
           <div id="project-search-results"></div>
         </div>
       </div>
+
+      <!-- Slim reveal handle pinned to the app's right edge. Always visible so
+           it's obvious the changes/plan panel can be opened; rides just right of
+           #diff-panel in the flex row, so it stays at the window edge whether the
+           panel is open or closed. Click toggles the panel (same as btn-diff). -->
+      <button id="diff-reveal" title="Toggle changes / plan panel" aria-label="Toggle changes and plan panel">
+        <span id="diff-reveal-arrow">&#9664;</span>
+      </button>
     </div>
   </div>
 
