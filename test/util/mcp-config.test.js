@@ -22,8 +22,9 @@ test('configFile resolves each agent + scope correctly', () => {
   assert.equal(mcp.configFile('claude', 'user', null, home), path.join(home, '.claude.json'));
   assert.equal(mcp.configFile('claude', 'project', '/repo', home), path.join('/repo', '.mcp.json'));
   assert.equal(mcp.configFile('gemini', 'user', null, home), path.join(home, '.gemini', 'settings.json'));
-  // Antigravity shares Gemini's user file.
-  assert.equal(mcp.configFile('antigravity', 'user', null, home), mcp.configFile('gemini', 'user', null, home));
+  // Antigravity has its own file under ~/.gemini (not Gemini's settings.json).
+  assert.equal(mcp.configFile('antigravity', 'user', null, home), path.join(home, '.gemini', 'config', 'mcp_config.json'));
+  assert.equal(mcp.configFile('cline', 'user', null, home), path.join(home, '.cline', 'data', 'settings', 'cline_mcp_settings.json'));
   assert.equal(mcp.configFile('codex', 'user', null, home), path.join(home, '.codex', 'config.toml'));
   // No project file for an agent that lacks one, or when no repo is given.
   assert.equal(mcp.configFile('copilot', 'project', '/repo', home), null);
@@ -116,13 +117,23 @@ test('malformed JSON config errors without clobbering the file', () => {
   assert.equal(fs.readFileSync(file, 'utf8'), '{ this is not json', 'file left untouched');
 });
 
-test('shared Gemini/Antigravity file is listed once', () => {
+test('Gemini and Antigravity write separate files', () => {
   const home = tmpHome();
-  mcp.addServer({ agentId: 'gemini', scope: 'user', homedir: home, server: { name: 's', type: 'stdio', command: 'x' } });
-  // Antigravity points at the same settings.json; listing must not double-count.
-  const listed = mcp.listServers({ homedir: home }).servers;
-  assert.equal(listed.length, 1, 'shared file deduped');
-  assert.equal(listed[0].agentId, 'gemini');
+  mcp.addServer({ agentId: 'gemini', scope: 'user', homedir: home, server: { name: 'g', type: 'stdio', command: 'x' } });
+  mcp.addServer({ agentId: 'antigravity', scope: 'user', homedir: home, server: { name: 'a', type: 'stdio', command: 'y' } });
+  assert.ok(fs.existsSync(path.join(home, '.gemini', 'settings.json')), 'gemini file');
+  assert.ok(fs.existsSync(path.join(home, '.gemini', 'config', 'mcp_config.json')), 'antigravity file');
+  const byAgent = mcp.listServers({ homedir: home }).servers.map((s) => s.agentId).sort();
+  assert.deepEqual(byAgent, ['antigravity', 'gemini']);
+});
+
+test('listServers dedups duplicate locations by file path', () => {
+  const home = tmpHome();
+  const repo = tmpHome();
+  mcp.addServer({ agentId: 'claude', scope: 'project', repoPath: repo, homedir: home, server: { name: 'p', type: 'stdio', command: 'x' } });
+  // Same repo passed as both a project and the active repo — must list once.
+  const listed = mcp.listServers({ homedir: home, projects: [{ name: 'r', path: repo }], activeRepo: repo }).servers;
+  assert.equal(listed.length, 1, 'duplicate location deduped');
 });
 
 // ---- Codex (TOML) ----

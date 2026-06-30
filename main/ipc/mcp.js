@@ -3,16 +3,14 @@
 // targets. The format-aware read/write lives in main/util/mcp-config.js; this
 // file just wires it to the renderer with the project/active-repo context.
 
-const fs = require('fs');
 const { execFileSync, execFile, spawn } = require('child_process');
-const { ipcMain, shell } = require('electron');
+const { ipcMain } = require('electron');
 const { loadConfig } = require('../util/config');
 const { currentRepoPath } = require('../state/pr-review');
 const { allProviders, getProvider, binFor } = require('../state/ai-providers');
 const { mcpConfigFor } = require('../state/mcp-configs');
 const mcp = require('../util/mcp-config');
 const { CATALOG, CATEGORIES } = require('../state/mcp-catalog');
-const { detectShellProfile } = require('../util/shell-env');
 
 // Is an agent's CLI on PATH? Mirrors windows-ipc's probeAgent (kept local to
 // avoid a cross-IPC require) — used only to default the add form's target
@@ -101,6 +99,15 @@ function shQuote(s) {
   return "'" + String(s).replace(/'/g, "'\\''") + "'";
 }
 
+// First terminal emulator on PATH (Linux), in preference order, or null.
+function findLinuxTerminal() {
+  const candidates = [process.env.TERMINAL, 'x-terminal-emulator', 'gnome-terminal', 'konsole', 'xfce4-terminal', 'alacritty', 'kitty', 'xterm'].filter(Boolean);
+  for (const t of candidates) {
+    try { execFileSync('which', [t], { stdio: 'ignore' }); return t; } catch { /* not on PATH */ }
+  }
+  return null;
+}
+
 // `claude mcp login` is interactive (prompts to paste the redirect URL), so it
 // needs a real TTY — headless fails with "stdin isn't a terminal". Launch it in
 // the OS terminal where the user completes the flow; return the cmd for show/copy.
@@ -118,30 +125,11 @@ ipcMain.handle('mcp-login-terminal', (_event, { name }) => {
     } else if (process.platform === 'win32') {
       spawn('cmd', ['/c', 'start', 'cmd', '/k', displayCmd], { detached: true, stdio: 'ignore' }).unref();
     } else {
-      const term = process.env.TERMINAL || 'x-terminal-emulator';
+      const term = findLinuxTerminal();
+      if (!term) return { error: 'No terminal emulator found — run this yourself: ' + displayCmd, command: displayCmd };
       spawn(term, ['-e', 'bash', '-lc', `${shellCmd}; echo; read -n1 -p 'Sign-in finished — press any key to close'`], { detached: true, stdio: 'ignore' }).unref();
     }
     return { ok: true, command: displayCmd };
-  } catch (e) {
-    return { error: e.message };
-  }
-});
-
-// Shell-profile info so the add form can tell the user exactly where to set the
-// env vars an stdio server needs (we write ${VAR} refs, not the secrets).
-ipcMain.handle('mcp-env-info', () => detectShellProfile({ shell: process.env.SHELL }));
-
-// Open the user's shell profile so they can paste in their export lines,
-// creating an empty file first if it doesn't exist. Falls back to revealing it
-// in the file manager when the OS has no default opener for a dotfile.
-ipcMain.handle('mcp-open-profile', async () => {
-  const info = detectShellProfile({ shell: process.env.SHELL });
-  if (!info.profilePath) return { error: 'On this platform set env vars with setx or your PowerShell profile.' };
-  try {
-    if (!fs.existsSync(info.profilePath)) fs.writeFileSync(info.profilePath, '');
-    const err = await shell.openPath(info.profilePath);
-    if (err) shell.showItemInFolder(info.profilePath);
-    return { ok: true, profilePath: info.profilePath };
   } catch (e) {
     return { error: e.message };
   }

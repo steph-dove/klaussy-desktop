@@ -788,8 +788,6 @@ contextBridge.exposeInMainWorld('klaus', {
     targets: () => ipcRenderer.invoke('mcp-targets'),
     add: (agentId, scope, server) => ipcRenderer.invoke('mcp-add', { agentId, scope, server }),
     remove: (agentId, scope, name) => ipcRenderer.invoke('mcp-remove', { agentId, scope, name }),
-    envInfo: () => ipcRenderer.invoke('mcp-env-info'),
-    openProfile: () => ipcRenderer.invoke('mcp-open-profile'),
     status: () => ipcRenderer.invoke('mcp-status'),
     loginTerminal: (name) => ipcRenderer.invoke('mcp-login-terminal', { name }),
   },

@@ -1159,7 +1159,6 @@ window.Dialogs = (function () {
     var catalog = [];
     var categories = [];
     var targets = [];
-    var envInfo = { shell: 'zsh', profilePath: '~/.zshrc', syntax: 'posix' };
 
     function close() { overlay.remove(); }
 
@@ -1173,12 +1172,11 @@ window.Dialogs = (function () {
 
     loadingView('Reading MCP configs\u2026');
 
-    Promise.all([window.klaus.mcp.catalog(), window.klaus.mcp.targets(), window.klaus.mcp.envInfo()])
+    Promise.all([window.klaus.mcp.catalog(), window.klaus.mcp.targets()])
       .then(function (res) {
         catalog = (res[0] && res[0].catalog) || [];
         categories = (res[0] && res[0].categories) || [];
         targets = (res[1] && res[1].targets) || [];
-        if (res[2]) envInfo = res[2];
         showList();
       })
       .catch(function () { loadingView('Could not load MCP data.'); });
@@ -1481,104 +1479,61 @@ window.Dialogs = (function () {
       var optEnv = entry.optionalEnv || [];
       var html = '<div class="mcp-env-label">Environment variables</div>';
       if (reqEnv.length || optEnv.length) {
-        html += '<div class="mcp-note">Klaussy stores these as <code>${VAR}</code> references, never the secret. Set the real values in your shell profile below.</div>';
+        html += '<div class="mcp-note">Stored in each selected agent\'s config file'
+          + (entry.docsUrl ? ' (<a class="mcp-docs-link" href="' + escHtml(entry.docsUrl) + '" target="_blank" rel="noreferrer">where to get these</a>)' : '') + '.</div>';
       }
       html += '<div class="mcp-var-list">';
-      reqEnv.forEach(function (e) {
-        html += '<div class="mcp-var" data-key="' + escHtml(e.key) + '" data-ph="' + escHtml(e.placeholder || '') + '" data-required="1">'
-          + '<code class="mcp-envkey">' + escHtml(e.key) + '</code> <span class="mcp-var-label">' + escHtml(e.label || '') + ' \u2014 required</span></div>';
-      });
-      optEnv.forEach(function (e) {
-        html += '<label class="mcp-var mcp-var-opt" data-key="' + escHtml(e.key) + '" data-ph="' + escHtml(e.placeholder || '') + '">'
-          + '<input type="checkbox" class="mcp-opt-cb"> <code class="mcp-envkey">' + escHtml(e.key) + '</code> <span class="mcp-var-label">' + escHtml(e.label || '') + '</span></label>';
-      });
+      reqEnv.forEach(function (e) { html += envValueRow(e, true); });
+      optEnv.forEach(function (e) { html += envValueRow(e, false); });
       html += '<div id="mcp-custom-env"></div>';
       html += '<button class="skills-create-cancel mcp-add-env" type="button">+ Add variable</button>';
       html += '</div>';
-      // Shell-profile setup block.
-      html += '<div id="mcp-setup" class="mcp-setup mcp-hidden">'
-        + '<div class="mcp-setup-head">Set these in your shell profile</div>'
-        + '<div class="mcp-setup-sub" id="mcp-setup-sub"></div>'
-        + '<pre class="mcp-exports" id="mcp-exports"></pre>'
-        + '<div class="mcp-setup-actions">'
-          + '<button class="skills-create-cancel mcp-copy-exports" type="button">Copy</button>'
-          + (envInfo.profilePath ? '<button class="skills-create-cancel mcp-open-profile" type="button">Open ' + escHtml(envInfo.profilePath) + '</button>' : '')
-          + (entry.docsUrl ? '<a class="mcp-docs-link" href="' + escHtml(entry.docsUrl) + '" target="_blank" rel="noreferrer">Where to get these \u2192</a>' : '')
-        + '</div>'
-      + '</div>';
       box.innerHTML = html;
       wireEnvBox();
-      updateExports();
+
+      function envValueRow(e, required) {
+        return '<div class="mcp-field"><label>' + escHtml(e.label || e.key) + (required ? ' *' : '') + '</label>'
+          + '<div class="mcp-control">'
+          + '<input class="skills-create-name mcp-in mcp-env-fixed" type="text" autocomplete="off" data-env-key="' + escHtml(e.key) + '"' + (required ? ' data-required="1"' : '') + ' spellcheck="false" placeholder="' + escHtml(e.placeholder || '') + '">'
+          + '<span class="mcp-env-keyname">' + escHtml(e.key) + '</span></div></div>';
+      }
     }
 
-    function includedVars() {
-      var vars = [];
-      dialog.querySelectorAll('.mcp-var[data-required="1"]').forEach(function (el) {
-        vars.push({ key: el.dataset.key, ph: el.dataset.ph });
-      });
-      dialog.querySelectorAll('.mcp-var-opt').forEach(function (el) {
-        var cb = el.querySelector('.mcp-opt-cb');
-        if (cb && cb.checked) vars.push({ key: el.dataset.key, ph: el.dataset.ph });
+    // Collect env values typed into the form. Required-but-empty \u2192 `missing`;
+    // bad custom key \u2192 `bad`. Values are written inline into config (the only
+    // portable channel; listing never returns them back).
+    function collectEnv() {
+      var env = {};
+      var missing = null;
+      var bad = null;
+      dialog.querySelectorAll('.mcp-env-fixed').forEach(function (inp) {
+        var v = inp.value.trim();
+        if (v) env[inp.dataset.envKey] = v;
+        else if (inp.dataset.required) missing = inp.dataset.envKey;
       });
       dialog.querySelectorAll('.mcp-custom-row').forEach(function (rowEl) {
         var k = rowEl.querySelector('.mcp-env-k').value.trim();
-        if (k) vars.push({ key: k, ph: '' });
+        if (!k) return;
+        if (!/^[A-Za-z0-9_]+$/.test(k)) { bad = k; return; }
+        env[k] = rowEl.querySelector('.mcp-env-v').value;
       });
-      return vars;
-    }
-
-    function exportLineFor(key, ph) {
-      var val = ph || ('your-' + key.toLowerCase().replace(/_/g, '-'));
-      if (envInfo.syntax === 'fish') return 'set -Ux ' + key + ' "' + val + '"';
-      if (envInfo.syntax === 'powershell') return '[Environment]::SetEnvironmentVariable("' + key + '", "' + val + '", "User")';
-      return 'export ' + key + '="' + val + '"';
-    }
-
-    function updateExports() {
-      var setup = dialog.querySelector('#mcp-setup');
-      if (!setup) return;
-      var vars = includedVars();
-      if (!vars.length) { setup.classList.add('mcp-hidden'); return; }
-      setup.classList.remove('mcp-hidden');
-      var sub = dialog.querySelector('#mcp-setup-sub');
-      sub.textContent = envInfo.profilePath
-        ? 'Add to ' + envInfo.profilePath + ' (your ' + envInfo.shell + ' profile), then restart your agents:'
-        : 'Set these as user environment variables (PowerShell), then restart your shell and agents:';
-      dialog.querySelector('#mcp-exports').textContent = vars.map(function (v) { return exportLineFor(v.key, v.ph); }).join('\n');
+      return { env: env, missing: missing, bad: bad };
     }
 
     function wireEnvBox() {
       var addBtn = dialog.querySelector('.mcp-add-env');
-      if (addBtn) {
-        addBtn.addEventListener('click', function () {
-          var hostBox = dialog.querySelector('#mcp-custom-env');
-          var rowEl = document.createElement('div');
-          rowEl.className = 'mcp-field mcp-custom-row';
-          rowEl.innerHTML = '<label></label><div class="mcp-control mcp-custom-pair">'
-            + '<input class="skills-create-name mcp-in mcp-env-k" spellcheck="false" placeholder="VAR_NAME">'
-            + '<span class="mcp-var-label">set the value in your shell</span>'
-            + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove">&times;</button>'
-          + '</div>';
-          rowEl.querySelector('.mcp-env-del').addEventListener('click', function () { rowEl.remove(); updateExports(); });
-          rowEl.querySelector('.mcp-env-k').addEventListener('input', updateExports);
-          hostBox.appendChild(rowEl);
-          updateExports();
-        });
-      }
-      dialog.querySelectorAll('.mcp-opt-cb').forEach(function (cb) {
-        cb.addEventListener('change', updateExports);
-      });
-      var copyBtn = dialog.querySelector('.mcp-copy-exports');
-      if (copyBtn) copyBtn.addEventListener('click', function () {
-        var text = dialog.querySelector('#mcp-exports').textContent;
-        if (navigator.clipboard) navigator.clipboard.writeText(text);
-        if (window.toast) window.toast.success('Copied');
-      });
-      var openBtn = dialog.querySelector('.mcp-open-profile');
-      if (openBtn) openBtn.addEventListener('click', function () {
-        window.klaus.mcp.openProfile().then(function (r) {
-          if (r && r.error && window.toast) window.toast.error(r.error);
-        });
+      if (!addBtn) return;
+      addBtn.addEventListener('click', function () {
+        var hostBox = dialog.querySelector('#mcp-custom-env');
+        var rowEl = document.createElement('div');
+        rowEl.className = 'mcp-field mcp-custom-row';
+        rowEl.innerHTML = '<label></label><div class="mcp-control mcp-custom-pair">'
+          + '<input class="skills-create-name mcp-in mcp-env-k" spellcheck="false" placeholder="VAR_NAME">'
+          + '<input class="skills-create-name mcp-in mcp-env-v" spellcheck="false" placeholder="value">'
+          + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove">&times;</button>'
+        + '</div>';
+        rowEl.querySelector('.mcp-env-del').addEventListener('click', function () { rowEl.remove(); });
+        hostBox.appendChild(rowEl);
       });
     }
 
@@ -1599,18 +1554,6 @@ window.Dialogs = (function () {
     function fail(msg) {
       var el = dialog.querySelector('#mcp-error');
       if (el) el.textContent = msg;
-    }
-
-    // Build the env object as ${VAR} references \u2014 values live in the user's
-    // shell, never in the config. Returns null on an invalid custom key.
-    function buildEnvRefs() {
-      var env = {};
-      var bad = null;
-      includedVars().forEach(function (v) {
-        if (!/^[A-Za-z0-9_]+$/.test(v.key)) { bad = v.key; return; }
-        env[v.key] = '${' + v.key + '}';
-      });
-      return { env: env, bad: bad };
     }
 
     function submit(entry) {
@@ -1639,8 +1582,9 @@ window.Dialogs = (function () {
         });
         if (missingArg) return fail('Fill in all required arguments.');
         server.args = args;
-        var built = buildEnvRefs();
+        var built = collectEnv();
         if (built.bad) return fail('Variable name \u201c' + built.bad + '\u201d may contain only letters, numbers, underscore.');
+        if (built.missing) return fail('Required variable \u201c' + built.missing + '\u201d is empty.');
         if (Object.keys(built.env).length) server.env = built.env;
       }
 
@@ -1669,10 +1613,8 @@ window.Dialogs = (function () {
         var ok = results.filter(function (r) { return r.res && r.res.ok; });
         var errs = results.filter(function (r) { return !r.res || r.res.error; });
         if (ok.length && window.toast) {
-          var needsEnv = server.env && Object.keys(server.env).length;
           window.toast.success('Added ' + name + ' to ' + ok.length + ' agent' + (ok.length > 1 ? 's' : '')
-            + (skipped.length ? ' (' + skipped.length + ' skipped \u2014 no project scope)' : '')
-            + (needsEnv ? ' \u2014 remember to set its env vars in your shell profile' : ''));
+            + (skipped.length ? ' (' + skipped.length + ' skipped \u2014 no project scope)' : ''));
         }
         if (errs.length) {
           btn.disabled = false;
