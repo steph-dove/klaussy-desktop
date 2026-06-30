@@ -172,8 +172,11 @@ window.Sidebar = (function () {
     item.dataset.repo = wt.repoPath || '';
     item.dataset.branch = wt.branch || '';
 
-    var iconColor = AppUtils.iconColor(wt.name);
-    var iconLetter = (wt.name || '?').charAt(0).toUpperCase();
+    // Label by repo name from repoPath; wt.name is the worktree dir, which for
+    // branch-checkout sessions duplicates the branch already shown in the detail.
+    var repoName = wt.repoPath ? wt.repoPath.split(/[\\/]/).filter(Boolean).pop() : (wt.name || '');
+    var iconColor = AppUtils.iconColor(repoName);
+    var iconLetter = (repoName || '?').charAt(0).toUpperCase();
 
     if (wt.isSavedSession) {
       var age = window.App && window.App.formatAge ? window.App.formatAge(wt.savedAt) : '';
@@ -183,10 +186,10 @@ window.Sidebar = (function () {
       
       item.innerHTML =
         '<span class="status-dot saved"></span>' +
-        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(wt.name) + '">' + iconLetter + '</span>' +
+        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '">' + iconLetter + '</span>' +
         '<span class="task-mode" title="' + modeTitle + '">' + modeLabel + '</span>' +
         '<div class="saved-session-info">' +
-          '<span class="task-name" title="' + escHtml(wt.path || '') + '">' + escHtml(wt.name) + '</span>' +
+          '<span class="task-name" title="' + escHtml(wt.path || '') + '">' + escHtml(repoName) + '</span>' +
           '<span class="saved-session-detail">' + escHtml(wt.branch || pathShort) + ' &middot; ' + escHtml(age) + '</span>' +
         '</div>' +
         '<div class="saved-session-actions">' +
@@ -269,9 +272,9 @@ window.Sidebar = (function () {
     } else {
       item.innerHTML =
         '<span class="status-dot idle"></span>' +
-        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(wt.name) + '">' + iconLetter + '</span>' +
+        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '">' + iconLetter + '</span>' +
         '<div class="saved-session-info">' +
-          '<span class="task-name" title="' + escHtml(wt.path) + '">' + escHtml(wt.name) + '</span>' +
+          '<span class="task-name" title="' + escHtml(wt.path) + '">' + escHtml(repoName) + '</span>' +
           '<span class="saved-session-detail">' + escHtml(wt.branch) + '</span>' +
         '</div>' +
         '<div class="saved-session-actions">' +
@@ -499,11 +502,8 @@ window.Sidebar = (function () {
 
   // ---- H2: Cross-task dirty indicators ----
   //
-  // Each task item shows a compact summary of its worktree state: staged /
-  // unstaged / untracked counts plus ahead/behind arrows. We subscribe to H3's
-  // `worktree-changed` event once at module init and refresh only the affected
-  // row (granular, not a full re-render) so a save in one worktree doesn't
-  // restat every sibling.
+  // Each item shows staged/unstaged/untracked counts + ahead/behind arrows.
+  // A single `worktree-changed` subscription refreshes only the affected row.
 
   function startDirtyWatch(task) {
     if (!task || !task.worktreePath) return;
@@ -726,10 +726,9 @@ window.Sidebar = (function () {
       nameEl.textContent = newName;
       task.name = newName;
       window.klaus.task.rename(id, newName);
-      // The terminal top bar shows repo › worktree-dir › agent, none of which
-      // change on rename — only the sidebar name needs updating. (The old
-      // wholesale .grid-label rewrite here also destroyed the name/actions
-      // span structure and with it the actions dropdown.)
+      // Only the sidebar name needs updating on rename. (The old wholesale
+      // .grid-label rewrite here destroyed the name/actions span structure
+      // and with it the actions dropdown.)
     }
 
     input.addEventListener('blur', commit);
