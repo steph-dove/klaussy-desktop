@@ -28,9 +28,8 @@ window.App = window.App || {};
   });
 
   // ---- Directory picker dialog (replaces native NSOpenPanel) ----
-  // macOS's scopedbookmarksagent can wedge and freeze the app on Open; this
-  // paste/drag prompt bypasses NSOpenPanel entirely. Returns a Promise that
-  // resolves to the selected path or null on cancel.
+  // NSOpenPanel can wedge/freeze the app on Open; this paste/drag prompt
+  // bypasses it. Resolves a Promise to the selected path or null on cancel.
   window.pickDirectoryPopup = (function () {
     const overlay = document.getElementById('dir-pick-overlay');
     const drop = document.getElementById('dir-pick-drop');
@@ -178,9 +177,8 @@ window.App = window.App || {};
   });
 
   // ---- Repo-intel notifications ----
-  // klaussy-repo-conventions runs in the background at session create; without
-  // these toasts there is zero visible evidence it happened (artifacts land in
-  // the BASE repo, which worktrees don't show).
+  // klaussy-repo-conventions runs in the background at session create; these
+  // toasts are the only visible evidence (artifacts land in the unshown BASE repo).
   if (window.klaus.task.onRepoIntelEvent) {
     window.klaus.task.onRepoIntelEvent(function (ev) {
       if (!ev) return;
@@ -349,11 +347,9 @@ window.App = window.App || {};
 
   // ---- Branchless-task UI (Open Folder flow) ----
   //
-  // Tasks opened via "Open Folder" have no branch. The orange warning banner
-  // lives inside the specific terminal's container (not globally), so it only
-  // covers that pane in grid/columns view. What the active-task signal still
-  // controls: which tabs are visible in the diff panel (git-only tabs hide
-  // when the active task is branchless) and the default Files tab selection.
+  // Tasks opened via "Open Folder" have no branch; the orange warning banner
+  // lives in that terminal's container. The active-task signal still controls
+  // diff-panel tab visibility (git-only tabs hide) and default Files selection.
   App.filesTabBtn = document.querySelector('#diff-tabs .diff-tab[data-tab="files"]');
 
   window.BranchlessUI = {
@@ -592,9 +588,8 @@ window.App = window.App || {};
   // ---- Init ----
   AppState.repoPath = await window.klaus.repo.get();
   // Always show the app — the project-switcher's `+` button is the canonical
-  // way to add a repo. The old "Select Repository" splash blocked startup
-  // for first-runs without a project; the empty task list + project picker
-  // handle that case fine on their own.
+  // way to add a repo. The old "Select Repository" splash blocked startup;
+  // the empty task list + project picker handle the no-project first-run fine.
   App.showApp();
 
   window._addWorktreeToSidebar = App.addWorktreeToSidebar;
@@ -633,11 +628,9 @@ window.App = window.App || {};
   App.selectedMode = 'claude';
   App.selectedBaseBranch = '';
 
-  // True only once the user deliberately picks a base branch. The combobox is
-  // pre-filled with the default branch, so without this flag "no name" would
-  // always be read as "continue the default branch" and never as "name
-  // required" — and checking out the default usually fails (it's already the
-  // primary worktree's branch).
+  // True only once the user deliberately picks a base branch. Since the combobox
+  // is pre-filled with the default branch, this flag disambiguates "no name" as
+  // "name required" rather than "continue default" (which usually fails anyway).
   App.baseBranchUserPicked = false;
 
   // Shell selector
@@ -713,9 +706,8 @@ window.App = window.App || {};
   }
 
   // Discovery promises, cached per modal-open so toggling a dropdown doesn't
-  // re-crawl the filesystem / re-shell `git worktree list`. Reset in showModal;
-  // the repos cache is also invalidated when a discovered repo is adopted (it
-  // then moves into the Projects section).
+  // re-crawl the FS / re-shell `git worktree list`. Reset in showModal; the repos
+  // cache is also invalidated when a discovered repo is adopted into Projects.
   App.discoverReposCache = null;
 
   App.discoverWorktreesCache = null;
@@ -726,19 +718,15 @@ window.App = window.App || {};
   App.recentGhReposCache = null;
 
   // ---- Existing sessions (Existing Session tab) -----------------------------
-  // A session is ONE unit no matter how many repos it spans. Worktrees under
-  // ~/klaussy/sessions/<name>/ group by that folder name (the canonical
-  // multi-repo layout); everything else (legacy single worktrees) groups by
-  // branch under a separate "Other worktrees" optgroup so old work stays
-  // reachable without flooding the session list.
+  // A session is ONE unit spanning any number of repos. Worktrees under
+  // ~/klaussy/sessions/<name>/ group by folder; legacy ones group by branch in "Other worktrees".
   App.existingSessionsMap = {}; // option value -> [{ path, branch, repoName, active }]
 
   App.SESSION_DIR_RE = /\/klaussy\/sessions\/([^/]+)\//;
 
   // ---- Manage Sessions (sidebar) --------------------------------------------
-  // Lists every session with a per-session Delete: warns that ALL work in the
-  // session goes away, closes its open terminals, then removes the worktrees
-  // and the session folder (delete-session IPC). Branches are kept.
+  // Per-session Delete: warns ALL work is lost, closes terminals, then removes
+  // the worktrees and session folder (delete-session IPC). Branches are kept.
   App.sessionsModalOverlay = document.getElementById('sessions-modal-overlay');
 
   App.sessionsModalList = document.getElementById('sessions-modal-list');
@@ -807,9 +795,8 @@ window.App = window.App || {};
   });
 
   // Source-repo Browse: native Finder via browse-directory IPC. addProject
-  // validates the picked folder is a git repo (offers git init if not)
-  // and persists it into config.projects so it shows in the recents list
-  // next time.
+  // validates the folder is a git repo (offers git init if not) and persists
+  // it into config.projects so it shows in recents next time.
   App.modalRepoBrowseBtn.addEventListener('click', async function () {
     var dir = await window.klaus.repo.browseDirectory();
     if (!dir) return;
@@ -851,17 +838,13 @@ window.App = window.App || {};
   });
 
   // ---- Multi-repo rows ------------------------------------------------------
-  // The "+" bar appends a repo-picker row identical to the source-repo one
-  // (path display, Browse, ▾ dropdown, drag-and-drop) plus a ×. On submit the
-  // same branch + worktree naming schema fans out to every row with a repo
-  // picked — common when one ticket spans multiple repos. The resulting tasks
-  // are independent; these rows are just creation-time input.
+  // The "+" bar appends a repo-picker row like the source-repo one. On submit the
+  // branch + worktree naming fans out to every picked row (independent tasks).
   App.additionalRepoRows = []; // [{ el, pathEl, path, name }]
 
-  // Clones started from a row's dropdown that haven't finished yet. Submit is
-  // blocked while > 0 so a repo the user picked can't be silently missing
-  // from the fan-out. Stamped with the modal session so a clone that finishes
-  // after close/reopen doesn't write into the wrong session's rows.
+  // In-flight clones from a row's dropdown; submit is blocked while > 0 so a
+  // picked repo can't be silently missing from the fan-out. Stamped with the
+  // modal session so a late-finishing clone doesn't write to the wrong rows.
   App.pendingRepoClones = 0;
 
   App.modalSession = 0;
@@ -897,12 +880,9 @@ window.App = window.App || {};
   App.btnNewTask.addEventListener('click', App.showModal);
   App.modalCreate.addEventListener('click', App.submitModal);
   App.modalCancel.addEventListener('click', App.hideModal);
-  // Backdrop-dismiss, but only when BOTH the press and the release land on the
-  // overlay itself. Tracking just the click target wrongly dismisses when a
-  // child popover closes on mousedown (SearchableSelect hides its list, so the
-  // trailing click resolves to the backdrop) or when a text-selection drag ends
-  // on the backdrop. Requiring the mousedown to have started on the overlay too
-  // means only a genuine backdrop click closes the modal.
+  // Backdrop-dismiss only when BOTH press and release land on the overlay.
+  // Tracking just the click target wrongly dismisses on popover-close or a
+  // text-selection drag that ends on the backdrop.
   var modalMouseDownTarget = null;
   App.modalOverlay.addEventListener('mousedown', function (e) {
     modalMouseDownTarget = e.target;
@@ -1001,10 +981,9 @@ window.App = window.App || {};
   var broadcastToggle = document.getElementById('broadcast-toggle');
   var broadcastBar = document.getElementById('broadcast-bar');
 
-  // The session a broadcast would target: an explicitly selected session
-  // group, or the session that owns the currently focused terminal. Returns
-  // null when the user isn't inside a recognized session (e.g. a standalone
-  // local-folder task), which is also our cue to hide the broadcast UI.
+  // The session a broadcast targets: an explicitly selected group, or the one
+  // owning the focused terminal. Returns null outside a recognized session
+  // (e.g. a standalone local-folder task), the cue to hide the broadcast UI.
   function broadcastTargetSession() {
     if (AppState.activeSessionName) return AppState.activeSessionName;
     var t = AppState.activeTaskId != null ? AppState.tasks.get(AppState.activeTaskId) : null;
@@ -1058,11 +1037,21 @@ window.App = window.App || {};
     }
 
     broadcastInput.value = '';
+    var termCount = 0;
     activeTasks.forEach(function(task) {
+      // Primary pty (addressed with no subId)...
       window.klaus.terminal.write(task.id, val + '\r');
+      termCount++;
+      // ...plus every live split/sub-terminal in the same worktree, so the
+      // broadcast lands in all open terminals, not only the primary.
+      var subIds = window.TerminalManager.getLiveSubIds(task.id);
+      subIds.forEach(function(subId) {
+        window.klaus.terminal.write(task.id, val + '\r', subId);
+        termCount++;
+      });
     });
 
-    window.toast.success('Broadcasted command to ' + activeTasks.length + ' ' + (activeTasks.length === 1 ? 'agent' : 'agents'));
+    window.toast.success('Broadcasted command to ' + termCount + ' ' + (termCount === 1 ? 'terminal' : 'terminals'));
   }
 
   if (broadcastInput && broadcastSend) {
@@ -1228,11 +1217,9 @@ window.App = window.App || {};
   // the dialog. Manual invocation also available via the command palette.
   setTimeout(function () { Dialogs.checkAndPromptDeps(); }, 800);
 
-  // Empty-state CTA: "Add a worktree" opens the same modal as the
-  // sidebar's `+` New Task button. The modal's source-repo Browse/drag/
-  // recents flow lets the user pick a repo from inside the modal even
-  // before any project has been added.
-  // Modern Empty State Dashboard Card click handlers
+  // Empty-state CTA: "Add a worktree" opens the same modal as the sidebar's
+  // `+` New Task button, whose Browse/drag/recents flow lets you pick a repo
+  // even before any project is added. Empty-state dashboard card handlers:
   var cardNewSession = document.getElementById('card-new-session');
   var cardOpenFolder = document.getElementById('card-open-folder');
   var cardReviewPr = document.getElementById('card-review-pr');

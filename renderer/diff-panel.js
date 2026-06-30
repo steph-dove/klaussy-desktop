@@ -21,6 +21,14 @@ window.DiffPanel = window.DiffPanel || {};
   DP.refreshPaused = false;
   DP.diffViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('diffViewMode')) || 'unified';
 
+  // Stale-while-revalidate caches keyed by worktree path: paint last-known git
+  // status / ahead-behind instantly, then refetch in background and re-render.
+  // renderedStatusPath/renderedAheadBehindPath track the DOM to avoid double-render.
+  DP.statusCache = new Map();
+  DP.aheadBehindCache = new Map();
+  DP.renderedStatusPath = null;
+  DP.renderedAheadBehindPath = null;
+
   // Branch diff mode state
   DP.diffMode = 'working'; // 'working' or 'branch'
 
@@ -28,17 +36,17 @@ window.DiffPanel = window.DiffPanel || {};
   DP.branchList = [];
   DP.remoteList = [];
 
-  // Subscribe to the renderer event bus for task switches. updateWorktree is
-  // the expensive path (re-fetches git state); skip when the panel isn't
-  // visible — the original direct callers guarded with DiffPanel.isVisible().
-  // Registered at module-load rather than inside init() so the subscription
-  // is live even before init runs (task switches emit during startup).
+  // Subscribe to task switches; updateWorktree re-fetches git state, so skip
+  // when the panel isn't visible. Registered at module-load (not in init) so
+  // the subscription is live for task switches that emit during startup.
   Events.on('task:switched', function (detail) {
     var task = detail && detail.task;
     if (!task) return;
     if (!DP.isVisible()) return;
+    // updateWorktree already calls DP.refresh() unconditionally, so the old
+    // extra refresh on detail.refreshDiff was a redundant second git status
+    // spawn + file-list rebuild on every switch.
     DP.updateWorktree(task.worktreePath);
-    if (detail.refreshDiff) DP.refresh();
   });
 
   DP.init = function() {
@@ -643,11 +651,24 @@ window.DiffPanel = window.DiffPanel || {};
     var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
     if (!path) return;
 
+    // Paint cached status instantly when switching to a worktree we've shown
+    // before, so the file list appears without waiting on a git spawn. Skipped
+    // on same-worktree auto-refresh to avoid a redundant render.
+    var cached = DP.statusCache.get(path);
+    if (cached && DP.renderedStatusPath !== path) {
+      DP.currentFiles = cached.files;
+      DP.renderFileList(cached.files, cached.branch);
+    }
+
     const result = await window.klaus.git.status(path);
     if (result.error) {
       DP.fileListEl.innerHTML = '<div class="diff-error">' + DP.escHtml(result.error) + '</div>';
       return;
     }
+    // Drop a response that arrived after the user switched worktrees again.
+    if (path !== (DP.currentWorktreePath || DP.getActiveWorktreePath())) return;
+    DP.statusCache.set(path, { files: result.files, branch: result.branch });
+    DP.renderedStatusPath = path;
     DP.currentFiles = result.files;
     DP.renderFileList(result.files, result.branch);
 
