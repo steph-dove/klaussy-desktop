@@ -5,10 +5,9 @@
 
 (function (DP) {
 
-  // H1: Side-by-side split view. Reuses parseAndHighlight so hunks + hljs pipeline
-  // match the unified renderer exactly. Pairs consecutive - with + into rows; pure
-  // adds/dels get a blank slot on the opposite side. D6 checkboxes live in the
-  // pane that owns the line (LEFT for -, RIGHT for +).
+  // Side-by-side split view, reusing parseAndHighlight to match the unified renderer.
+  // Pairs consecutive - with + into rows; pure adds/dels get a blank opposite slot.
+  // Checkboxes live in the pane owning the line (LEFT for -, RIGHT for +).
   DP.renderDiffSplit = function(diffText) {
     var parsed = DP.parseAndHighlight(diffText);
     var lines = parsed.lines;
@@ -143,9 +142,8 @@
   };
 
   // ---- Pre-commit silent-failure review (app commit flow) ----
-  // First Commit click runs the review (skippable); findings render above
-  // the message box and the button re-arms as "Commit anyway" — the user
-  // decides fix-first vs commit. Pref `preCommitReview` (default on) gates it.
+  // First Commit click runs the review; findings render above the message box
+  // and the button re-arms as "Commit anyway". Pref `preCommitReview` gates it.
   DP.precommitCleared = false;
 
   DP.precommitPending = false;
@@ -772,12 +770,23 @@
       el.textContent = parts.join(' ');
       el.title = totalAhead + ' ahead, ' + totalBehind + ' behind across session';
     } else {
-      var result = await window.klaus.git.aheadBehind(DP.currentWorktreePath);
-      var parts = [];
-      if (result.ahead > 0) parts.push('\u2191' + result.ahead);
-      if (result.behind > 0) parts.push('\u2193' + result.behind);
-      el.textContent = parts.join(' ');
-      el.title = (result.ahead || 0) + ' ahead, ' + (result.behind || 0) + ' behind';
+      var abPath = DP.currentWorktreePath;
+      var applyAheadBehind = function (r) {
+        var parts = [];
+        if (r.ahead > 0) parts.push('\u2191' + r.ahead);
+        if (r.behind > 0) parts.push('\u2193' + r.behind);
+        el.textContent = parts.join(' ');
+        el.title = (r.ahead || 0) + ' ahead, ' + (r.behind || 0) + ' behind';
+      };
+      // Stale-while-revalidate: show the last-known counts instantly on a
+      // switch, then refetch. Skipped on same-worktree auto-refresh.
+      var cachedAB = DP.aheadBehindCache.get(abPath);
+      if (cachedAB && DP.renderedAheadBehindPath !== abPath) applyAheadBehind(cachedAB);
+      var result = await window.klaus.git.aheadBehind(abPath);
+      if (abPath !== DP.currentWorktreePath) return;
+      DP.aheadBehindCache.set(abPath, result);
+      DP.renderedAheadBehindPath = abPath;
+      applyAheadBehind(result);
     }
   };
 

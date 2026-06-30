@@ -5,6 +5,15 @@ window.PRPanel = (function () {
   var currentPR = null;
   var currentChecks = null;
   var replyCounter = 0;
+  // Stale-while-revalidate cache of `forBranch` results keyed by worktree path,
+  // so switching back to a branch shows its PR instantly and the diff-panel
+  // Comment action has a PR without a fresh `gh pr view` spawn on every switch.
+  var prCache = new Map();
+
+  function isPrTabActive() {
+    var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
+    return !!activeTab && activeTab.dataset.tab === 'pr';
+  }
 
   function init() {
     prInfoEl = document.getElementById('pr-info');
@@ -83,8 +92,10 @@ window.PRPanel = (function () {
 
   function setWorktree(worktreePath) {
     currentWorktreePath = worktreePath;
-    currentPR = null;
     currentChecks = null;
+    // Serve the PR from cache instantly so a switch back to a branch keeps the
+    // Comment action and merge button working with no spawn. Cache miss -> null.
+    currentPR = prCache.get(worktreePath) || null;
     prInfoEl.innerHTML = '';
     commentsListEl.innerHTML = '';
     var checksEl = document.getElementById('pr-checks');
@@ -92,9 +103,9 @@ window.PRPanel = (function () {
     var aiEl = document.getElementById('pr-ai-review');
     if (aiEl) aiEl.innerHTML = '';
     updateMergeButton();
-    // Background fetch — populates currentPR without rendering into the PR
-    // tab, so the diff-panel Comment action works even from the Changes tab.
-    fetchPRSilent(worktreePath);
+    // Lazy network: spawn `gh pr view` only when the PR tab is hidden and nothing
+    // is cached. When the tab is active, loadPR is the single fetcher.
+    if (!currentPR && !isPrTabActive()) fetchPRSilent(worktreePath);
     reloadActiveTab();
   }
 
@@ -115,6 +126,7 @@ window.PRPanel = (function () {
     try {
       result = await window.klaus.pr.forBranch(worktreePathAtRequest);
     } catch (_) { return; }
+    if (result && result.pr) prCache.set(worktreePathAtRequest, result.pr);
     // Drop the response if the user has since switched worktrees or the PR tab
     // has already rendered a fresher result.
     if (worktreePathAtRequest !== currentWorktreePath) return;
@@ -138,14 +150,28 @@ window.PRPanel = (function () {
 
   async function loadPR() {
     if (!currentWorktreePath) return;
-    prInfoEl.innerHTML = '<div class="pr-loading">Loading PR...</div>';
-    commentsListEl.innerHTML = '';
-    var checksEl = document.getElementById('pr-checks');
-    if (checksEl) checksEl.innerHTML = '';
-    var aiEl = document.getElementById('pr-ai-review');
-    if (aiEl) aiEl.innerHTML = '';
+    // Stale-while-revalidate: if we have a cached PR for this worktree, render
+    // it immediately so the tab isn't blank during the gh round-trip; otherwise
+    // show the loading state. Either way we refetch below and re-render.
+    var cachedPr = prCache.get(currentWorktreePath);
+    if (cachedPr) {
+      currentPR = cachedPr;
+      renderPRInfo(cachedPr);
+      renderComments(cachedPr);
+      updateMergeButton();
+    } else {
+      prInfoEl.innerHTML = '<div class="pr-loading">Loading PR...</div>';
+      commentsListEl.innerHTML = '';
+      var checksEl = document.getElementById('pr-checks');
+      if (checksEl) checksEl.innerHTML = '';
+      var aiEl = document.getElementById('pr-ai-review');
+      if (aiEl) aiEl.innerHTML = '';
+    }
 
-    var result = await window.klaus.pr.forBranch(currentWorktreePath);
+    var worktreeAtForBranch = currentWorktreePath;
+    var result = await window.klaus.pr.forBranch(worktreeAtForBranch);
+    // Drop a response that arrived after the user switched worktrees.
+    if (worktreeAtForBranch !== currentWorktreePath) return;
 
     if (result.error) {
       renderPRError(result);
@@ -153,10 +179,12 @@ window.PRPanel = (function () {
     }
 
     if (!result.pr) {
+      prCache.delete(worktreeAtForBranch);
       prInfoEl.innerHTML = '<div class="pr-empty">No pull request found for this branch.</div>';
       return;
     }
 
+    prCache.set(worktreeAtForBranch, result.pr);
     currentPR = result.pr;
     currentChecks = null;
     renderPRInfo(result.pr);
@@ -195,10 +223,8 @@ window.PRPanel = (function () {
     loadCachedAiReview(worktreeAtRequest, prNumber);
   }
 
-  // Render a PR-load failure. Access/auth failures (wrong gh account for this
-  // repo, expired token, missing scope, un-authorized SSO org) get actionable
-  // controls — switch accounts or sign in — wired to the same gh dialogs the
-  // PR picker uses, then a reload. Everything else is a plain error line.
+  // Render a PR-load failure. Access/auth failures get actionable switch/sign-in
+  // controls (same gh dialogs as the PR picker); everything else is a plain line.
   function renderPRError(result) {
     var ACCESS = { 'not-found': 1, auth: 1, sso: 1, scope: 1 };
     // Prefer the main process's classification, but fall back to sniffing the
@@ -1181,10 +1207,8 @@ window.PRPanel = (function () {
 
   // ---- F6 finding parser + Fix button wiring ----
 
-  // Shared with pr-review.js via renderer/finding-parser.js — previously a
-  // hand-synced copy that had already drifted (stricter split regex here
-  // than in pr-review.js). Defensive fallback so a missing shared script
-  // degrades to whole-text rendering instead of killing the module.
+  // Shared with pr-review.js via renderer/finding-parser.js (replaces a drifted
+  // hand-synced copy). Fallback degrades to whole-text rendering if it's missing.
   var _FP = window.FindingParser || {
     parseReviewFindings: function (t) { return { preamble: t || '', findings: [], postamble: '' }; },
     severityOf: function () { return ''; },

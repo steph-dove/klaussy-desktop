@@ -12,12 +12,9 @@ window.TerminalManager = (function () {
     grid: '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1"/><rect x="9" y="9" width="5.5" height="5.5" rx="1"/></svg>'
   };
 
-  // Keep an xterm fitted to its wrapper whenever the wrapper's box actually
-  // changes \u2014 layout switch, sidebar collapse, window resize, font zoom,
-  // devtools, pane drag, or a task becoming active. A ResizeObserver fires
-  // AFTER layout settles, replacing the fragile setTimeout(50) guesswork that
-  // left terminals mis-sized. Skips hidden/zero-size wrappers (fitting those
-  // yields garbage row counts). Returns a disconnect fn for cleanup.
+  // Refit an xterm whenever its wrapper's box changes, via ResizeObserver
+  // (fires after layout settles, unlike the old setTimeout guess). Skips
+  // hidden/zero-size wrappers; returns a disconnect fn for cleanup.
   function observeWrapperFit(wrapperEl, fit) {
     if (typeof ResizeObserver === 'undefined') return function () {};
     var pending = false;
@@ -54,10 +51,8 @@ window.TerminalManager = (function () {
       cursorStyle: AppState.savedPrefs.cursorStyle || 'block',
       scrollback: 10000,
       theme: termTheme,
-      // Auto-darken/lighten any cell whose fg/bg contrast is too low so text is
-      // never invisible — e.g. a program emitting white/bright-white (or
-      // truecolor white) foreground while we're in light mode. Only adjusts
-      // cells below the ratio; normal high-contrast text is untouched.
+      // Adjust only low-contrast cells so text is never invisible (e.g. white
+      // fg in light mode); high-contrast text is untouched.
       minimumContrastRatio: 4.5,
       allowProposedApi: true,
     });
@@ -83,13 +78,9 @@ window.TerminalManager = (function () {
     var label = document.createElement('div');
     label.className = 'grid-label';
 
-    // The name span carries the drag/click behaviors; the actions span holds
-    // the dropdown. Splitting them avoids the dropdown trigger accidentally
-    // starting a drag or switching tasks as a side-effect of clicking.
-    // Layout: <dot> <repo name> › <branch>. The agent + version live on the
-    // sub-tabs (each tab can run a different agent), not up here.
-    // Branch, not the worktree dir name — the dir prepends the repo name
-    // (repo-branch), which would just repeat the repo segment.
+    // Name span (drag/click) vs actions span (dropdown) are split so the
+    // dropdown trigger can't start a drag or switch tasks. Layout: <dot> <repo>
+    // › <branch>; branch not dir name (dir would just repeat the repo segment).
     var repoName = task.repoPath ? task.repoPath.split('/').filter(Boolean).pop() : '';
     var branchLabel = branch || (worktreePath ? worktreePath.split('/').filter(Boolean).pop() : name);
     var nameSpan = document.createElement('span');
@@ -189,13 +180,9 @@ window.TerminalManager = (function () {
     // on this task's worktree and kicks off the appropriate command.
     buildActionsDropdown(actionsSpan, id);
 
-    // Open the xterm into a dedicated flex body, NOT straight into the
-    // container. FitAddon sizes the terminal from `element.parentElement`'s
-    // height — if that parent is the container, it includes the grid-label
-    // header + sub-terminal-tabs bar, so fit() proposes ~3 too many rows and
-    // the terminal overflows past the bottom edge. The body wrapper makes the
-    // measured parent equal exactly the available terminal area (this mirrors
-    // how sub-terminals already open into .sub-terminal-wrapper).
+    // Open into a dedicated flex body, not the container: FitAddon sizes from
+    // parentElement's height, and the container includes the header + tab bar,
+    // so fit() would over-count rows and overflow. (Mirrors sub-terminals.)
     var termBody = document.createElement('div');
     termBody.className = 'terminal-body';
     container.appendChild(termBody);
@@ -232,15 +219,9 @@ window.TerminalManager = (function () {
       if (e.type !== 'keydown') return true;
       var meta = e.metaKey;
       if (e.key === 'Enter' && e.shiftKey) {
-        // Known limitation: Claude Code's Ink input layer inside our
-        // xterm.js PTY doesn't reliably distinguish Shift+Enter from Enter.
-        // None of `\r`, `\n`, `\x1b\r` (Meta+Enter), `\x1b[13;2u` (CSI-u
-        // Shift+Enter), or bracketed-paste `\x1b[200~\n\x1b[201~` caused a
-        // newline insertion in testing — all submitted. The only thing that
-        // reliably triggers Claude's multi-line mode is the backslash-
-        // escape (`\<Enter>`), which works on an empty prompt and leaves
-        // a trailing `\` on non-empty prompts. We ship that as the best
-        // partial behavior — users can always type `\<Enter>` manually.
+        // Known limitation: Ink can't reliably tell Shift+Enter from Enter in
+        // our PTY. No escape sequence inserts a newline reliably; only the
+        // backslash-escape (`\<Enter>`) triggers multi-line, so we send that.
         window.klaus.terminal.write(id, '\\\r');
         return false;
       }
@@ -250,11 +231,9 @@ window.TerminalManager = (function () {
         return true;
       }
       if (meta && e.key === 'v') {
-        // preventDefault is critical — returning false from xterm's custom
-        // key handler only stops xterm from processing the keystroke, but
-        // the browser's native paste event still fires on xterm's helper
-        // textarea and xterm pastes a second time. Preventing the default
-        // kills that second path.
+        // preventDefault is critical: returning false only stops xterm's
+        // handler, but the native paste event still fires on the helper
+        // textarea and pastes a second time. preventDefault kills that path.
         e.preventDefault();
         navigator.clipboard.readText().then(function (text) {
           if (text) window.klaus.terminal.write(id, text);
@@ -293,13 +272,9 @@ window.TerminalManager = (function () {
         return /\s/.test(p) ? '"' + p + '"' : p;
       }).filter(Boolean).join(' ');
       if (!paths) return;
-      // Route to whichever shell tab is active for this task, not always the
-      // primary. Sub-terminal wrappers have no drop handler of their own, so
-      // the drop bubbles up to `container` and fires here; without the
-      // activeSubId the path lands in the primary (Claude) terminal even when
-      // the user is typing in a Shell sub-tab. Fall back to the primary if the
-      // active sub isn't live — the main handler silently discards writes to a
-      // dead/missing sub, so we must not route there.
+      // Route to the active sub-tab, not always the primary (drops bubble up
+      // from sub-wrappers to `container`). Fall back to the primary if the
+      // active sub isn't live, since writes to a dead sub are discarded.
       var entry = tasks.get(id);
       var activeSubId = entry ? entry.activeSubId : null;
       if (activeSubId != null && entry) {
@@ -350,13 +325,9 @@ window.TerminalManager = (function () {
     };
     tasks.set(id, taskEntry);
 
-    // Auto-fit the primary terminal whenever its body resizes (this also
-    // performs the initial fit once the body first gets a real height, and
-    // re-fits when the task becomes active). Only emits an IPC resize when the
-    // grid actually changed, so it doesn't churn the PTY on no-op observations.
-    // Stored on the task (NOT in `cleanup`) because rewireTerminal() empties
-    // and rebuilds `cleanup` for I/O listeners — the observer is a DOM concern
-    // that must survive a resume/reconnect. Disconnected in removeTaskFromUI.
+    // Auto-fit the primary terminal on body resize, emitting an IPC resize only
+    // when the grid changed. Stored on the task (not `cleanup`) so it survives
+    // rewireTerminal's reset; disconnected in removeTaskFromUI.
     taskEntry.disconnectResize = observeWrapperFit(termBody, function () {
       var t = taskEntry.terminal;
       var pc = t.cols, pr = t.rows;
@@ -379,11 +350,9 @@ window.TerminalManager = (function () {
 
     subTabBar.addEventListener('click', function (e) {
       e.stopPropagation();
-      // Only emit when the task actually changed (e.g., user clicked a
-      // sub-tab on a different task in grid layout). Re-emitting on every
-      // tap of an already-active task's tab bar caused subscribers like
-      // closeFileViewerOnTaskSwitch and DiffPanel.refresh to wipe the
-      // file viewer / refetch git state for no reason.
+      // Only emit when the task actually changed; re-emitting on the active
+      // task made subscribers (closeFileViewerOnTaskSwitch, DiffPanel.refresh)
+      // needlessly wipe the file viewer / refetch git state.
       var changed = AppState.activeTaskId !== id;
       AppState.focusedTaskId = id;
       AppState.activeTaskId = id;
@@ -481,11 +450,9 @@ window.TerminalManager = (function () {
     return s;
   }
 
-  // Label a tab for its agent: agent name immediately, model once known.
-  // The model may not exist yet at spawn time (the session file appears with
-  // the agent's first response), so callers re-apply on tab switches until a
-  // model resolves — and recheck occasionally after that, so an in-session
-  // /model switch eventually shows.
+  // Label a tab: agent name immediately, model once known. The model may not
+  // exist at spawn (session file appears with the first response), so callers
+  // re-apply on tab switches and recheck periodically to catch /model switches.
   var MODEL_RECHECK_MS = 30 * 1000;
   function applyAgentLabel(span, mode, worktreePath, taskId) {
     if (!span) return;
@@ -565,10 +532,9 @@ window.TerminalManager = (function () {
 
   // ---- Sub-terminal Management ----
 
-  // `agentTab` = the tab was opened as a plain agent/shell from the "+"
-  // picker, so its label is the agent + version. Purpose-named tabs (Plan /
-  // Debug / Review, runInSubTerminal) keep their given label — it says what
-  // the tab is *for*, and runInSubTerminal reuses tabs by label match.
+  // `agentTab` = opened from the "+" picker, so its label is the agent +
+  // version. Purpose-named tabs (Plan/Debug/Review, runInSubTerminal) keep
+  // their given label, which runInSubTerminal also reuses by match.
   function addSubTerminalTab(taskEntry, subId, label, mode, agentTab) {
     var id = taskEntry.id;
     var container = taskEntry.container;
@@ -617,11 +583,9 @@ window.TerminalManager = (function () {
     container.appendChild(subWrapper);
     subTerminal.open(subWrapper);
 
-    // Same focus tracker the primary terminal has (line ~172): clicking
-    // into a sub-terminal in a different task should switch the active
-    // task so the diff/file panels track that worktree. Without this,
-    // grid layout looks like the panels are "stuck" on whichever task's
-    // primary terminal you focused last.
+    // Same focus tracker as the primary terminal: focusing a sub-terminal in
+    // another task switches the active task so the diff/file panels follow
+    // that worktree (otherwise grid panels look "stuck").
     subTerminal.textarea.addEventListener('focus', function () {
       if (AppState.focusedTaskId !== id) {
         AppState.focusedTaskId = id;
@@ -754,11 +718,9 @@ window.TerminalManager = (function () {
 
   // ---- runInSubTerminal (Run buttons) ----
 
-  // Find-or-create a sub-terminal with `label` on the active task, focus it,
-  // and type `command` + Enter. Reuses an existing terminal with the same
-  // label to avoid piling up one per invocation; clears it first so output
-  // starts fresh. The boot delay before typing is longer when creating a new
-  // shell because the login shell needs time to print its prompt.
+  // Find-or-create a sub-terminal named `label`, clear it, focus it, and type
+  // `command` + Enter. Reuse avoids piling up tabs; new shells get a longer
+  // boot delay before typing so the login prompt can print first.
   async function runInSubTerminal(taskId, label, command) {
     var taskEntry = tasks.get(taskId);
     if (!taskEntry) return { error: 'No active task' };
@@ -791,22 +753,16 @@ window.TerminalManager = (function () {
 
   // ---- openClaudeSubTerminal (Actions dropdown) ----
 
-  // Spawn a new agent sub-tab on the given task's worktree, seeded with the
-  // Plan/Debug/Review prompt. The prompt is handed to the agent as its initial
-  // positional argument at spawn (see add-sub-terminal in main/ipc/tasks.js) —
-  // NOT typed in after boot. Typing raced the agent's TUI startup (a fixed
-  // delay is fragile across agents and machines) and mangled multi-line prompts
-  // by submitting them line-by-line; passing the prompt at spawn fixes both.
-  // `label` becomes the tab's visible label.
+  // Spawn an agent sub-tab on the worktree, seeded with the Plan/Debug/Review
+  // prompt passed as the spawn arg (see add-sub-terminal in tasks.js), not
+  // typed after boot — which raced TUI startup and mangled multi-line prompts.
   async function openClaudeSubTerminal(taskId, label, command) {
     var taskEntry = tasks.get(taskId);
     if (!taskEntry) return { error: 'No active task' };
 
-    // Spawn the action sub-terminal with the PARENT task's agent so a Codex /
-    // Gemini / Copilot task's Plan/Debug/Review opens that same agent. A
-    // shell-only task falls back to the default agent. (NOTE: the Plan/Debug/
-    // Review prompt bodies are still Claude-flavored slash commands — see
-    // plan-modal.js; tuning them per-agent is a follow-up.)
+    // Use the parent task's agent so a Codex/Gemini/Copilot task's actions open
+    // that same agent; shell-only tasks fall back to the default. (NOTE: the
+    // prompt bodies are still Claude-flavored slash commands — see plan-modal.)
     var defaultAgent = (AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude';
     var agentMode = (taskEntry.mode && taskEntry.mode !== 'shell') ? taskEntry.mode : defaultAgent;
     var result = await window.klaus.terminal.addSub(taskId, label, agentMode, command);
@@ -1145,6 +1101,16 @@ window.TerminalManager = (function () {
     refreshAgentChip: function (taskId) {
       var t = tasks.get(taskId);
       if (t) updatePrimaryAgentTab(t);
+    },
+    // subId list of a task's live split/sub-terminals (excludes the primary
+    // pty, which callers address with no subId). Used by broadcast so a single
+    // command reaches every terminal in a worktree, not just the primary.
+    getLiveSubIds: function (taskId) {
+      var t = tasks.get(taskId);
+      if (!t || !t.subTerminals) return [];
+      return t.subTerminals
+        .filter(function (s) { return s.alive !== false; })
+        .map(function (s) { return s.subId; });
     },
   };
 })();
