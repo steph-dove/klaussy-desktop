@@ -88,6 +88,12 @@
         "WordComplete": "writable"
       },
       "rules": { "no-undef": "error" }
+    },
+    {
+      "files": ["test/**/*.js", "e2e/**/*.js"],
+      "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
+      "env": { "node": true, "es2022": true },
+      "rules": { "no-undef": "error" }
     }
   ]
 }

@@ -3719,6 +3719,233 @@ body.pr-review-popout #pr-review-root {
   margin-right: 4px;
 }
 
+/* MCP manager (view + catalog + add form). */
+.mcp-body { flex: 1; overflow-y: auto; }
+.mcp-hidden { display: none !important; }
+.mcp-row { cursor: default; }
+.mcp-agent-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.15);
+  color: var(--text-dim);
+}
+
+/* Live connection status pill (health-checked via `claude mcp list`). */
+.mcp-conn {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 7px 1px 14px;
+  border-radius: 10px;
+  position: relative;
+  white-space: nowrap;
+}
+.mcp-conn:empty { display: none; }
+.mcp-conn::before {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.mcp-conn-loading { color: var(--text-dim); background: rgba(128, 128, 128, 0.12); }
+.mcp-conn-connected { color: var(--diff-add-fg, #46a758); background: rgba(70, 167, 88, 0.15); }
+.mcp-conn-auth { color: #d9a23a; background: rgba(217, 162, 58, 0.15); }
+.mcp-conn-partial { color: #d9a23a; background: rgba(217, 162, 58, 0.15); }
+.mcp-conn-failed { color: var(--error, #e5484d); background: rgba(229, 72, 77, 0.15); }
+.mcp-conn-none { padding: 0; }
+
+.mcp-connect {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  font-family: inherit;
+}
+.mcp-connect:hover { filter: brightness(1.1); }
+.mcp-connect:disabled { opacity: 0.6; cursor: wait; }
+
+/* Persistent sign-in instructions box (shown under a needs-auth row). */
+.mcp-authbox {
+  margin-top: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mcp-auth-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.mcp-auth-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.mcp-auth-close:hover { color: var(--text); }
+.mcp-auth-text { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+.mcp-remove {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.mcp-remove:hover { color: var(--diff-del-fg, #e27c7c); background: var(--surface-hover); }
+.mcp-remove:disabled { opacity: 0.5; cursor: wait; }
+
+/* Catalog grid */
+.mcp-catalog { padding: 0 12px 8px; }
+.mcp-cat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin: 10px 4px 6px;
+}
+.mcp-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+}
+.mcp-card {
+  text-align: left;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-family: inherit;
+}
+.mcp-card:hover { border-color: var(--accent); background: var(--surface-hover); }
+.mcp-card-name { color: var(--text); font-weight: 600; font-size: 12px; }
+.mcp-card-desc { color: var(--text-muted); font-size: 11px; }
+.mcp-card-custom { border-style: dashed; }
+.mcp-unverified { color: var(--accent); cursor: help; }
+
+/* Add form */
+.mcp-form { padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.mcp-note {
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.mcp-field { display: grid; grid-template-columns: 150px 1fr; align-items: center; gap: 12px; }
+.mcp-field > label { color: var(--text-dim); font-size: 12px; }
+.mcp-control { display: flex; align-items: center; gap: 8px; }
+.mcp-in { width: 100%; }
+.mcp-env-keyname {
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.mcp-custom-pair { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+.mcp-env-del { padding: 2px 8px; }
+.mcp-env-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.mcp-add-env { align-self: flex-start; padding: 4px 10px; }
+.mcp-targets, .mcp-scope { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.mcp-target {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.mcp-target-note { color: var(--text-muted); font-size: 11px; }
+.mcp-target-disabled { opacity: 0.45; }
+.mcp-targets-hint { color: var(--text-muted); font-size: 11px; margin: -2px 0 6px; }
+.mcp-secret-ref { display: flex; align-items: center; gap: 6px; }
+.mcp-secret-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.mcp-agent-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.mcp-form-error { min-height: 14px; }
+
+/* Catalog card auth tag (OAuth / env). */
+.mcp-card-tag {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--text-dim);
+  vertical-align: middle;
+}
+
+/* Env-var list + shell-profile setup block. */
+.mcp-var-list { display: flex; flex-direction: column; gap: 6px; }
+.mcp-var { font-size: 12px; color: var(--text); display: flex; align-items: center; gap: 6px; }
+.mcp-var-opt { cursor: pointer; }
+.mcp-var-label { color: var(--text-muted); font-size: 11px; }
+.mcp-custom-pair { display: flex; align-items: center; gap: 8px; }
+.mcp-custom-pair .mcp-env-k { max-width: 220px; }
+
+.mcp-setup {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mcp-setup-head { font-size: 12px; font-weight: 600; color: var(--text); }
+.mcp-setup-sub { font-size: 11px; color: var(--text-muted); }
+.mcp-exports {
+  margin: 0;
+  background: var(--input-bg, #000);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.mcp-setup-actions { display: flex; align-items: center; gap: 8px; }
+.mcp-docs-link { color: var(--accent); font-size: 11px; text-decoration: none; }
+.mcp-docs-link:hover { text-decoration: underline; }
+
 /* Plugin rows. */
 .plugin-version {
   font-family: 'SF Mono', Menlo, monospace;
