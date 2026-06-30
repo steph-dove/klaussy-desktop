@@ -18,11 +18,9 @@ window.FileBrowser = (function () {
   var fileTreeWorktree = null;
   var fileViewerWorktree = null;
 
-  // Monaco editor instance + its model are owned by the module so we can
-  // dispose them across file switches. The editor is always disposed on
-  // switch. The model is disposed only if it's a one-off (non-project) model
-  // — project models are shared with the TS worker for cross-file intel and
-  // disposing them silently breaks sibling diagnostics.
+  // Editor + model owned by the module so we can dispose across file switches.
+  // The model is disposed only when one-off; project models are shared with the
+  // TS worker, so disposing them breaks sibling diagnostics.
   var currentEditor = null;
   var currentModel = null;
   var currentModelIsProject = false;
@@ -32,9 +30,8 @@ window.FileBrowser = (function () {
   var currentMarkerDisposable = null;
 
   // ---- K1: Tabs state ----
-  // Each open file is a tab with its own model + savedContent. The single
-  // currentEditor swaps its model on tab switch. Tabs share the header
-  // (save button, breadcrumbs, run, blame) — those all reflect the active tab.
+  // Each open file is a tab with its own model + savedContent; currentEditor
+  // swaps its model on switch. Tabs share the header, which reflects the active tab.
   var tabs = []; // [{ filePath, model, isProjectModel, savedContent }]
   var activeTabIndex = -1;
   var viewerInitialized = false;
@@ -137,10 +134,8 @@ window.FileBrowser = (function () {
     el.hidden = !branch;
   }
 
-  // Count markers by severity on the model and update the pill. Monaco's
-  // MarkerSeverity: 8=Error, 4=Warning, 2=Info, 1=Hint. We roll Info/Hint
-  // under the "warning" visual (amber) to keep the pill binary — users
-  // care most about "anything to fix here" vs "hard errors".
+  // Update the pill from marker counts. Info/Hint roll under "warning" (amber)
+  // to keep the pill binary: hard errors vs everything else worth a look.
   function updateProblemsBadge(monaco, model) {
     var badge = document.querySelector('.file-viewer-problems-badge');
     if (!badge) return;
@@ -169,20 +164,16 @@ window.FileBrowser = (function () {
     badge.title = parts.join(', ');
   }
 
-  // Whether we should eagerly load sibling TS/JS models for cross-file intel.
-  // Only kicks in for TS/JS/JSX/TSX/D.TS — other languages (JSON, CSS, HTML,
-  // Markdown…) work fine in isolation and don't benefit from project-wide
-  // model population.
+  // Whether to eagerly load sibling TS/JS models for cross-file intel.
+  // Only TS/JS/JSX/TSX/D.TS benefit; other languages work in isolation.
   function isTsJsPath(filePath) {
     return /\.(t|j)sx?$|\.d\.ts$/i.test(filePath);
   }
 
   // ---- Markdown "pretty" preview ----
   //
-  // Per-tab `previewMode` flag flips `.file-viewer-body.preview-mode` so the
-  // Monaco container hides and `.file-md-preview` shows. Rendering goes
-  // through window.MarkdownPreview (markdown-it + hljs + DOMPurify) — shared
-  // with the diff/Changes panel so both surfaces match.
+  // `previewMode` flips `.preview-mode` to hide Monaco and show `.file-md-preview`.
+  // Renders via window.MarkdownPreview, shared with the diff panel so they match.
 
   function isMarkdownPath(filePath) {
     return window.MarkdownPreview && window.MarkdownPreview.isMarkdownPath(filePath);
@@ -256,10 +247,9 @@ window.FileBrowser = (function () {
     }
   }
 
-  // Fire the "figure out how to run this app and run it" flow. Hands the job
-  // to Claude Code running in a sub-terminal — it inspects README / package.json
-  // / pyproject / etc., picks a command, and (with tool-use approval) runs it.
-  // User sees the full session interactively.
+  // "Figure out how to run this app and run it" flow. Hands off to Claude Code
+  // in a sub-terminal, which inspects the repo, picks a command, and runs it
+  // (with tool-use approval) interactively.
   function runApp() {
     var taskId = AppState.activeTaskId;
     if (taskId == null) return;
@@ -278,11 +268,9 @@ window.FileBrowser = (function () {
 
   // ---- Multi-file navigation (I6) ----
 
-  // Browser-style history of viewer navigations. Each entry is
-  // { filePath, line }. navIndex points at the currently-displayed entry;
-  // back/forward move along the stack without pushing new entries.
-  // programmaticNav suppresses the push on openFileViewer calls that come
-  // from back/forward themselves.
+  // Browser-style nav history; entries are { filePath, line }. navIndex marks
+  // the current entry; back/forward move along the stack. programmaticNav
+  // suppresses the push for openFileViewer calls from back/forward themselves.
   var navStack = [];
   var navIndex = -1;
   var programmaticNav = false;
@@ -349,10 +337,9 @@ window.FileBrowser = (function () {
       .join('<span class="crumb-sep">/</span>');
   }
 
-  // Monaco delegates cross-file opens (e.g. go-to-def that lands in another
-  // file) to `_codeEditorService.openCodeEditor`. In an embedded host the
-  // default returns null — meaning "I don't know how to open that, do nothing."
-  // Overriding it lets us route the target URI to our own viewer.
+  // Monaco routes cross-file opens (e.g. go-to-def) through
+  // `_codeEditorService.openCodeEditor`, which returns null in an embedded host.
+  // Override it to route the target URI to our own viewer.
   function interceptCrossFileOpen(editor, monaco) {
     try {
       var svc = editor._codeEditorService;
@@ -376,10 +363,8 @@ window.FileBrowser = (function () {
     }
   }
 
-  // The file viewer belongs to one worktree at a time; showing it against a
-  // different worktree is confusing (and blame / diff hooks would target the
-  // wrong repo), so we close it on task switch. Subscribes via the event
-  // bus instead of being poked directly from terminal-manager.
+  // The viewer is per-worktree, so we close it on task switch (blame/diff hooks
+  // would otherwise target the wrong repo). Subscribes via the event bus.
   function closeFileViewerOnTaskSwitch() {
     disposeCurrentEditor();
     fileViewerContent.style.display = 'none';
@@ -463,10 +448,8 @@ window.FileBrowser = (function () {
       if (!isNaN(idx)) closeTab(idx);
     });
 
-    // Monaco is lazy-loaded; first `await window.MonacoReady` starts the
-    // require(). If the init module itself never loaded (wrong path / bad
-    // bundle), `window.getMonaco` won't be defined and we bail without
-    // triggering a rejected-promise path.
+    // Monaco is lazy-loaded. If its init module never loaded, `window.getMonaco`
+    // is undefined and we bail cleanly instead of hitting a rejected promise.
     if (typeof window.getMonaco !== 'function') {
       fileViewerView.querySelector('.file-viewer-body').innerHTML =
         '<span style="color: var(--error)">Editor failed to load (Monaco not initialized).</span>';
@@ -491,11 +474,9 @@ window.FileBrowser = (function () {
       renderWhitespace: 'selection',
     });
 
-    // Word-completion provider needs Monaco to exist. Previously
-    // word-complete.js wired itself via MonacoReady.then() at module init,
-    // which triggered the lazy Monaco load even if the user never opened a
-    // file. Register on editor creation instead — the provider is a global
-    // monaco.languages registration, so once is enough.
+    // Register word-completion on editor creation, not at module init, so we
+    // don't force the lazy Monaco load before any file opens. It's a global
+    // monaco.languages registration, so registering once is enough.
     if (window.WordComplete && typeof window.WordComplete.register === 'function') {
       try { window.WordComplete.register(monaco); } catch (_) {}
     }
@@ -580,13 +561,9 @@ window.FileBrowser = (function () {
     viewerExplainZones = [];
   }
 
-  // Selection-based Explain in the Monaco file viewer. Mirrors the diff/PR
-  // surfaces' Explain UX:
-  //   * highlight code → small floating FAB appears near the selection
-  //   * click → FAB hides, a Monaco view zone opens below the selection
-  //   * the explain agent streams into the view zone in real time
-  //   * close button removes the view zone (agent keeps running in registry
-  //     so the result is reachable from the Agents panel)
+  // Selection-based Explain in the file viewer, mirroring the diff/PR UX:
+  // select code → FAB → click opens a Monaco view zone the agent streams into.
+  // Closing removes the zone; the agent keeps running in the registry.
   function setupViewerExplain(editor, monaco) {
     var fab = document.getElementById('viewer-explain-fab');
     if (!fab) {
@@ -978,9 +955,8 @@ window.FileBrowser = (function () {
   // ---- File Tree mutations: create / rename / delete / move (I9) ----
   //
   // Right-click and drag-and-drop fan out to the fs.* IPC, then refresh the
-  // tree on success and reconcile any tabs that pointed at the affected
-  // path. Renames recreate the Monaco model under the new URI (URIs are
-  // immutable in Monaco), preserving cursor/scroll across the swap.
+  // tree and reconcile affected tabs. Renames recreate the Monaco model under
+  // the new URI (URIs are immutable), preserving cursor/scroll.
 
   function cssEscape(s) {
     if (window.CSS && window.CSS.escape) return window.CSS.escape(s);
@@ -1302,12 +1278,9 @@ window.FileBrowser = (function () {
 
   // ---- External-modification detection (I9) ----
   //
-  // The H3 watcher fires `worktree-changed` with the changed file list. For
-  // every open tab whose file is in that list we re-stat: if mtime drifted
-  // from our last-known disk mtime, the file was modified outside our save
-  // path. Clean buffers reload silently; dirty buffers warn and let the
-  // user pick reload-or-keep. Suppression: every save updates diskMtimeMs,
-  // and we ignore events whose stat matches the stamp.
+  // The H3 watcher reports changed files; for each open tab we re-stat and
+  // compare mtime. Clean buffers reload silently, dirty ones warn. Saves stamp
+  // diskMtimeMs so we ignore the events our own writes trigger.
 
   async function reloadTabFromDisk(tabIndex) {
     var tab = tabs[tabIndex];
@@ -1444,10 +1417,9 @@ window.FileBrowser = (function () {
       });
     });
     fileTree.innerHTML = '';
-    // With a filter active, auto-expand matched paths so the user sees the
-    // results without having to click through directories. Without a filter,
-    // lazy mode keeps the initial render cheap — collapsed directories don't
-    // build their subtrees until the user opens them.
+    // With a filter, auto-expand matched paths so results show without
+    // clicking through dirs. Without one, lazy mode leaves collapsed dirs
+    // unbuilt until opened, keeping the initial render cheap.
     renderTreeNode(tree, fileTree, 0, { autoExpand: hasFilter });
   }
 
@@ -1501,11 +1473,9 @@ window.FileBrowser = (function () {
     children.className = 'file-tree-children';
     children.style.display = 'none';
 
-    // Lazy: don't build the child DOM until this directory is first opened.
-    // Tracking with a flag on the element so we only build once, then toggle
-    // display on subsequent clicks. Saves O(files) DOM construction on tree
-    // render for collapsed subtrees — the main perf win of virtualization
-    // without needing a flat-list windowing framework.
+    // Lazy: build child DOM only when the dir first opens, tracked by a flag
+    // so we build once then just toggle display. Saves O(files) construction
+    // for collapsed subtrees — virtualization without a windowing framework.
     var built = false;
     function openDir() {
       if (!built) {
@@ -1712,11 +1682,9 @@ window.FileBrowser = (function () {
   // Event listeners for tab switching
   window.addEventListener('load-file-tree', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
   window.addEventListener('reload-tab-files', function (e) { loadFileTree(e.detail && e.detail.worktreePath); });
-  // H3's watcher: file changed outside our save path — refresh the gutter
-  // and (I9) reconcile open buffers + tree against the on-disk state.
-  // The previous code listened to a `window` 'worktree-changed' event that
-  // was never dispatched; subscribe through the IPC bridge like diff-panel
-  // and sidebar-manager do.
+  // H3's watcher: file changed outside our save path. Refresh the gutter and
+  // reconcile buffers + tree against disk. Subscribe via the IPC bridge (the
+  // old `window` 'worktree-changed' event was never dispatched).
   window.klaus.fs.onWorktreeChanged(function (data) {
     if (!data || data.worktreePath !== fileViewerWorktree) return;
     refreshGitGutter();
@@ -1825,10 +1793,9 @@ window.FileBrowser = (function () {
     var result = await window.klaus.git.blame(task.worktreePath, fileName);
     if (result.error || !result.lines || result.lines.length === 0) return;
 
-    // Replace the line-number column with "<hash> <author>" — mirrors the
-    // pre-Monaco behavior (git blame swaps out numbers). Monaco re-renders
-    // when the function reference changes, so the closure-captured blame
-    // array updates the gutter without any explicit refresh call.
+    // Replace the line-number column with "<hash> <author>". A new function
+    // reference makes Monaco re-render, so the closure-captured blame array
+    // updates the gutter without an explicit refresh.
     currentBlameLines = result.lines;
     currentEditor.updateOptions({
       lineNumbers: function (ln) {
@@ -1841,19 +1808,26 @@ window.FileBrowser = (function () {
     fileViewerView.classList.add('blame-active');
   };
 
-  // Cmd+K is overloaded (global command palette vs in-editor inline-edit).
-  // Export a getter so app.js's document-level handler can tell whether to
-  // route to inline-edit when a file is open — without depending on focus,
-  // which is unreliable after clicks on the tab bar or elsewhere in the
-  // file viewer.
+  // Cmd+K is overloaded (command palette vs in-editor inline-edit). Export a
+  // getter so app.js can route to inline-edit when a file is open, without
+  // relying on focus (unreliable after tab-bar clicks).
   function getActiveEditor() {
     // `currentEditor` is closed over; if no file is open it's undefined.
     return (typeof currentEditor !== 'undefined') ? currentEditor : null;
+  }
+
+  // Open editor tabs as { filePath, content }, newest last. Used by inline
+  // completion to feed a few neighbouring files as cross-file FIM context.
+  function listOpenFiles() {
+    return tabs
+      .filter(function (t) { return t && t.filePath && t.model; })
+      .map(function (t) { return { filePath: t.filePath, content: t.model.getValue() }; });
   }
 
   return {
     loadFileTree: loadFileTree,
     doProjectSearch: doProjectSearch,
     getActiveEditor: getActiveEditor,
+    listOpenFiles: listOpenFiles,
   };
 })();

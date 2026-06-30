@@ -3,10 +3,8 @@
 // identical regardless of who produced the text:
 //
 //   - Manual (Cmd+Shift+Space): claude -p. High quality, 1-3s latency.
-//   - Passive (typing pause, ~150ms debounce): Ollama fill-in-middle with
-//     qwen2.5-coder:1.5b running locally. ~50-200ms TTFT. Only activates
-//     if a probe succeeds — otherwise word-complete.js keeps running as
-//     the always-on fallback.
+//   - Passive (~150ms debounce): Ollama qwen2.5-coder:1.5b fill-in-middle,
+//     ~50-200ms TTFT; falls back to word-complete.js if the probe fails.
 //
 // The two paths use different IPC surfaces (window.klaus.ai.inlineComplete*
 // for Claude, window.klaus.ai.ollama.* for Ollama) but both end up setting
@@ -84,7 +82,41 @@ window.InlineComplete = (function () {
       endLineNumber: Math.min(model.getLineCount(), position.lineNumber + 20),
       endColumn: model.getLineMaxColumn(Math.min(model.getLineCount(), position.lineNumber + 20)),
     });
-    return { model: model, position: position, before: before, after: after };
+    return {
+      model: model, position: position, before: before, after: after,
+      filePath: (model.uri && model.uri.fsPath) || null,
+      languageId: (model.getLanguageId && model.getLanguageId()) || null,
+    };
+  }
+
+  // Repo-relative path for the FIM `<|file_sep|>` token (matches Qwen's
+  // training format); falls back to the basename when outside the worktree.
+  function relPath(abs, worktree) {
+    if (!abs) return '';
+    if (worktree && abs.indexOf(worktree) === 0) return abs.slice(worktree.length).replace(/^[/\\]/, '');
+    return abs.split(/[/\\]/).pop();
+  }
+
+  // A few neighbouring open tabs as cross-file FIM context. Newest tabs first
+  // (most relevant), current file excluded, each head-truncated so the whole
+  // set stays well inside the model's context budget.
+  function gatherSnippets(currentFilePath, worktree) {
+    var MAX_FILES = 3;
+    var MAX_CHARS = 2000;
+    var out = [];
+    try {
+      if (!window.FileBrowser || !window.FileBrowser.listOpenFiles) return out;
+      var open = window.FileBrowser.listOpenFiles();
+      for (var i = open.length - 1; i >= 0 && out.length < MAX_FILES; i--) {
+        var f = open[i];
+        if (!f || !f.filePath || !f.content || f.filePath === currentFilePath) continue;
+        out.push({
+          path: relPath(f.filePath, worktree),
+          content: f.content.length > MAX_CHARS ? f.content.slice(0, MAX_CHARS) : f.content,
+        });
+      }
+    } catch (_) {}
+    return out;
   }
 
   // Finalizes the completion and pokes Monaco to re-query the provider. The
@@ -148,8 +180,8 @@ window.InlineComplete = (function () {
       worktreePath: worktree,
       before: ctx.before,
       after: ctx.after,
-      languageId: ctx.model.getLanguageId && ctx.model.getLanguageId(),
-      filePath: null,
+      languageId: ctx.languageId,
+      filePath: ctx.filePath,
     });
   }
 
@@ -185,10 +217,14 @@ window.InlineComplete = (function () {
       cancel: function () { try { window.klaus.ai.ollama.completeCancel(requestId); } catch (_) {} },
     };
 
+    var worktree = typeof worktreeGetter === 'function' ? worktreeGetter() : null;
     window.klaus.ai.ollama.completeStart({
       requestId: requestId,
       prefix: ctx.before,
       suffix: ctx.after,
+      filePath: relPath(ctx.filePath, worktree) || ctx.filePath || null,
+      repoName: worktree ? worktree.split(/[/\\]/).filter(Boolean).pop() : null,
+      snippets: gatherSnippets(ctx.filePath, worktree),
     });
   }
 
@@ -201,17 +237,15 @@ window.InlineComplete = (function () {
     setStatus('');
   }
 
-  // Runs the consent+install flow if the user hasn't set Ollama up yet,
-  // then probes. Caches the result in `ollamaAvailable` so subsequent editor
-  // opens skip the round-trip. Returns true iff the passive trigger should
-  // activate on this editor.
+  // Runs the consent+install flow if needed, then probes. Caches the result
+  // in `ollamaAvailable` so later opens skip the round-trip. Returns true iff
+  // the passive trigger should activate.
   async function probeOllamaOnce() {
     if (ollamaAvailable !== null) return ollamaAvailable;
     try {
-      // Consent gate — shows modal only when state is not-ready-and-not-
-      // declined. Returns { ok: true } when the full pipeline succeeds (or
-      // when Ollama was already set up), { ok: false, declined: true } if
-      // the user opted out.
+      // Consent gate — modal shows only when not ready and not declined.
+      // { ok: true } means pipeline succeeded or Ollama already set up;
+      // { ok: false, declined: true } means the user opted out.
       if (window.OllamaConsent && typeof window.OllamaConsent.openIfNeeded === 'function') {
         var consent = await window.OllamaConsent.openIfNeeded();
         if (!(consent && consent.ok)) {
@@ -262,13 +296,9 @@ window.InlineComplete = (function () {
       scheduleRequest();
     });
 
-    // Cursor moves without a content change (e.g. arrow keys, click) should
-    // cancel in-flight requests + hide ghost text. We intentionally do NOT
-    // clear debounceTimer here — Monaco fires cursor-position events during
-    // ordinary typing too, with a source string that's not reliably 'model',
-    // and clearing the timer on each keystroke was stopping the debounce
-    // from ever firing. The content-change handler already schedules fresh
-    // debounce on every edit, so leaving any pending timer alone is safe.
+    // Cursor moves without a content change cancel in-flight requests + hide
+    // ghost text, but must NOT clear debounceTimer: Monaco also fires this on
+    // ordinary typing, and clearing it each keystroke stopped debounce firing.
     editor.onDidChangeCursorPosition(function () {
       if (currentRequest) cancel();
       currentCompletion = null;

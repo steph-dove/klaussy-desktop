@@ -34,6 +34,8 @@
   var fontSize = document.getElementById('pref-font-size');
   var lineHeight = document.getElementById('pref-line-height');
   var cursorStyle = document.getElementById('pref-cursor-style');
+  var ollamaModel = document.getElementById('pref-ollama-model');
+  var ollamaModelStatus = document.getElementById('ollama-model-status');
   var themeSelect = document.getElementById('pref-theme');
   var claudePath = document.getElementById('pref-claude-path');
   var defaultMode = document.getElementById('pref-default-mode');
@@ -56,6 +58,17 @@
   fontSize.value = prefs.fontSize;
   lineHeight.value = prefs.lineHeight;
   cursorStyle.value = prefs.cursorStyle;
+
+  // Autocomplete model: show the saved value even if it isn't one of the
+  // presets (e.g. a hand-set tag), so the picker never misrepresents config.
+  var savedOllamaModel = prefs.ollamaModel || 'qwen2.5-coder:1.5b-base';
+  if (!Array.prototype.slice.call(ollamaModel.options).some(function (o) { return o.value === savedOllamaModel; })) {
+    var custom = document.createElement('option');
+    custom.value = savedOllamaModel;
+    custom.textContent = savedOllamaModel + ' (current)';
+    ollamaModel.insertBefore(custom, ollamaModel.firstChild);
+  }
+  ollamaModel.value = savedOllamaModel;
   Object.keys(agentPaths).forEach(function (id) {
     agentPaths[id].input.value = prefs[agentPaths[id].prefKey] || '';
   });
@@ -243,6 +256,32 @@
       setTimeout(function () { loadAgentInfo(id); }, 500);
     });
   });
+
+  // Autocomplete model picker: persist immediately (partial update so it
+  // doesn't depend on the debounced doSave), then pull the model if it isn't
+  // installed yet, surfacing download progress inline.
+  ollamaModel.addEventListener('change', async function () {
+    await window.klaus.ui.setPreferences({ ollamaModel: ollamaModel.value });
+    showStatus('Saved');
+    pullSelectedModel();
+  });
+
+  function pullSelectedModel() {
+    var api = window.klaus.ai && window.klaus.ai.ollama;
+    if (!api || !api.ensureModel) return;
+    ollamaModelStatus.textContent = 'Checking model…';
+    var dispose = api.onSetupProgress ? api.onSetupProgress(function (p) {
+      if (!p || p.step !== 'model') return;
+      ollamaModelStatus.textContent = (p.message || 'Downloading…') +
+        (typeof p.percent === 'number' ? ' ' + p.percent + '%' : '');
+    }) : null;
+    api.ensureModel().then(function (r) {
+      if (dispose) dispose();
+      if (r && r.error) ollamaModelStatus.textContent = 'Could not install model: ' + r.error;
+      else if (r && r.alreadyPresent) ollamaModelStatus.textContent = 'Model installed.';
+      else ollamaModelStatus.textContent = 'Model ready.';
+    }).catch(function () { if (dispose) dispose(); });
+  }
 
   function escHtml(str) {
     var div = document.createElement('div');
