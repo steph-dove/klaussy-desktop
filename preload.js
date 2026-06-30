@@ -780,4 +780,17 @@ contextBridge.exposeInMainWorld('klaus', {
     listMcp: () => ipcRenderer.invoke('list-mcp-servers'),
     listPlugins: () => ipcRenderer.invoke('list-plugins'),
   },
+
+  // ---- mcp: manage MCP server connections across every agent ----
+  mcp: {
+    list: () => ipcRenderer.invoke('mcp-list'),
+    catalog: () => ipcRenderer.invoke('mcp-catalog'),
+    targets: () => ipcRenderer.invoke('mcp-targets'),
+    add: (agentId, scope, server) => ipcRenderer.invoke('mcp-add', { agentId, scope, server }),
+    remove: (agentId, scope, name) => ipcRenderer.invoke('mcp-remove', { agentId, scope, name }),
+    envInfo: () => ipcRenderer.invoke('mcp-env-info'),
+    openProfile: () => ipcRenderer.invoke('mcp-open-profile'),
+    status: () => ipcRenderer.invoke('mcp-status'),
+    loginTerminal: (name) => ipcRenderer.invoke('mcp-login-terminal', { name }),
+  },
 });

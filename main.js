@@ -2,19 +2,9 @@
 // file just wires modules together and hands control to the app-events
 // bootstrap.
 //
-// Require order matters for a few pieces:
-//   1. util/logging — installs console hooks on load, so anything that logs
-//      later (including import-time errors) routes through the ring buffer +
-//      rolling file.
-//   2. util/path-gate — gets its loadConfig + getInstances deps injected
-//      here (the one cross-module wire-up that still lives in main.js,
-//      because app-events.js doesn't know about path-gate).
-//   3. IPC modules — side-effect imports; each registers its ipcMain
-//      handlers on load.
-//   4. bootstrap/app-events.install() — attaches app.whenReady +
-//      window-all-closed + before-quit + will-quit, injects remaining state
-//      deps (isQuitting / startCIPolling), and kicks off the
-//      migrate-on-startup + PATH-fix.
+// Require order matters: util/logging first (installs console hooks), then
+// path-gate (deps injected below), then IPC modules (side-effect handler
+// registration), then bootstrap/app-events.install() last.
 //
 // See SPLIT_PLAN.md for the full module layout and shared-state contract.
 
@@ -47,6 +37,7 @@ pathGate.setDeps({ loadConfig, getInstances: () => instances });
 require('./main/ipc/windows-ipc');
 require('./main/ipc/lsp');
 require('./main/ipc/skills');
+require('./main/ipc/mcp');
 require('./main/ipc/files');
 require('./main/ipc/gh');
 require('./main/ipc/git');

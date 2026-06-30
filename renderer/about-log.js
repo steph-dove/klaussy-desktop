@@ -2,9 +2,8 @@ window.Dialogs = (function () {
   var escHtml = AppUtils.escHtml;
 
   // Write a slash command into the active task's terminal. `run` appends a
-  // carriage return so the CLI executes it immediately; otherwise it's left
-  // on the prompt for the user to edit and submit. Routes to the active sub-
-  // terminal (Shell tab) when one is live, mirroring the drag-drop handler.
+  // carriage return to execute immediately. Routes to the active sub-terminal
+  // (Shell tab) when one is live, mirroring the drag-drop handler.
   function sendSlashToTerminal(insert, run) {
     var state = window.AppState;
     var id = state && state.activeTaskId;
@@ -82,11 +81,9 @@ window.Dialogs = (function () {
     });
   }
 
-  // Open-source attribution shown in About → Licenses. Includes bundled
-  // deps (from package.json), the local Ollama runtime we invoke, and the
-  // qwen2.5-coder model we pull. Update when adding a dep that ships in the
-  // binary or is invoked at runtime — commercial redistribution requires
-  // every license notice be preserved.
+  // Open-source attribution shown in About → Licenses: bundled deps, the local
+  // Ollama runtime, and the qwen2.5-coder model. Update when adding a shipped/
+  // invoked dep — commercial redistribution requires preserving every notice.
   function showLicenses() {
     var entries = [
       { name: 'Electron', license: 'MIT License', copyright: '© GitHub Inc. and Electron contributors', url: 'https://github.com/electron/electron/blob/main/LICENSE' },
@@ -263,10 +260,9 @@ window.Dialogs = (function () {
     });
   }
 
-  // First-run / on-demand setup dialog. Probes gh + claude and only shows
-  // when something is missing/unauthed, so the steady-state user never sees
-  // it. Has a Re-check button so the user can fix in another terminal and
-  // verify without restarting the app.
+  // First-run / on-demand setup dialog. Probes gh + claude, shows only when
+  // something is missing/unauthed. Has a Re-check button so the user can fix in
+  // another terminal and verify without restarting.
   async function checkAndPromptDeps(opts) {
     var force = opts && opts.force;
     var deps = await window.klaus.gh.checkDependencies();
@@ -302,10 +298,9 @@ window.Dialogs = (function () {
               : !deps.gh.authed ? 'Installed, but not authenticated.'
               : null,
       fixes: [],
-      // Per-row Sign-in button (handled inline by the in-app login modal).
-      // Missing-binary installs are handled by the global "Install
-      // requirements" button at the bottom of the dialog so the user
-      // doesn't have to click two install buttons in sequence.
+      // Per-row Sign-in button (handled by the in-app login modal). Missing-
+      // binary installs use the global "Install requirements" button below, so
+      // the user doesn't click two install buttons in sequence.
       action: (deps.gh.installed && !deps.gh.authed) ? {
         label: 'Sign in to GitHub',
         kind: 'gh-signin',
@@ -346,10 +341,9 @@ window.Dialogs = (function () {
       : deps.platform === 'win32' ? 'Windows'
       : deps.platform === 'linux' ? 'Linux'
       : 'this system';
-    // Spell out exactly what gets installed and why so the user knows what
-    // they're agreeing to before a 2 GB download starts. The script in main
-    // is idempotent — already-installed pieces are skipped — but this list
-    // is the *full* set so the user can audit it once.
+    // Spell out exactly what gets installed and why before a 2 GB download. The
+    // main-process script is idempotent (installed pieces skipped); this is the
+    // full set so the user can audit it once.
     var defaultAgent = agentList.filter(function (a) { return a.isDefault; })[0] || agentList[0] || {};
     var defaultAgentName = defaultAgent.name || 'your AI agent';
     var requirements = [
@@ -505,10 +499,9 @@ window.Dialogs = (function () {
     });
   }
 
-  // Browse Claude skills + slash commands installed on the user's machine
-  // (user-level + every klaussy project). Click a row to preview the file
-  // contents in-app; an explicit "Open in editor" button kicks out to the
-  // user's default editor when they actually want to edit.
+  // Browse Claude skills + slash commands installed on the user's machine (user
+  // + every klaussy project). Click a row to preview in-app; "Open in editor"
+  // kicks out to the user's default editor.
   function showSkills() {
     var overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
@@ -800,10 +793,8 @@ window.Dialogs = (function () {
   }
 
   // ---- GitHub login (device flow via gh CLI) ----
-  // Spawns gh auth login --web in main, surfaces the one-time code, and
-  // resolves once gh exits 0. We don't run the OAuth flow ourselves —
-  // letting gh do the keyring write keeps every other code path that calls
-  // `gh` from getting confused about where the token lives.
+  // Spawns `gh auth login --web`, surfaces the one-time code, resolves on exit 0.
+  // gh does the keyring write so other `gh` code paths agree on where the token lives.
   function showGhLogin(opts) {
     var hostname = (opts && opts.hostname) || 'github.com';
     var onSuccess = (opts && opts.onSuccess) || function () {};
@@ -926,9 +917,8 @@ window.Dialogs = (function () {
   }
 
   // ---- GitHub accounts ----
-  // opts.onChange (optional) fires after a successful account switch or
-  // re-auth, so a caller showing stale data (e.g. a PR view that failed for
-  // the wrong account) can reload without waiting for the dialog to close.
+  // opts.onChange (optional) fires after a switch/re-auth so a caller showing
+  // stale data can reload without waiting for the dialog to close.
   function showGhAccounts(opts) {
     opts = opts || {};
     var overlay = document.createElement('div');
@@ -961,13 +951,9 @@ window.Dialogs = (function () {
           });
           return;
         }
-        // Each row gets one of three actions:
-        //   - active + valid \u2192 disabled "active" badge
-        //   - inactive + valid \u2192 "Switch" (calls gh-switch-account)
-        //   - any + invalid   \u2192 "Re-auth" (re-runs the login flow for that user)
-        // Mixing valid/invalid in one list (instead of dropping invalids)
-        // is the whole point of the parser fix \u2014 one bad token shouldn't
-        // hide the rest of the user's accounts.
+        // Each row: active+valid \u2192 "active" badge; inactive+valid \u2192 "Switch";
+        // any+invalid \u2192 "Re-auth". Keeping invalids in the list (not dropping
+        // them) is the point \u2014 one bad token shouldn't hide the other accounts.
         body.innerHTML = '<p class="gh-accounts-intro">Klaussy uses whichever gh account is active. Click another to switch.</p>'
           + accounts.map(function (a) {
             var classes = 'gh-account-row';
@@ -1159,54 +1145,544 @@ window.Dialogs = (function () {
   }
 
   // ---- MCP servers ----
+  // Full manager: view configured servers across every agent, add from a catalog
+  // (or custom), and remove. Format-aware read/write lives in main/util/mcp-config.js.
   function showMcpServers() {
     var overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
     var dialog = document.createElement('div');
-    dialog.className = 'skills-dialog';
-    dialog.innerHTML =
-      '<div class="skills-head">'
-        + '<h2>MCP servers</h2>'
-        + '<button class="skills-close" type="button" title="Close">&times;</button>'
-      + '</div>'
-      + '<div class="skills-body" style="grid-template-columns:1fr">'
-        + '<div class="skills-list-pane" style="border-right:none;">'
-          + '<div class="skills-loading">Reading mcp configs\u2026</div>'
-        + '</div>'
-      + '</div>';
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+    dialog.className = 'skills-dialog mcp-dialog';
     overlay.appendChild(dialog);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     document.body.appendChild(overlay);
-    dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
-    var pane = dialog.querySelector('.skills-list-pane');
 
-    window.klaus.skills.listMcp().then(function (r) {
-      var servers = (r && r.servers) || [];
-      if (servers.length === 0) {
-        pane.innerHTML = '<div class="skills-empty">'
-          + '<p>No MCP servers configured.</p>'
-          + '<p class="skills-empty-hint">Klaussy looks at ~/.claude.json, ~/.claude/mcp.json, and each project\u2019s .mcp.json or .claude/mcp.json. Configure servers there and reopen.</p>'
+    var catalog = [];
+    var categories = [];
+    var targets = [];
+    var envInfo = { shell: 'zsh', profilePath: '~/.zshrc', syntax: 'posix' };
+
+    function close() { overlay.remove(); }
+
+    function loadingView(msg) {
+      dialog.innerHTML =
+        '<div class="skills-head"><h2>MCP servers</h2>'
+          + '<button class="skills-close" type="button" title="Close">&times;</button></div>'
+        + '<div class="mcp-body"><div class="skills-loading">' + escHtml(msg) + '</div></div>';
+      dialog.querySelector('.skills-close').addEventListener('click', close);
+    }
+
+    loadingView('Reading MCP configs\u2026');
+
+    Promise.all([window.klaus.mcp.catalog(), window.klaus.mcp.targets(), window.klaus.mcp.envInfo()])
+      .then(function (res) {
+        catalog = (res[0] && res[0].catalog) || [];
+        categories = (res[0] && res[0].categories) || [];
+        targets = (res[1] && res[1].targets) || [];
+        if (res[2]) envInfo = res[2];
+        showList();
+      })
+      .catch(function () { loadingView('Could not load MCP data.'); });
+
+    // ---- List view ----
+    function showList() {
+      loadingView('Reading MCP configs\u2026');
+      window.klaus.mcp.list().then(function (r) {
+        var groups = groupServers((r && r.servers) || []);
+        dialog.innerHTML =
+          '<div class="skills-head">'
+            + '<h2>MCP servers</h2>'
+            + '<div class="skills-head-actions">'
+              + '<button class="skills-new mcp-add-open" type="button">+ Add server</button>'
+              + '<button class="skills-close" type="button" title="Close">&times;</button>'
+            + '</div>'
+          + '</div>'
+          + '<div class="mcp-body">' + listBody(groups) + '</div>';
+        dialog.querySelector('.skills-close').addEventListener('click', close);
+        dialog.querySelector('.mcp-add-open').addEventListener('click', function () { showAdd(null); });
+        wireRemove(groups);
+        annotateStatus();
+      });
+    }
+
+    // A server can live in several agents' configs (one "add" fans out). Collapse
+    // those into one row keyed by name + scope + definition, so Notion on 6 agents
+    // reads as one Notion with six badges, not six rows.
+    function groupServers(servers) {
+      var map = {};
+      var order = [];
+      servers.forEach(function (s) {
+        var detail = s.type === 'stdio'
+          ? (s.command + (s.args && s.args.length ? ' ' + s.args.join(' ') : ''))
+          : s.url;
+        var key = [s.name, s.scope, s.projectName || '', s.type, detail, (s.envKeys || []).join(',')].join(' ');
+        if (!map[key]) {
+          map[key] = { name: s.name, scope: s.scope, projectName: s.projectName, type: s.type, detail: detail, envKeys: s.envKeys || [], members: [] };
+          order.push(key);
+        }
+        map[key].members.push({ agentId: s.agentId, agentName: s.agentName, sourceFile: s.sourceFile });
+      });
+      return order.map(function (k) { return map[k]; });
+    }
+
+    function listBody(groups) {
+      if (!groups.length) {
+        return '<div class="skills-empty">'
+          + '<p>No MCP servers configured yet.</p>'
+          + '<p class="skills-empty-hint">Click \u201cAdd server\u201d to connect GitHub, Slack, Linear, Jira, Datadog and more \u2014 across Claude, Codex, Cursor, Gemini and the other agents Klaussy drives.</p>'
         + '</div>';
+      }
+      return '<div class="skills-section-head">Configured <span class="skills-section-count">' + groups.length + '</span></div>'
+        + '<div class="skills-list">' + groups.map(groupRowHtml).join('') + '</div>';
+    }
+
+    function groupRowHtml(g, i) {
+      var scopeLabel = g.scope === 'project' ? ('project' + (g.projectName ? ': ' + g.projectName : '')) : 'user';
+      var title = g.members.map(function (m) { return m.sourceFile; }).join('\n');
+      var badges = g.members.map(function (m) { return '<span class="mcp-agent-badge">' + escHtml(m.agentName) + '</span>'; }).join('');
+      return '<div class="skills-row mcp-row" title="' + escHtml(title) + '">'
+        + '<div class="skills-row-main">'
+          + '<span class="skills-row-name">' + escHtml(g.name) + '</span>'
+          + '<span class="mcp-conn mcp-conn-loading" data-name="' + escHtml(g.name) + '">checking…</span>'
+          + '<button class="mcp-connect mcp-hidden" type="button" data-name="' + escHtml(g.name) + '" title="Sign in to this server (opens your browser)">Connect</button>'
+          + '<span class="skills-row-source ' + (g.scope === 'user' ? 'skills-source-user' : 'skills-source-project') + '">' + escHtml(scopeLabel) + '</span>'
+          + '<span class="mcp-type">' + escHtml(g.type) + '</span>'
+          + '<button class="mcp-remove" type="button" data-index="' + i + '" title="Remove from all of its agents">&times;</button>'
+        + '</div>'
+        + '<div class="skills-row-desc mcp-agent-badges">' + badges + '</div>'
+        + '<div class="skills-row-desc"><code class="mcp-cmd">' + escHtml(g.detail) + '</code></div>'
+        + (g.envKeys.length
+          ? '<div class="skills-row-desc">env: ' + g.envKeys.map(function (k) { return '<code class="mcp-envkey">' + escHtml(k) + '</code>'; }).join(' ') + '</div>'
+          : '')
+        + '<div class="mcp-authbox mcp-hidden"></div>'
+      + '</div>';
+    }
+
+    function wireRemove(groups) {
+      dialog.querySelectorAll('.mcp-remove').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var g = groups[parseInt(btn.dataset.index, 10)];
+          if (!g) return;
+          var where = g.members.length > 1 ? g.members.length + ' agents' : g.members[0].agentName;
+          if (!window.confirm('Remove \u201c' + g.name + '\u201d from ' + where + ' (' + g.scope + ' scope)?')) return;
+          btn.disabled = true;
+          Promise.all(g.members.map(function (m) {
+            return window.klaus.mcp.remove(m.agentId, g.scope, g.name);
+          })).then(function (results) {
+            var err = results.filter(function (r) { return !r || r.error; })[0];
+            if (err && window.toast) window.toast.error((err && err.error) || 'Remove failed');
+            else if (window.toast) window.toast.success('Removed ' + g.name);
+            showList();
+          });
+        });
+      });
+    }
+
+    // Live connection status, health-checked by `claude mcp list`. Runs async
+    // (the check takes a few seconds) and fills each row's pill when it returns.
+    // Servers Claude doesn't have configured get no pill (status is Claude-only).
+    var STATUS_LABEL = { connected: 'connected', auth: 'needs auth', partial: 'tools failed', failed: 'not connected', unknown: '' };
+    function annotateStatus() {
+      window.klaus.mcp.status().then(function (r) {
+        var byName = (r && r.byName) || {};
+        var sourceErr = r && r.error;
+        dialog.querySelectorAll('.mcp-row').forEach(function (row) {
+          var el = row.querySelector('.mcp-conn');
+          if (!el) return;
+          var connect = row.querySelector('.mcp-connect');
+          var st = byName[el.dataset.name];
+          if (!st) {
+            // No Claude-side status for this server — leave it blank rather than
+            // implying a failure (it may only live in other agents).
+            el.className = 'mcp-conn mcp-conn-none';
+            el.textContent = '';
+            el.title = sourceErr ? 'Status check unavailable' : 'Not in Claude — status unknown';
+            if (connect) connect.classList.add('mcp-hidden');
+            return;
+          }
+          el.className = 'mcp-conn mcp-conn-' + st.status;
+          el.textContent = STATUS_LABEL[st.status] || st.text;
+          el.title = st.text + ' (via claude mcp list)';
+          // Offer a sign-in button only when the server actually needs auth.
+          if (connect) {
+            if (st.status === 'auth') { connect.classList.remove('mcp-hidden'); wireConnect(connect); }
+            else connect.classList.add('mcp-hidden');
+          }
+          // Once connected, retire any open sign-in instructions for this row.
+          if (st.status === 'connected') {
+            var doneBox = row.querySelector('.mcp-authbox');
+            if (doneBox) { doneBox.classList.add('mcp-hidden'); doneBox.innerHTML = ''; }
+          }
+        });
+      }).catch(function () {
+        dialog.querySelectorAll('.mcp-conn').forEach(function (el) { el.className = 'mcp-conn mcp-conn-none'; el.textContent = ''; });
+      });
+    }
+
+    // Sign-in for a needs-auth server. `claude mcp login` is interactive, so it
+    // can't run headless; the Connect button opens a persistent instructions box
+    // that launches the flow in a real terminal. Stays until closed.
+    function wireConnect(btn) {
+      if (btn._wired) return;
+      btn._wired = true;
+      btn.addEventListener('click', function () {
+        var name = btn.dataset.name;
+        var row = btn.closest('.mcp-row');
+        var box = row.querySelector('.mcp-authbox');
+        if (!box) return;
+        if (!box.classList.contains('mcp-hidden')) { box.classList.add('mcp-hidden'); box.innerHTML = ''; return; }
+        var cmd = 'claude mcp login ' + name;
+        box.innerHTML =
+          '<div class="mcp-auth-head">Sign in to ' + escHtml(name)
+            + '<button class="mcp-auth-close" type="button" title="Close">&times;</button></div>'
+          + '<div class="mcp-auth-text">This server uses an interactive sign-in. Open a terminal, approve access in your browser, then paste the redirect URL back into the terminal when it asks. Come back and Recheck when done.</div>'
+          + '<pre class="mcp-exports">' + escHtml(cmd) + '</pre>'
+          + '<div class="mcp-setup-actions">'
+            + '<button class="mcp-connect mcp-auth-open" type="button">Open in Terminal</button>'
+            + '<button class="skills-create-cancel mcp-auth-copy" type="button">Copy command</button>'
+            + '<button class="skills-create-cancel mcp-auth-recheck" type="button">Recheck status</button>'
+          + '</div>';
+        box.classList.remove('mcp-hidden');
+        box.querySelector('.mcp-auth-close').addEventListener('click', function () { box.classList.add('mcp-hidden'); box.innerHTML = ''; });
+        box.querySelector('.mcp-auth-open').addEventListener('click', function () {
+          window.klaus.mcp.loginTerminal(name).then(function (r) {
+            if (r && r.error) { if (window.toast) window.toast.error('Could not open a terminal: ' + r.error); return; }
+            if (window.toast) window.toast.info('Terminal opened — finish signing in there, then Recheck.');
+          });
+        });
+        box.querySelector('.mcp-auth-copy').addEventListener('click', function () {
+          if (navigator.clipboard) navigator.clipboard.writeText(cmd);
+          if (window.toast) window.toast.success('Copied');
+        });
+        box.querySelector('.mcp-auth-recheck').addEventListener('click', function () { annotateStatus(); });
+      });
+    }
+
+    // ---- Add view ----
+    function showAdd(entry) {
+      dialog.innerHTML =
+        '<div class="skills-head">'
+          + '<h2>Add MCP server</h2>'
+          + '<div class="skills-head-actions">'
+            + '<button class="skills-create-cancel mcp-back" type="button">\u2190 Back</button>'
+            + '<button class="skills-close" type="button" title="Close">&times;</button>'
+          + '</div>'
+        + '</div>'
+        + '<div class="mcp-body">'
+          + catalogGrid()
+          + formHtml(entry)
+        + '</div>';
+      dialog.querySelector('.skills-close').addEventListener('click', close);
+      dialog.querySelector('.mcp-back').addEventListener('click', showList);
+      dialog.querySelectorAll('.mcp-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+          var id = card.dataset.id;
+          showAdd(id ? catalog.find(function (c) { return c.id === id; }) : null);
+        });
+      });
+      wireForm(entry);
+    }
+
+    function catalogGrid() {
+      var html = '<div class="skills-section-head">Catalog</div><div class="mcp-catalog">';
+      categories.forEach(function (cat) {
+        var items = catalog.filter(function (c) { return c.category === cat; });
+        if (!items.length) return;
+        html += '<div class="mcp-cat-label">' + escHtml(cat) + '</div><div class="mcp-card-grid">';
+        items.forEach(function (c) {
+          var tag = c.auth === 'oauth' ? '<span class="mcp-card-tag">OAuth</span>'
+            : (c.auth === 'env' ? '<span class="mcp-card-tag">env</span>' : '');
+          html += '<button class="mcp-card" type="button" data-id="' + escHtml(c.id) + '">'
+            + '<span class="mcp-card-name">' + escHtml(c.name) + tag + '</span>'
+            + '<span class="mcp-card-desc">' + escHtml(c.description || '') + '</span>'
+          + '</button>';
+        });
+        html += '</div>';
+      });
+      html += '<div class="mcp-card-grid"><button class="mcp-card mcp-card-custom" type="button" data-id="">'
+        + '<span class="mcp-card-name">Custom server\u2026</span>'
+        + '<span class="mcp-card-desc">Enter command/URL by hand</span></button></div>';
+      html += '</div>';
+      return html;
+    }
+
+    function formHtml(entry) {
+      entry = entry || {};
+      var type = entry.type || 'stdio';
+      var isRemote = type === 'http' || type === 'sse';
+      var f = '<div class="skills-section-head">' + (entry.id ? escHtml(entry.name) : 'Custom server') + '</div>';
+      f += '<div class="mcp-form">';
+      if (entry.note) f += '<div class="mcp-note">' + escHtml(entry.note) + '</div>';
+      f += row('Name', '<input class="skills-create-name mcp-in" id="mcp-name" spellcheck="false" value="' + escHtml(entry.id || '') + '" placeholder="my-server">');
+      f += row('Transport',
+        '<select class="skills-create-scope mcp-in" id="mcp-type">'
+          + opt('stdio', 'stdio (local command)', type)
+          + opt('http', 'http (remote)', type)
+          + opt('sse', 'sse (remote)', type)
+        + '</select>');
+      // stdio fields
+      f += '<div id="mcp-stdio" class="' + (isRemote ? 'mcp-hidden' : '') + '">';
+      f += row('Command', '<input class="skills-create-name mcp-in" id="mcp-command" spellcheck="false" value="' + escHtml(entry.command || '') + '" placeholder="npx">');
+      f += row('Args', '<input class="skills-create-name mcp-in" id="mcp-args" spellcheck="false" value="' + escHtml((entry.args || []).join(' ')) + '" placeholder="-y some-package">');
+      (entry.requiredArgs || []).forEach(function (a, idx) {
+        f += row(a.label, '<input class="skills-create-name mcp-in mcp-reqarg" data-idx="' + idx + '" spellcheck="false" placeholder="' + escHtml(a.placeholder || '') + '">');
+      });
+      f += '</div>';
+      // remote field
+      f += '<div id="mcp-remote" class="' + (isRemote ? '' : 'mcp-hidden') + '">';
+      f += row('URL', '<input class="skills-create-name mcp-in" id="mcp-url" spellcheck="false" value="' + escHtml(entry.url || '') + '" placeholder="https://mcp.example.com/mcp">');
+      f += '</div>';
+      // Environment variables \u2014 rendered/refreshed by renderEnvBox() so the
+      // shell-profile setup block tracks which vars are included.
+      f += '<div id="mcp-envbox"></div>';
+      // targets — default-check only the user's default agent so a single add
+      // doesn't silently fan out to every installed CLI. Others are opt-in.
+      f += '<div class="mcp-env-label">Add to agents</div>'
+        + '<div class="mcp-targets-hint">Defaults to your default agent — check more to add this server to several at once.</div>'
+        + '<div class="mcp-targets">';
+      targets.forEach(function (t) {
+        var note = !t.installed ? ' <span class="mcp-target-note">(not installed)</span>'
+          : (!t.verified ? ' <span class="mcp-target-note">(unverified path)</span>' : '');
+        f += '<label class="mcp-target"><input type="checkbox" class="mcp-target-cb" data-agent="' + escHtml(t.id) + '" data-project="' + (t.hasProjectScope ? '1' : '0') + '"' + (t.isDefault ? ' checked' : '') + '> ' + escHtml(t.name) + note + '</label>';
+      });
+      f += '</div>';
+      // scope
+      var anyProject = targets.some(function (t) { return t.hasProjectScope; });
+      f += '<div class="mcp-env-label">Scope</div><div class="mcp-scope">'
+        + '<label class="mcp-target"><input type="radio" name="mcp-scope" value="user" checked> User (applies everywhere)</label>'
+        + '<label class="mcp-target"><input type="radio" name="mcp-scope" value="project"' + (anyProject ? '' : ' disabled') + '> This project' + (anyProject ? '' : ' <span class="mcp-target-note">(open a repo with a project-scoped agent)</span>') + '</label>'
+        + '</div>';
+      f += '<div class="skills-create-error mcp-form-error" id="mcp-error" style="margin-left:0"></div>';
+      f += '<div class="skills-create-actions"><button class="skills-create-go mcp-submit" type="button">Add server</button></div>';
+      f += '</div>';
+      return f;
+
+      function row(label, control) {
+        return '<div class="mcp-field"><label>' + escHtml(label) + '</label><div class="mcp-control">' + control + '</div></div>';
+      }
+      function opt(val, label, cur) {
+        return '<option value="' + val + '"' + (cur === val ? ' selected' : '') + '>' + escHtml(label) + '</option>';
+      }
+    }
+
+    // Build the env-var section. Secrets are never stored: declared vars become
+    // ${VAR} refs and the user sets real values in their shell profile.
+    // updateExports() refreshes the copy/paste block as vars change.
+    function renderEnvBox(entry) {
+      entry = entry || {};
+      var box = dialog.querySelector('#mcp-envbox');
+      var typeSel = dialog.querySelector('#mcp-type');
+      var remote = typeSel.value === 'http' || typeSel.value === 'sse';
+      if (remote) {
+        box.innerHTML = '<div class="mcp-env-label">Authentication</div>'
+          + '<div class="mcp-note">Remote servers sign in from your agent on first use (OAuth) \u2014 no environment setup needed here.</div>';
         return;
       }
-      pane.innerHTML =
-        '<div class="skills-section-head">Configured <span class="skills-section-count">' + servers.length + '</span></div>'
-        + '<div class="skills-list">' + servers.map(function (s) {
-          var sourceCls = s.sourceKind === 'user' ? 'skills-source-user' : 'skills-source-project';
-          var argLine = s.command + (s.args.length ? ' ' + s.args.join(' ') : '');
-          return '<div class="skills-row" title="' + escHtml(s.sourceFile) + '">'
-            + '<div class="skills-row-main">'
-              + '<span class="skills-row-name">' + escHtml(s.name) + '</span>'
-              + '<span class="skills-row-source ' + sourceCls + '">' + escHtml(s.source) + '</span>'
-              + '<span class="mcp-type">' + escHtml(s.type) + '</span>'
-            + '</div>'
-            + '<div class="skills-row-desc"><code class="mcp-cmd">' + escHtml(argLine) + '</code></div>'
-            + (s.envKeys.length
-              ? '<div class="skills-row-desc">env: ' + s.envKeys.map(function (k) { return '<code class="mcp-envkey">' + escHtml(k) + '</code>'; }).join(' ') + '</div>'
-              : '')
+      var reqEnv = entry.requiredEnv || [];
+      var optEnv = entry.optionalEnv || [];
+      var html = '<div class="mcp-env-label">Environment variables</div>';
+      if (reqEnv.length || optEnv.length) {
+        html += '<div class="mcp-note">Klaussy stores these as <code>${VAR}</code> references, never the secret. Set the real values in your shell profile below.</div>';
+      }
+      html += '<div class="mcp-var-list">';
+      reqEnv.forEach(function (e) {
+        html += '<div class="mcp-var" data-key="' + escHtml(e.key) + '" data-ph="' + escHtml(e.placeholder || '') + '" data-required="1">'
+          + '<code class="mcp-envkey">' + escHtml(e.key) + '</code> <span class="mcp-var-label">' + escHtml(e.label || '') + ' \u2014 required</span></div>';
+      });
+      optEnv.forEach(function (e) {
+        html += '<label class="mcp-var mcp-var-opt" data-key="' + escHtml(e.key) + '" data-ph="' + escHtml(e.placeholder || '') + '">'
+          + '<input type="checkbox" class="mcp-opt-cb"> <code class="mcp-envkey">' + escHtml(e.key) + '</code> <span class="mcp-var-label">' + escHtml(e.label || '') + '</span></label>';
+      });
+      html += '<div id="mcp-custom-env"></div>';
+      html += '<button class="skills-create-cancel mcp-add-env" type="button">+ Add variable</button>';
+      html += '</div>';
+      // Shell-profile setup block.
+      html += '<div id="mcp-setup" class="mcp-setup mcp-hidden">'
+        + '<div class="mcp-setup-head">Set these in your shell profile</div>'
+        + '<div class="mcp-setup-sub" id="mcp-setup-sub"></div>'
+        + '<pre class="mcp-exports" id="mcp-exports"></pre>'
+        + '<div class="mcp-setup-actions">'
+          + '<button class="skills-create-cancel mcp-copy-exports" type="button">Copy</button>'
+          + (envInfo.profilePath ? '<button class="skills-create-cancel mcp-open-profile" type="button">Open ' + escHtml(envInfo.profilePath) + '</button>' : '')
+          + (entry.docsUrl ? '<a class="mcp-docs-link" href="' + escHtml(entry.docsUrl) + '" target="_blank" rel="noreferrer">Where to get these \u2192</a>' : '')
+        + '</div>'
+      + '</div>';
+      box.innerHTML = html;
+      wireEnvBox();
+      updateExports();
+    }
+
+    function includedVars() {
+      var vars = [];
+      dialog.querySelectorAll('.mcp-var[data-required="1"]').forEach(function (el) {
+        vars.push({ key: el.dataset.key, ph: el.dataset.ph });
+      });
+      dialog.querySelectorAll('.mcp-var-opt').forEach(function (el) {
+        var cb = el.querySelector('.mcp-opt-cb');
+        if (cb && cb.checked) vars.push({ key: el.dataset.key, ph: el.dataset.ph });
+      });
+      dialog.querySelectorAll('.mcp-custom-row').forEach(function (rowEl) {
+        var k = rowEl.querySelector('.mcp-env-k').value.trim();
+        if (k) vars.push({ key: k, ph: '' });
+      });
+      return vars;
+    }
+
+    function exportLineFor(key, ph) {
+      var val = ph || ('your-' + key.toLowerCase().replace(/_/g, '-'));
+      if (envInfo.syntax === 'fish') return 'set -Ux ' + key + ' "' + val + '"';
+      if (envInfo.syntax === 'powershell') return '[Environment]::SetEnvironmentVariable("' + key + '", "' + val + '", "User")';
+      return 'export ' + key + '="' + val + '"';
+    }
+
+    function updateExports() {
+      var setup = dialog.querySelector('#mcp-setup');
+      if (!setup) return;
+      var vars = includedVars();
+      if (!vars.length) { setup.classList.add('mcp-hidden'); return; }
+      setup.classList.remove('mcp-hidden');
+      var sub = dialog.querySelector('#mcp-setup-sub');
+      sub.textContent = envInfo.profilePath
+        ? 'Add to ' + envInfo.profilePath + ' (your ' + envInfo.shell + ' profile), then restart your agents:'
+        : 'Set these as user environment variables (PowerShell), then restart your shell and agents:';
+      dialog.querySelector('#mcp-exports').textContent = vars.map(function (v) { return exportLineFor(v.key, v.ph); }).join('\n');
+    }
+
+    function wireEnvBox() {
+      var addBtn = dialog.querySelector('.mcp-add-env');
+      if (addBtn) {
+        addBtn.addEventListener('click', function () {
+          var hostBox = dialog.querySelector('#mcp-custom-env');
+          var rowEl = document.createElement('div');
+          rowEl.className = 'mcp-field mcp-custom-row';
+          rowEl.innerHTML = '<label></label><div class="mcp-control mcp-custom-pair">'
+            + '<input class="skills-create-name mcp-in mcp-env-k" spellcheck="false" placeholder="VAR_NAME">'
+            + '<span class="mcp-var-label">set the value in your shell</span>'
+            + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove">&times;</button>'
           + '</div>';
-        }).join('') + '</div>';
-    });
+          rowEl.querySelector('.mcp-env-del').addEventListener('click', function () { rowEl.remove(); updateExports(); });
+          rowEl.querySelector('.mcp-env-k').addEventListener('input', updateExports);
+          hostBox.appendChild(rowEl);
+          updateExports();
+        });
+      }
+      dialog.querySelectorAll('.mcp-opt-cb').forEach(function (cb) {
+        cb.addEventListener('change', updateExports);
+      });
+      var copyBtn = dialog.querySelector('.mcp-copy-exports');
+      if (copyBtn) copyBtn.addEventListener('click', function () {
+        var text = dialog.querySelector('#mcp-exports').textContent;
+        if (navigator.clipboard) navigator.clipboard.writeText(text);
+        if (window.toast) window.toast.success('Copied');
+      });
+      var openBtn = dialog.querySelector('.mcp-open-profile');
+      if (openBtn) openBtn.addEventListener('click', function () {
+        window.klaus.mcp.openProfile().then(function (r) {
+          if (r && r.error && window.toast) window.toast.error(r.error);
+        });
+      });
+    }
+
+    function wireForm(entry) {
+      var typeSel = dialog.querySelector('#mcp-type');
+      var stdioBox = dialog.querySelector('#mcp-stdio');
+      var remoteBox = dialog.querySelector('#mcp-remote');
+      typeSel.addEventListener('change', function () {
+        var remote = typeSel.value === 'http' || typeSel.value === 'sse';
+        stdioBox.classList.toggle('mcp-hidden', remote);
+        remoteBox.classList.toggle('mcp-hidden', !remote);
+        renderEnvBox(entry);
+      });
+      renderEnvBox(entry);
+      dialog.querySelector('.mcp-submit').addEventListener('click', function () { submit(entry); });
+    }
+
+    function fail(msg) {
+      var el = dialog.querySelector('#mcp-error');
+      if (el) el.textContent = msg;
+    }
+
+    // Build the env object as ${VAR} references \u2014 values live in the user's
+    // shell, never in the config. Returns null on an invalid custom key.
+    function buildEnvRefs() {
+      var env = {};
+      var bad = null;
+      includedVars().forEach(function (v) {
+        if (!/^[A-Za-z0-9_]+$/.test(v.key)) { bad = v.key; return; }
+        env[v.key] = '${' + v.key + '}';
+      });
+      return { env: env, bad: bad };
+    }
+
+    function submit(entry) {
+      entry = entry || {};
+      var name = dialog.querySelector('#mcp-name').value.trim();
+      var type = dialog.querySelector('#mcp-type').value;
+      var remote = type === 'http' || type === 'sse';
+      if (!name) return fail('A server name is required.');
+      if (!/^[\w.-]+$/.test(name)) return fail('Name may contain only letters, numbers, dot, dash, underscore.');
+
+      var server = { name: name, type: type };
+      if (remote) {
+        var url = dialog.querySelector('#mcp-url').value.trim();
+        if (!url) return fail('A URL is required for http/sse servers.');
+        server.url = url;
+      } else {
+        var command = dialog.querySelector('#mcp-command').value.trim();
+        if (!command) return fail('A command is required for stdio servers.');
+        server.command = command;
+        var args = dialog.querySelector('#mcp-args').value.trim().split(/\s+/).filter(Boolean);
+        var missingArg = false;
+        dialog.querySelectorAll('.mcp-reqarg').forEach(function (inp) {
+          var v = inp.value.trim();
+          if (!v) missingArg = true;
+          else args.push(v);
+        });
+        if (missingArg) return fail('Fill in all required arguments.');
+        server.args = args;
+        var built = buildEnvRefs();
+        if (built.bad) return fail('Variable name \u201c' + built.bad + '\u201d may contain only letters, numbers, underscore.');
+        if (Object.keys(built.env).length) server.env = built.env;
+      }
+
+      var scope = (dialog.querySelector('input[name="mcp-scope"]:checked') || {}).value || 'user';
+      var chosen = [];
+      dialog.querySelectorAll('.mcp-target-cb:checked').forEach(function (cb) {
+        chosen.push({ id: cb.dataset.agent, hasProject: cb.dataset.project === '1' });
+      });
+      if (!chosen.length) return fail('Pick at least one agent to add this server to.');
+
+      var writeTargets = chosen;
+      var skipped = [];
+      if (scope === 'project') {
+        writeTargets = chosen.filter(function (t) { return t.hasProject; });
+        skipped = chosen.filter(function (t) { return !t.hasProject; });
+        if (!writeTargets.length) return fail('None of the selected agents support project scope here.');
+      }
+
+      fail('');
+      var btn = dialog.querySelector('.mcp-submit');
+      btn.disabled = true;
+      btn.textContent = 'Adding\u2026';
+      Promise.all(writeTargets.map(function (t) {
+        return window.klaus.mcp.add(t.id, scope, server).then(function (r) { return { id: t.id, res: r }; });
+      })).then(function (results) {
+        var ok = results.filter(function (r) { return r.res && r.res.ok; });
+        var errs = results.filter(function (r) { return !r.res || r.res.error; });
+        if (ok.length && window.toast) {
+          var needsEnv = server.env && Object.keys(server.env).length;
+          window.toast.success('Added ' + name + ' to ' + ok.length + ' agent' + (ok.length > 1 ? 's' : '')
+            + (skipped.length ? ' (' + skipped.length + ' skipped \u2014 no project scope)' : '')
+            + (needsEnv ? ' \u2014 remember to set its env vars in your shell profile' : ''));
+        }
+        if (errs.length) {
+          btn.disabled = false;
+          btn.textContent = 'Add server';
+          fail('Failed for ' + errs.length + ' agent(s): ' + errs.map(function (e) { return (e.res && e.res.error) || e.id; }).join('; '));
+          return;
+        }
+        showList();
+      });
+    }
   }
 
   // ---- Plugins ----
@@ -1259,10 +1735,9 @@ window.Dialogs = (function () {
     });
   }
 
-  // Quick slash-command launcher. Lists every discovered command (and skill)
-  // and, on pick, types it into the active terminal so users can fire a
-  // `/command` without remembering the exact plugin namespace. Enter runs it;
-  // ⌘/Ctrl+Enter (or the "Insert" affordance) just inserts it for editing.
+  // Quick slash-command launcher. Lists every discovered command/skill and, on
+  // pick, types it into the active terminal. Enter runs it; ⌘/Ctrl+Enter (or
+  // "Insert") just inserts it for editing.
   function showSlashLauncher() {
     var overlay = document.createElement('div');
     overlay.className = 'palette-overlay';
