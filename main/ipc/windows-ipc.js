@@ -85,13 +85,9 @@ nativeTheme.on('updated', () => {
 
 // ---- Per-window top-bar color ----
 //
-// Each app window can carry an accent color (shown as a top strip + header
-// tint) so multiple windows — e.g. a work project vs a side project, each with
-// its own terminals — are easy to tell apart. The color is per-window: the
-// main window persists its choice in config.windowColor; secondary windows are
-// session-only (kept in a Map keyed by webContents id). The picker lives in the
-// (global) Preferences window, so we remember which window opened it and apply
-// the color to that owner.
+// Each window can carry an accent color so multiple windows are easy to tell
+// apart. The main window persists it in config.windowColor; secondary windows
+// are session-only (Map keyed by webContents id). The picker lives in Preferences.
 const windowColors = new Map(); // webContents.id -> color string
 
 function windowColorFor(win) {
@@ -129,9 +125,8 @@ let prefsWindow = null;
 let prefsOwner = null;
 
 // Open (or focus) the shared Preferences window, remembering which app window
-// it was opened from so the per-window color picker targets the right window.
-// Exported so the app menu's "Preferences…" item can call it directly with the
-// focused window (a menu click has no event.sender).
+// opened it so the color picker targets the right one. Exported so the app
+// menu's "Preferences…" item can call it (a menu click has no event.sender).
 function openPreferencesWindow(ownerWin) {
   if (ownerWin && !ownerWin.isDestroyed()) prefsOwner = ownerWin;
   if (prefsWindow && !prefsWindow.isDestroyed()) {
@@ -179,6 +174,8 @@ ipcMain.handle('get-preferences', () => {
     fontSize: config.fontSize || 13,
     lineHeight: config.lineHeight || 1.2,
     cursorStyle: config.cursorStyle || 'block',
+    // Inline-autocomplete (Ollama FIM) model tag; base = FIM-tuned.
+    ollamaModel: config.ollamaModel || 'qwen2.5-coder:1.5b-base',
     claudePath: config.claudePath || '',
     codexPath: config.codexPath || '',
     geminiPath: config.geminiPath || '',
@@ -213,6 +210,7 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.fontSize !== undefined) config.fontSize = prefs.fontSize;
   if (prefs.lineHeight !== undefined) config.lineHeight = prefs.lineHeight;
   if (prefs.cursorStyle !== undefined) config.cursorStyle = prefs.cursorStyle;
+  if (prefs.ollamaModel !== undefined) config.ollamaModel = prefs.ollamaModel;
   if (prefs.claudePath !== undefined) config.claudePath = prefs.claudePath;
   if (prefs.codexPath !== undefined) config.codexPath = prefs.codexPath;
   if (prefs.geminiPath !== undefined) config.geminiPath = prefs.geminiPath;
@@ -290,11 +288,9 @@ ipcMain.handle('get-claude-info', async () => {
   return { path: info.path, version: info.version };
 });
 
-// Per-provider version probe for the preferences UI and the "agent not
-// installed" setup prompt. { provider } in, { id, displayName, path, version,
-// installed, installCommand, docsUrl, loginCommand } out (version='not found'
-// and installed=false on failure). The install/docs fields let the renderer
-// guide the user to set up an agent they picked but don't have yet.
+// Per-provider version probe for the preferences UI and "agent not installed"
+// prompt. { provider } in; { id, displayName, path, version, installed,
+// installCommand, docsUrl, loginCommand } out. Install/docs fields guide setup.
 ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
   const config = loadConfig();
   const prov = getProvider(provider);

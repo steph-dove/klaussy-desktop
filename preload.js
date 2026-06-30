@@ -1,22 +1,16 @@
 // Preload: the only bridge between the sandboxed renderer and main.
 //
-// API is namespaced: `window.klaus.git.status(...)` rather than the
-// previous flat `window.klaus.gitStatus(...)`. Grouping makes it obvious
-// which module owns each IPC target; a renderer that only needs git shouldn't
-// see the whole PR surface. See M-ARCH-2 in REVIEW_OUTPUT.md for the rationale.
+// API is namespaced (`window.klaus.git.status(...)`) so each IPC target's
+// owning module is obvious. See M-ARCH-2 in REVIEW_OUTPUT.md.
 //
 // Every entry is a thin `ipcRenderer.invoke` / `.send` / `.on` wrapper —
 // the handlers live in main/ipc/<feature>.js and the state modules.
 
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-// Static AI-provider descriptors (id / displayName / shortLabel / defaultBin)
-// handed to the renderer as one source of truth for labels and the provider
-// picker. This preload is SANDBOXED — it can only require electron + Node
-// builtins, NOT local project files — so we pull the list from main over a
-// synchronous IPC (main owns the canonical registry). A hardcoded fallback
-// guarantees we never throw here and blank the renderer if that IPC is
-// unavailable; keep it in sync with main/state/ai-providers.js.
+// Static AI-provider descriptors, the renderer's single source of truth. This
+// sandboxed preload pulls them from main over sync IPC; a hardcoded fallback
+// (keep synced with main/state/ai-providers.js) guards against a blank renderer.
 let AGENT_PROVIDERS;
 try {
   AGENT_PROVIDERS = ipcRenderer.sendSync('get-providers-sync');
@@ -337,10 +331,8 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
-    // Implement runs inside an interactive node-pty (see
-    // main/state/pr-implement-pty.js). Renderer mounts xterm.js,
-    // streams raw bytes via onReviewImplementPtyData, and parses
-    // structured progress via onReviewImplementPtyEvent.
+    // Implement runs in an interactive node-pty (main/state/pr-implement-pty.js);
+    // renderer mounts xterm.js, streaming raw bytes and structured progress events.
     reviewImplementStart: (requestId, mode, body, provider) =>
       ipcRenderer.invoke('pr-review-implement-start', { requestId, mode, body, provider }),
     reviewImplementInput: (requestId, data) =>
@@ -559,13 +551,15 @@ contextBridge.exposeInMainWorld('klaus', {
         ipcRenderer.once(channel, handler);
         return () => ipcRenderer.removeListener(channel, handler);
       },
-      // Consent / install flow. The setup-start handler streams progress
-      // events on the shared `ollama-setup-progress` channel; subscribe
-      // once and you'll receive every step (install / server / model /
-      // warmup / done).
+      // Consent / install flow. setup-start streams progress on the shared
+      // `ollama-setup-progress` channel; subscribe once for every step.
       setupStatus: () => ipcRenderer.invoke('ollama-setup-status'),
       setupStart: () => ipcRenderer.invoke('ollama-setup-start'),
       setupDecline: () => ipcRenderer.invoke('ollama-setup-decline'),
+      // Pull the currently-configured model if it isn't installed yet (used
+      // after the autocomplete-model picker changes). Streams progress on the
+      // shared `ollama-setup-progress` channel.
+      ensureModel: () => ipcRenderer.invoke('ollama-ensure-model'),
       onSetupProgress: (callback) => {
         const handler = (_e, p) => callback(p);
         ipcRenderer.on('ollama-setup-progress', handler);
@@ -590,10 +584,9 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.on('agents-changed', handler);
       return () => ipcRenderer.removeListener('agents-changed', handler);
     },
-    // Generic chunk subscription for an in-flight backgrounded agent. The
-    // channel matches whatever channelPrefix the agent was registered with
-    // (`<prefix>-chunk-<id>` for plain text, `<prefix>-data-<id>` for
-    // stream-json). Lets a re-mounting consumer attach to live output.
+    // Generic chunk subscription for a backgrounded agent. Channel is
+    // `<prefix>-chunk-<id>` (plain) or `<prefix>-data-<id>` (stream-json),
+    // letting a re-mounting consumer attach to live output.
     onChunk: (channelPrefix, id, isStreamJson, callback) => {
       const channel = `${channelPrefix}-${isStreamJson ? 'data' : 'chunk'}-${id}`;
       const handler = (_e, chunk) => callback(chunk);

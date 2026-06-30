@@ -3,14 +3,13 @@
 // the renderer can decide whether to activate passive ghost-text or fall
 // back to word-complete.
 //
-// We deliberately avoid a dependency — Node 18+ has a global `fetch` and
-// `AbortController`, which is all we need. Streaming uses ReadableStream's
-// async iterator, splitting on newlines since Ollama emits one JSON object
-// per line.
+// No HTTP dependency — Node 18+ has global `fetch` and `AbortController`.
+// Streaming reads ReadableStream line by line, since Ollama emits one JSON
+// object per line.
 //
 // Config overrides (persisted in userData/config.json):
 //   ollamaUrl   — default 'http://127.0.0.1:11434'
-//   ollamaModel — default 'qwen2.5-coder:1.5b'
+//   ollamaModel — default 'qwen2.5-coder:1.5b-base' (base = FIM-tuned)
 
 const { execFile, spawn } = require('child_process');
 const { app } = require('electron');
@@ -22,7 +21,13 @@ const IS_MAC = process.platform === 'darwin';
 const IS_LINUX = process.platform === 'linux';
 
 const DEFAULT_URL = 'http://127.0.0.1:11434';
-const DEFAULT_MODEL = 'qwen2.5-coder:1.5b';
+// Base (not instruct) variant: trained for fill-in-the-middle, so it continues
+// code cleanly instead of narrating. Override via config `ollamaModel`.
+const DEFAULT_MODEL = 'qwen2.5-coder:1.5b-base';
+// Ollama's runtime default context window is 4096 when num_ctx is unset, which
+// silently truncates once we add cross-file snippets. 8192 fits the current
+// window plus repo context with room for the completion.
+const DEFAULT_NUM_CTX = 8192;
 
 function getBaseUrl() {
   const cfg = loadConfig();
@@ -55,10 +60,12 @@ async function probeNow() {
     result.running = true;
     const body = await res.json();
     const names = Array.isArray(body.models) ? body.models.map((m) => m.name) : [];
-    // Ollama reports model tags as "<name>:<tag>"; accept either an exact
-    // match (user set `ollamaModel: "qwen2.5-coder:1.5b"`) or a prefix
-    // (user just said `qwen2.5-coder`, any tag is fine).
-    result.modelPresent = names.some((n) => n === model || n.startsWith(model + ':') || n.split(':')[0] === model.split(':')[0]);
+    // Tags are "<name>:<tag>". A configured tag must match exactly (a sibling
+    // tag is a different download and FIM would 404); a bare name with no ':'
+    // matches any tag of that family.
+    const hasTag = model.includes(':');
+    result.modelPresent = names.some((n) =>
+      n === model || n.startsWith(model + ':') || (!hasTag && n.split(':')[0] === model));
   } catch (err) {
     result.error = (err && err.message) || String(err);
   }
@@ -71,20 +78,38 @@ async function probe() {
   return probeNow();
 }
 
-// Streams a fill-in-middle completion. qwen2.5-coder supports FIM natively;
-// Ollama's /api/generate handles the token wrapping when both `prompt` and
-// `suffix` are supplied.
+// Builds Qwen2.5-Coder's repo-level FIM prompt: optional repo name, cross-file
+// snippets, then the current file with the cursor hole. Sent raw:true so Ollama
+// passes it verbatim instead of applying a chat template.
+function buildRepoFimPrompt({ repoName, filePath, prefix, suffix, snippets }) {
+  const parts = [];
+  if (repoName) parts.push('<|repo_name|>' + repoName);
+  (snippets || []).forEach((s) => {
+    if (s && s.path && s.content) parts.push('<|file_sep|>' + s.path + '\n' + s.content);
+  });
+  const head = filePath ? '<|file_sep|>' + filePath + '\n' : '';
+  parts.push(head + '<|fim_prefix|>' + (prefix || '') + '<|fim_suffix|>' + (suffix || '') + '<|fim_middle|>');
+  return parts.join('\n');
+}
+
+// Streams a fill-in-middle completion.
+//
+// Two transports: with filePath/snippets we send the repo-level FIM prompt
+// raw (model sees filename + neighbours); without, legacy file-level FIM via
+// Ollama's native prompt+suffix wrapping.
 //
 // Callbacks:
 //   onChunk(text)      — each response delta from the stream
 //   onDone({ ok, error, cancelled })
 //
 // Returns a cancel function.
-function generateFIM({ prefix, suffix, options, onChunk, onDone }) {
+function generateFIM({ prefix, suffix, filePath, snippets, repoName, options, onChunk, onDone }) {
   const url = getBaseUrl();
   const model = getModel();
   const ctrl = new AbortController();
   let settled = false;
+
+  const useRepoFim = !!(filePath || (snippets && snippets.length));
 
   function finish(payload) {
     if (settled) return;
@@ -95,26 +120,24 @@ function generateFIM({ prefix, suffix, options, onChunk, onDone }) {
   (async () => {
     let res;
     try {
+      // Keep completions short and deterministic-ish — this is inline
+      // autocomplete, not free-form generation. num_ctx must be explicit or
+      // Ollama caps at 4096 and truncates the repo context.
+      const reqOptions = Object.assign({
+        num_ctx: DEFAULT_NUM_CTX,
+        num_predict: 128,
+        temperature: 0.2,
+        top_p: 0.95,
+        stop: ['\n\n\n', '<|endoftext|>', '<|file_sep|>', '<|fim_pad|>'],
+      }, options || {});
+      const body = useRepoFim
+        ? { model, prompt: buildRepoFimPrompt({ repoName, filePath, prefix, suffix, snippets }), raw: true, stream: true, options: reqOptions }
+        : { model, prompt: prefix || '', suffix: suffix || '', stream: true, options: reqOptions };
       res = await fetch(url + '/api/generate', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         signal: ctrl.signal,
-        body: JSON.stringify({
-          model,
-          prompt: prefix,
-          suffix: suffix || '',
-          stream: true,
-          // Keep completions short and deterministic-ish — this is inline
-          // autocomplete, not free-form generation. num_predict caps runtime
-          // on the long tail; stop tokens bail early when the model would
-          // otherwise start explaining itself.
-          options: Object.assign({
-            num_predict: 128,
-            temperature: 0.2,
-            top_p: 0.95,
-            stop: ['\n\n\n', '<|endoftext|>', '<|file_sep|>'],
-          }, options || {}),
-        }),
+        body: JSON.stringify(body),
       });
     } catch (err) {
       if (ctrl.signal.aborted) { finish({ cancelled: true }); return; }
@@ -199,12 +222,9 @@ function which(bin) {
   return Promise.resolve(whichBinSync(bin));
 }
 
-// The detection cascade the consent/install flow consumes. Returns one of:
-//   'ready'         — server running + model installed, nothing to do
-//   'needs-model'   — server up but model missing
-//   'needs-server'  — ollama binary exists but server isn't up
-//   'needs-install' — no ollama binary on PATH
-//   'declined'      — user previously chose Not now / Don't ask again
+// Detection cascade for the consent/install flow. Returns 'ready',
+// 'needs-model', 'needs-server', 'needs-install', or 'declined' (the last
+// when the user previously opted out).
 async function getSetupState() {
   const cfg = loadConfig();
   if (cfg.ollamaConsent === 'declined') return 'declined';
@@ -258,9 +278,8 @@ async function ensureServerRunning({ onProgress } = {}) {
   return { error: 'ollama serve did not become ready within 15s' };
 }
 
-// Spawns a package-manager install command with progress streamed through
-// onProgress. Shared between the brew (macOS) and winget (Windows) paths;
-// the bookkeeping is identical, only the binary + args differ. Returns
+// Spawns a package-manager install command, streaming progress via onProgress.
+// Shared by the brew/winget/snap paths (only binary + args differ). Returns
 // { ok } on exit 0, { error } otherwise.
 function spawnInstall({ cmd, args, label, onProgress }) {
   onProgress && onProgress({ step: 'install', message: `Installing Ollama via ${label}…` });
@@ -293,16 +312,9 @@ function spawnInstall({ cmd, args, label, onProgress }) {
   });
 }
 
-// Installs Ollama via the platform-native package manager.
-//   macOS:   brew
-//   Windows: winget
-//   Linux:   snap if available, else point at the install URL — we
-//            deliberately don't curl-pipe-sh the install script
-//            without consent (running arbitrary shell from a GUI is
-//            a footgun).
-// If the chosen manager isn't present we surface a user-friendly
-// message pointing at the official download page so the user can
-// install manually and re-run setup.
+// Installs Ollama via the platform package manager (brew/winget/snap). We
+// don't curl-pipe-sh on Linux without consent. If the manager is missing,
+// returns a message pointing at the official download page.
 async function installOllama({ onProgress } = {}) {
   if (IS_WIN) {
     const winget = await which('winget');
@@ -410,6 +422,23 @@ async function pullModel({ onProgress } = {}) {
   return { ok: true };
 }
 
+// Ensures the configured model is installed: starts the server if needed, then
+// pulls only when absent. Assumes the Ollama binary exists. Returns
+// { ok } / { ok, alreadyPresent } / { error }.
+async function ensureModel({ onProgress } = {}) {
+  let probed = await probeNow();
+  if (!probed.running) {
+    const r = await ensureServerRunning({ onProgress });
+    if (r.error) return r;
+    probed = await probeNow();
+  }
+  if (probed.modelPresent) return { ok: true, alreadyPresent: true };
+  const r = await pullModel({ onProgress });
+  if (r.error) return r;
+  await probeNow();
+  return { ok: true };
+}
+
 // End-to-end: install binary if needed → start server → pull model → warm up.
 // Each step streams a progress event so the consent modal can show what's
 // happening. Returns { ok } or { error } at the end.
@@ -466,6 +495,7 @@ module.exports = {
   getModel,
   getSetupState,
   ensureServerRunning,
+  ensureModel,
   runSetup,
   declineSetup,
 };

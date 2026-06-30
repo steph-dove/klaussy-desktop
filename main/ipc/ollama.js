@@ -2,11 +2,9 @@
 // layout of claude-stream-ipc.js (chunk-/done- suffixes keyed by requestId)
 // so the renderer can reuse the same streaming-subscription pattern.
 //
-// Request lifecycle:
-//   renderer calls ollama-complete-start with { requestId, prefix, suffix }
-//   main streams ollama-complete-chunk-<id> events back
-//   main fires ollama-complete-done-<id> with { ok | error | cancelled }
-//   renderer can call ollama-complete-cancel with { requestId } at any point
+// Request lifecycle: renderer calls ollama-complete-start; main streams
+// ollama-complete-chunk-<id> then ollama-complete-done-<id> ({ ok | error |
+// cancelled }); renderer may ollama-complete-cancel at any point.
 
 const { ipcMain } = require('electron');
 const ollama = require('../state/ollama');
@@ -29,7 +27,17 @@ ipcMain.handle('ollama-warmup', async () => {
   return { ok: true };
 });
 
-ipcMain.handle('ollama-complete-start', (event, { requestId, prefix, suffix }) => {
+// Pull the configured model if missing, streaming progress to the caller so
+// the preferences model-picker can show a download bar. Awaited so the UI can
+// report the final result.
+ipcMain.handle('ollama-ensure-model', async (event) => {
+  const sender = event.sender;
+  return ollama.ensureModel({
+    onProgress: (p) => { if (!sender.isDestroyed()) sender.send('ollama-setup-progress', p); },
+  });
+});
+
+ipcMain.handle('ollama-complete-start', (event, { requestId, prefix, suffix, filePath, snippets, repoName }) => {
   if (!requestId) return { error: 'Missing requestId' };
   if (inFlight.has(requestId)) return { error: 'Already in flight' };
 
@@ -48,6 +56,9 @@ ipcMain.handle('ollama-complete-start', (event, { requestId, prefix, suffix }) =
   const cancel = ollama.generateFIM({
     prefix: prefix || '',
     suffix: suffix || '',
+    filePath: filePath || null,
+    snippets: snippets || [],
+    repoName: repoName || null,
     onChunk: (text) => {
       if (!sender.isDestroyed()) sender.send(chunkChannel, text);
     },
