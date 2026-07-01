@@ -1890,6 +1890,13 @@ body.pr-review-popout #pr-review-root {
   overflow-y: auto;
 }
 
+.pr-ai-no-findings {
+  padding: 14px;
+  font-size: 13px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
 .pr-ai-inline-code {
   background: rgba(128, 128, 128, 0.18);
   padding: 1px 5px;

@@ -481,6 +481,9 @@
       body = '<div class="pr-ai-body error">' + PR.escHtml(PR.aiReview.error) + '</div>';
     } else if (!PR.aiReview.finalText && PR.aiReview.requestId) {
       body = '<div class="pr-ai-body status-pulse">Working\u2026</div>';
+    } else if (PR.aiReview.findings.length === 0 && PR.aiReview.summary) {
+      // Clean approve: verdict banner already shows the outcome.
+      body = '<div class="pr-ai-no-findings">No line-level findings.</div>';
     } else if (PR.aiReview.findings.length === 0) {
       // Parser found nothing — show the raw text as one fallback card so the
       // user still sees the review even when the structured shape is off.
