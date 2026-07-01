@@ -238,6 +238,18 @@ window.FindingParser = (function () {
           try { rawFindings.push(JSON.parse(sources[i])); } catch (_e) {}
         }
       }
+      // Recover the sibling "summary" object too, so a parse failure in the
+      // findings array doesn't also drop the (intact) verdict banner.
+      var sumKey = inner.indexOf('"summary"');
+      if (sumKey !== -1) {
+        var sumBrace = inner.indexOf('{', sumKey);
+        if (sumBrace !== -1) {
+          var sumSources = extractObjectSources(inner.slice(sumBrace));
+          if (sumSources.length) {
+            try { summary = JSON.parse(sumSources[0]); } catch (_e2) {}
+          }
+        }
+      }
     }
     if (!rawFindings) return null;
     var findings = rawFindings.map(normalizeJsonFinding).filter(Boolean);
