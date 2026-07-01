@@ -1040,6 +1040,17 @@ body.pr-review-popout #pr-review-root {
   font-family: 'SF Mono', Menlo, monospace;
   font-size: 11px;
 }
+.pr-local-file-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.pr-local-file-check {
+  flex-shrink: 0;
+  cursor: pointer;
+  margin: 0;
+}
 .pr-local-file-status {
   display: inline-block;
   width: 22px;

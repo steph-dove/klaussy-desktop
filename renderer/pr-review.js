@@ -366,6 +366,7 @@ window.PrReview = window.PrReview || {};
       // briefly show stale file names while the new PR's state is fetched.
       PR.localChanges = null;
       PR.localCommitMsg = 'Apply review feedback';
+      PR.localSelectedFiles = {};
       PR.localBusy = null;
       PR.localBanner = null;
       // Fire-and-forget. Pass the PR number explicitly — lastState isn't
