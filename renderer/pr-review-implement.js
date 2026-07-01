@@ -317,6 +317,14 @@
     return PR.pendingComments.some(function (c) { return c.fromFindingId === findingId; });
   };
 
+  // Add-to-PR and Copy send only the text under a finding's "Suggested change:"
+  // label. Reads live f.text (pencil edits flow through); no label sends all.
+  PR.findingSuggestionText = function(f) {
+    var text = (f && f.text) || '';
+    var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
+    return m ? text.slice(m.index + m[0].length).trim() : text.trim();
+  };
+
   // Add a finding to the PR. Two paths:
   //   - verified inline location → push onto pendingComments so the draft
   //     appears anchored to the file:line in the diff, and the user can
@@ -325,6 +333,7 @@
   //     comment (legacy behavior, with attribution prefix).
   // The commentStatus lifecycle (posting/posted/failed) only applies to the
   // issue-comment path — drafts are purely client-side until submitted.
+
   PR.postFindingAsComment = async function(f) {
     // Toggle-off when the user clicks the button on an already-drafted
     // finding: pull the draft back out of pendingComments.
@@ -336,11 +345,9 @@
     }
     if (f.commentStatus === 'posting' || f.commentStatus === 'posted') return;
 
-    // Post the review block as the reviewer's own words. No bot attribution:
-    // the finding is theirs to stand behind, and the prompt already strips the
-    // AI tells (em dashes, filler, signposting) so it reads like a human wrote
-    // it. Whether or not they edited the text, it posts verbatim.
-    var attributedBody = f.text || '';
+    // Just the suggested change, posted as the reviewer's own words (no bot
+    // attribution). Body/severity/location stay on the card as reference.
+    var attributedBody = PR.findingSuggestionText(f);
 
     if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
       PR.pendingComments.push({
@@ -426,12 +433,10 @@
     if (PR.lastState) PR.render(PR.lastState);
   };
 
-  // Copy a finding's markdown body to the clipboard — whatever is currently
-  // in the review block, edits and all. Flips a transient state flag for a
-  // ~1.5s "Copied" label.
+  // Copy the same suggested-change text Add-to-PR posts, so paste matches send.
   PR.copyFindingAsMarkdown = async function(f) {
     try {
-      await navigator.clipboard.writeText(f.text || '');
+      await navigator.clipboard.writeText(PR.findingSuggestionText(f));
       f.copyStatus = 'copied';
       PR.repaintAiReviewTab();
       setTimeout(function () {
