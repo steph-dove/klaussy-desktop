@@ -355,6 +355,12 @@
       <div class="claude-info" id="agent-info-cline"></div>
 
       <div class="field field-full">
+        <label>opencode Path</label>
+        <input type="text" id="pref-opencode-path" placeholder="opencode (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-opencode"></div>
+
+      <div class="field field-full">
         <label>Aider Path (for Ollama)</label>
         <input type="text" id="pref-aider-path" placeholder="aider (uses PATH)" spellcheck="false" />
       </div>
@@ -372,6 +378,7 @@
           <option value="copilot">Copilot</option>
           <option value="cursor">Cursor</option>
           <option value="cline">Cline</option>
+          <option value="opencode">opencode</option>
           <option value="ollama">Ollama (via Aider)</option>
           <option value="shell">Shell</option>
         </select>

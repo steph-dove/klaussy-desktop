@@ -51,6 +51,7 @@
     copilot: { input: document.getElementById('pref-copilot-path'), infoEl: document.getElementById('agent-info-copilot'), prefKey: 'copilotPath' },
     cursor: { input: document.getElementById('pref-cursor-path'), infoEl: document.getElementById('agent-info-cursor'), prefKey: 'cursorPath' },
     cline: { input: document.getElementById('pref-cline-path'), infoEl: document.getElementById('agent-info-cline'), prefKey: 'clinePath' },
+    opencode: { input: document.getElementById('pref-opencode-path'), infoEl: document.getElementById('agent-info-opencode'), prefKey: 'opencodePath' },
     ollama: { input: document.getElementById('pref-aider-path'), infoEl: document.getElementById('agent-info-ollama'), prefKey: 'aiderPath' },
   };
 
@@ -223,6 +224,7 @@
       copilotPath: agentPaths.copilot.input.value.trim(),
       cursorPath: agentPaths.cursor.input.value.trim(),
       clinePath: agentPaths.cline.input.value.trim(),
+      opencodePath: agentPaths.opencode.input.value.trim(),
       aiderPath: agentPaths.ollama.input.value.trim(),
       defaultProvider: defaultMode.value,
       theme: { preset: themeSelect.value },

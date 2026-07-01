@@ -1,28 +1,6 @@
 // AI CLI provider registry — the single source of truth for the per-tool
-// differences between the coding agents Klaussy can drive (Claude Code,
-// OpenAI Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI, Cursor CLI,
-// Cline CLI).
-//
-// Every place that used to hardcode `config.claudePath || 'claude'` and the
-// `claude --resume <id>` / `claude -p` shapes now asks this registry instead.
-// A task/instance's `mode` is the provider id ('claude' | 'codex' | 'gemini' |
-// 'copilot') or the sentinel 'shell' for a plain login shell. Use
-// `isAgentMode(mode)` rather than `=== 'claude'` to mean "this is an AI agent".
-//
-// Phase 1 scope (interactive terminals + resume + selection):
-//   - buildInteractiveCmd / buildHeadlessRun / binFor / display metadata are
-//     live and exercised by the spawn + detection paths.
-//   - Only Claude does exact session-id tracking (its per-worktree .jsonl model
-//     in main/state/instances.js). The other tools store sessions globally or
-//     under an opaque project hash, so Phase 1 resume uses each tool's native
-//     "continue the most recent session in this directory" form via the
-//     `resumeLatest` flag instead of threading an exact id around.
-//   - parseStreamLine / usageFromSessionLine encode each tool's documented
-//     stream-JSON / transcript schema for the headless surfaces (Phase 2+).
-//     Claude's is verified (it mirrors the existing parsers); the other three
-//     are documented-but-unverified — marked `VERIFY:` — and MUST be checked
-//     against a real `--output-format`/`--json` capture before being trusted.
-//     Nothing in Phase 1 calls them, so they are dormant until then.
+// differences between the coding agents Klaussy can drive (Claude Code, OpenAI
+// Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI, Cursor CLI, Cline
 
 const path = require('path');
 const os = require('os');
@@ -65,8 +43,7 @@ function realPath(p) {
 
 // Read a Codex rollout file's launch cwd from its session_meta first line
 // without a full JSON.parse — that line embeds the entire system prompt and can
-// be hundreds of KB, but `cwd` sits near the front, so a regex over the head
-// is both correct and cheap.
+// be hundreds of KB, but `cwd` sits near the front, so a regex over the head is
 function readCodexSessionCwd(file) {
   try {
     const fd = fs.openSync(file, 'r');
@@ -103,19 +80,12 @@ function claudeUsage(u) {
 }
 
 // All adapters return the same normalized event shape so the renderer's
-// progress UI (tool chips, usage, end_turn) is provider-agnostic:
-//   { kind: 'usage', usage, requestId? }
-//   { kind: 'tool',  name, hint }
-//   { kind: 'text',  text }
-//   { kind: 'end_turn' }
-// parseStreamLine(obj) returns an array of those (possibly empty).
+// progress UI (tool chips, usage, end_turn) is provider-agnostic: { kind:
+// 'usage', usage, requestId? } { kind: 'tool', name, hint } { kind: 'text',
 
 // Shell-quoted extra workspace directories for a multi-repo session. Passing
-// these through each agent's add-directory flag lets the agent READ and EDIT its
-// sibling worktrees, not just its own cwd — without them the agents treat sibling
-// repos as outside their workspace and refuse cross-repo changes ("I can't change
-// that, it's in another repo"). buildInteractiveCmd returns a shell string, so
-// each path is JSON.stringify-quoted like model names elsewhere. [] when none.
+// these through each agent's add-directory flag lets the agent READ and EDIT
+// its sibling worktrees, not just its own cwd — without them the agents treat
 function quotedSessionDirs(sessionDirs) {
   return (Array.isArray(sessionDirs) ? sessionDirs : [])
     .filter((d) => typeof d === 'string' && d)
@@ -150,7 +120,6 @@ const PROVIDERS = {
     // Headless one-shot. mode 'text' → caller wants the clean final answer on
     // stdout; mode 'stream' → structured stream-json events. outputMode tells
     // spawnAgentStream how to read stdout: 'passthrough' (stdout IS the
-    // payload) or 'json-text' (stdout is JSONL; extract agent text events).
     buildHeadlessRun(_bin, { prompt, mode, model /*, allowEdits */ } = {}) {
       // Claude's headless `-p` already edits within cwd on the autonomous
       // surfaces today, so allowEdits needs no extra flag here.
@@ -162,9 +131,8 @@ const PROVIDERS = {
     sessionDir(worktreePath) {
       if (!worktreePath) return null;
       // Claude replaces every non-alphanumeric char with '-' (not just '/') —
-      // see util/claude-paths. A '/'-only encoding misses PR-checkout
-      // worktrees under "Application Support" (space), so the implement-PTY
-      // tail never finds the session file and the run never marks "done".
+      // see util/claude-paths. A '/'-only encoding misses PR-checkout worktrees
+      // under "Application Support" (space), so the implement-PTY tail never
       return claudeProjectDir(worktreePath);
     },
 
@@ -233,9 +201,8 @@ const PROVIDERS = {
     perWorktreeSessions: false,
     supportsExactResume: false,
     // Codex signs in with single-use rotating OAuth refresh tokens: two Codex
-    // processes refreshing at once invalidate each other (refresh_token_reused),
-    // forcing a re-login. agent-concurrency.js warns before a second concurrent
-    // Codex session starts. Claude/Gemini don't set this.
+    // processes refreshing at once invalidate each other
+    // (refresh_token_reused), forcing a re-login. agent-concurrency.js warns
     concurrentAuthUnsafe: true,
     // The interactive TUI pre-fills the positional prompt but waits for an
     // Enter to submit it (Claude auto-runs its positional prompt). The implement
@@ -255,17 +222,12 @@ const PROVIDERS = {
     buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
       // `codex exec --json` always emits JSONL (no clean-text plain mode). For
       // text surfaces we extract the agent_message text ('json-text'); for
-      // stream surfaces we translate Codex events into Claude-shaped
-      // stream-json so the PR-review renderer parses one format ('json-translate').
-      // `--skip-git-repo-check` lets it run in a file-only (non-git) folder
-      // (verified: only `codex exec` accepts this flag, not the interactive TUI).
+      // stream surfaces we translate Codex events into Claude-shaped stream-
       const args = ['exec', '--skip-git-repo-check'];
       if (model) args.push('-m', model); // pin a codex model/version when chosen
       // Autonomous-edit surfaces (pr-fix-check): Codex defaults to a read-only
-      // sandbox, so grant scoped workspace writes. `codex exec` is already
-      // non-interactive (no `--ask-for-approval` flag — verified), and this is
-      // NOT the dangerous full bypass (`--yolo` / `--dangerously-bypass-...`):
-      // the sandbox still blocks escaping the workspace and network access.
+      // sandbox, so grant scoped workspace writes. `codex exec` is already non-
+      // interactive (no `--ask-for-approval` flag — verified), and this is NOT
       if (allowEdits) args.push('--sandbox', 'workspace-write');
       args.push('--json', prompt);
       return { args, outputMode: mode === 'stream' ? 'json-translate' : 'json-text' };
@@ -278,11 +240,6 @@ const PROVIDERS = {
     // VERIFIED against codex-cli 0.135.0 `codex exec --json` (2026-05-28):
     // {type:'thread.started',thread_id}, {type:'turn.started'},
     // {type:'item.completed',item:{type:'agent_message',text}}, and
-    // {type:'turn.completed',usage:{input_tokens,cached_input_tokens,
-    // output_tokens,reasoning_output_tokens}} (input_tokens is the full input;
-    // cached_input_tokens is a subset of it — don't add it to the total).
-    // The tool-event subtypes (command_execution / file_change / patch) are
-    // still inferred — confirm with a tool-using run before fully trusting.
     parseStreamLine(obj) {
       const events = [];
       if (!obj || !obj.type) return events;
@@ -320,9 +277,6 @@ const PROVIDERS = {
       // VERIFIED against codex-cli 0.135.0 rollout-*.jsonl (2026-05-31): the
       // session file records usage as an `event_msg`/`token_count` line whose
       // `info.last_token_usage` is THIS turn and `info.total_token_usage` is
-      // cumulative. For per-turn aggregation (Phase 4) use last_token_usage to
-      // avoid double-counting the running total. Codex's own `total_tokens`
-      // (= input + output, excludes reasoning) is authoritative when present.
       if (obj && obj.type === 'event_msg' && obj.payload && obj.payload.type === 'token_count') {
         const info = obj.payload.info || {};
         const u = info.last_token_usage || info.total_token_usage;
@@ -341,12 +295,9 @@ const PROVIDERS = {
       }
       return null;
     },
-    // Implement-PTY JSONL tail. VERIFIED against codex-cli 0.135.0 rollout-*.jsonl
-    // (tool-using session, 2026-05-31): the session file uses {type,payload}
-    // where event_msg:agent_message carries `message` text, event_msg:token_count
-    // carries usage, event_msg:task_complete ends the turn, and
-    // response_item:custom_tool_call is a tool (name 'apply_patch'→Edit with the
-    // patched file as hint, 'shell'→Bash with the command as hint).
+    // Implement-PTY JSONL tail. VERIFIED against codex-cli 0.135.0
+    // rollout-*.jsonl (tool-using session, 2026-05-31): the session file uses
+    // {type,payload} where event_msg:agent_message carries `message` text,
     sessionLineToEvents(obj) {
       const events = [];
       if (!obj) return events;
@@ -379,7 +330,6 @@ const PROVIDERS = {
     // Session detection for the implement PTY. Codex sessions are global,
     // bucketed by date (not per-worktree), so we snapshot the whole tree before
     // spawn and pick the newest new file whose recorded launch cwd matches this
-    // worktree (disambiguates concurrent Codex runs in other dirs).
     snapshotSessions() {
       return new Set(listJsonlFiles(this.sessionDir(), true).map(f => f.path));
     },
@@ -424,8 +374,6 @@ const PROVIDERS = {
     // Gemini's "trusted folders" gate refuses to run in a directory it hasn't
     // been told to trust. We surface this as a per-(worktree, agent) consent
     // prompt (see util/agent-consent.js); only when the user allows do we pass
-    // `--skip-trust` (trust the folder) + `--approval-mode auto_edit` (the
-    // read/write the user granted). Without consent the agent isn't spawned.
     worktreeConsent: {
       prompt: 'Gemini needs to trust this folder and read/write its files to work here.',
       allowLabel: 'Allow read & write',
@@ -443,9 +391,7 @@ const PROVIDERS = {
     buildHeadlessRun(_bin, { prompt, mode, allowEdits, trust, model } = {}) {
       // VERIFIED (gemini-cli 0.44.1): `-p` = non-interactive; `-o stream-json`
       // = NDJSON we translate into Claude-shaped events; `--approval-mode
-      // auto_edit` auto-approves edit tools. `--skip-trust` clears the
-      // trusted-folders gate (only applied once the user has consented).
-      // `-m <model>` pins a version (e.g. gemini-2.5-flash) when chosen.
+      // auto_edit` auto-approves edit tools. `--skip-trust` clears the trusted-
       const args = [];
       if (trust) args.push('--skip-trust');
       if (model) args.push('-m', model);
@@ -459,13 +405,8 @@ const PROVIDERS = {
     },
 
     // VERIFIED against gemini-cli 0.44.1 `-o stream-json` (2026-06-02):
-    //   {type:'init', session_id, model}
-    //   {type:'message', role:'user', content}        ← the echoed prompt; IGNORE
-    //   {type:'message', role:'assistant', content, delta:true}  ← streamed deltas
-    //   {type:'result', status, stats:{total_tokens,input_tokens,output_tokens,cached,...}}
-    // Only assistant messages are output; they arrive as deltas (delta:true), so
-    // the json-translate layer ACCUMULATES them. tool calls land as tool_use
-    // events (shape still unverified — left best-effort).
+    // {type:'init', session_id, model} {type:'message', role:'user', content} ←
+    // the echoed prompt; IGNORE {type:'message', role:'assistant', content,
     parseStreamLine(obj) {
       const events = [];
       if (!obj || !obj.type) return events;
@@ -509,25 +450,6 @@ const PROVIDERS = {
   // Antigravity CLI (`agy`) — Google's successor to Gemini CLI (Gemini CLI was
   // retired 2026-06-18 for free/individual users). Built in Go, installed via a
   // curl script (NOT npm — see INSTALL_COMMANDS). VERIFIED against `agy --help`
-  // (agy 1.0.10, darwin_arm64):
-  //   - default invocation is interactive; `--version` prints the bare version
-  //   - `-p`/`--print`/`--prompt "<prompt>"` runs one non-interactive prompt →
-  //     PLAIN TEXT only (there is NO `--output-format`/json/stream-json flag).
-  //     `--print-timeout` (default 5m) bounds the wait.
-  //   - `--continue`/`-c` resumes the most recent conversation; `--conversation
-  //     <ID>` resumes a specific one (so resume IS supported — earlier issue #7
-  //     is fixed as of 1.0.10).
-  //   - `--model "<name>"` pins a model; `agy models` lists the names (BUT both
-  //     `agy models` and `-p` require an interactive Google sign-in first, so the
-  //     model list couldn't be enumerated headless — see MODELS below).
-  //   - `--dangerously-skip-permissions` auto-approves all tool prompts.
-  //   - config/sessions live in ~/.gemini/antigravity-cli/ (conversations/ holds
-  //     resumable transcripts); shared settings/trust at ~/.gemini/settings.json
-  //     + ~/.gemini/trustedFolders.json. CONFIRMED on a real install.
-  // STILL UNVERIFIED (need an authenticated session): the exact `-p` stdout
-  // capture on a non-TTY pipe (the old #76 drop — 1.0.10 did print to a pipe in
-  // testing, but only the pre-auth prompt), the conversations/ file format (for
-  // exact-resume detection + token tailing), and the repo memory filename.
   antigravity: {
     id: 'antigravity',
     // VERIFY: repo memory file unconfirmed. agy shares Gemini's ~/.gemini home,
@@ -547,7 +469,6 @@ const PROVIDERS = {
     // agy normally establishes folder trust interactively. We surface that as a
     // per-(worktree, agent) consent prompt (see util/agent-consent.js); only on
     // consent do we pass `--dangerously-skip-permissions` so it can read/write
-    // without per-tool confirmations. Without consent the agent isn't spawned.
     worktreeConsent: {
       prompt: 'Antigravity needs permission to read and write files in this folder to work here.',
       allowLabel: 'Allow read & write',
@@ -563,8 +484,6 @@ const PROVIDERS = {
       // `--conversation <ID>` resumes an exact conversation; `--continue`
       // resumes the most recent. We don't yet auto-detect new conversation IDs
       // (supportsExactResume:false — the conversations/ format is unverified),
-      // so resumeSessionId is only honored when a caller threads one through;
-      // the common path is resumeLatest → --continue (mirrors copilot/gemini).
       if (resumeSessionId) return `${base} --conversation ${resumeSessionId}`;
       if (resumeLatest) return `${base} --continue`;
       return base;
@@ -630,8 +549,6 @@ const PROVIDERS = {
     // VERIFY: Copilot's `--output-format json` is documented as JSONL but the
     // per-line schema is NOT published. This parser is a best-effort guess and
     // MUST be rewritten from a real capture before Phase 2/3 trusts it. Known
-    // gotcha (issue #2012): raw U+2028/U+2029 in events.jsonl can break
-    // JSON.parse on resume — sanitize when reading session files.
     parseStreamLine(obj) {
       const events = [];
       if (!obj || typeof obj !== 'object') return events;
@@ -671,19 +588,6 @@ const PROVIDERS = {
   // Cursor CLI (`cursor-agent`) — Cursor's headless/interactive coding agent,
   // installed via Cursor's curl script (NOT npm — see INSTALL_COMMANDS). The
   // binary laid down on PATH is `cursor-agent` (docs examples sometimes shorten
-  // it to `agent`; `cursor-agent` is the unambiguous installed name, and the
-  // user can override it via the Cursor Path preference). Grounded against the
-  // Cursor CLI docs (cursor.com/docs/cli, 2026-06):
-  //   - bare `cursor-agent` is interactive; `--version` prints the version.
-  //   - `-p`/`--print "<prompt>"` runs one non-interactive prompt. Pair with
-  //     `--output-format text|json|stream-json`; default is human text.
-  //     stream-json emits Claude-shaped NDJSON (type:assistant/tool_call/result).
-  //   - `--resume [chatId]` resumes a specific chat; `--continue` resumes the
-  //     most recent. `cursor-agent ls` lists chats.
-  //   - `--model <name>` pins a model; `-f`/`--force` (alias `--yolo`)
-  //     auto-approves edits/commands.
-  //   - chats/config live under ~/.cursor/. The on-disk chat file format is
-  //     unverified, so no session tail is wired yet (stubs below).
   cursor: {
     id: 'cursor',
     // VERIFY: Cursor reads `.cursor/rules/*.mdc` and the legacy root
@@ -722,10 +626,8 @@ const PROVIDERS = {
       return path.join(home(), '.cursor');
     },
     // Cursor's stream-json mirrors Claude's message shape: {type:'assistant',
-    // message:{content:[{type:'text',text}|{type:'tool_use',name,input}]}} and a
-    // terminal {type:'result',...}. The token-usage fields on the result event
-    // are not yet documented, so usage extraction is best-effort. VERIFY against
-    // a real `--output-format stream-json` capture before trusting it.
+    // message:{content:[{type:'text',text}|{type:'tool_use',name,input}]}} and
+    // a terminal {type:'result',...}. The token-usage fields on the result
     parseStreamLine(obj) {
       const events = [];
       if (!obj || typeof obj !== 'object') return events;
@@ -767,18 +669,8 @@ const PROVIDERS = {
   },
 
   // Cline CLI (`cline`) — the terminal surface of the Cline coding agent,
-  // installed via npm (`cline`; see NPM_PACKAGES). It shares the same agent core
-  // as the Cline VS Code extension/SDK. Grounded against the Cline CLI docs
-  // (docs.cline.bot, 2026-06):
-  //   - bare `cline` enters interactive/TUI mode in a TTY (`-i`/`--tui` force
-  //     it); `-V`/`--version` prints the version.
-  //   - `cline "<prompt>"` runs a one-shot task; `--json` makes it
-  //     non-interactive and streams structured NDJSON events.
-  //   - `--yolo`/`-y` auto-approves tools (limited toolset).
-  //   - `-m`/`--model <id>` selects a model; `--id <id>` resumes an existing
-  //     session by id. There is no documented "continue latest" flag.
-  //   - data/config live under ~/.cline/ (settings at ~/.cline/data/settings).
-  //     The on-disk task file format is unverified, so no session tail is wired.
+  // installed via npm (`cline`; see NPM_PACKAGES). It shares the same agent
+  // core as the Cline VS Code extension/SDK. Grounded against the Cline CLI
   cline: {
     id: 'cline',
     // VERIFY: Cline reads a `.clinerules` file or `.clinerules/` directory for
@@ -817,9 +709,8 @@ const PROVIDERS = {
       return path.join(home(), '.cline');
     },
     // VERIFIED partial (cline --json README example): NDJSON lines shaped
-    // {type:'agent_event', event:{text}}. The tool-call / token-usage / turn-end
-    // event shapes are not yet documented, so this is best-effort. VERIFY against
-    // a real `--json` capture before trusting it.
+    // {type:'agent_event', event:{text}}. The tool-call / token-usage / turn-
+    // end event shapes are not yet documented, so this is best-effort. VERIFY
     parseStreamLine(obj) {
       const events = [];
       if (!obj || typeof obj !== 'object') return events;
@@ -847,6 +738,91 @@ const PROVIDERS = {
     },
     // VERIFY: Cline task file format undocumented. Stubs so the implement PTY
     // degrades gracefully (no tail attached) instead of crashing.
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
+
+  // opencode (`opencode`) — SST's open-source terminal agent (opencode.ai/docs/cli,
+  // 2026-06). `run --format json` streams JSONL with per-turn token counts; AGENTS.md
+  // is its native instructions file. Approves tools per its own config.
+  opencode: {
+    id: 'opencode',
+    memoryFile: 'AGENTS.md',
+    shortLabel: 'oc',
+    displayName: 'opencode',
+    defaultBin: 'opencode',
+    configPathKey: 'opencodePath',
+    versionArgs: ['--version'],
+    // Sessions live in a SQLite DB, not tailable JSONL, so the file-based tail
+    // can't attach; exact resume resolves the worktree's latest session via
+    // opencode's CLI (state/opencode-sessions.js), routed by `sessionTracking`.
+    perWorktreeSessions: false,
+    supportsExactResume: true,
+    sessionTracking: 'opencode-cli',
+
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model } = {}) {
+      // Model names are provider/model and may contain '/', so quote them; this
+      // returns a shell string.
+      let base = bin;
+      if (model) base += ` --model ${JSON.stringify(model)}`;
+      if (resumeSessionId) return `${base} --session ${resumeSessionId}`;
+      if (resumeLatest) return `${base} --continue`;
+      return base;
+    },
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+      // `run` is the non-interactive subcommand; `--format json` streams JSONL we
+      // translate, else stdout passes through. `--auto` auto-approves tools on
+      // autonomous-edit surfaces (else a headless edit blocks on a TTY-less prompt).
+      const args = ['run'];
+      if (model) args.push('--model', model);
+      if (allowEdits) args.push('--auto');
+      if (mode === 'stream') args.push('--format', 'json');
+      args.push(prompt);
+      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+    },
+    sessionDir() {
+      // opencode stores data under its XDG data dir.
+      return path.join(home(), '.local', 'share', 'opencode');
+    },
+    // No tailable session files, so interactive-TUI token tracking isn't wired
+    // (headless runs track live here). JSONL is one {type, part} object per line,
+    // grounded on a real capture (opencode 1.17.12): step_start/text/tool_use/step_finish.
+    parseStreamLine(obj) {
+      const events = [];
+      if (!obj || typeof obj !== 'object') return events;
+      const part = obj.part || {};
+      if (obj.type === 'text' && part.text) {
+        events.push({ kind: 'text', text: String(part.text) });
+      } else if (obj.type === 'tool_use' || obj.type === 'tool') {
+        // The tool name is on part.tool; its arguments live under part.state.input
+        // (a completed tool call), not part.input.
+        const name = part.tool || obj.name || 'tool';
+        const inp = (part.state && part.state.input) || part.input || obj.input || {};
+        const hint = inp.filePath || inp.path || inp.command || inp.pattern || '';
+        events.push({ kind: 'tool', name, hint: typeof hint === 'string' ? hint : '' });
+      }
+      if (obj.type === 'step_finish' || obj.type === 'step-finish') {
+        const t = part.tokens || obj.tokens || {};
+        const cache = t.cache || {};
+        events.push({
+          kind: 'usage',
+          usage: {
+            inputTokens: t.input || 0,
+            cacheCreationInputTokens: cache.write || 0,
+            cacheReadInputTokens: cache.read || 0,
+            outputTokens: t.output || 0,
+            totalTokens: (t.input || 0) + (t.output || 0),
+          },
+        });
+        if ((part.reason || obj.reason) === 'stop') events.push({ kind: 'end_turn' });
+      }
+      return events;
+    },
+    // VERIFY: opencode's on-disk session format is undocumented; these stubs let
+    // the implement PTY degrade gracefully (no tail attached) instead of
+    // crashing. Ground them once a real install can be inspected.
     usageFromSessionLine() { return null; },
     sessionLineToEvents() { return []; },
     snapshotSessions() { return new Set(); },
@@ -894,14 +870,12 @@ const NPM_PACKAGES = {
   gemini: '@google/gemini-cli',
   copilot: '@github/copilot',
   cline: 'cline',
+  opencode: 'opencode-ai',
 };
 
 // Non-npm install commands, per platform, for CLIs that don't ship as npm
-// packages. Antigravity installs via Google's official script: a curl|bash
-// one-liner on macOS/Linux (the script self-detects platform/arch) and an
-// `irm | iex` PowerShell one-liner on Windows — the bash form can't run in
-// PowerShell. Both URLs verified to serve real scripts (install.sh =
-// application/x-sh, install.ps1 = PowerShell). Keys are process.platform values.
+// packages. Antigravity installs via Google's official script: a curl|bash one-
+// liner on macOS/Linux (the script self-detects platform/arch) and an `irm |
 const INSTALL_COMMANDS = {
   antigravity: {
     darwin: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
@@ -924,8 +898,7 @@ const INSTALL_COMMANDS = {
 
 // Per-provider documentation / "get started" pages, surfaced when a user picks
 // an agent whose CLI isn't installed yet (so the "set it up" prompt can link
-// straight to the right install/usage docs). Keep these pointed at the CLI docs,
-// not the IDE/marketing home, so the install command on the page matches ours.
+// straight to the right install/usage docs). Keep these pointed at the CLI
 const DOCS_URLS = {
   claude: 'https://docs.claude.com/en/docs/claude-code/overview',
   codex: 'https://github.com/openai/codex',
@@ -934,6 +907,7 @@ const DOCS_URLS = {
   copilot: 'https://github.com/github/copilot-cli',
   cursor: 'https://cursor.com/docs/cli',
   cline: 'https://docs.cline.bot/cli-reference/overview',
+  opencode: 'https://opencode.ai/docs',
   ollama: 'https://aider.chat',
 };
 function docsUrlFor(id) { return DOCS_URLS[id] || null; }
@@ -947,20 +921,14 @@ const SHORT_NAMES = {
   copilot: 'Copilot',
   cursor: 'Cursor',
   cline: 'Cline',
+  opencode: 'opencode',
   ollama: 'Ollama',
 };
 
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
-// Lists are grounded against each CLI, not guessed:
-//   claude  — `--model` takes the aliases 'opus'/'sonnet'/'haiku' (claude --help),
-//             which always resolve to the latest of each tier.
-//   codex   — the list-visible slugs from ~/.codex/models_cache.json (gpt-5.5,
-//             gpt-5.4-mini). `-m` is accepted by both the TUI and `codex exec`.
-//   gemini  — verified against gemini-cli --help / docs.
-//   copilot — Default-only: its `--model` slugs couldn't be verified here (the
-//             account's Copilot subscription/policy blocks runs), so we don't
-//             ship slugs that might error. Fill in once it can run + verify.
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', ollama: '--model' };
+// Lists are grounded against each CLI, not guessed: claude — `--model` takes
+// the aliases 'opus'/'sonnet'/'haiku' (claude --help), which always resolve to
+const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', ollama: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -980,11 +948,9 @@ const MODELS = {
     { id: 'gemini-3-flash-preview', label: '3 Flash (preview)' },
     { id: 'gemini-3-pro-preview', label: '3 Pro (preview)' },
   ],
-  // VERIFY: agy's `--model` takes display names with spaces (e.g.
-  // "Gemini 3.5 Flash (Low)"); the full list comes from `agy models`, which
-  // requires an interactive Google sign-in — so it couldn't be enumerated
-  // headless here. Default-only until an authed run lists them, so we don't ship
-  // names that would error (same rationale as copilot).
+  // VERIFY: agy's `--model` takes display names with spaces (e.g. "Gemini 3.5
+  // Flash (Low)"); the full list comes from `agy models`, which requires an
+  // interactive Google sign-in — so it couldn't be enumerated headless here.
   antigravity: [{ id: '', label: 'Default' }],
   copilot: [{ id: '', label: 'Default' }],
   // VERIFY: Cursor's `--model` slugs (e.g. 'auto', 'sonnet-4.5', 'gpt-5') and
@@ -992,6 +958,9 @@ const MODELS = {
   // over time, so we ship Default-only rather than slugs that might error.
   cursor: [{ id: '', label: 'Default' }],
   cline: [{ id: '', label: 'Default' }],
+  // opencode models are `provider/model` and depend on the user's configured
+  // providers, so we ship Default-only rather than slugs that might error.
+  opencode: [{ id: '', label: 'Default' }],
   ollama: [
     { id: '', label: 'Default (qwen2.5-coder)' },
     { id: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B' },
@@ -1006,7 +975,6 @@ function modelFlagFor(id) { return MODEL_FLAGS[id] || '--model'; }
 // One-line install command for a provider, tailored to `platform` (defaults to
 // the host). npm packages install the same way everywhere; the non-npm script
 // installers (INSTALL_COMMANDS) differ per OS, so callers that generate
-// platform-specific scripts pass the target platform explicitly.
 function installCommandFor(id, platform = process.platform) {
   if (NPM_PACKAGES[id]) return `npm install -g ${NPM_PACKAGES[id]}`;
   const cmd = INSTALL_COMMANDS[id];
@@ -1018,9 +986,6 @@ function installCommandFor(id, platform = process.platform) {
 // Auth/sign-in probing for the Setup Check. `statusArgs` is a non-interactive
 // command that reports login state (parsed against `notAuthedPattern`);
 // `loginCommand` is what we tell the user to run to sign in. Only Codex has a
-// verified quiet status command today (`codex login status` → "Not logged in"
-// / "Logged in", exit 0); the others' status probes are added once verified on
-// a real install (statusArgs:null → auth state reported as unknown, not false).
 const AUTH_CHECKS = {
   claude:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'claude' },
   codex:   { statusArgs: ['login', 'status'], notAuthedPattern: /not logged in/i, loginCommand: 'codex login' },
@@ -1033,6 +998,10 @@ const AUTH_CHECKS = {
   // its provider config. No verified quiet status probe for either yet.
   cursor: { statusArgs: null, notAuthedPattern: null, loginCommand: 'cursor-agent login' },
   cline: { statusArgs: null, notAuthedPattern: null, loginCommand: 'cline' },
+  // opencode signs in per-provider via `opencode auth login`; `opencode auth
+  // list` shows configured providers but isn't a quiet yes/no probe, so auth
+  // state is reported as unknown (not false).
+  opencode: { statusArgs: null, notAuthedPattern: null, loginCommand: 'opencode auth login' },
   ollama:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'ollama serve' },
 };
 

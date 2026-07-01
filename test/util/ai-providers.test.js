@@ -3,10 +3,9 @@ require('../setup');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// Smoke tests for the AI provider registry — the single source of truth wiring
-// every coding agent Klaussy can drive. These assert the *contract* every
-// provider must satisfy (so a half-wired new provider fails CI), plus a couple
-// of provider-specific checks for the command shapes the spawn path depends on.
+// Smoke tests for the AI provider registry: assert the *contract* every provider
+// must satisfy (so a half-wired new provider fails CI), plus provider-specific
+// checks for the command shapes the spawn path depends on.
 const providers = require('../../main/state/ai-providers');
 
 const ALL = providers.PROVIDER_IDS;
@@ -15,7 +14,7 @@ const VALID_OUTPUT_MODES = new Set(['passthrough', 'json-text', 'json-translate'
 test('registry exposes the expected providers', () => {
   // Order-independent membership check — guards against a provider being
   // dropped from the registry object or PROVIDER_IDS drifting out of sync.
-  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline']) {
+  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode']) {
     assert.ok(ALL.includes(id), `missing provider: ${id}`);
   }
 });
@@ -140,4 +139,75 @@ test('cline builds the documented cline command shapes', () => {
   // The documented NDJSON event shape extracts agent text.
   const events = p.parseStreamLine({ type: 'agent_event', event: { text: 'hello' } });
   assert.deepEqual(events, [{ kind: 'text', text: 'hello' }]);
+});
+
+test('opencode builds the documented opencode command shapes', () => {
+  const p = providers.getProvider('opencode');
+  assert.equal(p.defaultBin, 'opencode');
+  assert.equal(p.memoryFile, 'AGENTS.md');
+
+  // Interactive: bare launch, resume-by-id, continue-latest, quoted model.
+  assert.equal(p.buildInteractiveCmd('opencode', {}), 'opencode');
+  assert.match(p.buildInteractiveCmd('opencode', { resumeSessionId: 'ses_abc' }), /--session ses_abc/);
+  assert.match(p.buildInteractiveCmd('opencode', { resumeLatest: true }), /--continue/);
+  assert.match(p.buildInteractiveCmd('opencode', { model: 'anthropic/claude' }), /--model "anthropic\/claude"/);
+
+  // Headless: `run` subcommand; stream adds `--format json` we translate;
+  // allowEdits adds `--auto` to auto-approve tools on autonomous surfaces.
+  const stream = p.buildHeadlessRun('opencode', { prompt: 'x', mode: 'stream', allowEdits: true });
+  assert.deepEqual(stream.args, ['run', '--auto', '--format', 'json', 'x']);
+  assert.equal(stream.outputMode, 'json-translate');
+
+  const text = p.buildHeadlessRun('opencode', { prompt: 'x' });
+  assert.deepEqual(text.args, ['run', 'x']);
+  assert.equal(text.outputMode, 'passthrough');
+
+  // Installed via npm.
+  assert.equal(providers.installCommandFor('opencode'), 'npm install -g opencode-ai');
+
+  // Exact resume is wired via opencode's own CLI (sessionTracking tag), not by
+  // tailing .jsonl files — so it opts out of the file-based perWorktreeSessions.
+  assert.equal(p.supportsExactResume, true);
+  assert.equal(p.sessionTracking, 'opencode-cli');
+  assert.equal(p.perWorktreeSessions, false);
+});
+
+test('opencode session-tracking leaves Claude on its untouched file-based path', () => {
+  // Regression guard: opencode's CLI-based resume must not migrate Claude off
+  // .jsonl tailing — Claude keeps exact resume + per-worktree sessions and no
+  // sessionTracking tag, so dispatch stays on the original Claude helpers.
+  const c = providers.getProvider('claude');
+  assert.equal(c.supportsExactResume, true);
+  assert.equal(c.perWorktreeSessions, true);
+  assert.equal(c.sessionTracking, undefined);
+});
+
+test('opencode parseStreamLine maps the real JSONL event shapes', () => {
+  // Event shapes captured from a real `opencode run --format json` (opencode 1.17.12).
+  const p = providers.getProvider('opencode');
+
+  // text → a text event.
+  assert.deepEqual(
+    p.parseStreamLine({ type: 'text', part: { type: 'text', text: 'pong' } }),
+    [{ kind: 'text', text: 'pong' }],
+  );
+
+  // tool_use → a tool event; the args live under part.state.input.
+  assert.deepEqual(
+    p.parseStreamLine({ type: 'tool_use', part: { type: 'tool', tool: 'read', state: { status: 'completed', input: { filePath: '/a.txt' } } } }),
+    [{ kind: 'tool', name: 'read', hint: '/a.txt' }],
+  );
+
+  // step_finish → a usage event (mapped tokens + cache) plus end_turn on reason:'stop'.
+  const done = p.parseStreamLine({ type: 'step_finish', part: { type: 'step-finish', reason: 'stop', tokens: { total: 7866, input: 7838, output: 3, reasoning: 25, cache: { write: 0, read: 0 } } } });
+  assert.deepEqual(done, [
+    { kind: 'usage', usage: { inputTokens: 7838, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 3, totalTokens: 7841 } },
+    { kind: 'end_turn' },
+  ]);
+
+  // Error path: step_finish with no tokens must not throw and yields zero-filled usage.
+  const empty = p.parseStreamLine({ type: 'step_finish', part: { reason: 'tool-calls' } });
+  assert.deepEqual(empty, [
+    { kind: 'usage', usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+  ]);
 });

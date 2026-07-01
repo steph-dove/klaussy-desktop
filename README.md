@@ -15,7 +15,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 ## 🚀 Key Highlights
 
 *   **⚡ Parallel Agents, Isolated Worktrees**
-    One task = one git worktree + one independent agent. Run Claude Code, Codex, Gemini, Copilot, Cursor, and Cline side by side. The visual sidebar tracks staged/unstaged counts, status, and branch alignment per task.
+    One task = one git worktree + one independent agent. Run Claude Code, Codex, Gemini, Copilot, Cursor, Cline, and opencode side by side. The visual sidebar tracks staged/unstaged counts, status, and branch alignment per task.
 *   **📂 Multi-Repo Git Sessions**
     Coordinate changes across multiple microservices or repositories on a shared task branch. Each repository spins up its own isolated worktree so agents can safely collaborate.
 *   **🛡️ Commit-Time Review Gate**
@@ -23,7 +23,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 *   **🔍 PR Reviews Without Local Checkout**
     Paste a GitHub Pull Request URL to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
 *   **🔄 Cross-Agent Session Resuming**
-    Start a session with Claude Code, pause it, and resume it under Gemini, Cursor, or Cline. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
+    Start a session with Claude Code, pause it, and resume it under Gemini, Cursor, Cline, or opencode. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
     Type one prompt and send it to every agent in a session at once — kick off the same task across each worktree without retyping.
 *   **🔌 Multi-Agent MCP Manager**
@@ -70,7 +70,7 @@ Prebuilt, signed, and notarized binaries are available for macOS, Windows, and L
 Klaussy Desktop automatically detects and configures your local environment. It requires:
 1.  **Node.js 18+**
 2.  **GitHub CLI (`gh`)** (with active authentication)
-3.  **An Agent CLI or IDE extension** (Claude Code is the default, supports Codex, Gemini, Copilot, Cursor, and Cline)
+3.  **An Agent CLI or IDE extension** (Claude Code is the default, supports Codex, Gemini, Copilot, Cursor, Cline, and opencode)
 
 ### Setup Commands
 

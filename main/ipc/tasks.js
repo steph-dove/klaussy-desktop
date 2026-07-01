@@ -34,12 +34,9 @@ function getWorktreeDir(repoPath) {
   return path.join(path.dirname(repoPath), 'klaus-worktrees');
 }
 
-// Freshen `branch` from origin before a worktree is created off it, so the
-// new worktree starts from the latest remote state instead of whatever was
-// fetched last. Non-fatal by design. Returns { warning, info }:
-//   warning — failure text (caller continues anyway and shows a warn toast)
-//   info    — success evidence ("pulled a1b2c3d → e4f5a6b" / "up to date"),
-//             surfaced as an info toast so the fetch+pull isn't invisible.
+// Freshen `branch` from origin before a worktree is created off it, so the new
+// worktree starts from the latest remote state instead of whatever was fetched
+// last. Non-fatal by design. Returns { warning, info }: warning — failure text
 async function freshenBranchFromOrigin(repoPath, branch) {
   // Local-only repo (no origin): nothing to freshen, nothing to report.
   try {
@@ -112,8 +109,6 @@ async function freshenBranchFromOrigin(repoPath, branch) {
 // A worktree's directory can vanish (manual delete, cleaned tmp, git gc) while
 // git still has it registered and its branch still exists. Find the configured
 // repo that registers `worktreePath` and the branch it tracks, so a missing
-// worktree can be recreated on open instead of failing. Returns null if no
-// configured repo claims it.
 function findRegisteringWorktree(worktreePath) {
   const config = loadConfig();
   const repos = [];
@@ -183,9 +178,6 @@ function ensureWorktreeOnDisk(worktreePath, repoPath, branch) {
 // Scan the sessions root for worktrees on disk. saveSessions() only persists
 // CURRENTLY-ACTIVE instances and replaces the whole savedSessions array, so a
 // session whose terminal was closed (or that existed across a restart) silently
-// drops out of config — and then can't be found in "Existing Session" and
-// collides on re-create. The filesystem is the source of truth, so we discover
-// from it. Layout: ~/klaussy/sessions/<session>/<repo>.
 function discoverDiskSessions() {
   const root = path.join(os.homedir(), 'klaussy', 'sessions');
   const out = [];
@@ -263,8 +255,6 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
   // Cross-agent resume: the user picked a different agent than the one that
   // started this session. Native resume can't carry state across agents, so
   // distill the prior session into a handoff brief and seed the new agent with
-  // it as its first prompt (see state/session-handoff). No stale session id —
-  // the incoming agent has no transcript of its own here.
   if (isAgentMode(resumeMode) && isAgentMode(startedBy) && resumeMode !== startedBy) {
     let seed = '';
     try {
@@ -280,11 +270,14 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
     }
   }
 
-  // Same-agent resume. Only Claude tracks an exact session id; other providers
-  // resume their latest session in the worktree via their native flag (handled
-  // by the registry's buildInteractiveCmd), so we don't pass a stale sessionId.
+  // Same-agent resume. Claude has a persisted exact id; opencode resolves its
+  // worktree's latest session via its CLI; everything else resumes its latest
+  // via its native flag.
   const provider = getProvider(resumeMode);
-  const exactId = provider && provider.supportsExactResume ? sessionId : null;
+  let exactId = provider && provider.supportsExactResume ? sessionId : null;
+  if (provider && provider.sessionTracking === 'opencode-cli' && !exactId) {
+    exactId = require('../state/opencode-sessions').latestSession(binFor(provider.id, loadConfig()), worktreePath) || null;
+  }
   try {
     return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);
   } catch (err) {
@@ -336,11 +329,6 @@ ipcMain.handle('dismiss-saved-session', (_event, { worktreePath, sessionId }) =>
 // Seed an agent's native memory file with multi-repo session context so every
 // agent we support (Claude / Codex / Gemini / Copilot / future Cursor) starts
 // aware of its sibling repos. Each repo in a session shares one branch name and
-// lives in its own worktree under ~/klaussy/sessions/<session>/<repo>. Writing
-// the agent's own memory file (per the provider's `memoryFile`) means the agent
-// is aware from turn one without us consuming its first prompt. The file is
-// git-excluded so it never lands in a commit. No-op for single-repo sessions,
-// shell mode, or providers without a memory file.
 const SESSION_CTX_START = '<!-- klaussy:session-context (auto-generated; safe to delete) -->';
 const SESSION_CTX_END = '<!-- /klaussy:session-context -->';
 
@@ -417,7 +405,6 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     // The worktree already exists on disk — often a session we created but
     // never persisted to savedSessions (saveSessions only snapshots active
     // instances). Don't dead-end: hand the renderer enough to offer "open the
-    // existing one" and resume it.
     let existingBranch = branch;
     try {
       existingBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
@@ -445,10 +432,9 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
       try {
         execFileSync('git', ['branch', baseBranch, 'origin/' + baseBranch], { cwd: repoPath, stdio: 'pipe' });
       } catch (err) {
-        // Multi-repo create passes baseBranchFallback for secondary repos:
-        // the base was picked from the primary repo's branch list, so a repo
-        // that doesn't have it should branch from its own default instead of
-        // failing the whole fan-out. The swap is surfaced via result.warning.
+        // Multi-repo create passes baseBranchFallback for secondary repos: the
+        // base was picked from the primary repo's branch list, so a repo that
+        // doesn't have it should branch from its own default instead of failing
         if (!baseBranchFallback) {
           return { error: 'Base branch "' + baseBranch + '" not found locally or on origin.' };
         }
@@ -536,10 +522,9 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.log(`Worktree created: ${worktreePath} (repo: ${wtTopLevel}, base: ${baseBranch})`);
   } catch {}
 
-  // Seed the worktree with the base repo's intel artifacts (CLAUDE.md,
-  // rules, skills) BEFORE the agent spawns — worktrees only contain
-  // committed files, and an agent that boots without CLAUDE.md announces
-  // "no CLAUDE.md provided".
+  // Seed the worktree with the base repo's intel artifacts (CLAUDE.md, rules,
+  // skills) BEFORE the agent spawns — worktrees only contain committed files,
+  // and an agent that boots without CLAUDE.md announces "no CLAUDE.md
   try { require('../state/repo-intel').syncIntelIntoWorktree(worktreePath); } catch (e) {
     console.warn('[repo-intel] pre-spawn sync failed:', e.message);
   }
@@ -576,7 +561,6 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
 // Find the repository a worktree path is REGISTERED to by scanning the
 // configured repos' `git worktree list` output. Needed when the worktree's
 // directory no longer exists (stale registration): baseRepoForWorktree can't
-// run there (no cwd), but the registration still names the path verbatim.
 function findRepoForRegisteredWorktree(wtPath) {
   const config = loadConfig();
   const candidates = new Set();
@@ -604,10 +588,8 @@ function findRepoForRegisteredWorktree(wtPath) {
 }
 
 // Delete a whole session: remove every worktree (git worktree remove --force,
-// with a sessions-root-only rm fallback) and the now-empty session folder,
-// then scrub config debris (saved sessions, recents, hidden list) for the
-// deleted paths. Destructive by design — the renderer collects an explicit
-// confirmation first. Branches are intentionally kept.
+// with a sessions-root-only rm fallback) and the now-empty session folder, then
+// scrub config debris (saved sessions, recents, hidden list) for the deleted
 ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
   if (!Array.isArray(worktreePaths) || !worktreePaths.length) {
     return { error: 'No worktrees given' };
@@ -715,11 +697,9 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
   return { results };
 });
 
-// Sibling repos in the same session, so an agent planning in one worktree
-// knows the work spans the whole session. A session's worktrees live under
+// Sibling repos in the same session, so an agent planning in one worktree knows
+// the work spans the whole session. A session's worktrees live under
 // ~/klaussy/sessions/<name>/<repo>; the siblings are the other repo dirs in
-// that <name> folder. Returns { session, repos:[{name,path,isCurrent}] } —
-// empty repos for a non-session (legacy) worktree.
 ipcMain.handle('get-session-repos', (_event, { worktreePath }) => {
   try {
     if (typeof worktreePath !== 'string') return { session: null, repos: [] };
@@ -774,10 +754,9 @@ try {
   console.warn('[precommit-hook] server start failed:', e.message);
 }
 
-// Repository-intelligence block (conventions + import graph) for renderer-
-// side prompt builders (Plan / Debug / Review sub-tabs). '' until generated.
-// `agent` enables the slim graph-only block for claude in synced worktrees
-// (CLAUDE.md loads natively there — full injection pays its tokens twice).
+// Repository-intelligence block (conventions + import graph) for renderer- side
+// prompt builders (Plan / Debug / Review sub-tabs). '' until generated. `agent`
+// enables the slim graph-only block for claude in synced worktrees (CLAUDE.md
 ipcMain.handle('get-repo-intel', (_event, { worktreePath, agent }) => {
   try {
     const { getRepoIntelBlock } = require('../state/repo-intel');
@@ -791,19 +770,10 @@ ipcMain.handle('get-repo-intel', (_event, { worktreePath, agent }) => {
 // ---- Current model for the sub-tab agent labels -----------------------------
 // "Claude Fable 5", not "claude code 2.1.172". Resolution order: the pinned
 // per-provider model from Preferences, then (Claude only) the model stamped on
-// the worktree's newest session JSONL. Null until a session exists — the
-// renderer shows the bare agent name and re-asks on tab switches.
 
 // Last "model" value in a session JSONL written at/after `minTs` (ms epoch),
-// scanning backwards in chunks. A shallow tail isn't enough — the file can
-// end in a multi-hundred-KB tool result with no assistant line in it. The
-// timestamp gate matters for resumed sessions: the file's tail still carries
-// the model of whoever ran the session LAST time until the current run's
-// first response lands, and reporting that would mislabel the tab. Entry
-// timestamps increase down the file, so the newest model line decides: if
-// it predates minTs, no in-run model exists yet. Chunks overlap 4KB so a
-// line can't be lost on a boundary; capped so a giant session can't stall
-// the main process.
+// scanning backwards in chunks. A shallow tail isn't enough — the file can end
+// in a multi-hundred-KB tool result with no assistant line in it. The timestamp
 function lastModelInFile(filePath, minTs) {
   let fd;
   try {
@@ -848,7 +818,6 @@ function lastModelInFile(filePath, minTs) {
 // The model this task's Claude session is on. Prefer the instance's tracked
 // session id (exact file); fall back to the newest session in the worktree's
 // project dir — but ONLY the newest. Falling back to older sessions reports
-// whatever model some previous task ran, which is worse than showing nothing.
 function currentClaudeSessionModel(worktreePath, sessionId, spawnedAtMs) {
   try {
     const home = process.env.HOME || os.homedir();
@@ -899,8 +868,7 @@ function claudeDefaultModelFromSettings() {
 
 // Resolution order: the model the app pinned at spawn (Preferences), then
 // session JSONL evidence from THIS run (catches in-session /model switches),
-// then the CLI's configured default. Bare null → renderer shows the agent
-// name alone.
+// then the CLI's configured default. Bare null → renderer shows the agent name
 ipcMain.handle('agent-current-model', async (_event, { worktreePath, mode, taskId }) => {
   if (!mode || mode === 'shell') return { model: null };
   const config = loadConfig();
@@ -1011,13 +979,9 @@ ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode, repoPath,
   }
 });
 
-// Browse for a directory (used by the existing worktree tab).
-// NOTE: we intentionally do NOT pass a parent window here. A sheet-attached
-// NSOpenPanel serializes the selected URL via NSRemoteViewMarshal, which
-// requires a round-trip to `com.apple.ScopedBookmarkAgent`. On some machines
-// that daemon hangs and the sheet never dismisses (main thread stuck in
-// mach_msg → force-quit only). A parentless dialog is a free-floating
-// in-process NSOpenPanel and skips that path entirely.
+// Browse for a directory (used by the existing worktree tab). NOTE: we
+// intentionally do NOT pass a parent window here. A sheet-attached NSOpenPanel
+// serializes the selected URL via NSRemoteViewMarshal, which requires a round-
 ipcMain.handle('browse-directory', async () => {
   const result = await dialog.showOpenDialog({
     title: 'Select existing worktree directory',
@@ -1164,10 +1128,9 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  // Mark BEFORE kill(): pty.kill is async, and the onExit handler checks
-  // this flag to skip the Claude→shell auto-convert branch. Without it,
-  // killing a Claude task would spawn an orphan shell with no instances
-  // entry — nothing could find or stop it after this point.
+  // Mark BEFORE kill(): pty.kill is async, and the onExit handler checks this
+  // flag to skip the Claude→shell auto-convert branch. Without it, killing a
+  // Claude task would spawn an orphan shell with no instances entry — nothing
   inst.killed = true;
   clearIdleTimer(inst);
   stopCIPolling(id);
@@ -1188,18 +1151,15 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  // Mark restarting BEFORE kill(): pty.kill is async and the stale exit
-  // handler would otherwise race with the new-pty assignment below — in
-  // particular if the instance was still in claude mode, the old-pty's
-  // onExit would spawn a convert-shell and overwrite inst.pty right after
-  // we set it on line below.
+  // Mark restarting BEFORE kill(): pty.kill is async and the stale exit handler
+  // would otherwise race with the new-pty assignment below — in particular if
+  // the instance was still in claude mode, the old-pty's onExit would spawn a
   inst.restarting = true;
   try { inst.pty.kill(); } catch {}
 
   // Resume as the same agent this task was originally running. For Claude we
   // prefer this instance's tracked session id so multiple terminals on one
-  // worktree don't collide on the "latest" .jsonl; other providers resume
-  // their most recent session in the worktree via their native flag.
+  // worktree don't collide on the "latest" .jsonl; other providers resume their
   const userShell = defaultShell();
   const config = loadConfig();
   const restartMode = isAgentMode(inst.originalMode) ? inst.originalMode
@@ -1214,9 +1174,6 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   // Hand off the concurrency slot: free the slot the old (just-killed) process
   // held, then re-acquire for the respawn. Releasing first means a plain
   // restart won't warn — it only warns if *another* Codex task is still live,
-  // i.e. the restart would genuinely leave two Codex sessions running. If the
-  // user declines that overlap, fall back to a plain shell rather than leaving
-  // the task dead.
   if (inst.agentSession) inst.agentSession.release();
   const session = beginSession(provider.id);
   if (!session.ok) {
@@ -1229,9 +1186,15 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   let agentCmd;
   if (provider.supportsExactResume) {
-    const resumeId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath);
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId: resumeId, trust, model });
-    inst.preSpawnSessionIds = snapshotSessionIds(inst.worktreePath);
+    // Claude tracks its exact id via .jsonl files; opencode has none, so it
+    // resolves its worktree's latest session via its CLI. resumeLatest is the
+    // no-id fallback (harmlessly ignored by Claude's buildInteractiveCmd).
+    const resumeId = inst.claudeSessionId || (provider.sessionTracking === 'opencode-cli'
+      ? require('../state/opencode-sessions').latestSession(bin, inst.worktreePath)
+      : findLatestSessionId(inst.worktreePath));
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId: resumeId, resumeLatest: !resumeId, trust, model });
+    inst.preSpawnSessionIds = provider.sessionTracking === 'opencode-cli'
+      ? new Set() : snapshotSessionIds(inst.worktreePath);
     inst.claudeSessionId = resumeId || null;
   } else {
     agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model });
@@ -1357,12 +1320,9 @@ ipcMain.handle('get-worktree-state', async (_event, { taskId }) => {
   return collectWorktreeState(task);
 });
 
-// E2: Export session transcript
-//
-// The dialog-selected path is held main-side in `pendingTranscripts` rather
-// than round-tripping through the renderer. Previously the renderer could
-// hand any path back to `write-transcript` (including /etc/hosts) because
-// main had no way to verify the path actually came from a dialog.
+// E2: Export session transcript The dialog-selected path is held main-side in
+// `pendingTranscripts` rather than round-tripping through the renderer.
+// Previously the renderer could hand any path back to `write-transcript`
 const pendingTranscripts = new Map(); // instanceId -> expected file path
 ipcMain.handle('export-transcript', async (_event, { id }) => {
   const inst = instances.get(id);
