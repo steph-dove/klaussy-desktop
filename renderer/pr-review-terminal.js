@@ -426,11 +426,10 @@
       ? '<span class="pr-ai-finding-comment-edited" title="You edited this review block">✎ edited</span>'
       : '';
 
-    // Add-to-PR behavior depends on whether we have a verified file+line.
-    //   - verified → push onto pendingComments (G4 draft review list); the
-    //     existing Submit-review UI batches them into a single review.
-    //   - unverified → post as a general issue comment (legacy behavior).
-    var inDraft = f.postMode === 'inline' && f.locationVerified && PR.pendingCommentExistsForFinding(f.id);
+    // Add-to-PR always stages onto pendingComments (the Submit-review UI
+    // batches them). Verified findings draft as inline comments; unverified
+    // ones draft as general issue comments posted after the review.
+    var inDraft = PR.pendingCommentDraftExistsForFinding(f.id);
     var addBtnTitle = (f.postMode === 'inline' && f.locationVerified)
       ? (inDraft
           ? 'Draft review comment — click to remove from the pending review'
@@ -448,7 +447,7 @@
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Try again">Add to PR</button>';
       editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
     } else if (inDraft) {
-      commentBadge = '<span class="pr-ai-finding-comment-status drafted" title="Queued as an inline review comment — submit the review to post it">✎ Drafted</span>';
+      commentBadge = '<span class="pr-ai-finding-comment-status drafted" title="Queued — submit the review to post it">✎ Drafted</span>';
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="' + PR.escHtml(addBtnTitle) + '">Remove draft</button>';
       editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
     } else {
