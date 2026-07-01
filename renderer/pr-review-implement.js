@@ -325,38 +325,15 @@
     return m ? text.slice(m.index + m[0].length).trim() : text.trim();
   };
 
-  // Add a finding to the PR. Two paths:
-  //   - verified inline location → push onto pendingComments so the draft
-  //     appears anchored to the file:line in the diff, and the user can
-  //     batch-submit via the existing Submit-review flow.
-  //   - unverified or no location → post directly as a general PR issue
-  //     comment (legacy behavior, with attribution prefix).
-  // The commentStatus lifecycle (posting/posted/failed) only applies to the
-  // issue-comment path — drafts are purely client-side until submitted.
-
-  PR.postFindingAsComment = async function(f) {
-    // Toggle-off when the user clicks the button on an already-drafted
-    // finding: pull the draft back out of pendingComments.
-    if (PR.pendingCommentExistsForFinding(f.id)) {
-      PR.pendingComments = PR.pendingComments.filter(function (c) { return c.fromFindingId !== f.id; });
-      PR.repaintAiReviewTab();
-      if (PR.lastState) PR.render(PR.lastState);
-      return;
-    }
-    if (f.commentStatus === 'posting' || f.commentStatus === 'posted') return;
-
-    // Just the suggested change, posted as the reviewer's own words (no bot
-    // attribution). Body/severity/location stay on the card as reference.
-    var attributedBody = PR.findingSuggestionText(f);
-
-    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
-      PR.pendingComments.push({
-        id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-        fromFindingId: f.id,
-        path: f.path,
-        line: f.line,
-        side: f.side || 'RIGHT',
-        body: attributedBody,
+  // Add a finding to the pending review. Both paths STAGE into pendingComments
+  // (nothing posts until Submit review): verified findings draft inline,
+  // unverified ones as an issueComment draft posted after the review.
+  PR.postFindingAsComment = function(f) {
+    // Toggle-off: clicking a drafted finding pulls its draft back out. Match
+    // only the entry this button created (leave any implement draft in place).
+    if (PR.pendingCommentDraftExistsForFinding(f.id)) {
+      PR.pendingComments = PR.pendingComments.filter(function (c) {
+        return !(c.fromFindingId === f.id && !c.fromImplementDraft);
       });
       PR.repaintAiReviewTab();
       PR.saveAiReviewCache();
@@ -364,30 +341,32 @@
       return;
     }
 
-    // Issue-comment fallback. The await below can reject (not just resolve
-    // with {error}) — historically a missing `spawn` import in main left the
-    // promise rejected and this function threw an unhandled rejection,
-    // stranding the UI at "posting". Wrap in try/catch so the failed badge
-    // and error block always render.
-    f.commentStatus = 'posting';
-    f.commentError = null;
-    PR.repaintAiReviewTab();
-    try {
-      var result = await window.klaus.pr.addIssueComment(attributedBody);
-      if (result && result.error) {
-        f.commentStatus = 'failed';
-        f.commentError = result.error;
-      } else {
-        f.commentStatus = 'posted';
-      }
-    } catch (err) {
-      console.error('addIssueComment IPC failed', err);
-      f.commentStatus = 'failed';
-      f.commentError = (err && err.message) ? err.message : String(err);
+    // Just the suggested change, staged as the reviewer's own words (no bot
+    // attribution). Body/severity/location stay on the card as reference.
+    var attributedBody = PR.findingSuggestionText(f);
+    var entry = {
+      id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      fromFindingId: f.id,
+      body: attributedBody,
+    };
+    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
+      entry.path = f.path;
+      entry.line = f.line;
+      entry.side = f.side || 'RIGHT';
+    } else {
+      entry.issueComment = true;
     }
+    PR.pendingComments.push(entry);
     PR.repaintAiReviewTab();
     PR.saveAiReviewCache();
-    if (f.commentStatus === 'posted') window.klaus.pr.refreshThreads();
+    if (PR.lastState) PR.render(PR.lastState);
+  };
+
+  // A finding has an Add-to-PR draft queued (as opposed to an implement draft).
+  PR.pendingCommentDraftExistsForFinding = function(findingId) {
+    return PR.pendingComments.some(function (c) {
+      return c.fromFindingId === findingId && !c.fromImplementDraft;
+    });
   };
 
   // Approve a Claude-implement draft comment: push it onto pendingComments
