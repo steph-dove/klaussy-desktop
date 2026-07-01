@@ -24,6 +24,10 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
     Paste a GitHub Pull Request URL to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
 *   **🔄 Cross-Agent Session Resuming**
     Start a session with Claude Code, pause it, and resume it under Gemini, Cursor, or Cline. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
+*   **📡 Broadcast to All Agents**
+    Type one prompt and send it to every agent in a session at once — kick off the same task across each worktree without retyping.
+*   **🔌 Multi-Agent MCP Manager**
+    Connect Model Context Protocol servers (GitHub, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Gemini, and the rest — from one catalog, with a single add fanning out to every agent you pick.
 *   **🛠️ Workflow-Oriented Tools**
     Fuzzy command palette (`Cmd+K`), pop-out task windows, and built-in flows for planning, debugging, and humanizing prose.
 

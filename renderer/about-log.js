@@ -168,12 +168,20 @@ window.Dialogs = (function () {
         body: 'Pulls in someone else\'s PR for review. The Files tab shows the full diff with inline comment threads + draft review-comment composer (Finish review submits everything in one go). Conversation tab is the full GitHub-style comment feed. Checks tab lists CI runs with a Debug button on failures that has the agent diagnose them. Review tab runs an AI review and breaks the result into per-finding cards (Ignore / Implement / Add to PR). Implement-all bundles open findings into one agent run.',
       },
       {
+        title: 'Resuming & cross-agent handoff',
+        body: 'Reopen past work from the New Worktree modal’s Existing Session tab — pick a saved session and hit Resume to reattach its worktree(s) and agent. By default it resumes under the agent that started the session; choose a different one (Claude, Codex, Gemini, Copilot, Cursor, Cline…) and Klaussy summarizes the previous transcript into a handoff brief and seeds the new agent with it, so context carries across CLIs. A toast shows while the summary is being compiled — the resume isn’t instant.',
+      },
+      {
+        title: 'MCP servers',
+        body: 'Open MCP Servers (View menu or Cmd+K) to connect Model Context Protocol servers — GitHub, Slack, Linear, Notion, Datadog and more — across every agent Klaussy drives, not just one. Pick from the built-in catalog or add a custom stdio / HTTP / SSE server, name any env vars it needs (Klaussy references the variable, never stores the secret), and tick which agents to add it to (defaults to your default agent; check more to fan out in one add). Each row shows a live connection pill; servers that need sign-in get a Connect button that walks you through the OAuth flow in a terminal. Remove pulls a server from all of its agents at once.',
+      },
+      {
         title: 'Pop-out & detach',
         body: 'Any task can pop out into its own window via the Pop Out command (Cmd+K → Pop Out). The PR review surface has its own Pop out / Pop back in toggle so you can read a review on a second monitor.',
       },
       {
         title: 'Command palette (Cmd+K)',
-        body: 'Fuzzy-search every action: New Task, Toggle Diff Panel, Switch to: <task>, Review Pull Request…, Theme, Preferences, View Logs, About Klaussy. Faster than hunting through menus.',
+        body: 'Fuzzy-search every action: New Task, Toggle Diff Panel, Switch to: <task>, Review Pull Request…, Run Slash Command…, Skills & Commands, Memory (CLAUDE.md), MCP Servers, Plugins, GitHub accounts, Keyboard shortcuts, Theme, Preferences, View Logs, About Klaussy. Faster than hunting through menus.',
       },
       {
         title: 'Multi-project',
@@ -181,7 +189,7 @@ window.Dialogs = (function () {
       },
       {
         title: 'Notifications & idle',
-        body: 'Klaussy pings the macOS notification center when the agent finishes responding in a backgrounded task. Toggle per-task in the task notes / context menu.',
+        body: 'Klaussy raises a desktop notification when an agent finishes responding in a backgrounded task, so you can run several in parallel and get pinged as each one lands. Toggle per-task from the task notes / context menu.',
       },
     ];
 
