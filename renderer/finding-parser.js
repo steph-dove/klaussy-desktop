@@ -123,6 +123,40 @@ window.FindingParser = (function () {
     return objs;
   }
 
+  // Escape the invalid-JSON patterns agents emit constantly: raw control chars
+  // and unescaped `"` in string values (disambiguated by lookahead). Only runs
+  // after a strict JSON.parse has failed, so it can't regress the valid path.
+  function repairLooseJson(s) {
+    var out = '';
+    var inStr = false, esc = false;
+    for (var i = 0; i < s.length; i++) {
+      var ch = s[i];
+      if (!inStr) {
+        if (ch === '"') inStr = true;
+        out += ch;
+        continue;
+      }
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === '\\') { out += ch; esc = true; continue; }
+      if (ch === '"') {
+        var j = i + 1;
+        while (j < s.length && (s[j] === ' ' || s[j] === '\t' || s[j] === '\n' || s[j] === '\r')) j++;
+        var nx = s[j];
+        if (nx === undefined || nx === ',' || nx === '}' || nx === ']' || nx === ':') {
+          inStr = false; out += ch; continue; // real closing quote
+        }
+        out += '\\"'; continue;               // literal quote inside the value
+      }
+      if (ch === '\n') { out += '\\n'; continue; }
+      if (ch === '\r') { out += '\\r'; continue; }
+      if (ch === '\t') { out += '\\t'; continue; }
+      var code = s.charCodeAt(i);
+      if (code < 0x20) { out += '\\u' + ('0000' + code.toString(16)).slice(-4); continue; }
+      out += ch;
+    }
+    return out;
+  }
+
   function coerceSeverity(s) {
     var v = String(s == null ? '' : s).trim().toLowerCase();
     if (v === 'critical') return 'blocker';
@@ -228,25 +262,41 @@ window.FindingParser = (function () {
         summary = parsed.summary || null;
       }
     } catch (_) {
-      // Streaming / truncated: recover whatever complete finding objects exist.
-      var arrKey = inner.indexOf('"findings"');
-      var scanFrom = arrKey !== -1 ? inner.indexOf('[', arrKey) : inner.indexOf('[');
-      if (scanFrom !== -1) {
-        rawFindings = [];
-        var sources = extractObjectSources(inner.slice(scanFrom));
-        for (var i = 0; i < sources.length; i++) {
-          try { rawFindings.push(JSON.parse(sources[i])); } catch (_e) {}
+      // Dominant cause is invalid escaping, not truncation, so repair and retry
+      // the whole object first; the per-object scan below is only for genuinely
+      // truncated / mid-stream JSON.
+      var repaired = repairLooseJson(inner);
+      try {
+        var reparsed = JSON.parse(repaired);
+        if (Array.isArray(reparsed)) {
+          rawFindings = reparsed;
+        } else if (reparsed && typeof reparsed === 'object') {
+          rawFindings = Array.isArray(reparsed.findings) ? reparsed.findings : [];
+          summary = reparsed.summary || null;
         }
-      }
-      // Recover the sibling "summary" object too, so a parse failure in the
-      // findings array doesn't also drop the (intact) verdict banner.
-      var sumKey = inner.indexOf('"summary"');
-      if (sumKey !== -1) {
-        var sumBrace = inner.indexOf('{', sumKey);
-        if (sumBrace !== -1) {
-          var sumSources = extractObjectSources(inner.slice(sumBrace));
-          if (sumSources.length) {
-            try { summary = JSON.parse(sumSources[0]); } catch (_e2) {}
+      } catch (_r) {
+        // Still unparseable (truncated stream, or a repair the heuristic can't
+        // handle): recover whatever complete finding objects exist, from the
+        // repaired text so per-object parses benefit from the escaping fixes.
+        var arrKey = repaired.indexOf('"findings"');
+        var scanFrom = arrKey !== -1 ? repaired.indexOf('[', arrKey) : repaired.indexOf('[');
+        if (scanFrom !== -1) {
+          rawFindings = [];
+          var sources = extractObjectSources(repaired.slice(scanFrom));
+          for (var i = 0; i < sources.length; i++) {
+            try { rawFindings.push(JSON.parse(sources[i])); } catch (_e) {}
+          }
+        }
+        // Recover the sibling "summary" object too, so a parse failure in the
+        // findings array doesn't also drop the (intact) verdict banner.
+        var sumKey = repaired.indexOf('"summary"');
+        if (sumKey !== -1) {
+          var sumBrace = repaired.indexOf('{', sumKey);
+          if (sumBrace !== -1) {
+            var sumSources = extractObjectSources(repaired.slice(sumBrace));
+            if (sumSources.length) {
+              try { summary = JSON.parse(sumSources[0]); } catch (_e2) {}
+            }
           }
         }
       }
@@ -263,7 +313,10 @@ window.FindingParser = (function () {
 
     // Stage 0: structured JSON contract (preferred).
     var json = parseJsonContract(text);
-    if (json && json.findings.length) {
+    // Satisfied by findings OR a summary: a clean "Approve, zero findings"
+    // review is valid JSON with an empty array and a real summary, which would
+    // otherwise fall through to the legacy parser and render as a raw dump.
+    if (json && (json.findings.length || json.summary)) {
       return {
         preamble: text.slice(0, text.indexOf('<FINDINGS_JSON>')).trim(),
         findings: json.findings,

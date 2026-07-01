@@ -531,6 +531,7 @@ window.PrReview = window.PrReview || {};
       PR.aiReview.error = agent.status === 'error' ? agent.error : null;
       PR.aiReview.cancelled = agent.status === 'cancelled';
       PR.aiReview.findings = [];
+      PR.aiReview.summary = null;
       PR.aiReview.usage = null;
       PR.aiReview.worktreePath = (agent.sourceContext && agent.sourceContext.worktreePath) || PR.aiReview.worktreePath;
 
