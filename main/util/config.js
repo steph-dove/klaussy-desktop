@@ -1,21 +1,6 @@
-// Persistent config living at userData/config.json: repo path, project list,
-// UI prefs, notify toggles, per-agent CLI paths (claudePath / codexPath /
-// geminiPath / antigravityPath / copilotPath / cursorPath / clinePath), defaultProvider, theme, and (historically) a
-// PR-review cache that has since moved to its own file-per-PR store.
-//
-// saveConfig has ~64 call sites (prefs changes, PR cache writes, notify pref
-// updates, the 10s auto-save timer). Writes are atomic (tmp+rename) and
-// serialized behind a single in-flight promise so overlapping callers
-// coalesce to sequential merge+write passes. shutdownAndSave awaits the
-// tail of that queue via flushSaveConfig() before quitting.
-//
-// Schema versioning: `config.schemaVersion` is stamped on the file after
-// every successful migration pass. On startup, runConfigMigrations() walks
-// the `migrations` array and applies each step whose index is at/after the
-// stored version — then stamps the new version. Callers reading individual
-// fields still get best-effort resilience (missing fields fall back to
-// defaults), but breaking-shape changes can now be handled explicitly
-// instead of silently corrupting state.
+// Persistent config living at userData/config.json: repo path, project list, UI
+// prefs, notify toggles, per-agent CLI paths (claudePath / codexPath /
+// geminiPath / antigravityPath / copilotPath / cursorPath / clinePath /
 
 const path = require('path');
 const fs = require('fs');
@@ -37,16 +22,8 @@ function loadConfig() {
 }
 
 // `saveConfig` has ~64 call sites including a 10s auto-save timer, prefs
-// changes, PR-review cache writes, and notify-pref updates. Previously this
-// was read-modify-write into the final path with no locking: two overlapping
-// calls could each read the same prior state, merge their own field, and
-// whoever wrote last would lose the first caller's field. A crash mid-write
-// would also truncate config.json and wipe every saved session / project.
-//
-// Fix: atomic writes via tmp+rename, serialized behind a single in-flight
-// promise so overlapping callers coalesce to sequential write passes. The
-// read inside each pass sees the freshly-written state from the previous
-// pass, so field merges compose correctly.
+// changes, PR-review cache writes, and notify-pref updates. Previously this was
+// read-modify-write into the final path with no locking: two overlapping calls
 let _saveConfigQueue = Promise.resolve();
 function saveConfig(config) {
   _saveConfigQueue = _saveConfigQueue.then(() => {
@@ -77,16 +54,10 @@ function flushSaveConfig() { return _saveConfigQueue; }
 // Migrations from version n-1 to version n. Each function mutates the passed
 // config object in place and MUST be idempotent — we only run each migration
 // once, but migrations can fail mid-way and we'd rather re-run cleanly than
-// corrupt state.
-//
-// Index N = migration v{N} → v{N+1} (so migrations[0] bumps v0 to v1).
-// Pre-versioning is v0: any config file without a schemaVersion field.
 const migrations = [
   // v0 → v1: fold legacy `config.prReviews` (G-series in-config PR review
-  // cache) into the file-per-PR store under userData/pr-review-cache/.
-  // The legacy cache ran in parallel with the new one for a release, which
-  // let saves diverge; this brings the old entries forward so there's
-  // exactly one cache, then drops the config key.
+  // cache) into the file-per-PR store under userData/pr-review-cache/. The
+  // legacy cache ran in parallel with the new one for a release, which let
   function v0_to_v1(config) {
     const legacy = config.prReviews;
     if (!legacy || typeof legacy !== 'object' || Object.keys(legacy).length === 0) {
@@ -136,9 +107,8 @@ const migrations = [
   },
 
   // v1 → v2: multi-agent support. `defaultMode` ('claude' | 'shell') becomes
-  // `defaultProvider`, which now also accepts 'codex' | 'gemini' | 'antigravity' | 'copilot' | 'cursor' | 'cline'.
-  // We keep `defaultMode` in place for one release so a downgrade still reads
-  // a sane value; the new code prefers `defaultProvider`.
+  // `defaultProvider`, which now also accepts 'codex' | 'gemini' |
+  // 'antigravity' | 'copilot' | 'cursor' | 'cline'. We keep `defaultMode` in
   function v1_to_v2(config) {
     if (config.defaultProvider === undefined) {
       config.defaultProvider = config.defaultMode || 'claude';
@@ -147,11 +117,8 @@ const migrations = [
 ];
 
 // Run on every startup. Fresh installs get stamped with CURRENT_SCHEMA_VERSION
-// directly; existing configs get each missing migration applied in order,
-// then the new version is written atomically via saveConfig.
-//
-// On failure at step N, we skip stamping schemaVersion so the next startup
-// retries from the same point. Individual migrations log their own errors.
+// directly; existing configs get each missing migration applied in order, then
+// the new version is written atomically via saveConfig. On failure at step N,
 function runConfigMigrations() {
   try {
     const configPath = getConfigPath();

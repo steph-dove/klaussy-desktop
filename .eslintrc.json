@@ -9,11 +9,20 @@
     "renderer/hljs-bundle.js",
     "renderer/monaco-init.js",
     "renderer/monaco-typescript.js",
-    "**/*.min.js"
+    "**/*.min.js",
+    "**/*.md",
+    "**/*.html",
+    "**/*.json"
   ],
   "overrides": [
     {
       "files": ["main/**/*.js", "main.js", "preload.js"],
+      "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
+      "env": { "node": true, "es2022": true },
+      "rules": { "no-undef": "error" }
+    },
+    {
+      "files": ["test/**/*.js"],
       "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
       "env": { "node": true, "es2022": true },
       "rules": { "no-undef": "error" }
