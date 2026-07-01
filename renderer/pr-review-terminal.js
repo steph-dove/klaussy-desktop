@@ -144,14 +144,21 @@
       + '</div>';
     }
 
+    // Per-file staging: only checked files are committed. Default unchecked so
+    // nothing lands in a commit unless the user explicitly picks it.
+    var selected = PR.localSelectedFiles || (PR.localSelectedFiles = {});
     var fileListHtml = files.length
       ? '<ul class="pr-local-file-list">'
           + files.map(function (f) {
-              return '<li><code class="pr-local-file-status">' + PR.escHtml(f.status) + '</code> '
-                + PR.escHtml(f.file) + '</li>';
+              return '<li class="pr-local-file-item"><label class="pr-local-file-label">'
+                + '<input type="checkbox" class="pr-local-file-check" data-file="' + PR.escHtml(f.file) + '"'
+                  + (selected[f.file] ? ' checked' : '') + (PR.localBusy ? ' disabled' : '') + '> '
+                + '<code class="pr-local-file-status">' + PR.escHtml(f.status) + '</code> '
+                + PR.escHtml(f.file) + '</label></li>';
             }).join('')
         + '</ul>'
       : '';
+    var selectedCount = files.filter(function (f) { return selected[f.file]; }).length;
 
     var diffHtml = (files.length && PR.localChanges.diff)
       ? '<details class="pr-local-diff"><summary>View diff</summary>'
@@ -165,8 +172,8 @@
             + ' value="' + PR.escHtml(PR.localCommitMsg || '') + '"'
             + (PR.localBusy ? ' disabled' : '') + '>'
           + '<button class="pr-review-btn pr-local-commit-btn" type="button"'
-            + (PR.localBusy ? ' disabled' : '') + '>'
-            + (PR.localBusy === 'committing' ? 'Committing…' : 'Commit')
+            + ((PR.localBusy || !selectedCount) ? ' disabled' : '') + '>'
+            + (PR.localBusy === 'committing' ? 'Committing…' : 'Commit' + (selectedCount ? ' (' + selectedCount + ')' : ''))
           + '</button>'
         + '</div>'
       : '';
@@ -232,6 +239,25 @@
     });
 
     var commitBtn = section.querySelector('.pr-local-commit-btn');
+
+    // Keep the selection set + Commit button in sync as boxes are toggled,
+    // without a full repaint (which would collapse the diff view / drop focus).
+    var checks = section.querySelectorAll('.pr-local-file-check');
+    Array.prototype.forEach.call(checks, function (cb) {
+      cb.addEventListener('change', function () {
+        var file = cb.getAttribute('data-file');
+        if (!file) return;
+        PR.localSelectedFiles = PR.localSelectedFiles || {};
+        if (cb.checked) PR.localSelectedFiles[file] = true;
+        else delete PR.localSelectedFiles[file];
+        var n = section.querySelectorAll('.pr-local-file-check:checked').length;
+        if (commitBtn) {
+          commitBtn.disabled = !!PR.localBusy || n === 0;
+          if (!PR.localBusy) commitBtn.textContent = 'Commit' + (n ? ' (' + n + ')' : '');
+        }
+      });
+    });
+
     if (commitBtn) commitBtn.addEventListener('click', function () {
       var msg = msgInput ? msgInput.value.trim() : (PR.localCommitMsg || '').trim();
       if (!msg) {
@@ -239,20 +265,32 @@
         PR.repaintAiReviewTab();
         return;
       }
+      // Read the checked files straight from the DOM so stale set entries
+      // (files that vanished after a prior commit) can't sneak in.
+      var selectedFiles = Array.prototype.map.call(
+        section.querySelectorAll('.pr-local-file-check:checked'),
+        function (cb) { return cb.getAttribute('data-file'); }
+      ).filter(Boolean);
+      if (!selectedFiles.length) {
+        PR.localBanner = { kind: 'error', text: 'Select at least one file to commit.' };
+        PR.repaintAiReviewTab();
+        return;
+      }
       PR.localCommitMsg = msg;
       PR.localBusy = 'committing';
       PR.localBanner = null;
       PR.repaintAiReviewTab();
-      window.klaus.pr.commitLocal(msg, PR.aiReview.worktreePath || null).then(function (r) {
+      window.klaus.pr.commitLocal(msg, PR.aiReview.worktreePath || null, selectedFiles).then(function (r) {
         PR.localBusy = null;
         if (r && r.error) {
           PR.localBanner = { kind: 'error', text: r.error };
           PR.repaintAiReviewTab();
         } else {
           PR.localBanner = { kind: 'ok', text: 'Committed.' };
-          // Clear the message field on success so the next commit starts
-          // with the default again.
+          // Clear the message field + selection on success so the next commit
+          // starts clean.
           PR.localCommitMsg = 'Apply review feedback';
+          PR.localSelectedFiles = {};
           PR.refreshLocalChanges();
         }
       });

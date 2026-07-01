@@ -921,25 +921,36 @@ function ensureWorktreeScratchIgnored(worktreePath) {
   } catch (_) { /* best-effort */ }
 }
 
-ipcMain.handle('pr-review-commit-local', async (_event, { message, worktreeHint }) => {
+ipcMain.handle('pr-review-commit-local', async (_event, { message, worktreeHint, files }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   if (!message || !message.trim()) return { error: 'Commit message required' };
   const wt = activePrWorktree(worktreeHint);
   if (!wt) return { error: 'No worktree for this PR yet' };
 
+  // When the panel sends an explicit file list, stage + commit only those
+  // paths so unchecked files stay out of the commit. Empty/absent list keeps
+  // the legacy "stage everything" behavior for any older caller.
+  const selected = Array.isArray(files)
+    ? files.filter((f) => typeof f === 'string' && f.trim())
+    : [];
+  const scoped = selected.length > 0;
+
   try {
     // Ignore agent scratch before staging so `git add -A` can't sweep it in.
     ensureWorktreeScratchIgnored(wt.worktreePath);
-    await execFileP('git', ['add', '-A'], { cwd: wt.worktreePath });
+    const addArgs = scoped ? ['add', '--', ...selected] : ['add', '-A'];
+    await execFileP('git', addArgs, { cwd: wt.worktreePath });
   } catch (err) {
     return { error: 'git add failed: ' + (err.stderr || err.message) };
   }
   try {
     // --allow-empty=false is the default; if there's nothing to commit, fail
-    // loudly rather than silently producing a no-op commit message.
-    const { stdout } = await execFileP('git', ['commit', '-m', message], {
-      cwd: wt.worktreePath,
-    });
+    // loudly rather than silently producing a no-op commit message. The
+    // trailing pathspec limits the commit to the selected files even if the
+    // index happened to hold other staged changes.
+    const commitArgs = ['commit', '-m', message];
+    if (scoped) commitArgs.push('--', ...selected);
+    const { stdout } = await execFileP('git', commitArgs, { cwd: wt.worktreePath });
     return { ok: true, output: (stdout || '').trim() };
   } catch (err) {
     return { error: 'git commit failed: ' + (err.stderr || err.message) };
