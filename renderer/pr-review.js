@@ -1536,6 +1536,10 @@ window.PrReview = window.PrReview || {};
     if (cached.implementAllSummary) PR.aiReview.implementAllSummary = cached.implementAllSummary;
     if (cached.implementAllUsage) PR.aiReview.implementAllUsage = cached.implementAllUsage;
     if (cached.usage) PR.aiReview.usage = cached.usage;
+    // Re-derive anchors from the current diff after restoring cached per-finding
+    // state — otherwise a review cached with stale postMode/locationVerified
+    // (e.g. from before diff-based anchoring) stays wrong on reopen.
+    PR.verifyFindingLocations();
     PR.repaintAiReviewTab();
     // Tab badge was set to 0 in the new-PR reset; rerender meta to update it.
     var tabBtn = PR.hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
