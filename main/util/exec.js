@@ -67,10 +67,22 @@ function ghEnvForRepo(repoDir) {
   }
 }
 
-function ghExec(args, opts) {
-  const env = ghEnvForRepo(opts.cwd);
+// Resolve the GH_TOKEN env for a gh call, most specific first: an explicit
+// review account (survives global-account drift; the only thing that works for
+// org repos), then the repo owner, then {} (gh's ambient active account).
+function resolveGhEnv({ account, cwd } = {}) {
+  if (account) {
+    const acct = ghEnvForAccount(account);
+    if (acct.GH_TOKEN) return acct;
+  }
+  return ghEnvForRepo(cwd);
+}
+
+function ghExec(args, opts = {}) {
+  const { ghAccount, ...rest } = opts;
+  const env = resolveGhEnv({ account: ghAccount, cwd: rest.cwd });
   return execFileSync('gh', args, {
-    ...opts,
+    ...rest,
     env: { ...process.env, ...env },
   });
 }
@@ -78,10 +90,11 @@ function ghExec(args, opts) {
 // Async variant for background work (timers, polling) — sync ghExec freezes
 // the main thread for the full gh round-trip, which is unacceptable at
 // 30-second cadence across N tasks.
-async function ghExecP(args, opts) {
-  const env = ghEnvForRepo(opts && opts.cwd);
+async function ghExecP(args, opts = {}) {
+  const { ghAccount, ...rest } = opts;
+  const env = resolveGhEnv({ account: ghAccount, cwd: rest.cwd });
   return execFileP('gh', args, {
-    ...(opts || {}),
+    ...rest,
     env: { ...process.env, ...env },
   });
 }
@@ -154,6 +167,7 @@ module.exports = {
   appendStderr,
   ghEnvForRepo,
   ghEnvForAccount,
+  resolveGhEnv,
   ghExec,
   ghExecP,
   clearGhTokenCache,

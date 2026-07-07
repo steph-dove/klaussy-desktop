@@ -2,7 +2,21 @@ require('../setup');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { appendStderr, sanitizeExtraEnv, runWithConcurrency, STDERR_CAP_BYTES } = require('../../main/util/exec');
+const { appendStderr, sanitizeExtraEnv, runWithConcurrency, STDERR_CAP_BYTES, resolveGhEnv } = require('../../main/util/exec');
+
+// --- resolveGhEnv ---
+
+test('resolveGhEnv falls through to {} when neither account nor repo resolves', () => {
+  // Junk account (no such gh user) and a non-repo cwd: both lookups fail, so
+  // the fallback chain must terminate at {} without throwing.
+  const env = resolveGhEnv({ account: 'no-such-gh-user-xyz-123', cwd: '/nonexistent-xyz-path' });
+  assert.deepEqual(env, {});
+});
+
+test('resolveGhEnv tolerates empty / missing input', () => {
+  assert.equal(typeof resolveGhEnv(), 'object');
+  assert.equal(typeof resolveGhEnv({}), 'object');
+});
 
 // --- appendStderr ---
 

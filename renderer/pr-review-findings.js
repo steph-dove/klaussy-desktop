@@ -271,32 +271,37 @@
   // line (or finding the true one nearby). Fire-and-forget: updates the
   // finding state and repaints on completion.
   PR.verifyFindingLocations = function() {
-    if (!PR.aiReview.worktreePath) return;
+    var diffText = PR.lastState && PR.lastState.diff;
+    var changedSync = false;
     PR.aiReview.findings.forEach(function (f) {
       if (!f.path || !f.line) return;
-      // Downgrade any inline finding whose line isn't part of the PR diff —
-      // including ones cached as inline-verified by a Klaussy version that
-      // didn't check the diff. Without this they'd 422 on submit. Cheap,
-      // synchronous, and runs before the verified-skip below.
-      if (f.postMode === 'inline' &&
-          !PR.isLineInDiff(PR.lastState && PR.lastState.diff, f.path, f.line, f.side || 'RIGHT')) {
-        f.locationVerified = false;
-        f.lineNotInDiff = true;
-        f.postMode = 'issue';
+      // Anchor from the PR diff alone (no worktree needed): an inline comment
+      // only needs the cited line to be in the diff, which lets a "just opened,
+      // not checked out" review post inline instead of general comments.
+      if (!(f.locationVerified && f.verifiedSnippet)) {
+        // Guard the null-diff case explicitly (isLineInDiff is optimistic there)
+        // so we never mark inline without a diff to confirm the anchor.
+        var inDiff = !!diffText && PR.isLineInDiff(diffText, f.path, f.line, f.side || 'RIGHT');
+        var mode = inDiff ? 'inline' : 'issue';
+        if (f.locationVerified !== inDiff || f.lineNotInDiff !== !inDiff || f.postMode !== mode) {
+          f.locationVerified = inDiff;
+          f.lineNotInDiff = !inDiff;
+          f.postMode = mode;
+          changedSync = true;
+        }
       }
-      // Re-verify cached findings missing the file snippet — happens for
-      // findings cached from a Klaussy version that didn't capture the file
-      // content. Skip only when fully verified.
+      // A readable worktree refines the exact line + snippet below and may
+      // override the decision above; its absence or failure no longer strands
+      // the finding as a general comment.
+      if (!PR.aiReview.worktreePath) return;
       if (f.locationVerified && f.verifiedSnippet) return;
       if (f._verifyInFlight) return;
       f._verifyInFlight = true;
       window.klaus.pr.readWorktreeFile(PR.aiReview.worktreePath, f.path).then(function (r) {
         f._verifyInFlight = false;
         if (!r || r.error || !r.content) {
-          // File missing / unreadable → we can't verify. Leave postMode
-          // at 'inline' if the AI gave us a location — submitReview will
-          // surface a server-side error if the path is truly bad, which
-          // is more diagnostic than a silent fallback.
+          // Can't read the file → keep the diff-based anchor decided above
+          // (already a valid inline anchor when the line is in the diff).
           f.locationVerifyError = r && r.error ? r.error : 'unreadable';
           PR.repaintAiReviewTab();
           return;
@@ -318,7 +323,6 @@
         // GitHub rejects inline anchors that aren't part of the PR diff (422
         // "line must be part of the diff"). Gate inline mode on the line
         // actually being in the diff and fall back to an issue comment otherwise.
-        var diffText = PR.lastState && PR.lastState.diff;
         var inDiff = match && PR.isLineInDiff(diffText, f.path, match.line, f.side || 'RIGHT');
         if (match && inDiff) {
           f.line = match.line;
@@ -376,6 +380,7 @@
         PR.repaintAiReviewTab();
       });
     });
+    if (changedSync) PR.repaintAiReviewTab();
   };
 
   // Whether repo-intel (conventions + import graph from klaussy-repo-conventions) is

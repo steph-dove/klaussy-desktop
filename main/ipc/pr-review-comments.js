@@ -6,12 +6,20 @@
 const { ipcMain } = require('electron');
 const log = require('electron-log');
 const { execFile, execFileSync, spawn } = require('child_process');
-const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
+const { ghExec, ghExecP, resolveGhEnv, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { humanizeComment } = require('../util/humanize-comment');
 const {
   prReview, currentRepoPath, sanitizePrReview, broadcastPrReview, fetchThreadsForActive,
 } = require('../state/pr-review');
+
+// Pin every gh call in an active review to the account it runs under, so
+// posting survives global-account drift and works for org repos. Falls back to
+// the ambient account when there's no pinned account or its token won't read.
+function reviewGhEnv(cwd) {
+  const account = prReview.active && prReview.active.account;
+  return { ...process.env, ...resolveGhEnv({ account, cwd }) };
+}
 
 // G4: post all pending review comments + decision as one review. The GitHub
 // REST endpoint accepts `comments` inline so we only make one network call.
@@ -32,6 +40,7 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
+      env: reviewGhEnv(cwd),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
@@ -74,7 +83,7 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   // `spawn` is imported at the top of the file.
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
-      cwd, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd, env: reviewGhEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
@@ -112,7 +121,7 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
   // `spawn` is imported at the top of the file.
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
-      cwd, stdio: ['pipe', 'pipe', 'pipe'],
+      cwd, env: reviewGhEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
     proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
@@ -142,7 +151,7 @@ ipcMain.handle('pr-current-user', async () => {
   if (cachedCurrentUser) return { login: cachedCurrentUser };
   try {
     const out = execFileSync('gh', ['api', 'user', '--jq', '.login'], {
-      stdio: 'pipe', timeout: 10000,
+      stdio: 'pipe', timeout: 10000, env: reviewGhEnv(currentRepoPath() || require('os').homedir()),
     }).toString().trim();
     if (out) cachedCurrentUser = out;
     return { login: cachedCurrentUser };
@@ -171,6 +180,7 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
+      env: reviewGhEnv(cwd),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
@@ -212,7 +222,7 @@ ipcMain.handle('pr-review-resolve-thread', async (_event, { threadId, resolve })
       'api', 'graphql',
       '-f', 'query=' + mutation,
       '-F', 'id=' + threadId,
-    ], { cwd, stdio: 'pipe', timeout: 15000 });
+    ], { cwd, ghAccount: prReview.active.account, stdio: 'pipe', timeout: 15000 });
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
   }
@@ -267,6 +277,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   const reviewResult = await new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
+      env: reviewGhEnv(cwd),
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let stdoutBuf = '', stderrBuf = '';
@@ -318,6 +329,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     const res = await new Promise((resolve) => {
       const proc = spawn('gh', ['api', issueEndpoint, '--method', 'POST', '--input', '-'], {
         cwd,
+        env: reviewGhEnv(cwd),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       let stdoutBuf = '', stderrBuf = '';
