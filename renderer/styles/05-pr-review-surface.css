@@ -934,15 +934,15 @@ body.pr-review-popout #pr-review-root {
 .pr-implement-terminal-body {
   flex: 1;
   min-height: 0;
-  padding: 6px 8px;
   background: var(--term-bg);
   overflow: hidden;
 }
-.pr-implement-terminal-body .xterm,
-.pr-implement-terminal-body .xterm-viewport,
-.pr-implement-terminal-body .xterm-screen {
-  height: 100% !important;
-  width: 100% !important;
+/* Pad the .xterm, never this wrapper: FitAddon measures the wrapper for its row
+   count and subtracts the xterm's own padding, so padding the wrapper desyncs
+   rows from the viewport and paints black bands. Mirrors .terminal-body. */
+.pr-implement-terminal-body > .xterm {
+  height: 100%;
+  padding: 6px 8px;
 }
 
 /* Empty state shown in the Terminal tab when no implement run is active. */
