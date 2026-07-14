@@ -6,7 +6,8 @@
 
 const { ipcMain, BrowserWindow } = require('electron');
 const crypto = require('crypto');
-const { execFile, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
+const { execHeadlessAgent, promptGoesOnStdin } = require('../util/agent-spawn');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { isAgentMode } = require('../state/ai-providers');
 const { prReview, ensureWorktreeForActivePr, currentRepoPath, resolveFallbackBaseBranch } = require('../state/pr-review');
@@ -578,22 +579,16 @@ ipcMain.handle('pr-review-investigate-cancel', makeClaudeCancelHandler(investiga
 
 ipcMain.handle('explain-diff', async (_event, { worktreePath, file, hunk }) => {
   // PR review mode calls this without a worktree — fall back to the current
-  // project path (or the user's home as a last resort) since execFile insists
+  // project path (or the user's home as a last resort) since the spawn insists
   // on a valid cwd. Claude doesn't actually need repo context for this prompt.
   const cwd = worktreePath || currentRepoPath() || require('os').homedir();
-  return new Promise((resolve) => {
-    execFile('claude', ['-p', explainPrompt(file, hunk)], {
-      cwd,
-      timeout: 30000,
-      maxBuffer: 1024 * 1024,
-    }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ error: stderr || err.message });
-      } else {
-        resolve({ explanation: stdout.trim() });
-      }
-    });
-  });
+  // A Windows `.cmd` shim can't carry the multi-line prompt as an arg, so it
+  // goes on stdin (`claude -p` reads it); elsewhere it's a normal `-p <prompt>`
+  // arg. See util/agent-spawn.
+  const win = promptGoesOnStdin('claude');
+  const p = explainPrompt(file, hunk);
+  return execHeadlessAgent('claude', win ? ['-p'] : ['-p', p], { cwd, timeout: 30000 }, win ? p : null)
+    .then((res) => (res.error ? { error: res.error } : { explanation: res.stdout.trim() }));
 });
 
 // Streaming variant. Pipes claude stdout to the renderer in real time so the
@@ -765,17 +760,8 @@ SUGGESTED REPLY:
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
-  return new Promise((resolve) => {
-    execFile(claudeBin, ['-p', prompt], {
-      cwd: worktreePath,
-      timeout: 60000,
-      maxBuffer: 1024 * 1024,
-    }, (err, stdout, stderr) => {
-      if (err) {
-        resolve({ error: stderr || err.message });
-      } else {
-        resolve({ review: stdout.trim() });
-      }
-    });
-  });
+  // Windows `.cmd` shim: prompt on stdin (it can't take the multi-line arg).
+  const win = promptGoesOnStdin(claudeBin);
+  return execHeadlessAgent(claudeBin, win ? ['-p'] : ['-p', prompt], { cwd: worktreePath, timeout: 60000 }, win ? prompt : null)
+    .then((res) => (res.error ? { error: res.error } : { review: res.stdout.trim() }));
 });

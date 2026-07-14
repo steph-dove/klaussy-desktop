@@ -779,6 +779,7 @@ contextBridge.exposeInMainWorld('klaus', {
     createMemory: (filePath) => ipcRenderer.invoke('create-memory-file', { filePath }),
     listMcp: () => ipcRenderer.invoke('list-mcp-servers'),
     listPlugins: () => ipcRenderer.invoke('list-plugins'),
+    resolveSkill: (worktreePath, agentId, kind) => ipcRenderer.invoke('resolve-skill', { worktreePath, agentId, kind }),
   },
 
   // ---- mcp: manage MCP server connections across every agent ----

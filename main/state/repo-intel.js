@@ -265,10 +265,18 @@ async function pickInstaller() {
     await execFileP('uv', ['--version'], { timeout: 10000 });
     return { kind: 'uv' };
   } catch { /* no uv */ }
-  for (const py of ['python3', 'python']) {
+  // Interpreter candidates differ by OS. Stock python.org Windows installs ship
+  // the `py` launcher (invoked `py -3`) and NO `python3` — and a bare `python`
+  // is often the Microsoft Store alias stub — so `py -3` goes first on Windows.
+  // macOS/Linux reliably have `python3`. Each candidate carries its own prefix
+  // args (`pyArgs`) so callers can rebuild the exact interpreter invocation.
+  const candidates = process.platform === 'win32'
+    ? [{ py: 'py', pyArgs: ['-3'] }, { py: 'python', pyArgs: [] }, { py: 'python3', pyArgs: [] }]
+    : [{ py: 'python3', pyArgs: [] }, { py: 'python', pyArgs: [] }];
+  for (const c of candidates) {
     try {
-      await execFileP(py, ['-m', 'pip', '--version'], { timeout: 10000 });
-      return { kind: 'pip', py };
+      await execFileP(c.py, [...c.pyArgs, '-m', 'pip', '--version'], { timeout: 10000 });
+      return { kind: 'pip', py: c.py, pyArgs: c.pyArgs };
     } catch { /* try next */ }
   }
   return null;
@@ -280,7 +288,7 @@ async function pickInstaller() {
 // the externally-managed escape hatch. Wires PATH via `pipx ensurepath` +
 // refreshSpawnPath so the freshly-installed pipx is usable this session.
 // Returns true only if `pipx` is callable afterwards.
-async function bootstrapPipx(py) {
+async function bootstrapPipx(py, pyArgs = []) {
   const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
   console.log('[repo-intel] no pipx/uv found — bootstrapping pipx in the background');
   let installed = false;
@@ -291,13 +299,13 @@ async function bootstrapPipx(py) {
   } catch { /* no brew, or brew install failed — try pip below */ }
   if (!installed && py) {
     try {
-      await execFileP(py, ['-m', 'pip', 'install', '--user', 'pipx'], BIG);
+      await execFileP(py, [...pyArgs, '-m', 'pip', 'install', '--user', 'pipx'], BIG);
       installed = true;
     } catch (err) {
       const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
       if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
         try {
-          await execFileP(py, ['-m', 'pip', 'install', '--user', '--break-system-packages', 'pipx'], BIG);
+          await execFileP(py, [...pyArgs, '-m', 'pip', 'install', '--user', '--break-system-packages', 'pipx'], BIG);
           installed = true;
         } catch { /* give up on pip bootstrap */ }
       }
@@ -305,7 +313,7 @@ async function bootstrapPipx(py) {
   }
   if (!installed) return false;
   // Wire the new pipx onto PATH for this session.
-  try { await execFileP(py || 'python3', ['-m', 'pipx', 'ensurepath'], { timeout: 30000 }); } catch {}
+  try { await execFileP(py || 'python3', [...pyArgs, '-m', 'pipx', 'ensurepath'], { timeout: 30000 }); } catch {}
   try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
   try { await execFileP('pipx', ['--version'], { timeout: 10000 }); return true; }
   catch { return false; }
@@ -338,7 +346,7 @@ function ensureReviewTools() {
     // user in the background and prefer it, so the tools land in clean venvs
     // instead of leaning on pip's PEP 668 escape hatch. Falls back to pip if the
     // bootstrap doesn't take.
-    if (installer.kind === 'pip' && await bootstrapPipx(installer.py)) {
+    if (installer.kind === 'pip' && await bootstrapPipx(installer.py, installer.pyArgs)) {
       console.log('[repo-intel] bootstrapped pipx');
       installer = { kind: 'pipx' };
     }
@@ -355,11 +363,11 @@ function ensureReviewTools() {
       // the plain install; retry once with --break-system-packages — the
       // documented escape hatch, safe here since --user can't touch system pkgs.
       try {
-        return await execFileP(installer.py, ['-m', 'pip', 'install', '--user', pkg], BIG);
+        return await execFileP(installer.py, [...(installer.pyArgs || []), '-m', 'pip', 'install', '--user', pkg], BIG);
       } catch (err) {
         const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
         if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
-          return execFileP(installer.py, ['-m', 'pip', 'install', '--user', '--break-system-packages', pkg], BIG);
+          return execFileP(installer.py, [...(installer.pyArgs || []), '-m', 'pip', 'install', '--user', '--break-system-packages', pkg], BIG);
         }
         throw err;
       }
@@ -421,11 +429,11 @@ async function upgradeReviewToolsIfDue() {
           await execFileP('uv', ['tool', 'upgrade', pkg], BIG);
         } else {
           try {
-            await execFileP(installer.py, ['-m', 'pip', 'install', '--user', '-U', pkg], BIG);
+            await execFileP(installer.py, [...(installer.pyArgs || []), '-m', 'pip', 'install', '--user', '-U', pkg], BIG);
           } catch (err) {
             const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
             if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
-              await execFileP(installer.py, ['-m', 'pip', 'install', '--user', '-U', '--break-system-packages', pkg], BIG);
+              await execFileP(installer.py, [...(installer.pyArgs || []), '-m', 'pip', 'install', '--user', '-U', '--break-system-packages', pkg], BIG);
             }
           }
         }

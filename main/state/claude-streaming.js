@@ -22,7 +22,7 @@
 //   * accumulated text lives in the registry so a late-mounting consumer
 //     can render the catch-up content immediately
 
-const { spawn } = require('child_process');
+const { spawnHeadlessAgent, promptGoesOnStdin } = require('../util/agent-spawn');
 const { loadConfig } = require('../util/config');
 const { appendStderr } = require('../util/exec');
 const agentRegistry = require('./agent-registry');
@@ -146,13 +146,19 @@ function spawnClaudeStream({
 
   // Pinned model/version for this agent (Gemini today), '' = the agent default.
   const model = (config.agentModel || {})[prov.id] || '';
-  const run = prov.buildHeadlessRun(bin, { prompt, mode, allowEdits, trust, model });
+  // When the CLI is a Windows `.cmd` shim it can't carry the multi-line prompt
+  // as a command-line arg (see util/agent-spawn), so providers return it on
+  // `stdinInput` instead and the helper writes it to stdin. False for native
+  // binaries and everywhere off Windows — the prompt stays a normal arg and
+  // behaviour is unchanged.
+  const promptOnStdin = promptGoesOnStdin(bin);
+  const run = prov.buildHeadlessRun(bin, { prompt, mode, allowEdits, trust, model, promptOnStdin });
   let proc;
   try {
-    proc = spawn(bin, run.args, {
+    proc = spawnHeadlessAgent(bin, run.args, {
       cwd,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+      stdio: [run.stdinInput != null ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    }, run.stdinInput);
   } catch (err) {
     authSlot.release(); // never spawned — free the concurrency slot
     throw err;

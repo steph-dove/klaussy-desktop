@@ -247,19 +247,76 @@ window.FileBrowser = (function () {
     }
   }
 
-  // "Figure out how to run this app and run it" flow. Hands off to Claude Code
-  // in a sub-terminal, which inspects the repo, picks a command, and runs it
-  // (with tool-use approval) interactively.
-  function runApp() {
+  // Built-in template used when the worktree has no <repo>-run skill (a repo
+  // generated before klaussy-agents 0.14, or one klaussy doesn't manage). Mirrors
+  // the run skill's body so unmanaged repos still get the structured flow — the
+  // skill body is repo-agnostic (only its frontmatter name is namespaced), so
+  // this stays a faithful fallback. Same prefer-skill-else-template shape as the
+  // PR-review flow's PR_REVIEW_TEMPLATE.
+  var RUN_APP_FALLBACK_PROMPT = [
+    'Run this project\'s app in the current working directory and drive it far',
+    'enough to observe its behavior — don\'t just start it and call it done.',
+    '',
+    '1. Read CLAUDE.md — its Commands section is the source of truth for how this',
+    '   project installs, builds, and runs. Prefer a run / start / serve / dev',
+    '   entry, a CLI entrypoint, or a server command. If it exposes more than one',
+    '   (e.g. a CLI and a server) and it\'s ambiguous which to run, ask.',
+    '2. Read any .claude/rules/*.md whose paths glob covers the code you\'ll',
+    '   exercise — it may note required env vars, ports, or setup.',
+    '3. If CLAUDE.md names no run command, fall back to the stack default',
+    '   (package.json scripts dev/start/serve, pyproject [project.scripts],',
+    '   go run, cargo run). If you still can\'t tell, ask — don\'t guess and run',
+    '   something destructive.',
+    '4. Install/build first only if needed. If the app needs an env var, config,',
+    '   or secret that isn\'t present, STOP and ask rather than inventing a value.',
+    '5. For a one-shot (CLI/script/build) invoke it directly, starting with a',
+    '   cheap --help/--version sanity call then a representative real command. For',
+    '   a long-running process (server/watcher/daemon), start it in the background,',
+    '   wait for its ready signal, drive it from a second command, then tear it',
+    '   down — don\'t leave a stray process running.',
+    '6. Capture the actual output and state plainly whether it matches expected',
+    '   behavior. If it failed, show the real error; don\'t paper over it.',
+    '',
+    'Do NOT change code to make the app run, and never use production credentials',
+    'or a production service — local/dev only unless I say otherwise.',
+  ].join('\n');
+
+  // "Figure out how to run this app and run it" flow. Hands off to the task's
+  // OWN agent (Claude / Codex / Gemini / …) in a sub-terminal via
+  // openClaudeSubTerminal, which resolves the agent from the parent task's mode
+  // exactly like the Plan/Debug/Review actions — not a hardcoded `claude`.
+  //
+  // The seed prompt is agent-neutral prose — NOT a Claude `/<skill>` slash
+  // command. klaussy scaffolds the same <repo>-run skill into every agent's own
+  // skills dir (klaussy-agents >= 0.14), and these skills are model-invoked by
+  // description across all agents, so naming the skill in plain prose triggers
+  // it everywhere Claude's slash syntax would only work in Claude. We resolve
+  // the skill in the TASK agent's own dir (a Gemini task looks in .gemini/skills,
+  // not .claude/skills); if this agent has no run skill (aider, or a repo
+  // generated before it existed), we seed the self-contained RUN_APP_FALLBACK_-
+  // PROMPT instead — also plain prose that any agent can follow directly.
+  async function runApp() {
     var taskId = AppState.activeTaskId;
     if (taskId == null) return;
-    var prompt = 'Find how to run this app in the current working directory ' +
-      'and run it. Show its output. If there is ambiguity between dev vs prod ' +
-      'or between multiple entry points, pick the most likely dev entry point ' +
-      'and note your choice.';
-    var command = 'claude ' + shellQuote(prompt);
-    if (window.TerminalManager && window.TerminalManager.runInSubTerminal) {
-      window.TerminalManager.runInSubTerminal(taskId, '▶ Run App', command);
+    var task = AppState.tasks.get(taskId);
+    var worktree = task ? task.worktreePath : null;
+
+    // Resolve the agent the same way openClaudeSubTerminal will when it spawns,
+    // so we look for the skill in the dir of the agent that actually runs.
+    var defaultAgent = (AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude';
+    var agentMode = (task && task.mode && task.mode !== 'shell') ? task.mode : defaultAgent;
+
+    var skillName = null;
+    if (worktree && window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill) {
+      try { skillName = await window.klaus.skills.resolveSkill(worktree, agentMode, 'run'); } catch (_e) { /* fall back to prose */ }
+    }
+
+    var prompt = skillName
+      ? 'Use your "' + skillName + '" skill to run this project\'s app in the current '
+        + 'working directory and drive it end-to-end, then report what you observed.'
+      : RUN_APP_FALLBACK_PROMPT;
+    if (window.TerminalManager && window.TerminalManager.openClaudeSubTerminal) {
+      window.TerminalManager.openClaudeSubTerminal(taskId, '▶ Run App', prompt);
     }
   }
 

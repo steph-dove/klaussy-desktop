@@ -703,7 +703,9 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
 ipcMain.handle('get-session-repos', (_event, { worktreePath }) => {
   try {
     if (typeof worktreePath !== 'string') return { session: null, repos: [] };
-    const m = worktreePath.replace(/\/+$/, '').match(/^(.*\/klaussy\/sessions\/([^/]+))\/([^/]+)$/);
+    // Normalize `\`→`/` so Windows session paths match too (Node fs/path accept
+    // forward slashes on Windows, so the derived paths below still work).
+    const m = worktreePath.replace(/\\/g, '/').replace(/\/+$/, '').match(/^(.*\/klaussy\/sessions\/([^/]+))\/([^/]+)$/);
     if (!m) return { session: null, repos: [] };
     const sessionDir = m[1];
     const sessionName = m[2];
@@ -1070,7 +1072,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
     // in after boot — shared staging with the cross-agent session-resume
     // handoff (see util/agent-prompt).
-    const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`);
+    const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`, userShell);
     agentCmd = staged.agentCmd;
     promptFile = staged.promptFile;
     needsEnter = staged.needsEnter;

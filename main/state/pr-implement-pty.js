@@ -27,6 +27,7 @@ const pty = require('node-pty');
 const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
+const { promptFileArg } = require('../util/agent-prompt');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -259,7 +260,7 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
   // need a flag to execute it interactively (Gemini: `-i`). interactivePromptFlag
   // supplies that; default is none.
   const promptFlag = prov.interactivePromptFlag ? `${prov.interactivePromptFlag} ` : '';
-  const quotedPrompt = `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+  const quotedPrompt = promptFileArg(promptFile, userShell);
   const shellCmd = `${agentCmd} ${promptFlag}${quotedPrompt}`;
   const args = shellRunCmdArgs(userShell, shellCmd);
 

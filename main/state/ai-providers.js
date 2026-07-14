@@ -87,9 +87,14 @@ function claudeUsage(u) {
 // these through each agent's add-directory flag lets the agent READ and EDIT
 // its sibling worktrees, not just its own cwd — without them the agents treat
 function quotedSessionDirs(sessionDirs) {
+  // PowerShell (the Windows default shell) doesn't treat `\` as an escape, so
+  // JSON.stringify's doubled backslashes (`C:\\Users\\…`) would reach the agent
+  // verbatim and break the --add-dir path. Single-quote it literally there.
+  // POSIX shells keep the JSON double-quoted form (their paths have no `\`).
+  const isWin = process.platform === 'win32';
   return (Array.isArray(sessionDirs) ? sessionDirs : [])
     .filter((d) => typeof d === 'string' && d)
-    .map((d) => JSON.stringify(d));
+    .map((d) => (isWin ? `'${d.replace(/'/g, "''")}'` : JSON.stringify(d)));
 }
 
 const PROVIDERS = {
@@ -120,10 +125,18 @@ const PROVIDERS = {
     // Headless one-shot. mode 'text' → caller wants the clean final answer on
     // stdout; mode 'stream' → structured stream-json events. outputMode tells
     // spawnAgentStream how to read stdout: 'passthrough' (stdout IS the
-    buildHeadlessRun(_bin, { prompt, mode, model /*, allowEdits */ } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, model, promptOnStdin /*, allowEdits */ } = {}) {
       // Claude's headless `-p` already edits within cwd on the autonomous
       // surfaces today, so allowEdits needs no extra flag here.
       const m = model ? ['--model', model] : [];
+      // Windows (promptOnStdin): `claude -p` with no positional reads the prompt
+      // from stdin, so the multi-line prompt never has to survive a cmd.exe
+      // command line (see util/agent-spawn). stdinInput carries it to the child.
+      if (promptOnStdin) {
+        return mode === 'stream'
+          ? { args: [...m, '-p', '--output-format', 'stream-json', '--verbose'], stdinInput: prompt, outputMode: 'passthrough' }
+          : { args: [...m, '-p'], stdinInput: prompt, outputMode: 'passthrough' };
+      }
       return mode === 'stream'
         ? { args: [...m, '-p', prompt, '--output-format', 'stream-json', '--verbose'], outputMode: 'passthrough' }
         : { args: [...m, '-p', prompt], outputMode: 'passthrough' };
@@ -219,7 +232,7 @@ const PROVIDERS = {
       if (resumeLatest) return `${top} resume --last`;
       return top;
     },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model, promptOnStdin } = {}) {
       // `codex exec --json` always emits JSONL (no clean-text plain mode). For
       // text surfaces we extract the agent_message text ('json-text'); for
       // stream surfaces we translate Codex events into Claude-shaped stream-
@@ -229,8 +242,12 @@ const PROVIDERS = {
       // sandbox, so grant scoped workspace writes. `codex exec` is already non-
       // interactive (no `--ask-for-approval` flag — verified), and this is NOT
       if (allowEdits) args.push('--sandbox', 'workspace-write');
-      args.push('--json', prompt);
-      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'json-text' };
+      // Windows: the prompt (positional) goes on stdin so it survives the
+      // `.cmd` shim (see util/agent-spawn). VERIFY `codex exec --json` reads
+      // stdin when no positional prompt is given.
+      args.push('--json');
+      if (!promptOnStdin) args.push(prompt);
+      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'json-text' };
     },
     sessionDir() {
       // Global, date-bucketed; not resolvable from a worktree path.
@@ -388,17 +405,20 @@ const PROVIDERS = {
       if (resumeLatest) return `${base} --resume latest`;
       return base;
     },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits, trust, model } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, trust, model, promptOnStdin } = {}) {
       // VERIFIED (gemini-cli 0.44.1): `-p` = non-interactive; `-o stream-json`
       // = NDJSON we translate into Claude-shaped events; `--approval-mode
       // auto_edit` auto-approves edit tools. `--skip-trust` clears the trusted-
       const args = [];
       if (trust) args.push('--skip-trust');
       if (model) args.push('-m', model);
-      args.push('-p', prompt);
+      // Windows: prompt on stdin so it survives the `.cmd` shim (util/agent-spawn).
+      // `-p` requires a value and would greedily consume the next flag, so drop
+      // it and let gemini read the piped stdin as the prompt. VERIFY on gemini-cli.
+      if (!promptOnStdin) args.push('-p', prompt);
       if (mode === 'stream') args.push('--output-format', 'stream-json');
       if (allowEdits) args.push('--approval-mode', 'auto_edit');
-      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
     },
     sessionDir() {
       return path.join(home(), '.gemini', 'tmp');
@@ -533,14 +553,18 @@ const PROVIDERS = {
       if (resumeLatest) return `${bin} --continue`;
       return bin;
     },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, promptOnStdin } = {}) {
       // `copilot -p -s` (silent) prints only the final response. Stream mode
       // uses JSONL we translate into Claude-shaped events. VERIFY on a real install.
-      const args = ['-p', prompt];
+      // Windows `.cmd`: prompt on stdin. `-p` takes the next token as its value,
+      // so keeping it would swallow `-s`; drop it and pipe stdin. VERIFY copilot
+      // reads stdin.
+      const args = [];
+      if (!promptOnStdin) args.push('-p', prompt);
       if (mode === 'stream') args.push('--output-format', 'json'); else args.push('-s');
       // Allow the write tool for autonomous-edit surfaces. VERIFY exact tool name.
       if (allowEdits) args.push('--allow-tool', 'write');
-      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
     },
     sessionDir() {
       return path.join(home(), '.copilot', 'session-state');
@@ -612,15 +636,19 @@ const PROVIDERS = {
       if (resumeLatest) return `${base} --continue`;
       return base;
     },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model, promptOnStdin } = {}) {
       // `-p` non-interactive. text → clean stdout (passthrough); stream → NDJSON
       // we translate into Claude-shaped events. `--force` auto-approves writes
       // for the autonomous-edit surfaces. args is passed to spawn() directly.
-      const args = ['-p', prompt];
+      // Windows `.cmd` (only if cursor-agent is shimmed rather than a native
+      // binary): prompt on stdin; `-p` would swallow the next flag, so drop it.
+      // VERIFY cursor-agent reads stdin.
+      const args = [];
+      if (!promptOnStdin) args.push('-p', prompt);
       if (model) args.push('--model', model);
       if (allowEdits) args.push('--force');
       if (mode === 'stream') args.push('--output-format', 'stream-json');
-      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
     },
     sessionDir() {
       return path.join(home(), '.cursor');
@@ -694,7 +722,7 @@ const PROVIDERS = {
       if (resumeSessionId) return `${base} --id ${resumeSessionId}`;
       return base;
     },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model, promptOnStdin } = {}) {
       // `--json` → NDJSON we translate into Claude-shaped events; otherwise the
       // task prints clean text we pass through. `--yolo` auto-approves tools for
       // the autonomous-edit surfaces. The prompt is the trailing positional arg.
@@ -702,8 +730,10 @@ const PROVIDERS = {
       if (model) args.push('--model', model);
       if (allowEdits) args.push('--yolo');
       if (mode === 'stream') args.push('--json');
-      args.push(prompt);
-      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+      // Windows `.cmd`: prompt on stdin instead of the positional (util/agent-spawn).
+      // VERIFY cline reads stdin when no positional prompt is given.
+      if (!promptOnStdin) args.push(prompt);
+      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
     },
     sessionDir() {
       return path.join(home(), '.cline');
@@ -771,7 +801,7 @@ const PROVIDERS = {
       if (resumeLatest) return `${base} --continue`;
       return base;
     },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, allowEdits, model, promptOnStdin } = {}) {
       // `run` is the non-interactive subcommand; `--format json` streams JSONL we
       // translate, else stdout passes through. `--auto` auto-approves tools on
       // autonomous-edit surfaces (else a headless edit blocks on a TTY-less prompt).
@@ -779,12 +809,18 @@ const PROVIDERS = {
       if (model) args.push('--model', model);
       if (allowEdits) args.push('--auto');
       if (mode === 'stream') args.push('--format', 'json');
-      args.push(prompt);
-      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+      // Windows `.cmd`: prompt on stdin instead of the positional (util/agent-spawn).
+      // VERIFY `opencode run` reads stdin when no positional prompt is given.
+      if (!promptOnStdin) args.push(prompt);
+      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
     },
     sessionDir() {
-      // opencode stores data under its XDG data dir.
-      return path.join(home(), '.local', 'share', 'opencode');
+      // opencode stores data under its XDG data dir: $XDG_DATA_HOME if set,
+      // else %LOCALAPPDATA% on Windows, else ~/.local/share on POSIX.
+      const xdg = process.env.XDG_DATA_HOME
+        || (process.platform === 'win32' ? process.env.LOCALAPPDATA : null)
+        || path.join(home(), '.local', 'share');
+      return path.join(xdg, 'opencode');
     },
     // No tailable session files, so interactive-TUI token tracking isn't wired
     // (headless runs track live here). JSONL is one {type, part} object per line,
@@ -980,6 +1016,10 @@ function installCommandFor(id, platform = process.platform) {
   const cmd = INSTALL_COMMANDS[id];
   if (!cmd) return null;
   if (typeof cmd === 'string') return cmd;
+  // Never fall back to the POSIX (`linux`) command on Windows: it's a
+  // `curl … | bash` pipe that would be injected verbatim into the generated
+  // PowerShell installer and fail. No win32 entry → no automated install there.
+  if (platform === 'win32') return cmd.win32 || null;
   return cmd[platform] || cmd.linux || null;
 }
 

@@ -388,6 +388,17 @@ function startPrecommitServer() {
   // gate the whole feature there rather than half-install it.
   if (process.platform === 'win32') {
     console.warn('[precommit-hook] git-hook review not yet supported on Windows — skipping');
+    // Self-heal: a prior build installed the git hooks on Windows too, but the
+    // client script only gets written alongside a running server — which never
+    // starts here. Those orphaned hooks then `exec node <missing client>` and
+    // exit 1, BLOCKING every commit/push. Remove any we left behind (marker-
+    // gated, restores each repo's original hook). installHookForRepo is also
+    // gated below so we never re-install them.
+    try {
+      if ((loadConfig().precommitHookRepos || []).length) uninstallAllHooks();
+    } catch (e) {
+      console.warn('[precommit-hook] Windows hook cleanup failed:', e.message);
+    }
     return;
   }
   // Each instance owns a unique per-pid socket, so there's nothing to steal —
@@ -684,6 +695,11 @@ function installOneHook(hooksDir, hookName, repoPath) {
 // any pre-existing foreign hooks. No-op when the preference is off.
 function installHookForRepo(repoPath) {
   try {
+    // Windows: the socket server + client scripts aren't wired up yet (see
+    // startPrecommitServer's win32 gate), so installing the git hooks would
+    // leave a `node <missing client>` that exits 1 and blocks every commit/push.
+    // Never install on Windows until the named-pipe server lands.
+    if (process.platform === 'win32') return;
     const config = loadConfig();
     // Install when EITHER the review or the comment cleanup is enabled — both
     // run through the same pre-commit hook + socket server. Comment cleanup is
