@@ -243,11 +243,17 @@ window.FindingParser = (function () {
     var rest = text.slice(open + '<FINDINGS_JSON>'.length);
     var close = rest.indexOf('</FINDINGS_JSON>');
     var inner = close !== -1 ? rest.slice(0, close) : rest;
-    // Strip a leading ```json fence and a trailing ``` (closing fence may not
-    // have streamed in yet).
-    inner = inner.replace(/^\s*```[a-zA-Z0-9_-]*\s*/, '');
-    var fenceEnd = inner.lastIndexOf('```');
-    if (fenceEnd !== -1) inner = inner.slice(0, fenceEnd);
+    // Strip an outer ```json fence if present. The trailing ``` is stripped ONLY
+    // when a leading fence was actually removed — otherwise lastIndexOf('```')
+    // grabs the ``` inside a finding's value (a fenced code suggestion) and
+    // truncates the JSON mid-string. A missing trailing ``` is fine (the closing
+    // fence may not have streamed in yet).
+    var lead = inner.match(/^\s*```[a-zA-Z0-9_-]*\s*/);
+    if (lead) {
+      inner = inner.slice(lead[0].length);
+      var fenceEnd = inner.lastIndexOf('```');
+      if (fenceEnd !== -1) inner = inner.slice(0, fenceEnd);
+    }
     inner = inner.trim();
     if (!inner) return { findings: [], summary: null };
 

@@ -52,6 +52,21 @@ test('truncated mid-stream: recovers the complete findings, drops the partial ta
   assert.equal(r.findings[1].path, 'b.js');
 });
 
+test('recovers findings when a value contains a fenced ``` code block (unfenced JSON)', () => {
+  // Regression: the trailing-fence strip used lastIndexOf('```'), which grabbed
+  // the ``` inside a finding's suggestion/body and truncated the JSON mid-value
+  // whenever the block itself was not wrapped in an outer ```json fence.
+  const inner = JSON.stringify({
+    findings: [{ severity: 'High', category: 'Correctness', path: 'm.js', line: 7, side: 'RIGHT', title: 'Guard null', code: 'x = foo.bar;', body: 'Add a guard.', suggestion: '```js\nif (!foo) return null;\n```' }],
+    summary: { verdict: 'Request Changes', highestRisk: ['null deref'], testCoverage: 'none' },
+  });
+  const r = FP.parseReviewFindings(wrap(inner));
+  assert.equal(r.findings.length, 1);
+  assert.equal(r.findings[0].severity, 'high');
+  assert.equal(r.findings[0].path, 'm.js');
+  assert.equal(r.summary.verdict, 'Request Changes');
+});
+
 test('clean approve: zero findings + summary renders as structured (not an unparsed dump)', () => {
   const r = FP.parseReviewFindings(wrap('{ "findings": [], "summary": { "verdict": "Approve", "highestRisk": [], "testCoverage": "good" } }'));
   assert.equal(r.structured, true);
