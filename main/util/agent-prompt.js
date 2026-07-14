@@ -11,6 +11,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { isPosixShell } = require('./platform');
 
 // Returns { agentCmd, promptFile, needsEnter }:
 //   agentCmd  — the command with the staged prompt appended (or unchanged if no
@@ -18,7 +19,20 @@ const crypto = require('crypto');
 //   promptFile — tempfile path to unlink on PTY exit (null if nothing staged)
 //   needsEnter — true for TUIs (codex) that pre-fill but wait for an Enter to
 //               submit; the caller nudges the PTY with '\r' once it's up.
-function stageInitialPrompt(provider, agentCmd, prompt, tag = 'prompt') {
+// Build the shell expression that expands a staged prompt file into a single
+// argument, matching the shell the command will run under (see shellRunCmdArgs).
+// POSIX shells (mac/Linux, or Git Bash on Windows) use `$(cat …)`; the Windows
+// default shell is PowerShell, which needs `(Get-Content -Raw …)` — `$(cat
+// 'file')` there runs Get-Content and flattens the newlines via $OFS, defeating
+// the whole point of staging a multi-line prompt to a file.
+function promptFileArg(promptFile, shellPath = null) {
+  const usePosix = isPosixShell(shellPath) || process.platform !== 'win32';
+  return usePosix
+    ? `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`
+    : `(Get-Content -Raw -LiteralPath '${promptFile.replace(/'/g, "''")}')`;
+}
+
+function stageInitialPrompt(provider, agentCmd, prompt, tag = 'prompt', shellPath = null) {
   if (!prompt || !prompt.trim()) return { agentCmd, promptFile: null, needsEnter: false };
   try {
     const dir = path.join(os.tmpdir(), 'klaussy-action-prompts');
@@ -26,7 +40,7 @@ function stageInitialPrompt(provider, agentCmd, prompt, tag = 'prompt') {
     const promptFile = path.join(dir, `${tag}-${crypto.randomBytes(6).toString('hex')}.txt`);
     fs.writeFileSync(promptFile, prompt);
     const promptFlag = provider.interactivePromptFlag ? `${provider.interactivePromptFlag} ` : '';
-    const quoted = `"$(cat '${promptFile.replace(/'/g, "'\\''")}')"`;
+    const quoted = promptFileArg(promptFile, shellPath);
     return {
       agentCmd: `${agentCmd} ${promptFlag}${quoted}`,
       promptFile,
@@ -38,4 +52,4 @@ function stageInitialPrompt(provider, agentCmd, prompt, tag = 'prompt') {
   }
 }
 
-module.exports = { stageInitialPrompt };
+module.exports = { stageInitialPrompt, promptFileArg };

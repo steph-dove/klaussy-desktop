@@ -232,6 +232,55 @@ ipcMain.handle('write-skill-file', (_event, { filePath, content }) => {
   }
 });
 
+// Where klaussy scaffolds each agent's skills (relative to the worktree root).
+// klaussy writes the same <repo>-run skill into every selected agent's own dir,
+// so the Run App handoff must look in the dir for the TASK's agent — not assume
+// Claude's. Agents absent here have no skills mechanism (aider reads CONVENTIONS.md).
+const AGENT_SKILLS_DIRS = {
+  claude: ['.claude', 'skills'],
+  codex: ['.agents', 'skills'],
+  cline: ['.agents', 'skills'],
+  gemini: ['.gemini', 'skills'],
+  cursor: ['.cursor', 'skills'],
+  copilot: ['.github', 'skills'],
+  antigravity: ['.gemini', 'antigravity-cli', 'plugins', 'klaussy', 'skills'],
+  opencode: ['.opencode', 'skills'],
+};
+
+// Resolve the worktree's klaussy-generated `<repo>-<kind>` skill for a given
+// agent (kind = run / plan / debug / review / …). klaussy namespaces skills as
+// <sanitized-repo-name>-<kind>, so we match by the `-<kind>` suffix rather than
+// reconstructing the sanitized name (mirrors findRepoReviewSkill in
+// state/review-prompts.js). Returns the skill name so the renderer can name it
+// in an agent-neutral prompt; null when this agent has no such skill (repo
+// generated before it existed, agent has no skills mechanism, or not
+// klaussy-managed) — the caller falls back to a self-contained prose prompt.
+//
+// Ambiguity guard: some kinds are suffixes of others (`review` ⊂ `self-review` /
+// `address-review`; `commit` ⊂ `precommit`). Since every skill shares the same
+// `<repo>-` prefix, the plain kind's dir name is always the SHORTEST among the
+// `-<kind>` matches, so we pick the shortest — `<repo>-review`, never
+// `<repo>-self-review`.
+ipcMain.handle('resolve-skill', (_event, { worktreePath, agentId, kind } = {}) => {
+  if (!worktreePath || !pathUnderAnyRoot(worktreePath) || !kind) return null;
+  // No agentId → default to Claude's dir (safe fallback). A *known* agent that
+  // isn't mapped (aider, or a non-skill agent) → null, so we don't false-match
+  // one agent's skill against another that can't invoke it.
+  const rel = agentId ? AGENT_SKILLS_DIRS[agentId] : AGENT_SKILLS_DIRS.claude;
+  if (!rel) return null;
+  const suffix = '-' + kind;
+  try {
+    const skillsDir = path.join(worktreePath, ...rel);
+    const matches = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.endsWith(suffix)
+        && fs.existsSync(path.join(skillsDir, e.name, 'SKILL.md')))
+      .map((e) => e.name)
+      .sort((a, b) => a.length - b.length);
+    return matches[0] || null;
+  } catch { /* no skills dir for this agent — not generated yet */ }
+  return null;
+});
+
 // List CLAUDE.md memory files across scopes. Each scope has at most one
 // memory file — the dialog uses this to show what's there vs. missing.
 ipcMain.handle('list-memory-files', () => {

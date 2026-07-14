@@ -34,7 +34,10 @@ function baseRepoForWorktree(worktreePath) {
 function sessionSiblingWorktrees(worktreePath) {
   try {
     if (typeof worktreePath !== 'string') return [];
-    const m = worktreePath.replace(/\/+$/, '').match(/^(.*\/klaussy\/sessions\/[^/]+)\/([^/]+)$/);
+    // Normalize `\`→`/` first so Windows session paths (C:\Users\..\klaussy\
+    // sessions\name\repo) match too; Node's fs/path accept forward slashes on
+    // Windows, so the derived paths below still work.
+    const m = worktreePath.replace(/\\/g, '/').replace(/\/+$/, '').match(/^(.*\/klaussy\/sessions\/[^/]+)\/([^/]+)$/);
     if (!m) return [];
     const sessionDir = m[1];
     const current = m[2];

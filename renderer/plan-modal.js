@@ -13,31 +13,40 @@ window.ActionModal = (function () {
   var tabs = overlay ? overlay.querySelectorAll('.plan-modal-tab') : [];
   var contents = overlay ? overlay.querySelectorAll('.plan-tab-content') : [];
 
-  // Plan flow runs locally (no cloud round-trip), so it gets the full prompt
-  // inlined the same way Review does. The earlier `/ultraplan` slash command
-  // launched a remote session which has no access to the user's chat context
-  // (or any uncommitted code) — for a worktree-scoped tab that's the wrong
-  // shape. Debug stays as a local slash command since `/debug` ships with
-  // Claude Code itself.
+  // Each action prefers the repo's own klaussy-generated <repo>-<action> skill
+  // (resolved per-agent — a Codex task looks in Codex's skills dir), seeded with
+  // an agent-neutral "use your <skill> skill" prompt that any agent's skill
+  // system triggers on by name. The inlined prompts below are the FALLBACK for
+  // repos that have no such skill (generated before it existed, or not
+  // klaussy-managed); they're project-agnostic and self-contained.
+  //
+  // Plan flow runs locally (no cloud round-trip), so its fallback is inlined the
+  // same way Review's is. The earlier `/ultraplan` slash command launched a
+  // remote session which has no access to the user's chat context (or any
+  // uncommitted code) — for a worktree-scoped tab that's the wrong shape. Debug
+  // no longer uses Claude Code's built-in `/debug` slash (meaningless to other
+  // agents); its fallback is the agent-neutral DEBUG_PROMPT.
   //
   // The prompt itself is intentionally project-agnostic: Klaussy users invoke
   // it from their own repos, not from this one, so anything Klaussy-specific
   // would be wrong advice in the spawned tab.
   //
-  // Self-contained — no Claude Code plugin install required. Shape borrowed
-  // from the official `feature-dev` skill (parallel exploration, multi-
-  // architect compare, post-implementation review) but the specialized agent
-  // bodies (the analysis approach, architect process, reviewer process) are
-  // inlined here so every spawned tab has them whether or not the user has
-  // any plugins installed. All sub-Agent calls use `subagent_type: general-
-  // purpose`, which ships with Claude Code by default. Anti-patterns kept as
-  // universal craft rules; the prompt instructs Claude to read the target
-  // repo's CLAUDE.md / README / CONTRIBUTING for project-specific rules and
-  // append them to its working list.
+  // Self-contained and agent-neutral — no plugin install required, and no
+  // Claude-specific tool assumptions (it runs in whichever agent the task uses).
+  // Shape borrowed from the official `feature-dev` skill (parallel exploration,
+  // multi-architect compare, post-implementation review) but the specialized
+  // agent bodies (the analysis approach, architect process, reviewer process)
+  // are inlined here so every spawned tab has them. Parallelism is expressed
+  // generically ("use your subagent mechanism, or work through them one at a
+  // time") so agents without a spawn primitive still complete the flow; progress
+  // is a plain checklist rather than any specific todo tool. Anti-patterns kept
+  // as universal craft rules; the prompt instructs the agent to read the target
+  // repo's CLAUDE.md / AGENTS.md / README / CONTRIBUTING for project-specific
+  // rules and append them to its working list.
   var PLAN_PROMPT = [
     'You are helping plan and implement a task. Follow these phases in order — do NOT skip Phase 3 (clarifying questions).',
     '',
-    'Use TodoWrite throughout: create one task per phase up front, mark each in_progress when starting and completed when done. The flow is long-running, and the todo list keeps the user oriented.',
+    'Track progress throughout: keep a running checklist with one item per phase, marking each in progress when you start it and done when you finish (use your task-tracking tool if you have one). The flow is long-running, and the checklist keeps the user oriented.',
     '',
     '## Phase 1 — Discovery',
     '',
@@ -54,7 +63,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 2 — Understand (parallel exploration)',
     '',
-    'Launch 2–3 explore subagents IN PARALLEL via the Agent tool with `subagent_type: general-purpose`. Pass each agent BOTH the analysis approach AND the angle below in its prompt — they need that context inline because they don\'t see this master prompt. Mark this phase\'s todo in_progress when the agents are dispatched.',
+    'Launch 2–3 exploration subagents IN PARALLEL using your agent/subagent mechanism (whatever your tool calls it — Task, subagent, spawn). If you have no way to spawn subagents, work through the angles below yourself, one at a time. Pass each subagent BOTH the analysis approach AND its angle inline — they don\'t see this master prompt. Mark this phase in progress when exploration starts.',
     '',
     '### Analysis approach (every explore agent uses this)',
     '',
@@ -84,11 +93,11 @@ window.ActionModal = (function () {
     '',
     'If the user replies "your call" or "no preference," commit to a recommendation and explicitly confirm it.',
     '',
-    '## Phase 4 — Design (parallel architectures, in plan mode)',
+    '## Phase 4 — Design (parallel architectures — design only, no edits)',
     '',
-    '**Enter plan mode now** — design and approval must happen before any edits. Stay in plan mode through Phase 5.',
+    '**Design only from here — make NO file edits.** Design and approval must happen before any code changes. Stay read-only through Phase 5.',
     '',
-    'Launch 2–3 architect subagents IN PARALLEL via the Agent tool with `subagent_type: general-purpose`. Pass each agent the architect process below + their priority + the user\'s task + the answers from Phase 3 + the file list and findings from Phase 2 — they need all of that inline.',
+    'Launch 2–3 architect subagents IN PARALLEL using your agent/subagent mechanism (or, if you can\'t spawn subagents, produce each architecture yourself in turn). Pass each the architect process below + their priority + the user\'s task + the answers from Phase 3 + the file list and findings from Phase 2 — they need all of that inline.',
     '',
     '### Architect process (every architect uses this)',
     '',
@@ -111,11 +120,11 @@ window.ActionModal = (function () {
     '',
     '## Phase 5 — Approval gate',
     '',
-    'Still in plan mode. Write the chosen plan to the plan file, and output the complete plan in your chat response so the user can see it immediately. To prevent blocking or proceeding without review, you MUST end your turn here by calling no other tools (do NOT run the terminal command `ExitPlanMode` or make any edits yet). Ask the user to confirm the plan in the chat. Once the user replies to approve, run the terminal command `ExitPlanMode` in your next turn to register the plan with the desktop app, and then proceed to Phase 6.',
+    'Still making no edits. Write the chosen plan to a plan file (any filename containing "plan", e.g. `plan.md`), and output the complete plan in your response so the user can see it immediately. Stop here and wait — do NOT run the `ExitPlanMode` command or make any edits yet. Ask the user to confirm the plan. Once the user replies to approve, run the terminal command `ExitPlanMode` (a Klaussy CLI on your PATH — works from any agent) to register the plan with the desktop app, and then proceed to Phase 6.',
     '',
     '## Phase 6 — Implementation',
     '',
-    'Work in small, independently-shippable batches. Update TodoWrite as each batch starts and completes. After each batch:',
+    'Work in small, independently-shippable batches. Update your checklist as each batch starts and completes. After each batch:',
     '- Verify the code parses / compiles / lints (`node -c`, `tsc --noEmit`, `cargo check`, etc., as the language requires).',
     '- Briefly state what changed (1–2 sentences).',
     '- Pause if the next batch touches a different surface area or needs a separate user decision.',
@@ -124,7 +133,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 7 — Quality review (parallel)',
     '',
-    'After implementation, launch 3 reviewer subagents IN PARALLEL via the Agent tool with `subagent_type: general-purpose`. Pass each agent the reviewer process below + their focus + the diff (`git diff main...HEAD` or equivalent) + any context files they\'ll need.',
+    'After implementation, launch 3 reviewer subagents IN PARALLEL using your agent/subagent mechanism (or review each focus yourself in turn if you can\'t spawn subagents). Pass each the reviewer process below + their focus + the diff (`git diff main...HEAD` or equivalent) + any context files they\'ll need.',
     '',
     '### Reviewer process (every reviewer uses this)',
     '',
@@ -149,7 +158,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 8 — Summary',
     '',
-    'Write a 3–5 line summary: what was built, key decisions, files modified, suggested next steps. Mark all TodoWrite tasks complete.',
+    'Write a 3–5 line summary: what was built, key decisions, files modified, suggested next steps. Mark all checklist items complete.',
     '',
     '## Anti-patterns to avoid (universal craft rules)',
     '',
@@ -171,8 +180,27 @@ window.ActionModal = (function () {
     '{{TASK}}',
   ].join('\n');
 
+  // Agent-neutral debug fallback — used when the repo has no <repo>-debug skill.
+  // Replaces the old `/debug ` seed, which was a Claude Code built-in slash
+  // command and meant nothing to Codex/Gemini/etc. Prose any agent can follow;
+  // mirrors the klaussy debug skill's phases (reproduce → root-cause read-only →
+  // failing test → minimal fix → verify). The user's details are appended.
+  var DEBUG_PROMPT = [
+    'Help me debug and fix this issue. Work through it methodically:',
+    '',
+    '1. Reproduce it — establish the exact steps and the observed vs expected behavior before changing anything.',
+    '2. Diagnose the root cause read-only — trace the code path and confirm a hypothesis with evidence (logs, a minimal repro), don\'t guess.',
+    '3. Write a failing test that captures the bug, where the project has a test suite.',
+    '4. Apply the smallest fix that addresses the root cause, not the symptom.',
+    '5. Verify — the new test passes and the full suite still passes. Report what was wrong and what you changed.',
+    '',
+    'The issue:',
+    '',
+    '',
+  ].join('\n');
+
   // Per-action config — title shown at the top of the modal, the submission
-  // builder for the new Claude tab, and a human label for the tab itself.
+  // builder for the new agent tab, and a human label for the tab itself.
   // Review runs a fixed multi-phase prompt and skips the modal entirely, so
   // it has no entry here.
   var ACTIONS = {
@@ -181,6 +209,12 @@ window.ActionModal = (function () {
       title: 'Plan a task',
       submitLabel: 'Plan',
       hint: 'Provide details. A new agent tab opens on this worktree and runs a multi-agent flow: discovery → parallel exploration → clarify → parallel architectures → approve → implement → parallel review → summary. All local, no cloud round-trip.',
+      // Preferred path: delegate to the repo's own <repo>-plan skill by name
+      // (agent-neutral — every agent's skill system triggers on the name).
+      skillSeed: function (skillName, content) {
+        return 'Use your "' + skillName + '" skill to plan and implement this task:\n\n' + content;
+      },
+      // Fallback when the repo has no plan skill: the self-contained prompt.
       buildSubmission: function (content) {
         return PLAN_PROMPT.replace('{{TASK}}', content);
       },
@@ -189,18 +223,21 @@ window.ActionModal = (function () {
       label: 'Debug',
       title: 'Debug an issue',
       submitLabel: 'Debug',
-      hint: 'Provide details. A new agent tab will open on this worktree and run <code>/debug</code>.',
+      hint: 'Provide details. A new agent tab opens on this worktree and runs the repo\'s debug flow.',
+      skillSeed: function (skillName, content) {
+        return 'Use your "' + skillName + '" skill to debug this issue:\n\n' + content;
+      },
       buildSubmission: function (content) {
-        return '/debug ' + content;
+        return DEBUG_PROMPT + content;
       },
     },
   };
 
-  // Review runs this prompt as-is in a new Claude tab. It contains
-  // {{BASE_BRANCH}} and {{REPO_SPECIFIC_CHECKS}} placeholders; the prompt
-  // itself instructs Claude how to resolve them ("default to dev if
-  // available, otherwise main" / fallback to CLAUDE.md), so we do not
-  // substitute them here.
+  // Review runs this prompt as-is in a new agent tab (agent-neutral — no Claude-
+  // specific tool assumptions). It contains {{BASE_BRANCH}} and
+  // {{REPO_SPECIFIC_CHECKS}} placeholders; the prompt itself instructs the agent
+  // how to resolve them ("default to dev if available, otherwise main" /
+  // fallback to CLAUDE.md), so we do not substitute them here.
   var REVIEW_PROMPT = [
     'You are conducting a thorough PR review. Follow these phases in order.',
     '',
@@ -215,7 +252,7 @@ window.ActionModal = (function () {
     '1. Run `git diff --stat <base-ref>...HEAD` and count the total lines changed (additions + deletions). The three-dot `...` form scopes the diff to your branch only (changes since it diverged from the base).',
     '2. Run `git diff <base-ref>...HEAD` to get the full diff.',
     '3. Run `git log <base-ref>..HEAD --oneline` to understand commit history and intent.',
-    '4. **Read the full file (not just the diff hunks) for every changed file** listed in the stat output. These are independent reads — issue them all in a single batch of parallel tool calls (one assistant message containing multiple Read tool_use blocks), not sequentially.',
+    '4. **Read the full file (not just the diff hunks) for every changed file** listed in the stat output. These are independent reads — batch them in parallel if your tools allow, otherwise read them one after another; just make sure every changed file is read in full.',
     '5. If the branch name contains a ticket reference (e.g. FEAT-1234), note it for context.',
     '',
     'Store the diff output, file contents, and commit log — you will need them in the next phase.',
@@ -309,7 +346,7 @@ window.ActionModal = (function () {
     '',
     '## Parallel Review',
     '',
-    'This PR is large enough to benefit from focused, parallel review. Use the **Agent tool** with `subagent_type: general-purpose` to launch the selected review sub-agents **simultaneously in a single assistant message** (parallel tool calls).',
+    'This PR is large enough to benefit from focused, parallel review. Launch the selected review sub-agents **simultaneously** using your agent/subagent mechanism (whatever your tool provides). If you have no way to spawn sub-agents, apply each lens below yourself, one at a time, and combine the findings.',
     '',
     'For each sub-agent, compose the prompt body as: the **Common scaffold** below (with `[PASTE THE FULL DIFF HERE]` and `[PASTE THE COMMIT LOG HERE]` replaced by the actual diff and commit log from Phase 1), then the sub-agent\'s `## Lens` section, then its `## Additional rules` if any.',
     '',
@@ -779,6 +816,25 @@ window.ActionModal = (function () {
     }
   }
 
+  // Resolve the repo's <repo>-<kind> skill for the task's agent, so an action
+  // can delegate to it by name instead of firing a Claude-flavored inline
+  // prompt. Same agent resolution as repoIntelFor (parent task's agent, else
+  // the default). Returns null when the agent has no such skill — the caller
+  // falls back to the inlined prompt. Never throws.
+  async function resolveSkillFor(taskId, kind) {
+    try {
+      var task = AppState.tasks.get(taskId);
+      if (!task || !task.worktreePath) return null;
+      if (!(window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill)) return null;
+      var defaultAgent = (AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude';
+      var agent = (task.mode && task.mode !== 'shell') ? task.mode : defaultAgent;
+      return await window.klaus.skills.resolveSkill(task.worktreePath, agent, kind);
+    } catch (e) {
+      console.warn('[plan-modal resolve-skill]', e);
+      return null;
+    }
+  }
+
   // Session context: when this worktree is part of a multi-repo session,
   // tell the agent about ALL the repos so it plans for the whole space, not
   // just its own checkout. '' for single-repo / non-session worktrees. The
@@ -820,7 +876,10 @@ window.ActionModal = (function () {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Starting…';
     try {
-      var command = cfg.buildSubmission(content);
+      // Prefer the repo's own <repo>-<action> skill (agent-neutral seed); fall
+      // back to the inlined prompt when the agent has no such skill.
+      var skillName = cfg.skillSeed ? await resolveSkillFor(currentTaskId, currentAction) : null;
+      var command = skillName ? cfg.skillSeed(skillName, content) : cfg.buildSubmission(content);
       // Multi-repo session awareness first (the full space), then this repo's
       // conventions/graph context.
       var sessionCtx = await sessionContextFor(currentTaskId);
@@ -844,17 +903,25 @@ window.ActionModal = (function () {
     }
   }
 
-  // Review has no modal — it just spawns a Claude sub-tab and fires the
-  // full review prompt. Returns the same shape as openClaudeSubTerminal so
-  // the caller can surface errors. When repo intel is cached we substitute
-  // the {{REPO_SPECIFIC_CHECKS}} placeholder with it; otherwise the
-  // placeholder stays and the prompt's own fallback (read CLAUDE.md) applies.
+  // Review has no modal — it just spawns an agent sub-tab and fires the review.
+  // Returns the same shape as openClaudeSubTerminal so the caller can surface
+  // errors. Prefers the repo's own <repo>-review skill (agent-neutral seed);
+  // otherwise falls back to the inlined REVIEW_PROMPT. Repo-intel/session
+  // context is appended either way — substituted into the fallback's
+  // {{REPO_SPECIFIC_CHECKS}} placeholder, or appended to the skill seed.
   async function runReview(taskId) {
-    var prompt = REVIEW_PROMPT;
+    var skillName = await resolveSkillFor(taskId, 'review');
     var sessionCtx = await sessionContextFor(taskId);
     var intel = await repoIntelFor(taskId);
     var block = [sessionCtx, intel].filter(Boolean).join('\n\n');
-    if (block) prompt = prompt.split('{{REPO_SPECIFIC_CHECKS}}').join('\n' + block + '\n');
+    var prompt;
+    if (skillName) {
+      prompt = 'Use your "' + skillName + '" skill to review this branch and report the findings.';
+      if (block) prompt += '\n\n' + block;
+    } else {
+      prompt = REVIEW_PROMPT;
+      if (block) prompt = prompt.split('{{REPO_SPECIFIC_CHECKS}}').join('\n' + block + '\n');
+    }
     return TerminalManager.openClaudeSubTerminal(taskId, 'Review', prompt);
   }
 

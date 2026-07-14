@@ -309,7 +309,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).
     if (initialPrompt) {
-      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`);
+      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
       agentCmd = staged.agentCmd;
       promptFile = staged.promptFile;
       needsEnter = staged.needsEnter;

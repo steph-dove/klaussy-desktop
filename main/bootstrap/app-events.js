@@ -7,6 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const { execSync, execFileSync, execFile } = require('child_process');
+const { whichBinSync } = require('../util/platform');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const lspManager = require('../../lsp-manager');
 const { loadConfig, saveConfig, flushSaveConfig, runConfigMigrations } = require('../util/config');
@@ -163,11 +164,15 @@ function refreshSpawnPath() {
   } catch { /* shell or registry read failed; keep current PATH */ }
 }
 
-// Resolve whether a binary is reachable: a configured absolute path is checked
-// on disk; a bare name is looked up on PATH via `which`.
+// Resolve whether a binary is reachable: a configured path (contains a path
+// separator) is checked on disk; a bare name is looked up on PATH. Uses
+// whichBinSync so Windows resolves via `where.exe` + PATHEXT (finding
+// `claude.cmd`/`.exe`) rather than `which`, which doesn't exist on Windows and
+// made every agent read as "not installed" there. The separator test accepts
+// `\` too so a configured `C:\tools\claude.exe` isn't treated as a bare name.
 function binPresent(bin, cb) {
-  if (bin && bin.includes('/')) { cb(fs.existsSync(bin)); return; }
-  execFile('which', [bin], { timeout: 2000 }, (err) => cb(!err));
+  if (bin && /[/\\]/.test(bin)) { cb(fs.existsSync(bin)); return; }
+  cb(!!whichBinSync(bin));
 }
 
 // Startup nudge: gh is needed for PR/GitHub features, and at least ONE agent
