@@ -50,6 +50,20 @@ function subscribeTerminalChannel(channel, webContents) {
   if (!subs) { subs = new Set(); terminalSubscribers.set(channel, subs); }
   if (subs.has(webContents)) return;
   subs.add(webContents);
+
+  const match = channel.match(/^terminal-data-(\d+)$/);
+  if (match) {
+    const id = parseInt(match[1], 10);
+    const inst = instances.get(id);
+    if (inst && inst.freshenWarning) {
+      const msg = `\r\n\x1b[31;1mError: Failed to freshen base branch from origin:\x1b[0m\r\n` +
+                  `\x1b[31m${inst.freshenWarning}\x1b[0m\r\n` +
+                  `\x1b[33mSpawning a plain shell so you can fix the underlying git issue.\x1b[0m\r\n\r\n`;
+      webContents.send(channel, msg);
+      inst.freshenWarning = null;
+    }
+  }
+
   // Auto-cleanup when the renderer goes away so we don't keep sending to
   // dead senders or leak Set entries. Each subscription adds one destroyed
   // listener; acceptable because Electron caps listeners generously and
@@ -277,7 +291,7 @@ function clearIdleTimer(inst) {
 
 // ---- PTY lifecycle ----
 
-function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber, initialPrompt) {
+function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber, initialPrompt, freshenWarning) {
   const id = nextId++;
   const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
@@ -394,6 +408,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     prNumber: prNumber || null,
     prBaseOwner: null,
     prBaseRepo: null,
+    freshenWarning: freshenWarning || null,
   };
   initIdleDetectionFields(instance);
   instances.set(id, instance);

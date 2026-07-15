@@ -550,7 +550,8 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   } catch (e) { console.warn('[session-memory] seed skipped:', e.message); }
 
   const warning = [fallbackWarning, freshenWarning, reusedBranchWarning].filter(Boolean).join(' ') || null;
-  const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars);
+  const launchMode = freshenWarning ? 'shell' : (mode || 'claude');
+  const result = spawnInWorktree(name, worktreePath, branch, launchMode, null, envVars, undefined, undefined, freshenWarning);
   if (result && !result.error) {
     if (warning) result.warning = warning;
     if (freshen.info) result.freshenInfo = freshen.info;
