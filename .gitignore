@@ -34,3 +34,15 @@ pr-description.md
 REVIEW_OUTPUT.md
 plan.md
 .agents/session.json
+# klaussy-repo-conventions generated per-agent configs (local dogfooding output)
+CONVENTIONS.md
+.agents/
+.clinerules/
+.aider.conf.yml
+.aiderignore
+.clineignore
+.cursorignore
+.geminiignore
+.antigravityrules
+.github/copilot-instructions.md
+.github/instructions/
