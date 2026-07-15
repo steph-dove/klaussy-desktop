@@ -8,6 +8,9 @@
   PR.sanitizeAiTone = PR._FP.sanitizeAiTone;
   PR.parseReviewFindings = PR._FP.parseReviewFindings;
   PR.severityOf = PR._FP.severityOf;
+  // Shared path de-wrapper (strips backticks/quotes the model puts around a
+  // path, which otherwise break the exact `b/`-path diff-membership lookup).
+  PR.cleanPath = (PR._FP && PR._FP.cleanPath) || function (p) { return p; };
 
   // Extract `[Location: path/to/file.ts:42 …]` into structured fields.
   // Returns { path, line, snippet } or null. Accepts 0–2 bold asterisks
@@ -31,7 +34,9 @@
     var tail = inner.slice(pm.index + pm[0].length).replace(/^\s*(and\s+)?/i, '').trim();
     if (tail) snippet = tail;
     var endLine = pm[3] ? parseInt(pm[3], 10) : null;
-    return { path: pm[1], line: parseInt(pm[2], 10), endLine: endLine, snippet: snippet };
+    // `[Location: `path:line`]` leaves a leading backtick on the captured path;
+    // strip wrappers so the diff-membership lookup matches the b/ path.
+    return { path: PR.cleanPath(pm[1]), line: parseInt(pm[2], 10), endLine: endLine, snippet: snippet };
   };
 
   // Extract `[Category: Correctness]` (0–2 bold asterisks, like the others).
@@ -275,6 +280,11 @@
     var changedSync = false;
     PR.aiReview.findings.forEach(function (f) {
       if (!f.path || !f.line) return;
+      // Heal a path wrapped in backticks/quotes before it reaches the diff
+      // lookup or a GitHub inline POST — covers findings restored from a cache
+      // saved before this de-wrapping existed, not just freshly parsed ones.
+      var cleaned = PR.cleanPath(f.path);
+      if (cleaned && cleaned !== f.path) { f.path = cleaned; changedSync = true; }
       // Anchor from the PR diff alone (no worktree needed): an inline comment
       // only needs the cited line to be in the diff, which lets a "just opened,
       // not checked out" review post inline instead of general comments.

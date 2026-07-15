@@ -1355,7 +1355,11 @@ window.PrReview = window.PrReview || {};
       index = PR._commentableIndex = PR.buildCommentableLineIndex(diffText);
       PR._commentableIndexSource = diffText;
     }
+    // Fall back to a de-wrapped path (strips backticks/quotes the model may
+    // have left on it) so a stray wrapper doesn't miss the exact b/-path key
+    // and silently downgrade the finding to a floating comment.
     var entry = index[path];
+    if (!entry && PR._FP && PR._FP.cleanPath) entry = index[PR._FP.cleanPath(path)];
     if (!entry) return false;
     return !!entry[side === 'LEFT' ? 'LEFT' : 'RIGHT'][line];
   };
@@ -1600,6 +1604,7 @@ window.PrReview = window.PrReview || {};
     sanitizeAiTone: function (t) { return t; },
     parseReviewFindings: function (t) { return { preamble: t || '', findings: [], postamble: '' }; },
     severityOf: function () { return ''; },
+    cleanPath: function (p) { return p; },
   };
 
 })(window.PrReview);

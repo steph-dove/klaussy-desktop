@@ -200,6 +200,21 @@ window.FindingParser = (function () {
     return (body ? body + '\n\n' : '') + 'Suggested change:\n\n' + block;
   }
 
+  // Strip markdown/quote wrappers (`path`, "path", **path**, <path>) and a
+  // leading ./ the model sometimes leaves on a path, so it matches the diff's
+  // exact `b/` path; a stray wrapper otherwise makes the diff-membership lookup
+  // miss and silently downgrades the finding to a floating comment. Passes
+  // null/undefined/'' through unchanged.
+  function cleanPath(p) {
+    if (p == null) return p;
+    return String(p)
+      .trim()
+      .replace(/^[`'"*<(]+/, '')
+      .replace(/[`'"*>)]+$/, '')
+      .replace(/^\.\/+/, '')
+      .trim();
+  }
+
   function normalizeJsonFinding(obj) {
     if (!obj || typeof obj !== 'object') return null;
     var text = composeFindingText(obj);
@@ -216,7 +231,7 @@ window.FindingParser = (function () {
       title: title,
       severity: coerceSeverity(obj.severity),
       category: String(obj.category == null ? '' : obj.category).trim(),
-      path: obj.path ? String(obj.path).trim() : null,
+      path: obj.path ? (cleanPath(String(obj.path)) || null) : null,
       line: line,
       side: side,
       code: String(obj.code == null ? '' : obj.code),
@@ -364,5 +379,6 @@ window.FindingParser = (function () {
     sanitizeAiTone: sanitizeAiTone,
     parseReviewFindings: parseReviewFindings,
     severityOf: severityOf,
+    cleanPath: cleanPath,
   };
 })();

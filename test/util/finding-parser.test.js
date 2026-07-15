@@ -79,3 +79,36 @@ test('genuinely unstructured text still falls back cleanly (no throw, no finding
   assert.equal(r.structured, false);
   assert.equal(r.findings.length, 0);
 });
+
+// Regression: the model sometimes wraps a path in markdown/quotes (a `path` in
+// a JSON value, or a `[Location: `path:line`]` marker leaving a leading
+// backtick), which made the path miss the diff's exact `b/`-path key so the
+// finding posted as a floating comment instead of inline. cleanPath de-wraps it.
+test('cleanPath strips backticks, quotes, asterisks, and a leading ./', () => {
+  assert.equal(FP.cleanPath('`src/app.ts`'), 'src/app.ts');
+  assert.equal(FP.cleanPath('`celery_worker/modules/handler.py'), 'celery_worker/modules/handler.py');
+  assert.equal(FP.cleanPath('"src/app.ts"'), 'src/app.ts');
+  assert.equal(FP.cleanPath("'src/app.ts'"), 'src/app.ts');
+  assert.equal(FP.cleanPath('**src/app.ts**'), 'src/app.ts');
+  assert.equal(FP.cleanPath('<src/app.ts>'), 'src/app.ts');
+  assert.equal(FP.cleanPath('./src/app.ts'), 'src/app.ts');
+  assert.equal(FP.cleanPath('  `src/app.ts`  '), 'src/app.ts');
+});
+
+test('cleanPath leaves an already-clean path and null/empty untouched', () => {
+  assert.equal(FP.cleanPath('src/app.ts'), 'src/app.ts');
+  assert.equal(FP.cleanPath('a-b_c/d.e.js'), 'a-b_c/d.e.js');
+  assert.equal(FP.cleanPath(null), null);
+  assert.equal(FP.cleanPath(undefined), undefined);
+  assert.equal(FP.cleanPath(''), '');
+});
+
+test('a backtick-wrapped JSON path is de-wrapped so it can anchor inline', () => {
+  const inner = JSON.stringify({
+    findings: [{ severity: 'High', category: 'Correctness', path: '`src/server/index.js`', line: 42, side: 'RIGHT', title: 'Bug', code: 'x=1;', body: 'Fix it.', suggestion: 'y=2;' }],
+    summary: { verdict: 'Request Changes', highestRisk: ['x'], testCoverage: 'none' },
+  });
+  const r = FP.parseReviewFindings(wrap(inner));
+  assert.equal(r.findings.length, 1);
+  assert.equal(r.findings[0].path, 'src/server/index.js');
+});
