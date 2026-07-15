@@ -2892,14 +2892,25 @@ body.task-branchless #ahead-behind {
   flex: 1;
   background: transparent;
   border: none;
-  color: var(--text);
+  /* Surface is a fixed dark glass, so the text stays light in every theme
+     (var(--text) would go dark in the light preset → unreadable). */
+  color: #e8e8ee;
   font-size: 13px;
   font-family: inherit;
   outline: none;
 }
 
+/* The global input:focus rule (see top of file) forces a light --input-bg,
+   accent border, and box-shadow with !important. Inside the fixed dark pill
+   that paints an opaque white box, so re-assert the transparent surface here. */
+#broadcast-input:focus {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
 #broadcast-input::placeholder {
-  color: var(--text-muted);
+  color: rgba(232, 232, 238, 0.5);
 }
 
 #btn-broadcast-send {
@@ -2925,7 +2936,7 @@ body.task-branchless #ahead-behind {
 #btn-broadcast-close {
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: rgba(232, 232, 238, 0.6);
   font-size: 18px;
   line-height: 1;
   padding: 0 2px;
@@ -2934,7 +2945,7 @@ body.task-branchless #ahead-behind {
 }
 
 #btn-broadcast-close:hover {
-  color: var(--text);
+  color: #e8e8ee;
 }
 
 #btn-broadcast-close:active {
@@ -2956,7 +2967,9 @@ body.task-branchless #ahead-behind {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   border-radius: 9999px;
   padding: 8px 18px;
-  color: var(--text);
+  /* Dark glass background is theme-independent, so keep the label light —
+     var(--text) turns dark in the light preset and vanishes into the pill. */
+  color: #e8e8ee;
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
