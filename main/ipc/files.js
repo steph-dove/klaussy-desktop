@@ -140,21 +140,36 @@ ipcMain.handle('search-files', async (_event, { worktreePath, query, maxPerFile 
       return { results: [], error: msg };
     }
   }
-  // Non-git fallback — plain `grep -rnF -I` with the same ignore list the walker uses.
+  // Non-git fallback — portable in-process search.
   try {
-    const args = ['-rnF', '-I', cap];
-    for (const dir of WALK_IGNORE) args.push('--exclude-dir=' + dir);
-    args.push('--', query, '.');
-    const { stdout: output } = await execFileP('grep', args, {
-      cwd: worktreePath, maxBuffer: 5 * 1024 * 1024, timeout: 10000,
-    });
-    // grep prefixes paths with "./" — trim for consistency with git grep.
-    const normalized = output.split('\n').map(l => l.replace(/^\.\//, '')).join('\n');
-    return { results: parseGrepOutput(normalized) };
+    const files = walkDirectory(worktreePath);
+    const results = [];
+    const capVal = typeof maxPerFile === 'number' ? maxPerFile : 5;
+    for (const rel of files) {
+      const abs = path.join(worktreePath, rel);
+      let content;
+      try {
+        content = fs.readFileSync(abs, 'utf8');
+      } catch {
+        continue;
+      }
+      // Skip binary files (rough check for null byte, mirroring grep -I)
+      if (content.includes('\0')) continue;
+
+      const lines = content.split(/\r?\n/);
+      let count = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.includes(query)) {
+          results.push({ file: rel, line: i + 1, text: line });
+          count++;
+          if (count >= capVal) break;
+        }
+      }
+    }
+    return { results: results.slice(0, 100) };
   } catch (err) {
-    // grep exits 1 when nothing matched (promisified exposes this on err.code).
-    if (err.code === 1) return { results: [] };
-    return { results: [], error: err.stderr ? err.stderr.toString() : err.message };
+    return { results: [], error: err.message };
   }
 });
 

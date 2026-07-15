@@ -294,6 +294,9 @@ function socketPath() {
   // Per-PROCESS socket so multiple Klaussy instances (dev + packaged, or two
   // separate launches) each run their own review server instead of one stealing
   // the socket from the other. The hook client discovers all live sockets.
+  if (process.platform === 'win32') {
+    return '\\\\.\\pipe\\klaussy-precommit-' + process.pid;
+  }
   return path.join(app.getPath('userData'), 'precommit-' + process.pid + '.sock');
 }
 
@@ -384,24 +387,7 @@ function leaveReviewPassmark(worktreePath) {
 // any install so a relaunch re-arms hooks installed in earlier runs.
 function startPrecommitServer() {
   if (server) return;
-  // Unix-socket paths; the Windows named-pipe variant isn't wired up yet, so
-  // gate the whole feature there rather than half-install it.
-  if (process.platform === 'win32') {
-    console.warn('[precommit-hook] git-hook review not yet supported on Windows — skipping');
-    // Self-heal: a prior build installed the git hooks on Windows too, but the
-    // client script only gets written alongside a running server — which never
-    // starts here. Those orphaned hooks then `exec node <missing client>` and
-    // exit 1, BLOCKING every commit/push. Remove any we left behind (marker-
-    // gated, restores each repo's original hook). installHookForRepo is also
-    // gated below so we never re-install them.
-    try {
-      if ((loadConfig().precommitHookRepos || []).length) uninstallAllHooks();
-    } catch (e) {
-      console.warn('[precommit-hook] Windows hook cleanup failed:', e.message);
-    }
-    return;
-  }
-  // Each instance owns a unique per-pid socket, so there's nothing to steal —
+  // Each instance owns a unique per-pid socket/pipe, so there's nothing to steal —
   // just clean up after any instances that died without unregistering, then
   // start our own server.
   pruneDeadInstances();
@@ -426,7 +412,11 @@ function pruneDeadInstances() {
     }
     if (!alive) {
       try { fs.rmSync(p, { force: true }); } catch {}
-      if (entry && entry.socket) { try { fs.rmSync(entry.socket, { force: true }); } catch {} }
+      if (entry && entry.socket) {
+        if (process.platform !== 'win32') {
+          try { fs.rmSync(entry.socket, { force: true }); } catch {}
+        }
+      }
     }
   }
 }
@@ -437,7 +427,9 @@ function registerCleanupOnce() {
   cleanupRegistered = true;
   const cleanup = () => {
     try { fs.rmSync(REGISTRY_FILE, { force: true }); } catch {}
-    try { fs.rmSync(socketPath(), { force: true }); } catch {}
+    if (process.platform !== 'win32') {
+      try { fs.rmSync(socketPath(), { force: true }); } catch {}
+    }
   };
   try { app.on('will-quit', cleanup); } catch {}
   process.on('exit', cleanup);
@@ -569,6 +561,11 @@ tryNext();
 
   try {
     fs.writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+    if (process.platform === 'win32') {
+      const cmdPath = path.join(binDir, 'ExitPlanMode.cmd');
+      const cmdContent = `@echo off\nnode "%~dp0ExitPlanMode" %*\n`;
+      fs.writeFileSync(cmdPath, cmdContent);
+    }
   } catch (e) {
     console.warn('[plan-gate] could not write ExitPlanMode script:', e.message);
   }
@@ -576,7 +573,9 @@ tryNext();
 
 function reallyStartServer(sock) {
   if (server) return;
-  try { fs.rmSync(sock, { force: true }); } catch {}
+  if (process.platform !== 'win32') {
+    try { fs.rmSync(sock, { force: true }); } catch {}
+  }
   server = net.createServer((conn) => {
     conn.setEncoding('utf8');
     let buf = '';
@@ -647,7 +646,9 @@ function reallyStartServer(sock) {
     server = null;
   });
   server.listen(sock, () => {
-    try { fs.chmodSync(sock, 0o600); } catch {}
+    try {
+      if (process.platform !== 'win32') fs.chmodSync(sock, 0o600);
+    } catch {}
     try {
       fs.mkdirSync(SOCKETS_DIR, { recursive: true });
       // Route THIS instance's own terminals' hooks back to itself: a commit in
@@ -695,11 +696,6 @@ function installOneHook(hooksDir, hookName, repoPath) {
 // any pre-existing foreign hooks. No-op when the preference is off.
 function installHookForRepo(repoPath) {
   try {
-    // Windows: the socket server + client scripts aren't wired up yet (see
-    // startPrecommitServer's win32 gate), so installing the git hooks would
-    // leave a `node <missing client>` that exits 1 and blocks every commit/push.
-    // Never install on Windows until the named-pipe server lands.
-    if (process.platform === 'win32') return;
     const config = loadConfig();
     // Install when EITHER the review or the comment cleanup is enabled — both
     // run through the same pre-commit hook + socket server. Comment cleanup is
