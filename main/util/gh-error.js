@@ -62,6 +62,20 @@ function classifyGhError(raw, ctx = {}) {
       retryable: false,
     };
   }
+  // GitHub 5xx. Must be checked BEFORE the auth branch: gh appends its own
+  // "To re-authenticate, run: gh auth login" hint to failures it blames on the
+  // token, and during a REST outage it blames the token — so that phrase would
+  // match the auth branch below and tell the user to re-login over an outage no
+  // login can fix. See util/gh-outage.js for the same misdiagnosis at the
+  // account level.
+  if (has(/http 5\d\d|service unavailable|bad gateway|\bunicorn\b/i)) {
+    return {
+      kind: 'outage',
+      summary: `GitHub's API is returning server errors${target} — this isn't your connection or your login.`,
+      fix: 'Nothing to fix on your end — check githubstatus.com. Retry once GitHub recovers.',
+      retryable: true,
+    };
+  }
   if (has(/bad credentials|http 401|not logged in|no github hosts|gh auth login|authentication failed/i)) {
     return {
       kind: 'auth',

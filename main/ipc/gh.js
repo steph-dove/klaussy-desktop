@@ -8,6 +8,7 @@ const { execFileSync, spawn } = require('child_process');
 const { ipcMain, shell, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { ghExec, clearGhTokenCache, execFileP } = require('../util/exec');
+const { reconcileOutage, clearOutageProbeCache } = require('../util/gh-outage');
 const { allProviders, getProvider, binFor, installCommandFor, authMetaFor } = require('../state/ai-providers');
 const { discoverReposOnDisk } = require('./repo');
 
@@ -77,6 +78,15 @@ function readGhAccounts() {
   }
 }
 
+// readGhAccounts() plus the outage tiebreaker — see util/gh-outage.js. Prefer
+// this over the bare sync readGhAccounts() anywhere the verdict gates the user
+// out of the app, since gh reports a REST outage as an invalid token.
+async function readGhAccountsChecked() {
+  const result = readGhAccounts();
+  await reconcileOutage(result.accounts);
+  return result;
+}
+
 // Open URL in default browser. Scheme-restricted: a compromised renderer (or
 // xterm's WebLinksAddon auto-detecting a file:// / javascript: / smb: token in
 // the PTY stream) must not be able to hand an arbitrary URI to the OS opener.
@@ -94,25 +104,27 @@ ipcMain.handle('open-external', (_event, { url }) => {
 
 // List authed accounts with per-account validity. One bad token must NOT
 // hide the other accounts — see readGhAccounts() for the recovery path.
-ipcMain.handle('gh-list-accounts', async () => readGhAccounts());
+ipcMain.handle('gh-list-accounts', async () => readGhAccountsChecked());
 
 ipcMain.handle('gh-switch-account', async (_event, { username }) => {
   if (!username) return { error: 'Missing username' };
   // Refuse to switch into an account whose token gh has already flagged
   // invalid — `gh auth switch` succeeds in that case but every downstream
   // call then fails cryptically. Caller should route to the login flow.
-  const { accounts } = readGhAccounts();
+  const { accounts } = await readGhAccountsChecked();
   const target = accounts.find((a) => a.username === username);
   if (target && !target.valid) {
     // Drop cached owner→token entries — caller will re-auth and the next
     // gh call must read the fresh token, not whatever was cached for this
     // user when its token was still believed valid.
     clearGhTokenCache();
+    clearOutageProbeCache();
     return { error: 'invalid-token', needsLogin: true, username };
   }
   try {
     execFileSync('gh', ['auth', 'switch', '-u', username], { stdio: 'pipe', timeout: 5000 });
     clearGhTokenCache();
+    clearOutageProbeCache();
     return { ok: true };
   } catch (err) {
     return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
@@ -203,10 +215,15 @@ ipcMain.handle('gh-login-start', async (event, opts) => {
     clearTimeout(authTimer);
     if (code === 0) {
       // Re-read accounts so the renderer can refresh without a second IPC
-      // round-trip — and so we surface the freshly-logged-in username.
-      const { accounts } = readGhAccounts();
+      // round-trip — and so we surface the freshly-logged-in username. The
+      // checked read matters most here: during a REST outage gh calls the
+      // token it just minted invalid, which would bounce the user straight
+      // back into the login they just completed.
       clearGhTokenCache();
-      send('success', { accounts });
+      clearOutageProbeCache();
+      readGhAccountsChecked()
+        .then(({ accounts }) => send('success', { accounts }))
+        .catch(() => send('success', { accounts: readGhAccounts().accounts }));
       return;
     }
     if (signal === 'SIGTERM' || signal === 'SIGKILL') {
@@ -430,7 +447,7 @@ ipcMain.handle('gh-clone-repo', async (_event, { nameWithOwner }) => {
 // hold accounts across multiple hosts).
 ipcMain.handle('gh-detect-account-for-repo', async (_event, { owner, repo, prNumber }) => {
   if (!owner || !repo || !prNumber) return { error: 'missing owner/repo/prNumber' };
-  const { accounts: parsed, error } = readGhAccounts();
+  const { accounts: parsed, error } = await readGhAccountsChecked();
   if (parsed.length === 0 && error) return { error };
   // Skip accounts whose tokens gh has already flagged invalid — probing
   // them just wastes an API call that's guaranteed to 401.
@@ -483,6 +500,7 @@ ipcMain.handle('check-dependencies', async () => {
     refreshSpawnPath();
   } catch { /* during early init the bootstrap module may not be ready */ }
   clearGhTokenCache();
+  clearOutageProbeCache();
 
   const config = loadConfig();
   const claudeBin = config.claudePath || 'claude';
@@ -504,9 +522,12 @@ ipcMain.handle('check-dependencies', async () => {
   // Don't trust gh's exit code — it returns 1 if any account has a bad
   // token, even when others are fine. Treat gh as authed if at least one
   // account in the parsed status output is valid.
-  const ghStatus = ghVersion.ok ? readGhAccounts() : { accounts: [], error: 'gh not installed' };
+  const ghStatus = ghVersion.ok ? await readGhAccountsChecked() : { accounts: [], error: 'gh not installed' };
   const validAccounts = ghStatus.accounts.filter((a) => a.valid);
   const authed = validAccounts.length > 0;
+  // Accounts gh called invalid that GitHub still accepts — the user is signed
+  // in and must not be prompted, but calls may fail while the outage lasts.
+  const outage = validAccounts.some((a) => a.outage);
   const claudeVersion = probe(claudeBin, ['--version']);
 
   // Probe every supported AI CLI so the Setup Check can list install status +
@@ -556,6 +577,7 @@ ipcMain.handle('check-dependencies', async () => {
     gh: {
       installed: ghVersion.ok,
       authed,
+      outage,
       version: ghVersion.ok ? ghVersion.output.split('\n')[0] : null,
       authError: authed ? null : (ghStatus.error || null),
       accounts: ghStatus.accounts,
