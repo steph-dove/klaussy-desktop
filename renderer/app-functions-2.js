@@ -535,7 +535,10 @@ window.App = window.App || {};
       accountSelect.innerHTML = accounts.map(function (a) {
         var sel = a.username === selectedAccount ? ' selected' : '';
         var suffix = a.active ? ' (active)' : '';
+        // `outage` = gh called the token invalid but GitHub still accepts it.
+        // The account is fine; don't imply the user has to do anything.
         if (a.valid === false) suffix = ' (needs sign-in)';
+        else if (a.outage) suffix += ' (GitHub degraded)';
         return '<option value="' + AppUtils.escAttr(a.username) + '"' + sel + ' data-valid="' + (a.valid === false ? 'false' : 'true') + '">'
           + AppUtils.escHtml(a.username) + suffix
           + '</option>';
@@ -614,11 +617,16 @@ window.App = window.App || {};
       var result = await window.klaus.pr.recentRepos(selectedAccount);
       if (result.error) {
         var isAccess = /^(not-found|auth|sso|scope)$/.test(result.errorKind || '');
-        var text = isAccess
-          ? (result.errorSummary || result.error) + ' Switch accounts above, or paste a URL.'
-          : (result.error || '');
+        // An outage is nobody's fault and nothing to act on — say so plainly
+        // instead of dumping "gh: HTTP 503", and never route it to sign-in.
+        var isOutage = result.errorKind === 'outage';
+        var text = isOutage
+          ? (result.errorSummary || 'GitHub is having an outage.') + ' ' + (result.errorFix || '')
+          : isAccess
+            ? (result.errorSummary || result.error) + ' Switch accounts above, or paste a URL.'
+            : (result.error || '');
         listEl.innerHTML = '<div class="pr-picker-section-head">Recent pull requests</div>'
-          + '<div class="' + (isAccess ? 'pr-picker-empty' : 'pr-picker-error') + '">' + AppUtils.escHtml(text) + '</div>';
+          + '<div class="' + (isAccess || isOutage ? 'pr-picker-empty' : 'pr-picker-error') + '">' + AppUtils.escHtml(text) + '</div>';
         // Let the account-switch handler know the active account couldn't list
         // for access reasons, so it can offer to (re)sign in to that account.
         return { listErrorKind: isAccess ? (result.errorKind || 'unknown') : null };
