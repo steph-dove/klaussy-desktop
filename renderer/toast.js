@@ -69,6 +69,19 @@
       .klaussy-toast.info    { border-left-color: #64b5f6; }
       .klaussy-toast.success { border-left-color: #81c784; }
       .klaussy-toast .msg { white-space: pre-wrap; }
+      .klaussy-toast-action {
+        display: inline-block;
+        margin-top: 8px;
+        padding: 4px 12px;
+        font: inherit;
+        font-weight: 600;
+        color: #e8e8f0;
+        background: rgba(255,255,255,0.12);
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .klaussy-toast-action:hover { background: rgba(255,255,255,0.2); }
     `;
     document.head.appendChild(style);
 
@@ -84,8 +97,11 @@
   // so users can read + copy the failure message before it disappears.
   const DISMISS_MS = { error: 8000, warn: 6000, info: 4500, success: 4500 };
 
-  function show(level, message) {
+  // opts (optional): { actionLabel, onAction, sticky }. An action toast renders
+  // a button that runs onAction then dismisses; `sticky` disables auto-dismiss.
+  function show(level, message, opts) {
     if (!_installed) install();
+    opts = opts || {};
     const el = document.createElement('div');
     el.className = 'klaussy-toast ' + level;
     const span = document.createElement('span');
@@ -93,23 +109,42 @@
     // Plain text: no innerHTML, so message content can't smuggle markup.
     span.textContent = String(message == null ? '' : message);
     el.appendChild(span);
-    _container.appendChild(el);
 
-    // Next frame so the transition runs from the initial off-screen state.
-    requestAnimationFrame(() => el.classList.add('visible'));
-
-    const timeout = DISMISS_MS[level] || DISMISS_MS.info;
     let dismissed = false;
     const dismiss = () => {
       if (dismissed) return;
       dismissed = true;
+      clearTimeout(timer);
       el.classList.remove('visible');
       el.classList.add('leaving');
       // Wait for the fade-out transition before removing from the DOM.
       setTimeout(() => { try { el.remove(); } catch {} }, 200);
     };
-    const timer = setTimeout(dismiss, timeout);
-    el.addEventListener('click', () => { clearTimeout(timer); dismiss(); });
+
+    if (opts.actionLabel && typeof opts.onAction === 'function') {
+      const btn = document.createElement('button');
+      btn.className = 'klaussy-toast-action';
+      btn.textContent = String(opts.actionLabel);
+      btn.addEventListener('click', (e) => {
+        // Don't let the click bubble to the toast body's dismiss handler before
+        // the action runs.
+        e.stopPropagation();
+        try { opts.onAction(); } finally { dismiss(); }
+      });
+      el.appendChild(document.createElement('br'));
+      el.appendChild(btn);
+    }
+
+    _container.appendChild(el);
+
+    // Next frame so the transition runs from the initial off-screen state.
+    requestAnimationFrame(() => el.classList.add('visible'));
+
+    // Sticky toasts stay until clicked — used for actionable prompts the user
+    // shouldn't miss (a timed-out upgrade nag reads as "nothing to do").
+    const timeout = DISMISS_MS[level] || DISMISS_MS.info;
+    const timer = opts.sticky ? null : setTimeout(dismiss, timeout);
+    el.addEventListener('click', dismiss);
   }
 
   window.toast = {
@@ -117,5 +152,9 @@
     warn:    (msg) => show('warn', msg),
     info:    (msg) => show('info', msg),
     success: (msg) => show('success', msg),
+    // Actionable toast: level + message + a button. Sticky by default so the
+    // action stays available; pass opts.sticky === false to auto-dismiss.
+    action:  (level, msg, actionLabel, onAction, opts) =>
+      show(level, msg, Object.assign({ sticky: true, actionLabel, onAction }, opts)),
   };
 })();

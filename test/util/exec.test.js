@@ -2,7 +2,7 @@ require('../setup');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { appendStderr, sanitizeExtraEnv, runWithConcurrency, STDERR_CAP_BYTES, resolveGhEnv } = require('../../main/util/exec');
+const { appendStderr, sanitizeExtraEnv, runWithConcurrency, STDERR_CAP_BYTES, resolveGhEnv, winShellQuote } = require('../../main/util/exec');
 
 // --- resolveGhEnv ---
 
@@ -153,4 +153,33 @@ test('runWithConcurrency with cap > items runs up to items.length workers', asyn
     active--;
   });
   assert.ok(peak <= 2, 'spawned more workers than items: ' + peak);
+});
+
+// --- winShellQuote (cmd.exe batch-shim arg quoting) ---
+
+test('winShellQuote leaves safe bare tokens untouched', () => {
+  // The fixed tool args we route through the shell branch must not gain quotes.
+  for (const s of ['upgrade', '--short', 'klaussy-agents', '-3', '-m', 'pip',
+                   '--user', '-U', 'C:\\Users\\me\\.local\\bin\\pipx.cmd',
+                   'PIPX_BIN_DIR', '--value']) {
+    assert.equal(winShellQuote(s), s, 'should pass through: ' + s);
+  }
+});
+
+test('winShellQuote double-quotes anything with whitespace or metacharacters', () => {
+  assert.equal(winShellQuote('C:\\Program Files\\pipx\\pipx.cmd'),
+    '"C:\\Program Files\\pipx\\pipx.cmd"');
+  assert.equal(winShellQuote('a b'), '"a b"');
+  // cmd metacharacters that would otherwise break the command line.
+  assert.equal(winShellQuote('a&b'), '"a&b"');
+  assert.equal(winShellQuote('a|b'), '"a|b"');
+  assert.equal(winShellQuote('a>b'), '"a>b"');
+});
+
+test('winShellQuote escapes embedded double quotes', () => {
+  assert.equal(winShellQuote('say "hi"'), '"say \\"hi\\""');
+});
+
+test('winShellQuote coerces non-strings without throwing', () => {
+  assert.equal(winShellQuote(3), '3');
 });

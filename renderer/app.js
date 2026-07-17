@@ -196,6 +196,29 @@ window.App = window.App || {};
         window.toast.warn('Repo-analysis tools (' + (ev.missing || []).join(', ') + ') couldn’t be installed automatically (' + (ev.reason || 'unknown') + '). Klaussy will retry in the background.');
         return;
       }
+      if (ev.type === 'tools-outdated') {
+        var msg = 'klaussy-agents is out of date (' + (ev.current || '?') + ' → needs ' + (ev.min || '?')
+          + '). New agent skills won’t appear in your repos until you upgrade.';
+        if (window.klaus.task.upgradeReviewTools) {
+          window.toast.action('warn', msg, 'Upgrade now', function () {
+            window.toast.info('Upgrading klaussy-agents…');
+            window.klaus.task.upgradeReviewTools().then(function (res) {
+              if (res && res.ok) {
+                window.toast.success('klaussy-agents upgraded to ' + res.version + ' — repos pick up new skills on next open');
+              } else {
+                window.toast.warn('Upgrade didn’t complete'
+                  + (res && res.version ? ' (still ' + res.version + ')' : '')
+                  + '. Try manually: pipx upgrade klaussy-agents  (or: uv tool upgrade klaussy-agents)');
+              }
+            }).catch(function (e) {
+              window.toast.warn('Upgrade failed: ' + (e && e.message ? e.message : e));
+            });
+          });
+        } else {
+          window.toast.warn(msg + ' Run: pipx upgrade klaussy-agents');
+        }
+        return;
+      }
       if (!ev.repoPath) return;
       var repoName = ev.repoPath.split('/').filter(Boolean).pop();
       if (ev.type === 'started') {
