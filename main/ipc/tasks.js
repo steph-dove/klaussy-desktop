@@ -771,6 +771,17 @@ ipcMain.handle('get-repo-intel', (_event, { worktreePath, agent }) => {
   }
 });
 
+// Backs the renderer's "Upgrade now" toast — forces an immediate tool upgrade
+// past the daily gate and returns { version, min, ok } for the toast to report
+ipcMain.handle('upgrade-review-tools', async () => {
+  try {
+    return await require('../state/repo-intel').upgradeReviewToolsNow();
+  } catch (e) {
+    console.warn('[upgrade-review-tools]', e.message);
+    return { version: null, ok: false, error: e.message };
+  }
+});
+
 // ---- Current model for the sub-tab agent labels -----------------------------
 // "Claude Fable 5", not "claude code 2.1.172". Resolution order: the pinned
 // per-provider model from Preferences, then (Claude only) the model stamped on

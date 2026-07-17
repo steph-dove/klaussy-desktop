@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const { execSync, execFileSync, execFile } = require('child_process');
 const { whichBinSync } = require('../util/platform');
+const { execToolSync } = require('../util/exec');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const lspManager = require('../../lsp-manager');
 const { loadConfig, saveConfig, flushSaveConfig, runConfigMigrations } = require('../util/config');
@@ -109,7 +110,10 @@ function fixSpawnPath() {
 // absent or the query fails.
 function pipxBinDir() {
   try {
-    const out = execFileSync('pipx', ['environment', '--value', 'PIPX_BIN_DIR'], {
+    // execToolSync so a Windows scoop-shim pipx (pipx.cmd) resolves + runs —
+    // a bare execFileSync('pipx') would ENOENT on it and silently drop a
+    // custom PIPX_BIN_DIR from the spawn PATH.
+    const out = execToolSync('pipx', ['environment', '--value', 'PIPX_BIN_DIR'], {
       stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
     }).toString().trim();
     return out || null;
@@ -355,6 +359,10 @@ function install() {
         Promise.resolve()
           .then(() => repoIntel.ensureReviewTools())
           .then(() => repoIntel.upgradeReviewToolsIfDue())
+          // After install + any daily upgrade, warn (once) if klaussy-agents is
+          // still below the version floor so the user gets a one-click upgrade
+          // instead of silently working against stale skills.
+          .then(() => repoIntel.warnIfKlaussyOutdated())
           .catch((e) => console.warn('[repo-intel] tool install/upgrade at boot failed:', e.message));
       }, 3000);
     }

@@ -33,7 +33,10 @@ const path = require('path');
 const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const { app } = require('electron');
-const { execFileP } = require('../util/exec');
+// execToolP (aliased to execFileP here) hardens every external-tool spawn in
+// this file on Windows — where.exe/PATHEXT resolution + `.cmd`/`.bat` shim
+// support + windowsHide — while staying a pure passthrough on macOS/Linux.
+const { execToolP: execFileP } = require('../util/exec');
 const { baseRepoForWorktree } = require('../util/git-repo');
 const { loadConfig, saveConfig } = require('../util/config');
 
@@ -207,6 +210,32 @@ function getKlaussyCli() {
   return p;
 }
 
+// Lowest klaussy-agents version we treat as current — bump on any release we
+// want every repo to pick up, and the desktop prompts a one-click upgrade when
+// the installed CLI is below this floor (regeneration elsewhere keys on equality)
+const KLAUSSY_AGENTS_MIN_VERSION = '0.19.2';
+
+// Pull the first dotted numeric triple out of a `klaussy --version` string
+// ("klaussy, version 0.15.0" / "0.15.0" / "klaussy-agents 0.15.0" all parse).
+// Returns [major, minor, patch] or null when no version is parseable.
+function parseVersionTriple(s) {
+  const m = String(s || '').match(/(\d+)\.(\d+)\.(\d+)/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+
+// True only when BOTH versions parse AND current < min. Unparseable input
+// returns false, so an odd version string never nags the user forever.
+function versionBelow(current, min) {
+  const c = parseVersionTriple(current);
+  const m = parseVersionTriple(min);
+  if (!c || !m) return false;
+  for (let i = 0; i < 3; i++) {
+    if (c[i] < m[i]) return true;
+    if (c[i] > m[i]) return false;
+  }
+  return false;
+}
+
 // Tell every window what's happening so the renderer can toast it — silent
 // success reads as "nothing ran" and silent failure hides a missing CLI.
 // Lazy require avoids a load-order dependency on state/windows.
@@ -279,6 +308,27 @@ async function pickInstaller() {
       return { kind: 'pip', py: c.py, pyArgs: c.pyArgs };
     } catch { /* try next */ }
   }
+  return null;
+}
+
+// True when a manager's list output has `pkg` as a line's first token — the
+// shape of both `pipx list --short` and `uv tool list` output
+function listHasPkg(stdout, pkg) {
+  return String(stdout || '').split('\n').some((line) => line.trim().split(/\s+/)[0] === pkg);
+}
+
+// Which isolated manager OWNS an already-installed tool (vs pickInstaller's
+// "what CAN install") — needed because a blind `pipx upgrade` on a uv-installed
+// tool silently no-ops. Returns { kind } or null (no owner); never throws
+async function detectToolOwner(pkg) {
+  try {
+    const r = await execFileP('pipx', ['list', '--short'], { timeout: 15000 });
+    if (listHasPkg(r.stdout, pkg)) return { kind: 'pipx' };
+  } catch { /* no pipx, or nothing installed via it */ }
+  try {
+    const r = await execFileP('uv', ['tool', 'list'], { timeout: 15000 });
+    if (listHasPkg(r.stdout, pkg)) return { kind: 'uv' };
+  } catch { /* no uv, or nothing installed via it */ }
   return null;
 }
 
@@ -422,18 +472,22 @@ async function upgradeReviewToolsIfDue() {
     const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
     for (const t of TOOLS) {
       const pkg = t.pkg;
+      // Upgrade with the manager that OWNS this tool — a blind `pipx upgrade`
+      // on a uv-installed CLI no-ops (caught below) and strands a stale version.
+      // Fall back to pickInstaller only when neither isolated manager claims it
+      const owner = (await detectToolOwner(pkg)) || installer;
       try {
-        if (installer.kind === 'pipx') {
+        if (owner.kind === 'pipx') {
           await execFileP('pipx', ['upgrade', pkg], BIG);
-        } else if (installer.kind === 'uv') {
+        } else if (owner.kind === 'uv') {
           await execFileP('uv', ['tool', 'upgrade', pkg], BIG);
         } else {
           try {
-            await execFileP(installer.py, [...(installer.pyArgs || []), '-m', 'pip', 'install', '--user', '-U', pkg], BIG);
+            await execFileP(owner.py, [...(owner.pyArgs || []), '-m', 'pip', 'install', '--user', '-U', pkg], BIG);
           } catch (err) {
             const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
             if (/externally-managed-environment|PEP ?668|break-system-packages/i.test(msg)) {
-              await execFileP(installer.py, [...(installer.pyArgs || []), '-m', 'pip', 'install', '--user', '-U', '--break-system-packages', pkg], BIG);
+              await execFileP(owner.py, [...(owner.pyArgs || []), '-m', 'pip', 'install', '--user', '-U', '--break-system-packages', pkg], BIG);
             }
           }
         }
@@ -453,6 +507,41 @@ async function upgradeReviewToolsIfDue() {
   } catch (e) {
     console.warn('[repo-intel] upgrade check failed:', (e && e.message) || e);
   }
+}
+
+// Has this app run already surfaced the "klaussy-agents is out of date" prompt?
+// One nag per launch — the toast carries a one-click upgrade action, so
+// repeating it on every repo-intel run would just be noise.
+let outdatedNotified = false;
+
+// Emit a `tools-outdated` event when the installed klaussy-agents is below the
+// floor, so the renderer can offer a one-click upgrade — a MISSING CLI isn't
+// "outdated" (owned by the tools-failed toast), so stay quiet with no version
+async function warnIfKlaussyOutdated() {
+  try {
+    if (outdatedNotified) return;
+    const cli = await getKlaussyCli();
+    if (!cli.version) return;
+    if (!versionBelow(cli.version, KLAUSSY_AGENTS_MIN_VERSION)) return;
+    outdatedNotified = true;
+    notifyWindows({ type: 'tools-outdated', current: cli.version, min: KLAUSSY_AGENTS_MIN_VERSION });
+  } catch { /* best-effort — a version probe hiccup shouldn't crash boot */ }
+}
+
+// Force an immediate upgrade (the "Upgrade now" action), bypassing the daily
+// gate — re-probes and reports whether the machine cleared the floor; never throws
+async function upgradeReviewToolsNow() {
+  try {
+    const cfg = loadConfig();
+    cfg.reviewToolsCheckedAt = 0; // clear the daily gate so the upgrade runs now
+    saveConfig(cfg);
+  } catch { /* fall through — the upgrade may still be due */ }
+  outdatedNotified = false; // let a fresh nag fire if the upgrade doesn't take
+  await upgradeReviewToolsIfDue();
+  let version = null;
+  try { version = (await getKlaussyCli()).version; } catch { /* probe failed */ }
+  const ok = version ? !versionBelow(version, KLAUSSY_AGENTS_MIN_VERSION) : false;
+  return { version, min: KLAUSSY_AGENTS_MIN_VERSION, ok };
 }
 
 // Resolve a worktree (or repo) path to its primary checkout — intel belongs
@@ -1192,5 +1281,8 @@ function ensureWorktreeBootstrap(worktreePath) {
 }
 
 module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureEnvLinks, ensureReviewTools, upgradeReviewToolsIfDue,
+  warnIfKlaussyOutdated, upgradeReviewToolsNow,
   // Exported for unit testing of the prompt-minimization logic (Item 4).
-  loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock };
+  loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock,
+  // Exported for unit testing of the version-floor comparison.
+  versionBelow, KLAUSSY_AGENTS_MIN_VERSION };

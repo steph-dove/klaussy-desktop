@@ -5,6 +5,44 @@
 
 const { execFile, execFileSync } = require('child_process');
 const execFileP = require('util').promisify(execFile);
+const { whichBinSync } = require('./platform');
+
+const IS_WIN = process.platform === 'win32';
+
+// cmd.exe-safe quoting for execToolP's batch-shim branch: bare tokens pass
+// through; anything with whitespace/metacharacters is double-quoted (no `%`).
+function winShellQuote(s) {
+  s = String(s);
+  if (/^[A-Za-z0-9_.:=+\-\\/]+$/.test(s)) return s;
+  return '"' + s.replace(/"/g, '\\"') + '"';
+}
+
+// Windows-hardened execFile for PATH tools, a plain passthrough on macOS/Linux
+// (on Windows: where+PATHEXT resolution, cmd/bat shims via shell, windowsHide,
+// and batch files that execFile blocks per CVE-2024-27980 run through cmd)
+function execToolP(file, args = [], opts = {}) {
+  if (!IS_WIN) return execFileP(file, args, opts);
+  const resolved = /[\\/]/.test(file) ? file : (whichBinSync(file) || file);
+  if (/\.(cmd|bat)$/i.test(resolved)) {
+    return execFileP(winShellQuote(resolved), args.map(winShellQuote), {
+      ...opts, shell: true, windowsHide: true,
+    });
+  }
+  return execFileP(resolved, args, { ...opts, windowsHide: true });
+}
+
+// Synchronous twin of execToolP for startup PATH-discovery, same Windows
+// hardening, passthrough to execFileSync on macOS/Linux
+function execToolSync(file, args = [], opts = {}) {
+  if (!IS_WIN) return execFileSync(file, args, opts);
+  const resolved = /[\\/]/.test(file) ? file : (whichBinSync(file) || file);
+  if (/\.(cmd|bat)$/i.test(resolved)) {
+    return execFileSync(winShellQuote(resolved), args.map(winShellQuote), {
+      ...opts, shell: true, windowsHide: true,
+    });
+  }
+  return execFileSync(resolved, args, { ...opts, windowsHide: true });
+}
 
 // Cap accumulation of a child process's stderr. Every streaming claude handler
 // buffers stderr unboundedly — a `--verbose` run or a lot of warnings could
@@ -163,6 +201,9 @@ function sanitizeExtraEnv(extraEnv) {
 
 module.exports = {
   execFileP,
+  execToolP,
+  execToolSync,
+  winShellQuote,
   STDERR_CAP_BYTES,
   appendStderr,
   ghEnvForRepo,
