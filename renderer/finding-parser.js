@@ -142,8 +142,21 @@ window.FindingParser = (function () {
         var j = i + 1;
         while (j < s.length && (s[j] === ' ' || s[j] === '\t' || s[j] === '\n' || s[j] === '\r')) j++;
         var nx = s[j];
-        if (nx === undefined || nx === ',' || nx === '}' || nx === ']' || nx === ':') {
+        if (nx === undefined || nx === '}' || nx === ']' || nx === ':') {
           inStr = false; out += ch; continue; // real closing quote
+        }
+        if (nx === ',') {
+          // A comma after the quote is ambiguous: a value-terminating comma
+          // starts the next JSON token, but a comma in prose ("returns "ok",
+          // but…") is just more words, so only close when a real JSON token
+          // actually follows — else we corrupt the object and drop the finding.
+          var k = j + 1;
+          while (k < s.length && (s[k] === ' ' || s[k] === '\t' || s[k] === '\n' || s[k] === '\r')) k++;
+          var after = s.slice(k);
+          if (after === '' || after[0] === '"' || after[0] === '{' || after[0] === '[' ||
+              /^-?\d/.test(after) || /^(true|false|null)\b/.test(after)) {
+            inStr = false; out += ch; continue; // real closing quote
+          }
         }
         out += '\\"'; continue;               // literal quote inside the value
       }
