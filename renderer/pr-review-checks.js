@@ -599,7 +599,7 @@
     for (var i = 0; i < checks.length; i++) {
       if (String(checks[i].id) === String(checkId)) {
         var c = checks[i];
-        return [c.state || '', c.conclusion || '', c.completedAt || '', c.runId || ''].join(' ');
+        return [c.state || '', c.conclusion || '', c.completedAt || '', c.runId || ''].join('\u0000');
       }
     }
     return '';

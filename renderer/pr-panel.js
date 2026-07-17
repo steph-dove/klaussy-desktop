@@ -1021,14 +1021,14 @@ window.PRPanel = (function () {
     src = src.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_match, _lang, code) {
       var idx = blocks.length;
       blocks.push('<pre class="pr-code-block">' + escHtml(code.replace(/\n$/, '')) + '</pre>');
-      return ' CODEBLOCK' + idx + ' ';
+      return '\u0000CODEBLOCK' + idx + '\u0000';
     });
     src = escHtml(src)
       .replace(/`([^`]+)`/g, '<code class="pr-inline-code">$1</code>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
       .replace(/\n/g, '<br>');
-    src = src.replace(/ CODEBLOCK(\d+) /g, function (_, i) { return blocks[parseInt(i, 10)]; });
+    src = src.replace(/\u0000CODEBLOCK(\d+)\u0000/g, function (_, i) { return blocks[parseInt(i, 10)]; });
     return src;
   }
 

@@ -400,7 +400,7 @@ ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => 
         message: a.message || '',
         rawDetails: a.raw_details || '',
       };
-      const key = [norm.path, norm.startLine, norm.endLine, norm.level, norm.title, norm.message].join('');
+      const key = [norm.path, norm.startLine, norm.endLine, norm.level, norm.title, norm.message].join('\u0001');
       if (seen.has(key)) continue;
       seen.add(key);
       annotations.push(norm);
