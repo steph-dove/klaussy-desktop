@@ -1220,7 +1220,7 @@ window.Dialogs = (function () {
         var detail = s.type === 'stdio'
           ? (s.command + (s.args && s.args.length ? ' ' + s.args.join(' ') : ''))
           : s.url;
-        var key = [s.name, s.scope, s.projectName || '', s.type, detail, (s.envKeys || []).join(',')].join(' ');
+        var key = [s.name, s.scope, s.projectName || '', s.type, detail, (s.envKeys || []).join(',')].join('\u0000');
         if (!map[key]) {
           map[key] = { name: s.name, scope: s.scope, projectName: s.projectName, type: s.type, detail: detail, envKeys: s.envKeys || [], members: [] };
           order.push(key);
