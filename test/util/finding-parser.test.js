@@ -43,6 +43,19 @@ test('recovers findings when body contains an unescaped double-quote', () => {
   assert.equal(r.findings[0].severity, 'high');
 });
 
+test('recovers findings when body has an inner quote followed by a comma (verdict-but-no-cards regression)', () => {
+  // Regression: an inner quote followed by `,`/`}`/`]`/`:` ("returns "ok", but
+  // …") was misread as the value's closing quote, corrupting the object so
+  // every finding was dropped while the quote-free summary survived — the exact
+  // "Request Changes verdict shows, zero cards render" symptom.
+  const inner = '{ "findings": [ { "severity": "High", "category": "Correctness", "path": "m.js", "line": 5, "side": "RIGHT", "title": "Ignored return", "code": "x=1;", "body": "The call returns "ok", but the caller ignores it.", "suggestion": "check the result" } ], "summary": { "verdict": "Request Changes", "highestRisk": ["ignored return"], "testCoverage": "none" } }';
+  const r = FP.parseReviewFindings(wrap(inner));
+  assert.equal(r.findings.length, 1);
+  assert.equal(r.findings[0].severity, 'high');
+  assert.equal(r.findings[0].path, 'm.js');
+  assert.equal(r.summary.verdict, 'Request Changes');
+});
+
 test('truncated mid-stream: recovers the complete findings, drops the partial tail', () => {
   const inner = '{\n  "findings": [\n    { "severity": "High", "category": "Correctness", "path": "a.js", "line": 1, "side": "RIGHT", "title": "One", "code": "let a = 1;\nlet b = 2;", "body": "First.", "suggestion": "x" },\n    { "severity": "Low", "category": "Design", "path": "b.js", "line": 9, "side": "RIGHT", "title": "Two", "code": "y=2;", "body": "Second.", "suggestion": "z" },\n    { "severity": "Nit", "category": "Readability", "path": "c.js", "line": 3, "side": "RIGHT", "title": "Thre';
   // Note: no closing </FINDINGS_JSON> — mid-stream.
