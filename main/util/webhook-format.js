@@ -1,0 +1,116 @@
+// Pure formatters: normalized Nemesis8 lifecycle event -> Slack / Discord
+// webhook payloads. No electron, no network, no config — just data in, JSON
+// body out — so the shapes are cheap to unit-test and the gateway
+// (util/notification-gateway.js) only has to POST what these return.
+
+const { EVENT_TYPES } = require('./nemesis-client');
+
+// Slack blocks and Discord embed descriptions both have hard size limits;
+// agent log tails can be huge. Keep the last slice (the tail is where a crash
+// reason or the pending prompt lives) and mark the truncation.
+function truncateLogs(logs, max = 1200) {
+  const s = String(logs || '').trim();
+  if (s.length <= max) return s;
+  return '…(truncated)\n' + s.slice(-max);
+}
+
+// Break any triple-backtick run in log text so it can't close the code fence
+// we wrap it in (a zero-width space keeps it looking the same to a reader).
+function fenceSafe(s) {
+  return String(s || '').replace(/```/g, '`​`​`');
+}
+
+// Head titles have hard caps — Slack rejects a header block over 150 chars and
+// Discord an embed title over 256 — so a long agent name never nukes the whole
+// message. Trim from the end since the lead ("<agent> …") is the important part.
+function cap(str, max) {
+  const s = String(str || '');
+  return s.length <= max ? s : s.slice(0, max - 1) + '…';
+}
+
+function presentation(event) {
+  switch (event.type) {
+    case EVENT_TYPES.COMPLETED:
+      return { emoji: '✅', verb: 'completed', color: 0x2eb67d };
+    case EVENT_TYPES.FAILED:
+      return { emoji: '❌', verb: 'failed', color: 0xe01e5a };
+    case EVENT_TYPES.APPROVAL_REQUIRED:
+      return { emoji: '⏸️', verb: 'needs approval', color: 0xecb22e };
+    default:
+      return { emoji: '🔔', verb: event.type, color: 0x1d9bd1 };
+  }
+}
+
+function agentLabel(event) {
+  return event.agentName || 'Agent';
+}
+
+function headline(event, p) {
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
+    // The specific tool goes in the fields (it can be a long command line and
+    // would blow the header length cap); the title stays short and stable.
+    return `${agentLabel(event)} is paused — waiting for approval`;
+  }
+  if (event.type === EVENT_TYPES.FAILED) {
+    const code = event.exitCode != null ? ` (exit ${event.exitCode})` : '';
+    return `${agentLabel(event)} ${p.verb}${code}`;
+  }
+  return `${agentLabel(event)} ${p.verb}`;
+}
+
+function formatSlack(event) {
+  const p = presentation(event);
+  const title = cap(`${p.emoji} ${headline(event, p)}`, 150);
+
+  const fields = [];
+  if (event.workspacePath) fields.push({ type: 'mrkdwn', text: `*Workspace:*\n\`${event.workspacePath}\`` });
+  if (event.containerId) fields.push({ type: 'mrkdwn', text: `*Container:*\n\`${event.containerId}\`` });
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && (event.tool || event.step)) {
+    fields.push({ type: 'mrkdwn', text: `*Awaiting approval:*\n\`${event.tool || event.step}\`` });
+  }
+
+  const blocks = [
+    { type: 'header', text: { type: 'plain_text', text: title, emoji: true } },
+  ];
+  if (fields.length) blocks.push({ type: 'section', fields });
+
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: 'Respond in Klaussy to *Approve* or *Reject* this step.' }],
+    });
+  }
+
+  const logs = truncateLogs(event.logsTail);
+  if (logs) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '```' + fenceSafe(logs) + '```' } });
+
+  // `text` is the notification fallback Slack shows in the sidebar / on mobile.
+  return { text: title, blocks };
+}
+
+function formatDiscord(event) {
+  const p = presentation(event);
+  const title = cap(`${p.emoji} ${headline(event, p)}`, 256);
+
+  const fields = [];
+  if (event.workspacePath) fields.push({ name: 'Workspace', value: '`' + event.workspacePath + '`' });
+  if (event.containerId) fields.push({ name: 'Container', value: '`' + event.containerId + '`' });
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && (event.tool || event.step)) {
+    fields.push({ name: 'Awaiting approval', value: '`' + (event.tool || event.step) + '`' });
+  }
+
+  const parts = [];
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
+    parts.push('Respond in Klaussy to **Approve** or **Reject** this step.');
+  }
+  const logs = truncateLogs(event.logsTail);
+  if (logs) parts.push('```\n' + fenceSafe(logs) + '\n```');
+
+  const embed = { title, color: p.color };
+  if (parts.length) embed.description = parts.join('\n');
+  if (fields.length) embed.fields = fields;
+
+  return { embeds: [embed] };
+}
+
+module.exports = { formatSlack, formatDiscord, truncateLogs };

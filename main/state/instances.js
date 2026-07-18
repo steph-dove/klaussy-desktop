@@ -23,6 +23,7 @@ const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-provi
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
 const { stageInitialPrompt } = require('../util/agent-prompt');
+const nemesis = require('../util/nemesis-client');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -164,8 +165,32 @@ const PROMPT_PATTERNS = [
   /❯\s*$/,
 ];
 
+// Prompts that mean the agent needs authorization (not a bare idle cursor);
+// only these fire an approval webhook.
+const APPROVAL_PROMPT_PATTERNS = [
+  /\(y\/n\)\s*$/i,
+  /\(Y\/n\)\s*$/,
+  /\(yes\/no\)\s*$/i,
+  /Do you want to proceed/i,
+  /Allow\s.*\?/i,
+];
+
+// A single approval prompt can repaint many times per second; only publish one
+// approval webhook per instance per this window even if the flag re-arms.
+const APPROVAL_NOTIFY_COOLDOWN_MS = 30000;
+
 function stripAnsi(str) {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
+}
+
+// Best-effort: pull the tool awaiting authorization out of an approval prompt
+// ("Allow <tool>?" / "Do you want to <verb>…"); '' when nothing recognizable.
+function extractApprovalTool(tail) {
+  const allow = tail.match(/Allow\s+([^\n?]+?)\s*\?/i);
+  if (allow) return allow[1].trim();
+  const wants = tail.match(/Do you want to\s+([^\n?]+?)\s*\??\s*$/i);
+  if (wants) return wants[1].trim();
+  return '';
 }
 
 function isAnyWindowFocused() {
@@ -261,6 +286,30 @@ function processIdleDetection(inst, data) {
       break;
     }
   }
+
+  // Publish approval-required on the transition into a waiting state. The
+  // approvalPending flag + cooldown stop a repainting TUI from storming the webhook.
+  const needsApproval = APPROVAL_PROMPT_PATTERNS.some((p) => p.test(tail));
+  if (needsApproval) {
+    const now = Date.now();
+    if (!inst.approvalPending && now - inst.lastApprovalPublishTime >= APPROVAL_NOTIFY_COOLDOWN_MS) {
+      inst.approvalPending = true;
+      inst.lastApprovalPublishTime = now;
+      try {
+        nemesis.publish({
+          type: nemesis.EVENT_TYPES.APPROVAL_REQUIRED,
+          containerId: inst.id,
+          workspacePath: inst.worktreePath,
+          agentName,
+          tool: extractApprovalTool(tail),
+          logsTail: inst.recentOutput,
+          ts: now,
+        });
+      } catch { /* never let a publish break the terminal path */ }
+    }
+  } else {
+    inst.approvalPending = false;
+  }
 }
 
 function initIdleDetectionFields(inst) {
@@ -280,6 +329,8 @@ function initIdleDetectionFields(inst) {
   inst.notifiedIdle = false;
   inst.lastNotifyTime = 0;
   inst.recentOutput = '';
+  inst.approvalPending = false;
+  inst.lastApprovalPublishTime = 0;
 }
 
 function clearIdleTimer(inst) {
@@ -427,6 +478,15 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     } catch {}
   }
 
+  // Start the webhook notification gateway once an agent (not a plain shell) is
+  // running. Idempotent and pref-gated inside — a no-op unless the user has
+  // configured a Slack/Discord webhook URL.
+  if (isAgentMode(mode)) {
+    try { require('../util/notification-gateway').ensureStarted(); } catch (e) {
+      console.warn('[notification-gateway] start failed:', e.message);
+    }
+  }
+
   ptyProc.onData((data) => {
     processIdleDetection(instance, data);
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
@@ -436,6 +496,21 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     clearIdleTimer(instance);
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
+    // Publish this agent's terminal event once, on its own natural exit only:
+    // skip the converted shell (mode!=='agent'), user kill/restart, and quit.
+    if (isAgentMode(instance.mode) && !instance.killed && !instance.restarting && !_isQuitting()) {
+      try {
+        nemesis.publish({
+          type: exitCode === 0 ? nemesis.EVENT_TYPES.COMPLETED : nemesis.EVENT_TYPES.FAILED,
+          containerId: instance.id,
+          workspacePath: instance.worktreePath,
+          agentName: displayNameFor(instance.originalMode || instance.mode),
+          exitCode,
+          logsTail: instance.recentOutput || '',
+          ts: Date.now(),
+        });
+      } catch { /* never let a publish break teardown */ }
+    }
     // If this was a Claude session, auto-convert to shell in-place — but
     // only for natural exits. An explicit kill-task sets `killed`, and
     // restart-task sets `restarting`; neither should spawn a shell we'd

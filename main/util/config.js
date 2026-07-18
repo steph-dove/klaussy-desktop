@@ -51,6 +51,29 @@ function saveConfig(config) {
 // (which may still be in-flight when Cmd+Q fires) has a chance to land.
 function flushSaveConfig() { return _saveConfigQueue; }
 
+// Webhook notification-gateway prefs (config.notificationGateway), read here so
+// the gateway and PTY publisher share defaults. Off unless a webhook URL is set.
+function getNotificationConfig(config = loadConfig()) {
+  const ng = (config && typeof config.notificationGateway === 'object' && config.notificationGateway) || {};
+  const slackWebhookUrl = typeof ng.slackWebhookUrl === 'string' ? ng.slackWebhookUrl.trim() : '';
+  const discordWebhookUrl = typeof ng.discordWebhookUrl === 'string' ? ng.discordWebhookUrl.trim() : '';
+  const nemesisUrl = typeof ng.nemesisUrl === 'string' ? ng.nemesisUrl.trim() : '';
+  const events = (ng.events && typeof ng.events === 'object') ? ng.events : {};
+  return {
+    // Explicit `enabled: false` hard-disables; otherwise presence of any
+    // webhook URL turns it on.
+    enabled: ng.enabled === false ? false : Boolean(slackWebhookUrl || discordWebhookUrl),
+    slackWebhookUrl,
+    discordWebhookUrl,
+    nemesisUrl,
+    events: {
+      completed: events.completed !== false,
+      failed: events.failed !== false,
+      approvalRequired: events.approvalRequired !== false,
+    },
+  };
+}
+
 // Migrations from version n-1 to version n. Each function mutates the passed
 // config object in place and MUST be idempotent — we only run each migration
 // once, but migrations can fail mid-way and we'd rather re-run cleanly than
@@ -152,5 +175,6 @@ module.exports = {
   saveConfig,
   flushSaveConfig,
   runConfigMigrations,
+  getNotificationConfig,
   CURRENT_SCHEMA_VERSION,
 };

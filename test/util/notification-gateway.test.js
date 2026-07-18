@@ -1,0 +1,193 @@
+require('../setup');
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const http = require('http');
+
+const gateway = require('../../main/util/notification-gateway');
+const nemesis = require('../../main/util/nemesis-client');
+const { EVENT_TYPES } = nemesis;
+const { saveConfig, flushSaveConfig } = require('../../main/util/config');
+
+// A capturing webhook server. Records every POST (path + parsed JSON body) and
+// lets a test await the first request whose path contains a marker.
+function makeCaptureServer() {
+  const requests = [];
+  const waiters = [];
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => { body += c; });
+    req.on('end', () => {
+      let json = null;
+      try { json = JSON.parse(body); } catch {}
+      const entry = { path: req.url, body: json };
+      requests.push(entry);
+      for (let i = waiters.length - 1; i >= 0; i--) {
+        if (req.url.includes(waiters[i].marker)) {
+          waiters[i].resolve(entry);
+          waiters.splice(i, 1);
+        }
+      }
+      res.writeHead(200);
+      res.end('ok');
+    });
+  });
+  return {
+    async start() {
+      await new Promise((r) => server.listen(0, r));
+      this.base = `http://127.0.0.1:${server.address().port}`;
+      return this.base;
+    },
+    waitFor(marker) {
+      const hit = requests.find((r) => r.path.includes(marker));
+      if (hit) return Promise.resolve(hit);
+      return new Promise((resolve) => waiters.push({ marker, resolve }));
+    },
+    requests,
+    close() { return new Promise((r) => server.close(r)); },
+  };
+}
+
+const APPROVAL = {
+  type: EVENT_TYPES.APPROVAL_REQUIRED,
+  containerId: '3',
+  workspacePath: '/work/x',
+  agentName: 'Claude',
+  tool: 'file-write',
+  logsTail: 'pending write',
+};
+
+function cfg(base, over = {}) {
+  return {
+    enabled: true,
+    slackWebhookUrl: base + '/slack',
+    discordWebhookUrl: base + '/discord',
+    nemesisUrl: '',
+    events: { completed: true, failed: true, approvalRequired: true },
+    ...over,
+  };
+}
+
+test('postWebhook resolves with the HTTP status', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    const { status } = await gateway.postWebhook(base + '/hook', { hello: 'world' });
+    assert.equal(status, 200);
+    const rec = await srv.waitFor('/hook');
+    assert.deepEqual(rec.body, { hello: 'world' });
+  } finally {
+    await srv.close();
+  }
+});
+
+// Verification Plan, Test Cases 1 & 2: an approval-required event reaches the
+// registered Slack webhook as a formatted block naming the tool.
+test('dispatchEvent posts a formatted approval block to Slack and Discord', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    const results = await gateway.dispatchEvent(APPROVAL, cfg(base));
+    assert.equal(results.length, 2);
+    assert.ok(results.every((r) => r.ok), 'both targets returned 2xx');
+
+    const slack = await srv.waitFor('/slack');
+    assert.ok(Array.isArray(slack.body.blocks), 'slack payload uses blocks');
+    assert.match(JSON.stringify(slack.body), /file-write/, 'names the tool awaiting approval');
+    assert.match(JSON.stringify(slack.body), /Approve/, 'offers an approve/reject action');
+
+    const discord = await srv.waitFor('/discord');
+    assert.ok(Array.isArray(discord.body.embeds), 'discord payload uses embeds');
+    assert.match(JSON.stringify(discord.body), /file-write/);
+  } finally {
+    await srv.close();
+  }
+});
+
+// Verification Plan, Test Case 3: final exit states dispatch completion /
+// failure with truncated logs.
+test('dispatchEvent sends completion and failure with truncated logs', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    const longLog = 'L'.repeat(5000) + 'END_OF_LOG';
+    await gateway.dispatchEvent({
+      type: EVENT_TYPES.FAILED, containerId: '3', workspacePath: '/w',
+      agentName: 'Claude', exitCode: 1, logsTail: longLog,
+    }, cfg(base));
+
+    const slack = await srv.waitFor('/slack');
+    const flat = JSON.stringify(slack.body);
+    assert.match(flat, /failed/i);
+    assert.match(flat, /END_OF_LOG/, 'keeps the tail of the log');
+    assert.match(flat, /truncated/i, 'marks truncation');
+    assert.ok(flat.length < longLog.length, 'payload is smaller than the raw log');
+  } finally {
+    await srv.close();
+  }
+});
+
+test('a muted event type dispatches nothing', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    const results = await gateway.dispatchEvent(
+      APPROVAL,
+      cfg(base, { events: { completed: true, failed: true, approvalRequired: false } }),
+    );
+    assert.deepEqual(results, [], 'no targets posted for a muted type');
+    assert.equal(srv.requests.length, 0);
+  } finally {
+    await srv.close();
+  }
+});
+
+test('one dead target does not suppress the other', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    // Discord URL points at a closed port; Slack should still succeed.
+    const results = await gateway.dispatchEvent(APPROVAL, cfg(base, {
+      discordWebhookUrl: 'http://127.0.0.1:1/discord',
+    }));
+    const slack = results.find((r) => r.target === 'slack');
+    const discord = results.find((r) => r.target === 'discord');
+    assert.ok(slack.ok, 'slack delivered');
+    assert.equal(discord.ok, false, 'discord failed but did not throw');
+    await srv.waitFor('/slack');
+  } finally {
+    await srv.close();
+  }
+});
+
+// End-to-end: a published lifecycle event (as instances.js would emit) flows
+// through the started gateway to a real webhook, driven entirely by config.
+test('ensureStarted wires published events to the configured webhook', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    saveConfig({
+      notificationGateway: {
+        slackWebhookUrl: base + '/slack',
+        events: { completed: true, failed: true, approvalRequired: true },
+      },
+    });
+    await flushSaveConfig();
+
+    gateway.ensureStarted();
+    nemesis.publish({
+      type: EVENT_TYPES.APPROVAL_REQUIRED,
+      containerId: '99',
+      workspacePath: '/work/e2e',
+      agentName: 'Claude',
+      tool: 'shell-exec',
+      logsTail: 'run rm -rf?',
+    });
+
+    const slack = await srv.waitFor('/slack');
+    assert.match(JSON.stringify(slack.body), /shell-exec/, 'the published tool reached Slack');
+  } finally {
+    gateway.stop();
+    await srv.close();
+  }
+});
