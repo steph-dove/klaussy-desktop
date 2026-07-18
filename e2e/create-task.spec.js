@@ -119,7 +119,7 @@ function buildBaseRepoWithBrokenOrigin() {
   return dir;
 }
 
-test('create-task downgrades to shell and prints error if freshening fails', async ({ mainWindow }) => {
+test('create-task keeps the chosen agent and prints error if freshening fails', async ({ mainWindow }) => {
   await mainWindow.waitForLoadState('networkidle');
 
   const repo = buildBaseRepoWithBrokenOrigin();
@@ -137,7 +137,8 @@ test('create-task downgrades to shell and prints error if freshening fails', asy
 
     expect(result.id).toBeDefined();
     taskId = result.id;
-    expect(result.mode).toBe('shell');
+    // Freshen failure is non-fatal: keep the agent (downgrading mislabeled tabs "Shell").
+    expect(result.mode).toBe('claude');
     expect(result.warning).toContain('Could not fetch latest');
 
     // Subscribe and verify the warning is printed in the terminal
