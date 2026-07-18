@@ -18,6 +18,9 @@ window.DiffPanel = window.DiffPanel || {};
   DP.currentRawDiff = '';
   DP.currentDiffStaged = false;
   DP.selectedLineKeys = new Set();
+  // Pending annotations, each { id, filePath, side, line, text }. Persists
+  // across file switches so comments can span files before one batched send.
+  DP.activeAnnotations = [];
   DP.refreshPaused = false;
   DP.diffViewMode = (typeof localStorage !== 'undefined' && localStorage.getItem('diffViewMode')) || 'unified';
 
@@ -877,6 +880,76 @@ window.DiffPanel = window.DiffPanel || {};
     if (s.startsWith('D')) return 'deleted';
     if (s.startsWith('R')) return 'renamed';
     return '';
+  };
+
+  // ---- Inline diff annotations ----
+  // Pure aggregation/formatting lives in window.DiffAnnotations; this half owns
+  // the state + floating bar, and sends one batched prompt to the active agent.
+
+  DP.addAnnotation = function(annotation) {
+    annotation.id = window.DiffAnnotations.keyFor(annotation);
+    DP.activeAnnotations = window.DiffAnnotations.upsert(DP.activeAnnotations, annotation);
+    DP.renderAnnotationsBar();
+    return annotation;
+  };
+
+  DP.removeAnnotation = function(id) {
+    DP.activeAnnotations = window.DiffAnnotations.removeById(DP.activeAnnotations, id);
+    var marker = DP.diffViewEl && DP.diffViewEl.querySelector('.diff-annotation[data-annotation-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+    if (marker) marker.remove();
+    DP.renderAnnotationsBar();
+  };
+
+  DP.clearAnnotations = function() {
+    DP.activeAnnotations = [];
+    if (DP.diffViewEl) {
+      DP.diffViewEl.querySelectorAll('.diff-annotation').forEach(function (el) { el.remove(); });
+    }
+    DP.renderAnnotationsBar();
+  };
+
+  // The bar lives on the panel, not the per-file diff view, so the count
+  // survives file switches.
+  DP.renderAnnotationsBar = function() {
+    if (!DP.panelEl) return;
+    var bar = document.getElementById('diff-annotations-bar');
+    var count = DP.activeAnnotations.length;
+    if (count === 0) {
+      if (bar) bar.remove();
+      return;
+    }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.id = 'diff-annotations-bar';
+      bar.innerHTML =
+        '<span class="diff-annotations-count"></span>' +
+        '<button type="button" class="diff-annotations-clear">Clear</button>' +
+        '<button type="button" class="diff-annotations-send">Send to Agent</button>';
+      bar.querySelector('.diff-annotations-clear').addEventListener('click', DP.clearAnnotations);
+      bar.querySelector('.diff-annotations-send').addEventListener('click', DP.sendAnnotations);
+      DP.panelEl.appendChild(bar);
+    }
+    bar.querySelector('.diff-annotations-count').textContent =
+      count + ' comment' + (count === 1 ? '' : 's');
+  };
+
+  // Injects one formatted prompt via the comment callback — the same seam the
+  // Cmd+Shift+E "send selection" keybind uses — then clears.
+  DP.sendAnnotations = function() {
+    if (DP.activeAnnotations.length === 0) return;
+    if (typeof AppState !== 'undefined' && !AppState.activeTaskId) {
+      window.toast.warn('No active agent terminal — open a task to send comments to');
+      return;
+    }
+    if (!DP.commentCallback) {
+      window.toast.warn('No agent connection available for comments');
+      return;
+    }
+    var prompt = window.DiffAnnotations.formatPrompt(DP.activeAnnotations);
+    DP.commentCallback(prompt);
+    var count = DP.activeAnnotations.length;
+    DP.clearAnnotations();
+    window.toast.success('Sent ' + count + ' comment' + (count === 1 ? '' : 's') + ' to the agent');
   };
 
 })(window.DiffPanel);
