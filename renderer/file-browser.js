@@ -303,24 +303,25 @@ window.FileBrowser = (function () {
   function setupSplitResize() {
     var els = splitEls();
     if (!els.handle || !els.body) return;
-    var dragging = false;
-    els.handle.addEventListener('mousedown', function (e) {
-      dragging = true;
-      els.body.classList.add('resizing');
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', function (e) {
-      if (!dragging) return;
+    // Document listeners live only for the duration of a drag, so re-running
+    // this on a viewer rebuild leaves no stale listeners behind.
+    function onMove(e) {
       var rect = els.body.getBoundingClientRect();
       var max = Math.max(ARTIFACT_MIN_PANE, rect.width - ARTIFACT_MIN_PANE);
       artifactPaneWidth = Math.max(ARTIFACT_MIN_PANE, Math.min(rect.right - e.clientX, max));
       els.pane.style.flex = '0 0 ' + artifactPaneWidth + 'px';
-    });
-    document.addEventListener('mouseup', function () {
-      if (!dragging) return;
-      dragging = false;
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
       els.body.classList.remove('resizing');
       window.dispatchEvent(new Event('resize'));
+    }
+    els.handle.addEventListener('mousedown', function (e) {
+      els.body.classList.add('resizing');
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      e.preventDefault();
     });
   }
 

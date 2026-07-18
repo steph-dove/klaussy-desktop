@@ -1,5 +1,5 @@
-/* global window */
-// window is used inside page.evaluate callbacks (renderer context); the e2e
+/* global window, document, MutationObserver */
+// These are used inside page.evaluate callbacks (renderer context); the e2e
 // eslint override is node-only.
 //
 // Live artifact/preview pane: HTML/SVG in a sandboxed iframe, Markdown inline,
@@ -31,6 +31,7 @@ function buildBaseRepo() {
 // Create a task/worktree, open the diff panel against it, and start the file
 // watcher. Returns the worktree path and a cleanup fn.
 async function openWorktree(win) {
+  await suppressOllamaOverlay(win);
   const repo = buildBaseRepo();
   const taskName = `artifact-${process.pid}-${Date.now()}`;
   const sessionDir = path.join(os.homedir(), 'klaussy', 'sessions', taskName);
@@ -55,6 +56,19 @@ async function openWorktree(win) {
     fs.rmSync(sessionDir, { recursive: true, force: true });
   };
   return { worktree: result.worktreePath, cleanup };
+}
+
+// The Ollama consent modal pops asynchronously in a fresh CI profile and, as a
+// full-screen overlay, swallows every click.
+async function suppressOllamaOverlay(win) {
+  await win.evaluate(() => {
+    const kill = () => {
+      const o = document.getElementById('ollama-consent-overlay');
+      if (o) o.remove();
+    };
+    kill();
+    new MutationObserver(kill).observe(document.documentElement, { childList: true, subtree: true });
+  });
 }
 
 async function openInViewer(win, filePath, name) {
