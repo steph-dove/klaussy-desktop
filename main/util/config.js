@@ -51,6 +51,18 @@ function saveConfig(config) {
 // (which may still be in-flight when Cmd+Q fires) has a chance to land.
 function flushSaveConfig() { return _saveConfigQueue; }
 
+// Remote-execution keys (see util/nemesis-client): nemesisEnabled routes agent
+// tabs to a Nemesis8 gateway; nemesisRemote (URL), nemesisToken, nemesisModel.
+function getNemesisConfig() {
+  const cfg = loadConfig();
+  return {
+    enabled: !!cfg.nemesisEnabled,
+    remote: cfg.nemesisRemote || '',
+    token: cfg.nemesisToken || '',
+    model: cfg.nemesisModel || '',
+  };
+}
+
 // Migrations from version n-1 to version n. Each function mutates the passed
 // config object in place and MUST be idempotent — we only run each migration
 // once, but migrations can fail mid-way and we'd rather re-run cleanly than
@@ -151,6 +163,7 @@ module.exports = {
   loadConfig,
   saveConfig,
   flushSaveConfig,
+  getNemesisConfig,
   runConfigMigrations,
   CURRENT_SCHEMA_VERSION,
 };

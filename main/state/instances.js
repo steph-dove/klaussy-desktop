@@ -13,7 +13,8 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
-const { loadConfig, saveConfig } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisConfig } = require('../util/config');
+const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { claudeProjectDir } = require('../util/claude-paths');
@@ -304,48 +305,64 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   let session = { release: () => {} };
   let promptFile = null;  // staged-prompt tempfile (cross-agent handoff), removed on exit
   let needsEnter = false; // codex-style TUIs pre-fill but wait for an Enter
-  if (mode === 'shell') {
-    agentCmd = null;
+  let ptyProc;
+
+  // When enabled, agent tabs run one-shot against a remote Nemesis8 gateway via
+  // a node-pty-shaped bridge instead of a local CLI; plain shells stay local.
+  const nemesisCfg = getNemesisConfig();
+  const useNemesis = nemesisCfg.enabled && isAgentMode(mode);
+
+  if (useNemesis) {
+    ptyProc = nemesis.createNemesisTerminal({
+      worktreePath,
+      model: nemesisCfg.model || (config.agentModel || {})[mode] || '',
+      initialPrompt: initialPrompt || null,
+      resumeSessionId: resumeSessionId || null,
+    });
   } else {
-    const provider = getProvider(mode) || getProvider('claude');
-    const bin = binFor(provider.id, config);
-    // Gated agents (Gemini) prompt once per worktree for trust + file access.
-    // If the user cancels, don't spawn at all.
-    const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
-    if (!consent.allowed) return { cancelled: true };
-    // Token-rotation guard: warn before a second concurrent Codex session.
-    session = beginSession(provider.id);
-    if (!session.ok) return { cancelled: true };
-    const model = (config.agentModel || {})[provider.id] || '';
-    const sessionDirs = sessionSiblingWorktrees(worktreePath);
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs });
-    // Cross-agent resume handoff: seed the incoming agent with a brief distilled
-    // from the prior (different-agent) session, passed at spawn rather than
-    // typed in (see util/agent-prompt + state/session-handoff).
-    if (initialPrompt) {
-      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
-      agentCmd = staged.agentCmd;
-      promptFile = staged.promptFile;
-      needsEnter = staged.needsEnter;
+    if (mode === 'shell') {
+      agentCmd = null;
+    } else {
+      const provider = getProvider(mode) || getProvider('claude');
+      const bin = binFor(provider.id, config);
+      // Gated agents (Gemini) prompt once per worktree for trust + file access.
+      // If the user cancels, don't spawn at all.
+      const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
+      if (!consent.allowed) return { cancelled: true };
+      // Token-rotation guard: warn before a second concurrent Codex session.
+      session = beginSession(provider.id);
+      if (!session.ok) return { cancelled: true };
+      const model = (config.agentModel || {})[provider.id] || '';
+      const sessionDirs = sessionSiblingWorktrees(worktreePath);
+      agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs });
+      // Cross-agent resume handoff: seed the incoming agent with a brief distilled
+      // from the prior (different-agent) session, passed at spawn rather than
+      // typed in (see util/agent-prompt + state/session-handoff).
+      if (initialPrompt) {
+        const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
+        agentCmd = staged.agentCmd;
+        promptFile = staged.promptFile;
+        needsEnter = staged.needsEnter;
+      }
     }
-  }
 
-  const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
-  const ptyProc = pty.spawn(userShell, args, {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
-    cwd: worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
-  });
+    const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
+    ptyProc = pty.spawn(userShell, args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd: worktreePath,
+      env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
+    });
 
-  // codex pre-fills its positional handoff prompt but waits for an Enter to
-  // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is
-  // up, with a retry for a slow boot; harmless for agents that already ran it.
-  if (needsEnter) {
-    const sendEnter = () => { try { if (instances.get(id)) ptyProc.write('\r'); } catch { /* gone */ } };
-    setTimeout(sendEnter, 3500);
-    setTimeout(sendEnter, 8000);
+    // codex pre-fills its positional handoff prompt but waits for an Enter to
+    // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is
+    // up, with a retry for a slow boot; harmless for agents that already ran it.
+    if (needsEnter) {
+      const sendEnter = () => { try { if (instances.get(id)) ptyProc.write('\r'); } catch { /* gone */ } };
+      setTimeout(sendEnter, 3500);
+      setTimeout(sendEnter, 8000);
+    }
   }
 
   // The base repo this worktree belongs to — used to group/filter worktrees by
