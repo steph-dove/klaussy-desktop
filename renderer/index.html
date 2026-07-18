@@ -121,6 +121,15 @@
         <button id="btn-manage-sessions" type="button" title="Manage sessions — review and delete sessions and their worktrees">Manage sessions</button>
       </div>
 
+      <!-- Shown when the repo selected above has no Klaussy commit review gate
+           installed; one click writes the hooks via the same installer the
+           app uses automatically. Hidden otherwise. -->
+      <div id="commit-gate-banner" hidden>
+        <span class="commit-gate-icon" aria-hidden="true">&#128272;</span>
+        <span class="commit-gate-text">This repo has no commit review gate.</span>
+        <button id="btn-enable-commit-gate" type="button">Enable Commit Review Gate</button>
+      </div>
+
       <div id="task-list"></div>
 
       <div id="sidebar-footer">
@@ -750,6 +759,7 @@
   <script src="word-complete.js"></script>
   <script src="about-log.js"></script>
   <script src="searchable-select.js"></script>
+  <script src="commit-gate-banner.js"></script>
   <script src="project-switcher.js"></script>
   <script src="agent-router.js"></script>
   <script src="agents-panel.js"></script>
