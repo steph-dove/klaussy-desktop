@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('klaus', {
     addProject: (folderPath) => ipcRenderer.invoke('add-project', { folderPath }),
     removeProject: (projectPath) => ipcRenderer.invoke('remove-project', { projectPath }),
     switchProject: (projectPath) => ipcRenderer.invoke('switch-project', { projectPath }),
+    hookStatus: (repoPath) => ipcRenderer.invoke('repo:hook-status', { repoPath }),
+    installHook: (repoPath) => ipcRenderer.invoke('repo:install-hook', { repoPath }),
     listWorktrees: () => ipcRenderer.invoke('list-worktrees'),
     discoverRepos: () => ipcRenderer.invoke('discover-repos'),
     discoverWorktrees: () => ipcRenderer.invoke('discover-worktrees'),

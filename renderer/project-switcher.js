@@ -109,6 +109,8 @@ window.ProjectSwitcher = (function () {
     });
 
     filterTaskList();
+    // Reflect the commit-gate state for the selected repo (hidden for "All").
+    if (window.CommitGateBanner) window.CommitGateBanner.update(current);
   }
 
   function filterTaskList() {
@@ -125,6 +127,7 @@ window.ProjectSwitcher = (function () {
     var repo = repoSelect.value || null;
     AppState.selectedRepoFilter = repo;
     filterTaskList();
+    if (window.CommitGateBanner) window.CommitGateBanner.update(repo);
     // Picking a specific repo also makes it the active source repo for the
     // New Session modal (default source, base-branch list, suggestions).
     if (repo) {
