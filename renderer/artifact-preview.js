@@ -26,17 +26,24 @@
     return classify(filePath) !== null;
   }
 
+  // Egress-blocking CSP prepended to every previewed document; inline scripts
+  // stay allowed so live scripted previews still work.
+  var CSP_META = '<meta http-equiv="Content-Security-Policy" content="' +
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; " +
+    "img-src data:; font-src data:" +
+    '">';
+
   // Document for the iframe. HTML passes through; a bare SVG gets wrapped in
   // minimal centering HTML since it isn't a document on its own.
   function buildDoc(kind, content) {
     var body = content == null ? '' : String(content);
     if (kind === 'svg') {
-      return '<!doctype html><meta charset="utf-8">' +
+      return '<!doctype html><meta charset="utf-8">' + CSP_META +
         '<style>html,body{margin:0;height:100%}' +
         'body{display:flex;align-items:center;justify-content:center;background:#fff}' +
         'svg{max-width:100%;max-height:100%}</style>' + body;
     }
-    return body;
+    return CSP_META + body;
   }
 
   // (Re)render into `container`: Markdown inline as sanitized HTML, html/svg in

@@ -229,6 +229,8 @@ window.FileBrowser = (function () {
   // stays live.
 
   var ARTIFACT_MIN_PANE = 200; // px floor for either side of the split
+  // Module-global (not per-tab) on purpose: the preview pane is a single shared
+  // element, so a divider drag sets one width that every tab's split reuses.
   var artifactPaneWidth = 0;   // last dragged pane width in px; 0 = use default
 
   function artifactKind(filePath) {
