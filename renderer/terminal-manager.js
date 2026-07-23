@@ -35,6 +35,7 @@ window.TerminalManager = (function () {
 
   function addTaskToUI(task) {
     var id = task.id;
+    if (tasks.has(id)) { switchToTask(id); return; }
     var name = task.name;
     var worktreePath = task.worktreePath;
     var branch = task.branch;
