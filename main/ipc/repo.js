@@ -203,13 +203,23 @@ ipcMain.handle('repo:install-hook', (_event, { repoPath }) => {
     const hook = require('../state/precommit-hook');
     // Enabling is explicit consent to the gate, so re-enable review if it was
     // turned off — otherwise the hook installs comment-cleanup-only (or no-ops).
+    // installHookForRepo reads the pref from disk, so flip it before install.
     const config = loadConfig();
-    if (config.preCommitReview === false) {
+    const reviewWasOff = config.preCommitReview === false;
+    if (reviewWasOff) {
       config.preCommitReview = true;
       saveConfig(config);
     }
     hook.installHookForRepo(repoPath);
-    return { ok: true, installed: hook.isHookInstalledForRepo(repoPath) };
+    const installed = hook.isHookInstalledForRepo(repoPath);
+    // installHookForRepo swallows errors and no-ops on a non-git path, so revert
+    // the global pref flip when the hook didn't actually land.
+    if (!installed && reviewWasOff) {
+      const revert = loadConfig();
+      revert.preCommitReview = false;
+      saveConfig(revert);
+    }
+    return { ok: true, installed };
   } catch (e) {
     return { ok: false, error: e.message };
   }

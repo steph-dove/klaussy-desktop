@@ -20,6 +20,10 @@ window.CommitGateBanner = (function () {
   function update(repoPath) {
     if (!el || !btn) return;
     if (!repoPath) { hide(); return; }
+    // Disarm before awaiting so a click during the in-flight window can't install
+    // to the previously-selected repo; the fresh status re-arms both below.
+    shownRepo = null;
+    btn.disabled = true;
     window.klaus.repo.hookStatus(repoPath).then(function (status) {
       // Stale response — the selection moved on while we were awaiting.
       if (AppState.selectedRepoFilter !== repoPath) return;
