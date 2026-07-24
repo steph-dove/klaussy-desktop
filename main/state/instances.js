@@ -23,6 +23,7 @@ const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-provi
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
 const { stageInitialPrompt } = require('../util/agent-prompt');
+const { agentExitAction } = require('../util/agent-exit');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -432,23 +433,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
-  ptyProc.onExit(({ exitCode }) => {
-    clearIdleTimer(instance);
-    session.release(); // free the concurrency slot (Codex token-rotation guard)
-    if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
-    // If this was a Claude session, auto-convert to shell in-place — but
-    // only for natural exits. An explicit kill-task sets `killed`, and
-    // restart-task sets `restarting`; neither should spawn a shell we'd
-    // lose track of (kill-task already deleted the instances entry; the
-    // orphan shell would have no Map entry and nothing could kill it).
-    if (isAgentMode(instance.mode) && !_isQuitting()
-        && !instance.killed && !instance.restarting) {
-      convertInstanceToShell(instance);
-      return;
-    }
-    instance.alive = false;
-    sendToTerminalSubscribers(`terminal-exit-${id}`, exitCode);
-  });
+  ptyProc.onExit(makeAgentExitHandler(instance, ptyProc, { session, promptFile }));
 
   // Start CI polling for this task (dep-injected so ci-poll.js can own it
   // in a later phase without a circular import between state modules).
@@ -457,7 +442,35 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   return { id, name, worktreePath, branch, mode, repoPath };
 }
 
-function convertInstanceToShell(inst) {
+// Shared by spawn and restart: a copy that dropped the quit/kill/restart guards
+// was the original orphaned-shell bug.
+function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
+  const id = instance.id;
+  return ({ exitCode } = {}) => {
+    clearIdleTimer(instance);
+    if (session) session.release(); // free the concurrency slot (Codex token-rotation guard)
+    if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
+    const action = agentExitAction({
+      isCurrentPty: !instance.pty || instance.pty === ptyProc,
+      isAgent: isAgentMode(instance.mode),
+      quitting: _isQuitting(),
+      killed: !!instance.killed,
+      restarting: !!instance.restarting,
+    });
+    if (action === 'ignore') return;
+    if (action === 'convert') { convertInstanceToShell(instance, exitCode); return; }
+    instance.alive = false;
+    sendToTerminalSubscribers(`terminal-exit-${id}`, exitCode);
+  };
+}
+
+function convertInstanceToShell(inst, exitCode) {
+  const uptimeS = inst.spawnTime ? Math.round((Date.now() - inst.spawnTime) / 1000) : null;
+  // The CLI's own exit reason isn't captured, so a crash, an auth failure, and
+  // a user typing /exit all look alike here.
+  console.log(`[agent-exit] ${inst.mode} in "${inst.name}" exited`
+    + ` (code=${exitCode == null ? '?' : exitCode}${uptimeS == null ? '' : `, uptime=${uptimeS}s`})`
+    + ' — converting terminal to shell');
   sendIdleNotification(inst, `${displayNameFor(inst.originalMode || inst.mode)} has exited`);
   const id = inst.id;
   const userShell = defaultShell();
@@ -547,6 +560,7 @@ module.exports = {
   clearIdleTimer,
   spawnInWorktree,
   convertInstanceToShell,
+  makeAgentExitHandler,
   sendCIFlipNotification,
   isAnyWindowFocused,
   setDeps,
