@@ -54,6 +54,14 @@ window.AppUtils = (function () {
     return p ? p.displayName : (mode || 'Agent');
   }
 
+  // No default-provider fallback here, unlike the sidebar's Resume target: that
+  // would label a deliberately-opened shell with an agent that never ran.
+  function exitedAgent(task) {
+    if (!task || task.mode !== 'shell') return null;
+    var prior = task.resumeAgent;
+    return (prior && prior !== 'shell') ? prior : null;
+  }
+
   return {
     escHtml: escHtml,
     escAttr: escAttr,
@@ -61,5 +69,6 @@ window.AppUtils = (function () {
     iconColor: iconColor,
     modeShortLabel: modeShortLabel,
     modeDisplayName: modeDisplayName,
+    exitedAgent: exitedAgent,
   };
 })();
