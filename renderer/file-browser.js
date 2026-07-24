@@ -210,9 +210,121 @@ window.FileBrowser = (function () {
     var tab = tabs[activeTabIndex];
     if (!tab || !isMarkdownPath(tab.filePath)) return;
     tab.previewMode = !tab.previewMode;
+    // In-place preview and the split pane both own .file-viewer-body's layout,
+    // so they're mutually exclusive — turning one on turns the other off.
+    if (tab.previewMode && tab.splitMode) {
+      tab.splitMode = false;
+      applySplitMode(tab);
+      updateSplitButton(tab);
+    }
     applyPreviewMode(tab);
     updatePreviewButton(tab);
     if (!tab.previewMode && currentEditor) currentEditor.focus();
+  }
+
+  // ---- Live artifact split preview ----
+  //
+  // A rendered preview beside Monaco (the markdown Preview button swaps in
+  // place instead). Per-tab tab.splitMode; refreshes on save/reload so it
+  // stays live.
+
+  var ARTIFACT_MIN_PANE = 200; // px floor for either side of the split
+  // Module-global (not per-tab) on purpose: the preview pane is a single shared
+  // element, so a divider drag sets one width that every tab's split reuses.
+  var artifactPaneWidth = 0;   // last dragged pane width in px; 0 = use default
+
+  function artifactKind(filePath) {
+    return window.ArtifactPreview ? window.ArtifactPreview.classify(filePath) : null;
+  }
+
+  function splitEls() {
+    if (!fileViewerView) return {};
+    return {
+      body: fileViewerView.querySelector('.file-viewer-body'),
+      pane: fileViewerView.querySelector('.file-artifact-preview'),
+      handle: fileViewerView.querySelector('.artifact-split-handle'),
+    };
+  }
+
+  // Render the tab's current buffer into the (single, shared) preview pane.
+  // No-op unless the tab is in split mode and previewable — callers don't need
+  // to pre-check.
+  function refreshArtifactForTab(tab) {
+    var pane = fileViewerView && fileViewerView.querySelector('.file-artifact-preview');
+    if (!pane || !tab || !tab.splitMode || !tab.model || tab.model.isDisposed()) return;
+    var kind = artifactKind(tab.filePath);
+    if (!kind || !window.ArtifactPreview) return;
+    window.ArtifactPreview.render(pane, kind, tab.model.getValue(), tab.filePath);
+  }
+
+  function updateSplitButton(tab) {
+    var btn = fileViewerView && fileViewerView.querySelector('.file-viewer-split-btn');
+    if (!btn) return;
+    var show = !!(tab && artifactKind(tab.filePath));
+    btn.hidden = !show;
+    btn.classList.toggle('active', !!(tab && tab.splitMode));
+  }
+
+  function applySplitMode(tab) {
+    var els = splitEls();
+    if (!els.body || !els.pane || !els.handle) return;
+    var on = !!(tab && tab.splitMode && artifactKind(tab.filePath));
+    els.body.classList.toggle('split-preview', on);
+    els.pane.hidden = !on;
+    els.handle.hidden = !on;
+    if (on) {
+      els.pane.style.flex = artifactPaneWidth ? '0 0 ' + artifactPaneWidth + 'px' : '0 0 50%';
+      refreshArtifactForTab(tab);
+    } else if (window.ArtifactPreview) {
+      window.ArtifactPreview.clear(els.pane);
+    }
+  }
+
+  function toggleSplitMode() {
+    var tab = tabs[activeTabIndex];
+    if (!tab || !artifactKind(tab.filePath)) return;
+    tab.splitMode = !tab.splitMode;
+    // Split and the in-place markdown preview both own .file-viewer-body's
+    // layout, so they're mutually exclusive — turning one on turns the other off.
+    if (tab.splitMode && tab.previewMode) {
+      tab.previewMode = false;
+      applyPreviewMode(tab);
+      updatePreviewButton(tab);
+    }
+    applySplitMode(tab);
+    updateSplitButton(tab);
+    // Monaco has automaticLayout, but nudge it so it reflows into the narrower
+    // column right away rather than waiting for the next natural resize.
+    window.dispatchEvent(new Event('resize'));
+    if (!tab.splitMode && currentEditor) currentEditor.focus();
+  }
+
+  // Drag the divider between Monaco and the artifact pane. Mirrors the diff
+  // panel's resize (app.js): clamp both sides to a floor, then fire a window
+  // resize on release so Monaco relayouts into its new width.
+  function setupSplitResize() {
+    var els = splitEls();
+    if (!els.handle || !els.body) return;
+    // Document listeners live only for the duration of a drag, so re-running
+    // this on a viewer rebuild leaves no stale listeners behind.
+    function onMove(e) {
+      var rect = els.body.getBoundingClientRect();
+      var max = Math.max(ARTIFACT_MIN_PANE, rect.width - ARTIFACT_MIN_PANE);
+      artifactPaneWidth = Math.max(ARTIFACT_MIN_PANE, Math.min(rect.right - e.clientX, max));
+      els.pane.style.flex = '0 0 ' + artifactPaneWidth + 'px';
+    }
+    function onUp() {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      els.body.classList.remove('resizing');
+      window.dispatchEvent(new Event('resize'));
+    }
+    els.handle.addEventListener('mousedown', function (e) {
+      els.body.classList.add('resizing');
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      e.preventDefault();
+    });
   }
 
   // Map file extensions to their run commands. Only the small set of languages
@@ -448,12 +560,15 @@ window.FileBrowser = (function () {
         '<span class="file-viewer-problems-badge" hidden></span>' +
         '<button class="file-viewer-run-btn" title="Run" hidden>▶</button>' +
         '<button class="file-viewer-preview-btn" title="Toggle Markdown preview" hidden>Preview</button>' +
+        '<button class="file-viewer-split-btn" title="Toggle live preview beside the editor" hidden>Split</button>' +
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
         '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
       '</div>' +
       '<div class="file-viewer-body">' +
         '<div class="file-editor-monaco"></div>' +
         '<div class="file-md-preview" tabindex="0"></div>' +
+        '<div class="artifact-split-handle" hidden></div>' +
+        '<div class="file-artifact-preview" hidden></div>' +
       '</div>' +
       '<div class="file-viewer-statusbar">' +
         '<span class="statusbar-left">' +
@@ -479,8 +594,12 @@ window.FileBrowser = (function () {
     fileViewerView.querySelector('.file-viewer-save-btn').addEventListener('click', saveFile);
     fileViewerView.querySelector('.file-viewer-run-btn').addEventListener('click', runCurrentFile);
     fileViewerView.querySelector('.file-viewer-preview-btn').addEventListener('click', togglePreviewMode);
+    fileViewerView.querySelector('.file-viewer-split-btn').addEventListener('click', toggleSplitMode);
+    setupSplitResize();
     if (window.MarkdownPreview) {
       window.MarkdownPreview.attachLinkInterceptor(fileViewerView.querySelector('.file-md-preview'));
+      // The split pane can also show markdown; delegate its links once too.
+      window.MarkdownPreview.attachLinkInterceptor(fileViewerView.querySelector('.file-artifact-preview'));
     }
 
     // Tab bar: click switches, close X closes, middle-click closes.
@@ -862,6 +981,8 @@ window.FileBrowser = (function () {
     updateRunButtonForTab(tab.filePath);
     updatePreviewButton(tab);
     applyPreviewMode(tab);
+    updateSplitButton(tab);
+    applySplitMode(tab);
     refreshDirtyState();
     updateProblemsBadge(monaco, tab.model);
     updateStatusDiagnostics(monaco, tab.model);
@@ -969,6 +1090,7 @@ window.FileBrowser = (function () {
       }
     }, 2000);
     refreshDirtyState();
+    refreshArtifactForTab(tab);
     if (window.DiffPanel && window.DiffPanel.isVisible()) window.DiffPanel.refresh();
     if (window.LspClient) window.LspClient.notifyDidSave(tab.filePath);
     refreshGitGutter();
@@ -1356,6 +1478,9 @@ window.FileBrowser = (function () {
     if (savedPos && currentEditor) currentEditor.setPosition(savedPos);
     if (savedScroll != null && currentEditor) currentEditor.setScrollTop(savedScroll);
     refreshDirtyState();
+    // Agent/external write landed on disk and we pulled it into the buffer —
+    // keep the live preview in sync (only matters for the visible active tab).
+    if (tabIndex === activeTabIndex) refreshArtifactForTab(tab);
   }
 
   async function checkExternalMod(changedFiles) {
