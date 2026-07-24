@@ -37,6 +37,23 @@ function authHeaders(token) {
   return token ? { authorization: 'Bearer ' + token } : {};
 }
 
+// True when a token would ride an unencrypted http:// connection to a
+// non-loopback host — the Bearer header leaks in cleartext. http to localhost
+// is fine (never leaves the box).
+function isInsecureRemote(base, token) {
+  if (!token || !base || !/^http:\/\//i.test(base)) return false;
+  let host;
+  try { host = new URL(base).hostname; } catch { return false; }
+  return host !== '127.0.0.1' && host !== 'localhost' && host !== '::1';
+}
+
+// Route a spawn to the remote gateway only when the integration is enabled AND
+// the tab runs an agent (plain shells stay local). `isAgentMode` is injected so
+// this stays pure and the routing choice can be pinned without a pty.
+function shouldUseNemesis(cfg, mode, isAgentMode) {
+  return !!(cfg && cfg.enabled) && isAgentMode(mode);
+}
+
 function errMsg(err) {
   return (err && err.message) || String(err);
 }
@@ -51,9 +68,9 @@ function parseInputChunk(buffer, chunk) {
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
     if (ch === '\x1b') {
-      // Drop an ANSI escape sequence (arrows, Home/End, etc.) whole rather than
-      // leaking its "[D" tail into the line. CSI/SS3 run until a final byte in
-      // 0x40-0x7e; a bare ESC or one split across chunks just gets swallowed.
+      // Drop an ANSI escape sequence (arrows, Home/End) whole — CSI/SS3 run until
+      // a final byte in 0x40-0x7e. Stateless between chunks, so a bare ESC is
+      // swallowed but a CSI split on a chunk boundary leaks its "[D" tail (rare).
       if (s[i + 1] === '[' || s[i + 1] === 'O') {
         i += 2;
         while (i < s.length && !(s[i] >= '@' && s[i] <= '~')) i++;
@@ -172,10 +189,11 @@ function createNemesisTerminal(opts = {}) {
     for (const cb of dataCbs) { try { cb(s); } catch { /* subscriber threw */ } }
   }
 
-  function fireExit(code) {
+  function fireExit(code, extra) {
     if (!alive) return;
     alive = false;
-    for (const cb of exitCbs) { try { cb({ exitCode: code }); } catch { /* subscriber threw */ } }
+    const payload = { exitCode: code, ...extra };
+    for (const cb of exitCbs) { try { cb(payload); } catch { /* subscriber threw */ } }
   }
 
   function writePrompt() {
@@ -215,11 +233,19 @@ function createNemesisTerminal(opts = {}) {
   setTimeout(async () => {
     emit(C.cyan + 'Nemesis8 remote session' + C.reset +
          C.dim + (worktreePath ? '  (' + worktreePath + ')' : '') + C.reset + '\r\n');
+    const { remote, token } = getNemesisConfig();
+    if (isInsecureRemote(normalizeBaseUrl(remote), token)) {
+      emit(C.red + 'warning: the nemesis token is sent unencrypted over http:// — ' +
+           'use an https gateway or a trusted tunnel' + C.reset + '\r\n');
+    }
     const h = await client.health();
     if (!alive) return;
     if (!h || !h.ok) {
       emit(C.red + 'Cannot reach nemesis8 gateway: ' + ((h && h.error) || 'unknown') + C.reset + '\r\n');
-      fireExit(1); // instances.js falls back to a local shell on this exit
+      // Distinct signal so instances.js keeps the tab in an exited/error state
+      // rather than silently dropping to a local shell in a worktree the user
+      // meant to drive remotely (a misleading "<agent> has exited").
+      fireExit(1, { nemesisUnreachable: true });
       return;
     }
     emit(C.dim + 'connected' + (h.version ? ' · v' + h.version : '') +
@@ -271,6 +297,8 @@ function createNemesisTerminal(opts = {}) {
 module.exports = {
   normalizeBaseUrl,
   authHeaders,
+  isInsecureRemote,
+  shouldUseNemesis,
   parseInputChunk,
   health,
   complete,

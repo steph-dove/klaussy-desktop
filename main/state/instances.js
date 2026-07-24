@@ -310,7 +310,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   // When enabled, agent tabs run one-shot against a remote Nemesis8 gateway via
   // a node-pty-shaped bridge instead of a local CLI; plain shells stay local.
   const nemesisCfg = getNemesisConfig();
-  const useNemesis = nemesisCfg.enabled && isAgentMode(mode);
+  const useNemesis = nemesis.shouldUseNemesis(nemesisCfg, mode, isAgentMode);
 
   if (useNemesis) {
     ptyProc = nemesis.createNemesisTerminal({
@@ -449,10 +449,21 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
-  ptyProc.onExit(({ exitCode }) => {
+  ptyProc.onExit((info) => {
+    const { exitCode } = info || {};
     clearIdleTimer(instance);
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
+    // A Nemesis8 bridge that can't reach its gateway exits with a distinct
+    // signal. Skip the agent→shell fallback (a misleading "<agent> has exited"
+    // + a local shell) — notify the real cause and leave the tab exited.
+    if (info && info.nemesisUnreachable) {
+      const label = displayNameFor(instance.originalMode || instance.mode);
+      sendIdleNotification(instance, `${label}: nemesis8 gateway unreachable`);
+      instance.alive = false;
+      sendToTerminalSubscribers(`terminal-exit-${id}`, exitCode);
+      return;
+    }
     // If this was a Claude session, auto-convert to shell in-place — but
     // only for natural exits. An explicit kill-task sets `killed`, and
     // restart-task sets `restarting`; neither should spawn a shell we'd

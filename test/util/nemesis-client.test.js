@@ -29,6 +29,26 @@ test('authHeaders only sets Authorization when a token is present', () => {
   assert.deepEqual(nemesis.authHeaders(undefined), {});
 });
 
+test('isInsecureRemote flags a token over http to a non-loopback host only', () => {
+  // token + http + remote host: the Bearer header rides in cleartext
+  assert.equal(nemesis.isInsecureRemote('http://gw.example.com:9801', 'tok'), true);
+  // loopback over http is fine — never leaves the box
+  assert.equal(nemesis.isInsecureRemote('http://127.0.0.1:9801', 'tok'), false);
+  assert.equal(nemesis.isInsecureRemote('http://localhost:9801', 'tok'), false);
+  // https is encrypted; no token means nothing to leak
+  assert.equal(nemesis.isInsecureRemote('https://gw.example.com:9801', 'tok'), false);
+  assert.equal(nemesis.isInsecureRemote('http://gw.example.com:9801', ''), false);
+  assert.equal(nemesis.isInsecureRemote('', 'tok'), false);
+});
+
+test('shouldUseNemesis routes only when enabled and the tab is an agent', () => {
+  const isAgent = (m) => m === 'claude' || m === 'codex';
+  assert.equal(nemesis.shouldUseNemesis({ enabled: true }, 'claude', isAgent), true);
+  assert.equal(nemesis.shouldUseNemesis({ enabled: true }, 'shell', isAgent), false);
+  assert.equal(nemesis.shouldUseNemesis({ enabled: false }, 'claude', isAgent), false);
+  assert.equal(nemesis.shouldUseNemesis(null, 'claude', isAgent), false);
+});
+
 test('parseInputChunk accumulates printable chars and emits a line on Enter', () => {
   let r = nemesis.parseInputChunk('', 'hi');
   assert.equal(r.buf, 'hi');
@@ -244,11 +264,14 @@ test('createNemesisTerminal exits non-zero when the gateway is unreachable', asy
   try {
     const term = nemesis.createNemesisTerminal({ worktreePath: '/wt' });
     let out = '';
-    let exitCode = null;
+    let exit = null;
     term.onData((d) => { out += d; });
-    term.onExit(({ exitCode: c }) => { exitCode = c; });
-    await waitFor(() => exitCode !== null);
-    assert.equal(exitCode, 1);
+    term.onExit((e) => { exit = e; });
+    await waitFor(() => exit !== null);
+    assert.equal(exit.exitCode, 1);
+    // distinct signal so instances.js keeps the tab exited instead of dropping
+    // to a local shell (a misleading "<agent> has exited")
+    assert.equal(exit.nemesisUnreachable, true);
     assert.match(out, /Cannot reach nemesis8 gateway/);
   } finally { restore(); }
 });
