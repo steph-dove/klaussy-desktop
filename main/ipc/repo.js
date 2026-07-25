@@ -219,7 +219,7 @@ ipcMain.handle('repo:install-hook', (_event, { repoPath }) => {
       revert.preCommitReview = false;
       saveConfig(revert);
     }
-    return { ok: true, installed };
+    return { ok: installed, installed, error: installed ? undefined : 'hook install failed' };
   } catch (e) {
     return { ok: false, error: e.message };
   }
