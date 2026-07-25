@@ -9,7 +9,8 @@ const crypto = require('crypto');
 const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
-const { loadConfig, saveConfig } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
+const nemesis = require('../util/nemesis-client');
 const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { claudeProjectDir } = require('../util/claude-paths');
@@ -1070,37 +1071,42 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   let session = { release: () => {} };
   let promptFile = null;     // staged-prompt tempfile, removed on exit
   let needsEnter = false;    // codex-style TUIs pre-fill but wait for Enter
-  if (isAgentMode(mode)) {
-    const config = loadConfig();
-    const provider = getProvider(mode);
-    const bin = binFor(provider.id, config);
-    const consent = ensureWorktreeConsentSync(provider.id, inst.worktreePath);
-    if (!consent.allowed) return { cancelled: true };
-    // Token-rotation guard: warn before a second concurrent Codex session.
-    session = beginSession(provider.id);
-    if (!session.ok) return { cancelled: true };
-    const model = (config.agentModel || {})[provider.id] || '';
-    const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
-    let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model, sessionDirs });
-    // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
-    // in after boot — shared staging with the cross-agent session-resume
-    // handoff (see util/agent-prompt).
-    const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`, userShell);
-    agentCmd = staged.agentCmd;
-    promptFile = staged.promptFile;
-    needsEnter = staged.needsEnter;
-    args = shellRunCmdArgs(userShell, agentCmd);
-  } else {
-    args = shellLoginArgs(userShell);
-  }
+  let ptyProc;
+  {
+    if (isAgentMode(mode)) {
+      const config = loadConfig();
+      const provider = getProvider(mode);
+      const bin = binFor(provider.id, config);
+      // Nemesis8 sub-tab → `nemesis8 interactive` from the picked gateway profile.
+      const nemProfile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
+      const consent = ensureWorktreeConsentSync(provider.id, inst.worktreePath);
+      if (!consent.allowed) return { cancelled: true };
+      // Token-rotation guard: warn before a second concurrent Codex session.
+      session = beginSession(provider.id);
+      if (!session.ok) return { cancelled: true };
+      const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
+      const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
+      let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model, sessionDirs, profile: nemProfile });
+      // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
+      // in after boot — shared staging with the cross-agent session-resume
+      // handoff (see util/agent-prompt).
+      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`, userShell);
+      agentCmd = staged.agentCmd;
+      promptFile = staged.promptFile;
+      needsEnter = staged.needsEnter;
+      args = shellRunCmdArgs(userShell, agentCmd);
+    } else {
+      args = shellLoginArgs(userShell);
+    }
 
-  const ptyProc = pty.spawn(userShell, args, {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
-    cwd: inst.worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
-  });
+    ptyProc = pty.spawn(userShell, args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd: inst.worktreePath,
+      env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
+    });
+  }
 
   const sub = { subId, label: label || displayNameFor(mode || 'shell'), pty: ptyProc, alive: true, mode: mode || 'shell' };
   inst.subTerminals.push(sub);
@@ -1126,6 +1132,51 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   });
 
   return { subId, label: sub.label };
+});
+
+// One-click gateway setup in a Klaussy terminal tab — a real TTY, which the
+// interactive `nemesis8 login` needs: spawn a shell, focus it, type the script.
+ipcMain.handle('nemesis-setup-local', (_event, opts = {}) => {
+  const { nemesisSetupScript, nemesisRunCmd } = require('../util/nemesis-setup');
+  const token = String(opts.token || '').trim() || crypto.randomBytes(24).toString('hex');
+  const provider = String(opts.provider || '').trim();
+
+  const { ext, content } = nemesisSetupScript(process.platform, provider, token);
+  const scriptPath = path.join(os.tmpdir(), `klaussy-nemesis-setup-${Date.now()}.${ext}`);
+  try {
+    // The script inlines the gateway token, so keep it owner-only (it's run via
+    // `sh "<path>"`, so it needs no +x) and remove it once the shell has read it.
+    fs.writeFileSync(scriptPath, content, { mode: 0o600 });
+  } catch (err) {
+    return { error: 'could not write setup script: ' + err.message };
+  }
+  setTimeout(() => { fs.unlink(scriptPath, () => {}); }, 30000);
+
+  let task;
+  try {
+    // Run in a neutral dir (not home — that could itself be a git repo and
+    // trip repo-intel/hook install). nemesis8 uses ~/.nemesis8 regardless of cwd.
+    task = spawnInWorktree('Nemesis8 setup', os.tmpdir(), '', 'shell');
+  } catch (err) {
+    return { error: 'could not open a terminal: ' + err.message };
+  }
+  if (!task || !task.id) return { error: 'could not open a terminal' };
+
+  // Type the run command into the shell. The pty buffers input, so a single
+  // write lands whether or not the prompt has painted yet.
+  const runCmd = nemesisRunCmd(process.platform, scriptPath);
+  const typeCmd = () => {
+    const inst = instances.get(task.id);
+    if (inst && inst.pty && inst.alive) { try { inst.pty.write(runCmd + '\r'); } catch { /* gone */ } }
+  };
+  setTimeout(typeCmd, 1000);
+
+  // Hand the new tab to the main window (this IPC may come from Preferences).
+  const win = getMainWindow();
+  if (win && !win.isDestroyed()) {
+    try { win.webContents.send('open-external-task', task); win.focus(); } catch { /* window gone */ }
+  }
+  return { ok: true, token, taskId: task.id };
 });
 
 ipcMain.handle('kill-sub-terminal', (_event, { taskId, subId }) => {
@@ -1178,12 +1229,15 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   const config = loadConfig();
   const restartMode = isAgentMode(inst.originalMode) ? inst.originalMode
     : (isAgentMode(inst.mode) ? inst.mode : 'claude');
+
   const provider = getProvider(restartMode);
   const bin = binFor(provider.id, config);
+  // Nemesis8 restart → `nemesis8 interactive` from the picked gateway profile.
+  const nemProfile = nemesis.shouldUseNemesis(restartMode) ? getNemesisProfile(restartMode) : null;
   // The task already ran this agent, so consent is normally already stored
   // (no re-prompt); we just carry the granted trust flag into the respawn.
   const trust = ensureWorktreeConsentSync(provider.id, inst.worktreePath).trust;
-  const model = (config.agentModel || {})[provider.id] || '';
+  const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
 
   // Hand off the concurrency slot: free the slot the old (just-killed) process
   // held, then re-acquire for the respawn. Releasing first means a plain
@@ -1211,7 +1265,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
       ? new Set() : snapshotSessionIds(inst.worktreePath);
     inst.claudeSessionId = resumeId || null;
   } else {
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model });
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model, profile: nemProfile });
     inst.preSpawnSessionIds = new Set();
     inst.claudeSessionId = null;
   }

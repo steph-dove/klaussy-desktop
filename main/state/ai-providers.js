@@ -97,6 +97,28 @@ function quotedSessionDirs(sessionDirs) {
     .map((d) => (isWin ? `'${d.replace(/'/g, "''")}'` : JSON.stringify(d)));
 }
 
+// A Nemesis8 gateway URL points at another machine (vs localhost/empty, which
+// runs local Docker). Used to decide whether `interactive` needs --remote.
+function nemesisIsRemoteHost(remote) {
+  if (!remote) return false;
+  let host;
+  try {
+    host = new URL(/^https?:\/\//i.test(remote) ? remote : 'http://' + remote).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return true; // a non-empty but unparseable URL isn't local — surface it as remote, don't silently run local
+  }
+  return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
+}
+
+// Single-quote a value so a pasted token can't inject. Both bash and PowerShell
+// use '…' literals but escape an embedded quote differently ('\'' vs '').
+function shQuote(s, platform = process.platform) {
+  const v = String(s);
+  return platform === 'win32'
+    ? `'${v.replace(/'/g, "''")}'`
+    : `'${v.replace(/'/g, "'\\''")}'`;
+}
+
 const PROVIDERS = {
   claude: {
     id: 'claude',
@@ -894,6 +916,45 @@ const PROVIDERS = {
     snapshotSessions() { return new Set(); },
     findNewSession() { return null; },
   },
+
+  // Runs an agent in a Nemesis8 Docker sandbox via `nemesis8 interactive` (a pty
+  // TUI), not the gateway's /completion (broken upstream). `remoteBackend` = a
+  // special sandbox agent (own picker/setup, no headless), not "no binary".
+  nemesis8: {
+    id: 'nemesis8',
+    displayName: 'Nemesis8 Sandbox',
+    shortLabel: 'n8',
+    remoteBackend: true,
+    defaultBin: 'nemesis8',
+    configPathKey: 'nemesis8Path',
+    versionArgs: ['--version'],
+    perWorktreeSessions: false,
+    supportsExactResume: false,
+
+    // `profile` (the picked gateway) supplies the inner agent and, for a genuinely
+    // remote gateway, the URL/token. A localhost/empty URL runs local Docker
+    // directly (no --remote), which is the path that actually works.
+    buildInteractiveCmd(bin, { profile, model, platform = process.platform } = {}) {
+      const p = profile || {};
+      const q = (s) => shQuote(s, platform);
+      let cmd = `${bin} interactive`;
+      if (p.provider) cmd += ` --provider ${q(p.provider)}`;
+      if (nemesisIsRemoteHost(p.remote)) {
+        cmd += ` --remote ${q(p.remote)}`;
+        if (p.token) cmd += ` --token ${q(p.token)}`;
+      }
+      const m = model || p.model;
+      if (m) cmd += ` --model ${q(m)}`;
+      return cmd;
+    },
+    buildHeadlessRun() { return null; },
+    sessionDir() { return null; },
+    parseStreamLine() { return []; },
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
 };
 
 const PROVIDER_IDS = Object.keys(PROVIDERS);
@@ -945,6 +1006,7 @@ const DOCS_URLS = {
   cline: 'https://docs.cline.bot/cli-reference/overview',
   opencode: 'https://opencode.ai/docs',
   ollama: 'https://aider.chat',
+  nemesis8: 'https://github.com/DeepBlueDynamics/nemesis8',
 };
 function docsUrlFor(id) { return DOCS_URLS[id] || null; }
 
@@ -959,6 +1021,7 @@ const SHORT_NAMES = {
   cline: 'Cline',
   opencode: 'opencode',
   ollama: 'Ollama',
+  nemesis8: 'Nemesis8 Sandbox',
 };
 
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
@@ -1004,6 +1067,9 @@ const MODELS = {
     { id: 'deepseek-coder:6.7b', label: 'DeepSeek Coder 6.7B' },
     { id: 'llama3.1', label: 'Llama 3.1' },
   ],
+  // The valid models depend on which agent the gateway runs, so we can't
+  // enumerate slugs — Default-only; a specific model is set in Preferences.
+  nemesis8: [{ id: '', label: 'Gateway default' }],
 };
 function modelsFor(id) { return MODELS[id] || [{ id: '', label: 'Default' }]; }
 function modelFlagFor(id) { return MODEL_FLAGS[id] || '--model'; }
@@ -1049,7 +1115,14 @@ function authMetaFor(id) {
   return AUTH_CHECKS[id] || { statusArgs: null, notAuthedPattern: null, loginCommand: id };
 }
 
+// Nemesis8 modes are `nemesis8` or `nemesis8:<profileId>` (one picker entry per
+// configured gateway). They all resolve to the single nemesis8 provider object.
+function isNemesisMode(mode) {
+  return typeof mode === 'string' && (mode === 'nemesis8' || mode.startsWith('nemesis8:'));
+}
+
 function getProvider(id) {
+  if (isNemesisMode(id)) return PROVIDERS.nemesis8;
   return PROVIDERS[id] || null;
 }
 
@@ -1057,15 +1130,15 @@ function getProvider(id) {
 // shell. Replaces the old `mode === 'claude'` checks, which conflated
 // "is Claude" with "is an agent".
 function isAgentMode(mode) {
-  return !!PROVIDERS[mode];
+  return isNemesisMode(mode) || !!PROVIDERS[mode];
 }
 
 // Resolve the configured binary for a provider, falling back to the bare
 // command name (PATH-resolved). `config` is the loaded config object.
 function binFor(providerId, config) {
-  const p = PROVIDERS[providerId];
+  const p = getProvider(providerId); // resolves nemesis8:<profile> too
   if (!p) return null;
-  const configured = config && config[p.configPathKey];
+  const configured = config && p.configPathKey && config[p.configPathKey];
   return (configured && String(configured).trim()) || p.defaultBin;
 }
 
@@ -1080,6 +1153,8 @@ function allProviders() {
       shortLabel: p.shortLabel,
       defaultBin: p.defaultBin,
       configPathKey: p.configPathKey,
+      // Lets the UI skip binary-path inputs/version probes for gateway backends.
+      remoteBackend: !!p.remoteBackend,
       npmPackage: NPM_PACKAGES[p.id] || null,
       installCommand: installCommandFor(p.id),
       docsUrl: docsUrlFor(p.id),
@@ -1092,12 +1167,16 @@ function allProviders() {
 // Display helpers used by the sidebar / saved-session list.
 function shortLabelFor(mode) {
   if (mode === 'shell') return 'sh';
+  if (isNemesisMode(mode)) return PROVIDERS.nemesis8.shortLabel;
   const p = PROVIDERS[mode];
   return p ? p.shortLabel : 'cc';
 }
 
 function displayNameFor(mode) {
   if (mode === 'shell') return 'Shell';
+  // Per-profile names live in the renderer's provider list; main-side labels
+  // (exit notices) use the generic name.
+  if (isNemesisMode(mode)) return PROVIDERS.nemesis8.displayName;
   const p = PROVIDERS[mode];
   return p ? p.displayName : mode;
 }

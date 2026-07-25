@@ -13,7 +13,8 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
-const { loadConfig, saveConfig } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
+const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { claudeProjectDir } = require('../util/claude-paths');
@@ -305,11 +306,16 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   let session = { release: () => {} };
   let promptFile = null;  // staged-prompt tempfile (cross-agent handoff), removed on exit
   let needsEnter = false; // codex-style TUIs pre-fill but wait for an Enter
+  let ptyProc;
+
   if (mode === 'shell') {
     agentCmd = null;
   } else {
     const provider = getProvider(mode) || getProvider('claude');
     const bin = binFor(provider.id, config);
+    // Nemesis8 runs `nemesis8 interactive` in this pty, resolved from the picked
+    // gateway profile (nemesis8:<id>) — its inner agent and, if remote, URL/token.
+    const nemProfile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
     // Gated agents (Gemini) prompt once per worktree for trust + file access.
     // If the user cancels, don't spawn at all.
     const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
@@ -317,9 +323,9 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     // Token-rotation guard: warn before a second concurrent Codex session.
     session = beginSession(provider.id);
     if (!session.ok) return { cancelled: true };
-    const model = (config.agentModel || {})[provider.id] || '';
+    const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
     const sessionDirs = sessionSiblingWorktrees(worktreePath);
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs });
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, profile: nemProfile });
     // Cross-agent resume handoff: seed the incoming agent with a brief distilled
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).
@@ -332,7 +338,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   }
 
   const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
-  const ptyProc = pty.spawn(userShell, args, {
+  ptyProc = pty.spawn(userShell, args, {
     name: 'xterm-256color',
     cols: 120,
     rows: 30,
