@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
-const { loadConfig, saveConfig, getNemesisConfig } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
 const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
@@ -307,62 +307,51 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   let needsEnter = false; // codex-style TUIs pre-fill but wait for an Enter
   let ptyProc;
 
-  // When enabled, agent tabs run one-shot against a remote Nemesis8 gateway via
-  // a node-pty-shaped bridge instead of a local CLI; plain shells stay local.
-  const nemesisCfg = getNemesisConfig();
-  const useNemesis = nemesis.shouldUseNemesis(nemesisCfg, mode, isAgentMode);
-
-  if (useNemesis) {
-    ptyProc = nemesis.createNemesisTerminal({
-      worktreePath,
-      model: nemesisCfg.model || (config.agentModel || {})[mode] || '',
-      initialPrompt: initialPrompt || null,
-      resumeSessionId: resumeSessionId || null,
-    });
+  if (mode === 'shell') {
+    agentCmd = null;
   } else {
-    if (mode === 'shell') {
-      agentCmd = null;
-    } else {
-      const provider = getProvider(mode) || getProvider('claude');
-      const bin = binFor(provider.id, config);
-      // Gated agents (Gemini) prompt once per worktree for trust + file access.
-      // If the user cancels, don't spawn at all.
-      const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
-      if (!consent.allowed) return { cancelled: true };
-      // Token-rotation guard: warn before a second concurrent Codex session.
-      session = beginSession(provider.id);
-      if (!session.ok) return { cancelled: true };
-      const model = (config.agentModel || {})[provider.id] || '';
-      const sessionDirs = sessionSiblingWorktrees(worktreePath);
-      agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs });
-      // Cross-agent resume handoff: seed the incoming agent with a brief distilled
-      // from the prior (different-agent) session, passed at spawn rather than
-      // typed in (see util/agent-prompt + state/session-handoff).
-      if (initialPrompt) {
-        const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
-        agentCmd = staged.agentCmd;
-        promptFile = staged.promptFile;
-        needsEnter = staged.needsEnter;
-      }
+    const provider = getProvider(mode) || getProvider('claude');
+    const bin = binFor(provider.id, config);
+    // Nemesis8 runs `nemesis8 interactive` in this pty, resolved from the picked
+    // gateway profile (nemesis8:<id>) — its inner agent and, if remote, URL/token.
+    const nemProfile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
+    // Gated agents (Gemini) prompt once per worktree for trust + file access.
+    // If the user cancels, don't spawn at all.
+    const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
+    if (!consent.allowed) return { cancelled: true };
+    // Token-rotation guard: warn before a second concurrent Codex session.
+    session = beginSession(provider.id);
+    if (!session.ok) return { cancelled: true };
+    const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
+    const sessionDirs = sessionSiblingWorktrees(worktreePath);
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, profile: nemProfile });
+    // Cross-agent resume handoff: seed the incoming agent with a brief distilled
+    // from the prior (different-agent) session, passed at spawn rather than
+    // typed in (see util/agent-prompt + state/session-handoff).
+    if (initialPrompt) {
+      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
+      agentCmd = staged.agentCmd;
+      promptFile = staged.promptFile;
+      needsEnter = staged.needsEnter;
     }
+  }
 
-    const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
-    ptyProc = pty.spawn(userShell, args, {
-      name: 'xterm-256color',
-      cols: 120,
-      rows: 30,
-      cwd: worktreePath,
-      env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
-    });
+  const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
+  ptyProc = pty.spawn(userShell, args, {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd: worktreePath,
+    env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
+  });
 
-    // codex pre-fills its positional handoff prompt but waits for an Enter to
-    // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is
-    // up, with a retry for a slow boot; harmless for agents that already ran it.
-    if (needsEnter) {
-      const sendEnter = () => { try { if (instances.get(id)) ptyProc.write('\r'); } catch { /* gone */ } };
-      setTimeout(sendEnter, 3500);
-      setTimeout(sendEnter, 8000);
-    }
+  // codex pre-fills its positional handoff prompt but waits for an Enter to
+  // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is
+  // up, with a retry for a slow boot; harmless for agents that already ran it.
+  if (needsEnter) {
+    const sendEnter = () => { try { if (instances.get(id)) ptyProc.write('\r'); } catch { /* gone */ } };
+    setTimeout(sendEnter, 3500);
+    setTimeout(sendEnter, 8000);
   }
 
   // The base repo this worktree belongs to — used to group/filter worktrees by
@@ -454,16 +443,6 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     clearIdleTimer(instance);
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
-    // A Nemesis8 bridge that can't reach its gateway exits with a distinct
-    // signal. Skip the agent→shell fallback (a misleading "<agent> has exited"
-    // + a local shell) — notify the real cause and leave the tab exited.
-    if (info && info.nemesisUnreachable) {
-      const label = displayNameFor(instance.originalMode || instance.mode);
-      sendIdleNotification(instance, `${label}: nemesis8 gateway unreachable`);
-      instance.alive = false;
-      sendToTerminalSubscribers(`terminal-exit-${id}`, exitCode);
-      return;
-    }
     // If this was a Claude session, auto-convert to shell in-place — but
     // only for natural exits. An explicit kill-task sets `killed`, and
     // restart-task sets `restarting`; neither should spawn a shell we'd

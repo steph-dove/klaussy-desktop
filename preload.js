@@ -26,6 +26,7 @@ if (!Array.isArray(AGENT_PROVIDERS) || AGENT_PROVIDERS.length === 0) {
     { id: 'copilot', displayName: 'GitHub Copilot', shortLabel: 'cp', defaultBin: 'copilot' },
     { id: 'cursor', displayName: 'Cursor CLI', shortLabel: 'cu', defaultBin: 'cursor-agent' },
     { id: 'cline', displayName: 'Cline CLI', shortLabel: 'cl', defaultBin: 'cline' },
+    { id: 'nemesis8', displayName: 'Nemesis8 Sandbox', shortLabel: 'n8', defaultBin: 'nemesis8', remoteBackend: true },
   ];
 }
 
@@ -105,6 +106,11 @@ contextBridge.exposeInMainWorld('klaus', {
     popOut: (id) => ipcRenderer.invoke('pop-out-task', { id }),
     onConverted: (callback) => {
       ipcRenderer.on('task-converted-to-shell', (_event, data) => callback(data));
+    },
+    // A task spawned by the main process on the main window's behalf (e.g. the
+    // Nemesis8 in-app setup terminal launched from Preferences).
+    onOpenExternalTask: (callback) => {
+      ipcRenderer.on('open-external-task', (_event, task) => callback(task));
     },
     onPopoutInit: (callback) => {
       ipcRenderer.on('popout-init', (_event, data) => callback(data));
@@ -699,6 +705,12 @@ contextBridge.exposeInMainWorld('klaus', {
     // Per-provider version probe for Preferences. provider = 'claude' | 'codex'
     // | 'gemini' | 'copilot'. Returns { id, displayName, path, version }.
     getAgentInfo: (provider) => ipcRenderer.invoke('get-agent-info', { provider }),
+    // Test the saved Nemesis8 gateway connection (health check). Returns
+    // { ok, version, error, insecure, url } for the prefs "Test connection" button.
+    testNemesisConnection: (conn) => ipcRenderer.invoke('test-nemesis-connection', conn || {}),
+    // One-click: install + login + start a LOCAL gateway in the system terminal.
+    // Returns { ok, token } (token may be freshly generated) or { error }.
+    nemesisSetupLocal: (opts) => ipcRenderer.invoke('nemesis-setup-local', opts || {}),
     // Static list of supported AI CLIs for pickers/labels (no IPC round-trip).
     providers: AGENT_PROVIDERS,
     // Platform string ('darwin' | 'win32' | 'linux') — the renderer uses this

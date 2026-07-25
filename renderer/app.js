@@ -291,6 +291,17 @@ window.App = window.App || {};
     }, 100);
   });
 
+  // A task the main process opened on our behalf (Nemesis8 in-app setup, fired
+  // from the Preferences window) — render it and switch to it so the user lands
+  // in the terminal where the sign-in is running.
+  if (window.klaus.task.onOpenExternalTask) {
+    window.klaus.task.onOpenExternalTask(function (task) {
+      if (!task || !task.id || App.tasks.get(task.id)) return;
+      App.addTaskToUI(task);
+      App.switchToTask(task.id);
+    });
+  }
+
   // ---- Handle notification click → focus task ----
   window.klaus.task.onNotificationClicked(function (data) {
     App.switchToTask(data.id);

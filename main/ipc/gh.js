@@ -532,7 +532,8 @@ ipcMain.handle('check-dependencies', async () => {
 
   // Probe every supported AI CLI so the Setup Check can list install status +
   // a one-line install command per agent (optional — only Claude is required).
-  const agents = allProviders().map((p) => {
+  // Remote backends (Nemesis8) have no binary to probe or install — skip them.
+  const agents = allProviders().filter((p) => !p.remoteBackend).map((p) => {
     const provider = getProvider(p.id);
     const bin = binFor(p.id, config);
     const v = probe(bin, provider.versionArgs);

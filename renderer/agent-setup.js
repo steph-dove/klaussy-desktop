@@ -79,11 +79,11 @@
 
   function setText(el, text) { if (el) el.textContent = text == null ? '' : String(text); }
 
-  // Show the setup modal for a probed-missing agent. `info` is the enriched
-  // get-agent-info payload ({ displayName, installCommand, docsUrl, ... }).
-  // Returns a Promise that resolves true if a re-check found it installed.
+  // Setup modal for a probed-missing agent. Remote backends take the gateway
+  // variant; resolves true if a re-check found it ready.
   function showMissing(mode, info) {
     build();
+    if (info && info.remoteBackend) return showRemoteSetup(mode, info);
     var name = (info && info.displayName) || mode;
     var cmd = info && info.installCommand;
     var docs = info && info.docsUrl;
@@ -142,6 +142,78 @@
           finish(true);
         } else if (window.toast) {
           window.toast.warn(name + ' still not found. Make sure the install finished and the CLI is on your PATH.');
+        }
+      };
+
+      overlay.style.display = 'flex';
+    });
+  }
+
+  // Remote-backend variant: no CLI to install, so the modal points at
+  // Preferences (URL + token) and shows provisioning commands for users without
+  // a gateway. "Re-check" re-runs the gateway health check.
+  function showRemoteSetup(mode, info) {
+    var name = (info && info.displayName) || mode;
+    var notConfigured = (info && info.reason) === 'not configured';
+    var steps = (info && info.setupSteps) || [];
+    var cmd = steps.filter(Boolean).join('\n');
+
+    setText(els.title, notConfigured ? 'Set up ' + name : name + ' is unreachable');
+    setText(els.lead, notConfigured
+      ? 'You picked ' + name + ', but no gateway is configured yet. Open Preferences → Nemesis8 to '
+        + 'enter a gateway URL and token. Don’t have a gateway? Stand one up with the commands below.'
+      : 'Couldn’t reach the Nemesis8 gateway' + (info && info.reason ? ' (' + info.reason + ')' : '')
+        + '. Check the URL and token in Preferences → Nemesis8, or start the gateway with the commands below.');
+
+    if (cmd) { els.cmdRow.style.display = ''; setText(els.cmd, cmd); }
+    else { els.cmdRow.style.display = 'none'; }
+
+    setText(els.note, 'Needs Docker on the gateway host. The token is a secret you pick '
+      + '(no signup) — use the same value here. Which agent runs inside the sandbox is set on '
+      + 'the gateway (see its docs).');
+
+    // Repurpose the "docs" slot as "Open Preferences" (the setup form).
+    els.docs.style.display = '';
+    setText(els.docs, 'Open Preferences');
+
+    return new Promise(function (resolve) {
+      var settled = false;
+      function finish(ready) {
+        if (settled) return;
+        settled = true;
+        els.copy.onclick = null; els.docs.onclick = null;
+        els.recheck.onclick = null; els.close.onclick = null;
+        els.close.addEventListener('click', hide);
+        setText(els.docs, 'View docs'); // restore default label for other agents
+        hide();
+        resolve(!!ready);
+      }
+
+      els.copy.onclick = function () {
+        if (!cmd) return;
+        try { window.klaus.fs.copyToClipboard(cmd); } catch (_e) {}
+        setText(els.copy, 'Copied');
+        setTimeout(function () { setText(els.copy, 'Copy'); }, 1500);
+      };
+      els.docs.onclick = function () {
+        try { window.klaus.ui.openPreferences(); } catch (_e) {}
+      };
+      els.close.onclick = function () { finish(false); };
+      els.recheck.onclick = async function () {
+        setText(els.recheck, 'Checking…');
+        els.recheck.disabled = true;
+        var ok = false;
+        try {
+          var fresh = await window.klaus.ui.getAgentInfo(mode);
+          ok = !!(fresh && fresh.installed);
+        } catch (_e) {}
+        els.recheck.disabled = false;
+        setText(els.recheck, 'Re-check');
+        if (ok) {
+          if (window.toast) window.toast.success(name + ' gateway is reachable.');
+          finish(true);
+        } else if (window.toast) {
+          window.toast.warn(name + ' gateway still unreachable. Check the URL and token in Preferences.');
         }
       };
 

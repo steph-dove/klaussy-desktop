@@ -1679,6 +1679,7 @@ body.custom-titlebar #titlebar-content {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
+  flex-wrap: wrap;
   gap: 2px;
   background: var(--input-bg);
   border: 1px solid var(--border);
@@ -1687,9 +1688,11 @@ body.custom-titlebar #titlebar-content {
 }
 
 .shell-option {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 6px 4px;
+  /* Never shrink below the label — wrap to a new row instead of truncating.
+     max-content sizes the floor to the text so no label ever clips. */
+  flex: 1 1 auto;
+  min-width: max-content;
+  padding: 6px 10px;
   background: none;
   border: none;
   border-radius: 6px;

@@ -2,7 +2,7 @@
 // (check debug/fix, review, implement, chat). Pulled out of claude-stream-ipc.js
 // so handler groups can live in their own modules without duplicating this
 // logic. No side effects at require time.
-const { isAgentMode } = require('./ai-providers');
+const { getProvider } = require('./ai-providers');
 const { instances } = require('./instances');
 const { loadConfig } = require('../util/config');
 const { getRepoIntelBlock, ensureRepoIntel } = require('./repo-intel');
@@ -83,18 +83,26 @@ function repoIntelFor(worktreePath, agentMode) {
   }
 }
 
-// The editor/diff AI features (inline edit, completion, explain, commit
-// message) and the read-only PR-review surfaces run on the user's chosen
-// default agent.
-function defaultAgentProvider() {
-  const c = loadConfig();
-  return c.defaultProvider || c.defaultMode || 'claude';
+// Remote backends (Nemesis8) are interactive-only — buildHeadlessRun returns
+// null — so they must never drive the headless review/implement/ask surfaces.
+function isHeadlessAgent(mode) {
+  const p = getProvider(mode);
+  return !!p && !p.remoteBackend;
 }
 
-// Honor a renderer-chosen agent (from a split-button's agent picker) when it's
-// a valid agent id; otherwise use the surface's default resolution.
+// The editor/diff AI features and read-only PR-review surfaces run on the
+// user's chosen default agent, falling back to claude if that default can't
+// run headless.
+function defaultAgentProvider() {
+  const c = loadConfig();
+  const chosen = c.defaultProvider || c.defaultMode || 'claude';
+  return isHeadlessAgent(chosen) ? chosen : 'claude';
+}
+
+// Honor a renderer-chosen agent when it's a valid headless agent id; otherwise
+// use the surface's default resolution.
 function pickProvider(passed, fallback) {
-  return isAgentMode(passed) ? passed : fallback;
+  return isHeadlessAgent(passed) ? passed : fallback;
 }
 
 // Implement follows the agent of the task you're working this PR in: prefer a
@@ -104,8 +112,8 @@ function pickProvider(passed, fallback) {
 function agentForWorktree(worktreePath) {
   for (const [, inst] of instances) {
     if (inst.worktreePath !== worktreePath) continue;
-    if (isAgentMode(inst.mode)) return inst.mode;
-    if (isAgentMode(inst.originalMode)) return inst.originalMode;
+    if (isHeadlessAgent(inst.mode)) return inst.mode;
+    if (isHeadlessAgent(inst.originalMode)) return inst.originalMode;
   }
   return defaultAgentProvider();
 }

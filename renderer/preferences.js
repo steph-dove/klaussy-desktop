@@ -41,6 +41,9 @@
   var defaultMode = document.getElementById('pref-default-mode');
   var autoFetch = document.getElementById('pref-auto-fetch');
   var statusMsg = document.getElementById('status-msg');
+  var nemesisProfilesEl = document.getElementById('nemesis-profiles');
+  var nemesisProfileTpl = document.getElementById('nemesis-profile-tpl');
+  var nemesisAddBtn = document.getElementById('pref-nemesis-add');
 
   // Per-agent path inputs, keyed by provider id → { input, infoEl, prefKey }.
   var agentPaths = {
@@ -233,6 +236,7 @@
       preCommitReview: document.getElementById('pref-precommit-review').checked,
       stripComments: document.getElementById('pref-strip-comments').checked,
       repoIntelEnrich: document.getElementById('pref-repo-intel-enrich').checked,
+      nemesisProfiles: collectNemesisProfiles(),
     };
 
     await window.klaus.ui.setPreferences(updated);
@@ -285,6 +289,151 @@
     }).catch(function () {
       if (dispose) dispose();
       ollamaModelStatus.textContent = 'Could not install model.';
+    });
+  }
+
+  // ---- Nemesis8 gateway profiles ----
+  // One gateway (URL/token/agent) per card; the setup command inlines the token.
+  var nemesisProfiles = (prefs.nemesisProfiles || []).map(function (p) {
+    return {
+      id: p.id || newProfileId(), name: p.name || '', remote: p.remote || '',
+      token: p.token || '', provider: p.provider || '', model: p.model || '',
+    };
+  });
+
+  function randomHex(n) {
+    var bytes = new Uint8Array(n);
+    (window.crypto || window.msCrypto).getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+  function newProfileId() { return 'n8-' + randomHex(6); }
+
+  function collectNemesisProfiles() {
+    return nemesisProfiles.map(function (p, i) {
+      return {
+        id: p.id, name: (p.name || '').trim() || ('Nemesis8 ' + (i + 1)),
+        remote: (p.remote || '').trim(), token: p.token || '',
+        provider: p.provider || '', model: (p.model || '').trim(),
+      };
+    });
+  }
+
+  function isLocalHost(url) {
+    var v = (url || '').trim();
+    if (!v) return true;
+    var host = v.replace(/^https?:\/\//i, '').split(/[:/]/)[0].toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  }
+
+  function buildSetupCmd(profile) {
+    var win = window.klaus.ui.platform === 'win32';
+    var flag = profile.provider ? ' --provider ' + profile.provider : '';
+    var token = (profile.token || '').trim();
+    var install = win
+      ? 'powershell -c "irm https://nemesis8.nuts.services/install.ps1 | iex"'
+      : 'curl -fsSL https://nemesis8.nuts.services/install.sh | sh';
+    var login = 'nemesis8 login' + flag + '   # sign in to the agent (interactive) — required';
+    var tokenLine = token
+      ? (win ? '$env:NEMESIS8_AUTH_TOKEN="' + token + '"' : 'export NEMESIS8_AUTH_TOKEN="' + token + '"')
+      : (win ? '$env:NEMESIS8_AUTH_TOKEN="<click Generate>"' : 'export NEMESIS8_AUTH_TOKEN="<click Generate>"');
+    var serve = 'nemesis8 serve' + flag + '   # gateway on port 9801';
+    return [install, login, tokenLine, serve].join('\n');
+  }
+
+  function makeNemesisCard(profile) {
+    var card = nemesisProfileTpl.content.firstElementChild.cloneNode(true);
+    var q = function (sel) { return card.querySelector(sel); };
+    var nameEl = q('.np-name'), remoteEl = q('.np-remote'), tokenEl = q('.np-token');
+    var providerEl = q('.np-provider'), modelEl = q('.np-model');
+    var statusEl = q('.np-status'), cmdEl = q('.np-cmd');
+    var localRow = q('.np-local-row'), manualRow = q('.np-manual-row');
+
+    nameEl.value = profile.name || '';
+    remoteEl.value = profile.remote || '';
+    tokenEl.value = profile.token || '';
+    providerEl.value = profile.provider || '';
+    modelEl.value = profile.model || '';
+
+    function setStatus(kind, html) {
+      if (!html) { statusEl.innerHTML = ''; return; }
+      var cls = kind === 'ok' ? 'version' : kind === 'err' ? 'not-found' : '';
+      statusEl.innerHTML = 'Status: <span class="' + cls + '">' + html + '</span>';
+    }
+    function refresh() {
+      cmdEl.textContent = buildSetupCmd(profile);
+      var local = isLocalHost(profile.remote);
+      localRow.style.display = local ? '' : 'none';
+      manualRow.style.display = local ? 'none' : '';
+    }
+
+    nameEl.addEventListener('input', function () { profile.name = nameEl.value; saveAll(); });
+    remoteEl.addEventListener('input', function () { profile.remote = remoteEl.value; saveAll(); setStatus('', ''); refresh(); });
+    tokenEl.addEventListener('input', function () { profile.token = tokenEl.value; saveAll(); setStatus('', ''); refresh(); });
+    providerEl.addEventListener('change', function () { profile.provider = providerEl.value; saveAll(); refresh(); });
+    modelEl.addEventListener('input', function () { profile.model = modelEl.value; saveAll(); });
+
+    q('.np-gen').addEventListener('click', function () {
+      profile.token = randomHex(24); tokenEl.value = profile.token; saveAll(); setStatus('', ''); refresh();
+    });
+    q('.np-copy').addEventListener('click', function (e) {
+      var btn = e.currentTarget;
+      try { window.klaus.fs.copyToClipboard(cmdEl.textContent); } catch (_e) {}
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy command'; }, 1500);
+    });
+    q('.np-remove').addEventListener('click', function () {
+      var i = nemesisProfiles.indexOf(profile);
+      if (i !== -1) nemesisProfiles.splice(i, 1);
+      saveAll(); renderNemesisProfiles();
+    });
+    q('.np-test').addEventListener('click', async function (e) {
+      var btn = e.currentTarget;
+      var conn = { remote: (profile.remote || '').trim(), token: profile.token || '' };
+      window.klaus.ui.setPreferences({ nemesisProfiles: collectNemesisProfiles() });
+      btn.disabled = true; setStatus('', 'connecting…');
+      var res;
+      try { res = await window.klaus.ui.testNemesisConnection(conn); } catch (_e) { res = { ok: false, error: 'test failed' }; }
+      btn.disabled = false;
+      if (res && res.ok) { setStatus('ok', 'connected' + (res.version ? ' (v' + escHtml(res.version) + ')' : '')); }
+      else { setStatus('err', escHtml((res && res.error) || 'unreachable')); }
+      if (res && res.insecure) { statusEl.innerHTML += ' <span class="not-found">⚠ token sent over http — use https or a tunnel</span>'; }
+    });
+    q('.np-setup').addEventListener('click', async function (e) {
+      var btn = e.currentTarget; var prev = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Opening terminal…';
+      var res;
+      try { res = await window.klaus.ui.nemesisSetupLocal({ token: (profile.token || '').trim(), provider: profile.provider || '' }); }
+      catch (_e) { res = { error: 'could not start setup' }; }
+      btn.disabled = false; btn.textContent = prev;
+      if (res && res.ok) {
+        if (res.token) { profile.token = res.token; tokenEl.value = res.token; }
+        if (!(profile.remote || '').trim()) { profile.remote = 'http://localhost:9801'; remoteEl.value = profile.remote; }
+        saveAll(); refresh();
+        setStatus('', 'opened a setup tab in Klaussy — complete the sign-in there, then come back and Test connection');
+      } else { setStatus('err', escHtml((res && res.error) || 'could not start setup')); }
+    });
+
+    refresh();
+    return card;
+  }
+
+  function renderNemesisProfiles() {
+    nemesisProfilesEl.innerHTML = '';
+    nemesisProfiles.forEach(function (p) { nemesisProfilesEl.appendChild(makeNemesisCard(p)); });
+  }
+  renderNemesisProfiles();
+
+  if (nemesisAddBtn) {
+    nemesisAddBtn.addEventListener('click', function () {
+      nemesisProfiles.push({ id: newProfileId(), name: '', remote: '', token: '', provider: '', model: '' });
+      saveAll(); renderNemesisProfiles();
+    });
+  }
+
+  var nemesisDocsLink = document.getElementById('nemesis-docs-link');
+  if (nemesisDocsLink) {
+    nemesisDocsLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      try { window.klaus.gh.openExternal('https://github.com/DeepBlueDynamics/nemesis8'); } catch (_e) {}
     });
   }
 

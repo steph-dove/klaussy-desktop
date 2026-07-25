@@ -5,33 +5,66 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { app, ipcMain, BrowserWindow, nativeTheme } = require('electron');
-const { loadConfig, saveConfig } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisConfig, getNemesisProfiles, getNemesisProfile } = require('../util/config');
 const { getLogBuffer } = require('../util/logging');
 const { allWindows, hardenWindow, getMainWindow } = require('../state/windows');
 const { startAutoFetch } = require('../state/ci-poll');
 const { allProviders, getProvider, binFor, installCommandFor, docsUrlFor, authMetaFor } = require('../state/ai-providers');
+const nemesis = require('../util/nemesis-client');
 
 // Synchronous provider-list handed to the sandboxed preload (which can't
 // require local files). Registered on require, before any window/preload runs.
 ipcMain.on('get-providers-sync', (event) => {
   try {
-    event.returnValue = allProviders();
+    // Expand the single nemesis8 entry into one per configured gateway profile
+    // ('nemesis8:<id>', labelled with the profile name), so each is selectable
+    // in the picker. No profiles yet → the generic entry that prompts setup.
+    const profiles = getNemesisProfiles();
+    const out = [];
+    for (const p of allProviders()) {
+      if (p.id === 'nemesis8' && profiles.length) {
+        for (const prof of profiles) {
+          out.push({ ...p, id: 'nemesis8:' + prof.id, displayName: 'Nemesis8 Sandbox: ' + prof.name, shortName: 'Nemesis8 Sandbox: ' + prof.name });
+        }
+      } else {
+        out.push(p);
+      }
+    }
+    event.returnValue = out;
   } catch {
     event.returnValue = null;
   }
 });
 
-// Resolve a provider's configured binary and probe its --version. Returns
-// 'not found' if the binary isn't on PATH / errors out.
+// Probe a provider's binary --version ('not found' on failure). Remote backends
+// have no binary — probe the gateway instead.
 function probeAgent(providerId, config) {
   const provider = getProvider(providerId);
   if (!provider) return null;
+  if (provider.remoteBackend) return probeRemoteAgent(providerId, provider);
   const bin = binFor(providerId, config);
   let version = 'not found';
   try {
     version = execFileSync(bin, provider.versionArgs, { stdio: 'pipe', timeout: 5000 }).toString().trim();
   } catch {}
   return { id: providerId, displayName: provider.displayName, path: bin, version };
+}
+
+// Synchronous status for the About panel: reports only whether a gateway is
+// configured, since we won't block the panel on a network round-trip. Live
+// reachability is the async job of get-agent-info / test-nemesis-connection.
+function probeRemoteAgent(providerId, provider) {
+  const profiles = getNemesisProfiles();
+  const base = profiles.length ? nemesis.normalizeBaseUrl(profiles[0].remote) : '';
+  return {
+    id: providerId,
+    displayName: provider.displayName,
+    path: base || '(not configured)',
+    version: profiles.length
+      ? (profiles.length > 1 ? `${profiles.length} gateways configured` : 'configured')
+      : 'not found',
+    remoteBackend: true,
+  };
 }
 
 // ---- About Info (A7) ----
@@ -202,6 +235,9 @@ ipcMain.handle('get-preferences', () => {
     // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
+    // Nemesis8 named gateway profiles (migrates the legacy single-gateway keys
+    // into one profile when none exist yet).
+    nemesisProfiles: getNemesisProfiles(),
   };
 });
 
@@ -275,6 +311,22 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.repoIntelEnrich !== undefined) {
     config.repoIntelEnrich = !!prefs.repoIntelEnrich;
   }
+  // Nemesis8 gateway profiles: store the whole list (sanitized), and retire the
+  // legacy single-gateway keys so getNemesisProfiles() reads only the list.
+  if (Array.isArray(prefs.nemesisProfiles)) {
+    config.nemesisProfiles = prefs.nemesisProfiles.map((p, i) => ({
+      id: String((p && p.id) || `n8-${i}`),
+      name: String((p && p.name) || `Nemesis8 ${i + 1}`),
+      remote: String((p && p.remote) || '').trim(),
+      token: String((p && p.token) || ''),
+      provider: String((p && p.provider) || '').trim(),
+      model: String((p && p.model) || '').trim(),
+    }));
+    config.nemesisRemote = undefined;
+    config.nemesisToken = undefined;
+    config.nemesisProvider = undefined;
+    config.nemesisModel = undefined;
+  }
   saveConfig(config);
 
   // Broadcast to all windows so they can apply changes live
@@ -296,6 +348,8 @@ ipcMain.handle('get-claude-info', async () => {
 ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
   const config = loadConfig();
   const prov = getProvider(provider);
+  // Remote backends resolve "installed" via a live gateway health check.
+  if (prov && prov.remoteBackend) return remoteAgentInfo(provider, prov);
   const info = probeAgent(provider, config)
     || { id: provider, displayName: (prov && prov.displayName) || provider, path: '', version: 'not found' };
   return {
@@ -304,6 +358,66 @@ ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
     installCommand: installCommandFor(provider) || null,
     docsUrl: docsUrlFor(provider) || null,
     loginCommand: (authMetaFor(provider) || {}).loginCommand || null,
+  };
+});
+
+// Enriched agent-info for a remote backend: "installed" = configured AND a
+// health check succeeds; otherwise installed:false plus setup guidance.
+async function remoteAgentInfo(providerId, provider) {
+  // providerId is the picked mode ('nemesis8' or 'nemesis8:<id>') — resolve its
+  // gateway profile so the health check hits the right one.
+  const prof = getNemesisProfile(providerId) || { remote: '', token: '', provider: '' };
+  const base = prof.remote ? nemesis.normalizeBaseUrl(prof.remote) : '';
+  const h = base ? await nemesis.health({ remote: prof.remote, token: prof.token }) : { ok: false, error: 'not configured' };
+  return {
+    id: providerId,
+    displayName: provider.displayName,
+    remoteBackend: true,
+    path: base || '',
+    installed: !!(h && h.ok),
+    version: h && h.ok ? (h.version ? 'gateway v' + h.version : 'reachable') : 'not found',
+    reason: h && h.ok ? null : (h && h.error) || 'unreachable',
+    insecure: base ? nemesis.isInsecureRemote(base, prof.token) : false,
+    docsUrl: docsUrlFor('nemesis8') || null,
+    // HTTP-only client — no install command; setup is a URL + token in Prefs.
+    installCommand: null,
+    loginCommand: null,
+    setupSteps: remoteSetupSteps(process.platform, prof.provider, prof.token),
+  };
+}
+
+// Copy-paste gateway bring-up commands for the setup modal, matched to the host
+// OS. `provider` sets the sandbox agent via `serve --provider`; token is inlined.
+function remoteSetupSteps(platform = process.platform, provider = '', token = '') {
+  const win = platform === 'win32';
+  const flag = provider ? ` --provider ${provider}` : '';
+  const install = win
+    ? 'powershell -c "irm https://nemesis8.nuts.services/install.ps1 | iex"'
+    : 'curl -fsSL https://nemesis8.nuts.services/install.sh | sh';
+  // Sign the agent in with its subscription — required, or the agent hangs and
+  // its container is killed after 120s. Interactive, so it's a step we can't run.
+  const login = `nemesis8 login${flag}   # sign in to the agent (interactive) — required`;
+  // Inline the token Klaussy stores so the gateway and app can't drift.
+  const tok = token || '<generate one in Preferences>';
+  const tokenLine = win ? `$env:NEMESIS8_AUTH_TOKEN="${tok}"` : `export NEMESIS8_AUTH_TOKEN="${tok}"`;
+  return [install, login, tokenLine, `nemesis8 serve${flag}`];
+}
+
+// "Test connection" for the prefs section. Tests the values passed from the
+// form directly (not saved config) so it can't race the async config write.
+ipcMain.handle('test-nemesis-connection', async (_event, { remote, token } = {}) => {
+  const url = remote !== undefined ? remote : getNemesisConfig().remote;
+  const tok = token !== undefined ? token : getNemesisConfig().token;
+  if (!url) return { ok: false, error: 'Enter a gateway URL first.' };
+  const base = nemesis.normalizeBaseUrl(url);
+  if (!base) return { ok: false, error: 'That gateway URL doesn’t look valid.' };
+  const h = await nemesis.health({ remote: url, token: tok });
+  return {
+    ok: !!(h && h.ok),
+    version: (h && h.version) || null,
+    error: h && h.ok ? null : (h && h.error) || 'unreachable',
+    insecure: nemesis.isInsecureRemote(base, tok),
+    url: base,
   };
 });
 

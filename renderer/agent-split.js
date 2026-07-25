@@ -17,8 +17,11 @@ window.AgentSplit = (function () {
     if (openMenu) { openMenu.style.display = 'none'; openMenu = null; }
   });
 
+  // These split buttons drive headless AI actions, so exclude interactive-only
+  // remote backends (they stay selectable for terminal tabs elsewhere).
   function providers() {
-    return (window.klaus.ui && window.klaus.ui.providers) || [];
+    var all = (window.klaus.ui && window.klaus.ui.providers) || [];
+    return all.filter(function (p) { return !p.remoteBackend; });
   }
   function isKnown(id) {
     return providers().some(function (p) { return p.id === id; });

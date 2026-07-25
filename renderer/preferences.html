@@ -136,6 +136,66 @@
       color: var(--error);
     }
 
+    /* Nemesis8 remote-sandbox setup */
+    .klaus-btn {
+      font: inherit;
+      font-size: 12px;
+      padding: 5px 12px;
+      border-radius: 6px;
+      border: 1px solid var(--border, rgba(255,255,255,0.15));
+      background: var(--input-bg, rgba(255,255,255,0.06));
+      color: var(--text, #e8e8f0);
+      cursor: pointer;
+    }
+    .klaus-btn:hover { border-color: var(--accent, #64b5f6); }
+    .klaus-btn:disabled { opacity: 0.6; cursor: default; }
+    .klaus-btn-primary {
+      background: var(--accent, #6c5ce7);
+      border-color: var(--accent, #6c5ce7);
+      color: #fff;
+    }
+    .np-manual-row { margin-top: 14px; }
+    .nemesis-profile {
+      border: 1px solid var(--border, rgba(255,255,255,0.12));
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+      background: var(--input-bg, rgba(255,255,255,0.03));
+    }
+    .nemesis-profile-head {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    }
+    .nemesis-profile-head .np-name {
+      flex: 1 1 auto; font-weight: 600; font-size: 14px;
+    }
+    .nemesis-profile-head .np-remove { flex: 0 0 auto; }
+
+    #nemesis-setup-help .nemesis-setup-cmd {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      background: var(--input-bg, rgba(0,0,0,0.25));
+      border: 1px solid var(--border, rgba(255,255,255,0.1));
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin: 8px 0;
+      user-select: text;
+    }
+    #nemesis-setup-help .nemesis-docs {
+      color: var(--accent, #64b5f6);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    #nemesis-setup-help .nemesis-docs:hover { text-decoration: underline; }
+    .field-hint code {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 11px;
+      background: var(--input-bg, rgba(255,255,255,0.06));
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+
     /* Keybindings table */
     .keybindings-table {
       width: 100%;
@@ -383,6 +443,69 @@
           <option value="shell">Shell</option>
         </select>
       </div>
+    </div>
+
+    <!-- Nemesis8 Remote Sandbox Section -->
+    <div class="section">
+      <div class="section-title">Nemesis8 Sandboxes</div>
+      <div class="field-hint">Nemesis8 runs an agent inside an isolated Docker container on a gateway. Add one or more gateways — each shows up in the agent picker as <strong>Nemesis8: &lt;name&gt;</strong>, so you can run, say, a Claude sandbox and a Codex sandbox side by side.</div>
+
+      <div id="nemesis-profiles"></div>
+
+      <div class="field">
+        <button type="button" id="pref-nemesis-add" class="klaus-btn klaus-btn-secondary">+ Add a gateway</button>
+      </div>
+      <a href="#" id="nemesis-docs-link" class="nemesis-docs">Full setup guide ↗</a>
+
+      <!-- Card template cloned once per gateway profile -->
+      <template id="nemesis-profile-tpl">
+        <div class="nemesis-profile">
+          <div class="nemesis-profile-head">
+            <input type="text" class="np-name" placeholder="Name (e.g. Claude, staging)" spellcheck="false" />
+            <button type="button" class="np-remove klaus-btn klaus-btn-secondary" title="Remove this gateway">Remove</button>
+          </div>
+          <div class="field field-full">
+            <label>Gateway URL</label>
+            <input type="text" class="np-remote" placeholder="http://your-host:9801" spellcheck="false" />
+          </div>
+          <div class="field field-full">
+            <label>Auth Token</label>
+            <input type="password" class="np-token" placeholder="click Generate, or paste your own" spellcheck="false" autocomplete="off" />
+          </div>
+          <div class="field"><button type="button" class="np-gen klaus-btn klaus-btn-secondary">Generate token</button></div>
+          <div class="field">
+            <label>Sandbox agent</label>
+            <select class="np-provider">
+              <option value="">Gateway default</option>
+              <option value="codex">Codex</option>
+              <option value="claude">Claude</option>
+              <option value="antigravity">Antigravity</option>
+              <option value="grok">Grok</option>
+              <option value="opencode">opencode</option>
+              <option value="hermes">Hermes</option>
+              <option value="pi">Pi</option>
+              <option value="sakana">Sakana</option>
+            </select>
+          </div>
+          <div class="field field-full">
+            <label>Model (optional)</label>
+            <input type="text" class="np-model" placeholder="leave empty for the gateway default" spellcheck="false" />
+          </div>
+          <div class="field"><button type="button" class="np-test klaus-btn klaus-btn-secondary">Test connection</button></div>
+          <div class="claude-info np-status"></div>
+          <div class="field-hint np-setup-help">
+            <div class="np-local-row">
+              Set up this gateway on <strong>this machine</strong> in one step (needs Docker). Klaussy opens a terminal tab that installs nemesis8, signs the agent in, and starts it with the token above — you just complete the sign-in in that tab.
+              <div class="field"><button type="button" class="np-setup klaus-btn klaus-btn-primary">Set up &amp; start locally</button></div>
+            </div>
+            <div class="np-manual-row">
+              Gateway on another host? Run this there (nothing to copy back — it uses this gateway’s token and agent):
+              <pre class="nemesis-setup-cmd np-cmd"></pre>
+              <button type="button" class="np-copy klaus-btn klaus-btn-secondary">Copy command</button>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Git Section -->
