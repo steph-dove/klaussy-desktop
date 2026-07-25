@@ -188,6 +188,43 @@ ipcMain.handle('switch-project', (_event, { projectPath }) => {
   return { ok: true };
 });
 
+// Commit review gate — status + one-click enable for the selected repo. The
+// gate itself (pre-commit/pre-push/... hooks + socket review) lives in
+// state/precommit-hook.js; these handlers just surface it in the repo view.
+ipcMain.handle('repo:hook-status', (_event, { repoPath }) => {
+  if (!repoPath || typeof repoPath !== 'string') return { installed: false };
+  const { isHookInstalledForRepo } = require('../state/precommit-hook');
+  return { installed: isHookInstalledForRepo(repoPath) };
+});
+
+ipcMain.handle('repo:install-hook', (_event, { repoPath }) => {
+  if (!repoPath || typeof repoPath !== 'string') return { ok: false, error: 'no repo' };
+  try {
+    const hook = require('../state/precommit-hook');
+    // Enabling is explicit consent to the gate, so re-enable review if it was
+    // turned off — otherwise the hook installs comment-cleanup-only (or no-ops).
+    // installHookForRepo reads the pref from disk, so flip it before install.
+    const config = loadConfig();
+    const reviewWasOff = config.preCommitReview === false;
+    if (reviewWasOff) {
+      config.preCommitReview = true;
+      saveConfig(config);
+    }
+    hook.installHookForRepo(repoPath);
+    const installed = hook.isHookInstalledForRepo(repoPath);
+    // installHookForRepo swallows errors and no-ops on a non-git path, so revert
+    // the global pref flip when the hook didn't actually land.
+    if (!installed && reviewWasOff) {
+      const revert = loadConfig();
+      revert.preCommitReview = false;
+      saveConfig(revert);
+    }
+    return { ok: true, installed };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // ---- Multi-Window ----
 
 ipcMain.handle('new-window', () => {

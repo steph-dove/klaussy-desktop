@@ -1083,7 +1083,8 @@
 
 .diff-split-grid > .diff-split-hunk-header,
 .diff-split-grid > .diff-split-meta,
-.diff-split-grid > .inline-comment,
+.diff-split-grid > .diff-annotation,
+.diff-split-grid > .diff-annotation-editor,
 .diff-split-grid > .diff-explanation {
   grid-column: 1 / -1;
 }
@@ -1313,14 +1314,58 @@
   color: #fff;
 }
 
-/* Inline commenting (Phase 6) */
-.inline-comment {
-  padding: 4px 12px;
-  background: var(--surface);
-  border-left: 2px solid var(--accent);
+/* Inline diff annotations */
+/* Anchor for the hover "+" button on each commentable line. */
+.diff-line.diff-add,
+.diff-line.diff-del,
+.diff-line.diff-context {
+  position: relative;
 }
 
-.inline-comment-input {
+.diff-comment-add {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1;
+  white-space: normal;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.9;
+  z-index: 2;
+}
+
+.diff-line.diff-add:hover .diff-comment-add,
+.diff-line.diff-del:hover .diff-comment-add,
+.diff-line.diff-context:hover .diff-comment-add {
+  display: flex;
+}
+
+.diff-comment-add:hover {
+  opacity: 1;
+}
+
+.diff-annotation-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-left: 2px solid var(--accent);
+  white-space: normal;
+}
+
+.diff-annotation-input {
   width: 100%;
   padding: 4px 8px;
   background: var(--input-bg);
@@ -1329,11 +1374,112 @@
   color: var(--text);
   font-size: 12px;
   font-family: inherit;
+  resize: vertical;
   outline: none;
 }
 
-.inline-comment-input:focus {
+.diff-annotation-input:focus {
   border-color: var(--accent);
+}
+
+.diff-annotation-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.diff-annotation-actions button {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.diff-annotation-save {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.diff-annotation-cancel {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+.diff-annotation {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 12px;
+  background: var(--surface);
+  border-left: 2px solid var(--accent);
+  white-space: normal;
+}
+
+.diff-annotation-text {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text);
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.diff-annotation-remove {
+  flex-shrink: 0;
+  padding: 0 2px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.diff-annotation-remove:hover {
+  color: var(--danger, #e5534b);
+}
+
+/* Floating batch-send bar, anchored to the diff panel so its count survives
+   file switches. */
+#diff-annotations-bar {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  z-index: 20;
+}
+
+.diff-annotations-count {
+  font-size: 12px;
+  color: var(--text);
+}
+
+#diff-annotations-bar button {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.diff-annotations-clear {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.diff-annotations-send {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
 }
 
 /* Commit area & footer */

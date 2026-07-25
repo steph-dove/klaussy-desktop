@@ -18,7 +18,7 @@ const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platf
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
   processIdleDetection, clearIdleTimer, convertInstanceToShell,
-  sendToTerminalSubscribers,
+  sendToTerminalSubscribers, makeAgentExitHandler,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
@@ -1217,9 +1217,8 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  // Mark restarting BEFORE kill(): pty.kill is async and the stale exit handler
-  // would otherwise race with the new-pty assignment below — in particular if
-  // the instance was still in claude mode, the old-pty's onExit would spawn a
+  // Set BEFORE kill(): kill is async, so the old pty can exit before inst.pty is
+  // reassigned below; the identity check in makeAgentExitHandler covers after that.
   inst.restarting = true;
   try { inst.pty.kill(); } catch {}
 
@@ -1295,17 +1294,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
-  // When this agent exits, auto-convert to shell again
-  ptyProc.onExit(() => {
-    clearIdleTimer(inst);
-    session.release(); // free the concurrency slot (Codex token-rotation guard)
-    if (isAgentMode(inst.mode)) {
-      convertInstanceToShell(inst);
-    } else {
-      inst.alive = false;
-      sendToTerminalSubscribers(`terminal-exit-${id}`);
-    }
-  });
+  ptyProc.onExit(makeAgentExitHandler(inst, ptyProc, { session }));
 
   return { ok: true };
 });
