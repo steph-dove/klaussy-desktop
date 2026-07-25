@@ -110,10 +110,13 @@ function nemesisIsRemoteHost(remote) {
   return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
 }
 
-// Single-quote for a POSIX shell (the command is run via the login shell), so a
-// pasted token/model can't inject via spaces, $, backticks, or ;.
-function shQuote(s) {
-  return `'${String(s).replace(/'/g, "'\\''")}'`;
+// Single-quote a value so a pasted token can't inject. Both bash and PowerShell
+// use '…' literals but escape an embedded quote differently ('\'' vs '').
+function shQuote(s, platform = process.platform) {
+  const v = String(s);
+  return platform === 'win32'
+    ? `'${v.replace(/'/g, "''")}'`
+    : `'${v.replace(/'/g, "'\\''")}'`;
 }
 
 const PROVIDERS = {
@@ -931,16 +934,17 @@ const PROVIDERS = {
     // `profile` (the picked gateway) supplies the inner agent and, for a genuinely
     // remote gateway, the URL/token. A localhost/empty URL runs local Docker
     // directly (no --remote), which is the path that actually works.
-    buildInteractiveCmd(bin, { profile, model } = {}) {
+    buildInteractiveCmd(bin, { profile, model, platform = process.platform } = {}) {
       const p = profile || {};
+      const q = (s) => shQuote(s, platform);
       let cmd = `${bin} interactive`;
-      if (p.provider) cmd += ` --provider ${shQuote(p.provider)}`;
+      if (p.provider) cmd += ` --provider ${q(p.provider)}`;
       if (nemesisIsRemoteHost(p.remote)) {
-        cmd += ` --remote ${shQuote(p.remote)}`;
-        if (p.token) cmd += ` --token ${shQuote(p.token)}`;
+        cmd += ` --remote ${q(p.remote)}`;
+        if (p.token) cmd += ` --token ${q(p.token)}`;
       }
       const m = model || p.model;
-      if (m) cmd += ` --model ${shQuote(m)}`;
+      if (m) cmd += ` --model ${q(m)}`;
       return cmd;
     },
     buildHeadlessRun() { return null; },

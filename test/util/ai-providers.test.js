@@ -93,8 +93,13 @@ test('nemesis8 runs `nemesis8 interactive` from the picked gateway profile', () 
   assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'codex' } }),
     "nemesis8 interactive --provider 'codex'");
   // A token with shell metacharacters is neutralized (no injection).
-  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', remote: 'http://box:9801', token: "a b;$(x)" } }),
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', remote: 'http://box:9801', token: "a b;$(x)" }, platform: 'darwin' }),
     "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 'a b;$(x)'");
+  // An embedded single quote escapes per-shell: bash '\'' vs PowerShell ''.
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', token: "a'b", remote: 'http://box:9801' }, platform: 'darwin' }),
+    "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 'a'\\''b'");
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', token: "a'b", remote: 'http://box:9801' }, platform: 'win32' }),
+    "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 'a''b'");
 });
 
 test('per-profile nemesis8:<id> modes resolve to the nemesis8 provider', () => {
