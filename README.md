@@ -17,6 +17,8 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 
 *   **⚡ Parallel Agents, Isolated Worktrees**
     One task = one git worktree + one independent agent. Run Claude Code, Codex, Gemini, Copilot, Cursor, Cline, and opencode side by side. The visual sidebar tracks staged/unstaged counts, status, and branch alignment per task.
+*   **🧪 Sandboxed Agents (Nemesis8)**
+    Optionally run an agent inside an isolated [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) Docker sandbox instead of directly on your machine. Add a gateway under **Preferences → Nemesis8 Sandboxes** (one click sets one up locally), then pick **Nemesis8 Sandbox** as the agent for any tab. Keeps the agent's blast radius off your host, and works against a local or remote gateway.
 *   **📂 Multi-Repo Git Sessions**
     Coordinate changes across multiple microservices or repositories on a shared task branch. Each repository spins up its own isolated worktree so agents can safely collaborate.
 *   **🛡️ Commit-Time Review Gate**
