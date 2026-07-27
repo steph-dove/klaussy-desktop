@@ -12,6 +12,9 @@ const MCP_CONFIGS = {
   copilot: { format: 'json', mapKey: 'mcpServers', userFile: ['.copilot', 'mcp-config.json'], projectFile: null, envRef: null, verified: true },
   cursor: { format: 'json', mapKey: 'mcpServers', userFile: ['.cursor', 'mcp.json'], projectFile: ['.cursor', 'mcp.json'], envRef: 'envcolon', verified: true },
   cline: { format: 'json', mapKey: 'mcpServers', userFile: ['.cline', 'data', 'settings', 'cline_mcp_settings.json'], projectFile: null, envRef: null, verified: true },
+  // envRef null: kimi's parser has no ${VAR} expansion, so a secret can't be
+  // referenced by name here (verified against the 0.29.1 bundle).
+  kimi: { format: 'json', mapKey: 'mcpServers', userFile: ['.kimi-code', 'mcp.json'], projectFile: ['.kimi-code', 'mcp.json'], envRef: null, verified: true },
   ollama: null,
 };
 

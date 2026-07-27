@@ -27,7 +27,7 @@ const pty = require('node-pty');
 const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
-const { promptFileArg } = require('../util/agent-prompt');
+const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -256,12 +256,13 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
   // doesn't trigger unwanted expansion.
   const model = (config.agentModel || {})[prov.id] || '';
   const agentCmd = prov.buildInteractiveCmd(bin, { trust: consent.trust, model });
-  // Most agents take the prompt as a bare positional arg (Claude, Codex). Some
-  // need a flag to execute it interactively (Gemini: `-i`). interactivePromptFlag
-  // supplies that; default is none.
+  // Most agents take the prompt as a positional arg; some need a flag to run it
+  // interactively (Gemini `-i`). kimi accepts neither, so it launches bare and
+  // gets the prompt pasted into its TUI once that's up.
+  const pasteAtBoot = prov.promptDelivery === 'paste';
   const promptFlag = prov.interactivePromptFlag ? `${prov.interactivePromptFlag} ` : '';
   const quotedPrompt = promptFileArg(promptFile, userShell);
-  const shellCmd = `${agentCmd} ${promptFlag}${quotedPrompt}`;
+  const shellCmd = pasteAtBoot ? agentCmd : `${agentCmd} ${promptFlag}${quotedPrompt}`;
   const args = shellRunCmdArgs(userShell, shellCmd);
 
   const preSnapshot = prov.snapshotSessions(worktreePath);
@@ -387,6 +388,13 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
         }
       }, ms);
     }
+  }
+
+  // Claim promptSent up front so the 15s arg-form fallback above can't race
+  // this into a double-send.
+  if (pasteAtBoot) {
+    session.promptSent = true;
+    schedulePromptPaste(ptyProc, prompt, () => implementPtySessions.has(requestId));
   }
 
   return { ok: true };

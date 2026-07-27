@@ -449,6 +449,9 @@ module.exports = {
   addServer,
   removeServer,
   validateServer,
+  // shared TOML/write primitives (state/kimi-permissions.js)
+  atomicWrite,
+  tomlString,
   // exported for tests
   serverToDef,
   parseCodexServers,

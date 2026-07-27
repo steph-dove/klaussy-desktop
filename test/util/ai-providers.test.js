@@ -18,7 +18,7 @@ const VALID_OUTPUT_MODES = new Set(['passthrough', 'json-text', 'json-translate'
 test('registry exposes the expected providers', () => {
   // Order-independent membership check — guards against a provider being
   // dropped from the registry object or PROVIDER_IDS drifting out of sync.
-  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode']) {
+  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode', 'kimi']) {
     assert.ok(ALL.includes(id), `missing provider: ${id}`);
   }
 });
@@ -270,4 +270,89 @@ test('opencode parseStreamLine maps the real JSONL event shapes', () => {
   assert.deepEqual(empty, [
     { kind: 'usage', usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0, totalTokens: 0 } },
   ]);
+});
+
+test('kimi builds the verified Kimi Code command shapes', () => {
+  // Grounded on kimi-code 0.29.1 `--help` + the shipped bundle (NOT the retired
+  // Python kimi-cli, whose print-mode flags are spelled differently).
+  const p = providers.getProvider('kimi');
+  assert.equal(p.defaultBin, 'kimi');
+  assert.equal(p.memoryFile, 'AGENTS.md');
+
+  assert.equal(p.buildInteractiveCmd('kimi', {}), 'kimi');
+  assert.match(p.buildInteractiveCmd('kimi', { resumeSessionId: 'abc123' }), /--session abc123/);
+  assert.match(p.buildInteractiveCmd('kimi', { resumeLatest: true }), /--continue/);
+  assert.match(p.buildInteractiveCmd('kimi', { model: 'k2 turbo' }), /--model "k2 turbo"/);
+  // Sibling worktrees ride --add-dir so cross-repo edits work.
+  assert.match(p.buildInteractiveCmd('kimi', { sessionDirs: ['/a', '/b'] }), /--add-dir "\/a" --add-dir "\/b"/);
+
+  // `--session` and `--continue` are mutually exclusive — an id must win alone.
+  const both = p.buildInteractiveCmd('kimi', { resumeSessionId: 'abc123', resumeLatest: true });
+  assert.match(both, /--session abc123/);
+  assert.ok(!both.includes('--continue'), 'must not combine --session with --continue');
+
+  const stream = p.buildHeadlessRun('kimi', { prompt: 'x', mode: 'stream' });
+  assert.deepEqual(stream.args, ['-p', 'x', '--output-format', 'stream-json']);
+  assert.equal(stream.outputMode, 'json-translate');
+
+  const text = p.buildHeadlessRun('kimi', { prompt: 'x' });
+  assert.deepEqual(text.args, ['-p', 'x']);
+  assert.equal(text.outputMode, 'passthrough');
+
+  // kimi REJECTS --yolo/--auto/--plan alongside --prompt ("Cannot combine
+  // --prompt with --yolo"), so allowEdits must never add one.
+  const edits = p.buildHeadlessRun('kimi', { prompt: 'x', mode: 'stream', allowEdits: true });
+  for (const flag of ['--yolo', '-y', '--auto', '--plan']) {
+    assert.ok(!edits.args.includes(flag), `headless args must not contain ${flag}`);
+  }
+  // No stdin prompt path exists, so the prompt stays on the command line.
+  assert.equal(p.buildHeadlessRun('kimi', { prompt: 'x', promptOnStdin: true }).stdinInput, undefined);
+
+  assert.equal(providers.installCommandFor('kimi'), 'npm install -g @moonshot-ai/kimi-code');
+
+  // Exact resume reads kimi's session index; the TUI takes no spawn-time prompt.
+  assert.equal(p.supportsExactResume, true);
+  assert.equal(p.sessionTracking, 'kimi-index');
+  assert.equal(p.perWorktreeSessions, false);
+  assert.equal(p.promptDelivery, 'paste');
+  // Nothing may set an interactive prompt flag — `kimi <text>` is "unknown command".
+  assert.equal(p.interactivePromptFlag, undefined);
+});
+
+test('kimi parseStreamLine maps the PromptJsonWriter line shapes', () => {
+  // Shapes read off kimi-code 0.29.1's PromptJsonWriter: assistant lines carry
+  // content and/or tool_calls, tool results and meta lines carry neither.
+  const p = providers.getProvider('kimi');
+
+  assert.deepEqual(
+    p.parseStreamLine({ role: 'assistant', content: 'pong' }),
+    [{ kind: 'text', text: 'pong' }],
+  );
+
+  // tool_calls: arguments arrive as a JSON *string*.
+  assert.deepEqual(
+    p.parseStreamLine({
+      role: 'assistant',
+      content: 'Let me execute this.',
+      tool_calls: [{ type: 'function', id: 'tc_1', function: { name: 'Bash', arguments: '{"command":"ls"}' } }],
+    }),
+    [
+      { kind: 'text', text: 'Let me execute this.' },
+      { kind: 'tool', name: 'Bash', hint: 'ls' },
+    ],
+  );
+
+  assert.deepEqual(
+    p.parseStreamLine({ role: 'assistant', tool_calls: [{ function: { name: 'Read', arguments: '{"path":"/a.txt"}' } }] }),
+    [{ kind: 'tool', name: 'Read', hint: '/a.txt' }],
+  );
+
+  // Malformed arguments must degrade to a truncated hint, not throw.
+  assert.deepEqual(
+    p.parseStreamLine({ role: 'assistant', tool_calls: [{ function: { name: 'Grep', arguments: 'not json' } }] }),
+    [{ kind: 'tool', name: 'Grep', hint: 'not json' }],
+  );
+
+  assert.deepEqual(p.parseStreamLine({ role: 'tool', tool_call_id: 'tc_1', content: 'a.txt' }), []);
+  assert.deepEqual(p.parseStreamLine({ role: 'meta', type: 'session.resume_hint', session_id: 'abc' }), []);
 });

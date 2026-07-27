@@ -55,6 +55,7 @@
     cursor: { input: document.getElementById('pref-cursor-path'), infoEl: document.getElementById('agent-info-cursor'), prefKey: 'cursorPath' },
     cline: { input: document.getElementById('pref-cline-path'), infoEl: document.getElementById('agent-info-cline'), prefKey: 'clinePath' },
     opencode: { input: document.getElementById('pref-opencode-path'), infoEl: document.getElementById('agent-info-opencode'), prefKey: 'opencodePath' },
+    kimi: { input: document.getElementById('pref-kimi-path'), infoEl: document.getElementById('agent-info-kimi'), prefKey: 'kimiPath' },
     ollama: { input: document.getElementById('pref-aider-path'), infoEl: document.getElementById('agent-info-ollama'), prefKey: 'aiderPath' },
   };
 
@@ -80,6 +81,12 @@
   autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
   document.getElementById('pref-precommit-review').checked = prefs.preCommitReview !== false;
   document.getElementById('pref-strip-comments').checked = prefs.stripComments !== false;
+  // null = config.toml unreadable; disable rather than untick, so a Save can't
+  // revoke a grant that may still be live.
+  var kimiBash = document.getElementById('pref-kimi-autonomous-bash');
+  kimiBash.checked = prefs.kimiAutonomousBash === true;
+  kimiBash.disabled = prefs.kimiAutonomousBash === null;
+  if (kimiBash.disabled) kimiBash.title = "Can't read ~/.kimi-code/config.toml";
   document.getElementById('pref-repo-intel-enrich').checked = prefs.repoIntelEnrich === true;
 
   // Theme dropdown
@@ -228,6 +235,7 @@
       cursorPath: agentPaths.cursor.input.value.trim(),
       clinePath: agentPaths.cline.input.value.trim(),
       opencodePath: agentPaths.opencode.input.value.trim(),
+      kimiPath: agentPaths.kimi.input.value.trim(),
       aiderPath: agentPaths.ollama.input.value.trim(),
       defaultProvider: defaultMode.value,
       theme: { preset: themeSelect.value },
@@ -239,8 +247,11 @@
       nemesisProfiles: collectNemesisProfiles(),
     };
 
-    await window.klaus.ui.setPreferences(updated);
-    showStatus('Saved');
+    // Omitted entirely while unknown so the main side skips it (`!== undefined`).
+    if (!kimiBash.disabled) updated.kimiAutonomousBash = kimiBash.checked;
+
+    var res = await window.klaus.ui.setPreferences(updated);
+    showStatus(res && res.error ? res.error : 'Saved');
   }
 
   function showStatus(msg) {
@@ -254,6 +265,10 @@
     el.addEventListener('change', saveAll);
     el.addEventListener('input', saveAll);
   });
+
+  // Toggling this rewrites kimi's own config.toml, so it saves on change rather
+  // than riding along with whatever control the user touches next.
+  kimiBash.addEventListener('change', saveAll);
 
   // Re-probe an agent's version when its path changes.
   Object.keys(agentPaths).forEach(function (id) {
