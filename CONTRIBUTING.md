@@ -49,7 +49,7 @@ Klaussy Desktop is source-available under the **Sustainable Use License
 that:
 
 1. Your contribution is licensed to the project under SUL 1.0 (inbound = outbound), and
-2. You grant **Dovatech LLC** a perpetual, irrevocable, worldwide license to use
+2. You grant **Stephanie Dover** a perpetual, irrevocable, worldwide license to use
    and **relicense** your contribution, including under the commercial /
    enterprise terms that fund the project.
 
