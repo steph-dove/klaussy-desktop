@@ -2,6 +2,31 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.14.0
+
+### 🌙 Kimi Code — Moonshot's terminal agent, as a first-class provider
+
+Kimi Code joins the agent roster. Pick **Kimi** for any tab, or set it as your
+default under **Preferences → Default Agent**. It gets the same treatment as the
+rest: worktree tabs, the New Task picker, MCP server management, skills, and the
+Setup Check's install/sign-in guidance.
+
+- **Session resume that actually resumes.** Kimi records every session against
+  its working directory, so Klaussy reopens the right one for a worktree rather
+  than falling back to "most recent".
+- **Cross-agent handoff.** Start under Claude and resume under Kimi (or the other
+  way): its TUI accepts no prompt at launch, so Klaussy pastes the handoff brief
+  in once the interface is up, arriving as one block instead of line-by-line.
+- **Optional unattended shell access.** Kimi edits files in a worktree on its own
+  but always asks before running commands, which stops unattended jobs like CI
+  fix-check from running your tests. **Preferences → "Let Kimi run shell commands
+  unattended"** adds an allow rule to Kimi's own config; it's off by default, and
+  unticking removes it cleanly.
+
+Kimi tabs don't report token usage, and the Implement panel shows raw terminal
+output rather than tool-by-tool progress — Kimi doesn't publish either of those
+in a form Klaussy can read yet.
+
 ## 0.13.0
 
 ### 🧪 Nemesis8 Sandbox — run agents in an isolated Docker sandbox
