@@ -55,6 +55,7 @@
     cursor: { input: document.getElementById('pref-cursor-path'), infoEl: document.getElementById('agent-info-cursor'), prefKey: 'cursorPath' },
     cline: { input: document.getElementById('pref-cline-path'), infoEl: document.getElementById('agent-info-cline'), prefKey: 'clinePath' },
     opencode: { input: document.getElementById('pref-opencode-path'), infoEl: document.getElementById('agent-info-opencode'), prefKey: 'opencodePath' },
+    kimi: { input: document.getElementById('pref-kimi-path'), infoEl: document.getElementById('agent-info-kimi'), prefKey: 'kimiPath' },
     ollama: { input: document.getElementById('pref-aider-path'), infoEl: document.getElementById('agent-info-ollama'), prefKey: 'aiderPath' },
   };
 
@@ -80,6 +81,7 @@
   autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
   document.getElementById('pref-precommit-review').checked = prefs.preCommitReview !== false;
   document.getElementById('pref-strip-comments').checked = prefs.stripComments !== false;
+  document.getElementById('pref-kimi-autonomous-bash').checked = prefs.kimiAutonomousBash === true;
   document.getElementById('pref-repo-intel-enrich').checked = prefs.repoIntelEnrich === true;
 
   // Theme dropdown
@@ -228,6 +230,7 @@
       cursorPath: agentPaths.cursor.input.value.trim(),
       clinePath: agentPaths.cline.input.value.trim(),
       opencodePath: agentPaths.opencode.input.value.trim(),
+      kimiPath: agentPaths.kimi.input.value.trim(),
       aiderPath: agentPaths.ollama.input.value.trim(),
       defaultProvider: defaultMode.value,
       theme: { preset: themeSelect.value },
@@ -235,6 +238,7 @@
       autoFetchInterval: fetchSeconds * 1000,
       preCommitReview: document.getElementById('pref-precommit-review').checked,
       stripComments: document.getElementById('pref-strip-comments').checked,
+      kimiAutonomousBash: document.getElementById('pref-kimi-autonomous-bash').checked,
       repoIntelEnrich: document.getElementById('pref-repo-intel-enrich').checked,
       nemesisProfiles: collectNemesisProfiles(),
     };

@@ -64,6 +64,22 @@ function codexPatchHint(input) {
   return m ? m[1].trim() : '';
 }
 
+function kimiHome() {
+  const override = process.env.KIMI_CODE_HOME;
+  return (override && override.trim()) || path.join(home(), '.kimi-code');
+}
+
+// Chip hint for a kimi tool call, whose `arguments` arrive as a JSON *string*.
+function kimiToolHint(args) {
+  let inp = args;
+  if (typeof inp === 'string') {
+    try { inp = JSON.parse(inp); } catch { return inp.slice(0, 60); }
+  }
+  if (!inp || typeof inp !== 'object') return '';
+  const hint = inp.path || inp.file_path || inp.filePath || inp.command || inp.pattern || '';
+  return typeof hint === 'string' ? hint : '';
+}
+
 function claudeUsage(u) {
   if (!u) return null;
   return {
@@ -887,6 +903,73 @@ const PROVIDERS = {
     findNewSession() { return null; },
   },
 
+  // Kimi Code CLI, grounded against a real 0.29.1 install — NOT the retired
+  // Python `kimi-cli`, which ships the same `kimi` binary with different flags
+  // (`--print` as the headless toggle, `-c` carrying the prompt).
+  kimi: {
+    id: 'kimi',
+    memoryFile: 'AGENTS.md',
+    shortLabel: 'km',
+    displayName: 'Kimi Code',
+    defaultBin: 'kimi',
+    configPathKey: 'kimiPath',
+    versionArgs: ['--version'],
+    // Exact resume comes from the flat ~/.kimi-code/session_index.jsonl, not
+    // from per-worktree transcript files (see state/kimi-sessions.js).
+    perWorktreeSessions: false,
+    supportsExactResume: true,
+    sessionTracking: 'kimi-index',
+    // The TUI takes no prompt at spawn: `kimi "…"` is "unknown command", and
+    // `-p` is non-interactive-only. It gets pasted in after boot instead.
+    promptDelivery: 'paste',
+
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs } = {}) {
+      // Model aliases are user-defined in config.toml and may contain spaces.
+      let base = bin;
+      if (model) base += ` --model ${JSON.stringify(model)}`;
+      for (const d of quotedSessionDirs(sessionDirs)) base += ` --add-dir ${d}`;
+      // `--session` and `--continue` are mutually exclusive, so an id wins alone.
+      if (resumeSessionId) return `${base} --session ${resumeSessionId}`;
+      if (resumeLatest) return `${base} --continue`;
+      return base;
+    },
+    buildHeadlessRun(_bin, { prompt, mode } = {}) {
+      // allowEdits needs no flag: kimi's git-cwd-write policy already approves
+      // Write/Edit inside a worktree. Being POSIX-only and tool-specific, Bash
+      // (and any write on Windows) still asks, with no TTY to answer.
+      const args = ['-p', prompt];
+      if (mode === 'stream') args.push('--output-format', 'stream-json');
+      // kimi reads no stdin, so a multi-line headless prompt can't reach a
+      // Windows `.cmd` shim install through cmd.exe — a known gap.
+      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+    },
+    sessionDir() {
+      return kimiHome();
+    },
+
+    // kimi emits no usage or turn-end line, so token tracking stays unwired and
+    // the caller ends the run on process exit.
+    parseStreamLine(obj) {
+      const events = [];
+      if (!obj || obj.role !== 'assistant') return events;
+      if (typeof obj.content === 'string' && obj.content) {
+        events.push({ kind: 'text', text: obj.content });
+      }
+      for (const call of Array.isArray(obj.tool_calls) ? obj.tool_calls : []) {
+        const fn = (call && call.function) || {};
+        if (!fn.name) continue;
+        events.push({ kind: 'tool', name: fn.name, hint: kimiToolHint(fn.arguments) });
+      }
+      return events;
+    },
+    // Transcripts are per-agent wire records, not one tailable JSONL, so the
+    // implement PTY attaches no tail and degrades to raw PTY output.
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
+
   ollama: {
     id: 'ollama',
     displayName: 'Ollama (via Aider)',
@@ -968,6 +1051,7 @@ const NPM_PACKAGES = {
   copilot: '@github/copilot',
   cline: 'cline',
   opencode: 'opencode-ai',
+  kimi: '@moonshot-ai/kimi-code',
 };
 
 // Non-npm install commands, per platform, for CLIs that don't ship as npm
@@ -1005,6 +1089,7 @@ const DOCS_URLS = {
   cursor: 'https://cursor.com/docs/cli',
   cline: 'https://docs.cline.bot/cli-reference/overview',
   opencode: 'https://opencode.ai/docs',
+  kimi: 'https://moonshotai.github.io/kimi-code/',
   ollama: 'https://aider.chat',
   nemesis8: 'https://github.com/DeepBlueDynamics/nemesis8',
 };
@@ -1020,6 +1105,7 @@ const SHORT_NAMES = {
   cursor: 'Cursor',
   cline: 'Cline',
   opencode: 'opencode',
+  kimi: 'Kimi',
   ollama: 'Ollama',
   nemesis8: 'Nemesis8 Sandbox',
 };
@@ -1027,7 +1113,7 @@ const SHORT_NAMES = {
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
 // Lists are grounded against each CLI, not guessed: claude — `--model` takes
 // the aliases 'opus'/'sonnet'/'haiku' (claude --help), which always resolve to
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', ollama: '--model' };
+const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', kimi: '--model', ollama: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -1060,6 +1146,9 @@ const MODELS = {
   // opencode models are `provider/model` and depend on the user's configured
   // providers, so we ship Default-only rather than slugs that might error.
   opencode: [{ id: '', label: 'Default' }],
+  // kimi's `--model` takes an alias that login writes into the user's own
+  // config.toml, so any slug shipped here would error on someone else's setup.
+  kimi: [{ id: '', label: 'Default' }],
   ollama: [
     { id: '', label: 'Default (qwen2.5-coder)' },
     { id: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B' },
@@ -1108,6 +1197,9 @@ const AUTH_CHECKS = {
   // list` shows configured providers but isn't a quiet yes/no probe, so auth
   // state is reported as unknown (not false).
   opencode: { statusArgs: null, notAuthedPattern: null, loginCommand: 'opencode auth login' },
+  // `kimi provider list` exits 0 either way, so the pattern (not the exit code)
+  // is what distinguishes signed-out here.
+  kimi: { statusArgs: ['provider', 'list'], notAuthedPattern: /no providers configured/i, loginCommand: 'kimi login' },
   ollama:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'ollama serve' },
 };
 

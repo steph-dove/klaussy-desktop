@@ -421,6 +421,20 @@
       <div class="claude-info" id="agent-info-opencode"></div>
 
       <div class="field field-full">
+        <label>Kimi Path</label>
+        <input type="text" id="pref-kimi-path" placeholder="kimi (uses PATH)" spellcheck="false" />
+      </div>
+      <div class="claude-info" id="agent-info-kimi"></div>
+      <label class="field-full">
+        <input type="checkbox" id="pref-kimi-autonomous-bash" />
+        <span>Let Kimi run shell commands unattended</span>
+      </label>
+      <div class="field-hint">Kimi already edits files in a worktree on its own, but never runs
+        commands without asking — so unattended jobs like CI fix-check can't run your tests. This
+        adds an allow rule for its Bash tool to <code>~/.kimi-code/config.toml</code>, which applies
+        to your kimi CLI everywhere, not just Klaussy. Unticking removes it.</div>
+
+      <div class="field field-full">
         <label>Aider Path (for Ollama)</label>
         <input type="text" id="pref-aider-path" placeholder="aider (uses PATH)" spellcheck="false" />
       </div>
@@ -439,6 +453,7 @@
           <option value="cursor">Cursor</option>
           <option value="cline">Cline</option>
           <option value="opencode">opencode</option>
+          <option value="kimi">Kimi Code</option>
           <option value="ollama">Ollama (via Aider)</option>
           <option value="shell">Shell</option>
         </select>

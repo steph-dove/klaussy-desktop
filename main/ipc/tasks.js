@@ -25,7 +25,7 @@ const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
 const { buildHandoffSeed } = require('../state/session-handoff');
-const { stageInitialPrompt } = require('../util/agent-prompt');
+const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
 
@@ -235,6 +235,20 @@ ipcMain.handle('list-saved-sessions', () => {
   return saved.concat(disk);
 });
 
+// Latest session id for agents that keep sessions where the per-worktree .jsonl
+// scan can't see them. null means the caller falls back to resuming latest.
+function trackedLatestSession(provider, worktreePath) {
+  if (!provider || !worktreePath) return null;
+  if (provider.sessionTracking === 'opencode-cli') {
+    const bin = binFor(provider.id, loadConfig());
+    return require('../state/opencode-sessions').latestSession(bin, worktreePath) || null;
+  }
+  if (provider.sessionTracking === 'kimi-index') {
+    return require('../state/kimi-sessions').latestSession(worktreePath) || null;
+  }
+  return null;
+}
+
 ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath, branch, mode, originalMode, repoPath }) => {
   // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
   // exactly what made it a phantom (undiscoverable yet blocking re-create), so
@@ -271,14 +285,12 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
     }
   }
 
-  // Same-agent resume. Claude has a persisted exact id; opencode resolves its
-  // worktree's latest session via its CLI; everything else resumes its latest
-  // via its native flag.
+  // Same-agent resume. Claude has a persisted exact id; the `sessionTracking`
+  // agents resolve their worktree's latest session on demand; everything else
+  // resumes its latest via its native flag.
   const provider = getProvider(resumeMode);
   let exactId = provider && provider.supportsExactResume ? sessionId : null;
-  if (provider && provider.sessionTracking === 'opencode-cli' && !exactId) {
-    exactId = require('../state/opencode-sessions').latestSession(binFor(provider.id, loadConfig()), worktreePath) || null;
-  }
+  if (!exactId) exactId = trackedLatestSession(provider, worktreePath);
   try {
     return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);
   } catch (err) {
@@ -1071,6 +1083,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   let session = { release: () => {} };
   let promptFile = null;     // staged-prompt tempfile, removed on exit
   let needsEnter = false;    // codex-style TUIs pre-fill but wait for Enter
+  let pasteText = null;      // kimi-style TUIs take no spawn-time prompt at all
   let ptyProc;
   {
     if (isAgentMode(mode)) {
@@ -1094,6 +1107,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
       agentCmd = staged.agentCmd;
       promptFile = staged.promptFile;
       needsEnter = staged.needsEnter;
+      pasteText = staged.pasteText || null;
       args = shellRunCmdArgs(userShell, agentCmd);
     } else {
       args = shellLoginArgs(userShell);
@@ -1119,6 +1133,9 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     setTimeout(sendEnter, 3500);
     setTimeout(sendEnter, 8000);
   }
+
+  // Paste-delivery agents (kimi) took no prompt at spawn; no-ops for the rest.
+  schedulePromptPaste(ptyProc, pasteText, () => sub.alive);
 
   ptyProc.onData((data) => {
     sendToTerminalSubscribers(`terminal-data-${taskId}-${subId}`, data);
@@ -1254,14 +1271,14 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   let agentCmd;
   if (provider.supportsExactResume) {
-    // Claude tracks its exact id via .jsonl files; opencode has none, so it
-    // resolves its worktree's latest session via its CLI. resumeLatest is the
+    // Claude tracks its exact id via .jsonl files; the `sessionTracking` agents
+    // keep sessions elsewhere and resolve theirs on demand. resumeLatest is the
     // no-id fallback (harmlessly ignored by Claude's buildInteractiveCmd).
-    const resumeId = inst.claudeSessionId || (provider.sessionTracking === 'opencode-cli'
-      ? require('../state/opencode-sessions').latestSession(bin, inst.worktreePath)
+    const resumeId = inst.claudeSessionId || (provider.sessionTracking
+      ? trackedLatestSession(provider, inst.worktreePath)
       : findLatestSessionId(inst.worktreePath));
     agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId: resumeId, resumeLatest: !resumeId, trust, model });
-    inst.preSpawnSessionIds = provider.sessionTracking === 'opencode-cli'
+    inst.preSpawnSessionIds = provider.sessionTracking
       ? new Set() : snapshotSessionIds(inst.worktreePath);
     inst.claudeSessionId = resumeId || null;
   } else {

@@ -217,6 +217,10 @@ ipcMain.handle('get-preferences', () => {
     cursorPath: config.cursorPath || '',
     clinePath: config.clinePath || '',
     opencodePath: config.opencodePath || '',
+    kimiPath: config.kimiPath || '',
+    // Read from kimi's own config.toml rather than mirrored here, so the
+    // checkbox can't drift from the file the user may edit by hand.
+    kimiAutonomousBash: require('../state/kimi-permissions').isGranted(),
     aiderPath: config.aiderPath || '',
     // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
     defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
@@ -256,6 +260,11 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.cursorPath !== undefined) config.cursorPath = prefs.cursorPath;
   if (prefs.clinePath !== undefined) config.clinePath = prefs.clinePath;
   if (prefs.opencodePath !== undefined) config.opencodePath = prefs.opencodePath;
+  if (prefs.kimiPath !== undefined) config.kimiPath = prefs.kimiPath;
+  if (prefs.kimiAutonomousBash !== undefined) {
+    const r = require('../state/kimi-permissions').setGranted(prefs.kimiAutonomousBash);
+    if (r.error) console.warn('[kimi-permissions] could not update config.toml:', r.error);
+  }
   if (prefs.aiderPath !== undefined) config.aiderPath = prefs.aiderPath;
   if (prefs.defaultProvider !== undefined) {
     config.defaultProvider = prefs.defaultProvider;

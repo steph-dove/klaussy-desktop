@@ -23,7 +23,7 @@ const { allWindows, getMainWindow } = require('./windows');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
-const { stageInitialPrompt } = require('../util/agent-prompt');
+const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { agentExitAction } = require('../util/agent-exit');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
@@ -306,6 +306,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   let session = { release: () => {} };
   let promptFile = null;  // staged-prompt tempfile (cross-agent handoff), removed on exit
   let needsEnter = false; // codex-style TUIs pre-fill but wait for an Enter
+  let pasteText = null;   // kimi-style TUIs take no spawn-time prompt at all
   let ptyProc;
 
   if (mode === 'shell') {
@@ -334,6 +335,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
       agentCmd = staged.agentCmd;
       promptFile = staged.promptFile;
       needsEnter = staged.needsEnter;
+      pasteText = staged.pasteText || null;
     }
   }
 
@@ -354,6 +356,9 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     setTimeout(sendEnter, 3500);
     setTimeout(sendEnter, 8000);
   }
+
+  // Paste-delivery agents (kimi) took no prompt at spawn; no-ops for the rest.
+  schedulePromptPaste(ptyProc, pasteText, () => !!instances.get(id));
 
   // The base repo this worktree belongs to — used to group/filter worktrees by
   // repository in the sidebar. Derived from the worktree's common git dir so it
