@@ -83,6 +83,25 @@ test('grant creates config.toml when kimi has never run', () => {
   fs.rmSync(home, { recursive: true, force: true });
 });
 
+test('an unreadable config is never mistaken for an empty one', () => {
+  // Regression: swallowing read errors into '' let grant() overwrite a config it
+  // couldn't read; a directory at config.toml reproduces that without a uid dependency.
+  const home = tmpHome();
+  fs.mkdirSync(path.join(home, 'config.toml'));
+
+  const granted = perms.grant(home);
+  assert.ok(granted.error, 'grant must report the read failure, not overwrite');
+  assert.ok(!granted.ok, 'grant must not claim success');
+  assert.ok(fs.statSync(path.join(home, 'config.toml')).isDirectory(), 'must be untouched');
+
+  const revoked = perms.revoke(home);
+  assert.ok(revoked.error, 'revoke must report it rather than claim nothing to do');
+
+  assert.throws(() => perms.isGranted(home), 'isGranted surfaces it to its caller');
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 test('setGranted toggles both directions', () => {
   const home = tmpHome();
   perms.setGranted(true, home);

@@ -25,8 +25,15 @@ function configPath(home) {
   return path.join(home || getProvider('kimi').sessionDir(), 'config.toml');
 }
 
+// Only a missing file may read as empty; treating EACCES/EISDIR as "" would let
+// grant() destroy a config it simply couldn't read.
 function readText(file) {
-  try { return fs.readFileSync(file, 'utf8'); } catch { return ''; }
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return '';
+    throw err;
+  }
 }
 
 // [start, end] line indices of our fenced block, or null when absent.
@@ -37,17 +44,19 @@ function blockRange(lines) {
   return end === -1 ? null : { start, end };
 }
 
+// Throws if config.toml exists but can't be read — callers decide what that
+// means rather than having it silently look like "no rule present".
 function isGranted(home) {
   return blockRange(readText(configPath(home)).split('\n')) !== null;
 }
 
 function grant(home) {
   const file = configPath(home);
-  const text = readText(file);
-  if (blockRange(text.split('\n'))) return { ok: true, changed: false };
-  const block = [BEGIN, ...RULE_LINES, END].join('\n') + '\n';
-  const sep = text === '' || text.endsWith('\n\n') ? '' : (text.endsWith('\n') ? '\n' : '\n\n');
   try {
+    const text = readText(file);
+    if (blockRange(text.split('\n'))) return { ok: true, changed: false };
+    const block = [BEGIN, ...RULE_LINES, END].join('\n') + '\n';
+    const sep = text === '' || text.endsWith('\n\n') ? '' : (text.endsWith('\n') ? '\n' : '\n\n');
     atomicWrite(file, text + sep + block);
     return { ok: true, changed: true };
   } catch (err) {
@@ -57,15 +66,15 @@ function grant(home) {
 
 function revoke(home) {
   const file = configPath(home);
-  const lines = readText(file).split('\n');
-  const range = blockRange(lines);
-  if (!range) return { ok: true, changed: false };
-  const out = lines.slice(0, range.start).concat(lines.slice(range.end + 1));
-  // Collapse the doubled blank line left behind by the splice.
-  while (out.length > 1 && out[range.start - 1] === '' && out[range.start] === '') {
-    out.splice(range.start, 1);
-  }
   try {
+    const lines = readText(file).split('\n');
+    const range = blockRange(lines);
+    if (!range) return { ok: true, changed: false };
+    const out = lines.slice(0, range.start).concat(lines.slice(range.end + 1));
+    // Collapse the doubled blank line left behind by the splice.
+    while (out.length > 1 && out[range.start - 1] === '' && out[range.start] === '') {
+      out.splice(range.start, 1);
+    }
     atomicWrite(file, out.join('\n'));
     return { ok: true, changed: true };
   } catch (err) {

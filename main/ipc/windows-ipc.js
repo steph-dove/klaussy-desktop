@@ -200,6 +200,16 @@ ipcMain.handle('prefs-window-color-set', (_event, { color }) => {
   return { ok: true };
 });
 
+// A config.toml we can't read shouldn't take the whole Preferences dialog down.
+function kimiBashGranted() {
+  try {
+    return require('../state/kimi-permissions').isGranted();
+  } catch (err) {
+    console.warn('[kimi-permissions] could not read config.toml:', err.message);
+    return false;
+  }
+}
+
 ipcMain.handle('get-preferences', () => {
   const config = loadConfig();
   return {
@@ -220,7 +230,7 @@ ipcMain.handle('get-preferences', () => {
     kimiPath: config.kimiPath || '',
     // Read from kimi's own config.toml rather than mirrored here, so the
     // checkbox can't drift from the file the user may edit by hand.
-    kimiAutonomousBash: require('../state/kimi-permissions').isGranted(),
+    kimiAutonomousBash: kimiBashGranted(),
     aiderPath: config.aiderPath || '',
     // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
     defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
