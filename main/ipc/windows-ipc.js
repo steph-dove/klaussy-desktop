@@ -200,13 +200,14 @@ ipcMain.handle('prefs-window-color-set', (_event, { color }) => {
   return { ok: true };
 });
 
-// A config.toml we can't read shouldn't take the whole Preferences dialog down.
+// null = "couldn't read it", which the renderer must render as unknown rather
+// than unticked: a false here would let the next Save revoke a live grant.
 function kimiBashGranted() {
   try {
     return require('../state/kimi-permissions').isGranted();
   } catch (err) {
     console.warn('[kimi-permissions] could not read config.toml:', err.message);
-    return false;
+    return null;
   }
 }
 
@@ -271,9 +272,12 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.clinePath !== undefined) config.clinePath = prefs.clinePath;
   if (prefs.opencodePath !== undefined) config.opencodePath = prefs.opencodePath;
   if (prefs.kimiPath !== undefined) config.kimiPath = prefs.kimiPath;
+  // Collected, not returned early, so the other prefs still save while a failed
+  // revoke still reaches the user instead of showing "Saved".
+  let kimiError = null;
   if (prefs.kimiAutonomousBash !== undefined) {
     const r = require('../state/kimi-permissions').setGranted(prefs.kimiAutonomousBash);
-    if (r.error) console.warn('[kimi-permissions] could not update config.toml:', r.error);
+    if (r.error) kimiError = `Could not update kimi's config.toml: ${r.error}`;
   }
   if (prefs.aiderPath !== undefined) config.aiderPath = prefs.aiderPath;
   if (prefs.defaultProvider !== undefined) {
@@ -352,7 +356,7 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   for (const win of allWindows) {
     if (!win.isDestroyed()) win.webContents.send('preferences-changed', prefs);
   }
-  return { ok: true };
+  return kimiError ? { ok: false, error: kimiError } : { ok: true };
 });
 
 ipcMain.handle('get-claude-info', async () => {
