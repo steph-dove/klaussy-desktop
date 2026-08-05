@@ -2,6 +2,32 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.14.1
+
+### 🪟 Local models get a context window they can actually work in
+
+opencode running on a local Ollama model behaved as though it had no tools and
+no memory — it couldn't read your repo, and it forgot the previous turn. The
+cause wasn't opencode: Ollama hands local models a 4096-token window by default,
+and an agent's system prompt and tool definitions alone come to roughly 11,000
+tokens. The tools and the conversation were pushed out before you typed a word.
+
+Klaussy now raises that window on the model itself, since the window can't be
+set per request over the interface opencode uses. It happens when you pick a
+model, when opencode starts, and once at launch — so it also covers a provider
+you configured yourself in `opencode.json` without ever opening Klaussy's picker.
+
+- **Preferences → Local Model Context Window.** `Auto` sizes the window to your
+  machine's memory, so a 16GB laptop isn't handed one it can't load. Pick a
+  size explicitly to pin it, including a smaller one to reclaim memory.
+- **Windows and Linux fixes.** opencode's settings and sign-in files were being
+  written to macOS/Linux locations that Windows never reads, so this never took
+  effect there.
+- **Your config is no longer overwritten.** A settings file Klaussy couldn't
+  parse — a stray comma is enough — was being replaced with a blank one, which
+  could discard a hand-written `opencode.json` or your other providers' saved
+  sign-ins. Files that can't be read are now left alone.
+
 ## 0.14.0
 
 ### 🌙 Kimi Code — Moonshot's terminal agent, as a first-class provider
