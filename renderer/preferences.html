@@ -421,6 +421,37 @@
       <div class="claude-info" id="agent-info-opencode"></div>
 
       <div class="field field-full">
+        <label>opencode Model</label>
+        <select id="pref-opencode-model">
+          <option value="">Default (from opencode.json)</option>
+          <option value="ollama/qwen3-coder:30b">Qwen 3 Coder 30B (Ollama)</option>
+          <option value="ollama/qwen2.5-coder:32b">Qwen 2.5 Coder 32B (Ollama)</option>
+          <option value="ollama/qwen2.5-coder:14b">Qwen 2.5 Coder 14B (Ollama)</option>
+          <option value="ollama/qwen2.5-coder:7b">Qwen 2.5 Coder 7B (Ollama)</option>
+          <option value="ollama/deepseek-coder-v2">DeepSeek Coder V2 (Ollama)</option>
+          <option value="anthropic/claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+          <option value="openai/gpt-4o">GPT-4o</option>
+        </select>
+        <div class="claude-info" id="opencode-model-status"></div>
+      </div>
+
+      <div class="field field-full">
+        <label>Local Model Context Window</label>
+        <select id="pref-agent-context">
+          <option value="">Auto (match this machine)</option>
+          <option value="32768">32K — smaller machines</option>
+          <option value="65536">64K — balanced</option>
+          <option value="131072">128K — long sessions</option>
+          <option value="262144">256K — maximum</option>
+        </select>
+        <div class="claude-info" id="agent-context-status"></div>
+      </div>
+      <div class="field-hint">Ollama serves local models a 4096-token window by default, which
+        an agent's prompt and tool definitions alone exceed — so it loses its tools and forgets
+        the conversation. Klaussy raises this on the model itself. Bigger windows hold longer
+        sessions but reserve more memory up front, and are capped at what the model supports.</div>
+
+      <div class="field field-full">
         <label>Kimi Path</label>
         <input type="text" id="pref-kimi-path" placeholder="kimi (uses PATH)" spellcheck="false" />
       </div>

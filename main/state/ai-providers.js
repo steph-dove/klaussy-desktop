@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { claudeProjectDir } = require('../util/claude-paths');
+const { loadConfig } = require('../util/config');
 
 function home() {
   return process.env.HOME || os.homedir();
@@ -830,11 +831,17 @@ const PROVIDERS = {
     supportsExactResume: true,
     sessionTracking: 'opencode-cli',
 
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model } = {}) {
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, cwd } = {}) {
       // Model names are provider/model and may contain '/', so quote them; this
       // returns a shell string.
       let base = bin;
-      if (model) base += ` --model ${JSON.stringify(model)}`;
+      let cfg = {};
+      try { cfg = loadConfig() || {}; } catch {}
+      const effectiveModel = model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel;
+      if (effectiveModel) {
+        try { require('./opencode-config').ensureOpenCodeOllamaConfig(effectiveModel, cwd); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
+        base += ` --model ${JSON.stringify(effectiveModel)}`;
+      }
       if (resumeSessionId) return `${base} --session ${resumeSessionId}`;
       if (resumeLatest) return `${base} --continue`;
       return base;
@@ -844,7 +851,13 @@ const PROVIDERS = {
       // translate, else stdout passes through. `--auto` auto-approves tools on
       // autonomous-edit surfaces (else a headless edit blocks on a TTY-less prompt).
       const args = ['run'];
-      if (model) args.push('--model', model);
+      let cfg = {};
+      try { cfg = loadConfig() || {}; } catch {}
+      const effectiveModel = model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel;
+      if (effectiveModel) {
+        try { require('./opencode-config').ensureOpenCodeOllamaConfig(effectiveModel); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
+        args.push('--model', effectiveModel);
+      }
       if (allowEdits) args.push('--auto');
       if (mode === 'stream') args.push('--format', 'json');
       // Windows `.cmd`: prompt on stdin instead of the positional (util/agent-spawn).
@@ -1143,9 +1156,16 @@ const MODELS = {
   // over time, so we ship Default-only rather than slugs that might error.
   cursor: [{ id: '', label: 'Default' }],
   cline: [{ id: '', label: 'Default' }],
-  // opencode models are `provider/model` and depend on the user's configured
-  // providers, so we ship Default-only rather than slugs that might error.
-  opencode: [{ id: '', label: 'Default' }],
+  opencode: [
+    { id: '', label: 'Default (from opencode.json)' },
+    { id: 'ollama/qwen3-coder:30b', label: 'Qwen 3 Coder 30B (Ollama)' },
+    { id: 'ollama/qwen2.5-coder:32b', label: 'Qwen 2.5 Coder 32B (Ollama)' },
+    { id: 'ollama/qwen2.5-coder:14b', label: 'Qwen 2.5 Coder 14B (Ollama)' },
+    { id: 'ollama/qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B (Ollama)' },
+    { id: 'ollama/deepseek-coder-v2', label: 'DeepSeek Coder V2 (Ollama)' },
+    { id: 'anthropic/claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' },
+    { id: 'openai/gpt-4o', label: 'GPT-4o' },
+  ],
   // kimi's `--model` takes an alias that login writes into the user's own
   // config.toml, so any slug shipped here would error on someone else's setup.
   kimi: [{ id: '', label: 'Default' }],

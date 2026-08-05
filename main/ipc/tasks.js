@@ -290,6 +290,11 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
   // resumes its latest via its native flag.
   const provider = getProvider(resumeMode);
   let exactId = provider && provider.supportsExactResume ? sessionId : null;
+  if (exactId && provider && provider.sessionTracking === 'opencode-cli') {
+    const bin = binFor(provider.id, loadConfig());
+    const validIds = require('../state/opencode-sessions').listSessionIds(bin, worktreePath);
+    if (!validIds || !validIds.includes(exactId)) exactId = null;
+  }
   if (!exactId) exactId = trackedLatestSession(provider, worktreePath);
   try {
     return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);

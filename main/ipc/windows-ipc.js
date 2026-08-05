@@ -292,6 +292,18 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.agentModel !== undefined) {
     config.agentModel = Object.assign({}, config.agentModel, prefs.agentModel);
   }
+  if (prefs.opencodeModel !== undefined) {
+    config.opencodeModel = prefs.opencodeModel;
+  }
+  // 0 = auto; stored as 0 rather than deleted so "auto" is an explicit choice.
+  if (prefs.agentContextLength !== undefined) {
+    const n = Number(prefs.agentContextLength);
+    config.agentContextLength = Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  }
+  const effectiveOpencodeModel = (config.agentModel && config.agentModel.opencode) || config.opencodeModel;
+  if (effectiveOpencodeModel) {
+    try { require('../state/opencode-config').ensureOpenCodeOllamaConfig(effectiveOpencodeModel); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
+  }
   if (prefs.theme !== undefined) config.theme = prefs.theme;
   if (prefs.keybindings !== undefined) config.keybindings = prefs.keybindings;
   if (prefs.autoFetchInterval !== undefined) {

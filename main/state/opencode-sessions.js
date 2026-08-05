@@ -2,6 +2,7 @@
 // via `session list`. Shells out synchronously — use only on user-initiated
 // resume/restart, never the 10s autosave loop; failures yield [] (degrade clean).
 const { execFileSync } = require('child_process');
+const fs = require('fs');
 
 // `opencode session list` prints a table; each data row starts with the session
 // id token (`ses_…`) and rows are ordered newest-updated first. Parse the ids in
@@ -18,7 +19,7 @@ function parseSessionIds(stdout) {
 // Session ids for the opencode project rooted at worktreePath, newest-first.
 // opencode scopes `session list` to the cwd's project, so we run it there.
 function listSessionIds(bin, worktreePath) {
-  if (!bin || !worktreePath) return [];
+  if (!bin || !worktreePath || !fs.existsSync(worktreePath)) return [];
   try {
     const out = execFileSync(bin, ['session', 'list'], {
       cwd: worktreePath,
