@@ -11,6 +11,7 @@
 //   ollamaUrl   — default 'http://127.0.0.1:11434'
 //   ollamaModel — default 'qwen2.5-coder:1.5b-base' (base = FIM-tuned)
 
+const os = require('os');
 const { execFile, spawn } = require('child_process');
 const { app } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
@@ -28,6 +29,38 @@ const DEFAULT_MODEL = 'qwen2.5-coder:1.5b-base';
 // silently truncates once we add cross-file snippets. 8192 fits the current
 // window plus repo context with room for the completion.
 const DEFAULT_NUM_CTX = 8192;
+// The OpenAI-compatible endpoint agents use drops num_ctx, so the window must
+// be baked in. opencode costs ~11.3k tokens before the user types anything.
+const AGENT_MIN_NUM_CTX = 65536;
+
+// num_ctx is allocated up front, not a soft cap — a 30B at 65536 cost ~4GB of
+// KV cache on top of its weights. Scaling by RAM keeps a 16GB machine loadable
+// while letting a big one hold a longer session before opencode has to compact.
+const CONTEXT_BY_RAM_GB = [
+  { minGb: 64, ctx: 131072 },
+  { minGb: 32, ctx: 65536 },
+  { minGb: 16, ctx: 32768 },
+];
+// Below the smallest tier; still clears the ~12k floor so tools survive.
+const MIN_VIABLE_AGENT_CTX = 16384;
+
+function recommendedAgentContext(totalBytes = os.totalmem()) {
+  const gb = totalBytes / (1024 * 1024 * 1024);
+  for (const tier of CONTEXT_BY_RAM_GB) {
+    // 0.5 slack so a "16GB" machine reporting 15.9GiB still gets its tier.
+    if (gb >= tier.minGb - 0.5) return tier.ctx;
+  }
+  return MIN_VIABLE_AGENT_CTX;
+}
+
+// Preference `agentContextLength`: a positive number pins the window, anything
+// else (absent, 0, 'auto') scales it to the machine.
+function resolveAgentContext(cfg) {
+  const pref = cfg && cfg.agentContextLength;
+  const n = Number(pref);
+  if (Number.isFinite(n) && n > 0) return Math.floor(n);
+  return recommendedAgentContext();
+}
 
 function getBaseUrl() {
   const cfg = loadConfig();
@@ -45,9 +78,9 @@ function getModel() {
 let _probeCache = { ts: 0, running: false, modelPresent: false, error: null };
 const PROBE_CACHE_MS = 5000;
 
-async function probeNow() {
+async function probeNow(targetModel) {
   const url = getBaseUrl();
-  const model = getModel();
+  const model = targetModel || getModel();
   const result = { ts: Date.now(), running: false, modelPresent: false, error: null, model };
   try {
     // 500ms is plenty for a loopback request; keeps app startup snappy when
@@ -364,9 +397,9 @@ async function installOllama({ onProgress } = {}) {
 
 // Pulls the configured model via /api/pull. Streams digest + bytes progress
 // back through onProgress so the modal can render a percentage bar.
-async function pullModel({ onProgress } = {}) {
+async function pullModel({ model: targetModel, onProgress } = {}) {
   const url = getBaseUrl();
-  const model = getModel();
+  const model = targetModel || getModel();
   onProgress && onProgress({ step: 'model', message: 'Downloading model ' + model + '…', percent: 0 });
 
   let res;
@@ -425,18 +458,92 @@ async function pullModel({ onProgress } = {}) {
 // Ensures the configured model is installed: starts the server if needed, then
 // pulls only when absent. Assumes the Ollama binary exists. Returns
 // { ok } / { ok, alreadyPresent } / { error }.
-async function ensureModel({ onProgress } = {}) {
-  let probed = await probeNow();
+
+// /api/show returns parameters as one "key   value" per line.
+function parseNumCtx(parameters) {
+  const m = /^num_ctx\s+(\d+)/m.exec(parameters || '');
+  return m ? Number(m[1]) : 0;
+}
+
+// The architecture's own ceiling, keyed per-arch (`qwen3moe.context_length`),
+// so we never bake a window the model can't actually serve.
+function architectureContextLimit(modelInfo) {
+  if (!modelInfo || typeof modelInfo !== 'object') return 0;
+  for (const key of Object.keys(modelInfo)) {
+    if (key.endsWith('.context_length') && typeof modelInfo[key] === 'number') return modelInfo[key];
+  }
+  return 0;
+}
+
+// Bakes a num_ctx floor into the model itself. Rewrites the same tag (from ===
+// model) so every config that already names the model keeps working; weights
+// are shared, so this adds no download and no disk beyond the new manifest.
+async function ensureContextLength({ model: targetModel, minCtx } = {}) {
+  const cfg = loadConfig();
+  const floor = minCtx || resolveAgentContext(cfg);
+  // A pinned preference is matched exactly, so lowering it actually reclaims
+  // memory; on auto we only ever raise, never shrink a window the user chose.
+  const pinned = Number(cfg && cfg.agentContextLength) > 0;
+  const url = getBaseUrl();
+  const model = targetModel || getModel();
+
+  let shown;
+  try {
+    const res = await fetch(url + '/api/show', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model }),
+    });
+    if (!res.ok) return { error: 'ollama show HTTP ' + res.status };
+    shown = await res.json();
+  } catch (err) {
+    return { error: 'ollama show request failed: ' + ((err && err.message) || String(err)) };
+  }
+
+  const current = parseNumCtx(shown && shown.parameters);
+  const limit = architectureContextLimit(shown && shown.model_info);
+  const target = limit ? Math.min(floor, limit) : floor;
+  const satisfied = pinned ? current === target : current >= target;
+  if (satisfied) return { ok: true, alreadyAdequate: true, contextLength: current };
+
+  try {
+    const res = await fetch(url + '/api/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ model, from: model, parameters: { num_ctx: target }, stream: false }),
+    });
+    if (!res.ok) return { error: 'ollama create HTTP ' + res.status };
+    const body = await res.json();
+    if (body && body.error) return { error: body.error };
+  } catch (err) {
+    return { error: 'ollama create request failed: ' + ((err && err.message) || String(err)) };
+  }
+  return { ok: true, contextLength: target };
+}
+
+async function ensureModel({ model: targetModel, minContext, onProgress } = {}) {
+  const modelToEnsure = targetModel || getModel();
+  let probed = await probeNow(modelToEnsure);
   if (!probed.running) {
     const r = await ensureServerRunning({ onProgress });
     if (r.error) return r;
-    probed = await probeNow();
+    probed = await probeNow(modelToEnsure);
   }
-  if (probed.modelPresent) return { ok: true, alreadyPresent: true };
-  const r = await pullModel({ onProgress });
-  if (r.error) return r;
-  await probeNow();
-  return { ok: true };
+  let alreadyPresent = true;
+  if (!probed.modelPresent) {
+    const r = await pullModel({ model: modelToEnsure, onProgress });
+    if (r.error) return r;
+    await probeNow(modelToEnsure);
+    alreadyPresent = false;
+  }
+  // Only agent callers pass minContext; the FIM path sends num_ctx per request
+  // and keeps whatever window the model ships with.
+  if (!minContext) return alreadyPresent ? { ok: true, alreadyPresent: true } : { ok: true };
+
+  onProgress && onProgress({ step: 'context', message: 'Checking context window…' });
+  const ctx = await ensureContextLength({ model: modelToEnsure, minCtx: minContext });
+  if (ctx.error) return ctx;
+  return { ok: true, alreadyPresent, contextLength: ctx.contextLength };
 }
 
 // End-to-end: install binary if needed → start server → pull model → warm up.
@@ -496,6 +603,13 @@ module.exports = {
   getSetupState,
   ensureServerRunning,
   ensureModel,
+  ensureContextLength,
+  parseNumCtx,
+  architectureContextLimit,
+  AGENT_MIN_NUM_CTX,
+  recommendedAgentContext,
+  resolveAgentContext,
+  MIN_VIABLE_AGENT_CTX,
   runSetup,
   declineSetup,
 };

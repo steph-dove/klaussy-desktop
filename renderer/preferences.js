@@ -36,6 +36,10 @@
   var cursorStyle = document.getElementById('pref-cursor-style');
   var ollamaModel = document.getElementById('pref-ollama-model');
   var ollamaModelStatus = document.getElementById('ollama-model-status');
+  var opencodeModelSelect = document.getElementById('pref-opencode-model');
+  var opencodeModelStatus = document.getElementById('opencode-model-status');
+  var agentContextSelect = document.getElementById('pref-agent-context');
+  var agentContextStatus = document.getElementById('agent-context-status');
   var themeSelect = document.getElementById('pref-theme');
   var claudePath = document.getElementById('pref-claude-path');
   var defaultMode = document.getElementById('pref-default-mode');
@@ -74,6 +78,21 @@
     ollamaModel.insertBefore(custom, ollamaModel.firstChild);
   }
   ollamaModel.value = savedOllamaModel;
+
+  if (opencodeModelSelect) {
+    var savedOpencodeModel = (prefs.agentModel && prefs.agentModel.opencode) || prefs.opencodeModel || '';
+    if (savedOpencodeModel && !Array.prototype.slice.call(opencodeModelSelect.options).some(function (o) { return o.value === savedOpencodeModel; })) {
+      var customOpt = document.createElement('option');
+      customOpt.value = savedOpencodeModel;
+      customOpt.textContent = savedOpencodeModel + ' (custom)';
+      opencodeModelSelect.appendChild(customOpt);
+    }
+    opencodeModelSelect.value = savedOpencodeModel;
+  }
+
+  if (agentContextSelect) {
+    agentContextSelect.value = prefs.agentContextLength ? String(prefs.agentContextLength) : '';
+  }
   Object.keys(agentPaths).forEach(function (id) {
     agentPaths[id].input.value = prefs[agentPaths[id].prefKey] || '';
   });
@@ -235,6 +254,10 @@
       cursorPath: agentPaths.cursor.input.value.trim(),
       clinePath: agentPaths.cline.input.value.trim(),
       opencodePath: agentPaths.opencode.input.value.trim(),
+      opencodeModel: opencodeModelSelect ? opencodeModelSelect.value : '',
+      // '' means auto — the main side sizes it to the machine.
+      agentContextLength: agentContextSelect ? Number(agentContextSelect.value || 0) : 0,
+      agentModel: Object.assign({}, prefs.agentModel || {}, { opencode: opencodeModelSelect ? opencodeModelSelect.value : '' }),
       kimiPath: agentPaths.kimi.input.value.trim(),
       aiderPath: agentPaths.ollama.input.value.trim(),
       defaultProvider: defaultMode.value,
@@ -286,6 +309,66 @@
     showStatus('Saved');
     pullSelectedModel();
   });
+
+  if (opencodeModelSelect) {
+    opencodeModelSelect.addEventListener('change', async function () {
+      var val = opencodeModelSelect.value;
+      var agentModel = Object.assign({}, prefs.agentModel || {}, { opencode: val });
+      await window.klaus.ui.setPreferences({ agentModel: agentModel, opencodeModel: val });
+      showStatus('Saved');
+      checkAndPullOpencodeModel(val);
+    });
+  }
+
+  // Changing the window rewrites the model itself, so it saves on change and
+  // re-applies immediately rather than waiting for the next launch.
+  if (agentContextSelect) {
+    agentContextSelect.addEventListener('change', async function () {
+      // doSave, not the debounced saveAll: the main side reads the persisted
+      // window when re-baking, so it has to land before we apply.
+      await doSave();
+      var current = opencodeModelSelect ? opencodeModelSelect.value : '';
+      if (!current || current.indexOf('ollama/') !== 0) {
+        agentContextStatus.textContent = agentContextSelect.value
+          ? 'Applies when an Ollama model is selected above.'
+          : '';
+        return;
+      }
+      agentContextStatus.textContent = 'Applying to ' + current.replace('ollama/', '') + '…';
+      checkAndPullOpencodeModel(current);
+    });
+  }
+
+  function checkAndPullOpencodeModel(modelVal) {
+    if (!opencodeModelStatus) return;
+    if (!modelVal || !modelVal.startsWith('ollama/')) {
+      opencodeModelStatus.textContent = '';
+      return;
+    }
+    var tag = modelVal.replace('ollama/', '');
+    var api = window.klaus.ai && window.klaus.ai.ollama;
+    if (!api || !api.ensureModel) return;
+
+    opencodeModelStatus.textContent = 'Checking model ' + tag + '…';
+    var dispose = api.onSetupProgress ? api.onSetupProgress(function (p) {
+      if (!p || (p.step !== 'model' && p.step !== 'context')) return;
+      opencodeModelStatus.textContent = (p.message || 'Downloading…') +
+        (typeof p.percent === 'number' ? ' ' + p.percent + '%' : '');
+    }) : null;
+
+    // agentContext makes Ollama serve opencode a usable window; without it the
+    // agent loses its tools and history to the 4096 default.
+    api.ensureModel({ model: tag, agentContext: true }).then(function (r) {
+      if (dispose) dispose();
+      var ctx = r && r.contextLength ? ' (context ' + r.contextLength + ')' : '';
+      if (r && r.error) opencodeModelStatus.textContent = 'Could not install ' + tag + ': ' + r.error;
+      else if (r && r.alreadyPresent) opencodeModelStatus.textContent = 'Model ' + tag + ' is ready' + ctx + '.';
+      else opencodeModelStatus.textContent = 'Model ' + tag + ' downloaded & ready' + ctx + '.';
+    }).catch(function () {
+      if (dispose) dispose();
+      opencodeModelStatus.textContent = 'Could not install ' + tag + '.';
+    });
+  }
 
   function pullSelectedModel() {
     var api = window.klaus.ai && window.klaus.ai.ollama;

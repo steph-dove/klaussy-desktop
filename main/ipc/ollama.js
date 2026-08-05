@@ -30,9 +30,17 @@ ipcMain.handle('ollama-warmup', async () => {
 // Pull the configured model if missing, streaming progress to the caller so
 // the preferences model-picker can show a download bar. Awaited so the UI can
 // report the final result.
-ipcMain.handle('ollama-ensure-model', async (event) => {
+ipcMain.handle('ollama-ensure-model', async (event, opts) => {
   const sender = event.sender;
+  const targetModel = (opts && typeof opts === 'object' && opts.model) || (typeof opts === 'string' ? opts : undefined);
+  // Agent callers ask for the floor by name; the main side resolves it from the
+  // preference (or the machine) so the renderer never carries the number.
+  const minContext = opts && opts.agentContext
+    ? ollama.resolveAgentContext(require('../util/config').loadConfig())
+    : undefined;
   return ollama.ensureModel({
+    model: targetModel,
+    minContext,
     onProgress: (p) => { if (!sender.isDestroyed()) sender.send('ollama-setup-progress', p); },
   });
 });

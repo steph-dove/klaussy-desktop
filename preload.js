@@ -568,7 +568,7 @@ contextBridge.exposeInMainWorld('klaus', {
       // Pull the currently-configured model if it isn't installed yet (used
       // after the autocomplete-model picker changes). Streams progress on the
       // shared `ollama-setup-progress` channel.
-      ensureModel: () => ipcRenderer.invoke('ollama-ensure-model'),
+      ensureModel: (opts) => ipcRenderer.invoke('ollama-ensure-model', opts),
       onSetupProgress: (callback) => {
         const handler = (_e, p) => callback(p);
         ipcRenderer.on('ollama-setup-progress', handler);
