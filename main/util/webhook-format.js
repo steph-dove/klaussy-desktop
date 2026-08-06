@@ -42,7 +42,19 @@ function presentation(event) {
 }
 
 function agentLabel(event) {
-  return event.agentName || 'Agent';
+  const agent = event.agentName || 'Agent';
+  return event.sessionName ? `${agent} on “${event.sessionName}”` : agent;
+}
+
+// Only for a session that has actually ended — on an approval prompt the agent
+// is still alive and waiting, so restart steps would misrepresent it.
+function restartSteps(event) {
+  const ended = event.type === EVENT_TYPES.COMPLETED || event.type === EVENT_TYPES.FAILED;
+  if (!ended || !event.resumeCommand) return '';
+  const lines = [];
+  if (event.workspacePath) lines.push(`cd ${event.workspacePath}`);
+  lines.push(event.resumeCommand);
+  return lines.join('\n');
 }
 
 function headline(event, p) {
@@ -65,6 +77,7 @@ function formatSlack(event) {
   const fields = [];
   if (event.workspacePath) fields.push({ type: 'mrkdwn', text: `*Workspace:*\n\`${event.workspacePath}\`` });
   if (event.containerId) fields.push({ type: 'mrkdwn', text: `*Container:*\n\`${event.containerId}\`` });
+  if (event.sessionId) fields.push({ type: 'mrkdwn', text: `*Agent session:*\n\`${event.sessionId}\`` });
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && (event.tool || event.step)) {
     fields.push({ type: 'mrkdwn', text: `*Awaiting approval:*\n\`${event.tool || event.step}\`` });
   }
@@ -103,6 +116,18 @@ function formatSlack(event) {
   const logs = truncateLogs(event.logsTail);
   if (logs) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '```' + fenceSafe(logs) + '```' } });
 
+  const steps = restartSteps(event);
+  if (steps) {
+    blocks.push({
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: (event.resumeExact ? '*Pick it back up:*\n' : '*Start it again:*\n')
+          + '```' + fenceSafe(steps) + '```',
+      },
+    });
+  }
+
   // `text` is the notification fallback Slack shows in the sidebar / on mobile.
   return { text: title, blocks };
 }
@@ -114,6 +139,7 @@ function formatDiscord(event) {
   const fields = [];
   if (event.workspacePath) fields.push({ name: 'Workspace', value: '`' + event.workspacePath + '`' });
   if (event.containerId) fields.push({ name: 'Container', value: '`' + event.containerId + '`' });
+  if (event.sessionId) fields.push({ name: 'Agent session', value: '`' + event.sessionId + '`' });
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && (event.tool || event.step)) {
     fields.push({ name: 'Awaiting approval', value: '`' + (event.tool || event.step) + '`' });
   }
@@ -125,6 +151,12 @@ function formatDiscord(event) {
   }
   const logs = truncateLogs(event.logsTail);
   if (logs) parts.push('```\n' + fenceSafe(logs) + '\n```');
+
+  const steps = restartSteps(event);
+  if (steps) {
+    parts.push((event.resumeExact ? '**Pick it back up:**' : '**Start it again:**')
+      + '\n```\n' + fenceSafe(steps) + '\n```');
+  }
 
   const embed = { title, color: p.color };
   if (parts.length) embed.description = parts.join('\n');

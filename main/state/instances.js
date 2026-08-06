@@ -301,6 +301,7 @@ function processIdleDetection(inst, data) {
         nemesisEvents.publish({
           type: nemesisEvents.EVENT_TYPES.APPROVAL_REQUIRED,
           containerId: inst.id,
+          sessionName: inst.name,
           workspacePath: inst.worktreePath,
           agentName,
           tool: extractApprovalTool(tail),
@@ -525,6 +526,36 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   return { id, name, worktreePath, branch, mode, repoPath };
 }
 
+// Built by the provider itself so the hint can't drift from what restart-task
+// runs. `trust` is deliberately omitted — a permission-bypass flag shouldn't be
+// pasted into a chat channel.
+function resumeHintFor(inst) {
+  try {
+    const mode = isAgentMode(inst.originalMode) ? inst.originalMode : inst.mode;
+    const provider = getProvider(mode);
+    if (!provider || typeof provider.buildInteractiveCmd !== 'function') return {};
+    const config = loadConfig();
+    const bin = binFor(provider.id, config);
+    const profile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
+    const model = profile ? (profile.model || '') : ((config.agentModel || {})[provider.id] || '');
+    const sessionId = inst.claudeSessionId
+      || (provider.supportsExactResume ? findLatestSessionId(inst.worktreePath) : '')
+      || '';
+    const command = provider.buildInteractiveCmd(bin, {
+      resumeSessionId: sessionId || undefined,
+      resumeLatest: !sessionId,
+      model,
+      profile,
+    });
+    // resumeExact drives the wording: only an id guarantees the same
+    // conversation comes back, so everything else is offered as a fresh start.
+    return { sessionId, resumeCommand: command, resumeExact: Boolean(sessionId) };
+  } catch (err) {
+    console.warn('[instances] resume hint failed:', err.message);
+    return {};
+  }
+}
+
 // Shared by spawn and restart: a copy that dropped the quit/kill/restart guards
 // was the original orphaned-shell bug.
 function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
@@ -549,12 +580,14 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
         nemesisEvents.publish({
           type: exitCode === 0 ? nemesisEvents.EVENT_TYPES.COMPLETED : nemesisEvents.EVENT_TYPES.FAILED,
           containerId: instance.id,
+          sessionName: instance.name,
           workspacePath: instance.worktreePath,
           agentName: displayNameFor(instance.originalMode || instance.mode),
           exitCode,
           logsTail: instance.recentOutput || '',
           ts: Date.now(),
           notify: instance.notifyWebhookEnabled === true,
+          ...resumeHintFor(instance),
         });
       } catch { /* never let a publish break teardown */ }
       // The tab becomes a shell next, so nothing in chat should still route here.

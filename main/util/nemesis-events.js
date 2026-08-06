@@ -33,8 +33,15 @@ function normalize(event) {
     // Identity of the agent that produced the event. containerId keeps the
     // Nemesis8 vocabulary; in embedded mode it's the PTY instance id.
     containerId: event.containerId != null ? String(event.containerId) : '',
+    // Carried alongside containerId because an id means nothing to whoever
+    // reads the alert.
+    sessionName: event.sessionName || '',
     workspacePath: event.workspacePath || '',
     agentName: event.agentName || '',
+    // Resolved by the provider at exit time, not reconstructed by consumers.
+    sessionId: event.sessionId || '',
+    resumeCommand: event.resumeCommand || '',
+    resumeExact: event.resumeExact === true,
     // Populated for approval-required: which tool/step wants authorization.
     tool: event.tool || '',
     step: event.step || '',

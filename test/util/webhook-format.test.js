@@ -145,3 +145,45 @@ test('completed/failed alerts never get approval buttons', () => {
   assert.equal(formatSlack(evt).blocks.find((b) => b.type === 'actions'), undefined);
   assert.equal(formatDiscord(evt).components, undefined);
 });
+
+const ENDED = {
+  ...COMPLETED,
+  sessionName: 'auth-refactor',
+  sessionId: 'abc-123',
+  resumeCommand: 'claude --resume abc-123',
+  resumeExact: true,
+};
+
+test('an ended session says how to pick it back up', () => {
+  const flat = JSON.stringify(formatSlack(ENDED));
+  assert.match(flat, /auth-refactor/, 'names the Klaussy session');
+  assert.match(flat, /abc-123/, 'shows the agent session id');
+  assert.match(flat, /cd \/work\/feature-x/, 'cd to the worktree first');
+  assert.match(flat, /claude --resume abc-123/, 'the provider resume command');
+  assert.match(flat, /Pick it back up/);
+
+  const discord = JSON.stringify(formatDiscord(ENDED));
+  assert.match(discord, /claude --resume abc-123/);
+  assert.match(discord, /cd \/work\/feature-x/);
+});
+
+// Without a session id nothing guarantees the same conversation returns, so the
+// command is offered as a fresh start rather than described as a resume.
+test('no session id is offered as a fresh start, not a resume', () => {
+  const noId = {
+    ...COMPLETED,
+    sessionName: 'x',
+    resumeCommand: 'claude',
+    resumeExact: false,
+  };
+  const flat = JSON.stringify(formatSlack(noId));
+  assert.doesNotMatch(flat, /Pick it back up/, 'does not promise a restore');
+  assert.match(flat, /Start it again/);
+  assert.match(flat, /cd \/work\/feature-x/, 'still tells you where to run it');
+});
+
+test('an approval alert carries no restart block', () => {
+  const flat = JSON.stringify(formatSlack({ ...APPROVAL, ...ENDED, type: EVENT_TYPES.APPROVAL_REQUIRED }));
+  // The session hasn't ended, so telling someone how to restart it is noise.
+  assert.doesNotMatch(flat, /Pick it back up|Start it again/);
+});
