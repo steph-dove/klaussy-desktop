@@ -521,6 +521,7 @@
       if (!st) return; // not configured for replies
       var label = k === 'slack' ? 'Slack' : 'Discord';
       if (st.pending) lines.push(label + ' replies: connecting…');
+      else if (st.ok && st.degraded) lines.push(label + ' replies: ' + st.error);
       else if (st.ok) lines.push(label + ' replies: connected');
       else lines.push(label + ' replies: ' + (st.error || 'not connected'));
     });

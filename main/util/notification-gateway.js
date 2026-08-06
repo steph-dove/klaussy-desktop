@@ -95,22 +95,25 @@ async function dispatchEvent(event, cfg) {
   const decorated = approvalToken ? { ...event, approvalToken } : event;
 
   const jobs = [];
-  // Prefer the bot whenever it's configured: an incoming webhook returns no
-  // message ts, and without a ts there is nothing for a threaded reply to
-  // attach to. The webhook stays the path for notify-only setups.
+  // Buttons only go where a socket can hear them: a plain Discord webhook
+  // rejects components outright (400), losing the alert.
+  const slackEvent = cfg.slackInteractive ? decorated : event;
+  const discordEvent = cfg.discordInteractive ? decorated : event;
+
+  // Prefer the bot when configured: a webhook returns no message ts, and a
+  // threaded reply has nothing to attach to without one.
+
   if (cfg.slackInteractive) {
-    jobs.push(postSlackAsBot(cfg, formatSlack(decorated)));
+    jobs.push(postSlackAsBot(cfg, formatSlack(slackEvent)));
   } else if (cfg.slackWebhookUrl) {
-    jobs.push(safePost('slack', cfg.slackWebhookUrl, formatSlack(decorated)));
+    jobs.push(safePost('slack', cfg.slackWebhookUrl, formatSlack(slackEvent)));
   } else if (cfg.slackBotToken && cfg.slackChannel) {
-    jobs.push(postSlackAsBot(cfg, formatSlack(decorated)));
+    jobs.push(postSlackAsBot(cfg, formatSlack(slackEvent)));
   }
-  // Discord is different: a plain channel webhook cannot carry components, so
-  // an interactive alert MUST go through the bot API.
   if (cfg.discordInteractive && (approvalToken || !cfg.discordWebhookUrl)) {
-    jobs.push(postDiscordAsBot(cfg, formatDiscord(decorated)));
+    jobs.push(postDiscordAsBot(cfg, formatDiscord(discordEvent)));
   } else if (cfg.discordWebhookUrl) {
-    jobs.push(safePost('discord', cfg.discordWebhookUrl, formatDiscord(decorated)));
+    jobs.push(safePost('discord', cfg.discordWebhookUrl, formatDiscord(discordEvent)));
   }
   const results = await Promise.all(jobs);
   // Remember which alert belongs to which session so a reply in that thread
@@ -270,7 +273,12 @@ function getSocketStatus() {
 }
 
 function logStatus(which, s) {
-  _socketStatus[which] = { ok: !!(s && s.ok), error: (s && s.error) || '', fatal: !!(s && s.fatal) };
+  _socketStatus[which] = {
+    ok: !!(s && s.ok),
+    error: (s && s.error) || '',
+    fatal: !!(s && s.fatal),
+    degraded: !!(s && s.degraded),
+  };
   if (s && s.ok) console.log(`[notification-gateway] ${which} connected`);
   else console.warn(`[notification-gateway] ${which}: ${(s && s.error) || 'disconnected'}`);
 }

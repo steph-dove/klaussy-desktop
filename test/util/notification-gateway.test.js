@@ -223,3 +223,32 @@ test('normalize defaults notify to true but preserves an explicit false', () => 
   const off = nemesis.normalize({ type: EVENT_TYPES.COMPLETED, containerId: '1', notify: false });
   assert.equal(off.notify, false);
 });
+
+// Discord rejects components on a plain channel webhook (HTTP 400), so an
+// approval alert would vanish whenever Slack is interactive but Discord is not.
+test('buttons only go to the platform that can hear them', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  // The bot post goes to slack.com; stub it so this stays an offline test.
+  const realFetch = global.fetch;
+  const botPosts = [];
+  global.fetch = async (url, opts) => {
+    botPosts.push({ url: String(url), body: JSON.parse(opts.body) });
+    return { ok: true, json: async () => ({ ok: true, ts: '1.1' }) };
+  };
+  try {
+    await gateway.dispatchEvent(APPROVAL, cfg(base, {
+      slackInteractive: true, slackBotToken: 'xoxb-x', slackChannel: 'C1',
+      slackWebhookUrl: '', discordInteractive: false,
+    }));
+    const discord = await srv.waitFor('/discord');
+    assert.equal(discord.body.components, undefined,
+      'a webhook-only Discord target must not receive components');
+    const slack = botPosts.find((p) => p.url.includes('chat.postMessage'));
+    assert.ok(slack, 'slack posted via the bot API');
+    assert.ok(slack.body.blocks.some((b) => b.type === 'actions'), 'slack kept its buttons');
+  } finally {
+    global.fetch = realFetch;
+    await srv.close();
+  }
+});

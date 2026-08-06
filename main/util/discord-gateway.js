@@ -39,6 +39,18 @@ function createDiscordGateway({ botToken, onEvent, onStatus, wantMessages = true
   // Flipped off after a 4014 so we reconnect without the privileged intent.
   let messagesWanted = wantMessages;
 
+  // A reconnect after 4014 succeeds, so a bare ok:true would report "connected"
+  // while text replies are silently dead.
+  function readyStatus(extra) {
+    const degraded = wantMessages && !messagesWanted;
+    return {
+      ok: true,
+      degraded,
+      error: degraded ? 'connected — text replies off (Message Content intent)' : '',
+      ...extra,
+    };
+  }
+
   function stopHeartbeat() {
     if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
   }
@@ -119,10 +131,10 @@ function createDiscordGateway({ botToken, onEvent, onStatus, wantMessages = true
             attempt = 0;
             sessionId = frame.d.session_id;
             resumeUrl = frame.d.resume_gateway_url || null;
-            emitStatus({ ok: true, user: frame.d.user && frame.d.user.username });
+            emitStatus(readyStatus({ user: frame.d.user && frame.d.user.username }));
           } else if (frame.t === 'RESUMED') {
             attempt = 0;
-            emitStatus({ ok: true });
+            emitStatus(readyStatus({}));
           } else if (frame.t === 'INTERACTION_CREATE' || frame.t === 'MESSAGE_CREATE') {
             try { if (onEvent) onEvent(frame); } catch (err) {
               console.warn('[discord-gateway] handler failed:', err.message);
