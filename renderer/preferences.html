@@ -580,6 +580,15 @@
         <label>Agent needs approval</label>
         <input type="checkbox" id="pref-notify-approval" />
       </div>
+      <div class="field">
+        <label>Agent went quiet</label>
+        <input type="checkbox" id="pref-notify-stale" />
+      </div>
+      <div class="field">
+        <label>…after this many seconds</label>
+        <input type="number" id="pref-notify-stale-after" min="30" max="3600" step="30" />
+      </div>
+      <div class="field-hint">For when an agent stops without asking anything — usually output waiting to be read. Kept separate from the 15-second desktop idle notification, which is far too frequent for a chat channel.</div>
 
       <div class="field">
         <label>Turn the bell on for new sessions</label>

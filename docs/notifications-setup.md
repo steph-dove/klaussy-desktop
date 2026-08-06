@@ -168,6 +168,12 @@ several agents can run at once without their alerts interleaving.
 - **Text replies** — just type in the session's thread. Whatever you send is
   pasted into that agent's terminal, which is how you answer a prompt that wants
   something other than y/n — a numbered menu, say: send `1`.
+- **Went quiet** — if an agent stops for a while without asking anything (often
+  a wall of output waiting to be read), you get a 💤 alert carrying the tail of
+  what it wrote, so you can decide from chat whether it needs you. The threshold
+  is configurable and defaults to 2 minutes; it's deliberately much longer than
+  the 15-second desktop idle notification, which would be unbearable in a
+  channel.
 - **Per session** — each task row in the sidebar has a 🔔. It starts in the
   position set by *Turn the bell on for new sessions*, and your click for a given
   task sticks.
@@ -189,6 +195,7 @@ refused rather than typed into your shell.
 | Discord alerts post flat, with no thread | The bot lacks **Create Public Threads**. Re-open the `permissions=292057844736` link to re-authorize. |
 | Replies in an old thread are ignored | Threads stop routing once their agent exits — the thread stays as history. |
 | Nothing arrives at all | Check the session's 🔔 is on and the event type isn't unticked. |
+| Too many "went quiet" alerts | Raise the seconds field next to that checkbox, or untick it. |
 | Discord bot shows offline in the member list | Expected until Klaussy connects. If it stays offline after saving the token, check the status line in Preferences. |
 | Your server isn't in the "Add to Server" dropdown | You need **Manage Server** permission on it. |
 | Can't find "Send Messages" in the portal's permission checkboxes | It isn't offered there. Use the `permissions=292057844736` invite link above. |

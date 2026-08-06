@@ -12,6 +12,8 @@ const EVENT_TYPES = {
   COMPLETED: 'agent:completed',
   FAILED: 'agent:failed',
   APPROVAL_REQUIRED: 'agent:approval-required',
+  // Long silence with no prompt, distinct from the 15s local idle notification.
+  STALE: 'agent:stale',
 };
 
 const VALID_TYPES = new Set(Object.values(EVENT_TYPES));
@@ -47,6 +49,8 @@ function normalize(event) {
     step: event.step || '',
     // Populated for completed/failed.
     exitCode: typeof event.exitCode === 'number' ? event.exitCode : null,
+    // Populated for stale: how long the agent had been silent.
+    quietMs: typeof event.quietMs === 'number' ? event.quietMs : null,
     logsTail: event.logsTail || '',
     ts: typeof event.ts === 'number' ? event.ts : null,
     // Whether this session opted into webhooks (the sidebar bell). Defaults to

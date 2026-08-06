@@ -67,6 +67,9 @@ function getNotificationConfig(config = loadConfig()) {
   const discordChannel = str(ng.discordChannel);
   // Only these ids may approve or send text. Empty = nobody; see chat-reply.
   const allowList = Array.isArray(ng.allowList) ? ng.allowList.map(String).filter(Boolean) : [];
+  // Floored at 30s — an alert every time an agent pauses to think is worse
+  // than none.
+  const staleAfterSeconds = Math.max(30, Number(ng.staleAfterSeconds) || 120);
   return {
     // Explicit `enabled: false` hard-disables; otherwise presence of any
     // webhook URL or bot channel turns it on.
@@ -92,7 +95,11 @@ function getNotificationConfig(config = loadConfig()) {
       completed: events.completed !== false,
       failed: events.failed !== false,
       approvalRequired: events.approvalRequired !== false,
+      stale: events.stale !== false,
     },
+    // Both units: ms for the timer, seconds so the prefs field round-trips.
+    staleAfterSeconds: staleAfterSeconds,
+    staleAfterMs: staleAfterSeconds * 1000,
   };
 }
 

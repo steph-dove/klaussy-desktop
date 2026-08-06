@@ -226,3 +226,26 @@ test('getNotificationConfig: whitespace-only URLs do not enable the gateway', ()
   assert.equal(cfg.slackWebhookUrl, '');
   assert.equal(cfg.enabled, false);
 });
+
+test('getNotificationConfig: stale threshold round-trips and has a floor', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).staleAfterSeconds, 120, 'default');
+  assert.equal(getNotificationConfig({}).staleAfterMs, 120000);
+
+  const set = getNotificationConfig({ notificationGateway: { staleAfterSeconds: 300 } });
+  assert.equal(set.staleAfterSeconds, 300, 'the prefs field can read back what it saved');
+  assert.equal(set.staleAfterMs, 300000);
+
+  // A chat alert every few seconds is worse than none, so tiny values are floored.
+  assert.equal(getNotificationConfig({
+    notificationGateway: { staleAfterSeconds: 1 },
+  }).staleAfterSeconds, 30);
+});
+
+test('getNotificationConfig: the stale event defaults on and can be muted', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).events.stale, true);
+  assert.equal(getNotificationConfig({
+    notificationGateway: { events: { stale: false } },
+  }).events.stale, false);
+});

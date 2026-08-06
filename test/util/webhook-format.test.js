@@ -187,3 +187,36 @@ test('an approval alert carries no restart block', () => {
   // The session hasn't ended, so telling someone how to restart it is noise.
   assert.doesNotMatch(flat, /Pick it back up|Start it again/);
 });
+
+test('a stale alert says how long it has been quiet', () => {
+  const stale = {
+    type: EVENT_TYPES.STALE,
+    containerId: '7',
+    sessionName: 'auth-refactor',
+    workspacePath: '/work/feature-x',
+    agentName: 'Claude',
+    quietMs: 180000,
+    logsTail: 'Here is a long summary you should read.',
+  };
+  const flat = JSON.stringify(formatSlack(stale));
+  assert.match(flat, /gone quiet/);
+  assert.match(flat, /no output for 3m/);
+  assert.match(flat, /auth-refactor/);
+  assert.match(flat, /long summary/, 'carries the output waiting to be read');
+  // It has not ended, so restart steps would be wrong.
+  assert.doesNotMatch(flat, /Pick it back up|Start it again/);
+
+  assert.match(JSON.stringify(formatDiscord(stale)), /no output for 3m/);
+});
+
+test('a stale alert under a minute reports seconds', () => {
+  const flat = JSON.stringify(formatSlack({
+    type: EVENT_TYPES.STALE, containerId: '1', agentName: 'Codex', quietMs: 45000,
+  }));
+  assert.match(flat, /no output for 45s/);
+});
+
+test('a stale alert with no duration still renders', () => {
+  assert.doesNotThrow(() => formatSlack({ type: EVENT_TYPES.STALE, containerId: '1' }));
+  assert.doesNotMatch(JSON.stringify(formatSlack({ type: EVENT_TYPES.STALE, containerId: '1' })), /no output for/);
+});

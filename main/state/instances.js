@@ -181,6 +181,22 @@ const APPROVAL_PROMPT_PATTERNS = [
 // approval webhook per instance per this window even if the flag re-arms.
 const APPROVAL_NOTIFY_COOLDOWN_MS = 30000;
 
+// loadConfig() reads config.json synchronously and the stale timer reschedules
+// on every pty chunk, so reading the pref there would put a blocking disk read
+// in the terminal's hot path.
+const STALE_CFG_TTL_MS = 10000;
+let _staleCfgReadAt = 0;
+let _staleAfterMs = 120000;
+
+function staleAfterMs() {
+  const now = Date.now();
+  if (now - _staleCfgReadAt > STALE_CFG_TTL_MS) {
+    try { _staleAfterMs = getNotificationConfig().staleAfterMs; } catch { /* keep the last value */ }
+    _staleCfgReadAt = now;
+  }
+  return _staleAfterMs;
+}
+
 function stripAnsi(str) {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
 }
@@ -280,6 +296,30 @@ function processIdleDetection(inst, data) {
     }
   }, IDLE_TIMEOUT_MS);
 
+  // A longer quiet stretch, reported to chat rather than the desktop: the agent
+  // has stopped without asking anything, usually with output waiting to be read.
+  if (inst.staleTimer) clearTimeout(inst.staleTimer);
+  const quietMs = staleAfterMs();
+  inst.staleTimer = setTimeout(() => {
+    if (!inst.alive || !isAgentMode(inst.mode)) return;
+    // An approval prompt already told them, and more precisely.
+    if (inst.approvalPending) return;
+    try {
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.STALE,
+        containerId: inst.id,
+        sessionName: inst.name,
+        workspacePath: inst.worktreePath,
+        agentName,
+        quietMs,
+        logsTail: inst.recentOutput,
+        ts: Date.now(),
+        notify: inst.notifyWebhookEnabled === true,
+      });
+    } catch { /* never let a publish break the terminal path */ }
+  }, quietMs);
+  inst.staleTimer.unref?.();
+
   // Check prompt patterns against recent output tail
   const tail = inst.recentOutput.slice(-200);
   for (const pattern of PROMPT_PATTERNS) {
@@ -346,12 +386,17 @@ function initIdleDetectionFields(inst) {
   inst.recentOutput = '';
   inst.approvalPending = false;
   inst.lastApprovalPublishTime = 0;
+  inst.staleTimer = null;
 }
 
 function clearIdleTimer(inst) {
   if (inst.quietTimer) {
     clearTimeout(inst.quietTimer);
     inst.quietTimer = null;
+  }
+  if (inst.staleTimer) {
+    clearTimeout(inst.staleTimer);
+    inst.staleTimer = null;
   }
 }
 

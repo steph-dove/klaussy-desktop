@@ -36,6 +36,8 @@ function presentation(event) {
       return { emoji: '❌', verb: 'failed', color: 0xe01e5a };
     case EVENT_TYPES.APPROVAL_REQUIRED:
       return { emoji: '⏸️', verb: 'needs approval', color: 0xecb22e };
+    case EVENT_TYPES.STALE:
+      return { emoji: '💤', verb: 'has gone quiet', color: 0x8e9aaf };
     default:
       return { emoji: '🔔', verb: event.type, color: 0x1d9bd1 };
   }
@@ -57,6 +59,14 @@ function restartSteps(event) {
   return lines.join('\n');
 }
 
+function quietFor(event) {
+  const ms = Number(event.quietMs);
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  // Gate on the raw value: rounding first turns 45s into "1m".
+  if (ms < 60000) return ` — no output for ${Math.round(ms / 1000)}s`;
+  return ` — no output for ${Math.round(ms / 60000)}m`;
+}
+
 function headline(event, p) {
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
     // The specific tool goes in the fields (it can be a long command line and
@@ -66,6 +76,9 @@ function headline(event, p) {
   if (event.type === EVENT_TYPES.FAILED) {
     const code = event.exitCode != null ? ` (exit ${event.exitCode})` : '';
     return `${agentLabel(event)} ${p.verb}${code}`;
+  }
+  if (event.type === EVENT_TYPES.STALE) {
+    return `${agentLabel(event)} ${p.verb}${quietFor(event)}`;
   }
   return `${agentLabel(event)} ${p.verb}`;
 }
