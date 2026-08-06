@@ -116,6 +116,7 @@
   document.getElementById('pref-notify-failed').checked = ngEvents.failed !== false;
   document.getElementById('pref-notify-approval').checked = ngEvents.approvalRequired !== false;
   document.getElementById('pref-notify-stale').checked = ngEvents.stale !== false;
+  document.getElementById('pref-notify-message').checked = ngEvents.message !== false;
   document.getElementById('pref-notify-stale-after').value = ng.staleAfterSeconds || 120;
   document.getElementById('pref-notify-new-sessions').checked = ng.notifyNewSessions !== false;
   document.getElementById('pref-slack-app-token').value = ng.slackAppToken || '';
@@ -315,7 +316,7 @@
     'pref-notify-failed', 'pref-notify-approval', 'pref-notify-new-sessions',
     'pref-slack-app-token', 'pref-slack-bot-token', 'pref-slack-channel',
     'pref-discord-bot-token', 'pref-discord-channel', 'pref-notify-allowlist',
-    'pref-notify-stale', 'pref-notify-stale-after',
+    'pref-notify-stale', 'pref-notify-stale-after', 'pref-notify-message',
   ].forEach(function (id) {
     var el = document.getElementById(id);
     el.addEventListener('change', saveAll);
@@ -462,6 +463,7 @@
         failed: document.getElementById('pref-notify-failed').checked,
         approvalRequired: document.getElementById('pref-notify-approval').checked,
         stale: document.getElementById('pref-notify-stale').checked,
+        message: document.getElementById('pref-notify-message').checked,
       },
       staleAfterSeconds: Math.max(30, parseInt(document.getElementById('pref-notify-stale-after').value, 10) || 120),
     };

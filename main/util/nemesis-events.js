@@ -14,6 +14,8 @@ const EVENT_TYPES = {
   APPROVAL_REQUIRED: 'agent:approval-required',
   // Long silence with no prompt, distinct from the 15s local idle notification.
   STALE: 'agent:stale',
+  // Something the agent said, mirrored into the session thread.
+  MESSAGE: 'agent:message',
 };
 
 const VALID_TYPES = new Set(Object.values(EVENT_TYPES));
@@ -55,6 +57,8 @@ function normalize(event) {
     // Populated for stale: how long the agent had been silent.
     quietMs: typeof event.quietMs === 'number' ? event.quietMs : null,
     logsTail: event.logsTail || '',
+    // Populated for message: what the agent said since the last one.
+    body: event.body || '',
     ts: typeof event.ts === 'number' ? event.ts : null,
     // Whether this session opted into webhooks (the sidebar bell). Defaults to
     // true so a remote stream, which has no per-tab toggle, still notifies.

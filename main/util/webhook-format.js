@@ -88,6 +88,14 @@ function headline(event, p) {
 }
 
 function formatSlack(event) {
+  // A mirrored turn is the agent talking, not an alert about it.
+  if (event.type === EVENT_TYPES.MESSAGE) {
+    const body = fenceSafe(event.body || '');
+    return {
+      text: `${event.agentName || 'Agent'}: ${body.slice(0, 120)}`,
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '```' + body + '```' } }],
+    };
+  }
   const p = presentation(event);
   const title = cap(`${p.emoji} ${headline(event, p)}`, 150);
 
@@ -169,6 +177,9 @@ function formatSlack(event) {
 }
 
 function formatDiscord(event) {
+  if (event.type === EVENT_TYPES.MESSAGE) {
+    return { content: '```\n' + fenceSafe(event.body || '') + '\n```' };
+  }
   const p = presentation(event);
   const title = cap(`${p.emoji} ${headline(event, p)}`, 256);
 

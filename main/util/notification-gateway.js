@@ -57,6 +57,7 @@ function eventTypeEnabled(event, cfg) {
     case EVENT_TYPES.FAILED: return cfg.events.failed;
     case EVENT_TYPES.APPROVAL_REQUIRED: return cfg.events.approvalRequired;
     case EVENT_TYPES.STALE: return cfg.events.stale;
+    case EVENT_TYPES.MESSAGE: return cfg.events.message;
     default: return false;
   }
 }

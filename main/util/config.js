@@ -96,6 +96,7 @@ function getNotificationConfig(config = loadConfig()) {
       failed: events.failed !== false,
       approvalRequired: events.approvalRequired !== false,
       stale: events.stale !== false,
+      message: events.message !== false,
     },
     // Both units: ms for the timer, seconds so the prefs field round-trips.
     staleAfterSeconds: staleAfterSeconds,

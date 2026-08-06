@@ -27,6 +27,7 @@ const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-promp
 const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
+const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -190,6 +191,10 @@ const APPROVAL_TAIL_CHARS = 1500;
 // approval webhook per instance per this window even if the flag re-arms.
 const APPROVAL_NOTIFY_COOLDOWN_MS = 30000;
 
+// Long enough to span the gaps inside one turn, short enough to feel like
+// following along.
+const TURN_SETTLE_MS = 4000;
+
 // loadConfig() reads config.json synchronously and the stale timer reschedules
 // on every pty chunk, so reading the pref there would put a blocking disk read
 // in the terminal's hot path.
@@ -309,6 +314,29 @@ function processIdleDetection(inst, data) {
     }
   }, IDLE_TIMEOUT_MS);
 
+  // Mirroring the agent's own words means following along doesn't depend on
+  // recognising prompt shapes.
+  if (inst.turnTimer) clearTimeout(inst.turnTimer);
+  inst.turnTimer = setTimeout(() => {
+    if (!inst.alive || !isAgentMode(inst.mode)) return;
+    if (inst.notifyWebhookEnabled !== true) return;
+    try {
+      const body = takeNewOutput(inst.id, inst.recentOutput);
+      if (!body) return;
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+        containerId: inst.id,
+        sessionName: inst.name,
+        workspacePath: inst.worktreePath,
+        agentName,
+        body,
+        ts: Date.now(),
+        notify: true,
+      });
+    } catch { /* never let a publish break the terminal path */ }
+  }, TURN_SETTLE_MS);
+  inst.turnTimer.unref?.();
+
   // A longer quiet stretch, reported to chat rather than the desktop: the agent
   // has stopped without asking anything, usually with output waiting to be read.
   if (inst.staleTimer) clearTimeout(inst.staleTimer);
@@ -320,6 +348,9 @@ function processIdleDetection(inst, data) {
     if (!inst.alive || !isAgentMode(inst.mode)) return;
     // An approval prompt already told them, and more precisely.
     if (inst.approvalPending || inst.staleNotified) return;
+    // Mirroring already delivered whatever the agent said, so announcing the
+    // silence after it would just repeat the same turn.
+    try { if (getNotificationConfig().events.message) return; } catch { /* fall through */ }
     inst.staleNotified = true;
     try {
       nemesisEvents.publish({
@@ -406,6 +437,7 @@ function initIdleDetectionFields(inst) {
   inst.lastApprovalPublishTime = 0;
   inst.staleTimer = null;
   inst.staleNotified = false;
+  inst.turnTimer = null;
 }
 
 function clearIdleTimer(inst) {
@@ -416,6 +448,10 @@ function clearIdleTimer(inst) {
   if (inst.staleTimer) {
     clearTimeout(inst.staleTimer);
     inst.staleTimer = null;
+  }
+  if (inst.turnTimer) {
+    clearTimeout(inst.turnTimer);
+    inst.turnTimer = null;
   }
 }
 
@@ -657,6 +693,7 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
       // The tab becomes a shell next, so nothing in chat should still route here.
       try { require('../util/approval-registry').revokeForTask(instance.id); } catch { /* non-fatal */ }
       try { require('../util/notification-gateway').forgetTask(instance.id); } catch { /* non-fatal */ }
+      try { forgetTranscript(instance.id); } catch { /* non-fatal */ }
       convertInstanceToShell(instance, exitCode);
       return;
     }
