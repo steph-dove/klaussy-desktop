@@ -8,6 +8,7 @@ const gateway = require('../../main/util/notification-gateway');
 const nemesis = require('../../main/util/nemesis-events');
 const { EVENT_TYPES } = nemesis;
 const { saveConfig, flushSaveConfig } = require('../../main/util/config');
+const threads = require('../../main/util/session-threads');
 
 // A capturing webhook server. Records every POST (path + parsed JSON body) and
 // lets a test await the first request whose path contains a marker.
@@ -230,6 +231,7 @@ test('buttons only go to the platform that can hear them', async () => {
   const srv = makeCaptureServer();
   const base = await srv.start();
   // The bot post goes to slack.com; stub it so this stays an offline test.
+  threads._reset(); // thread state is module-level; don't inherit another test's
   const realFetch = global.fetch;
   const botPosts = [];
   global.fetch = async (url, opts) => {
@@ -244,9 +246,14 @@ test('buttons only go to the platform that can hear them', async () => {
     const discord = await srv.waitFor('/discord');
     assert.equal(discord.body.components, undefined,
       'a webhook-only Discord target must not receive components');
-    const slack = botPosts.find((p) => p.url.includes('chat.postMessage'));
-    assert.ok(slack, 'slack posted via the bot API');
-    assert.ok(slack.body.blocks.some((b) => b.type === 'actions'), 'slack kept its buttons');
+    const slackPosts = botPosts.filter((p) => p.url.includes('chat.postMessage'));
+    // First post opens the session thread; the alert follows inside it.
+    assert.equal(slackPosts.length, 2, 'thread parent + alert');
+    assert.ok(!slackPosts[0].body.thread_ts, 'parent is top-level');
+    const alert = slackPosts[1];
+    assert.equal(alert.body.thread_ts, '1.1', 'alert posted into the session thread');
+    assert.ok(alert.body.blocks.some((b) => b.type === 'actions'), 'slack kept its buttons');
+    assert.equal(alert.body.reply_broadcast, true, 'an approval is surfaced in-channel too');
   } finally {
     global.fetch = realFetch;
     await srv.close();

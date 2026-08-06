@@ -12,6 +12,7 @@ const { URL } = require('url');
 const nemesis = require('./nemesis-events');
 const { formatSlack, formatDiscord } = require('./webhook-format');
 const { getNotificationConfig } = require('./config');
+const threads = require('./session-threads');
 
 const { EVENT_TYPES } = nemesis;
 const POST_TIMEOUT_MS = 10000;
@@ -100,33 +101,27 @@ async function dispatchEvent(event, cfg) {
   const slackEvent = cfg.slackInteractive ? decorated : event;
   const discordEvent = cfg.discordInteractive ? decorated : event;
 
-  // Prefer the bot when configured: a webhook returns no message ts, and a
-  // threaded reply has nothing to attach to without one.
+  const urgent = event.type === EVENT_TYPES.APPROVAL_REQUIRED;
 
-  if (cfg.slackInteractive) {
-    jobs.push(postSlackAsBot(cfg, formatSlack(slackEvent)));
+  // Prefer the bot when configured: a webhook can't post into a thread.
+  if (cfg.slackInteractive || (cfg.slackBotToken && cfg.slackChannel)) {
+    jobs.push(threads.ensureSlackThread(cfg, event)
+      .then((ts) => postSlackAsBot(cfg, formatSlack(slackEvent), ts, urgent)));
   } else if (cfg.slackWebhookUrl) {
     jobs.push(safePost('slack', cfg.slackWebhookUrl, formatSlack(slackEvent)));
-  } else if (cfg.slackBotToken && cfg.slackChannel) {
-    jobs.push(postSlackAsBot(cfg, formatSlack(slackEvent)));
   }
   if (cfg.discordInteractive && (approvalToken || !cfg.discordWebhookUrl)) {
-    jobs.push(postDiscordAsBot(cfg, formatDiscord(discordEvent)));
+    jobs.push(threads.ensureDiscordThread(cfg, event)
+      .then((id) => postDiscordAsBot(cfg, formatDiscord(discordEvent), id)));
   } else if (cfg.discordWebhookUrl) {
     jobs.push(safePost('discord', cfg.discordWebhookUrl, formatDiscord(discordEvent)));
   }
-  const results = await Promise.all(jobs);
-  // Remember which alert belongs to which session so a reply in that thread
-  // reaches the same agent. Only bot-sent messages return an id.
-  for (const r of results) {
-    if (r && r.ok && event.containerId) rememberMessage(r.ts || r.messageId, event.containerId);
-  }
-  return results;
+  return Promise.all(jobs);
 }
 
-// chat.postMessage instead of the webhook: returns the message ts, which is
-// what lets a user reply in-thread to answer this specific session.
-async function postSlackAsBot(cfg, payload) {
+// chat.postMessage instead of the webhook: it can post into the session's
+// thread, which a webhook cannot.
+async function postSlackAsBot(cfg, payload, threadTs, broadcast) {
   try {
     const res = await fetch('https://slack.com/api/chat.postMessage', {
       method: 'POST',
@@ -134,7 +129,14 @@ async function postSlackAsBot(cfg, payload) {
         authorization: 'Bearer ' + cfg.slackBotToken,
         'content-type': 'application/json; charset=utf-8',
       },
-      body: JSON.stringify({ channel: cfg.slackChannel, ...payload }),
+      body: JSON.stringify({
+        channel: cfg.slackChannel,
+        ...payload,
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+        // A thread reply is invisible in the channel until you open the thread,
+        // which is the wrong default for something waiting on you.
+        ...(threadTs && broadcast ? { reply_broadcast: true } : {}),
+      }),
     });
     const body = await res.json().catch(() => ({}));
     if (!body.ok) return logPostFailure('slack', body.error || 'chat.postMessage failed');
@@ -151,9 +153,11 @@ function logPostFailure(target, error) {
   return { target, ok: false, error };
 }
 
-async function postDiscordAsBot(cfg, payload) {
+// A thread id is a channel id as far as the messages endpoint is concerned.
+async function postDiscordAsBot(cfg, payload, threadId) {
   try {
-    const res = await fetch(`${DISCORD_API}/channels/${cfg.discordChannel}/messages`, {
+    const target = threadId || cfg.discordChannel;
+    const res = await fetch(`${DISCORD_API}/channels/${target}/messages`, {
       method: 'POST',
       headers: {
         authorization: 'Bot ' + cfg.discordBotToken,
@@ -179,28 +183,9 @@ let _unsubscribe = null;
 let _connection = null;
 let _slack = null;
 let _discord = null;
-// Message id -> task id, so a threaded/replied message reaches the right agent.
-const _messageToTask = new Map();
-const MAX_TRACKED_MESSAGES = 200;
 
-// Called when a session ends so its alert threads stop routing anywhere, rather
-// than waiting to be aged out by the size cap.
 function forgetTask(taskId) {
-  const key = String(taskId);
-  for (const [messageId, id] of _messageToTask) {
-    if (String(id) === key) _messageToTask.delete(messageId);
-  }
-}
-
-function rememberMessage(messageId, taskId) {
-  if (!messageId) return;
-  _messageToTask.set(String(messageId), taskId);
-  // Bounded: oldest-first eviction keeps a long-running app from growing this
-  // map forever. Losing an old mapping only means an old thread stops routing.
-  if (_messageToTask.size > MAX_TRACKED_MESSAGES) {
-    const oldest = _messageToTask.keys().next().value;
-    _messageToTask.delete(oldest);
-  }
+  threads.forgetTask(taskId);
 }
 
 // Subscribe to the bus once; config is re-read per event so pref changes apply
@@ -307,7 +292,7 @@ function handleSlackFrame(parsed) {
   }
 
   if (parsed.kind === 'message' && parsed.threadTs) {
-    const taskId = _messageToTask.get(String(parsed.threadTs));
+    const taskId = threads.taskForSlackThread(parsed.threadTs);
     if (!taskId) return; // a thread we don't own
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     // Silence would look identical to "delivered", so say when it wasn't.
@@ -354,9 +339,11 @@ function handleDiscordFrame(parsed) {
     return;
   }
 
-  if (parsed.kind === 'message' && parsed.referencedMessageId) {
-    const taskId = _messageToTask.get(String(parsed.referencedMessageId));
-    if (!taskId) return;
+  // The thread the message was typed in identifies the session — no need for
+  // the sender to reply to a specific alert.
+  if (parsed.kind === 'message') {
+    const taskId = threads.taskForDiscordThread(parsed.channel);
+    if (!taskId) return; // a channel/thread we don't own
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     if (!res.ok) replyInDiscordChannel(cfg, parsed.channel, parsed.messageId, res.message);
   }
@@ -383,7 +370,7 @@ function stop() {
   if (_connection) { try { _connection.close(); } catch {} _connection = null; }
   if (_slack) { try { _slack.close(); } catch {} _slack = null; }
   if (_discord) { try { _discord.close(); } catch {} _discord = null; }
-  _messageToTask.clear();
+  threads._reset();
   _started = false;
 }
 
