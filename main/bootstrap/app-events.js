@@ -367,6 +367,16 @@ function install() {
       }, 3000);
     }
 
+    // Ollama's 4096 default costs opencode its tools and history; deferred and
+    // fire-and-forget so a local HTTP call never delays startup.
+    if (!process.env.KLAUSSY_E2E) {
+      setTimeout(() => {
+        require('../state/opencode-config').ensureStartupContextFloor()
+          .then((r) => { if (r && r.error) console.warn('[opencode] context floor:', r.error); })
+          .catch((e) => console.warn('[opencode] context floor failed:', e.message));
+      }, 5000);
+    }
+
     // Periodically save sessions in case quit events don't fire
     setInterval(() => {
       if (!isQuitting && instances.size > 0) {

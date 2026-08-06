@@ -6,6 +6,7 @@ const path = require('path');
 const os = require('os');
 const fs = require('fs');
 const { claudeProjectDir } = require('../util/claude-paths');
+const { loadConfig } = require('../util/config');
 
 function home() {
   return process.env.HOME || os.homedir();
@@ -64,6 +65,22 @@ function codexPatchHint(input) {
   return m ? m[1].trim() : '';
 }
 
+function kimiHome() {
+  const override = process.env.KIMI_CODE_HOME;
+  return (override && override.trim()) || path.join(home(), '.kimi-code');
+}
+
+// Chip hint for a kimi tool call, whose `arguments` arrive as a JSON *string*.
+function kimiToolHint(args) {
+  let inp = args;
+  if (typeof inp === 'string') {
+    try { inp = JSON.parse(inp); } catch { return inp.slice(0, 60); }
+  }
+  if (!inp || typeof inp !== 'object') return '';
+  const hint = inp.path || inp.file_path || inp.filePath || inp.command || inp.pattern || '';
+  return typeof hint === 'string' ? hint : '';
+}
+
 function claudeUsage(u) {
   if (!u) return null;
   return {
@@ -95,6 +112,28 @@ function quotedSessionDirs(sessionDirs) {
   return (Array.isArray(sessionDirs) ? sessionDirs : [])
     .filter((d) => typeof d === 'string' && d)
     .map((d) => (isWin ? `'${d.replace(/'/g, "''")}'` : JSON.stringify(d)));
+}
+
+// A Nemesis8 gateway URL points at another machine (vs localhost/empty, which
+// runs local Docker). Used to decide whether `interactive` needs --remote.
+function nemesisIsRemoteHost(remote) {
+  if (!remote) return false;
+  let host;
+  try {
+    host = new URL(/^https?:\/\//i.test(remote) ? remote : 'http://' + remote).hostname.replace(/^\[|\]$/g, '');
+  } catch {
+    return true; // a non-empty but unparseable URL isn't local — surface it as remote, don't silently run local
+  }
+  return host !== 'localhost' && host !== '127.0.0.1' && host !== '::1';
+}
+
+// Single-quote a value so a pasted token can't inject. Both bash and PowerShell
+// use '…' literals but escape an embedded quote differently ('\'' vs '').
+function shQuote(s, platform = process.platform) {
+  const v = String(s);
+  return platform === 'win32'
+    ? `'${v.replace(/'/g, "''")}'`
+    : `'${v.replace(/'/g, "'\\''")}'`;
 }
 
 const PROVIDERS = {
@@ -792,11 +831,17 @@ const PROVIDERS = {
     supportsExactResume: true,
     sessionTracking: 'opencode-cli',
 
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model } = {}) {
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, cwd } = {}) {
       // Model names are provider/model and may contain '/', so quote them; this
       // returns a shell string.
       let base = bin;
-      if (model) base += ` --model ${JSON.stringify(model)}`;
+      let cfg = {};
+      try { cfg = loadConfig() || {}; } catch {}
+      const effectiveModel = model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel;
+      if (effectiveModel) {
+        try { require('./opencode-config').ensureOpenCodeOllamaConfig(effectiveModel, cwd); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
+        base += ` --model ${JSON.stringify(effectiveModel)}`;
+      }
       if (resumeSessionId) return `${base} --session ${resumeSessionId}`;
       if (resumeLatest) return `${base} --continue`;
       return base;
@@ -806,7 +851,13 @@ const PROVIDERS = {
       // translate, else stdout passes through. `--auto` auto-approves tools on
       // autonomous-edit surfaces (else a headless edit blocks on a TTY-less prompt).
       const args = ['run'];
-      if (model) args.push('--model', model);
+      let cfg = {};
+      try { cfg = loadConfig() || {}; } catch {}
+      const effectiveModel = model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel;
+      if (effectiveModel) {
+        try { require('./opencode-config').ensureOpenCodeOllamaConfig(effectiveModel); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
+        args.push('--model', effectiveModel);
+      }
       if (allowEdits) args.push('--auto');
       if (mode === 'stream') args.push('--format', 'json');
       // Windows `.cmd`: prompt on stdin instead of the positional (util/agent-spawn).
@@ -865,6 +916,73 @@ const PROVIDERS = {
     findNewSession() { return null; },
   },
 
+  // Kimi Code CLI, grounded against a real 0.29.1 install — NOT the retired
+  // Python `kimi-cli`, which ships the same `kimi` binary with different flags
+  // (`--print` as the headless toggle, `-c` carrying the prompt).
+  kimi: {
+    id: 'kimi',
+    memoryFile: 'AGENTS.md',
+    shortLabel: 'km',
+    displayName: 'Kimi Code',
+    defaultBin: 'kimi',
+    configPathKey: 'kimiPath',
+    versionArgs: ['--version'],
+    // Exact resume comes from the flat ~/.kimi-code/session_index.jsonl, not
+    // from per-worktree transcript files (see state/kimi-sessions.js).
+    perWorktreeSessions: false,
+    supportsExactResume: true,
+    sessionTracking: 'kimi-index',
+    // The TUI takes no prompt at spawn: `kimi "…"` is "unknown command", and
+    // `-p` is non-interactive-only. It gets pasted in after boot instead.
+    promptDelivery: 'paste',
+
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs } = {}) {
+      // Model aliases are user-defined in config.toml and may contain spaces.
+      let base = bin;
+      if (model) base += ` --model ${JSON.stringify(model)}`;
+      for (const d of quotedSessionDirs(sessionDirs)) base += ` --add-dir ${d}`;
+      // `--session` and `--continue` are mutually exclusive, so an id wins alone.
+      if (resumeSessionId) return `${base} --session ${resumeSessionId}`;
+      if (resumeLatest) return `${base} --continue`;
+      return base;
+    },
+    buildHeadlessRun(_bin, { prompt, mode } = {}) {
+      // allowEdits needs no flag: kimi's git-cwd-write policy already approves
+      // Write/Edit inside a worktree. Being POSIX-only and tool-specific, Bash
+      // (and any write on Windows) still asks, with no TTY to answer.
+      const args = ['-p', prompt];
+      if (mode === 'stream') args.push('--output-format', 'stream-json');
+      // kimi reads no stdin, so a multi-line headless prompt can't reach a
+      // Windows `.cmd` shim install through cmd.exe — a known gap.
+      return { args, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
+    },
+    sessionDir() {
+      return kimiHome();
+    },
+
+    // kimi emits no usage or turn-end line, so token tracking stays unwired and
+    // the caller ends the run on process exit.
+    parseStreamLine(obj) {
+      const events = [];
+      if (!obj || obj.role !== 'assistant') return events;
+      if (typeof obj.content === 'string' && obj.content) {
+        events.push({ kind: 'text', text: obj.content });
+      }
+      for (const call of Array.isArray(obj.tool_calls) ? obj.tool_calls : []) {
+        const fn = (call && call.function) || {};
+        if (!fn.name) continue;
+        events.push({ kind: 'tool', name: fn.name, hint: kimiToolHint(fn.arguments) });
+      }
+      return events;
+    },
+    // Transcripts are per-agent wire records, not one tailable JSONL, so the
+    // implement PTY attaches no tail and degrades to raw PTY output.
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
+
   ollama: {
     id: 'ollama',
     displayName: 'Ollama (via Aider)',
@@ -894,6 +1012,45 @@ const PROVIDERS = {
     snapshotSessions() { return new Set(); },
     findNewSession() { return null; },
   },
+
+  // Runs an agent in a Nemesis8 Docker sandbox via `nemesis8 interactive` (a pty
+  // TUI), not the gateway's /completion (broken upstream). `remoteBackend` = a
+  // special sandbox agent (own picker/setup, no headless), not "no binary".
+  nemesis8: {
+    id: 'nemesis8',
+    displayName: 'Nemesis8 Sandbox',
+    shortLabel: 'n8',
+    remoteBackend: true,
+    defaultBin: 'nemesis8',
+    configPathKey: 'nemesis8Path',
+    versionArgs: ['--version'],
+    perWorktreeSessions: false,
+    supportsExactResume: false,
+
+    // `profile` (the picked gateway) supplies the inner agent and, for a genuinely
+    // remote gateway, the URL/token. A localhost/empty URL runs local Docker
+    // directly (no --remote), which is the path that actually works.
+    buildInteractiveCmd(bin, { profile, model, platform = process.platform } = {}) {
+      const p = profile || {};
+      const q = (s) => shQuote(s, platform);
+      let cmd = `${bin} interactive`;
+      if (p.provider) cmd += ` --provider ${q(p.provider)}`;
+      if (nemesisIsRemoteHost(p.remote)) {
+        cmd += ` --remote ${q(p.remote)}`;
+        if (p.token) cmd += ` --token ${q(p.token)}`;
+      }
+      const m = model || p.model;
+      if (m) cmd += ` --model ${q(m)}`;
+      return cmd;
+    },
+    buildHeadlessRun() { return null; },
+    sessionDir() { return null; },
+    parseStreamLine() { return []; },
+    usageFromSessionLine() { return null; },
+    sessionLineToEvents() { return []; },
+    snapshotSessions() { return new Set(); },
+    findNewSession() { return null; },
+  },
 };
 
 const PROVIDER_IDS = Object.keys(PROVIDERS);
@@ -907,6 +1064,7 @@ const NPM_PACKAGES = {
   copilot: '@github/copilot',
   cline: 'cline',
   opencode: 'opencode-ai',
+  kimi: '@moonshot-ai/kimi-code',
 };
 
 // Non-npm install commands, per platform, for CLIs that don't ship as npm
@@ -944,7 +1102,9 @@ const DOCS_URLS = {
   cursor: 'https://cursor.com/docs/cli',
   cline: 'https://docs.cline.bot/cli-reference/overview',
   opencode: 'https://opencode.ai/docs',
+  kimi: 'https://moonshotai.github.io/kimi-code/',
   ollama: 'https://aider.chat',
+  nemesis8: 'https://github.com/DeepBlueDynamics/nemesis8',
 };
 function docsUrlFor(id) { return DOCS_URLS[id] || null; }
 
@@ -958,13 +1118,15 @@ const SHORT_NAMES = {
   cursor: 'Cursor',
   cline: 'Cline',
   opencode: 'opencode',
+  kimi: 'Kimi',
   ollama: 'Ollama',
+  nemesis8: 'Nemesis8 Sandbox',
 };
 
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
 // Lists are grounded against each CLI, not guessed: claude — `--model` takes
 // the aliases 'opus'/'sonnet'/'haiku' (claude --help), which always resolve to
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', ollama: '--model' };
+const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', kimi: '--model', ollama: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -994,9 +1156,19 @@ const MODELS = {
   // over time, so we ship Default-only rather than slugs that might error.
   cursor: [{ id: '', label: 'Default' }],
   cline: [{ id: '', label: 'Default' }],
-  // opencode models are `provider/model` and depend on the user's configured
-  // providers, so we ship Default-only rather than slugs that might error.
-  opencode: [{ id: '', label: 'Default' }],
+  opencode: [
+    { id: '', label: 'Default (from opencode.json)' },
+    { id: 'ollama/qwen3-coder:30b', label: 'Qwen 3 Coder 30B (Ollama)' },
+    { id: 'ollama/qwen2.5-coder:32b', label: 'Qwen 2.5 Coder 32B (Ollama)' },
+    { id: 'ollama/qwen2.5-coder:14b', label: 'Qwen 2.5 Coder 14B (Ollama)' },
+    { id: 'ollama/qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B (Ollama)' },
+    { id: 'ollama/deepseek-coder-v2', label: 'DeepSeek Coder V2 (Ollama)' },
+    { id: 'anthropic/claude-3-5-sonnet', label: 'Claude 3.5 Sonnet' },
+    { id: 'openai/gpt-4o', label: 'GPT-4o' },
+  ],
+  // kimi's `--model` takes an alias that login writes into the user's own
+  // config.toml, so any slug shipped here would error on someone else's setup.
+  kimi: [{ id: '', label: 'Default' }],
   ollama: [
     { id: '', label: 'Default (qwen2.5-coder)' },
     { id: 'qwen2.5-coder:7b', label: 'Qwen 2.5 Coder 7B' },
@@ -1004,6 +1176,9 @@ const MODELS = {
     { id: 'deepseek-coder:6.7b', label: 'DeepSeek Coder 6.7B' },
     { id: 'llama3.1', label: 'Llama 3.1' },
   ],
+  // The valid models depend on which agent the gateway runs, so we can't
+  // enumerate slugs — Default-only; a specific model is set in Preferences.
+  nemesis8: [{ id: '', label: 'Gateway default' }],
 };
 function modelsFor(id) { return MODELS[id] || [{ id: '', label: 'Default' }]; }
 function modelFlagFor(id) { return MODEL_FLAGS[id] || '--model'; }
@@ -1042,6 +1217,9 @@ const AUTH_CHECKS = {
   // list` shows configured providers but isn't a quiet yes/no probe, so auth
   // state is reported as unknown (not false).
   opencode: { statusArgs: null, notAuthedPattern: null, loginCommand: 'opencode auth login' },
+  // `kimi provider list` exits 0 either way, so the pattern (not the exit code)
+  // is what distinguishes signed-out here.
+  kimi: { statusArgs: ['provider', 'list'], notAuthedPattern: /no providers configured/i, loginCommand: 'kimi login' },
   ollama:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'ollama serve' },
 };
 
@@ -1049,7 +1227,14 @@ function authMetaFor(id) {
   return AUTH_CHECKS[id] || { statusArgs: null, notAuthedPattern: null, loginCommand: id };
 }
 
+// Nemesis8 modes are `nemesis8` or `nemesis8:<profileId>` (one picker entry per
+// configured gateway). They all resolve to the single nemesis8 provider object.
+function isNemesisMode(mode) {
+  return typeof mode === 'string' && (mode === 'nemesis8' || mode.startsWith('nemesis8:'));
+}
+
 function getProvider(id) {
+  if (isNemesisMode(id)) return PROVIDERS.nemesis8;
   return PROVIDERS[id] || null;
 }
 
@@ -1057,15 +1242,15 @@ function getProvider(id) {
 // shell. Replaces the old `mode === 'claude'` checks, which conflated
 // "is Claude" with "is an agent".
 function isAgentMode(mode) {
-  return !!PROVIDERS[mode];
+  return isNemesisMode(mode) || !!PROVIDERS[mode];
 }
 
 // Resolve the configured binary for a provider, falling back to the bare
 // command name (PATH-resolved). `config` is the loaded config object.
 function binFor(providerId, config) {
-  const p = PROVIDERS[providerId];
+  const p = getProvider(providerId); // resolves nemesis8:<profile> too
   if (!p) return null;
-  const configured = config && config[p.configPathKey];
+  const configured = config && p.configPathKey && config[p.configPathKey];
   return (configured && String(configured).trim()) || p.defaultBin;
 }
 
@@ -1080,6 +1265,8 @@ function allProviders() {
       shortLabel: p.shortLabel,
       defaultBin: p.defaultBin,
       configPathKey: p.configPathKey,
+      // Lets the UI skip binary-path inputs/version probes for gateway backends.
+      remoteBackend: !!p.remoteBackend,
       npmPackage: NPM_PACKAGES[p.id] || null,
       installCommand: installCommandFor(p.id),
       docsUrl: docsUrlFor(p.id),
@@ -1092,12 +1279,16 @@ function allProviders() {
 // Display helpers used by the sidebar / saved-session list.
 function shortLabelFor(mode) {
   if (mode === 'shell') return 'sh';
+  if (isNemesisMode(mode)) return PROVIDERS.nemesis8.shortLabel;
   const p = PROVIDERS[mode];
   return p ? p.shortLabel : 'cc';
 }
 
 function displayNameFor(mode) {
   if (mode === 'shell') return 'Shell';
+  // Per-profile names live in the renderer's provider list; main-side labels
+  // (exit notices) use the generic name.
+  if (isNemesisMode(mode)) return PROVIDERS.nemesis8.displayName;
   const p = PROVIDERS[mode];
   return p ? p.displayName : mode;
 }

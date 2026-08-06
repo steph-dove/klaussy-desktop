@@ -35,6 +35,7 @@ window.TerminalManager = (function () {
 
   function addTaskToUI(task) {
     var id = task.id;
+    if (tasks.has(id)) { switchToTask(id); return; }
     var name = task.name;
     var worktreePath = task.worktreePath;
     var branch = task.branch;
@@ -496,10 +497,12 @@ window.TerminalManager = (function () {
   }
 
   // The primary tab tracks the task's own mode (it can change: agent exits to
-  // shell, sidebar Resume relaunches an agent).
+  // shell, sidebar Resume relaunches an agent). An agent whose CLI has exited
+  // keeps its name here so the tab stays the task's identity.
   function updatePrimaryAgentTab(taskEntry) {
     var span = taskEntry.container.querySelector('.sub-tab[data-sub-id="0"] .sub-tab-label');
-    applyAgentLabel(span, taskEntry.mode, taskEntry.worktreePath, taskEntry.id);
+    var mode = AppUtils.exitedAgent(taskEntry) || taskEntry.mode;
+    applyAgentLabel(span, mode, taskEntry.worktreePath, taskEntry.id);
   }
 
   // Re-resolve tab labels on tab switches: immediately while unresolved (the
@@ -512,9 +515,8 @@ window.TerminalManager = (function () {
       return Date.now() - Number(span.dataset.modelCheckedAt || 0) > MODEL_RECHECK_MS;
     };
     var primary = taskEntry.container.querySelector('.sub-tab[data-sub-id="0"] .sub-tab-label');
-    if (due(primary)) {
-      applyAgentLabel(primary, taskEntry.mode, taskEntry.worktreePath, taskEntry.id);
-    }
+    // Not applyAgentLabel directly: that would relabel an exited agent "Shell".
+    if (due(primary)) updatePrimaryAgentTab(taskEntry);
     taskEntry.subTerminals.forEach(function (s) {
       var span = s.tab && s.tab.querySelector('.sub-tab-label');
       if (span && span.dataset.agentTab && due(span)) {

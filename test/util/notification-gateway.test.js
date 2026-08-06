@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const http = require('http');
 
 const gateway = require('../../main/util/notification-gateway');
-const nemesis = require('../../main/util/nemesis-client');
+const nemesis = require('../../main/util/nemesis-events');
 const { EVENT_TYPES } = nemesis;
 const { saveConfig, flushSaveConfig } = require('../../main/util/config');
 

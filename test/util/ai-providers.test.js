@@ -9,33 +9,31 @@ const assert = require('node:assert/strict');
 const providers = require('../../main/state/ai-providers');
 
 const ALL = providers.PROVIDER_IDS;
+// CLI providers spawn a local binary; remote backends (Nemesis8) connect to a
+// gateway and have no binary/headless mode, so the command-shape contracts
+// below apply only to the CLI set. Remote backends get their own contract test.
+const CLI = ALL.filter((id) => !providers.getProvider(id).remoteBackend);
 const VALID_OUTPUT_MODES = new Set(['passthrough', 'json-text', 'json-translate']);
 
 test('registry exposes the expected providers', () => {
   // Order-independent membership check — guards against a provider being
   // dropped from the registry object or PROVIDER_IDS drifting out of sync.
-  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode']) {
+  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode', 'kimi']) {
     assert.ok(ALL.includes(id), `missing provider: ${id}`);
   }
 });
 
-test('every provider satisfies the registry contract', () => {
+test('every provider satisfies the universal registry contract', () => {
   for (const id of ALL) {
     const p = providers.getProvider(id);
     assert.ok(p, `getProvider(${id}) returned null`);
     assert.equal(p.id, id, `${id}: id mismatch`);
     assert.equal(providers.isAgentMode(id), true, `${id}: not recognized as agent mode`);
 
-    // Required metadata used by detection, the picker, and the sidebar.
-    for (const field of ['displayName', 'shortLabel', 'defaultBin', 'configPathKey']) {
+    // Metadata every surface (picker, sidebar) relies on for any provider.
+    for (const field of ['displayName', 'shortLabel']) {
       assert.ok(p[field] && typeof p[field] === 'string', `${id}: missing ${field}`);
     }
-    assert.ok(Array.isArray(p.versionArgs) && p.versionArgs.length, `${id}: bad versionArgs`);
-
-    // binFor: bare default when unconfigured, configured path when set.
-    assert.equal(providers.binFor(id, {}), p.defaultBin, `${id}: binFor default`);
-    const override = `/custom/bin/${id}`;
-    assert.equal(providers.binFor(id, { [p.configPathKey]: override }), override, `${id}: binFor override`);
 
     // Display helpers must round-trip.
     assert.equal(providers.shortLabelFor(id), p.shortLabel, `${id}: shortLabelFor`);
@@ -53,8 +51,70 @@ test('every provider satisfies the registry contract', () => {
   }
 });
 
-test('buildInteractiveCmd returns a runnable shell string for every provider', () => {
-  for (const id of ALL) {
+test('every CLI provider satisfies the binary contract', () => {
+  for (const id of CLI) {
+    const p = providers.getProvider(id);
+    // Required metadata used by detection and the spawn path.
+    for (const field of ['defaultBin', 'configPathKey']) {
+      assert.ok(p[field] && typeof p[field] === 'string', `${id}: missing ${field}`);
+    }
+    assert.ok(Array.isArray(p.versionArgs) && p.versionArgs.length, `${id}: bad versionArgs`);
+
+    // binFor: bare default when unconfigured, configured path when set.
+    assert.equal(providers.binFor(id, {}), p.defaultBin, `${id}: binFor default`);
+    const override = `/custom/bin/${id}`;
+    assert.equal(providers.binFor(id, { [p.configPathKey]: override }), override, `${id}: binFor override`);
+  }
+});
+
+test('remote backends declare themselves (special sandbox agents)', () => {
+  const remote = ALL.filter((id) => providers.getProvider(id).remoteBackend);
+  assert.ok(remote.includes('nemesis8'), 'nemesis8 should be a remote backend');
+  for (const id of remote) {
+    const p = providers.getProvider(id);
+    assert.equal(p.remoteBackend, true, `${id}: remoteBackend flag`);
+    // Interactive-only (a TUI) — no headless one-shot.
+    assert.equal(p.buildHeadlessRun('x', {}), null, `${id}: no headless run`);
+    assert.ok(Array.isArray(p.parseStreamLine({})), `${id}: parseStreamLine not array`);
+    // allProviders exposes the flag so the UI can branch on it.
+    const desc = providers.allProviders().find((d) => d.id === id);
+    assert.equal(desc.remoteBackend, true, `${id}: allProviders remoteBackend`);
+  }
+});
+
+test('nemesis8 runs `nemesis8 interactive` from the picked gateway profile', () => {
+  const p = providers.getProvider('nemesis8');
+  // localhost/empty → local Docker (no --remote); a real host delegates via
+  // --remote. Args are single-quoted so a pasted token can't inject.
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', remote: 'http://localhost:9801', token: 't' } }),
+    "nemesis8 interactive --provider 'claude'");
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', remote: 'http://box:9801', token: 't' } }),
+    "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 't'");
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'codex' } }),
+    "nemesis8 interactive --provider 'codex'");
+  // A token with shell metacharacters is neutralized (no injection).
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', remote: 'http://box:9801', token: "a b;$(x)" }, platform: 'darwin' }),
+    "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 'a b;$(x)'");
+  // An embedded single quote escapes per-shell: bash '\'' vs PowerShell ''.
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', token: "a'b", remote: 'http://box:9801' }, platform: 'darwin' }),
+    "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 'a'\\''b'");
+  assert.equal(p.buildInteractiveCmd('nemesis8', { profile: { provider: 'claude', token: "a'b", remote: 'http://box:9801' }, platform: 'win32' }),
+    "nemesis8 interactive --provider 'claude' --remote 'http://box:9801' --token 'a''b'");
+});
+
+test('per-profile nemesis8:<id> modes resolve to the nemesis8 provider', () => {
+  // The picker emits one id per gateway profile; they all route to nemesis8.
+  assert.equal(providers.isAgentMode('nemesis8:claude-prod'), true);
+  assert.equal(providers.isAgentMode('nemesis8'), true);
+  assert.equal(providers.getProvider('nemesis8:anything').id, 'nemesis8');
+  assert.equal(providers.shortLabelFor('nemesis8:x'), providers.getProvider('nemesis8').shortLabel);
+  assert.ok(/nemesis8/i.test(providers.displayNameFor('nemesis8:x')));
+  // A bare non-nemesis id is unaffected.
+  assert.equal(providers.isAgentMode('nemesis8extra'), false);
+});
+
+test('buildInteractiveCmd returns a runnable shell string for every CLI provider', () => {
+  for (const id of CLI) {
     const p = providers.getProvider(id);
     const bin = providers.binFor(id, {});
 
@@ -69,7 +129,7 @@ test('buildInteractiveCmd returns a runnable shell string for every provider', (
 
 test('buildHeadlessRun returns a valid {args, outputMode} carrying the prompt', () => {
   const PROMPT = 'smoke-test-prompt-token';
-  for (const id of ALL) {
+  for (const id of CLI) {
     const p = providers.getProvider(id);
     for (const mode of ['text', 'stream']) {
       const run = p.buildHeadlessRun(p.defaultBin, { prompt: PROMPT, mode, allowEdits: true, trust: true });
@@ -210,4 +270,89 @@ test('opencode parseStreamLine maps the real JSONL event shapes', () => {
   assert.deepEqual(empty, [
     { kind: 'usage', usage: { inputTokens: 0, cacheCreationInputTokens: 0, cacheReadInputTokens: 0, outputTokens: 0, totalTokens: 0 } },
   ]);
+});
+
+test('kimi builds the verified Kimi Code command shapes', () => {
+  // Grounded on kimi-code 0.29.1 `--help` + the shipped bundle (NOT the retired
+  // Python kimi-cli, whose print-mode flags are spelled differently).
+  const p = providers.getProvider('kimi');
+  assert.equal(p.defaultBin, 'kimi');
+  assert.equal(p.memoryFile, 'AGENTS.md');
+
+  assert.equal(p.buildInteractiveCmd('kimi', {}), 'kimi');
+  assert.match(p.buildInteractiveCmd('kimi', { resumeSessionId: 'abc123' }), /--session abc123/);
+  assert.match(p.buildInteractiveCmd('kimi', { resumeLatest: true }), /--continue/);
+  assert.match(p.buildInteractiveCmd('kimi', { model: 'k2 turbo' }), /--model "k2 turbo"/);
+  // Sibling worktrees ride --add-dir so cross-repo edits work.
+  assert.match(p.buildInteractiveCmd('kimi', { sessionDirs: ['/a', '/b'] }), /--add-dir "\/a" --add-dir "\/b"/);
+
+  // `--session` and `--continue` are mutually exclusive — an id must win alone.
+  const both = p.buildInteractiveCmd('kimi', { resumeSessionId: 'abc123', resumeLatest: true });
+  assert.match(both, /--session abc123/);
+  assert.ok(!both.includes('--continue'), 'must not combine --session with --continue');
+
+  const stream = p.buildHeadlessRun('kimi', { prompt: 'x', mode: 'stream' });
+  assert.deepEqual(stream.args, ['-p', 'x', '--output-format', 'stream-json']);
+  assert.equal(stream.outputMode, 'json-translate');
+
+  const text = p.buildHeadlessRun('kimi', { prompt: 'x' });
+  assert.deepEqual(text.args, ['-p', 'x']);
+  assert.equal(text.outputMode, 'passthrough');
+
+  // kimi REJECTS --yolo/--auto/--plan alongside --prompt ("Cannot combine
+  // --prompt with --yolo"), so allowEdits must never add one.
+  const edits = p.buildHeadlessRun('kimi', { prompt: 'x', mode: 'stream', allowEdits: true });
+  for (const flag of ['--yolo', '-y', '--auto', '--plan']) {
+    assert.ok(!edits.args.includes(flag), `headless args must not contain ${flag}`);
+  }
+  // No stdin prompt path exists, so the prompt stays on the command line.
+  assert.equal(p.buildHeadlessRun('kimi', { prompt: 'x', promptOnStdin: true }).stdinInput, undefined);
+
+  assert.equal(providers.installCommandFor('kimi'), 'npm install -g @moonshot-ai/kimi-code');
+
+  // Exact resume reads kimi's session index; the TUI takes no spawn-time prompt.
+  assert.equal(p.supportsExactResume, true);
+  assert.equal(p.sessionTracking, 'kimi-index');
+  assert.equal(p.perWorktreeSessions, false);
+  assert.equal(p.promptDelivery, 'paste');
+  // Nothing may set an interactive prompt flag — `kimi <text>` is "unknown command".
+  assert.equal(p.interactivePromptFlag, undefined);
+});
+
+test('kimi parseStreamLine maps the PromptJsonWriter line shapes', () => {
+  // Shapes read off kimi-code 0.29.1's PromptJsonWriter: assistant lines carry
+  // content and/or tool_calls, tool results and meta lines carry neither.
+  const p = providers.getProvider('kimi');
+
+  assert.deepEqual(
+    p.parseStreamLine({ role: 'assistant', content: 'pong' }),
+    [{ kind: 'text', text: 'pong' }],
+  );
+
+  // tool_calls: arguments arrive as a JSON *string*.
+  assert.deepEqual(
+    p.parseStreamLine({
+      role: 'assistant',
+      content: 'Let me execute this.',
+      tool_calls: [{ type: 'function', id: 'tc_1', function: { name: 'Bash', arguments: '{"command":"ls"}' } }],
+    }),
+    [
+      { kind: 'text', text: 'Let me execute this.' },
+      { kind: 'tool', name: 'Bash', hint: 'ls' },
+    ],
+  );
+
+  assert.deepEqual(
+    p.parseStreamLine({ role: 'assistant', tool_calls: [{ function: { name: 'Read', arguments: '{"path":"/a.txt"}' } }] }),
+    [{ kind: 'tool', name: 'Read', hint: '/a.txt' }],
+  );
+
+  // Malformed arguments must degrade to a truncated hint, not throw.
+  assert.deepEqual(
+    p.parseStreamLine({ role: 'assistant', tool_calls: [{ function: { name: 'Grep', arguments: 'not json' } }] }),
+    [{ kind: 'tool', name: 'Grep', hint: 'not json' }],
+  );
+
+  assert.deepEqual(p.parseStreamLine({ role: 'tool', tool_call_id: 'tc_1', content: 'a.txt' }), []);
+  assert.deepEqual(p.parseStreamLine({ role: 'meta', type: 'session.resume_hint', session_id: 'abc' }), []);
 });

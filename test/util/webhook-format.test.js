@@ -4,7 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { formatSlack, formatDiscord, truncateLogs } = require('../../main/util/webhook-format');
-const { EVENT_TYPES } = require('../../main/util/nemesis-client');
+const { EVENT_TYPES } = require('../../main/util/nemesis-events');
 
 const APPROVAL = {
   type: EVENT_TYPES.APPROVAL_REQUIRED,

@@ -310,34 +310,145 @@
     }
   };
 
-  DP.bindInlineComments = function(file) {
-    DP.diffViewEl.querySelectorAll('.diff-line.diff-add, .diff-line.diff-del, .diff-line.diff-context').forEach(function (lineEl) {
-      lineEl.addEventListener('click', function () {
-        // Don't trigger comment if user is selecting text
-        var sel = window.getSelection();
-        if (sel && !sel.isCollapsed) return;
-        if (!DP.commentCallback) return;
-        // Remove any existing inline comment
-        var existing = DP.diffViewEl.querySelector('.inline-comment');
-        if (existing) existing.remove();
+  // Prefer the new-side number (what the user reads on the right); deleted
+  // lines only carry the old one.
+  function annotationLineIdentity(lineEl) {
+    var side = lineEl.dataset.side || (lineEl.classList.contains('diff-del') ? 'LEFT' : 'RIGHT');
+    var raw = side === 'LEFT' ? lineEl.dataset.oldLn : (lineEl.dataset.newLn || lineEl.dataset.oldLn);
+    return { side: side, line: (raw != null && raw !== '') ? parseInt(raw, 10) : null };
+  }
 
-        var wrap = document.createElement('div');
-        wrap.className = 'inline-comment';
-        wrap.innerHTML = '<input type="text" placeholder="Comment for the agent..." class="inline-comment-input" />';
-        lineEl.after(wrap);
+  function cssId(id) {
+    return (window.CSS && CSS.escape) ? CSS.escape(id) : id;
+  }
 
-        var inp = wrap.querySelector('input');
-        inp.focus();
-        inp.addEventListener('keydown', function (e) {
-          if (e.key === 'Enter') {
-            var text = inp.value.trim();
-            if (text && DP.commentCallback) DP.commentCallback('Regarding ' + file + ': ' + text);
-            wrap.remove();
-          }
-          if (e.key === 'Escape') wrap.remove();
-        });
-      });
+  // Returns null if the line isn't on screen (e.g. a collapsed hunk) — the
+  // annotation stays in state regardless.
+  function findAnnotationLineEl(side, line) {
+    if (side === 'LEFT') {
+      return DP.diffViewEl.querySelector('.diff-line.diff-del[data-old-ln="' + line + '"]');
+    }
+    return DP.diffViewEl.querySelector('.diff-line[data-side="RIGHT"][data-new-ln="' + line + '"]');
+  }
+
+  // A full-width insert must land on a split-view row boundary: anchor after
+  // the paired right cell, since inserting between the pair would bump it to
+  // the next row and shift the whole grid.
+  function annotationAnchor(lineEl) {
+    if (lineEl.classList.contains('diff-split-left')) {
+      var right = lineEl.nextElementSibling;
+      if (right && right.classList.contains('diff-split-right')) return right;
+    }
+    return lineEl;
+  }
+
+  // Persistent chip under a commented line; clicking the text re-opens the editor.
+  DP.renderAnnotationMarker = function(lineEl, file, annotation) {
+    var prev = DP.diffViewEl.querySelector('.diff-annotation[data-annotation-id="' + cssId(annotation.id) + '"]');
+    if (prev) prev.remove();
+
+    var marker = document.createElement('div');
+    marker.className = 'diff-annotation';
+    marker.dataset.annotationId = annotation.id;
+
+    var text = document.createElement('span');
+    text.className = 'diff-annotation-text';
+    text.textContent = annotation.text;
+    text.title = 'Edit comment';
+    text.addEventListener('click', function () {
+      openAnnotationEditor(lineEl, file, { side: annotation.side, line: annotation.line }, annotation);
     });
+
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'diff-annotation-remove';
+    remove.textContent = '×';
+    remove.title = 'Remove comment';
+    remove.addEventListener('click', function () { DP.removeAnnotation(annotation.id); });
+
+    marker.appendChild(text);
+    marker.appendChild(remove);
+    annotationAnchor(lineEl).after(marker);
+  };
+
+  // Non-blocking: several editors can be open at once across lines and files.
+  function openAnnotationEditor(lineEl, file, identity, existing) {
+    var anchor = annotationAnchor(lineEl);
+    var sibling = anchor.nextElementSibling;
+    if (sibling && sibling.classList.contains('diff-annotation-editor')) {
+      sibling.querySelector('textarea').focus();
+      return;
+    }
+    // Editing: hide the marker while its editor is open, restore on cancel.
+    var marker = existing
+      ? DP.diffViewEl.querySelector('.diff-annotation[data-annotation-id="' + cssId(existing.id) + '"]')
+      : null;
+    if (marker) marker.remove();
+
+    var wrap = document.createElement('div');
+    wrap.className = 'diff-annotation-editor';
+    wrap.innerHTML =
+      '<textarea class="diff-annotation-input" rows="2" placeholder="Comment for the agent…"></textarea>' +
+      '<div class="diff-annotation-actions">' +
+        '<button type="button" class="diff-annotation-cancel">Cancel</button>' +
+        '<button type="button" class="diff-annotation-save">Save</button>' +
+      '</div>';
+    anchor.after(wrap);
+
+    var ta = wrap.querySelector('textarea');
+    ta.value = existing ? existing.text : '';
+    ta.focus();
+
+    function restore() { if (existing) DP.renderAnnotationMarker(lineEl, file, existing); }
+    function cancel() { wrap.remove(); restore(); }
+    function save() {
+      var text = ta.value.trim();
+      if (!text) { cancel(); return; }
+      var annotation = DP.addAnnotation({ filePath: file, side: identity.side, line: identity.line, text: text });
+      wrap.remove();
+      DP.renderAnnotationMarker(lineEl, file, annotation);
+    }
+
+    wrap.querySelector('.diff-annotation-save').addEventListener('click', save);
+    wrap.querySelector('.diff-annotation-cancel').addEventListener('click', cancel);
+    ta.addEventListener('keydown', function (e) {
+      // Plain Enter stays a newline so multi-line comments are possible.
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); save(); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    });
+  }
+
+  // Re-attach markers so comments survive a file switch or unified/split re-render.
+  DP.renderFileAnnotations = function(file) {
+    DP.activeAnnotations
+      .filter(function (a) { return a.filePath === file; })
+      .forEach(function (a) {
+        var lineEl = findAnnotationLineEl(a.side, a.line);
+        if (lineEl) DP.renderAnnotationMarker(lineEl, file, a);
+      });
+  };
+
+  DP.bindInlineComments = function(file) {
+    // Only offer the "+" when there's somewhere to send comments; without a
+    // callback the affordance would click to nothing.
+    if (DP.commentCallback) {
+      DP.diffViewEl.querySelectorAll('.diff-line.diff-add, .diff-line.diff-del, .diff-line.diff-context').forEach(function (lineEl) {
+        // Split view shows context lines in both panes; skip the left copy, which
+        // lacks data-side — the right pane's copy has the correct identity.
+        if (lineEl.classList.contains('diff-split-left') && lineEl.classList.contains('diff-context')) return;
+        var addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'diff-comment-add';
+        addBtn.textContent = '+';
+        addBtn.title = 'Add a comment on this line';
+        addBtn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openAnnotationEditor(lineEl, file, annotationLineIdentity(lineEl), null);
+        });
+        lineEl.appendChild(addBtn);
+      });
+    }
+    DP.renderFileAnnotations(file);
   };
 
   DP.bindExplainButtons = function(file) {
@@ -471,7 +582,7 @@
     // Checkbox selection
     DP.diffViewEl.querySelectorAll('.diff-stage-check').forEach(function (cb) {
       cb.addEventListener('click', function (e) {
-        e.stopPropagation(); // don't trigger bindInlineComments click-to-comment
+        e.stopPropagation();
       });
       cb.addEventListener('change', function () {
         var key = cb.dataset.lineKey;

@@ -6760,7 +6760,8 @@ body.task-branchless .file-viewer-blame-btn {
 
 /* ---- Markdown Preview (file viewer "pretty" mode) ---- */
 
-.file-viewer-preview-btn {
+.file-viewer-preview-btn,
+.file-viewer-split-btn {
   background: var(--surface-hover);
   border: 1px solid var(--border);
   color: var(--text);
@@ -6771,13 +6772,10 @@ body.task-branchless .file-viewer-blame-btn {
   flex-shrink: 0;
 }
 
-.file-viewer-preview-btn:hover {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.file-viewer-preview-btn.active {
+.file-viewer-preview-btn:hover,
+.file-viewer-split-btn:hover,
+.file-viewer-preview-btn.active,
+.file-viewer-split-btn.active {
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
@@ -6798,6 +6796,45 @@ body.task-branchless .file-viewer-blame-btn {
 
 .file-viewer-body.preview-mode .file-editor-monaco { display: none; }
 .file-viewer-body.preview-mode .file-md-preview { display: block; }
+
+/* Live artifact split preview — a rendered pane beside Monaco. Unlike
+   .preview-mode (which swaps Monaco out), split lays the two side by side.
+   Only the .split-preview parent flips the pane/handle visible, so the
+   [hidden] attribute keeps them out of the flow when split is off. */
+.file-viewer-body.split-preview { flex-direction: row; }
+.file-viewer-body.split-preview .file-editor-monaco { flex: 1 1 0; min-width: 200px; }
+
+.artifact-split-handle {
+  flex: 0 0 5px;
+  cursor: col-resize;
+  background: var(--border);
+}
+.artifact-split-handle:hover,
+.file-viewer-body.resizing .artifact-split-handle { background: var(--accent); }
+
+.file-viewer-body.split-preview .file-artifact-preview {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+  overflow: hidden;
+  background: var(--bg);
+}
+/* The markdown pane also carries .file-md-preview for its typography, whose
+   base rule is display:none — flip it visible and give it document padding. */
+.file-viewer-body.split-preview .file-artifact-preview.artifact-markdown {
+  display: block;
+  overflow: auto;
+  padding: 24px 32px 48px;
+}
+
+.artifact-iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}
+/* Don't let the artifact document swallow the divider drag. */
+.file-viewer-body.resizing .artifact-iframe { pointer-events: none; }
 
 /* In the Changes diff panel, the preview pane always shows when mounted —
    there's no preview-mode toggle on the parent. */

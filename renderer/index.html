@@ -121,6 +121,15 @@
         <button id="btn-manage-sessions" type="button" title="Manage sessions — review and delete sessions and their worktrees">Manage sessions</button>
       </div>
 
+      <!-- Shown when the repo selected above has no Klaussy commit review gate
+           installed; one click writes the hooks via the same installer the
+           app uses automatically. Hidden otherwise. -->
+      <div id="commit-gate-banner" hidden>
+        <span class="commit-gate-icon" aria-hidden="true">&#128272;</span>
+        <span class="commit-gate-text">This repo has no commit review gate.</span>
+        <button id="btn-enable-commit-gate" type="button">Enable Commit Review Gate</button>
+      </div>
+
       <div id="task-list"></div>
 
       <div id="sidebar-footer">
@@ -491,6 +500,8 @@
           <button class="shell-option" data-shell="cursor">Cursor</button>
           <button class="shell-option" data-shell="cline">Cline</button>
           <button class="shell-option" data-shell="opencode">opencode</button>
+          <button class="shell-option" data-shell="kimi">Kimi</button>
+          <button class="shell-option" data-shell="nemesis8" title="Run the agent in an isolated Nemesis8 Docker sandbox">Nemesis8 Sandbox</button>
           <button class="shell-option" data-shell="shell">Shell</button>
         </div>
       </div>
@@ -724,6 +735,7 @@
   <script src="lsp-client.js"></script>
   <script src="hljs-bundle.js"></script>
   <script src="markdown-preview.js"></script>
+  <script src="artifact-preview.js"></script>
   <script src="app-state.js"></script>
   <script src="utils.js"></script>
   <script src="toast.js"></script>
@@ -732,6 +744,7 @@
   <script src="events.js"></script>
   <script src="theme.js"></script>
   <script src="finding-parser.js"></script>
+  <script src="diff-annotations.js"></script>
   <script src="diff-panel.js"></script>
   <script src="diff-panel-filelist.js"></script>
   <script src="diff-panel-diff.js"></script>
@@ -750,6 +763,7 @@
   <script src="word-complete.js"></script>
   <script src="about-log.js"></script>
   <script src="searchable-select.js"></script>
+  <script src="commit-gate-banner.js"></script>
   <script src="project-switcher.js"></script>
   <script src="agent-router.js"></script>
   <script src="agents-panel.js"></script>

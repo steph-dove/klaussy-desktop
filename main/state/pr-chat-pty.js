@@ -23,7 +23,7 @@ const pty = require('node-pty');
 const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
-const { promptFileArg } = require('../util/agent-prompt');
+const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -110,9 +110,10 @@ function startOrAttachChat({ worktreePath, provider = 'claude', seedPrompt, onDa
 
   const model = (config.agentModel || {})[prov.id] || '';
   const agentCmd = prov.buildInteractiveCmd(bin, { trust: consent.trust, model });
+  const pasteAtBoot = prov.promptDelivery === 'paste';
   const promptFlag = prov.interactivePromptFlag ? `${prov.interactivePromptFlag} ` : '';
   const quotedPrompt = promptFileArg(promptFile, userShell);
-  const shellCmd = `${agentCmd} ${promptFlag}${quotedPrompt}`;
+  const shellCmd = pasteAtBoot ? agentCmd : `${agentCmd} ${promptFlag}${quotedPrompt}`;
   const args = shellRunCmdArgs(userShell, shellCmd);
 
   let ptyProc;
@@ -177,6 +178,13 @@ function startOrAttachChat({ worktreePath, provider = 'claude', seedPrompt, onDa
         try { ptyProc.write('\r'); } catch {}
       }, ms);
     }
+  }
+
+  // Claim promptSent up front so the 15s arg-form fallback above can't race
+  // this into a double-send.
+  if (pasteAtBoot) {
+    session.promptSent = true;
+    schedulePromptPaste(ptyProc, seed, () => chatSessions.has(wtKey));
   }
 
   return { ok: true, already: false, chatKey, worktreePath };

@@ -245,6 +245,9 @@ const AGENT_SKILLS_DIRS = {
   copilot: ['.github', 'skills'],
   antigravity: ['.gemini', 'antigravity-cli', 'plugins', 'klaussy', 'skills'],
   opencode: ['.opencode', 'skills'],
+  // kimi reads both `.kimi-code/skills` and `.agents/skills`; prefer the shared
+  // one so a repo scaffolded for codex/cline works here too.
+  kimi: ['.agents', 'skills'],
 };
 
 // Resolve the worktree's klaussy-generated `<repo>-<kind>` skill for a given

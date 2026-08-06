@@ -74,6 +74,60 @@ function getNotificationConfig(config = loadConfig()) {
   };
 }
 
+// Legacy single-gateway accessor, kept for back-compat surfaces. New code uses
+// getNemesisProfiles()/getNemesisProfile() — Klaussy supports several named
+// gateways, each its own picker entry.
+function getNemesisConfig() {
+  const cfg = loadConfig();
+  return {
+    enabled: !!cfg.nemesisEnabled,
+    remote: cfg.nemesisRemote || '',
+    token: cfg.nemesisToken || '',
+    model: cfg.nemesisModel || '',
+    provider: cfg.nemesisProvider || '',
+  };
+}
+
+function normalizeProfile(p, i) {
+  p = p || {};
+  return {
+    id: String(p.id || `n8-${i}`),
+    name: String(p.name || `Nemesis8 ${i + 1}`),
+    remote: String(p.remote || ''),
+    token: String(p.token || ''),
+    provider: String(p.provider || ''),
+    model: String(p.model || ''),
+  };
+}
+
+// Named gateway profiles; migrates the legacy single-gateway keys into one
+// profile (read-only) when none exist. Empty = nothing configured yet.
+function getNemesisProfiles() {
+  const cfg = loadConfig();
+  if (Array.isArray(cfg.nemesisProfiles) && cfg.nemesisProfiles.length) {
+    return cfg.nemesisProfiles.map(normalizeProfile);
+  }
+  if (cfg.nemesisRemote || cfg.nemesisToken || cfg.nemesisProvider) {
+    return [normalizeProfile({
+      id: 'default', name: 'Nemesis8',
+      remote: cfg.nemesisRemote, token: cfg.nemesisToken,
+      provider: cfg.nemesisProvider, model: cfg.nemesisModel,
+    }, 0)];
+  }
+  return [];
+}
+
+// Resolve the profile a picker mode targets: `nemesis8:<id>` → that profile,
+// bare `nemesis8` → the first profile. Null when none are configured.
+function getNemesisProfile(mode) {
+  const profiles = getNemesisProfiles();
+  if (typeof mode === 'string' && mode.startsWith('nemesis8:')) {
+    const id = mode.slice('nemesis8:'.length);
+    return profiles.find((p) => p.id === id) || profiles[0] || null;
+  }
+  return profiles[0] || null;
+}
+
 // Migrations from version n-1 to version n. Each function mutates the passed
 // config object in place and MUST be idempotent — we only run each migration
 // once, but migrations can fail mid-way and we'd rather re-run cleanly than
@@ -174,6 +228,9 @@ module.exports = {
   loadConfig,
   saveConfig,
   flushSaveConfig,
+  getNemesisConfig,
+  getNemesisProfiles,
+  getNemesisProfile,
   runConfigMigrations,
   getNotificationConfig,
   CURRENT_SCHEMA_VERSION,

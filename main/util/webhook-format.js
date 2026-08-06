@@ -3,7 +3,7 @@
 // body out — so the shapes are cheap to unit-test and the gateway
 // (util/notification-gateway.js) only has to POST what these return.
 
-const { EVENT_TYPES } = require('./nemesis-client');
+const { EVENT_TYPES } = require('./nemesis-events');
 
 // Slack blocks and Discord embed descriptions both have hard size limits;
 // agent log tails can be huge. Keep the last slice (the tail is where a crash

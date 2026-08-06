@@ -855,6 +855,57 @@ body.custom-titlebar #titlebar-content {
   gap: 6px;
 }
 
+/* Commit review gate prompt — shown under the filters when the selected repo
+   has no Klaussy pre-commit hook yet. Hidden via the [hidden] attribute. */
+#commit-gate-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: var(--accent-dim);
+}
+#commit-gate-banner[hidden] {
+  display: none;
+}
+#commit-gate-banner .commit-gate-icon {
+  font-size: 13px;
+  line-height: 1;
+}
+#commit-gate-banner .commit-gate-text {
+  flex: 1 1 auto;
+  min-width: 120px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+#btn-enable-commit-gate {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: background-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+#btn-enable-commit-gate:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  transform: translateY(-1px);
+}
+#btn-enable-commit-gate:active {
+  transform: translateY(0) scale(0.98);
+}
+#btn-enable-commit-gate:disabled {
+  opacity: 0.6;
+  cursor: default;
+  transform: none;
+}
+
 /* Full-width row under the filters: opens the Manage Sessions modal. */
 #btn-manage-sessions {
   flex: 1 1 100%;
@@ -1679,6 +1730,7 @@ body.custom-titlebar #titlebar-content {
   display: flex;
   flex: 1 1 auto;
   min-width: 0;
+  flex-wrap: wrap;
   gap: 2px;
   background: var(--input-bg);
   border: 1px solid var(--border);
@@ -1687,9 +1739,11 @@ body.custom-titlebar #titlebar-content {
 }
 
 .shell-option {
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 6px 4px;
+  /* Never shrink below the label — wrap to a new row instead of truncating.
+     max-content sizes the floor to the text so no label ever clips. */
+  flex: 1 1 auto;
+  min-width: max-content;
+  padding: 6px 10px;
   background: none;
   border: none;
   border-radius: 6px;

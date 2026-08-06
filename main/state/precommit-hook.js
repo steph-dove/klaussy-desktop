@@ -742,6 +742,21 @@ function uninstallHookForRepo(repoPath) {
   }
 }
 
+// True only when our marked pre-commit hook exists in the common git dir (so
+// every worktree sees it); a foreign pre-commit of the same name reads as not.
+function isHookInstalledForRepo(repoPath) {
+  if (!repoPath || typeof repoPath !== 'string') return false; // don't fall back to cwd
+  try {
+    const hooksDir = commonHooksDir(repoPath);
+    if (!hooksDir) return false;
+    const hookPath = path.join(hooksDir, 'pre-commit');
+    if (!fs.existsSync(hookPath)) return false;
+    return fs.readFileSync(hookPath, 'utf-8').includes(HOOK_MARKERS['pre-commit']);
+  } catch {
+    return false;
+  }
+}
+
 function uninstallAllHooks() {
   const config = loadConfig();
   // Repos whose uninstall failed (unmounted volume, perms) stay tracked so
@@ -755,4 +770,4 @@ function uninstallAllHooks() {
   saveConfig(config);
 }
 
-module.exports = { startPrecommitServer, installHookForRepo, uninstallAllHooks, leaveReviewPassmark };
+module.exports = { startPrecommitServer, installHookForRepo, isHookInstalledForRepo, uninstallAllHooks, leaveReviewPassmark };

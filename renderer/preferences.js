@@ -36,11 +36,18 @@
   var cursorStyle = document.getElementById('pref-cursor-style');
   var ollamaModel = document.getElementById('pref-ollama-model');
   var ollamaModelStatus = document.getElementById('ollama-model-status');
+  var opencodeModelSelect = document.getElementById('pref-opencode-model');
+  var opencodeModelStatus = document.getElementById('opencode-model-status');
+  var agentContextSelect = document.getElementById('pref-agent-context');
+  var agentContextStatus = document.getElementById('agent-context-status');
   var themeSelect = document.getElementById('pref-theme');
   var claudePath = document.getElementById('pref-claude-path');
   var defaultMode = document.getElementById('pref-default-mode');
   var autoFetch = document.getElementById('pref-auto-fetch');
   var statusMsg = document.getElementById('status-msg');
+  var nemesisProfilesEl = document.getElementById('nemesis-profiles');
+  var nemesisProfileTpl = document.getElementById('nemesis-profile-tpl');
+  var nemesisAddBtn = document.getElementById('pref-nemesis-add');
 
   // Per-agent path inputs, keyed by provider id → { input, infoEl, prefKey }.
   var agentPaths = {
@@ -52,6 +59,7 @@
     cursor: { input: document.getElementById('pref-cursor-path'), infoEl: document.getElementById('agent-info-cursor'), prefKey: 'cursorPath' },
     cline: { input: document.getElementById('pref-cline-path'), infoEl: document.getElementById('agent-info-cline'), prefKey: 'clinePath' },
     opencode: { input: document.getElementById('pref-opencode-path'), infoEl: document.getElementById('agent-info-opencode'), prefKey: 'opencodePath' },
+    kimi: { input: document.getElementById('pref-kimi-path'), infoEl: document.getElementById('agent-info-kimi'), prefKey: 'kimiPath' },
     ollama: { input: document.getElementById('pref-aider-path'), infoEl: document.getElementById('agent-info-ollama'), prefKey: 'aiderPath' },
   };
 
@@ -70,6 +78,21 @@
     ollamaModel.insertBefore(custom, ollamaModel.firstChild);
   }
   ollamaModel.value = savedOllamaModel;
+
+  if (opencodeModelSelect) {
+    var savedOpencodeModel = (prefs.agentModel && prefs.agentModel.opencode) || prefs.opencodeModel || '';
+    if (savedOpencodeModel && !Array.prototype.slice.call(opencodeModelSelect.options).some(function (o) { return o.value === savedOpencodeModel; })) {
+      var customOpt = document.createElement('option');
+      customOpt.value = savedOpencodeModel;
+      customOpt.textContent = savedOpencodeModel + ' (custom)';
+      opencodeModelSelect.appendChild(customOpt);
+    }
+    opencodeModelSelect.value = savedOpencodeModel;
+  }
+
+  if (agentContextSelect) {
+    agentContextSelect.value = prefs.agentContextLength ? String(prefs.agentContextLength) : '';
+  }
   Object.keys(agentPaths).forEach(function (id) {
     agentPaths[id].input.value = prefs[agentPaths[id].prefKey] || '';
   });
@@ -77,6 +100,12 @@
   autoFetch.value = Math.round((prefs.autoFetchInterval || 60000) / 1000);
   document.getElementById('pref-precommit-review').checked = prefs.preCommitReview !== false;
   document.getElementById('pref-strip-comments').checked = prefs.stripComments !== false;
+  // null = config.toml unreadable; disable rather than untick, so a Save can't
+  // revoke a grant that may still be live.
+  var kimiBash = document.getElementById('pref-kimi-autonomous-bash');
+  kimiBash.checked = prefs.kimiAutonomousBash === true;
+  kimiBash.disabled = prefs.kimiAutonomousBash === null;
+  if (kimiBash.disabled) kimiBash.title = "Can't read ~/.kimi-code/config.toml";
   document.getElementById('pref-repo-intel-enrich').checked = prefs.repoIntelEnrich === true;
 
   // Theme dropdown
@@ -225,6 +254,11 @@
       cursorPath: agentPaths.cursor.input.value.trim(),
       clinePath: agentPaths.cline.input.value.trim(),
       opencodePath: agentPaths.opencode.input.value.trim(),
+      opencodeModel: opencodeModelSelect ? opencodeModelSelect.value : '',
+      // '' means auto — the main side sizes it to the machine.
+      agentContextLength: agentContextSelect ? Number(agentContextSelect.value || 0) : 0,
+      agentModel: Object.assign({}, prefs.agentModel || {}, { opencode: opencodeModelSelect ? opencodeModelSelect.value : '' }),
+      kimiPath: agentPaths.kimi.input.value.trim(),
       aiderPath: agentPaths.ollama.input.value.trim(),
       defaultProvider: defaultMode.value,
       theme: { preset: themeSelect.value },
@@ -233,10 +267,14 @@
       preCommitReview: document.getElementById('pref-precommit-review').checked,
       stripComments: document.getElementById('pref-strip-comments').checked,
       repoIntelEnrich: document.getElementById('pref-repo-intel-enrich').checked,
+      nemesisProfiles: collectNemesisProfiles(),
     };
 
-    await window.klaus.ui.setPreferences(updated);
-    showStatus('Saved');
+    // Omitted entirely while unknown so the main side skips it (`!== undefined`).
+    if (!kimiBash.disabled) updated.kimiAutonomousBash = kimiBash.checked;
+
+    var res = await window.klaus.ui.setPreferences(updated);
+    showStatus(res && res.error ? res.error : 'Saved');
   }
 
   function showStatus(msg) {
@@ -250,6 +288,10 @@
     el.addEventListener('change', saveAll);
     el.addEventListener('input', saveAll);
   });
+
+  // Toggling this rewrites kimi's own config.toml, so it saves on change rather
+  // than riding along with whatever control the user touches next.
+  kimiBash.addEventListener('change', saveAll);
 
   // Re-probe an agent's version when its path changes.
   Object.keys(agentPaths).forEach(function (id) {
@@ -268,6 +310,66 @@
     pullSelectedModel();
   });
 
+  if (opencodeModelSelect) {
+    opencodeModelSelect.addEventListener('change', async function () {
+      var val = opencodeModelSelect.value;
+      var agentModel = Object.assign({}, prefs.agentModel || {}, { opencode: val });
+      await window.klaus.ui.setPreferences({ agentModel: agentModel, opencodeModel: val });
+      showStatus('Saved');
+      checkAndPullOpencodeModel(val);
+    });
+  }
+
+  // Changing the window rewrites the model itself, so it saves on change and
+  // re-applies immediately rather than waiting for the next launch.
+  if (agentContextSelect) {
+    agentContextSelect.addEventListener('change', async function () {
+      // doSave, not the debounced saveAll: the main side reads the persisted
+      // window when re-baking, so it has to land before we apply.
+      await doSave();
+      var current = opencodeModelSelect ? opencodeModelSelect.value : '';
+      if (!current || current.indexOf('ollama/') !== 0) {
+        agentContextStatus.textContent = agentContextSelect.value
+          ? 'Applies when an Ollama model is selected above.'
+          : '';
+        return;
+      }
+      agentContextStatus.textContent = 'Applying to ' + current.replace('ollama/', '') + '…';
+      checkAndPullOpencodeModel(current);
+    });
+  }
+
+  function checkAndPullOpencodeModel(modelVal) {
+    if (!opencodeModelStatus) return;
+    if (!modelVal || !modelVal.startsWith('ollama/')) {
+      opencodeModelStatus.textContent = '';
+      return;
+    }
+    var tag = modelVal.replace('ollama/', '');
+    var api = window.klaus.ai && window.klaus.ai.ollama;
+    if (!api || !api.ensureModel) return;
+
+    opencodeModelStatus.textContent = 'Checking model ' + tag + '…';
+    var dispose = api.onSetupProgress ? api.onSetupProgress(function (p) {
+      if (!p || (p.step !== 'model' && p.step !== 'context')) return;
+      opencodeModelStatus.textContent = (p.message || 'Downloading…') +
+        (typeof p.percent === 'number' ? ' ' + p.percent + '%' : '');
+    }) : null;
+
+    // agentContext makes Ollama serve opencode a usable window; without it the
+    // agent loses its tools and history to the 4096 default.
+    api.ensureModel({ model: tag, agentContext: true }).then(function (r) {
+      if (dispose) dispose();
+      var ctx = r && r.contextLength ? ' (context ' + r.contextLength + ')' : '';
+      if (r && r.error) opencodeModelStatus.textContent = 'Could not install ' + tag + ': ' + r.error;
+      else if (r && r.alreadyPresent) opencodeModelStatus.textContent = 'Model ' + tag + ' is ready' + ctx + '.';
+      else opencodeModelStatus.textContent = 'Model ' + tag + ' downloaded & ready' + ctx + '.';
+    }).catch(function () {
+      if (dispose) dispose();
+      opencodeModelStatus.textContent = 'Could not install ' + tag + '.';
+    });
+  }
+
   function pullSelectedModel() {
     var api = window.klaus.ai && window.klaus.ai.ollama;
     if (!api || !api.ensureModel) return;
@@ -285,6 +387,151 @@
     }).catch(function () {
       if (dispose) dispose();
       ollamaModelStatus.textContent = 'Could not install model.';
+    });
+  }
+
+  // ---- Nemesis8 gateway profiles ----
+  // One gateway (URL/token/agent) per card; the setup command inlines the token.
+  var nemesisProfiles = (prefs.nemesisProfiles || []).map(function (p) {
+    return {
+      id: p.id || newProfileId(), name: p.name || '', remote: p.remote || '',
+      token: p.token || '', provider: p.provider || '', model: p.model || '',
+    };
+  });
+
+  function randomHex(n) {
+    var bytes = new Uint8Array(n);
+    (window.crypto || window.msCrypto).getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+  function newProfileId() { return 'n8-' + randomHex(6); }
+
+  function collectNemesisProfiles() {
+    return nemesisProfiles.map(function (p, i) {
+      return {
+        id: p.id, name: (p.name || '').trim() || ('Nemesis8 ' + (i + 1)),
+        remote: (p.remote || '').trim(), token: p.token || '',
+        provider: p.provider || '', model: (p.model || '').trim(),
+      };
+    });
+  }
+
+  function isLocalHost(url) {
+    var v = (url || '').trim();
+    if (!v) return true;
+    var host = v.replace(/^https?:\/\//i, '').split(/[:/]/)[0].toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  }
+
+  function buildSetupCmd(profile) {
+    var win = window.klaus.ui.platform === 'win32';
+    var flag = profile.provider ? ' --provider ' + profile.provider : '';
+    var token = (profile.token || '').trim();
+    var install = win
+      ? 'powershell -c "irm https://nemesis8.nuts.services/install.ps1 | iex"'
+      : 'curl -fsSL https://nemesis8.nuts.services/install.sh | sh';
+    var login = 'nemesis8 login' + flag + '   # sign in to the agent (interactive) — required';
+    var tokenLine = token
+      ? (win ? '$env:NEMESIS8_AUTH_TOKEN="' + token + '"' : 'export NEMESIS8_AUTH_TOKEN="' + token + '"')
+      : (win ? '$env:NEMESIS8_AUTH_TOKEN="<click Generate>"' : 'export NEMESIS8_AUTH_TOKEN="<click Generate>"');
+    var serve = 'nemesis8 serve' + flag + '   # gateway on port 9801';
+    return [install, login, tokenLine, serve].join('\n');
+  }
+
+  function makeNemesisCard(profile) {
+    var card = nemesisProfileTpl.content.firstElementChild.cloneNode(true);
+    var q = function (sel) { return card.querySelector(sel); };
+    var nameEl = q('.np-name'), remoteEl = q('.np-remote'), tokenEl = q('.np-token');
+    var providerEl = q('.np-provider'), modelEl = q('.np-model');
+    var statusEl = q('.np-status'), cmdEl = q('.np-cmd');
+    var localRow = q('.np-local-row'), manualRow = q('.np-manual-row');
+
+    nameEl.value = profile.name || '';
+    remoteEl.value = profile.remote || '';
+    tokenEl.value = profile.token || '';
+    providerEl.value = profile.provider || '';
+    modelEl.value = profile.model || '';
+
+    function setStatus(kind, html) {
+      if (!html) { statusEl.innerHTML = ''; return; }
+      var cls = kind === 'ok' ? 'version' : kind === 'err' ? 'not-found' : '';
+      statusEl.innerHTML = 'Status: <span class="' + cls + '">' + html + '</span>';
+    }
+    function refresh() {
+      cmdEl.textContent = buildSetupCmd(profile);
+      var local = isLocalHost(profile.remote);
+      localRow.style.display = local ? '' : 'none';
+      manualRow.style.display = local ? 'none' : '';
+    }
+
+    nameEl.addEventListener('input', function () { profile.name = nameEl.value; saveAll(); });
+    remoteEl.addEventListener('input', function () { profile.remote = remoteEl.value; saveAll(); setStatus('', ''); refresh(); });
+    tokenEl.addEventListener('input', function () { profile.token = tokenEl.value; saveAll(); setStatus('', ''); refresh(); });
+    providerEl.addEventListener('change', function () { profile.provider = providerEl.value; saveAll(); refresh(); });
+    modelEl.addEventListener('input', function () { profile.model = modelEl.value; saveAll(); });
+
+    q('.np-gen').addEventListener('click', function () {
+      profile.token = randomHex(24); tokenEl.value = profile.token; saveAll(); setStatus('', ''); refresh();
+    });
+    q('.np-copy').addEventListener('click', function (e) {
+      var btn = e.currentTarget;
+      try { window.klaus.fs.copyToClipboard(cmdEl.textContent); } catch (_e) {}
+      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy command'; }, 1500);
+    });
+    q('.np-remove').addEventListener('click', function () {
+      var i = nemesisProfiles.indexOf(profile);
+      if (i !== -1) nemesisProfiles.splice(i, 1);
+      saveAll(); renderNemesisProfiles();
+    });
+    q('.np-test').addEventListener('click', async function (e) {
+      var btn = e.currentTarget;
+      var conn = { remote: (profile.remote || '').trim(), token: profile.token || '' };
+      window.klaus.ui.setPreferences({ nemesisProfiles: collectNemesisProfiles() });
+      btn.disabled = true; setStatus('', 'connecting…');
+      var res;
+      try { res = await window.klaus.ui.testNemesisConnection(conn); } catch (_e) { res = { ok: false, error: 'test failed' }; }
+      btn.disabled = false;
+      if (res && res.ok) { setStatus('ok', 'connected' + (res.version ? ' (v' + escHtml(res.version) + ')' : '')); }
+      else { setStatus('err', escHtml((res && res.error) || 'unreachable')); }
+      if (res && res.insecure) { statusEl.innerHTML += ' <span class="not-found">⚠ token sent over http — use https or a tunnel</span>'; }
+    });
+    q('.np-setup').addEventListener('click', async function (e) {
+      var btn = e.currentTarget; var prev = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Opening terminal…';
+      var res;
+      try { res = await window.klaus.ui.nemesisSetupLocal({ token: (profile.token || '').trim(), provider: profile.provider || '' }); }
+      catch (_e) { res = { error: 'could not start setup' }; }
+      btn.disabled = false; btn.textContent = prev;
+      if (res && res.ok) {
+        if (res.token) { profile.token = res.token; tokenEl.value = res.token; }
+        if (!(profile.remote || '').trim()) { profile.remote = 'http://localhost:9801'; remoteEl.value = profile.remote; }
+        saveAll(); refresh();
+        setStatus('', 'opened a setup tab in Klaussy — complete the sign-in there, then come back and Test connection');
+      } else { setStatus('err', escHtml((res && res.error) || 'could not start setup')); }
+    });
+
+    refresh();
+    return card;
+  }
+
+  function renderNemesisProfiles() {
+    nemesisProfilesEl.innerHTML = '';
+    nemesisProfiles.forEach(function (p) { nemesisProfilesEl.appendChild(makeNemesisCard(p)); });
+  }
+  renderNemesisProfiles();
+
+  if (nemesisAddBtn) {
+    nemesisAddBtn.addEventListener('click', function () {
+      nemesisProfiles.push({ id: newProfileId(), name: '', remote: '', token: '', provider: '', model: '' });
+      saveAll(); renderNemesisProfiles();
+    });
+  }
+
+  var nemesisDocsLink = document.getElementById('nemesis-docs-link');
+  if (nemesisDocsLink) {
+    nemesisDocsLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      try { window.klaus.gh.openExternal('https://github.com/DeepBlueDynamics/nemesis8'); } catch (_e) {}
     });
   }
 

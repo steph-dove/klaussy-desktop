@@ -6,7 +6,7 @@ const http = require('http');
 const https = require('https');
 const { URL } = require('url');
 
-const nemesis = require('./nemesis-client');
+const nemesis = require('./nemesis-events');
 const { formatSlack, formatDiscord } = require('./webhook-format');
 const { getNotificationConfig } = require('./config');
 

@@ -2,99 +2,103 @@ require('../setup');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const http = require('http');
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const os = require('node:os');
 
+const { fakeApp } = require('../setup');
 const nemesis = require('../../main/util/nemesis-client');
-const { EVENT_TYPES } = nemesis;
 
-test('normalize rejects junk and unknown types', () => {
-  assert.equal(nemesis.normalize(null), null);
-  assert.equal(nemesis.normalize({}), null);
-  assert.equal(nemesis.normalize({ type: 'agent:teleported' }), null);
+// ---- Pure helpers ----
+
+test('normalizeBaseUrl adds scheme and default port, trims trailing slash', () => {
+  assert.equal(nemesis.normalizeBaseUrl('host'), 'http://host:9801');
+  assert.equal(nemesis.normalizeBaseUrl('host:9801/'), 'http://host:9801');
+  assert.equal(nemesis.normalizeBaseUrl('http://host:4000'), 'http://host:4000');
+  assert.equal(nemesis.normalizeBaseUrl('https://gw.example.com'), 'https://gw.example.com:9801');
+  assert.equal(nemesis.normalizeBaseUrl('http://1.2.3.4:9801//'), 'http://1.2.3.4:9801');
+  assert.equal(nemesis.normalizeBaseUrl(''), '');
+  assert.equal(nemesis.normalizeBaseUrl('   '), '');
 });
 
-test('normalize coerces a valid event into the stable shape', () => {
-  const out = nemesis.normalize({
-    type: EVENT_TYPES.COMPLETED,
-    containerId: 42, // number coerced to string
-    workspacePath: '/w',
-    exitCode: 0,
-  });
-  assert.equal(out.type, EVENT_TYPES.COMPLETED);
-  assert.equal(out.containerId, '42');
-  assert.equal(out.workspacePath, '/w');
-  assert.equal(out.exitCode, 0);
-  assert.equal(out.tool, '');
+test('authHeaders only sets Authorization when a token is present', () => {
+  assert.deepEqual(nemesis.authHeaders('abc'), { authorization: 'Bearer abc' });
+  assert.deepEqual(nemesis.authHeaders(''), {});
+  assert.deepEqual(nemesis.authHeaders(undefined), {});
 });
 
-test('subscribe receives published events and unsubscribe stops them', () => {
-  const seen = [];
-  const off = nemesis.subscribe((e) => seen.push(e));
-
-  const published = nemesis.publish({
-    type: EVENT_TYPES.APPROVAL_REQUIRED,
-    containerId: '1',
-    tool: 'shell-exec',
-  });
-  assert.ok(published, 'publish returned the normalized event');
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0].tool, 'shell-exec');
-
-  off();
-  nemesis.publish({ type: EVENT_TYPES.COMPLETED, containerId: '1' });
-  assert.equal(seen.length, 1, 'no delivery after unsubscribe');
+test('isInsecureRemote flags a token over http to a non-loopback host only', () => {
+  assert.equal(nemesis.isInsecureRemote('http://gw.example.com:9801', 'tok'), true);
+  assert.equal(nemesis.isInsecureRemote('http://127.0.0.1:9801', 'tok'), false);
+  assert.equal(nemesis.isInsecureRemote('http://localhost:9801', 'tok'), false);
+  assert.equal(nemesis.isInsecureRemote('https://gw.example.com:9801', 'tok'), false);
+  assert.equal(nemesis.isInsecureRemote('http://gw.example.com:9801', ''), false);
+  assert.equal(nemesis.isInsecureRemote('', 'tok'), false);
 });
 
-test('publish of an invalid event returns null and notifies no one', () => {
-  const seen = [];
-  const off = nemesis.subscribe((e) => seen.push(e));
-  assert.equal(nemesis.publish({ type: 'nope' }), null);
-  assert.equal(seen.length, 0);
-  off();
+test('shouldUseNemesis routes the nemesis8 picker choice and per-profile ids', () => {
+  // Per-tab: base id, and one id per named gateway profile (nemesis8:<id>).
+  assert.equal(nemesis.shouldUseNemesis('nemesis8'), true);
+  assert.equal(nemesis.shouldUseNemesis(nemesis.NEMESIS_MODE), true);
+  assert.equal(nemesis.shouldUseNemesis('nemesis8:claude-prod'), true);
+  assert.equal(nemesis.shouldUseNemesis('claude'), false);
+  assert.equal(nemesis.shouldUseNemesis('shell'), false);
+  assert.equal(nemesis.shouldUseNemesis('nemesis8extra'), false); // must be exact or prefixed with ':'
+  assert.equal(nemesis.shouldUseNemesis(undefined), false);
 });
 
-test('a throwing subscriber does not break publish for others', () => {
-  const seen = [];
-  const offBad = nemesis.subscribe(() => { throw new Error('subscriber blew up'); });
-  const offGood = nemesis.subscribe((e) => seen.push(e));
-  assert.doesNotThrow(() => nemesis.publish({ type: EVENT_TYPES.COMPLETED, containerId: '9' }));
-  // The good subscriber registered after the bad one still ran despite the throw.
-  offBad();
-  offGood();
-});
+// ---- /health probe (used by the prefs "Test connection" button) ----
 
-test('connect() consumes an SSE stream and republishes events', async () => {
-  // Stand up a tiny SSE server that emits one lifecycle event, mimicking a real
-  // Nemesis8 endpoint, and assert the client turns it into a bus event.
-  const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    res.write('data: ' + JSON.stringify({
-      type: EVENT_TYPES.FAILED, containerId: 'sse-1', exitCode: 2,
-    }) + '\n\n');
-  });
-  await new Promise((r) => server.listen(0, r));
-  const url = `http://127.0.0.1:${server.address().port}/`;
-
-  let conn;
-  try {
-    const got = await new Promise((resolve) => {
-      const off = nemesis.subscribe((e) => {
-        if (e.containerId === 'sse-1') { off(); resolve(e); }
-      });
-      conn = nemesis.connect({ url });
+function withMockGateway(handler) {
+  const server = http.createServer(handler);
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({ server, url: `http://127.0.0.1:${port}` });
     });
-    assert.equal(got.type, EVENT_TYPES.FAILED);
-    assert.equal(got.exitCode, 2);
-  } finally {
-    // Close the SSE connection FIRST — server.close() only completes once the
-    // open connection is gone, so leaving it open would deadlock teardown.
-    if (conn) conn.close();
-    await new Promise((r) => server.close(r));
-  }
+  });
+}
+
+// Point config at a mock gateway in an isolated userData dir; returns restore().
+function useConfig(overrides) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nemesis-test-'));
+  const origGetPath = fakeApp.getPath;
+  fakeApp.getPath = (name) => (name === 'userData' ? dir : origGetPath(name));
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(overrides));
+  return () => { fakeApp.getPath = origGetPath; };
+}
+
+test('health() reports ok and version from a live gateway', async () => {
+  const { server, url } = await withMockGateway((req, res) => {
+    if (req.url === '/health') { res.end(JSON.stringify({ status: 'ok', version: '1.2.3' })); return; }
+    res.statusCode = 404; res.end();
+  });
+  const restore = useConfig({ nemesisRemote: url });
+  try {
+    const h = await nemesis.health();
+    assert.equal(h.ok, true);
+    assert.equal(h.version, '1.2.3');
+  } finally { restore(); server.close(); }
 });
 
-test('connect() with no url is a harmless no-op handle', () => {
-  const h = nemesis.connect({});
-  assert.equal(typeof h.close, 'function');
-  assert.doesNotThrow(() => h.close());
+test('health() surfaces an error when the gateway is unreachable', async () => {
+  const restore = useConfig({ nemesisRemote: 'http://127.0.0.1:1' });
+  try {
+    const h = await nemesis.health();
+    assert.equal(h.ok, false);
+    assert.ok(h.error);
+  } finally { restore(); }
+});
+
+test('health({remote}) probes the passed connection (not saved config)', async () => {
+  const { server, url } = await withMockGateway((req, res) => {
+    if (req.url === '/health') { res.end(JSON.stringify({ status: 'ok', version: '7' })); return; }
+    res.statusCode = 404; res.end();
+  });
+  try {
+    const h = await nemesis.health({ remote: url, token: 't' });
+    assert.equal(h.ok, true);
+    assert.equal(h.version, '7');
+  } finally { server.close(); }
 });

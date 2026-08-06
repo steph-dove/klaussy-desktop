@@ -1,148 +1,93 @@
-// Nemesis8 event-source client: models the agent lifecycle stream the
-// notification gateway subscribes to. Embedded by default (instances.js calls
-// publish()); connect() attaches to a real SSE endpoint if one is configured.
+// Nemesis8 helpers: the routing check plus a /health probe for the prefs "Test
+// connection" button. Tabs run `nemesis8 interactive` in a real pty (see
+// ai-providers.js / instances.js), not the gateway's HTTP /completion, which
+// hangs upstream (drops the prompt behind a synthetic session id).
 
-const { EventEmitter } = require('events');
-const http = require('http');
-const https = require('https');
-const { URL } = require('url');
+const { getNemesisConfig } = require('./config');
 
-const EVENT_TYPES = {
-  COMPLETED: 'agent:completed',
-  FAILED: 'agent:failed',
-  APPROVAL_REQUIRED: 'agent:approval-required',
-};
+const DEFAULT_PORT = 9801;
+const HEALTH_TIMEOUT_MS = 5000;
 
-const VALID_TYPES = new Set(Object.values(EVENT_TYPES));
-
-const bus = new EventEmitter();
-// Lifecycle events can fan out to Slack + Discord + a future in-app view; the
-// default cap of 10 is easy to trip and only produces a scary warning.
-bus.setMaxListeners(50);
-
-// Coerce an arbitrary event-ish object into the shape subscribers rely on.
-// Returns null for anything without a recognized type so a malformed event
-// from a remote stream can't crash a formatter downstream.
-function normalize(event) {
-  if (!event || typeof event !== 'object') return null;
-  const type = event.type;
-  if (!VALID_TYPES.has(type)) return null;
-  return {
-    type,
-    // Identity of the agent that produced the event. containerId keeps the
-    // Nemesis8 vocabulary; in embedded mode it's the PTY instance id.
-    containerId: event.containerId != null ? String(event.containerId) : '',
-    workspacePath: event.workspacePath || '',
-    agentName: event.agentName || '',
-    // Populated for approval-required: which tool/step wants authorization.
-    tool: event.tool || '',
-    step: event.step || '',
-    // Populated for completed/failed.
-    exitCode: typeof event.exitCode === 'number' ? event.exitCode : null,
-    logsTail: event.logsTail || '',
-    ts: typeof event.ts === 'number' ? event.ts : null,
-  };
-}
-
-// Publish to all subscribers; returns the normalized event or null if rejected.
-// Never throws — a bad publish must not take down the calling PTY path.
-function publish(event) {
-  const normalized = normalize(event);
-  if (!normalized) return null;
-  try {
-    bus.emit('event', normalized);
-  } catch (err) {
-    try { console.error('[nemesis] subscriber threw:', err && err.message); } catch {}
-  }
-  return normalized;
-}
-
-function subscribe(handler) {
-  bus.on('event', handler);
-  return () => bus.off('event', handler);
-}
-
-// ---- Connected mode (optional SSE transport) ----
-
-// Minimal SSE reader over built-in http/https (no ws dep): parses `data:` JSON
-// frames and republishes them, reconnecting with capped backoff. Blank url = no-op.
-function connect(opts = {}) {
-  const url = opts.url;
-  const handle = { close() { closed = true; if (req) { try { req.destroy(); } catch {} } } };
-  let closed = false;
-  let req = null;
-  let backoff = 1000;
-  const MAX_BACKOFF = 30000;
-
-  if (!url) return handle;
-
+// Normalize a gateway address: add http:// and :9801 if absent, strip a trailing
+// slash, keep an explicit scheme/port/path. Returns '' for empty input.
+function normalizeBaseUrl(raw) {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : 'http://' + trimmed;
   let parsed;
   try {
-    parsed = new URL(url);
+    parsed = new URL(withScheme);
   } catch {
-    try { console.error('[nemesis] invalid nemesisUrl, staying in embedded mode:', url); } catch {}
-    return handle;
+    return '';
   }
-  const transport = parsed.protocol === 'https:' ? https : http;
+  if (!parsed.port && !/:\d+$/.test(parsed.host)) parsed.port = String(DEFAULT_PORT);
+  return parsed.toString().replace(/\/+$/, '');
+}
 
-  const scheduleReconnect = () => {
-    if (closed) return;
-    const delay = backoff;
-    backoff = Math.min(backoff * 2, MAX_BACKOFF);
-    setTimeout(open, delay).unref?.();
-  };
+function authHeaders(token) {
+  return token ? { authorization: 'Bearer ' + token } : {};
+}
 
-  const open = () => {
-    if (closed) return;
-    req = transport.get(url, { headers: { Accept: 'text/event-stream' } }, (res) => {
-      if (res.statusCode !== 200) {
-        res.resume();
-        scheduleReconnect();
-        return;
-      }
-      backoff = 1000; // healthy connection — reset backoff
-      res.setEncoding('utf8');
-      let buffer = '';
-      // Guard against a misbehaving endpoint that streams without event
-      // separators — don't let the buffer grow without bound.
-      const MAX_BUFFER = 1 << 20; // 1 MiB
-      res.on('data', (chunk) => {
-        buffer += chunk;
-        if (buffer.length > MAX_BUFFER) buffer = buffer.slice(-MAX_BUFFER);
-        // SSE events are separated by a blank line; each may carry one or more
-        // `data:` lines. We only need the concatenated data payload as JSON.
-        let sep;
-        while ((sep = buffer.indexOf('\n\n')) !== -1) {
-          const raw = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          const data = raw
-            .split('\n')
-            .filter((line) => line.startsWith('data:'))
-            .map((line) => line.slice(5).trim())
-            .join('');
-          if (!data) continue;
-          try {
-            publish(JSON.parse(data));
-          } catch {
-            // Ignore keep-alives / non-JSON frames.
-          }
-        }
-      });
-      res.on('end', scheduleReconnect);
-    });
-    req.on('error', () => { if (!closed) scheduleReconnect(); });
-  };
+// True when a token would ride an unencrypted http:// connection to a
+// non-loopback host — the Bearer header leaks in cleartext. http to localhost
+// is fine (never leaves the box).
+function isInsecureRemote(base, token) {
+  if (!token || !base || !/^http:\/\//i.test(base)) return false;
+  let host;
+  try { host = new URL(base).hostname; } catch { return false; }
+  return host !== '127.0.0.1' && host !== 'localhost' && host !== '::1';
+}
 
-  open();
-  return handle;
+// Picker ids whose tabs run in a Nemesis8 sandbox: `nemesis8` or, per named
+// gateway profile, `nemesis8:<profileId>`. A per-tab choice, not a global flag.
+const NEMESIS_MODE = 'nemesis8';
+
+function shouldUseNemesis(mode) {
+  return mode === NEMESIS_MODE || (typeof mode === 'string' && mode.startsWith(NEMESIS_MODE + ':'));
+}
+
+function errMsg(err) {
+  if (!err) return 'unknown error';
+  // Node's fetch wraps the real network failure ("fetch failed") in err.cause;
+  // surface its code (ECONNREFUSED / ENOTFOUND / …) so the UI is diagnostic.
+  const cause = err.cause && (err.cause.code || err.cause.message);
+  return cause ? `${err.message} (${cause})` : (err.message || String(err));
+}
+
+// Resolve the {base, token} to probe. `conn` ({ remote, token }) targets a
+// specific gateway profile (or the prefs form's on-screen values).
+function resolveBase(conn) {
+  if (conn && (conn.remote || conn.token)) {
+    return { base: normalizeBaseUrl(conn.remote), token: conn.token || '' };
+  }
+  const { remote, token } = getNemesisConfig();
+  return { base: normalizeBaseUrl(remote), token };
+}
+
+// Liveness probe for a remote gateway's `serve`. { ok, version } / { ok:false, error }.
+async function health(conn) {
+  const { base, token } = resolveBase(conn);
+  if (!base) return { ok: false, error: 'no nemesis8 remote configured' };
+  const ctrl = new AbortController();
+  const to = setTimeout(() => ctrl.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const res = await fetch(base + '/health', { headers: authHeaders(token), signal: ctrl.signal });
+    if (res.status === 401) return { ok: false, error: 'unauthorized — check the nemesis token' };
+    if (!res.ok) return { ok: false, error: 'health HTTP ' + res.status };
+    const body = await res.json().catch(() => ({}));
+    return { ok: true, version: body.version };
+  } catch (err) {
+    return { ok: false, error: errMsg(err) };
+  } finally {
+    clearTimeout(to);
+  }
 }
 
 module.exports = {
-  EVENT_TYPES,
-  normalize,
-  publish,
-  subscribe,
-  connect,
-  // Exposed for tests that need to assert on subscriber count / reset.
-  _bus: bus,
+  NEMESIS_MODE,
+  normalizeBaseUrl,
+  authHeaders,
+  isInsecureRemote,
+  shouldUseNemesis,
+  health,
 };

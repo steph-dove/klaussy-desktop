@@ -9,7 +9,8 @@ const crypto = require('crypto');
 const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
-const { loadConfig, saveConfig } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
+const nemesis = require('../util/nemesis-client');
 const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { claudeProjectDir } = require('../util/claude-paths');
@@ -17,14 +18,14 @@ const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platf
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
   processIdleDetection, clearIdleTimer, convertInstanceToShell,
-  sendToTerminalSubscribers,
+  sendToTerminalSubscribers, makeAgentExitHandler,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
 const { buildHandoffSeed } = require('../state/session-handoff');
-const { stageInitialPrompt } = require('../util/agent-prompt');
+const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
 
@@ -234,6 +235,20 @@ ipcMain.handle('list-saved-sessions', () => {
   return saved.concat(disk);
 });
 
+// Latest session id for agents that keep sessions where the per-worktree .jsonl
+// scan can't see them. null means the caller falls back to resuming latest.
+function trackedLatestSession(provider, worktreePath) {
+  if (!provider || !worktreePath) return null;
+  if (provider.sessionTracking === 'opencode-cli') {
+    const bin = binFor(provider.id, loadConfig());
+    return require('../state/opencode-sessions').latestSession(bin, worktreePath) || null;
+  }
+  if (provider.sessionTracking === 'kimi-index') {
+    return require('../state/kimi-sessions').latestSession(worktreePath) || null;
+  }
+  return null;
+}
+
 ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath, branch, mode, originalMode, repoPath }) => {
   // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
   // exactly what made it a phantom (undiscoverable yet blocking re-create), so
@@ -270,14 +285,17 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
     }
   }
 
-  // Same-agent resume. Claude has a persisted exact id; opencode resolves its
-  // worktree's latest session via its CLI; everything else resumes its latest
-  // via its native flag.
+  // Same-agent resume. Claude has a persisted exact id; the `sessionTracking`
+  // agents resolve their worktree's latest session on demand; everything else
+  // resumes its latest via its native flag.
   const provider = getProvider(resumeMode);
   let exactId = provider && provider.supportsExactResume ? sessionId : null;
-  if (provider && provider.sessionTracking === 'opencode-cli' && !exactId) {
-    exactId = require('../state/opencode-sessions').latestSession(binFor(provider.id, loadConfig()), worktreePath) || null;
+  if (exactId && provider && provider.sessionTracking === 'opencode-cli') {
+    const bin = binFor(provider.id, loadConfig());
+    const validIds = require('../state/opencode-sessions').listSessionIds(bin, worktreePath);
+    if (!validIds || !validIds.includes(exactId)) exactId = null;
   }
+  if (!exactId) exactId = trackedLatestSession(provider, worktreePath);
   try {
     return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);
   } catch (err) {
@@ -1070,37 +1088,44 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   let session = { release: () => {} };
   let promptFile = null;     // staged-prompt tempfile, removed on exit
   let needsEnter = false;    // codex-style TUIs pre-fill but wait for Enter
-  if (isAgentMode(mode)) {
-    const config = loadConfig();
-    const provider = getProvider(mode);
-    const bin = binFor(provider.id, config);
-    const consent = ensureWorktreeConsentSync(provider.id, inst.worktreePath);
-    if (!consent.allowed) return { cancelled: true };
-    // Token-rotation guard: warn before a second concurrent Codex session.
-    session = beginSession(provider.id);
-    if (!session.ok) return { cancelled: true };
-    const model = (config.agentModel || {})[provider.id] || '';
-    const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
-    let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model, sessionDirs });
-    // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
-    // in after boot — shared staging with the cross-agent session-resume
-    // handoff (see util/agent-prompt).
-    const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`, userShell);
-    agentCmd = staged.agentCmd;
-    promptFile = staged.promptFile;
-    needsEnter = staged.needsEnter;
-    args = shellRunCmdArgs(userShell, agentCmd);
-  } else {
-    args = shellLoginArgs(userShell);
-  }
+  let pasteText = null;      // kimi-style TUIs take no spawn-time prompt at all
+  let ptyProc;
+  {
+    if (isAgentMode(mode)) {
+      const config = loadConfig();
+      const provider = getProvider(mode);
+      const bin = binFor(provider.id, config);
+      // Nemesis8 sub-tab → `nemesis8 interactive` from the picked gateway profile.
+      const nemProfile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
+      const consent = ensureWorktreeConsentSync(provider.id, inst.worktreePath);
+      if (!consent.allowed) return { cancelled: true };
+      // Token-rotation guard: warn before a second concurrent Codex session.
+      session = beginSession(provider.id);
+      if (!session.ok) return { cancelled: true };
+      const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
+      const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
+      let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model, sessionDirs, profile: nemProfile });
+      // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
+      // in after boot — shared staging with the cross-agent session-resume
+      // handoff (see util/agent-prompt).
+      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`, userShell);
+      agentCmd = staged.agentCmd;
+      promptFile = staged.promptFile;
+      needsEnter = staged.needsEnter;
+      pasteText = staged.pasteText || null;
+      args = shellRunCmdArgs(userShell, agentCmd);
+    } else {
+      args = shellLoginArgs(userShell);
+    }
 
-  const ptyProc = pty.spawn(userShell, args, {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
-    cwd: inst.worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
-  });
+    ptyProc = pty.spawn(userShell, args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd: inst.worktreePath,
+      env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
+    });
+  }
 
   const sub = { subId, label: label || displayNameFor(mode || 'shell'), pty: ptyProc, alive: true, mode: mode || 'shell' };
   inst.subTerminals.push(sub);
@@ -1114,6 +1139,9 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     setTimeout(sendEnter, 8000);
   }
 
+  // Paste-delivery agents (kimi) took no prompt at spawn; no-ops for the rest.
+  schedulePromptPaste(ptyProc, pasteText, () => sub.alive);
+
   ptyProc.onData((data) => {
     sendToTerminalSubscribers(`terminal-data-${taskId}-${subId}`, data);
   });
@@ -1126,6 +1154,51 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   });
 
   return { subId, label: sub.label };
+});
+
+// One-click gateway setup in a Klaussy terminal tab — a real TTY, which the
+// interactive `nemesis8 login` needs: spawn a shell, focus it, type the script.
+ipcMain.handle('nemesis-setup-local', (_event, opts = {}) => {
+  const { nemesisSetupScript, nemesisRunCmd } = require('../util/nemesis-setup');
+  const token = String(opts.token || '').trim() || crypto.randomBytes(24).toString('hex');
+  const provider = String(opts.provider || '').trim();
+
+  const { ext, content } = nemesisSetupScript(process.platform, provider, token);
+  const scriptPath = path.join(os.tmpdir(), `klaussy-nemesis-setup-${Date.now()}.${ext}`);
+  try {
+    // The script inlines the gateway token, so keep it owner-only (it's run via
+    // `sh "<path>"`, so it needs no +x) and remove it once the shell has read it.
+    fs.writeFileSync(scriptPath, content, { mode: 0o600 });
+  } catch (err) {
+    return { error: 'could not write setup script: ' + err.message };
+  }
+  setTimeout(() => { fs.unlink(scriptPath, () => {}); }, 30000);
+
+  let task;
+  try {
+    // Run in a neutral dir (not home — that could itself be a git repo and
+    // trip repo-intel/hook install). nemesis8 uses ~/.nemesis8 regardless of cwd.
+    task = spawnInWorktree('Nemesis8 setup', os.tmpdir(), '', 'shell');
+  } catch (err) {
+    return { error: 'could not open a terminal: ' + err.message };
+  }
+  if (!task || !task.id) return { error: 'could not open a terminal' };
+
+  // Type the run command into the shell. The pty buffers input, so a single
+  // write lands whether or not the prompt has painted yet.
+  const runCmd = nemesisRunCmd(process.platform, scriptPath);
+  const typeCmd = () => {
+    const inst = instances.get(task.id);
+    if (inst && inst.pty && inst.alive) { try { inst.pty.write(runCmd + '\r'); } catch { /* gone */ } }
+  };
+  setTimeout(typeCmd, 1000);
+
+  // Hand the new tab to the main window (this IPC may come from Preferences).
+  const win = getMainWindow();
+  if (win && !win.isDestroyed()) {
+    try { win.webContents.send('open-external-task', task); win.focus(); } catch { /* window gone */ }
+  }
+  return { ok: true, token, taskId: task.id };
 });
 
 ipcMain.handle('kill-sub-terminal', (_event, { taskId, subId }) => {
@@ -1166,9 +1239,8 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
-  // Mark restarting BEFORE kill(): pty.kill is async and the stale exit handler
-  // would otherwise race with the new-pty assignment below — in particular if
-  // the instance was still in claude mode, the old-pty's onExit would spawn a
+  // Set BEFORE kill(): kill is async, so the old pty can exit before inst.pty is
+  // reassigned below; the identity check in makeAgentExitHandler covers after that.
   inst.restarting = true;
   try { inst.pty.kill(); } catch {}
 
@@ -1179,12 +1251,15 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   const config = loadConfig();
   const restartMode = isAgentMode(inst.originalMode) ? inst.originalMode
     : (isAgentMode(inst.mode) ? inst.mode : 'claude');
+
   const provider = getProvider(restartMode);
   const bin = binFor(provider.id, config);
+  // Nemesis8 restart → `nemesis8 interactive` from the picked gateway profile.
+  const nemProfile = nemesis.shouldUseNemesis(restartMode) ? getNemesisProfile(restartMode) : null;
   // The task already ran this agent, so consent is normally already stored
   // (no re-prompt); we just carry the granted trust flag into the respawn.
   const trust = ensureWorktreeConsentSync(provider.id, inst.worktreePath).trust;
-  const model = (config.agentModel || {})[provider.id] || '';
+  const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
 
   // Hand off the concurrency slot: free the slot the old (just-killed) process
   // held, then re-acquire for the respawn. Releasing first means a plain
@@ -1201,18 +1276,18 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   let agentCmd;
   if (provider.supportsExactResume) {
-    // Claude tracks its exact id via .jsonl files; opencode has none, so it
-    // resolves its worktree's latest session via its CLI. resumeLatest is the
+    // Claude tracks its exact id via .jsonl files; the `sessionTracking` agents
+    // keep sessions elsewhere and resolve theirs on demand. resumeLatest is the
     // no-id fallback (harmlessly ignored by Claude's buildInteractiveCmd).
-    const resumeId = inst.claudeSessionId || (provider.sessionTracking === 'opencode-cli'
-      ? require('../state/opencode-sessions').latestSession(bin, inst.worktreePath)
+    const resumeId = inst.claudeSessionId || (provider.sessionTracking
+      ? trackedLatestSession(provider, inst.worktreePath)
       : findLatestSessionId(inst.worktreePath));
     agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId: resumeId, resumeLatest: !resumeId, trust, model });
-    inst.preSpawnSessionIds = provider.sessionTracking === 'opencode-cli'
+    inst.preSpawnSessionIds = provider.sessionTracking
       ? new Set() : snapshotSessionIds(inst.worktreePath);
     inst.claudeSessionId = resumeId || null;
   } else {
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model });
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model, profile: nemProfile });
     inst.preSpawnSessionIds = new Set();
     inst.claudeSessionId = null;
   }
@@ -1241,17 +1316,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
-  // When this agent exits, auto-convert to shell again
-  ptyProc.onExit(() => {
-    clearIdleTimer(inst);
-    session.release(); // free the concurrency slot (Codex token-rotation guard)
-    if (isAgentMode(inst.mode)) {
-      convertInstanceToShell(inst);
-    } else {
-      inst.alive = false;
-      sendToTerminalSubscribers(`terminal-exit-${id}`);
-    }
-  });
+  ptyProc.onExit(makeAgentExitHandler(inst, ptyProc, { session }));
 
   return { ok: true };
 });
