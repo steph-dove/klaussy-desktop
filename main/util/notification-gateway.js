@@ -134,11 +134,18 @@ async function postSlackAsBot(cfg, payload) {
       body: JSON.stringify({ channel: cfg.slackChannel, ...payload }),
     });
     const body = await res.json().catch(() => ({}));
-    if (!body.ok) return { target: 'slack', ok: false, error: body.error || 'chat.postMessage failed' };
+    if (!body.ok) return logPostFailure('slack', body.error || 'chat.postMessage failed');
     return { target: 'slack', ok: true, status: 200, ts: body.ts };
   } catch (err) {
-    return { target: 'slack', ok: false, error: err.message };
+    return logPostFailure('slack', err.message);
   }
+}
+
+// The fire-and-forget dispatch discards these results, so a revoked token or
+// wrong channel would otherwise stop alerts with no trace.
+function logPostFailure(target, error) {
+  try { console.error(`[notification-gateway] ${target} post failed:`, error); } catch {}
+  return { target, ok: false, error };
 }
 
 async function postDiscordAsBot(cfg, payload) {
@@ -153,12 +160,12 @@ async function postDiscordAsBot(cfg, payload) {
     });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      return { target: 'discord', ok: false, status: res.status, error: text.slice(0, 200) };
+      return logPostFailure('discord', `HTTP ${res.status} ${text.slice(0, 200)}`);
     }
     const body = await res.json().catch(() => ({}));
     return { target: 'discord', ok: true, status: res.status, messageId: body.id };
   } catch (err) {
-    return { target: 'discord', ok: false, error: err.message };
+    return logPostFailure('discord', err.message);
   }
 }
 
@@ -285,7 +292,8 @@ function handleSlackFrame(parsed) {
       const text = res.ok
         ? `${res.message} by <@${parsed.userId}>${what}`
         : `Not applied: ${res.message}`;
-      postWebhook(parsed.responseUrl, { replace_original: res.ok, text }).catch(() => {});
+      postWebhook(parsed.responseUrl, { replace_original: res.ok, text })
+        .catch((err) => logAckFailure('slack button ack', err.message));
     }
     return;
   }
@@ -308,7 +316,15 @@ function replyInSlackThread(cfg, channel, threadTs, text) {
       'content-type': 'application/json; charset=utf-8',
     },
     body: JSON.stringify({ channel, thread_ts: threadTs, text }),
-  }).catch(() => {});
+  })
+    .then((res) => res.json().catch(() => ({})))
+    .then((body) => { if (!body.ok) logAckFailure('slack thread reply', body.error); })
+    .catch((err) => logAckFailure('slack thread reply', err.message));
+}
+
+// These acks are the only signal in chat, so a failure here is silence on both ends.
+function logAckFailure(what, error) {
+  try { console.error(`[notification-gateway] ${what} failed:`, error); } catch {}
 }
 
 function handleDiscordFrame(parsed) {
@@ -324,7 +340,9 @@ function handleDiscordFrame(parsed) {
     const text = res.ok
       ? `${res.message} by <@${parsed.userId}>`
       : `Not applied: ${res.message}`;
-    respondToInteraction(parsed.interactionId, parsed.interactionToken, text).catch(() => {});
+    respondToInteraction(parsed.interactionId, parsed.interactionToken, text)
+      .then((r) => { if (r && !r.ok) logAckFailure('discord button ack', 'HTTP ' + r.status); })
+      .catch((err) => logAckFailure('discord button ack', err.message));
     return;
   }
 
@@ -345,7 +363,9 @@ function replyInDiscordChannel(cfg, channel, replyToId, text) {
       'content-type': 'application/json',
     },
     body: JSON.stringify({ content: text, message_reference: { message_id: replyToId } }),
-  }).catch(() => {});
+  })
+    .then((res) => { if (!res.ok) logAckFailure('discord reply', 'HTTP ' + res.status); })
+    .catch((err) => logAckFailure('discord reply', err.message));
 }
 
 // Tear down (tests / shutdown). Restores the pre-started state so ensureStarted

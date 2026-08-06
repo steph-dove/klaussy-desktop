@@ -154,8 +154,6 @@ window.Sidebar = (function () {
       rebuild();
     });
 
-    // Webhook bell. Hidden unless a webhook URL is configured, so the row stays
-    // uncluttered for anyone not using the integration.
     var notifyBtn = item.querySelector('.task-notify-btn');
     function paintBell(on) {
       notifyBtn.classList.toggle('notifying', !!on);
@@ -182,8 +180,16 @@ window.Sidebar = (function () {
       e.stopPropagation();
       var turningOn = !notifyBtn.classList.contains('notifying');
       paintBell(turningOn); // optimistic; reverted below if the main side refuses
-      var res = await window.klaus.task.setNotifyEnabled(task.id, turningOn, 'webhook');
-      if (!res || res.error) paintBell(!turningOn);
+      try {
+        var res = await window.klaus.task.setNotifyEnabled(task.id, turningOn, 'webhook');
+        if (!res || res.error) {
+          paintBell(!turningOn);
+          if (res && res.error && window.toast) window.toast.error(res.error);
+        }
+      } catch (err) {
+        paintBell(!turningOn);
+        if (window.toast) window.toast.error('Could not change notifications: ' + (err && err.message));
+      }
     });
 
     // Task notes
