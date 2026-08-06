@@ -4,14 +4,18 @@
 // (util/notification-gateway.js) only has to POST what these return.
 
 const { EVENT_TYPES } = require('./nemesis-events');
+const { cleanExcerpt } = require('./terminal-excerpt');
 
 // Slack blocks and Discord embed descriptions both have hard size limits;
 // agent log tails can be huge. Keep the last slice (the tail is where a crash
 // reason or the pending prompt lives) and mark the truncation.
 function truncateLogs(logs, max = 1200) {
-  const s = String(logs || '').trim();
+  const s = cleanExcerpt(logs);
   if (s.length <= max) return s;
-  return '…(truncated)\n' + s.slice(-max);
+  // Cut at a line boundary — slicing mid-word left fragments like "ght for 5s)".
+  const cut = s.slice(-max);
+  const nl = cut.indexOf('\n');
+  return '…(truncated)\n' + (nl > 0 && nl < 200 ? cut.slice(nl + 1) : cut);
 }
 
 // Break any triple-backtick run in log text so it can't close the code fence

@@ -26,6 +26,7 @@ const { beginSession } = require('../util/agent-concurrency');
 const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
+const { isChromeOnly } = require('../util/terminal-excerpt');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -206,7 +207,11 @@ function staleAfterMs() {
 }
 
 function stripAnsi(str) {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
+  return str
+    // Cursor-forward is how a TUI lays out columns; dropping it with the rest of
+    // the escapes ran words together ("1.Yes"), which then matched nothing.
+    .replace(/\x1b\[(\d*)C/g, (_m, n) => ' '.repeat(Math.min(parseInt(n || '1', 10), 80)))
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
 }
 
 // Best-effort: pull the tool awaiting authorization out of an approval prompt
@@ -307,11 +312,15 @@ function processIdleDetection(inst, data) {
   // A longer quiet stretch, reported to chat rather than the desktop: the agent
   // has stopped without asking anything, usually with output waiting to be read.
   if (inst.staleTimer) clearTimeout(inst.staleTimer);
+  // An idle agent still repaints its spinner and input box; counting that as
+  // activity re-armed the alert forever for a session that had done nothing.
+  if (!isChromeOnly(stripped)) inst.staleNotified = false;
   const quietMs = staleAfterMs();
   inst.staleTimer = setTimeout(() => {
     if (!inst.alive || !isAgentMode(inst.mode)) return;
     // An approval prompt already told them, and more precisely.
-    if (inst.approvalPending) return;
+    if (inst.approvalPending || inst.staleNotified) return;
+    inst.staleNotified = true;
     try {
       nemesisEvents.publish({
         type: nemesisEvents.EVENT_TYPES.STALE,
@@ -396,6 +405,7 @@ function initIdleDetectionFields(inst) {
   inst.approvalPending = false;
   inst.lastApprovalPublishTime = 0;
   inst.staleTimer = null;
+  inst.staleNotified = false;
 }
 
 function clearIdleTimer(inst) {

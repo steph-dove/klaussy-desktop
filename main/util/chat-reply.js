@@ -38,7 +38,10 @@ function menuRegion(tail) {
 function parsePromptOptions(tail) {
   const seen = new Map();
   for (const line of menuRegion(tail)) {
-    const m = line.match(/^\s*[❯>»*]?\s*(\d{1,2})[.)]\s+(\S.*)$/);
+    // A repaint can lay out columns with cursor moves rather than spaces, so the
+    // space is optional; the label may not start with a digit, or "1.5 seconds"
+    // would read as option 1.
+    const m = line.match(/^\s*[❯>»*]?\s*(\d{1,2})[.)]\s*(?!\d)(\S.*)$/);
     if (!m) continue;
     const key = m[1];
     const label = m[2].trim().replace(/\s+/g, ' ');
