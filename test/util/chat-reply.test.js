@@ -155,3 +155,39 @@ test('the decided keystrokes are what actually reach the pty', () => {
     instances.delete(5150);
   }
 });
+
+// A live prompt that matched no phrase-based pattern and ran past the old
+// detection window.
+const HOTDOG_PROMPT = [
+  'Is a hot dog a sandwich?',
+  '',
+  '❯ 1. Yes',
+  "   Meat in a bread carrier. The bun's hinge is an implementation detail, not a category boundary.",
+  '  2. No',
+  '   A sandwich needs two separate slices. One continuous bun makes it its own thing entirely.',
+  '  3. Type something.',
+  '  4. Chat about this',
+  '',
+  'Enter to select · ↑/↓ to navigate · Esc to cancel',
+].join('\n');
+
+test('a live selection prompt is recognised as waiting on the user', () => {
+  const { APPROVAL_PROMPT_PATTERNS } = require('../../main/state/instances');
+  assert.ok(
+    APPROVAL_PROMPT_PATTERNS.some((p) => p.test(HOTDOG_PROMPT)),
+    'the selection footer is the signal, not the wording of the question',
+  );
+});
+
+test('a live selection prompt maps Yes/No to its digits', () => {
+  const { keysForPrompt } = require('../../main/util/chat-reply');
+  const keys = keysForPrompt(HOTDOG_PROMPT);
+  assert.equal(keys.approveKeys, '1');
+  assert.equal(keys.rejectKeys, '2');
+});
+
+test('the buffer holds a whole menu, not just its footer', () => {
+  const { ROLLING_BUFFER_SIZE } = require('../../main/state/instances');
+  assert.ok(ROLLING_BUFFER_SIZE >= HOTDOG_PROMPT.length,
+    `buffer ${ROLLING_BUFFER_SIZE} must fit a ${HOTDOG_PROMPT.length}-char prompt`);
+});

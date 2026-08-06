@@ -155,7 +155,9 @@ function findLatestSessionId(worktreePath) {
 
 const IDLE_TIMEOUT_MS = 15000;
 const NOTIFY_COOLDOWN_MS = 30000;
-const ROLLING_BUFFER_SIZE = 500;
+// Holds enough of the screen for a full selection menu with its per-option
+// descriptions; 500 clipped the "1. Yes" line that says how to answer it.
+const ROLLING_BUFFER_SIZE = 2000;
 
 const PROMPT_PATTERNS = [
   /\(y\/n\)\s*$/i,
@@ -167,15 +169,21 @@ const PROMPT_PATTERNS = [
   /❯\s*$/,
 ];
 
-// Prompts that mean the agent needs authorization (not a bare idle cursor);
-// only these fire an approval webhook.
+// Matching the TUI's own selection footer catches any wording; listing
+// phrasings missed plain questions entirely.
 const APPROVAL_PROMPT_PATTERNS = [
+  /Enter to select/i,
+  /Esc to cancel/i,
   /\(y\/n\)\s*$/i,
   /\(Y\/n\)\s*$/,
   /\(yes\/no\)\s*$/i,
   /Do you want to proceed/i,
   /Allow\s.*\?/i,
 ];
+
+// A menu's option descriptions run well past the 200 chars the idle check
+// reads, and the answering keystroke sits on the "1. Yes" line near its top.
+const APPROVAL_TAIL_CHARS = 1500;
 
 // A single approval prompt can repaint many times per second; only publish one
 // approval webhook per instance per this window even if the flag re-arms.
@@ -331,7 +339,8 @@ function processIdleDetection(inst, data) {
 
   // Publish approval-required on the transition into a waiting state. The
   // approvalPending flag + cooldown stop a repainting TUI from storming the webhook.
-  const needsApproval = APPROVAL_PROMPT_PATTERNS.some((p) => p.test(tail));
+  const approvalTail = inst.recentOutput.slice(-APPROVAL_TAIL_CHARS);
+  const needsApproval = APPROVAL_PROMPT_PATTERNS.some((p) => p.test(approvalTail));
   if (needsApproval) {
     const now = Date.now();
     if (!inst.approvalPending && now - inst.lastApprovalPublishTime >= APPROVAL_NOTIFY_COOLDOWN_MS) {
@@ -344,7 +353,7 @@ function processIdleDetection(inst, data) {
           sessionName: inst.name,
           workspacePath: inst.worktreePath,
           agentName,
-          tool: extractApprovalTool(tail),
+          tool: extractApprovalTool(approvalTail),
           logsTail: inst.recentOutput,
           ts: now,
           notify: inst.notifyWebhookEnabled === true,
@@ -737,6 +746,8 @@ function isAgentInstance(inst) {
 module.exports = {
   instances,
   isAgentInstance,
+  APPROVAL_PROMPT_PATTERNS,
+  ROLLING_BUFFER_SIZE,
   reclaimOrphanedTasks,
   subscribeTerminalChannel,
   unsubscribeTerminalChannel,
