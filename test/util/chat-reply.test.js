@@ -210,24 +210,24 @@ test('a menu with no yes/no is still fully answerable', () => {
 
 test('prose that happens to be numbered is not turned into buttons', () => {
   const { parsePromptOptions } = require('../../main/util/chat-reply');
-  assert.deepEqual(parsePromptOptions('I did 3 things. 1.5 seconds elapsed.\nNo menu here.').options, []);
+  assert.deepEqual(parsePromptOptions('I did 3 things. 1.5 seconds elapsed.\nNo menu here.\nEnter to select').options, []);
 });
 
 test('a repainting TUI does not produce duplicate options', () => {
   const { parsePromptOptions } = require('../../main/util/chat-reply');
-  const repainted = '1. Yes\n2. No\n1. Yes\n2. No\n1. Yes\n2. No';
+  const repainted = '1. Yes\n2. No\n1. Yes\n2. No\n1. Yes\n2. No\nEnter to select';
   assert.deepEqual(parsePromptOptions(repainted).options.map((o) => o.key), ['1', '2']);
 });
 
 test('long menus are capped so the message stays readable', () => {
   const { parsePromptOptions, MAX_OPTIONS } = require('../../main/util/chat-reply');
-  const many = Array.from({ length: 12 }, (_, i) => `${i + 1}. Option ${i + 1}`).join('\n');
+  const many = Array.from({ length: 12 }, (_, i) => `${i + 1}. Option ${i + 1}`).join('\n') + '\nEnter to select';
   const long = parsePromptOptions(many);
   assert.equal(long.options.length, MAX_OPTIONS);
   assert.equal(long.truncated, true);
 
   // Exactly at the cap is a complete menu, so claiming more exist would be a lie.
-  const exact = Array.from({ length: MAX_OPTIONS }, (_, i) => `${i + 1}. Option ${i + 1}`).join('\n');
+  const exact = Array.from({ length: MAX_OPTIONS }, (_, i) => `${i + 1}. Option ${i + 1}`).join('\n') + '\nEnter to select';
   assert.equal(parsePromptOptions(exact).truncated, false);
 });
 
@@ -263,4 +263,53 @@ test('a choice can only press an option that was offered', () => {
   } finally {
     instances.delete(6161);
   }
+});
+
+const QUIZ = [
+  'Pop Quiz — 5 questions, mixed bag. No googling.',
+  '',
+  "1. What's the only mammal that can't jump?",
+  '2. In JavaScript, what does typeof NaN return?',
+  '3. Which country has the most time zones?',
+  '4. What year did the first email get sent?',
+  "5. A byte is 8 bits. What's a nibble?",
+  '',
+  "Give me your answers and I'll grade them.",
+].join('\n');
+
+test('a numbered list with no selection UI yields no buttons', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  assert.deepEqual(parsePromptOptions(QUIZ).options, []);
+});
+
+test('a stale footer elsewhere in the buffer cannot capture later prose', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  const older = 'Pick one\n 1. Alpha\n 2. Beta\nEnter to select · Esc to cancel';
+  const buffer = older + '\n\n' + QUIZ;
+  const opts = parsePromptOptions(buffer).options;
+  assert.deepEqual(opts.map((o) => o.label), ['Alpha', 'Beta'],
+    'only the real menu, never the quiz questions');
+});
+
+test('a real menu is still parsed through its footer', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  assert.deepEqual(
+    parsePromptOptions(HOTDOG_PROMPT).options.map((o) => o.key),
+    ['1', '2', '3', '4'],
+  );
+});
+
+// "to navigate" appears in ordinary prose, so matching it as a menu footer moved
+// the parse window onto a plain list and turned it into buttons.
+test('prose containing navigation words is not mistaken for a menu footer', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  const prose = [
+    'Esc to cancel',
+    '',
+    'Here is the plan:',
+    '1. Read the docs',
+    '2. Refactor the parser',
+    '3. Ship it, then use the sidebar to navigate the codebase',
+  ].join('\n');
+  assert.deepEqual(parsePromptOptions(prose).options, []);
 });

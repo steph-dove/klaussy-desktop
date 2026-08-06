@@ -17,10 +17,27 @@ const OPTION_LABEL_MAX = 70;
 // wall of buttons is unreadable — and a menu that long wants the real terminal.
 const MAX_OPTIONS = 5;
 
+// A TUI prints this under a selection menu; its presence is what makes a
+// numbered list selectable rather than prose.
+const SELECTION_FOOTER = /(enter to select|esc to cancel|↑\/↓)/i;
+const MENU_LOOKBACK_LINES = 30;
+
+// Only the lines just above the footer: agents write numbered prose constantly,
+// and a stale footer elsewhere in the buffer would turn that list into buttons.
+function menuRegion(tail) {
+  const lines = String(tail || '').split('\n');
+  let footer = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (SELECTION_FOOTER.test(lines[i])) { footer = i; break; }
+  }
+  if (footer === -1) return [];
+  return lines.slice(Math.max(0, footer - MENU_LOOKBACK_LINES), footer);
+}
+
 // Only option-shaped lines count, so numbered prose doesn't become buttons.
 function parsePromptOptions(tail) {
   const seen = new Map();
-  for (const line of String(tail || '').split('\n')) {
+  for (const line of menuRegion(tail)) {
     const m = line.match(/^\s*[❯>»*]?\s*(\d{1,2})[.)]\s+(\S.*)$/);
     if (!m) continue;
     const key = m[1];
