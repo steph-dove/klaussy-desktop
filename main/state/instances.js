@@ -28,6 +28,7 @@ const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
 const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
+const agentTranscript = require('../util/agent-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -211,6 +212,27 @@ function staleAfterMs() {
   return _staleAfterMs;
 }
 
+// Prefer the agent's own session store; a screen scrape has to guess at redraws.
+function newAgentSpeech(inst) {
+  const providerId = isAgentMode(inst.originalMode) ? inst.originalMode : inst.mode;
+  if (agentTranscript.hasReader(providerId)) {
+    if (providerId === 'codex' && !inst.codexRollout) {
+      inst.codexRollout = agentTranscript.findCodexRollout(inst.worktreePath, inst.spawnTime);
+    }
+    const read = agentTranscript.readNewMessages(providerId, {
+      worktreePath: inst.worktreePath,
+      sessionId: inst.claudeSessionId,
+      transcriptFile: inst.codexRollout,
+      cursor: inst.transcriptCursor || 0,
+    });
+    if (read) {
+      inst.transcriptCursor = read.cursor;
+      return read.text;
+    }
+  }
+  return takeNewOutput(inst.id, inst.recentOutput);
+}
+
 function stripAnsi(str) {
   return str
     // Cursor-forward is how a TUI lays out columns; dropping it with the rest of
@@ -321,7 +343,7 @@ function processIdleDetection(inst, data) {
     if (!inst.alive || !isAgentMode(inst.mode)) return;
     if (inst.notifyWebhookEnabled !== true) return;
     try {
-      const body = takeNewOutput(inst.id, inst.recentOutput);
+      const body = newAgentSpeech(inst);
       if (!body) return;
       nemesisEvents.publish({
         type: nemesisEvents.EVENT_TYPES.MESSAGE,
