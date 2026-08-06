@@ -258,6 +258,31 @@ ipcMain.handle('get-preferences', () => {
   };
 });
 
+// Long enough to outlast typing or pasting a token, short enough that the new
+// credentials are live before the user goes to test them.
+const GATEWAY_RESTART_DEBOUNCE_MS = 2000;
+let _gatewayRestartTimer = null;
+
+function scheduleGatewayRestart() {
+  if (_gatewayRestartTimer) clearTimeout(_gatewayRestartTimer);
+  _gatewayRestartTimer = setTimeout(() => {
+    _gatewayRestartTimer = null;
+    try { require('../util/notification-gateway').restart(); } catch (e) {
+      console.warn('[notification-gateway] restart failed:', e.message);
+    }
+  }, GATEWAY_RESTART_DEBOUNCE_MS);
+  _gatewayRestartTimer.unref?.();
+}
+
+// Whether the two-way sockets connected; null per platform when not configured.
+ipcMain.handle('get-notification-status', () => {
+  try {
+    return require('../util/notification-gateway').getSocketStatus();
+  } catch (e) {
+    return { error: e.message };
+  }
+});
+
 // Fires a sample event at the on-screen webhook URLs, so a URL can be checked
 // before it's saved.
 ipcMain.handle('test-notification', async (_event, cfg) => {
@@ -390,15 +415,11 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
     config.notificationGateway = Object.assign({}, prev, ng, {
       events: Object.assign({}, prev.events, ng.events),
     });
-    // Sockets capture their credentials at connect time, so new ones only apply
-    // after a reconnect. Compare first: this save runs on every keystroke in a
-    // token field, and blindly restarting would hammer the connect endpoints.
+    // Sockets capture credentials at connect time. This save fires per
+    // keystroke, so debounce or typing a token means a reconnect per character.
     const socketKeys = ['slackAppToken', 'slackBotToken', 'slackChannel', 'discordBotToken', 'discordChannel'];
-    const credsChanged = socketKeys.some((k) => (prev[k] || '') !== (config.notificationGateway[k] || ''));
-    if (credsChanged) {
-      try { require('../util/notification-gateway').restart(); } catch (e) {
-        console.warn('[notification-gateway] restart failed:', e.message);
-      }
+    if (socketKeys.some((k) => (prev[k] || '') !== (config.notificationGateway[k] || ''))) {
+      scheduleGatewayRestart();
     }
   }
   // Nemesis8 gateway profiles: store the whole list (sanitized), and retire the

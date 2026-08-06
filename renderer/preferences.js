@@ -469,7 +469,9 @@
       try {
         window.klaus.gh.openExternal(
           'https://github.com/steph-dove/klaussy-desktop/blob/main/docs/notifications-setup.md');
-      } catch (_e) {}
+      } catch (err) {
+        notifyTestStatus.textContent = 'Could not open the guide: ' + (err && err.message);
+      }
     });
   }
 
@@ -490,10 +492,45 @@
       notifyTestStatus.textContent = res && res.ok
         ? 'Sent — check your channel.'
         : 'Failed: ' + ((res && res.error) || 'unknown error');
+    } catch (err) {
+      // Without this the button re-enables but the text stays "Sending…".
+      notifyTestStatus.textContent = 'Failed: ' + (err && err.message ? err.message : String(err));
     } finally {
       notifyTestBtn.disabled = false;
     }
+    refreshSocketStatus();
   });
+
+  var socketStatusEl = document.getElementById('notify-socket-status');
+  async function refreshSocketStatus() {
+    if (!socketStatusEl) return;
+    var s;
+    try {
+      s = await window.klaus.ui.getNotificationStatus();
+    } catch (err) {
+      socketStatusEl.textContent = 'Could not read connection status: ' + (err && err.message);
+      return;
+    }
+    if (!s || s.error) {
+      socketStatusEl.textContent = s && s.error ? 'Status unavailable: ' + s.error : '';
+      return;
+    }
+    var lines = [];
+    ['slack', 'discord'].forEach(function (k) {
+      var st = s[k];
+      if (!st) return; // not configured for replies
+      var label = k === 'slack' ? 'Slack' : 'Discord';
+      if (st.pending) lines.push(label + ' replies: connecting…');
+      else if (st.ok) lines.push(label + ' replies: connected');
+      else lines.push(label + ' replies: ' + (st.error || 'not connected'));
+    });
+    socketStatusEl.textContent = lines.join(' · ');
+  }
+  refreshSocketStatus();
+  // Connecting is async and can fail later (token rejected, intent refused), so
+  // keep the line current while the window is open.
+  var socketStatusTimer = setInterval(refreshSocketStatus, 5000);
+  window.addEventListener('beforeunload', function () { clearInterval(socketStatusTimer); });
 
   function isLocalHost(url) {
     var v = (url || '').trim();

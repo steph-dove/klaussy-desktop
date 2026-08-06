@@ -1328,14 +1328,16 @@ ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
   const which = kind === 'ci' ? 'ci' : (kind === 'webhook' ? 'webhook' : 'idle');
   if (which === 'ci') inst.notifyCIEnabled = enabled;
   else if (which === 'webhook') {
-    inst.notifyWebhookEnabled = enabled;
     // Arm the gateway here too, so turning the bell on mid-session works even
-    // if no agent has spawned since the webhook URL was configured.
+    // if no agent has spawned since the webhook URL was configured. If it can't
+    // start, report that instead of leaving a lit bell that never posts.
     if (enabled) {
       try { require('../util/notification-gateway').ensureStarted(); } catch (e) {
         console.warn('[notification-gateway] start failed:', e.message);
+        return { error: 'Could not start the notification gateway: ' + e.message };
       }
     }
+    inst.notifyWebhookEnabled = enabled;
   } else inst.notifyEnabled = enabled;
   const config = loadConfig();
   if (!config.notifyPrefs) config.notifyPrefs = {};

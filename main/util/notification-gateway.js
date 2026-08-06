@@ -249,7 +249,21 @@ function startInboundSockets() {
   }
 }
 
+// Last known socket state per platform, for the prefs window: a bad token
+// otherwise looks exactly like a working one, since the test button only
+// exercises the outbound webhook.
+const _socketStatus = { slack: null, discord: null };
+
+function getSocketStatus() {
+  const cfg = getNotificationConfig();
+  return {
+    slack: cfg.slackInteractive ? (_socketStatus.slack || { pending: true }) : null,
+    discord: cfg.discordInteractive ? (_socketStatus.discord || { pending: true }) : null,
+  };
+}
+
 function logStatus(which, s) {
+  _socketStatus[which] = { ok: !!(s && s.ok), error: (s && s.error) || '', fatal: !!(s && s.fatal) };
   if (s && s.ok) console.log(`[notification-gateway] ${which} connected`);
   else console.warn(`[notification-gateway] ${which}: ${(s && s.error) || 'disconnected'}`);
 }
@@ -279,8 +293,22 @@ function handleSlackFrame(parsed) {
   if (parsed.kind === 'message' && parsed.threadTs) {
     const taskId = _messageToTask.get(String(parsed.threadTs));
     if (!taskId) return; // a thread we don't own
-    applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
+    const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
+    // Silence would look identical to "delivered", so say when it wasn't.
+    if (!res.ok) replyInSlackThread(cfg, parsed.channel, parsed.threadTs, res.message);
   }
+}
+
+function replyInSlackThread(cfg, channel, threadTs, text) {
+  if (!cfg.slackBotToken || !channel) return;
+  fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST',
+    headers: {
+      authorization: 'Bearer ' + cfg.slackBotToken,
+      'content-type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify({ channel, thread_ts: threadTs, text }),
+  }).catch(() => {});
 }
 
 function handleDiscordFrame(parsed) {
@@ -303,8 +331,21 @@ function handleDiscordFrame(parsed) {
   if (parsed.kind === 'message' && parsed.referencedMessageId) {
     const taskId = _messageToTask.get(String(parsed.referencedMessageId));
     if (!taskId) return;
-    applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
+    const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
+    if (!res.ok) replyInDiscordChannel(cfg, parsed.channel, parsed.messageId, res.message);
   }
+}
+
+function replyInDiscordChannel(cfg, channel, replyToId, text) {
+  if (!cfg.discordBotToken || !channel) return;
+  fetch(`${DISCORD_API}/channels/${channel}/messages`, {
+    method: 'POST',
+    headers: {
+      authorization: 'Bot ' + cfg.discordBotToken,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ content: text, message_reference: { message_id: replyToId } }),
+  }).catch(() => {});
 }
 
 // Tear down (tests / shutdown). Restores the pre-started state so ensureStarted
@@ -334,5 +375,6 @@ module.exports = {
   handleSlackFrame,
   handleDiscordFrame,
   forgetTask,
+  getSocketStatus,
   stop,
 };

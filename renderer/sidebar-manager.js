@@ -166,13 +166,17 @@ window.Sidebar = (function () {
     }
     window.klaus.ui.getPreferences().then(function (p) {
       var ng = (p && p.notificationGateway) || {};
-      if (!ng.slackWebhookUrl && !ng.discordWebhookUrl) {
+      // Mirror getNotificationConfig's `enabled`: a bot token + channel is a
+      // complete setup on its own, so gating on a webhook URL would hide the bell.
+      if (!ng.enabled) {
         notifyBtn.style.display = 'none';
         return;
       }
       return window.klaus.task.getNotifyEnabled(task.id).then(function (state) {
         paintBell(state && state.webhook);
       });
+    }).catch(function () {
+      notifyBtn.style.display = 'none'; // can't tell: don't show a bell that may do nothing
     });
     notifyBtn.addEventListener('click', async function (e) {
       e.stopPropagation();

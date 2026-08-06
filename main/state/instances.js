@@ -306,7 +306,7 @@ function processIdleDetection(inst, data) {
           tool: extractApprovalTool(tail),
           logsTail: inst.recentOutput,
           ts: now,
-          notify: inst.notifyWebhookEnabled !== false,
+          notify: inst.notifyWebhookEnabled === true,
         });
       } catch { /* never let a publish break the terminal path */ }
     }
@@ -554,7 +554,7 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
           exitCode,
           logsTail: instance.recentOutput || '',
           ts: Date.now(),
-          notify: instance.notifyWebhookEnabled !== false,
+          notify: instance.notifyWebhookEnabled === true,
         });
       } catch { /* never let a publish break teardown */ }
       // The tab becomes a shell next, so nothing in chat should still route here.
