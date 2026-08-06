@@ -313,3 +313,19 @@ test('prose containing navigation words is not mistaken for a menu footer', () =
   ].join('\n');
   assert.deepEqual(parsePromptOptions(prose).options, []);
 });
+
+// Regression: reading only the last footer found zero options, so a six-option
+// question fell back to Approve/Reject.
+test('a menu is found even when a later footer has only repaint noise above it', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  const menu = ['❯ 1. Audit CSS', '  2. Review spec', '  3. Commit', 'Enter to select · Esc to cancel'].join('\n');
+  const noise = Array.from({ length: 35 }, (_, i) => 'fragment line ' + i).join('\n');
+  const buffer = menu + '\n' + noise + '\nEnter to select · Esc to cancel';
+  assert.deepEqual(parsePromptOptions(buffer).options.map((o) => o.key), ['1', '2', '3']);
+});
+
+test('a selection prompt is recognised as one even when unparsable', () => {
+  const { hasSelectionFooter } = require('../../main/util/chat-reply');
+  assert.equal(hasSelectionFooter('whatever\nEnter to select · Esc to cancel'), true);
+  assert.equal(hasSelectionFooter('Overwrite? (y/n)'), false);
+});

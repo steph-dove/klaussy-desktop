@@ -91,6 +91,7 @@ async function dispatchEvent(event, cfg) {
   let approvalToken = '';
   let promptOptions = [];
   let optionsTruncated = false;
+  let menuPrompt = false;
   const wantsButtons = event.type === EVENT_TYPES.APPROVAL_REQUIRED
     && (cfg.slackInteractive || cfg.discordInteractive)
     && event.containerId;
@@ -103,6 +104,12 @@ async function dispatchEvent(event, cfg) {
       promptOptions = parsed.options;
       optionsTruncated = parsed.truncated;
     }
+    // A menu ignores y/n, so Approve/Reject for one would be dead buttons; none
+    // is better, since the mirrored turn still shows the choices.
+    menuPrompt = reply.hasSelectionFooter(event.logsTail);
+    if (menuPrompt && !promptOptions.length) {
+      console.warn('[notification-gateway] selection prompt with no readable options');
+    }
     approvalToken = require('./approval-registry').issue(
       event.containerId,
       event.tool || event.step,
@@ -110,7 +117,7 @@ async function dispatchEvent(event, cfg) {
     );
   }
   const decorated = approvalToken
-    ? { ...event, approvalToken, options: promptOptions, optionsTruncated }
+    ? { ...event, approvalToken, options: promptOptions, optionsTruncated, menuPrompt }
     : event;
 
   const jobs = [];

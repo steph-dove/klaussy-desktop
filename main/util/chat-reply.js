@@ -22,22 +22,40 @@ const MAX_OPTIONS = 5;
 const SELECTION_FOOTER = /(enter to select|esc to cancel|↑\/↓)/i;
 const MENU_LOOKBACK_LINES = 30;
 
-// Only the lines just above the footer: agents write numbered prose constantly,
-// and a stale footer elsewhere in the buffer would turn that list into buttons.
-function menuRegion(tail) {
+function footerLines(tail) {
   const lines = String(tail || '').split('\n');
-  let footer = -1;
+  const at = [];
   for (let i = lines.length - 1; i >= 0; i--) {
-    if (SELECTION_FOOTER.test(lines[i])) { footer = i; break; }
+    if (SELECTION_FOOTER.test(lines[i])) at.push(i);
   }
-  if (footer === -1) return [];
-  return lines.slice(Math.max(0, footer - MENU_LOOKBACK_LINES), footer);
+  return { lines, at };
+}
+
+// True even when the options can't be read, because the caller must not offer
+// y/n buttons for a menu.
+function hasSelectionFooter(tail) {
+  return footerLines(tail).at.length > 0;
+}
+
+// Newest first: a repaint leaves several footers behind, and the newest can
+// have redraw fragments above it rather than the menu.
+function menuRegions(tail) {
+  const { lines, at } = footerLines(tail);
+  return at.map((i) => lines.slice(Math.max(0, i - MENU_LOOKBACK_LINES), i));
 }
 
 // Only option-shaped lines count, so numbered prose doesn't become buttons.
 function parsePromptOptions(tail) {
+  for (const region of menuRegions(tail)) {
+    const parsed = parseRegion(region);
+    if (parsed.options.length) return parsed;
+  }
+  return { options: [], truncated: false };
+}
+
+function parseRegion(region) {
   const seen = new Map();
-  for (const line of menuRegion(tail)) {
+  for (const line of region) {
     // A repaint can lay out columns with cursor moves rather than spaces, so the
     // space is optional; the label may not start with a digit, or "1.5 seconds"
     // would read as option 1.
@@ -180,5 +198,5 @@ function applyText({ taskId, text, userId, allowList }) {
 module.exports = {
   applyDecision, applyChoice, applyText,
   isAllowed, sanitizeForPaste, keysForPrompt, parsePromptOptions, isMultiSelect,
-  MAX_OPTIONS,
+  hasSelectionFooter, MAX_OPTIONS,
 };

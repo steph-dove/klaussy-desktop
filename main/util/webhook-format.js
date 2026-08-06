@@ -132,7 +132,7 @@ function formatSlack(event) {
           elements: [{ type: 'mrkdwn', text: '_More options exist — answer in Klaussy to see them all._' }],
         });
       }
-    } else if (event.approvalToken) {
+    } else if (event.approvalToken && !event.menuPrompt) {
       blocks.push({
         type: 'actions',
         block_id: 'klaussy_approval',
@@ -220,11 +220,11 @@ function formatDiscord(event) {
         label: `${o.key}. ${o.label}`.slice(0, 80),
         custom_id: `klaussy_choice:${event.approvalToken}:${o.key}`,
       }))
-      : [
+      : (event.menuPrompt ? [] : [
         { type: 2, style: 3, label: 'Approve', custom_id: 'klaussy_approve:' + event.approvalToken },
         { type: 2, style: 4, label: 'Reject', custom_id: 'klaussy_reject:' + event.approvalToken },
-      ];
-    payload.components = [{ type: 1, components: buttons }];
+      ]);
+    if (buttons.length) payload.components = [{ type: 1, components: buttons }];
   }
   return payload;
 }

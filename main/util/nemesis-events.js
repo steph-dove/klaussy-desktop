@@ -52,6 +52,7 @@ function normalize(event) {
     // The menu options offered, one button each.
     options: Array.isArray(event.options) ? event.options : [],
     optionsTruncated: event.optionsTruncated === true,
+    menuPrompt: event.menuPrompt === true,
     // Populated for completed/failed.
     exitCode: typeof event.exitCode === 'number' ? event.exitCode : null,
     // Populated for stale: how long the agent had been silent.

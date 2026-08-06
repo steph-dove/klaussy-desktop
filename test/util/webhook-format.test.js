@@ -220,3 +220,17 @@ test('a stale alert with no duration still renders', () => {
   assert.doesNotThrow(() => formatSlack({ type: EVENT_TYPES.STALE, containerId: '1' }));
   assert.doesNotMatch(JSON.stringify(formatSlack({ type: EVENT_TYPES.STALE, containerId: '1' })), /no output for/);
 });
+
+test('an unreadable menu gets no buttons rather than useless ones', () => {
+  const evt = { ...APPROVAL, approvalToken: 'tok', options: [], menuPrompt: true };
+  const slack = formatSlack(evt);
+  assert.equal(slack.blocks.find((b) => b.type === 'actions'), undefined);
+  assert.equal(formatDiscord(evt).components, undefined);
+});
+
+test('a plain y/n prompt still gets Approve and Reject', () => {
+  const evt = { ...APPROVAL, approvalToken: 'tok', options: [], menuPrompt: false };
+  const actions = formatSlack(evt).blocks.find((b) => b.type === 'actions');
+  assert.deepEqual(actions.elements.map((e) => e.action_id), ['klaussy_approve', 'klaussy_reject']);
+  assert.equal(formatDiscord(evt).components[0].components.length, 2);
+});
