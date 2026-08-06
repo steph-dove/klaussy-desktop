@@ -249,3 +249,32 @@ test('getNotificationConfig: the stale event defaults on and can be muted', () =
     notificationGateway: { events: { stale: false } },
   }).events.stale, false);
 });
+
+// A 10s session-saver passing a whole snapshot silently ate credentials saved
+// in between.
+test('a partial save leaves other keys alone', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { discordBotToken: 'keep-me' }, savedSessions: ['old'] });
+  await flushSaveConfig();
+
+  saveConfig({ savedSessions: ['new'] });
+  await flushSaveConfig();
+
+  const after = loadConfig();
+  assert.deepEqual(after.savedSessions, ['new']);
+  assert.equal(after.notificationGateway.discordBotToken, 'keep-me',
+    'an unrelated writer must not revert credentials');
+});
+
+test('saveConfig replaces nested objects rather than merging them', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { discordBotToken: 'a', discordChannel: 'c' } });
+  await flushSaveConfig();
+
+  saveConfig({ notificationGateway: { discordBotToken: 'b' } });
+  await flushSaveConfig();
+
+  const ng = loadConfig().notificationGateway;
+  assert.equal(ng.discordBotToken, 'b');
+  assert.equal(ng.discordChannel, undefined, 'the sibling key went with it');
+});

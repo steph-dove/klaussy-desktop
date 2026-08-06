@@ -246,7 +246,6 @@ function saveSessions() {
     }
   }
 
-  const config = loadConfig();
   const sessions = [];
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
@@ -264,8 +263,9 @@ function saveSessions() {
       savedAt: new Date().toISOString(),
     });
   }
-  config.savedSessions = sessions;
-  saveConfig(config);
+  // saveConfig's write is queued, so passing a whole snapshot would revert
+  // anything saved between this function starting and landing.
+  saveConfig({ savedSessions: sessions });
 }
 
 function shutdownAndSave() {
