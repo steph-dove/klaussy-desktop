@@ -101,7 +101,26 @@ function formatSlack(event) {
   if (fields.length) blocks.push({ type: 'section', fields });
 
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
-    if (event.approvalToken) {
+    if (event.approvalToken && event.options && event.options.length) {
+      // One button per menu option, so choices beyond yes/no are reachable.
+      blocks.push({
+        type: 'actions',
+        block_id: 'klaussy_approval',
+        elements: event.options.map((o, i) => ({
+          type: 'button',
+          action_id: 'klaussy_choice_' + o.key,
+          ...(i === 0 ? { style: 'primary' } : {}),
+          text: { type: 'plain_text', text: `${o.key}. ${o.label}`.slice(0, 75) },
+          value: `${event.approvalToken}:${o.key}`,
+        })),
+      });
+      if (event.optionsTruncated) {
+        blocks.push({
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '_More options exist — answer in Klaussy to see them all._' }],
+        });
+      }
+    } else if (event.approvalToken) {
       blocks.push({
         type: 'actions',
         block_id: 'klaussy_approval',
@@ -178,14 +197,19 @@ function formatDiscord(event) {
   const payload = { embeds: [embed] };
   if (interactive) {
     // custom_id is the only state Discord hands back on a click, so the token
-    // rides in it. Style 3 = green, 4 = red; cap is 100 chars, ours is ~40.
-    payload.components = [{
-      type: 1,
-      components: [
+    // and the chosen key ride in it. Style 1 = blurple, 3 = green, 4 = red.
+    const buttons = (event.options && event.options.length)
+      ? event.options.map((o, i) => ({
+        type: 2,
+        style: i === 0 ? 3 : 1,
+        label: `${o.key}. ${o.label}`.slice(0, 80),
+        custom_id: `klaussy_choice:${event.approvalToken}:${o.key}`,
+      }))
+      : [
         { type: 2, style: 3, label: 'Approve', custom_id: 'klaussy_approve:' + event.approvalToken },
         { type: 2, style: 4, label: 'Reject', custom_id: 'klaussy_reject:' + event.approvalToken },
-      ],
-    }];
+      ];
+    payload.components = [{ type: 1, components: buttons }];
   }
   return payload;
 }

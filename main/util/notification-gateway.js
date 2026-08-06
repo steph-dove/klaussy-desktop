@@ -88,19 +88,29 @@ async function dispatchEvent(event, cfg) {
   // this session. Only for approval prompts, and only where a socket exists to
   // hear the click — otherwise the buttons would be dead.
   let approvalToken = '';
+  let promptOptions = [];
+  let optionsTruncated = false;
   const wantsButtons = event.type === EVENT_TYPES.APPROVAL_REQUIRED
     && (cfg.slackInteractive || cfg.discordInteractive)
     && event.containerId;
   if (wantsButtons) {
-    // logsTail still holds the prompt, so the answering keystrokes are decided
-    // here and stored with the token rather than guessed at click time.
+    // logsTail still holds the prompt, so the options and answering keystrokes
+    // are read here and stored with the token rather than guessed at click time.
+    const reply = require('./chat-reply');
+    if (!reply.isMultiSelect(event.logsTail)) {
+      const parsed = reply.parsePromptOptions(event.logsTail);
+      promptOptions = parsed.options;
+      optionsTruncated = parsed.truncated;
+    }
     approvalToken = require('./approval-registry').issue(
       event.containerId,
       event.tool || event.step,
-      require('./chat-reply').keysForPrompt(event.logsTail),
+      { ...reply.keysForPrompt(event.logsTail), options: promptOptions },
     );
   }
-  const decorated = approvalToken ? { ...event, approvalToken } : event;
+  const decorated = approvalToken
+    ? { ...event, approvalToken, options: promptOptions, optionsTruncated }
+    : event;
 
   const jobs = [];
   // Buttons only go where a socket can hear them: a plain Discord webhook
@@ -281,10 +291,19 @@ function handleSlackFrame(parsed) {
   const { applyDecision, applyText } = require('./chat-reply');
 
   if (parsed.kind === 'action') {
-    const decision = parsed.actionId === 'klaussy_approve' ? 'approve' : 'reject';
-    const res = applyDecision({
-      token: parsed.value, decision, userId: parsed.userId, allowList: cfg.allowList,
-    });
+    const res = parsed.actionId.startsWith('klaussy_choice')
+      ? (() => {
+        const [token, key] = String(parsed.value).split(':');
+        return require('./chat-reply').applyChoice({
+          token, key, userId: parsed.userId, allowList: cfg.allowList,
+        });
+      })()
+      : applyDecision({
+        token: parsed.value,
+        decision: parsed.actionId === 'klaussy_approve' ? 'approve' : 'reject',
+        userId: parsed.userId,
+        allowList: cfg.allowList,
+      });
     if (parsed.responseUrl) {
       // Replacing drops the (now single-use) buttons, so name the tool and who
       // clicked or the channel loses the record of what was approved.
@@ -334,9 +353,15 @@ function handleDiscordFrame(parsed) {
   const { respondToInteraction } = require('./discord-gateway');
 
   if (parsed.kind === 'action') {
-    const [action, token] = String(parsed.customId).split(':');
-    const decision = action === 'klaussy_approve' ? 'approve' : 'reject';
-    const res = applyDecision({ token, decision, userId: parsed.userId, allowList: cfg.allowList });
+    const [action, token, key] = String(parsed.customId).split(':');
+    const res = action === 'klaussy_choice'
+      ? require('./chat-reply').applyChoice({ token, key, userId: parsed.userId, allowList: cfg.allowList })
+      : applyDecision({
+        token,
+        decision: action === 'klaussy_approve' ? 'approve' : 'reject',
+        userId: parsed.userId,
+        allowList: cfg.allowList,
+      });
     const text = res.ok
       ? `${res.message} by <@${parsed.userId}>`
       : `Not applied: ${res.message}`;

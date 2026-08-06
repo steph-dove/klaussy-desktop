@@ -10,6 +10,35 @@ const { pastePromptInto } = require('./agent-prompt');
 const DEFAULT_APPROVE_KEYS = 'y\r';
 const DEFAULT_REJECT_KEYS = 'n\r';
 
+// Slack caps a button label at 75 chars and Discord at 80; option text can be a
+// whole sentence.
+const OPTION_LABEL_MAX = 70;
+// Slack allows 25 elements in an actions block and Discord 25 buttons, but a
+// wall of buttons is unreadable — and a menu that long wants the real terminal.
+const MAX_OPTIONS = 5;
+
+// Only option-shaped lines count, so numbered prose doesn't become buttons.
+function parsePromptOptions(tail) {
+  const seen = new Map();
+  for (const line of String(tail || '').split('\n')) {
+    const m = line.match(/^\s*[❯>»*]?\s*(\d{1,2})[.)]\s+(\S.*)$/);
+    if (!m) continue;
+    const key = m[1];
+    const label = m[2].trim().replace(/\s+/g, ' ');
+    // A repainting TUI shows the same option many times; keep the first.
+    if (!seen.has(key)) seen.set(key, { key, label: label.slice(0, OPTION_LABEL_MAX) });
+  }
+  const all = [...seen.values()];
+  // Reported, not inferred from the length: exactly MAX_OPTIONS is complete.
+  return { options: all.slice(0, MAX_OPTIONS), truncated: all.length > MAX_OPTIONS };
+}
+
+// Toggle-style prompts need several keystrokes and a confirm, which a single
+// button can't express — better to say so than to send one wrong key.
+function isMultiSelect(tail) {
+  return /space to (toggle|select)/i.test(String(tail || ''));
+}
+
 // Claude Code draws a numbered menu where 'y' does nothing, while other agents
 // take a literal y/n — so read the answer off the prompt that was on screen.
 function keysForPrompt(tail) {
@@ -49,22 +78,29 @@ function liveInstance(taskId) {
   return inst;
 }
 
-// Resolve a button click. Returns a result the caller renders back into chat.
-function applyDecision({ token, decision, userId, allowList }) {
+// Shared gate for every button click; returns { error } or { claim, inst }.
+function claimForClick({ token, userId, allowList }) {
   if (!isAllowed(userId, allowList)) {
-    return { ok: false, reason: 'not-allowed', message: 'You are not on this Klaussy approval allow-list.' };
+    return { error: { ok: false, reason: 'not-allowed', message: 'You are not on this Klaussy approval allow-list.' } };
   }
   const claim = redeem(token);
   if (!claim.ok) {
     const message = claim.reason === 'expired'
-      ? 'That request expired — approve it in Klaussy instead.'
+      ? 'That request expired — answer it in Klaussy instead.'
       : 'That request was already answered.';
-    return { ok: false, reason: claim.reason, message };
+    return { error: { ok: false, reason: claim.reason, message } };
   }
   const inst = liveInstance(claim.taskId);
   if (!inst) {
-    return { ok: false, reason: 'gone', message: 'That session is no longer running.' };
+    return { error: { ok: false, reason: 'gone', message: 'That session is no longer running.' } };
   }
+  return { claim, inst };
+}
+
+// Resolve a yes/no button click. Returns a result the caller renders into chat.
+function applyDecision({ token, decision, userId, allowList }) {
+  const { error, claim, inst } = claimForClick({ token, userId, allowList });
+  if (error) return error;
   try {
     const keys = decision === 'approve'
       ? (claim.approveKeys || DEFAULT_APPROVE_KEYS)
@@ -85,6 +121,24 @@ function applyDecision({ token, decision, userId, allowList }) {
   };
 }
 
+// The key is checked against the options that were actually offered, so a
+// redeemed token can only press what was on screen.
+function applyChoice({ token, key, userId, allowList }) {
+  const { error, claim, inst } = claimForClick({ token, userId, allowList });
+  if (error) return error;
+  const option = (claim.options || []).find((o) => o.key === String(key));
+  if (!option) {
+    return { ok: false, reason: 'unknown-option', message: 'That option is no longer on offer.' };
+  }
+  try {
+    inst.pty.write(option.key);
+  } catch (err) {
+    return { ok: false, reason: 'write-failed', message: 'Could not reach that session: ' + err.message };
+  }
+  revokeForTask(claim.taskId);
+  return { ok: true, taskId: claim.taskId, choice: option, message: `Chose “${option.label}”` };
+}
+
 // Send a freeform line to a session's agent. Used for chat replies and for
 // answering prompts that want something other than y/n.
 function applyText({ taskId, text, userId, allowList }) {
@@ -103,4 +157,8 @@ function applyText({ taskId, text, userId, allowList }) {
   return { ok: true, taskId, message: 'Sent to the agent.' };
 }
 
-module.exports = { applyDecision, applyText, isAllowed, sanitizeForPaste, keysForPrompt };
+module.exports = {
+  applyDecision, applyChoice, applyText,
+  isAllowed, sanitizeForPaste, keysForPrompt, parsePromptOptions, isMultiSelect,
+  MAX_OPTIONS,
+};

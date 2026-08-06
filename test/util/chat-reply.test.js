@@ -191,3 +191,76 @@ test('the buffer holds a whole menu, not just its footer', () => {
   assert.ok(ROLLING_BUFFER_SIZE >= HOTDOG_PROMPT.length,
     `buffer ${ROLLING_BUFFER_SIZE} must fit a ${HOTDOG_PROMPT.length}-char prompt`);
 });
+
+test('every menu option becomes a choice, not just Yes/No', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  const opts = parsePromptOptions(HOTDOG_PROMPT).options;
+  assert.deepEqual(opts.map((o) => o.key), ['1', '2', '3', '4']);
+  assert.equal(opts[0].label, 'Yes');
+  assert.equal(opts[3].label, 'Chat about this');
+});
+
+test('a menu with no yes/no is still fully answerable', () => {
+  const { parsePromptOptions, keysForPrompt } = require('../../main/util/chat-reply');
+  const prompt = 'How should I integrate?\n 1. Rebase\n 2. Merge\n 3. Cancel\nEnter to select';
+  assert.deepEqual(parsePromptOptions(prompt).options.map((o) => o.label), ['Rebase', 'Merge', 'Cancel']);
+  // The old approve/reject path would have sent 'y' here, which does nothing.
+  assert.equal(keysForPrompt(prompt).approveKeys, 'y\r');
+});
+
+test('prose that happens to be numbered is not turned into buttons', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  assert.deepEqual(parsePromptOptions('I did 3 things. 1.5 seconds elapsed.\nNo menu here.').options, []);
+});
+
+test('a repainting TUI does not produce duplicate options', () => {
+  const { parsePromptOptions } = require('../../main/util/chat-reply');
+  const repainted = '1. Yes\n2. No\n1. Yes\n2. No\n1. Yes\n2. No';
+  assert.deepEqual(parsePromptOptions(repainted).options.map((o) => o.key), ['1', '2']);
+});
+
+test('long menus are capped so the message stays readable', () => {
+  const { parsePromptOptions, MAX_OPTIONS } = require('../../main/util/chat-reply');
+  const many = Array.from({ length: 12 }, (_, i) => `${i + 1}. Option ${i + 1}`).join('\n');
+  const long = parsePromptOptions(many);
+  assert.equal(long.options.length, MAX_OPTIONS);
+  assert.equal(long.truncated, true);
+
+  // Exactly at the cap is a complete menu, so claiming more exist would be a lie.
+  const exact = Array.from({ length: MAX_OPTIONS }, (_, i) => `${i + 1}. Option ${i + 1}`).join('\n');
+  assert.equal(parsePromptOptions(exact).truncated, false);
+});
+
+test('a toggle prompt offers no buttons rather than pressing one key', () => {
+  const { isMultiSelect } = require('../../main/util/chat-reply');
+  assert.equal(isMultiSelect('Pick files\n 1. a\n 2. b\nSpace to toggle · Enter to confirm'), true);
+  assert.equal(isMultiSelect(HOTDOG_PROMPT), false);
+});
+
+test('a choice can only press an option that was offered', () => {
+  registry._reset();
+  const { applyChoice } = require('../../main/util/chat-reply');
+  const { instances } = require('../../main/state/instances');
+  const written = [];
+  instances.set(6161, {
+    id: 6161, alive: true, mode: 'claude', originalMode: 'claude',
+    pty: { write: (d) => written.push(d) },
+  });
+  try {
+    const options = [{ key: '1', label: 'Yes' }, { key: '2', label: 'No' }];
+    const bad = registry.issue(6161, 'q', { options });
+    // '9' was never on screen, so a crafted click must not reach the terminal.
+    const refused = applyChoice({ token: bad, key: '9', userId: 'U1', allowList: ['U1'] });
+    assert.equal(refused.ok, false);
+    assert.equal(refused.reason, 'unknown-option');
+    assert.deepEqual(written, []);
+
+    const token = registry.issue(6161, 'q', { options });
+    const ok = applyChoice({ token, key: '2', userId: 'U1', allowList: ['U1'] });
+    assert.equal(ok.ok, true);
+    assert.deepEqual(written, ['2']);
+    assert.match(ok.message, /No/);
+  } finally {
+    instances.delete(6161);
+  }
+});

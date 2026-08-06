@@ -47,6 +47,9 @@ function normalize(event) {
     // Populated for approval-required: which tool/step wants authorization.
     tool: event.tool || '',
     step: event.step || '',
+    // The menu options offered, one button each.
+    options: Array.isArray(event.options) ? event.options : [],
+    optionsTruncated: event.optionsTruncated === true,
     // Populated for completed/failed.
     exitCode: typeof event.exitCode === 'number' ? event.exitCode : null,
     // Populated for stale: how long the agent had been silent.

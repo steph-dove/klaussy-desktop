@@ -11,7 +11,9 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
 const pending = new Map(); // token -> { taskId, tool, createdAt, expiresAt }
 
-function issue(taskId, tool, { ttlMs = DEFAULT_TTL_MS, approveKeys = '', rejectKeys = '' } = {}) {
+function issue(taskId, tool, {
+  ttlMs = DEFAULT_TTL_MS, approveKeys = '', rejectKeys = '', options = [],
+} = {}) {
   const token = crypto.randomBytes(16).toString('hex');
   const now = Date.now();
   // Prompts that are never clicked would otherwise sit here forever; minting is
@@ -22,7 +24,7 @@ function issue(taskId, tool, { ttlMs = DEFAULT_TTL_MS, approveKeys = '', rejectK
   // silently matches nothing.
   pending.set(token, {
     token, taskId: String(taskId), tool: tool || '',
-    approveKeys, rejectKeys,
+    approveKeys, rejectKeys, options,
     createdAt: now, expiresAt: now + ttlMs,
   });
   return token;
@@ -41,6 +43,7 @@ function redeem(token) {
     tool: entry.tool,
     approveKeys: entry.approveKeys,
     rejectKeys: entry.rejectKeys,
+    options: entry.options,
   };
 }
 
