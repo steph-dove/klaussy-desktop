@@ -197,3 +197,32 @@ test('loadConfig returns {} when the file is malformed JSON', () => {
     assert.deepEqual(config.loadConfig(), {});
   } finally { restore(); }
 });
+
+test('getNotificationConfig: off with no webhook URL, on once one is set', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).enabled, false);
+  assert.equal(getNotificationConfig({
+    notificationGateway: { slackWebhookUrl: 'https://hooks.slack.com/x' },
+  }).enabled, true);
+  // An explicit false is a hard off, even with a URL present.
+  assert.equal(getNotificationConfig({
+    notificationGateway: { slackWebhookUrl: 'https://hooks.slack.com/x', enabled: false },
+  }).enabled, false);
+});
+
+test('getNotificationConfig: notifyNewSessions defaults on, respects explicit false', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).notifyNewSessions, true);
+  assert.equal(getNotificationConfig({
+    notificationGateway: { notifyNewSessions: false },
+  }).notifyNewSessions, false);
+});
+
+test('getNotificationConfig: whitespace-only URLs do not enable the gateway', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  const cfg = getNotificationConfig({
+    notificationGateway: { slackWebhookUrl: '   ', discordWebhookUrl: '\t' },
+  });
+  assert.equal(cfg.slackWebhookUrl, '');
+  assert.equal(cfg.enabled, false);
+});

@@ -75,10 +75,29 @@ function formatSlack(event) {
   if (fields.length) blocks.push({ type: 'section', fields });
 
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
-    blocks.push({
-      type: 'context',
-      elements: [{ type: 'mrkdwn', text: 'Respond in Klaussy to *Approve* or *Reject* this step.' }],
-    });
+    if (event.approvalToken) {
+      blocks.push({
+        type: 'actions',
+        block_id: 'klaussy_approval',
+        elements: [
+          {
+            type: 'button', action_id: 'klaussy_approve', style: 'primary',
+            text: { type: 'plain_text', text: 'Approve' },
+            value: event.approvalToken,
+          },
+          {
+            type: 'button', action_id: 'klaussy_reject', style: 'danger',
+            text: { type: 'plain_text', text: 'Reject' },
+            value: event.approvalToken,
+          },
+        ],
+      });
+    } else {
+      blocks.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: 'Respond in Klaussy to *Approve* or *Reject* this step.' }],
+      });
+    }
   }
 
   const logs = truncateLogs(event.logsTail);
@@ -100,7 +119,8 @@ function formatDiscord(event) {
   }
 
   const parts = [];
-  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED) {
+  const interactive = event.type === EVENT_TYPES.APPROVAL_REQUIRED && event.approvalToken;
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && !interactive) {
     parts.push('Respond in Klaussy to **Approve** or **Reject** this step.');
   }
   const logs = truncateLogs(event.logsTail);
@@ -110,7 +130,19 @@ function formatDiscord(event) {
   if (parts.length) embed.description = parts.join('\n');
   if (fields.length) embed.fields = fields;
 
-  return { embeds: [embed] };
+  const payload = { embeds: [embed] };
+  if (interactive) {
+    // custom_id is the only state Discord hands back on a click, so the token
+    // rides in it. Style 3 = green, 4 = red; cap is 100 chars, ours is ~40.
+    payload.components = [{
+      type: 1,
+      components: [
+        { type: 2, style: 3, label: 'Approve', custom_id: 'klaussy_approve:' + event.approvalToken },
+        { type: 2, style: 4, label: 'Reject', custom_id: 'klaussy_reject:' + event.approvalToken },
+      ],
+    }];
+  }
+  return payload;
 }
 
 module.exports = { formatSlack, formatDiscord, truncateLogs };

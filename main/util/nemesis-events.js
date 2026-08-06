@@ -42,6 +42,9 @@ function normalize(event) {
     exitCode: typeof event.exitCode === 'number' ? event.exitCode : null,
     logsTail: event.logsTail || '',
     ts: typeof event.ts === 'number' ? event.ts : null,
+    // Whether this session opted into webhooks (the sidebar bell). Defaults to
+    // true so a remote stream, which has no per-tab toggle, still notifies.
+    notify: event.notify !== false,
   };
 }
 

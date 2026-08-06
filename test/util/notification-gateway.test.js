@@ -191,3 +191,35 @@ test('ensureStarted wires published events to the configured webhook', async () 
     await srv.close();
   }
 });
+
+test('a session with its bell off is skipped even when the type is enabled', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    const results = await gateway.dispatchEvent({ ...APPROVAL, notify: false }, cfg(base));
+    assert.deepEqual(results, [], 'no targets posted');
+    assert.equal(srv.requests.length, 0, 'nothing hit the wire');
+  } finally {
+    await srv.close();
+  }
+});
+
+// A remote Nemesis8 stream has no per-tab bell, so an event that never mentions
+// `notify` must still post rather than being silently dropped.
+test('an event with no notify field still posts', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  try {
+    const results = await gateway.dispatchEvent(APPROVAL, cfg(base));
+    assert.ok(results.length > 0 && results.every((r) => r.ok));
+  } finally {
+    await srv.close();
+  }
+});
+
+test('normalize defaults notify to true but preserves an explicit false', () => {
+  const on = nemesis.normalize({ type: EVENT_TYPES.COMPLETED, containerId: '1' });
+  assert.equal(on.notify, true);
+  const off = nemesis.normalize({ type: EVENT_TYPES.COMPLETED, containerId: '1', notify: false });
+  assert.equal(off.notify, false);
+});

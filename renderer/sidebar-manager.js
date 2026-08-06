@@ -123,11 +123,13 @@ window.Sidebar = (function () {
       '<span class="ci-status-icon" title="CI status"></span>' +
       '<span class="dirty-indicator"></span>' +
       '<span class="unread-badge"></span>' +
+      '<button class="task-notify-btn" title="Slack/Discord notifications">&#128276;</button>' +
       '<button class="task-note-btn" title="Notes">&#9998;</button>' +
       '<button class="task-close" title="Remove">&times;</button>';
 
     item.addEventListener('click', function (e) {
-      if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')) return;
+      if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')
+          || e.target.classList.contains('task-notify-btn')) return;
       if (e.target.classList.contains('ci-status-icon')) {
         var url = e.target.dataset.url;
         if (url) window.klaus.gh.openExternal(url);
@@ -150,6 +152,34 @@ window.Sidebar = (function () {
 
       if (wt.branch) window._addWorktreeToSidebar(wt);
       rebuild();
+    });
+
+    // Webhook bell. Hidden unless a webhook URL is configured, so the row stays
+    // uncluttered for anyone not using the integration.
+    var notifyBtn = item.querySelector('.task-notify-btn');
+    function paintBell(on) {
+      notifyBtn.classList.toggle('notifying', !!on);
+      notifyBtn.innerHTML = on ? '&#128276;' : '&#128277;';
+      notifyBtn.title = on
+        ? 'Posting this session to Slack/Discord — click to stop'
+        : 'Not posting this session — click to send it to Slack/Discord';
+    }
+    window.klaus.ui.getPreferences().then(function (p) {
+      var ng = (p && p.notificationGateway) || {};
+      if (!ng.slackWebhookUrl && !ng.discordWebhookUrl) {
+        notifyBtn.style.display = 'none';
+        return;
+      }
+      return window.klaus.task.getNotifyEnabled(task.id).then(function (state) {
+        paintBell(state && state.webhook);
+      });
+    });
+    notifyBtn.addEventListener('click', async function (e) {
+      e.stopPropagation();
+      var turningOn = !notifyBtn.classList.contains('notifying');
+      paintBell(turningOn); // optimistic; reverted below if the main side refuses
+      var res = await window.klaus.task.setNotifyEnabled(task.id, turningOn, 'webhook');
+      if (!res || res.error) paintBell(!turningOn);
     });
 
     // Task notes

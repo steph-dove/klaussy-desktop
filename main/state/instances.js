@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
-const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile, getNotificationConfig } = require('../util/config');
 const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
@@ -306,10 +306,16 @@ function processIdleDetection(inst, data) {
           tool: extractApprovalTool(tail),
           logsTail: inst.recentOutput,
           ts: now,
+          notify: inst.notifyWebhookEnabled !== false,
         });
       } catch { /* never let a publish break the terminal path */ }
     }
   } else {
+    // The prompt is gone (answered locally or the agent moved on), so any
+    // Approve/Reject button still sitting in chat now refers to nothing.
+    if (inst.approvalPending) {
+      try { require('../util/approval-registry').revokeForTask(inst.id); } catch { /* non-fatal */ }
+    }
     inst.approvalPending = false;
   }
 }
@@ -326,6 +332,12 @@ function initIdleDetectionFields(inst) {
     inst.notifyEnabled = pref !== false;
     inst.notifyCIEnabled = true;
   }
+  // Webhook bell: an explicit per-task choice wins, otherwise the global
+  // "notify new sessions" default. Shells never post regardless.
+  const webhookPref = (typeof pref === 'object' && pref !== null) ? pref.webhook : undefined;
+  inst.notifyWebhookEnabled = isAgentMode(inst.mode) && (typeof webhookPref === 'boolean'
+    ? webhookPref
+    : getNotificationConfig(config).notifyNewSessions);
   inst.lastDataTime = 0;
   inst.quietTimer = null;
   inst.notifiedIdle = false;
@@ -542,8 +554,12 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
           exitCode,
           logsTail: instance.recentOutput || '',
           ts: Date.now(),
+          notify: instance.notifyWebhookEnabled !== false,
         });
       } catch { /* never let a publish break teardown */ }
+      // The tab becomes a shell next, so nothing in chat should still route here.
+      try { require('../util/approval-registry').revokeForTask(instance.id); } catch { /* non-fatal */ }
+      try { require('../util/notification-gateway').forgetTask(instance.id); } catch { /* non-fatal */ }
       convertInstanceToShell(instance, exitCode);
       return;
     }
@@ -634,8 +650,15 @@ function reclaimOrphanedTasks(closingWc) {
   }
 }
 
+// True only while this instance is still running its agent CLI. False once it
+// has been converted to a plain shell, which keeps the same id and alive flag.
+function isAgentInstance(inst) {
+  return Boolean(inst && inst.alive && isAgentMode(inst.mode));
+}
+
 module.exports = {
   instances,
+  isAgentInstance,
   reclaimOrphanedTasks,
   subscribeTerminalChannel,
   unsubscribeTerminalChannel,

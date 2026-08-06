@@ -1324,11 +1324,19 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
-  // `kind` lets the renderer toggle idle vs CI independently. Default 'idle'
-  // matches the legacy single-flag callers.
-  const which = kind === 'ci' ? 'ci' : 'idle';
+  // Default 'idle' matches the legacy single-flag callers.
+  const which = kind === 'ci' ? 'ci' : (kind === 'webhook' ? 'webhook' : 'idle');
   if (which === 'ci') inst.notifyCIEnabled = enabled;
-  else inst.notifyEnabled = enabled;
+  else if (which === 'webhook') {
+    inst.notifyWebhookEnabled = enabled;
+    // Arm the gateway here too, so turning the bell on mid-session works even
+    // if no agent has spawned since the webhook URL was configured.
+    if (enabled) {
+      try { require('../util/notification-gateway').ensureStarted(); } catch (e) {
+        console.warn('[notification-gateway] start failed:', e.message);
+      }
+    }
+  } else inst.notifyEnabled = enabled;
   const config = loadConfig();
   if (!config.notifyPrefs) config.notifyPrefs = {};
   // Migrate legacy boolean entries to the {idle, ci} shape on first write.
@@ -1344,8 +1352,13 @@ ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
 
 ipcMain.handle('get-notify-enabled', (_event, { id }) => {
   const inst = instances.get(id);
-  if (!inst) return { idle: true, ci: true };
-  return { idle: inst.notifyEnabled !== false, ci: inst.notifyCIEnabled !== false };
+  if (!inst) return { idle: true, ci: true, webhook: false };
+  return {
+    idle: inst.notifyEnabled !== false,
+    ci: inst.notifyCIEnabled !== false,
+    // Unlike idle/ci this defaults off — it posts outside the app.
+    webhook: inst.notifyWebhookEnabled === true,
+  };
 });
 
 ipcMain.handle('rename-task', (_event, { id, newName }) => {

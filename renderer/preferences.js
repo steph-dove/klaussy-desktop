@@ -108,6 +108,21 @@
   if (kimiBash.disabled) kimiBash.title = "Can't read ~/.kimi-code/config.toml";
   document.getElementById('pref-repo-intel-enrich').checked = prefs.repoIntelEnrich === true;
 
+  var ng = prefs.notificationGateway || {};
+  var ngEvents = ng.events || {};
+  document.getElementById('pref-slack-webhook').value = ng.slackWebhookUrl || '';
+  document.getElementById('pref-discord-webhook').value = ng.discordWebhookUrl || '';
+  document.getElementById('pref-notify-completed').checked = ngEvents.completed !== false;
+  document.getElementById('pref-notify-failed').checked = ngEvents.failed !== false;
+  document.getElementById('pref-notify-approval').checked = ngEvents.approvalRequired !== false;
+  document.getElementById('pref-notify-new-sessions').checked = ng.notifyNewSessions !== false;
+  document.getElementById('pref-slack-app-token').value = ng.slackAppToken || '';
+  document.getElementById('pref-slack-bot-token').value = ng.slackBotToken || '';
+  document.getElementById('pref-slack-channel').value = ng.slackChannel || '';
+  document.getElementById('pref-discord-bot-token').value = ng.discordBotToken || '';
+  document.getElementById('pref-discord-channel').value = ng.discordChannel || '';
+  document.getElementById('pref-notify-allowlist').value = (ng.allowList || []).join(', ');
+
   // Theme dropdown
   themes.forEach(function (t) {
     var opt = document.createElement('option');
@@ -268,6 +283,7 @@
       stripComments: document.getElementById('pref-strip-comments').checked,
       repoIntelEnrich: document.getElementById('pref-repo-intel-enrich').checked,
       nemesisProfiles: collectNemesisProfiles(),
+      notificationGateway: collectNotificationGateway(),
     };
 
     // Omitted entirely while unknown so the main side skips it (`!== undefined`).
@@ -292,6 +308,16 @@
   // Toggling this rewrites kimi's own config.toml, so it saves on change rather
   // than riding along with whatever control the user touches next.
   kimiBash.addEventListener('change', saveAll);
+
+  ['pref-slack-webhook', 'pref-discord-webhook', 'pref-notify-completed',
+    'pref-notify-failed', 'pref-notify-approval', 'pref-notify-new-sessions',
+    'pref-slack-app-token', 'pref-slack-bot-token', 'pref-slack-channel',
+    'pref-discord-bot-token', 'pref-discord-channel', 'pref-notify-allowlist',
+  ].forEach(function (id) {
+    var el = document.getElementById(id);
+    el.addEventListener('change', saveAll);
+    el.addEventListener('input', saveAll);
+  });
 
   // Re-probe an agent's version when its path changes.
   Object.keys(agentPaths).forEach(function (id) {
@@ -415,6 +441,59 @@
       };
     });
   }
+
+  function collectNotificationGateway() {
+    return {
+      slackWebhookUrl: document.getElementById('pref-slack-webhook').value.trim(),
+      discordWebhookUrl: document.getElementById('pref-discord-webhook').value.trim(),
+      notifyNewSessions: document.getElementById('pref-notify-new-sessions').checked,
+      slackAppToken: document.getElementById('pref-slack-app-token').value.trim(),
+      slackBotToken: document.getElementById('pref-slack-bot-token').value.trim(),
+      slackChannel: document.getElementById('pref-slack-channel').value.trim(),
+      discordBotToken: document.getElementById('pref-discord-bot-token').value.trim(),
+      discordChannel: document.getElementById('pref-discord-channel').value.trim(),
+      allowList: document.getElementById('pref-notify-allowlist').value
+        .split(',').map(function (s) { return s.trim(); }).filter(Boolean),
+      events: {
+        completed: document.getElementById('pref-notify-completed').checked,
+        failed: document.getElementById('pref-notify-failed').checked,
+        approvalRequired: document.getElementById('pref-notify-approval').checked,
+      },
+    };
+  }
+
+  var notifyDocsLink = document.getElementById('notify-docs-link');
+  if (notifyDocsLink) {
+    notifyDocsLink.addEventListener('click', function (e) {
+      e.preventDefault();
+      try {
+        window.klaus.gh.openExternal(
+          'https://github.com/steph-dove/klaussy-desktop/blob/main/docs/notifications-setup.md');
+      } catch (_e) {}
+    });
+  }
+
+  var notifyTestBtn = document.getElementById('pref-notify-test');
+  var notifyTestStatus = document.getElementById('notify-test-status');
+  notifyTestBtn.addEventListener('click', async function () {
+    var cfg = collectNotificationGateway();
+    if (!cfg.slackWebhookUrl && !cfg.discordWebhookUrl) {
+      notifyTestStatus.textContent = 'Add a Slack or Discord webhook URL first.';
+      return;
+    }
+    notifyTestBtn.disabled = true;
+    notifyTestStatus.textContent = 'Sending…';
+    try {
+      // Send the on-screen values rather than the saved ones, so a URL can be
+      // verified before committing it.
+      var res = await window.klaus.ui.testNotification(cfg);
+      notifyTestStatus.textContent = res && res.ok
+        ? 'Sent — check your channel.'
+        : 'Failed: ' + ((res && res.error) || 'unknown error');
+    } finally {
+      notifyTestBtn.disabled = false;
+    }
+  });
 
   function isLocalHost(url) {
     var v = (url || '').trim();

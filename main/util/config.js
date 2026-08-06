@@ -59,13 +59,35 @@ function getNotificationConfig(config = loadConfig()) {
   const discordWebhookUrl = typeof ng.discordWebhookUrl === 'string' ? ng.discordWebhookUrl.trim() : '';
   const nemesisUrl = typeof ng.nemesisUrl === 'string' ? ng.nemesisUrl.trim() : '';
   const events = (ng.events && typeof ng.events === 'object') ? ng.events : {};
+  const str = (v) => (typeof v === 'string' ? v.trim() : '');
+  const slackAppToken = str(ng.slackAppToken);
+  const slackBotToken = str(ng.slackBotToken);
+  const slackChannel = str(ng.slackChannel);
+  const discordBotToken = str(ng.discordBotToken);
+  const discordChannel = str(ng.discordChannel);
+  // Only these ids may approve or send text. Empty = nobody; see chat-reply.
+  const allowList = Array.isArray(ng.allowList) ? ng.allowList.map(String).filter(Boolean) : [];
   return {
     // Explicit `enabled: false` hard-disables; otherwise presence of any
-    // webhook URL turns it on.
-    enabled: ng.enabled === false ? false : Boolean(slackWebhookUrl || discordWebhookUrl),
+    // webhook URL or bot channel turns it on.
+    enabled: ng.enabled === false
+      ? false
+      : Boolean(slackWebhookUrl || discordWebhookUrl || (slackBotToken && slackChannel) || (discordBotToken && discordChannel)),
     slackWebhookUrl,
     discordWebhookUrl,
     nemesisUrl,
+    slackAppToken,
+    slackBotToken,
+    slackChannel,
+    discordBotToken,
+    discordChannel,
+    allowList,
+    // Buttons and text replies need a socket back from the platform, which
+    // needs the tokens above. Without them the alerts stay read-only.
+    slackInteractive: Boolean(slackAppToken && slackBotToken && slackChannel),
+    discordInteractive: Boolean(discordBotToken && discordChannel),
+    // Seeds each new session's per-task bell; the task can then override it.
+    notifyNewSessions: ng.notifyNewSessions !== false,
     events: {
       completed: events.completed !== false,
       failed: events.failed !== false,

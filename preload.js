@@ -689,6 +689,7 @@ contextBridge.exposeInMainWorld('klaus', {
     openPreferences: () => ipcRenderer.invoke('open-preferences'),
     getPreferences: () => ipcRenderer.invoke('get-preferences'),
     setPreferences: (prefs) => ipcRenderer.invoke('set-preferences', prefs),
+    testNotification: (cfg) => ipcRenderer.invoke('test-notification', cfg),
     // Per-window top-bar color. An app window reads its own color; Preferences
     // reads/writes the color of the window that opened it.
     getWindowColor: () => ipcRenderer.invoke('window-color-get'),

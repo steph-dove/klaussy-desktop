@@ -5,7 +5,7 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { app, ipcMain, BrowserWindow, nativeTheme } = require('electron');
-const { loadConfig, saveConfig, getNemesisConfig, getNemesisProfiles, getNemesisProfile } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisConfig, getNemesisProfiles, getNemesisProfile, getNotificationConfig } = require('../util/config');
 const { getLogBuffer } = require('../util/logging');
 const { allWindows, hardenWindow, getMainWindow } = require('../state/windows');
 const { startAutoFetch } = require('../state/ci-poll');
@@ -253,7 +253,43 @@ ipcMain.handle('get-preferences', () => {
     // Nemesis8 named gateway profiles (migrates the legacy single-gateway keys
     // into one profile when none exist yet).
     nemesisProfiles: getNemesisProfiles(),
+    // Slack/Discord webhook gateway (URLs, per-event mutes, new-session default).
+    notificationGateway: getNotificationConfig(config),
   };
+});
+
+// Fires a sample event at the on-screen webhook URLs, so a URL can be checked
+// before it's saved.
+ipcMain.handle('test-notification', async (_event, cfg) => {
+  const { dispatchEvent } = require('../util/notification-gateway');
+  const { EVENT_TYPES } = require('../util/nemesis-events');
+  const merged = {
+    slackWebhookUrl: (cfg && cfg.slackWebhookUrl) || '',
+    discordWebhookUrl: (cfg && cfg.discordWebhookUrl) || '',
+    events: { completed: true, failed: true, approvalRequired: true },
+  };
+  if (!merged.slackWebhookUrl && !merged.discordWebhookUrl) {
+    return { ok: false, error: 'no webhook URL configured' };
+  }
+  try {
+    const results = await dispatchEvent({
+      type: EVENT_TYPES.COMPLETED,
+      containerId: 'test',
+      workspacePath: 'Klaussy preferences',
+      agentName: 'Klaussy test',
+      exitCode: 0,
+      logsTail: 'If you can read this, the webhook works.',
+      ts: Date.now(),
+      notify: true,
+    }, merged);
+    const failed = results.filter((r) => !r.ok);
+    if (failed.length) {
+      return { ok: false, error: failed.map((f) => `${f.target}: ${f.error || 'HTTP ' + f.status}`).join('; ') };
+    }
+    return { ok: true, sent: results.map((r) => r.target) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('set-preferences', (_event, prefs) => {
@@ -345,6 +381,25 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   }
   if (prefs.repoIntelEnrich !== undefined) {
     config.repoIntelEnrich = !!prefs.repoIntelEnrich;
+  }
+  // Merged, not replaced, so a partial update (or a key the UI doesn't expose,
+  // like nemesisUrl) survives a save from the prefs window.
+  if (prefs.notificationGateway !== undefined && prefs.notificationGateway !== null) {
+    const ng = prefs.notificationGateway;
+    const prev = config.notificationGateway || {};
+    config.notificationGateway = Object.assign({}, prev, ng, {
+      events: Object.assign({}, prev.events, ng.events),
+    });
+    // Sockets capture their credentials at connect time, so new ones only apply
+    // after a reconnect. Compare first: this save runs on every keystroke in a
+    // token field, and blindly restarting would hammer the connect endpoints.
+    const socketKeys = ['slackAppToken', 'slackBotToken', 'slackChannel', 'discordBotToken', 'discordChannel'];
+    const credsChanged = socketKeys.some((k) => (prev[k] || '') !== (config.notificationGateway[k] || ''));
+    if (credsChanged) {
+      try { require('../util/notification-gateway').restart(); } catch (e) {
+        console.warn('[notification-gateway] restart failed:', e.message);
+      }
+    }
   }
   // Nemesis8 gateway profiles: store the whole list (sanitized), and retire the
   // legacy single-gateway keys so getNemesisProfiles() reads only the list.

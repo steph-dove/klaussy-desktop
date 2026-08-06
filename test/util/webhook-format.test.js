@@ -112,3 +112,36 @@ test('missing optional fields do not crash formatting', () => {
   assert.doesNotThrow(() => formatSlack(bare));
   assert.doesNotThrow(() => formatDiscord(bare));
 });
+
+test('an approval token turns the alert into real Approve/Reject buttons', () => {
+  const evt = { ...APPROVAL, approvalToken: 'tok123' };
+
+  const slack = formatSlack(evt);
+  const actions = slack.blocks.find((b) => b.type === 'actions');
+  assert.ok(actions, 'slack gets an actions block');
+  assert.deepEqual(actions.elements.map((e) => e.action_id), ['klaussy_approve', 'klaussy_reject']);
+  assert.ok(actions.elements.every((e) => e.value === 'tok123'), 'both carry the token');
+
+  const discord = formatDiscord(evt);
+  assert.ok(Array.isArray(discord.components), 'discord gets components');
+  const buttons = discord.components[0].components;
+  assert.deepEqual(buttons.map((b) => b.custom_id),
+    ['klaussy_approve:tok123', 'klaussy_reject:tok123']);
+  assert.ok(buttons.every((b) => b.custom_id.length <= 100), 'within discord custom_id limit');
+});
+
+test('without a token the alert stays read-only and says so', () => {
+  const slack = formatSlack(APPROVAL);
+  assert.equal(slack.blocks.find((b) => b.type === 'actions'), undefined, 'no dead buttons');
+  assert.match(JSON.stringify(slack), /Respond in Klaussy/);
+
+  const discord = formatDiscord(APPROVAL);
+  assert.equal(discord.components, undefined);
+  assert.match(JSON.stringify(discord), /Respond in Klaussy/);
+});
+
+test('completed/failed alerts never get approval buttons', () => {
+  const evt = { ...COMPLETED, approvalToken: 'tok123' };
+  assert.equal(formatSlack(evt).blocks.find((b) => b.type === 'actions'), undefined);
+  assert.equal(formatDiscord(evt).components, undefined);
+});
