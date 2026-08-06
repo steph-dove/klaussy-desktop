@@ -11,7 +11,7 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
 const pending = new Map(); // token -> { taskId, tool, createdAt, expiresAt }
 
-function issue(taskId, tool, ttlMs = DEFAULT_TTL_MS) {
+function issue(taskId, tool, { ttlMs = DEFAULT_TTL_MS, approveKeys = '', rejectKeys = '' } = {}) {
   const token = crypto.randomBytes(16).toString('hex');
   const now = Date.now();
   // Prompts that are never clicked would otherwise sit here forever; minting is
@@ -21,7 +21,9 @@ function issue(taskId, tool, ttlMs = DEFAULT_TTL_MS) {
   // normalized event's containerId. Store one canonical form or revokeForTask
   // silently matches nothing.
   pending.set(token, {
-    token, taskId: String(taskId), tool: tool || '', createdAt: now, expiresAt: now + ttlMs,
+    token, taskId: String(taskId), tool: tool || '',
+    approveKeys, rejectKeys,
+    createdAt: now, expiresAt: now + ttlMs,
   });
   return token;
 }
@@ -33,7 +35,13 @@ function redeem(token) {
   if (!entry) return { ok: false, reason: 'unknown' };
   pending.delete(token);
   if (Date.now() > entry.expiresAt) return { ok: false, reason: 'expired' };
-  return { ok: true, taskId: entry.taskId, tool: entry.tool };
+  return {
+    ok: true,
+    taskId: entry.taskId,
+    tool: entry.tool,
+    approveKeys: entry.approveKeys,
+    rejectKeys: entry.rejectKeys,
+  };
 }
 
 // Drop every outstanding token for a session — called when the agent exits or

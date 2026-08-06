@@ -92,7 +92,13 @@ async function dispatchEvent(event, cfg) {
     && (cfg.slackInteractive || cfg.discordInteractive)
     && event.containerId;
   if (wantsButtons) {
-    approvalToken = require('./approval-registry').issue(event.containerId, event.tool || event.step);
+    // logsTail still holds the prompt, so the answering keystrokes are decided
+    // here and stored with the token rather than guessed at click time.
+    approvalToken = require('./approval-registry').issue(
+      event.containerId,
+      event.tool || event.step,
+      require('./chat-reply').keysForPrompt(event.logsTail),
+    );
   }
   const decorated = approvalToken ? { ...event, approvalToken } : event;
 

@@ -37,7 +37,7 @@ test('tokens are unguessable and distinct per issue', () => {
 
 test('an expired token is refused and reported as expired', () => {
   registry._reset();
-  const token = registry.issue(3, 'tool', -1); // already past its TTL
+  const token = registry.issue(3, 'tool', { ttlMs: -1 }); // already past its TTL
   const res = registry.redeem(token);
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'expired');
@@ -68,7 +68,7 @@ test('revokeForTask matches regardless of id type', () => {
 
 test('sweepExpired clears stale entries without touching live ones', () => {
   registry._reset();
-  registry.issue(1, 'old', -1);
+  registry.issue(1, 'old', { ttlMs: -1 });
   const live = registry.issue(2, 'new');
   registry.sweepExpired();
   assert.equal(registry.size(), 1);

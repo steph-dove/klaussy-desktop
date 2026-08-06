@@ -32,7 +32,7 @@ test('a click from a non-allow-listed user never redeems the token', () => {
 
 test('an expired token reports expiry rather than acting', () => {
   registry._reset();
-  const token = registry.issue(1, 'tool', -1);
+  const token = registry.issue(1, 'tool', { ttlMs: -1 });
   const res = applyDecision({ token, decision: 'approve', userId: 'U1', allowList: ['U1'] });
   assert.equal(res.ok, false);
   assert.equal(res.reason, 'expired');
@@ -106,4 +106,52 @@ test('control characters cannot escape bracketed paste', () => {
   assert.equal(out, 'safe[201~rm -rf /');
   // Ordinary whitespace in a pasted snippet survives.
   assert.equal(sanitizeForPaste('a\tb\nc'), 'a\tb\nc');
+});
+
+// The bug this covers: Claude Code asks with a numbered menu, so the 'y' that
+// answers a (y/n) prompt does nothing and the agent just sits there.
+test('a numbered menu is answered with its digit, not y', () => {
+  const { keysForPrompt } = require('../../main/util/chat-reply');
+  const claudeMenu = [
+    'Do you want to proceed?',
+    '❯ 1. Yes',
+    '  2. Yes, and don\'t ask again for Bash commands',
+    '  3. No, and tell Claude what to do differently',
+  ].join('\n');
+  const keys = keysForPrompt(claudeMenu);
+  assert.equal(keys.approveKeys, '1');
+  assert.equal(keys.rejectKeys, '3');
+  assert.ok(!keys.approveKeys.includes('\r'), 'a menu selects on the digit alone');
+});
+
+test('a y/n prompt still gets y/n with Enter', () => {
+  const { keysForPrompt } = require('../../main/util/chat-reply');
+  const keys = keysForPrompt('Overwrite the file? (y/n)');
+  assert.equal(keys.approveKeys, 'y\r');
+  assert.equal(keys.rejectKeys, 'n\r');
+});
+
+test('a menu with no explicit No rejects with escape', () => {
+  const { keysForPrompt } = require('../../main/util/chat-reply');
+  const keys = keysForPrompt('Proceed?\n 1. Yes\n 2. Yes, always');
+  assert.equal(keys.approveKeys, '1');
+  assert.equal(keys.rejectKeys, '\x1b');
+});
+
+test('the decided keystrokes are what actually reach the pty', () => {
+  registry._reset();
+  const { instances } = require('../../main/state/instances');
+  const written = [];
+  instances.set(5150, {
+    id: 5150, alive: true, mode: 'claude', originalMode: 'claude',
+    pty: { write: (d) => written.push(d) },
+  });
+  try {
+    const token = registry.issue(5150, 'Bash', { approveKeys: '1', rejectKeys: '3' });
+    const res = applyDecision({ token, decision: 'approve', userId: 'U1', allowList: ['U1'] });
+    assert.equal(res.ok, true);
+    assert.deepEqual(written, ['1'], 'the menu digit, not "y\\r"');
+  } finally {
+    instances.delete(5150);
+  }
 });

@@ -7,11 +7,20 @@
 const { redeem, revokeForTask } = require('./approval-registry');
 const { pastePromptInto } = require('./agent-prompt');
 
-// 'y'/'n' answers the (y/n)-style prompts the approval detector matches. Agents
-// that ask with a numbered menu instead need the exact key, which is what the
-// freeform text reply is for.
-const APPROVE_KEYS = 'y';
-const REJECT_KEYS = 'n';
+const DEFAULT_APPROVE_KEYS = 'y\r';
+const DEFAULT_REJECT_KEYS = 'n\r';
+
+// Claude Code draws a numbered menu where 'y' does nothing, while other agents
+// take a literal y/n — so read the answer off the prompt that was on screen.
+function keysForPrompt(tail) {
+  const s = String(tail || '');
+  const yes = s.match(/(\d)[.)]\s*Yes\b/i);
+  if (!yes) return { approveKeys: DEFAULT_APPROVE_KEYS, rejectKeys: DEFAULT_REJECT_KEYS };
+  const no = s.match(/(\d)[.)]\s*No\b/i);
+  // A menu option is chosen by its digit alone — no Enter, which would fall
+  // through to whatever prompt comes next. ESC cancels when there is no No.
+  return { approveKeys: yes[1], rejectKeys: no ? no[1] : '\x1b' };
+}
 
 // A literal ESC would close bracketed paste early, leaving the rest to arrive
 // as raw keystrokes; tabs/newlines stay since pasted snippets need them.
@@ -57,7 +66,10 @@ function applyDecision({ token, decision, userId, allowList }) {
     return { ok: false, reason: 'gone', message: 'That session is no longer running.' };
   }
   try {
-    inst.pty.write((decision === 'approve' ? APPROVE_KEYS : REJECT_KEYS) + '\r');
+    const keys = decision === 'approve'
+      ? (claim.approveKeys || DEFAULT_APPROVE_KEYS)
+      : (claim.rejectKeys || DEFAULT_REJECT_KEYS);
+    inst.pty.write(keys);
   } catch (err) {
     return { ok: false, reason: 'write-failed', message: 'Could not reach that session: ' + err.message };
   }
@@ -91,4 +103,4 @@ function applyText({ taskId, text, userId, allowList }) {
   return { ok: true, taskId, message: 'Sent to the agent.' };
 }
 
-module.exports = { applyDecision, applyText, isAllowed, sanitizeForPaste };
+module.exports = { applyDecision, applyText, isAllowed, sanitizeForPaste, keysForPrompt };
