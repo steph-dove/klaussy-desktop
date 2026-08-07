@@ -843,9 +843,18 @@ function isAgentInstance(inst) {
   return Boolean(inst && inst.alive && isAgentMode(inst.mode));
 }
 
+function notifyingAgentInstances() {
+  const out = [];
+  for (const [, inst] of instances) {
+    if (isAgentInstance(inst) && inst.notifyWebhookEnabled === true) out.push(inst);
+  }
+  return out.sort((a, b) => (b.spawnTime || 0) - (a.spawnTime || 0));
+}
+
 module.exports = {
   instances,
   isAgentInstance,
+  notifyingAgentInstances,
   stripAnsi,
   APPROVAL_PROMPT_PATTERNS,
   ROLLING_BUFFER_SIZE,

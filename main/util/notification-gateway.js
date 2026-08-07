@@ -282,6 +282,18 @@ function startInboundSockets() {
 // exercises the outbound webhook.
 const _socketStatus = { slack: null, discord: null };
 
+// The message map lives in memory, so a restart loses it; dropping what someone
+// typed is worse than answering the only session that could have meant it.
+function fallbackTask() {
+  try {
+    const { notifyingAgentInstances } = require('../state/instances');
+    const live = notifyingAgentInstances();
+    if (live.length === 1) return { taskId: live[0].id };
+    if (live.length > 1) return { ambiguous: live.length };
+  } catch { /* instances unavailable */ }
+  return {};
+}
+
 function getSocketStatus() {
   const cfg = getNotificationConfig();
   return {
@@ -334,9 +346,18 @@ function handleSlackFrame(parsed) {
   }
 
   if (parsed.kind === 'message' && parsed.threadTs) {
-    const taskId = threads.taskForSlackThread(parsed.threadTs)
+    let taskId = threads.taskForSlackThread(parsed.threadTs)
       || threads.taskForMessage(parsed.threadTs);
-    if (!taskId) return; // not ours
+    if (!taskId) {
+      const fb = fallbackTask();
+      if (fb.ambiguous) {
+        replyInSlackThread(cfg, parsed.channel, parsed.threadTs,
+          `${fb.ambiguous} sessions are running — reply in the one you mean.`);
+        return;
+      }
+      if (!fb.taskId) return;
+      taskId = fb.taskId;
+    }
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     // Silence would look identical to "delivered", so say when it wasn't.
     if (!res.ok) replyInSlackThread(cfg, parsed.channel, parsed.threadTs, res.message);
@@ -391,9 +412,18 @@ function handleDiscordFrame(parsed) {
   // The thread the message was typed in identifies the session — no need for
   // the sender to reply to a specific alert.
   if (parsed.kind === 'message') {
-    const taskId = threads.taskForDiscordThread(parsed.channel)
+    let taskId = threads.taskForDiscordThread(parsed.channel)
       || threads.taskForMessage(parsed.referencedMessageId);
-    if (!taskId) return; // not ours
+    if (!taskId) {
+      const fb = fallbackTask();
+      if (fb.ambiguous) {
+        replyInDiscordChannel(cfg, parsed.channel, parsed.messageId,
+          `${fb.ambiguous} sessions are running — reply in the one you mean.`);
+        return;
+      }
+      if (!fb.taskId) return; // nothing is listening
+      taskId = fb.taskId;
+    }
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     if (!res.ok) replyInDiscordChannel(cfg, parsed.channel, parsed.messageId, res.message);
   }

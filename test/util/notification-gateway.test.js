@@ -264,3 +264,48 @@ test('buttons only go to the platform that can hear them', async () => {
     await srv.close();
   }
 });
+
+// A restart empties the message map, which is why an unmatched reply is delivered.
+test('a reply matching nothing still reaches the only live session', async () => {
+  const { instances } = require('../../main/state/instances');
+  const threads = require('../../main/util/session-threads');
+  threads._reset();
+  const written = [];
+  instances.set(8801, {
+    id: 8801, name: 't', alive: true, mode: 'claude', originalMode: 'claude',
+    notifyWebhookEnabled: true, spawnTime: 1, pty: { write: (d) => written.push(d) },
+  });
+  try {
+    saveConfig({ notificationGateway: { allowList: ['U1'] } });
+    await flushSaveConfig();
+    gateway.handleDiscordFrame({
+      kind: 'message', text: 'give me a new one', userId: 'U1',
+      channel: 'unknown-channel', messageId: 'm9', referencedMessageId: 'never-seen',
+    });
+    assert.ok(written.join('').includes('give me a new one'),
+      'the reply reached the agent despite matching no thread or message');
+  } finally {
+    instances.delete(8801);
+  }
+});
+
+test('with two sessions running it asks rather than guessing', () => {
+  const { instances } = require('../../main/state/instances');
+  const written = [];
+  for (const id of [8802, 8803]) {
+    instances.set(id, {
+      id, name: 't' + id, alive: true, mode: 'claude', originalMode: 'claude',
+      notifyWebhookEnabled: true, spawnTime: id, pty: { write: (d) => written.push(d) },
+    });
+  }
+  try {
+    gateway.handleDiscordFrame({
+      kind: 'message', text: 'which one', userId: 'U1',
+      channel: 'unknown', messageId: 'm', referencedMessageId: 'none',
+    });
+    assert.deepEqual(written, [], 'ambiguity is never resolved by picking one');
+  } finally {
+    instances.delete(8802);
+    instances.delete(8803);
+  }
+});
