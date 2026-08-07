@@ -8,6 +8,9 @@ const CHROME_PATTERNS = [
   /^\s*[✶✳✻✽✢⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/, // spinner frames
   /·\s*[↓↑]\s*[\d.]+\s*tokens?/i, // "(8s · ↓425 tokens)"
   /^\s*\?\s*for shortcuts/i,
+  /^\s*[⋮│├└]\s*$/, // a step gutter with nothing beside it
+  /^\s*(└\s*)?Tip: /i,
+  /^\s*⋮?\s*Working\.{2,}\s*$/i,
   /^\s*❯\s*$/, // the empty input box
   /^\s*running stop hook/i,
   /^\s*\d+\s*$/, // stray counter frames like "✳50" once the glyph is gone
@@ -29,7 +32,8 @@ function joinCharacterRuns(lines) {
     run = [];
   };
   for (const line of lines) {
-    if (line.trim().length === 1) run.push(line.trim());
+    // Letters and digits only: stitching gutter glyphs invents words nobody typed.
+    if (/^[\p{L}\p{N}]$/u.test(line.trim())) run.push(line.trim());
     else { flush(); out.push(line); }
   }
   flush();
@@ -41,13 +45,22 @@ function cleanExcerpt(text) {
     // A bare \r rewrites the current line; keep only what ended up there.
     .replace(/\r(?!\n)/g, '\n')
     .split('\n')
-    .map((l) => l.replace(/\s+$/, ''))
-    .filter((l) => !isChrome(l));
+    .map((l) => l.replace(/\s+$/, ''));
 
   const joined = joinCharacterRuns(lines);
 
-  const out = [];
+  // Must run before chrome removal: a growing label ("Wo", "Wor", "Work") only
+  // reaches the form chrome recognises at the end of the chain.
+  const grown = [];
   for (const line of joined) {
+    const prev = grown.length ? grown[grown.length - 1] : '';
+    if (prev && prev.trim() && line.trim().startsWith(prev.trim())) grown.pop();
+    grown.push(line);
+  }
+
+  const out = [];
+  for (const line of grown) {
+    if (isChrome(line)) continue;
     // A repaint emits the same line many times over.
     if (out.length && out[out.length - 1] === line) continue;
     if (!line.trim() && (!out.length || !out[out.length - 1].trim())) continue;

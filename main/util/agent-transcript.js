@@ -173,17 +173,24 @@ function antigravityWorkspace(file) {
 function findAntigravityConversation(worktreePath, sinceMs) {
   let entries = [];
   try { entries = fs.readdirSync(AGY_DIR); } catch { return ''; }
-  let best = null;
+  let matched = null;
+  let newest = null;
   for (const name of entries) {
     if (!name.endsWith('.db')) continue;
     const full = path.join(AGY_DIR, name);
     let st;
     try { st = fs.statSync(full); } catch { continue; }
+    // Only conversations touched since this session started can be its own.
     if (sinceMs && st.mtimeMs < sinceMs) continue;
-    if (best && st.mtimeMs <= best.mtimeMs) continue;
-    if (antigravityWorkspace(full) === worktreePath) best = { file: full, mtimeMs: st.mtimeMs };
+    if (!newest || st.mtimeMs > newest.mtimeMs) newest = { file: full, mtimeMs: st.mtimeMs };
+    if (antigravityWorkspace(full) === worktreePath
+      && (!matched || st.mtimeMs > matched.mtimeMs)) {
+      matched = { file: full, mtimeMs: st.mtimeMs };
+    }
   }
-  return best ? best.file : '';
+  // A conversation only records its workspace once it settles, so a live one has
+  // none to match on — hence the fallback to the newest touched since we spawned.
+  return (matched || newest || {}).file || '';
 }
 
 // The cursor is the last step index read, since rows are appended in order.

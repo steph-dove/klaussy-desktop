@@ -78,3 +78,31 @@ test('real output is activity and starts a new quiet episode', () => {
   assert.equal(isChromeOnly('Here is the answer you asked for.'), false);
   assert.equal(isChromeOnly('Done.\n✶ Perambulating… (1s · ↓5 tokens)'), false);
 });
+
+// Verbatim from a live Antigravity session, whose spinner label is retyped a
+// character at a time.
+test('a label typed out one character at a time collapses to nothing', () => {
+  const raw = [
+    'The :root default in renderer/styles/01-base.css,',
+    '⋮ Working...',
+    '└ Tip: Use /cs to search in your codebase.',
+    '⋮', '⋮', '⋮',
+    '⋮ Wo', '⋮ Wor', '⋮ Work', '⋮ Worki', '⋮ Working...',
+  ].join('\n');
+  const out = cleanExcerpt(raw);
+  assert.match(out, /:root default/, 'the real line survives');
+  assert.doesNotMatch(out, /Wo\b|Wor\b|Worki\b/, 'no growth stubs');
+  assert.doesNotMatch(out, /Tip:/, 'the hint line is chrome');
+  assert.doesNotMatch(out, /⋮/, 'bare gutter marks are chrome');
+});
+
+test('the final form of a grown label is what gets recognised as chrome', () => {
+  // Collapses to "Working...", which the chrome rules then remove entirely.
+  assert.equal(cleanExcerpt('Wo\nWor\nWork\nWorking...'), '');
+  assert.equal(cleanExcerpt('Fi\nFini\nFinished the refactor'), 'Finished the refactor');
+});
+
+test('gutter marks are never stitched into words', () => {
+  assert.doesNotMatch(cleanExcerpt('>\n⋮\n⋮\n⋮'), />⋮/);
+  assert.equal(cleanExcerpt('y\ne\ns'), 'yes');
+});
