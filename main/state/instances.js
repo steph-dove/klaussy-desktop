@@ -255,7 +255,14 @@ function stripAnsi(str) {
     // Cursor-forward is how a TUI lays out columns; dropping it with the rest of
     // the escapes ran words together ("1.Yes"), which then matched nothing.
     .replace(/\x1b\[(\d*)C/g, (_m, n) => ' '.repeat(Math.min(parseInt(n || '1', 10), 80)))
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
+    // OSC (window title and friends), ended by BEL or ST.
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    // Full CSI: parameter bytes are 0x30-0x3F, including the '?' of private
+    // modes like ESC[?25l, which a digits-only class left as literal text.
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    // Charset selection and the single-character escapes a TUI emits.
+    .replace(/\x1b[()][0-9A-B]/g, '')
+    .replace(/\x1b[=>78MENOc]/g, '');
 }
 
 // Best-effort: pull the tool awaiting authorization out of an approval prompt
@@ -832,6 +839,7 @@ function isAgentInstance(inst) {
 module.exports = {
   instances,
   isAgentInstance,
+  stripAnsi,
   APPROVAL_PROMPT_PATTERNS,
   ROLLING_BUFFER_SIZE,
   reclaimOrphanedTasks,
