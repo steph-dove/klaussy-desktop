@@ -24,6 +24,22 @@ function loadConfig() {
 // `saveConfig` has ~64 call sites including a 10s auto-save timer, prefs
 // changes, PR-review cache writes, and notify-pref updates. Previously this was
 // read-modify-write into the final path with no locking: two overlapping calls
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+// Merge one level rather than replacing: a writer that never mentions a nested
+// object should not wipe the fields it doesn't know about.
+function mergeConfig(existing, incoming) {
+  const out = { ...existing };
+  for (const [key, value] of Object.entries(incoming)) {
+    out[key] = (isPlainObject(value) && isPlainObject(existing[key]))
+      ? { ...existing[key], ...value }
+      : value;
+  }
+  return out;
+}
+
 let _saveConfigQueue = Promise.resolve();
 function saveConfig(config) {
   _saveConfigQueue = _saveConfigQueue.then(() => {
@@ -32,7 +48,7 @@ function saveConfig(config) {
       let merged;
       try {
         const existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        merged = Object.assign(existing, config);
+        merged = mergeConfig(existing, config);
       } catch {
         merged = config;
       }

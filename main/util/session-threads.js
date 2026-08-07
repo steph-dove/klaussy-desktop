@@ -12,6 +12,22 @@ const _sessions = new Map();
 const _slackThreadToTask = new Map();
 const _discordThreadToTask = new Map();
 const _pending = new Map();
+// Message id -> task, so replying to any alert reaches its session even when no
+// thread exists (thread creation needs a permission the bot may not have).
+const _messageToTask = new Map();
+const MAX_TRACKED_MESSAGES = 300;
+
+function rememberMessage(messageId, taskId) {
+  if (!messageId) return;
+  _messageToTask.set(String(messageId), String(taskId));
+  if (_messageToTask.size > MAX_TRACKED_MESSAGES) {
+    _messageToTask.delete(_messageToTask.keys().next().value);
+  }
+}
+
+function taskForMessage(messageId) {
+  return _messageToTask.get(String(messageId));
+}
 
 function sessionLabel(event) {
   const dir = event.workspacePath ? path.basename(event.workspacePath) : '';
@@ -114,7 +130,10 @@ async function ensureDiscordThread(cfg, event) {
         },
       );
       if (!threadRes.ok) {
-        console.error('[session-threads] discord thread failed: HTTP', threadRes.status);
+        console.error('[session-threads] discord thread failed: HTTP', threadRes.status,
+          threadRes.status === 403
+            ? '— the bot lacks Create Public Threads; re-invite with permissions=292057844736'
+            : '');
         return '';
       }
       const thread = await threadRes.json();
@@ -135,10 +154,14 @@ function forgetTask(taskId) {
   if (!entry) return;
   if (entry.slackTs) _slackThreadToTask.delete(String(entry.slackTs));
   if (entry.discordThreadId) _discordThreadToTask.delete(String(entry.discordThreadId));
+  for (const [messageId, id] of _messageToTask) {
+    if (id === key) _messageToTask.delete(messageId);
+  }
   _sessions.delete(key);
 }
 
 function _reset() {
+  _messageToTask.clear();
   _sessions.clear();
   _slackThreadToTask.clear();
   _discordThreadToTask.clear();
@@ -146,6 +169,8 @@ function _reset() {
 }
 
 module.exports = {
+  rememberMessage,
+  taskForMessage,
   ensureSlackThread,
   ensureDiscordThread,
   taskForSlackThread,

@@ -143,7 +143,13 @@ async function dispatchEvent(event, cfg) {
   } else if (cfg.discordWebhookUrl) {
     jobs.push(safePost('discord', cfg.discordWebhookUrl, formatDiscord(discordEvent)));
   }
-  return Promise.all(jobs);
+  const results = await Promise.all(jobs);
+  // Remember what was posted so a reply to it reaches this session even when no
+  // thread exists to type in.
+  for (const r of results) {
+    if (r && r.ok && event.containerId) threads.rememberMessage(r.ts || r.messageId, event.containerId);
+  }
+  return results;
 }
 
 // chat.postMessage instead of the webhook: it can post into the session's
@@ -328,8 +334,9 @@ function handleSlackFrame(parsed) {
   }
 
   if (parsed.kind === 'message' && parsed.threadTs) {
-    const taskId = threads.taskForSlackThread(parsed.threadTs);
-    if (!taskId) return; // a thread we don't own
+    const taskId = threads.taskForSlackThread(parsed.threadTs)
+      || threads.taskForMessage(parsed.threadTs);
+    if (!taskId) return; // not ours
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     // Silence would look identical to "delivered", so say when it wasn't.
     if (!res.ok) replyInSlackThread(cfg, parsed.channel, parsed.threadTs, res.message);
@@ -384,8 +391,9 @@ function handleDiscordFrame(parsed) {
   // The thread the message was typed in identifies the session — no need for
   // the sender to reply to a specific alert.
   if (parsed.kind === 'message') {
-    const taskId = threads.taskForDiscordThread(parsed.channel);
-    if (!taskId) return; // a channel/thread we don't own
+    const taskId = threads.taskForDiscordThread(parsed.channel)
+      || threads.taskForMessage(parsed.referencedMessageId);
+    if (!taskId) return; // not ours
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     if (!res.ok) replyInDiscordChannel(cfg, parsed.channel, parsed.messageId, res.message);
   }

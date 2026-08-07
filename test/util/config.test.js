@@ -266,7 +266,9 @@ test('a partial save leaves other keys alone', async () => {
     'an unrelated writer must not revert credentials');
 });
 
-test('saveConfig replaces nested objects rather than merging them', async () => {
+// Callers pass whole snapshots and the write is queued, so replacing a nested
+// object let a stale save revert credentials typed in between.
+test('saveConfig merges nested objects instead of replacing them', async () => {
   const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
   saveConfig({ notificationGateway: { discordBotToken: 'a', discordChannel: 'c' } });
   await flushSaveConfig();
@@ -275,6 +277,35 @@ test('saveConfig replaces nested objects rather than merging them', async () => 
   await flushSaveConfig();
 
   const ng = loadConfig().notificationGateway;
-  assert.equal(ng.discordBotToken, 'b');
-  assert.equal(ng.discordChannel, undefined, 'the sibling key went with it');
+  assert.equal(ng.discordBotToken, 'b', 'the written field updates');
+  assert.equal(ng.discordChannel, 'c', 'its siblings survive');
+});
+
+// Merging protects what a writer never mentions, not a field it explicitly
+// carries a stale value for — hence saveSessions now passes only its own keys.
+test('merging protects keys a writer never mentions', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { discordBotToken: 'live', discordChannel: 'c' } });
+  await flushSaveConfig();
+
+  saveConfig({ savedSessions: ['tick'] });
+  await flushSaveConfig();
+
+  assert.equal(loadConfig().notificationGateway.discordBotToken, 'live');
+
+  saveConfig({ notificationGateway: { allowList: ['U1'] } });
+  await flushSaveConfig();
+  const ng = loadConfig().notificationGateway;
+  assert.equal(ng.discordBotToken, 'live', 'untouched by an unrelated field');
+  assert.deepEqual(ng.allowList, ['U1']);
+});
+
+// Arrays are values, not things to merge: appending would be surprising.
+test('arrays are replaced wholesale', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { allowList: ['U1', 'U2'] } });
+  await flushSaveConfig();
+  saveConfig({ notificationGateway: { allowList: ['U3'] } });
+  await flushSaveConfig();
+  assert.deepEqual(loadConfig().notificationGateway.allowList, ['U3']);
 });
