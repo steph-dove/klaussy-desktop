@@ -121,3 +121,17 @@ test('an event with no session id gets no thread', async () => {
   assert.equal(await threads.ensureSlackThread(CFG, { agentName: 'X' }), '');
   assert.equal(await threads.ensureDiscordThread(CFG, { agentName: 'X' }), '');
 });
+
+// A rejection here used to reject the whole dispatch, taking the Discord post
+// down with it: being offline should cost one thread, not every alert.
+test('a network failure opening a slack thread does not sink the dispatch', async () => {
+  threads._reset();
+  const real = global.fetch;
+  global.fetch = async () => { throw new Error('getaddrinfo ENOTFOUND slack.com'); };
+  try {
+    const ts = await threads.ensureSlackThread(CFG, EVENT);
+    assert.equal(ts, '', 'resolves empty so the caller posts flat');
+  } finally {
+    global.fetch = real;
+  }
+});

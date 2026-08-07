@@ -86,7 +86,15 @@ function installForWorktree(worktreePath) {
     fs.mkdirSync(dir, { recursive: true });
 
     let settings = {};
-    try { settings = JSON.parse(fs.readFileSync(file, 'utf8')); } catch { /* new file */ }
+    try {
+      settings = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch (err) {
+      // Treating an unreadable file as empty would rewrite it as hooks alone,
+      // silently discarding permissions and anything else the user keeps there.
+      if (err.code !== 'ENOENT') {
+        return { ok: false, error: `refusing to overwrite ${file}: ${err.message}` };
+      }
+    }
     if (!settings.hooks || typeof settings.hooks !== 'object') settings.hooks = {};
 
     for (const event of HOOK_EVENTS) {

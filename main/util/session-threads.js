@@ -75,17 +75,24 @@ async function ensureSlackThread(cfg, event) {
   return once('slack:' + taskId, async () => {
     const existing = entryFor(taskId).slackTs;
     if (existing) return existing;
-    const body = await slackPost(cfg, {
-      channel: cfg.slackChannel,
-      text: `🧵 ${sessionLabel(event)}`,
-    });
-    if (!body.ok || !body.ts) {
-      console.error('[session-threads] slack parent failed:', body.error || 'no ts');
+    try {
+      const body = await slackPost(cfg, {
+        channel: cfg.slackChannel,
+        text: `🧵 ${sessionLabel(event)}`,
+      });
+      if (!body.ok || !body.ts) {
+        console.error('[session-threads] slack parent failed:', body.error || 'no ts');
+        return '';
+      }
+      entryFor(taskId).slackTs = body.ts;
+      _slackThreadToTask.set(String(body.ts), taskId);
+      return body.ts;
+    } catch (err) {
+      // A rejection here would reject the whole dispatch, taking the Discord
+      // post down with it — offline should cost one thread, not every alert.
+      console.error('[session-threads] slack parent failed:', err.message);
       return '';
     }
-    entryFor(taskId).slackTs = body.ts;
-    _slackThreadToTask.set(String(body.ts), taskId);
-    return body.ts;
   });
 }
 

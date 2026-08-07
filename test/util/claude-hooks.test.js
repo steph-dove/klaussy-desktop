@@ -88,3 +88,18 @@ test('the client script exits quietly rather than wedging the agent', () => {
   assert.match(src, /process\.exit\(0\)/, 'never signals failure to Claude');
   assert.match(src, /setTimeout/, 'never blocks indefinitely');
 });
+
+// Treating an unreadable file as empty would rewrite it as hooks alone, losing
+// permissions and anything else the user keeps there.
+test('a malformed settings file is left alone rather than replaced', () => {
+  const wt = tmpWorktree();
+  const dir = path.join(wt, '.claude');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'settings.local.json');
+  fs.writeFileSync(file, '{ "permissions": { "allow": ["Bash"] }, oops');
+
+  const r = hooks.installForWorktree(wt);
+  assert.equal(r.ok, false, 'reports rather than clobbering');
+  assert.match(r.error, /refusing to overwrite/);
+  assert.match(fs.readFileSync(file, 'utf8'), /oops/, 'the file is untouched');
+});
