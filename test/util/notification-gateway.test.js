@@ -107,22 +107,27 @@ test('dispatchEvent posts a formatted approval block to Slack and Discord', asyn
 
 // Verification Plan, Test Case 3: final exit states dispatch completion /
 // failure with truncated logs.
-test('dispatchEvent sends completion and failure with truncated logs', async () => {
+test('an ended session is announced without a screen dump', async () => {
   const srv = makeCaptureServer();
   const base = await srv.start();
   try {
-    const longLog = 'L'.repeat(5000) + 'END_OF_LOG';
     await gateway.dispatchEvent({
-      type: EVENT_TYPES.FAILED, containerId: '3', workspacePath: '/w',
-      agentName: 'Claude', exitCode: 1, logsTail: longLog,
+      type: EVENT_TYPES.COMPLETED,
+      containerId: '3',
+      sessionName: 'my-task',
+      workspacePath: '/work/x',
+      agentName: 'Claude',
+      exitCode: 0,
+      logsTail: 'ESC soup \u001b[?25h and repaint noise',
+      sessionId: 'abc-123',
+      resumeCommand: 'claude --resume abc-123',
+      resumeExact: true,
     }, cfg(base));
-
     const slack = await srv.waitFor('/slack');
     const flat = JSON.stringify(slack.body);
-    assert.match(flat, /failed/i);
-    assert.match(flat, /END_OF_LOG/, 'keeps the tail of the log');
-    assert.match(flat, /truncated/i, 'marks truncation');
-    assert.ok(flat.length < longLog.length, 'payload is smaller than the raw log');
+    assert.match(flat, /my-task/, 'names the session');
+    assert.match(flat, /claude --resume abc-123/, 'says how to resume it');
+    assert.doesNotMatch(flat, /repaint noise/, 'the mirror already delivered the session');
   } finally {
     await srv.close();
   }

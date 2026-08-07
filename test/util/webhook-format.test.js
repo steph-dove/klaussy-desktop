@@ -95,7 +95,8 @@ test('a very long tool name never overflows the slack header limit', () => {
 });
 
 test('triple backticks in logs cannot break the code fence', () => {
-  const evt = { ...COMPLETED, logsTail: 'before ``` after' };
+  // An approval still carries its screen; an ended session deliberately doesn't.
+  const evt = { ...APPROVAL, logsTail: 'before ``` after' };
   // The log section is the block whose text is fenced with ```.
   const section = formatSlack(evt).blocks.find(
     (b) => b.text && typeof b.text.text === 'string' && b.text.text.startsWith('```'),

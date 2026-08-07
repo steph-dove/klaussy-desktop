@@ -21,6 +21,10 @@ const MAX_OPTIONS = 5;
 // numbered list selectable rather than prose.
 const SELECTION_FOOTER = /(enter to select|esc to cancel|↑\/↓)/i;
 const MENU_LOOKBACK_LINES = 30;
+// A repaint can lay out columns with cursor moves rather than spaces, so the
+// space is optional; the label may not start with a digit, or "1.5 seconds"
+// would read as option 1.
+const OPTION_LINE = /^\s*[❯>»*]?\s*(\d{1,2})[.)]\s*(?!\d)(\S.*)$/;
 
 function footerLines(tail) {
   const lines = String(tail || '').split('\n');
@@ -44,6 +48,28 @@ function menuRegions(tail) {
   return at.map((i) => lines.slice(Math.max(0, i - MENU_LOOKBACK_LINES), i));
 }
 
+// The prose directly above a menu's first option, sent instead of the whole
+// screen, which the mirrored turn already covered.
+function parsePromptQuestion(tail) {
+  for (const region of menuRegions(tail)) {
+    const firstOption = region.findIndex((l) => OPTION_LINE.test(l));
+    if (firstOption <= 0) continue;
+    const lines = [];
+    for (let i = firstOption - 1; i >= 0 && lines.length < 4; i--) {
+      const line = region[i].trim();
+      if (!line) { if (lines.length) break; continue; }
+      // A rule or box edge is decoration, not the question.
+      if (/^[─━—=_.·\s]+$/.test(line)) { if (lines.length) break; continue; }
+      // A glyph-led label ("□ Next step") is the TUI naming its own panel; the
+      // question sits below it.
+      if (/^[□▪◆●○✱⏺*]\s/.test(line)) { if (lines.length) break; continue; }
+      lines.unshift(line);
+    }
+    if (lines.length) return lines.join(' ').slice(0, 300);
+  }
+  return '';
+}
+
 // Only option-shaped lines count, so numbered prose doesn't become buttons.
 function parsePromptOptions(tail) {
   for (const region of menuRegions(tail)) {
@@ -56,10 +82,7 @@ function parsePromptOptions(tail) {
 function parseRegion(region) {
   const seen = new Map();
   for (const line of region) {
-    // A repaint can lay out columns with cursor moves rather than spaces, so the
-    // space is optional; the label may not start with a digit, or "1.5 seconds"
-    // would read as option 1.
-    const m = line.match(/^\s*[❯>»*]?\s*(\d{1,2})[.)]\s*(?!\d)(\S.*)$/);
+    const m = line.match(OPTION_LINE);
     if (!m) continue;
     const key = m[1];
     const label = m[2].trim().replace(/\s+/g, ' ');
@@ -198,5 +221,5 @@ function applyText({ taskId, text, userId, allowList }) {
 module.exports = {
   applyDecision, applyChoice, applyText,
   isAllowed, sanitizeForPaste, keysForPrompt, parsePromptOptions, isMultiSelect,
-  hasSelectionFooter, MAX_OPTIONS,
+  hasSelectionFooter, parsePromptQuestion, MAX_OPTIONS,
 };

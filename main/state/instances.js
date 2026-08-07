@@ -212,6 +212,21 @@ function staleAfterMs() {
   return _staleAfterMs;
 }
 
+// A Klaussy launched from inside a Claude Code session inherits that session's
+// markers, and a child that sees them turns transcript saving off — costing the
+// session both its resume id and its readable history.
+const INHERITED_SESSION_MARKERS = [
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+];
+
+function agentSpawnEnv() {
+  const env = { ...process.env };
+  for (const key of INHERITED_SESSION_MARKERS) delete env[key];
+  return env;
+}
+
 // Prefer the agent's own session store; a screen scrape has to guess at redraws.
 function newAgentSpeech(inst) {
   const providerId = isAgentMode(inst.originalMode) ? inst.originalMode : inst.mode;
@@ -221,7 +236,9 @@ function newAgentSpeech(inst) {
     }
     const read = agentTranscript.readNewMessages(providerId, {
       worktreePath: inst.worktreePath,
-      sessionId: inst.claudeSessionId,
+      // claudeSessionId is only filled in by the 10s session sweep, so a fresh
+      // session would otherwise read nothing and fall back to the screen.
+      sessionId: inst.claudeSessionId || findLatestSessionId(inst.worktreePath),
       transcriptFile: inst.codexRollout,
       cursor: inst.transcriptCursor || 0,
     });
@@ -531,7 +548,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     cols: 120,
     rows: 30,
     cwd: worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
+    env: { ...agentSpawnEnv(), TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to

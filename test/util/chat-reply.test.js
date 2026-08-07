@@ -329,3 +329,25 @@ test('a selection prompt is recognised as one even when unparsable', () => {
   assert.equal(hasSelectionFooter('whatever\nEnter to select · Esc to cancel'), true);
   assert.equal(hasSelectionFooter('Overwrite? (y/n)'), false);
 });
+
+// The approval alert carries the question, not the screen it came from — the
+// mirrored turn already delivered that, which is what produced two messages.
+test('the question is read off a menu, without the TUI panel label', () => {
+  const { parsePromptQuestion } = require('../../main/util/chat-reply');
+  const screen = [
+    '□ Next step',
+    'You have uncommitted work. What should I do with it?',
+    '❯ 1. Review the diff first',
+    '  2. Commit and open a PR',
+    'Enter to select · Esc to cancel',
+  ].join('\n');
+  const q = parsePromptQuestion(screen);
+  assert.equal(q, 'You have uncommitted work. What should I do with it?');
+  assert.doesNotMatch(q, /Next step/, 'the panel label is chrome');
+});
+
+test('a prompt with no question above its options yields nothing', () => {
+  const { parsePromptQuestion } = require('../../main/util/chat-reply');
+  assert.equal(parsePromptQuestion('1. Yes\n2. No\nEnter to select'), '');
+  assert.equal(parsePromptQuestion('no menu here'), '');
+});

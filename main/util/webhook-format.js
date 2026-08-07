@@ -54,9 +54,12 @@ function agentLabel(event) {
 
 // Only for a session that has actually ended — on an approval prompt the agent
 // is still alive and waiting, so restart steps would misrepresent it.
+function ended(event) {
+  return event.type === EVENT_TYPES.COMPLETED || event.type === EVENT_TYPES.FAILED;
+}
+
 function restartSteps(event) {
-  const ended = event.type === EVENT_TYPES.COMPLETED || event.type === EVENT_TYPES.FAILED;
-  if (!ended || !event.resumeCommand) return '';
+  if (!ended(event) || !event.resumeCommand) return '';
   const lines = [];
   if (event.workspacePath) lines.push(`cd ${event.workspacePath}`);
   lines.push(event.resumeCommand);
@@ -157,7 +160,12 @@ function formatSlack(event) {
     }
   }
 
-  const logs = truncateLogs(event.logsTail);
+  if (event.promptQuestion) {
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: fenceSafe(event.promptQuestion) } });
+  }
+  // Only when there is nothing better to show: an ended session was already
+  // mirrored, and a parsed question beats the screen it came from.
+  const logs = (ended(event) || event.promptQuestion) ? '' : truncateLogs(event.logsTail);
   if (logs) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '```' + fenceSafe(logs) + '```' } });
 
   const steps = restartSteps(event);
@@ -196,7 +204,8 @@ function formatDiscord(event) {
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && !interactive) {
     parts.push('Respond in Klaussy to **Approve** or **Reject** this step.');
   }
-  const logs = truncateLogs(event.logsTail);
+  if (event.promptQuestion) parts.push(fenceSafe(event.promptQuestion));
+  const logs = (ended(event) || event.promptQuestion) ? '' : truncateLogs(event.logsTail);
   if (logs) parts.push('```\n' + fenceSafe(logs) + '\n```');
 
   const steps = restartSteps(event);
