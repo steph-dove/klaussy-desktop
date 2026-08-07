@@ -5,6 +5,7 @@
 
 const { EVENT_TYPES } = require('./nemesis-events');
 const { cleanExcerpt } = require('./terminal-excerpt');
+const md = require('./chat-markdown');
 
 // Slack blocks and Discord embed descriptions both have hard size limits;
 // agent log tails can be huge. Keep the last slice (the tail is where a crash
@@ -93,10 +94,11 @@ function headline(event, p) {
 function formatSlack(event) {
   // A mirrored turn is the agent talking, not an alert about it.
   if (event.type === EVENT_TYPES.MESSAGE) {
-    const body = fenceSafe(event.body || '');
+    // Not fenced: the agent wrote markdown, and a fence shows its source.
+    const body = md.forSlack(event.body);
     return {
-      text: `${event.agentName || 'Agent'}: ${body.slice(0, 120)}`,
-      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '```' + body + '```' } }],
+      text: `${event.agentName || 'Agent'}: ${body.replace(/[*_`]/g, '').slice(0, 120)}`,
+      blocks: [{ type: 'section', text: { type: 'mrkdwn', text: body } }],
     };
   }
   const p = presentation(event);
@@ -186,7 +188,7 @@ function formatSlack(event) {
 
 function formatDiscord(event) {
   if (event.type === EVENT_TYPES.MESSAGE) {
-    return { content: '```\n' + fenceSafe(event.body || '') + '\n```' };
+    return { content: md.forDiscord(event.body) };
   }
   const p = presentation(event);
   const title = cap(`${p.emoji} ${headline(event, p)}`, 256);
