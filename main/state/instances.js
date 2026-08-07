@@ -239,7 +239,8 @@ function newAgentSpeech(inst) {
       // claudeSessionId is only filled in by the 10s session sweep, so a fresh
       // session would otherwise read nothing and fall back to the screen.
       sessionId: inst.claudeSessionId || findLatestSessionId(inst.worktreePath),
-      transcriptFile: inst.codexRollout,
+      // Claude's hook hands us the exact path; codex's is resolved by cwd.
+      transcriptFile: inst.transcriptPath || inst.codexRollout,
       cursor: inst.transcriptCursor || 0,
     });
     if (read) {
@@ -655,6 +656,12 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   if (isAgentMode(mode)) {
     try { require('../util/notification-gateway').ensureStarted(); } catch (e) {
       console.warn('[notification-gateway] start failed:', e.message);
+    }
+    // Claude reports its own permission prompts and turn ends, which the
+    // terminal can only be pattern-matched for.
+    if (mode === 'claude') {
+      const r = require('../util/claude-hooks').installForWorktree(worktreePath);
+      if (!r.ok) console.warn('[claude-hook] install failed:', r.error);
     }
   }
 
