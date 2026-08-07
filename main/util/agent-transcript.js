@@ -6,6 +6,7 @@
 const fs = require('fs');
 const path = require('path');
 const { claudeProjectDir } = require('./claude-paths');
+const { stringsAt, scan } = require('./protobuf-scan');
 
 // Enough for a chat message; the caller trims further for platform limits.
 const MAX_TEXT = 4000;
@@ -129,7 +130,92 @@ function rolloutCwd(file) {
   } catch { return ''; }
 }
 
-const READERS = { claude: readClaude, codex: readCodex };
+// ---- Antigravity: ~/.gemini/antigravity-cli/conversations/<id>.db ----
+//
+// Rows are protobuf with no published schema, so this path was read off the
+// wire and can change under us; a miss falls back rather than posting whatever
+// bytes sit at that offset.
+const AGY_SPEECH_STEP = 15;
+const AGY_SPEECH_FIELD = '20.1';
+const AGY_DIR = path.join(process.env.HOME || '', '.gemini', 'antigravity-cli', 'conversations');
+
+// step_payload comes back as a Buffer, or as the byte list SQLite hands over
+// for a blob bound from JS.
+function toBuffer(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  return Buffer.from(String(value).split(',').map(Number));
+}
+
+function openDb(file) {
+  const { DatabaseSync } = require('node:sqlite');
+  return new DatabaseSync(file, { readOnly: true });
+}
+
+// The workspace a conversation belongs to, as a file:// URI in its metadata.
+function antigravityWorkspace(file) {
+  let db;
+  try {
+    db = openDb(file);
+    const row = db.prepare("select data from trajectory_metadata_blob where id='main'").get();
+    if (!row) return '';
+    for (const parts of scan(toBuffer(row.data)).values()) {
+      for (const b of parts) {
+        const s = b.toString('utf8');
+        if (s.startsWith('file://')) return decodeURIComponent(s.slice('file://'.length));
+      }
+    }
+    return '';
+  } catch { return ''; }
+  finally { if (db) try { db.close(); } catch { /* already closed */ } }
+}
+
+function findAntigravityConversation(worktreePath, sinceMs) {
+  let entries = [];
+  try { entries = fs.readdirSync(AGY_DIR); } catch { return ''; }
+  let best = null;
+  for (const name of entries) {
+    if (!name.endsWith('.db')) continue;
+    const full = path.join(AGY_DIR, name);
+    let st;
+    try { st = fs.statSync(full); } catch { continue; }
+    if (sinceMs && st.mtimeMs < sinceMs) continue;
+    if (best && st.mtimeMs <= best.mtimeMs) continue;
+    if (antigravityWorkspace(full) === worktreePath) best = { file: full, mtimeMs: st.mtimeMs };
+  }
+  return best ? best.file : '';
+}
+
+// The cursor is the last step index read, since rows are appended in order.
+function readAntigravity({ transcriptFile, cursor }) {
+  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+  let db;
+  try {
+    db = openDb(transcriptFile);
+    const rows = db.prepare(
+      'select idx, step_payload from steps where step_type = ? and idx > ? order by idx',
+    ).all(AGY_SPEECH_STEP, Number(cursor) || 0);
+
+    const parts = [];
+    let last = Number(cursor) || 0;
+    for (const row of rows) {
+      last = row.idx;
+      for (const text of stringsAt(toBuffer(row.step_payload), AGY_SPEECH_FIELD)) {
+        const t = text.trim();
+        // The same turn is stored more than once as it streams.
+        if (t && parts[parts.length - 1] !== t) parts.push(t);
+      }
+    }
+    return { text: parts.join('\n\n').slice(0, MAX_TEXT), cursor: last };
+  } catch (err) {
+    console.warn('[agent-transcript] antigravity read failed:', err.message);
+    return null;
+  } finally {
+    if (db) try { db.close(); } catch { /* already closed */ }
+  }
+}
+
+const READERS = { claude: readClaude, codex: readCodex, antigravity: readAntigravity };
 
 function hasReader(providerId) {
   return Object.prototype.hasOwnProperty.call(READERS, providerId);
@@ -153,5 +239,7 @@ module.exports = {
   hasReader,
   claudeTranscriptPath,
   findCodexRollout,
+  findAntigravityConversation,
+  antigravityWorkspace,
   MAX_TEXT,
 };

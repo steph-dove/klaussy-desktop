@@ -234,13 +234,18 @@ function newAgentSpeech(inst) {
     if (providerId === 'codex' && !inst.codexRollout) {
       inst.codexRollout = agentTranscript.findCodexRollout(inst.worktreePath, inst.spawnTime);
     }
+    // Antigravity names conversations by id, so the file is matched once per
+    // session by the workspace recorded inside it.
+    if (providerId === 'antigravity' && !inst.agyConversation) {
+      inst.agyConversation = agentTranscript.findAntigravityConversation(inst.worktreePath, inst.spawnTime);
+    }
     const read = agentTranscript.readNewMessages(providerId, {
       worktreePath: inst.worktreePath,
       // claudeSessionId is only filled in by the 10s session sweep, so a fresh
       // session would otherwise read nothing and fall back to the screen.
       sessionId: inst.claudeSessionId || findLatestSessionId(inst.worktreePath),
       // Claude's hook hands us the exact path; codex's is resolved by cwd.
-      transcriptFile: inst.transcriptPath || inst.codexRollout,
+      transcriptFile: inst.transcriptPath || inst.codexRollout || inst.agyConversation,
       cursor: inst.transcriptCursor || 0,
     });
     if (read) {
