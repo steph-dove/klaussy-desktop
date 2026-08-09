@@ -36,10 +36,13 @@ function taskForMessage(messageId) {
   return _messageToTask.get(String(messageId));
 }
 
+// Two sessions on one repo, or two agents in one session, would otherwise
+// share a thread name.
 function sessionLabel(event) {
-  const dir = event.workspacePath ? path.basename(event.workspacePath) : '';
+  const repo = event.workspacePath ? path.basename(event.workspacePath) : '';
   const agent = event.agentName || 'Agent';
-  const label = dir ? `${dir} (${agent})` : agent;
+  const where = [event.sessionBranch, repo].filter(Boolean).join(' · ');
+  const label = where ? `${where} (${agent})` : agent;
   return label.slice(0, 90); // Discord caps thread names at 100
 }
 

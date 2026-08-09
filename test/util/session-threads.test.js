@@ -10,7 +10,10 @@ const CFG = {
   discordBotToken: 'bot-x', discordChannel: 'D1',
 };
 
-const EVENT = { containerId: '7', workspacePath: '/work/auth-refactor', agentName: 'Claude' };
+const EVENT = {
+  containerId: '7', workspacePath: '/work/auth-refactor',
+  sessionBranch: 'add-oauth', agentName: 'Claude',
+};
 
 function stubFetch(handler) {
   const real = global.fetch;
@@ -24,8 +27,15 @@ function stubFetch(handler) {
 
 const okJson = (obj) => ({ ok: true, status: 200, json: async () => obj });
 
-test('sessionLabel names the worktree and agent, capped for Discord', () => {
-  assert.equal(threads.sessionLabel(EVENT), 'auth-refactor (Claude)');
+test('sessionLabel names the session, its repo and the agent, capped for Discord', () => {
+  assert.equal(threads.sessionLabel(EVENT), 'add-oauth · auth-refactor (Claude)');
+  assert.equal(threads.sessionLabel({ ...EVENT, agentName: 'Antigravity CLI' }),
+    'add-oauth · auth-refactor (Antigravity CLI)');
+  assert.equal(threads.sessionLabel({ ...EVENT, sessionBranch: 'other-work' }),
+    'other-work · auth-refactor (Claude)');
+
+  assert.equal(threads.sessionLabel({ workspacePath: '/work/solo', agentName: 'Codex' }),
+    'solo (Codex)', 'a session with no name of its own still says where it is');
   assert.equal(threads.sessionLabel({ agentName: 'Codex' }), 'Codex');
   const long = threads.sessionLabel({ workspacePath: '/w/' + 'x'.repeat(200), agentName: 'A' });
   assert.ok(long.length <= 90, 'stays under the 100-char thread name limit');
@@ -80,7 +90,7 @@ test('discord: anchor message then a thread hung off it', async () => {
     assert.equal(f.calls.length, 2);
     assert.ok(f.calls[0].url.endsWith('/channels/D1/messages'), 'anchor in the channel');
     assert.ok(f.calls[1].url.endsWith('/messages/M1/threads'), 'thread hangs off the anchor');
-    assert.equal(f.calls[1].body.name, 'auth-refactor (Claude)');
+    assert.equal(f.calls[1].body.name, 'add-oauth · auth-refactor (Claude)');
     assert.equal(threads.taskForDiscordThread('T99'), '7');
   } finally {
     f.restore();
