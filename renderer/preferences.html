@@ -635,11 +635,12 @@
         <input type="text" id="pref-discord-channel" placeholder="123456789012345678" spellcheck="false" autocomplete="off" />
       </div>
 
+      <div class="section-title" style="margin-top:14px;">Who may approve — both platforms</div>
       <div class="field field-full">
-        <label>Who may approve (user IDs, comma separated)</label>
+        <label>Slack member IDs / Discord user IDs (comma separated)</label>
         <input type="text" id="pref-notify-allowlist" placeholder="U01ABCDEFGH, 123456789012345678" spellcheck="false" autocomplete="off" />
       </div>
-      <div class="field-hint">Slack member IDs and/or Discord user IDs. Leaving this empty means nobody can approve from chat — the buttons will refuse every click.</div>
+      <div class="field-hint">Your Slack <strong>member ID</strong> (avatar → Profile → ⋯ → Copy member ID) and/or your Discord <strong>user ID</strong> (right-click your name → Copy User ID). Leaving this empty means nobody can approve from chat — the buttons will refuse every click.</div>
       <div class="claude-info" id="notify-socket-status"></div>
     </div>
 
