@@ -74,11 +74,16 @@ Continue with the app you made above.
    put it in any channel — open the channel in Slack and send `/invite @Klaussy`
    (use whatever you named the app). Without this, posting fails with
    `not_in_channel`.
-7. Copy the **channel ID** into **Slack channel**: right-click the channel →
-   **View channel details** → scroll to the bottom, where the ID reads `C0…`.
-   That's the ID, not the `#name`.
+7. Copy the **channel ID** into **Slack channel** — the ID, not the `#name`.
+   Right-click the channel in the sidebar → **Copy link**, which gives
+   `https://…/archives/C01ABCDEFGH`; the `C01ABCDEFGH` is the ID. (The channel
+   details panel also shows it at the very bottom, but not in every Slack
+   version.) A private channel may read `G0…` on older workspaces, which is
+   equally fine; a `D0…` is a DM and won't work.
 8. Get your own **member ID**: click your avatar → **Profile** → the **⋯**
-   button → **Copy member ID** (`U0…`). Put it in **Who may approve**.
+   button → **Copy member ID** (`U0…`). Put it in **Who may approve**. If that
+   menu doesn't offer it, open your profile in a browser — the URL ends in the
+   same `U0…`.
 
 Leave **Slack webhook URL** empty once the bot is set up. Klaussy prefers the
 bot whenever there is one, since a webhook cannot post into a thread.
