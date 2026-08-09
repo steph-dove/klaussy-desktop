@@ -5,17 +5,24 @@
 // is intentionally conservative: high-confidence, meaning-preserving edits
 // only. Code is never touched.
 //
+// This is a port of klaussy-agents' `src/klaussy/humanize.py`, which owns the
+// rules. Keep the two in lockstep: same patterns, same order, same tests.
+//
 // Returns the humanized string; passes non-strings through unchanged.
 
 const { execFileSync } = require('child_process');
 
-// Sentence-initial filler openers. Stripped only at the start of the text or a
-// line (so we don't cut mid-sentence), and the following word is re-capitalized.
-const OPENERS = '(?:It\'?s worth noting that|It\'?s important to note that'
-  + '|It\'?s worth mentioning that|It\'?s important to remember that'
+// Sentence-initial filler openers, stripped at the start of the text or a line
+// (so we don't cut mid-sentence), and the following word is re-capitalized.
+// Two families: chatbot "note that" scaffolding, and editorializing verdict
+// openers ("Personally", "Honestly", ...) that prime a dismissive read.
+const OPENERS = '(?:It(?:\'?s| is) worth noting that|It(?:\'?s| is) important to note that'
+  + '|It(?:\'?s| is) worth mentioning that|It(?:\'?s| is) important to remember that'
   + '|I noticed that|I wanted to point out that'
   + '|I want to (?:point out|note|mention|flag) that|Please note that'
   + '|Just to (?:note|mention)|Worth noting,?|Note that'
+  + '|Actually|Personally|Honestly|Frankly|Quite frankly|To be honest'
+  + '|In my (?:honest )?opinion|IMO|IMHO|If you ask me'
   + '|At the end of the day|Generally speaking|Now,? more than ever'
   + '|Furthermore|Moreover|Additionally|Consequently|Nevertheless|Indeed)';
 
@@ -40,40 +47,83 @@ const SCAFFOLD = '(?:Let me know if[^\\n]*|Hope (?:this|that) helps[^\\n]*'
   + '|I hope (?:this|that) helps[^\\n]*|Feel free to[^\\n]*'
   + '|Happy to help[^\\n]*|Let me know your thoughts[^\\n]*)';
 
+// Sentence-initial "Actually," is handled by the opener list; these cover the
+// mid-sentence and trailing uses. The adjective is only dropped after a
+// determiner that doesn't inflect, so "an actual bug" is left to the prompt.
+const ACTUALLY_TRAIL = /(?<=\w)[ \t]*,?[ \t]*\bactually\b(?=[ \t]*(?:[.,;:!?)\]]|$|\n))/gi;
+const ACTUALLY_MID = /(?<=\w)[ \t]+actually\b/gi;
+// "... works. Actually it does." — mid-line sentence starts, which the opener
+// list (anchored to the start of a line) never sees.
+const ACTUALLY_SENTENCE = /([.!?][ \t]+)actually\b[ \t,]*(\w)/gi;
+// The word after "actual" must be its noun: a verb, conjunction, or preposition
+// there means "the actual" was the noun ("compare the actual to the expected").
+const ACTUAL_ADJ = /\b(the|this|that|these|those|its|their|our|your|my|no|each|any|every|some|all)[ \t]+actual[ \t]+(?!(?:is|was|are|were|be|been|and|or|to|vs\.?|versus|of|in|on|at|for|with|from|than|but|so|because)\b)(?=\w)/gi;
+
+// Stiff phrasings with one short equivalent that reads the same in every
+// sentence. Anything whose replacement depends on the surrounding clause ("a
+// number of", "in terms of") stays prompt-side, where a model can judge it.
+const PHRASINGS = [
+  [/\butilize\b/gi, 'use'],
+  [/\butilizes\b/gi, 'uses'],
+  [/\butilizing\b/gi, 'using'],
+  [/\bleverage\b/gi, 'use'],
+  [/\bleverages\b/gi, 'uses'],
+  [/\bleveraging\b/gi, 'using'],
+  [/\bin order to\b/gi, 'to'],
+  [/\bcould potentially\b/gi, 'could'],
+  [/\bmay potentially\b/gi, 'may'],
+  [/\bdue to the fact that\b/gi, 'because'],
+  [/\bin the event that\b/gi, 'if'],
+  [/\bprior to\b/gi, 'before'],
+  [/\bsubsequent to\b/gi, 'after'],
+  [/\bat this point in time\b/gi, 'now'],
+  [/\bwith regards? to\b/gi, 'about'],
+  [/\b(?:is|are) able to\b/gi, 'can'],
+  [/\b(?:was|were) able to\b/gi, 'could'],
+  [/\bhas the ability to\b/gi, 'can'],
+  [/\bhave the ability to\b/gi, 'can'],
+];
+
+// Capitalize `replacement` iff `matched` was, so line-initial hits keep their capital.
+function matchCase(matched, replacement) {
+  if (matched[0] === matched[0].toUpperCase() && matched[0] !== matched[0].toLowerCase()) {
+    return replacement[0].toUpperCase() + replacement.slice(1);
+  }
+  return replacement;
+}
+
 function scrubProse(s) {
-  // Em / en dashes — the single strongest tell.
+  // Em / en dashes — the single strongest tell. A dash between two numbers is a
+  // range ("35–50 min"), so it collapses to a plain hyphen; spacing it out would
+  // read as a subtraction or a dropped clause.
+  s = s.replace(/(?<=\d)\s*[–—]\s*(?=\d)/g, '-');
   s = s.replace(/\s*—\s*/g, ', ').replace(/\s*–\s*/g, ' - ');
   // Drop overused AI emojis.
   s = s.replace(/[🚀✨🔑💡🎯😊🙏]/gu, '');
   // Drop trailing scaffolding sentences/lines.
   s = s.replace(new RegExp('(?:^|\\n)\\s*' + SCAFFOLD + '\\s*$', 'gi'), '');
-  // Strip filler openers at the start of the text or a line; recapitalize.
-  s = s.replace(new RegExp('(^|\\n)[ \\t]*' + OPENERS + '[ \\t,]+(\\w)', 'gi'),
-    function (_m, pre, ch) { return pre + ch.toUpperCase(); });
   // Drop standalone praise lines, then strip praise that leads into content.
   s = s.replace(PRAISE_LINE, '$1');
   s = s.replace(PRAISE_LEAD, function (_m, pre, ch) { return pre + ch.toUpperCase(); });
-  // Strip thanking bots followed by text; recapitalize.
+  // Drop standalone bot-thanks, then strip bot-thanks that leads into content.
+  s = s.replace(new RegExp('(^|\\n)[ \\t]*' + THANK_BOT + '[ \\t,!.?]*(?=\\n|$)', 'gi'), '$1');
   s = s.replace(new RegExp('(^|\\n)[ \\t]*' + THANK_BOT + '[ \\t,!.?]*(\\w)', 'gi'),
     function (_m, pre, ch) { return pre + ch.toUpperCase(); });
-  // Strip thanking bots at the end of a line or text.
-  s = s.replace(new RegExp('(^|\\n)[ \\t]*' + THANK_BOT + '[ \\t,!.?]*$', 'gi'), '');
-  // Strip apologies followed by text; recapitalize.
+  // Drop standalone apologies, then strip apologies that lead into content.
+  s = s.replace(new RegExp('(^|\\n)[ \\t]*' + APOLOGIES + '[ \\t,!.?]*(?=\\n|$)', 'gi'), '$1');
   s = s.replace(new RegExp('(^|\\n)[ \\t]*' + APOLOGIES + '[ \\t,!.?]*(\\w)', 'gi'),
     function (_m, pre, ch) { return pre + ch.toUpperCase(); });
-  // Strip apologies at the end of a line or text.
-  s = s.replace(new RegExp('(^|\\n)[ \\t]*' + APOLOGIES + '[ \\t,!.?]*$', 'gi'), '');
-  // Safe lexicon replacements: leverage/utilize -> use.
-  s = s.replace(/\butilize\b/gi, 'use')
-       .replace(/\butilizes\b/gi, 'uses')
-       .replace(/\butilizing\b/gi, 'using')
-       .replace(/\bleverage\b/gi, 'use')
-       .replace(/\bleverages\b/gi, 'uses')
-       .replace(/\bleveraging\b/gi, 'using');
-  // A few safe, unambiguous tightenings.
-  s = s.replace(/\bin order to\b/gi, 'to')
-    .replace(/\bcould potentially\b/gi, 'could')
-    .replace(/\bmay potentially\b/gi, 'may');
+  // Strip filler openers at the start of the text or a line; recapitalize.
+  s = s.replace(new RegExp('(^|\\n)[ \\t]*' + OPENERS + '[ \\t,]+(\\w)', 'gi'),
+    function (_m, pre, ch) { return pre + ch.toUpperCase(); });
+  // Drop "actually" (trailing first, so its comma goes with it) and "actual".
+  s = s.replace(ACTUALLY_SENTENCE, function (_m, pre, ch) { return pre + ch.toUpperCase(); });
+  s = s.replace(ACTUALLY_TRAIL, '');
+  s = s.replace(ACTUALLY_MID, '');
+  s = s.replace(ACTUAL_ADJ, function (_m, det) { return det + ' '; });
+  for (const [pattern, replacement] of PHRASINGS) {
+    s = s.replace(pattern, function (m) { return matchCase(m, replacement); });
+  }
   // Tidy whitespace introduced by the removals.
   s = s.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+(\n)/g, '$1');
   return s;
