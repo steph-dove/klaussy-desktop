@@ -265,8 +265,39 @@ test('buttons only go to the platform that can hear them', async () => {
   }
 });
 
-// A restart empties the message map, which is why an unmatched reply is delivered.
-test('a reply matching nothing still reaches the only live session', async () => {
+// A webhook cannot post into a thread and its posts carry no id to reply to, so
+// anything it sends is unanswerable. With a bot configured, a webhook url on the
+// side used to take every non-approval message down that dead end.
+test('an ordinary message goes through the bot, into its session thread', async () => {
+  threads._reset();
+  const realFetch = global.fetch;
+  const posts = [];
+  global.fetch = async (url, opts) => {
+    posts.push({ url: String(url), body: opts && opts.body ? JSON.parse(opts.body) : null });
+    if (String(url).endsWith('/threads')) return { ok: true, json: async () => ({ id: 'T5' }) };
+    return { ok: true, status: 200, json: async () => ({ id: 'M5' }) };
+  };
+  try {
+    await gateway.dispatchEvent(
+      { type: 'agent:message', containerId: '7', workspacePath: '/w/proj', agentName: 'Claude Code', body: 'Done.', notify: true },
+      cfg('', {
+        events: { completed: true, failed: true, approvalRequired: true, message: true },
+        discordInteractive: true, discordBotToken: 'bot-x', discordChannel: 'D1',
+        discordWebhookUrl: 'https://discord.com/api/webhooks/should-not-be-used',
+        slackInteractive: false, slackBotToken: '', slackChannel: '', slackWebhookUrl: '',
+      }),
+    );
+    assert.ok(!posts.some((p) => p.url.includes('/webhooks/')), 'the webhook was not used');
+    assert.ok(posts.some((p) => p.url.endsWith('/channels/T5/messages')),
+      'the message landed in the session thread');
+  } finally {
+    global.fetch = realFetch;
+  }
+});
+
+// An alert posts flat in the channel when the bot can't open threads, so a
+// channel-level reply has no thread to identify — the one live session is it.
+test('a channel reply with nothing to match reaches the only live session', async () => {
   const { instances } = require('../../main/state/instances');
   const threads = require('../../main/util/session-threads');
   threads._reset();
@@ -276,16 +307,41 @@ test('a reply matching nothing still reaches the only live session', async () =>
     notifyWebhookEnabled: true, spawnTime: 1, pty: { write: (d) => written.push(d) },
   });
   try {
-    saveConfig({ notificationGateway: { allowList: ['U1'] } });
+    saveConfig({ notificationGateway: { allowList: ['U1'], discordChannel: 'DCHAN' } });
     await flushSaveConfig();
     gateway.handleDiscordFrame({
       kind: 'message', text: 'give me a new one', userId: 'U1',
-      channel: 'unknown-channel', messageId: 'm9', referencedMessageId: 'never-seen',
+      channel: 'DCHAN', messageId: 'm9', referencedMessageId: 'never-seen',
     });
     assert.ok(written.join('').includes('give me a new one'),
       'the reply reached the agent despite matching no thread or message');
   } finally {
     instances.delete(8801);
+  }
+});
+
+// A restart empties the thread map, leaving every earlier thread unrecognised.
+// Answering them from whatever is running now types into a session that never
+// asked the question — which is what the user sees as a thread coming alive.
+test('a reply in an unrecognised thread reaches nothing', async () => {
+  const { instances } = require('../../main/state/instances');
+  const threads = require('../../main/util/session-threads');
+  threads._reset();
+  const written = [];
+  instances.set(8804, {
+    id: 8804, name: 't', alive: true, mode: 'claude', originalMode: 'claude',
+    notifyWebhookEnabled: true, spawnTime: 1, pty: { write: (d) => written.push(d) },
+  });
+  try {
+    saveConfig({ notificationGateway: { allowList: ['U1'], discordChannel: 'DCHAN' } });
+    await flushSaveConfig();
+    gateway.handleDiscordFrame({
+      kind: 'message', text: 'b', userId: 'U1',
+      channel: 'some-old-thread', messageId: 'm9', referencedMessageId: 'never-seen',
+    });
+    assert.deepEqual(written, [], 'an orphaned thread drives no session at all');
+  } finally {
+    instances.delete(8804);
   }
 });
 
@@ -301,7 +357,7 @@ test('with two sessions running it asks rather than guessing', () => {
   try {
     gateway.handleDiscordFrame({
       kind: 'message', text: 'which one', userId: 'U1',
-      channel: 'unknown', messageId: 'm', referencedMessageId: 'none',
+      channel: 'DCHAN', messageId: 'm', referencedMessageId: 'none',
     });
     assert.deepEqual(written, [], 'ambiguity is never resolved by picking one');
   } finally {

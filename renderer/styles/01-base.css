@@ -1773,7 +1773,8 @@ body.custom-titlebar #titlebar-content {
 
 /* "Open session in new window" checkbox — shown when this window already has
    open tasks; pre-checked when it's crowded (3+). */
-#window-selector {
+#window-selector,
+#resume-all-agents-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1783,10 +1784,12 @@ body.custom-titlebar #titlebar-content {
   cursor: pointer;
   user-select: none;
 }
-#window-selector:hover {
+#window-selector:hover,
+#resume-all-agents-row:hover {
   color: var(--text);
 }
-#window-selector input {
+#window-selector input,
+#resume-all-agents-row input {
   accent-color: var(--accent);
   cursor: pointer;
 }

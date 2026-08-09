@@ -2,8 +2,13 @@
 // thread you typed in, so no capped message->task map can forget an old alert.
 
 const path = require('path');
+const { loadConfig, saveConfig } = require('./config');
 
 const DISCORD_API = 'https://discord.com/api/v10';
+// A thread outlives the app that opened it, so what identifies its session must
+// too: an instance id is handed out afresh each launch, while the worktree and
+// its agent stay the same session to whoever is typing.
+const MAX_REMEMBERED_THREADS = 200;
 const THREAD_ARCHIVE_MINUTES = 1440; // 24h; a new alert un-archives it anyway
 
 // In-flight creations are kept as promises so two alerts arriving together
@@ -16,6 +21,8 @@ const _pending = new Map();
 // thread exists (thread creation needs a permission the bot may not have).
 const _messageToTask = new Map();
 const MAX_TRACKED_MESSAGES = 300;
+// Thread -> the worktree and agent it was opened for, which outlive a restart.
+const _threadOwners = new Map();
 
 function rememberMessage(messageId, taskId) {
   if (!messageId) return;
@@ -44,6 +51,66 @@ function entryFor(taskId) {
 
 function taskForSlackThread(ts) { return _slackThreadToTask.get(String(ts)); }
 function taskForDiscordThread(id) { return _discordThreadToTask.get(String(id)); }
+
+function rememberThreadOwner(threadId, event) {
+  if (!threadId || !event.workspacePath) return;
+  // Held in memory as well as on disk: saveConfig's write is queued, and a
+  // reply can arrive before it lands.
+  _threadOwners.set(String(threadId), {
+    worktreePath: event.workspacePath,
+    agentName: event.agentName || '',
+  });
+  try {
+    const config = loadConfig();
+    const kept = config.notificationThreads || {};
+    kept[String(threadId)] = {
+      worktreePath: event.workspacePath,
+      agentName: event.agentName || '',
+      at: new Date().toISOString(),
+    };
+    const ids = Object.keys(kept);
+    if (ids.length > MAX_REMEMBERED_THREADS) {
+      ids.sort((a, b) => String(kept[a].at).localeCompare(String(kept[b].at)));
+      for (const id of ids.slice(0, ids.length - MAX_REMEMBERED_THREADS)) delete kept[id];
+    }
+    config.notificationThreads = kept;
+    saveConfig(config);
+  } catch (err) {
+    console.error('[session-threads] could not record thread owner:', err.message);
+  }
+}
+
+// Reattaches a thread the running app has no memory of to whatever is now
+// running in the worktree and agent it was opened for. Returns '' when nothing
+// there matches, so the caller says so rather than answering someone else.
+function reattachThread(threadId) {
+  let record = _threadOwners.get(String(threadId));
+  if (!record) {
+    try { record = (loadConfig().notificationThreads || {})[String(threadId)]; } catch { return ''; }
+  }
+  if (!record) return '';
+  const { instances } = require('../state/instances');
+  const { isAgentMode, displayNameFor } = require('../state/ai-providers');
+  for (const [, inst] of instances) {
+    if (!inst.alive || inst.worktreePath !== record.worktreePath) continue;
+    const mode = inst.originalMode || inst.mode;
+    if (isAgentMode(mode) && displayNameFor(mode) === record.agentName) {
+      _discordThreadToTask.set(String(threadId), String(inst.id));
+      _slackThreadToTask.set(String(threadId), String(inst.id));
+      return String(inst.id);
+    }
+    // The session's other agents run as tabs on it and answer for themselves.
+    for (const sub of (inst.subTerminals || [])) {
+      if (!sub.alive || !isAgentMode(sub.mode)) continue;
+      if (displayNameFor(sub.mode) !== record.agentName) continue;
+      const id = `${inst.id}:${sub.subId}`;
+      _discordThreadToTask.set(String(threadId), id);
+      _slackThreadToTask.set(String(threadId), id);
+      return id;
+    }
+  }
+  return '';
+}
 
 function once(key, fn) {
   if (_pending.has(key)) return _pending.get(key);
@@ -86,6 +153,7 @@ async function ensureSlackThread(cfg, event) {
       }
       entryFor(taskId).slackTs = body.ts;
       _slackThreadToTask.set(String(body.ts), taskId);
+      rememberThreadOwner(body.ts, event);
       return body.ts;
     } catch (err) {
       // A rejection here would reject the whole dispatch, taking the Discord
@@ -146,6 +214,7 @@ async function ensureDiscordThread(cfg, event) {
       const thread = await threadRes.json();
       entryFor(taskId).discordThreadId = thread.id;
       _discordThreadToTask.set(String(thread.id), taskId);
+      rememberThreadOwner(thread.id, event);
       return thread.id;
     } catch (err) {
       console.error('[session-threads] discord thread failed:', err.message);
@@ -168,6 +237,7 @@ function forgetTask(taskId) {
 }
 
 function _reset() {
+  _threadOwners.clear();
   _messageToTask.clear();
   _sessions.clear();
   _slackThreadToTask.clear();
@@ -182,6 +252,7 @@ module.exports = {
   ensureDiscordThread,
   taskForSlackThread,
   taskForDiscordThread,
+  reattachThread,
   sessionLabel,
   forgetTask,
   _reset,

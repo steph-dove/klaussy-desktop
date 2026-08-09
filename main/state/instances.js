@@ -149,8 +149,12 @@ function detectClaudeSessionId(inst, claimed) {
   return files.length > 0 ? files[0].sessionId : null;
 }
 
-function findLatestSessionId(worktreePath) {
-  const files = listSessionFiles(worktreePath).sort((a, b) => b.mtime - a.mtime);
+// `sinceMs` narrows the answer to transcripts written during a given session; a
+// worktree accumulates them, and the newest overall is often an older session's.
+function findLatestSessionId(worktreePath, sinceMs) {
+  const files = listSessionFiles(worktreePath)
+    .filter((f) => !sinceMs || f.mtime >= sinceMs)
+    .sort((a, b) => b.mtime - a.mtime);
   return files.length > 0 ? files[0].sessionId : null;
 }
 
@@ -176,10 +180,10 @@ const PROMPT_PATTERNS = [
 // phrasings missed plain questions entirely.
 const APPROVAL_PROMPT_PATTERNS = [
   /Enter to select/i,
-  /Esc to cancel/i,
   /\(y\/n\)\s*$/i,
   /\(Y\/n\)\s*$/,
   /\(yes\/no\)\s*$/i,
+  /\[y\/n\]\s*$/i,
   /Do you want to proceed/i,
   /Allow\s.*\?/i,
 ];
@@ -227,33 +231,168 @@ function agentSpawnEnv() {
   return env;
 }
 
+// A conversation that has not recorded its workspace yet can only be guessed
+// at, and the newest file is often a previous session's — so the guess is
+// re-made each poll until one names this worktree.
+function bindAgyConversation(inst) {
+  if (inst.agyConversationExact) return;
+  const taken = new Set();
+  for (const other of instances.values()) {
+    if (other !== inst && other.agyConversation) taken.add(other.agyConversation);
+  }
+  const found = agentTranscript.findAntigravityConversation(inst.worktreePath, inst.spawnTime, taken);
+  if (!found.file) return;
+  inst.agyConversationExact = found.exact;
+  inst.agyConversation = found.file;
+}
+
+// Which file this session's speech is read from, resolved fresh each poll: a
+// session id can arrive late, and Antigravity only names its conversation once
+// it settles.
+function transcriptFileFor(inst, providerId) {
+  if (providerId === 'claude') {
+    // Claude Code's own hook payload carries the exact path.
+    if (inst.transcriptPath) return inst.transcriptPath;
+    // Until the 10s sweep names the session, the transcript is found by the
+    // worktree — bounded to those written since it began, or the newest is
+    // whichever agent last wrote there.
+    const sessionId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath, inst.spawnTime);
+    if (!sessionId) return '';
+    return agentTranscript.claudeTranscriptPath(inst.worktreePath, sessionId);
+  }
+  if (providerId === 'codex') {
+    if (!inst.codexRollout) {
+      inst.codexRollout = agentTranscript.findCodexRollout(inst.worktreePath, inst.spawnTime);
+    }
+    return inst.codexRollout;
+  }
+  if (providerId === 'antigravity') {
+    bindAgyConversation(inst);
+    return inst.agyConversation;
+  }
+  return '';
+}
+
+// A cursor only means something in the file it was measured in: carried over to
+// another, it reads from an arbitrary point and posts whatever follows.
+function repointTranscript(inst, file, providerId) {
+  if (file === inst.transcriptFile) return false;
+  const hadOne = !!inst.transcriptFile;
+  inst.transcriptFile = file;
+  inst.transcriptCursor = 0;
+  // Switching away from a file we were reading: what is in the new one was said
+  // to whoever was reading it before.
+  if (hadOne) return true;
+  // Claude stamps every record, so its reader drops the old ones by age and
+  // still reports the first thing this run says.
+  if (providerId === 'claude') return false;
+  return predatesSession(file, inst.spawnTime);
+}
+
+function predatesSession(file, spawnTime) {
+  if (!spawnTime) return false;
+  try { return fs.statSync(file).birthtimeMs < spawnTime; } catch { return false; }
+}
+
+// A session's second agent is a tab on the task, not an instance of its own. It
+// speaks for itself, so it mirrors for itself: its own buffer and cursor.
+function subMirrorTarget(inst, sub) {
+  if (!sub.mirror) {
+    sub.mirror = {
+      // Distinct from the task id, which keys the parent's own screen buffer.
+      id: `${inst.id}:${sub.subId}`,
+      name: sub.label || displayNameFor(sub.mode),
+      mode: sub.mode,
+      originalMode: sub.mode,
+      worktreePath: inst.worktreePath,
+      spawnTime: sub.spawnTime || Date.now(),
+      recentOutput: '',
+      alive: true,
+    };
+  }
+  return sub.mirror;
+}
+
+// The sub-terminal half of processIdleDetection: mirroring only, since the
+// desktop notifications and approval prompts belong to the task's own agent.
+function processSubOutput(inst, sub, data) {
+  if (!inst || !sub || !isAgentMode(sub.mode)) return;
+  const target = subMirrorTarget(inst, sub);
+  target.alive = sub.alive !== false;
+  target.recentOutput = (target.recentOutput + stripAnsi(data)).slice(-ROLLING_BUFFER_SIZE);
+  // The bell belongs to the session, and this tab is part of it.
+  if (inst.notifyWebhookEnabled !== true) return;
+
+  if (sub.turnTimer) clearTimeout(sub.turnTimer);
+  sub.turnTimer = setTimeout(() => {
+    if (!sub.alive) return;
+    try {
+      const body = newAgentSpeech(target);
+      if (!body) return;
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+        // Its own id, not the task's: an answer typed under what this agent
+        // said has to reach this agent, not whichever one owns the session.
+        containerId: target.id,
+        sessionName: `${inst.name} · ${target.name}`,
+        workspacePath: inst.worktreePath,
+        agentName: displayNameFor(sub.mode),
+        body,
+        ts: Date.now(),
+        notify: true,
+      });
+    } catch { /* never let a publish break the terminal path */ }
+  }, TURN_SETTLE_MS);
+  sub.turnTimer.unref?.();
+}
+
+function fileSize(file) {
+  if (!file) return 0;
+  try { return fs.statSync(file).size; } catch { return -1; }
+}
+
+// Set KLAUSSY_DEBUG_MIRROR to tell a transcript read from a screen scrape, which
+// look identical once the text reaches chat.
+function traceMirror(inst, providerId, source, text) {
+  if (!process.env.KLAUSSY_DEBUG_MIRROR) return;
+  console.warn('[mirror] ' + JSON.stringify({
+    id: inst.id,
+    mode: inst.mode,
+    originalMode: inst.originalMode,
+    providerId,
+    source,
+    file: inst.transcriptFile || '',
+    size: fileSize(inst.transcriptFile),
+    cursor: inst.transcriptCursor,
+    chars: (text || '').length,
+    head: (text || '').slice(0, 120),
+  }));
+}
+
 // Prefer the agent's own session store; a screen scrape has to guess at redraws.
 function newAgentSpeech(inst) {
   const providerId = isAgentMode(inst.originalMode) ? inst.originalMode : inst.mode;
-  if (agentTranscript.hasReader(providerId)) {
-    if (providerId === 'codex' && !inst.codexRollout) {
-      inst.codexRollout = agentTranscript.findCodexRollout(inst.worktreePath, inst.spawnTime);
-    }
-    // Antigravity names conversations by id, so the file is matched once per
-    // session by the workspace recorded inside it.
-    if (providerId === 'antigravity' && !inst.agyConversation) {
-      inst.agyConversation = agentTranscript.findAntigravityConversation(inst.worktreePath, inst.spawnTime);
-    }
+  const file = agentTranscript.hasReader(providerId) ? transcriptFileFor(inst, providerId) : '';
+  if (file) {
     const read = agentTranscript.readNewMessages(providerId, {
+      fromEnd: repointTranscript(inst, file, providerId),
       worktreePath: inst.worktreePath,
-      // claudeSessionId is only filled in by the 10s session sweep, so a fresh
-      // session would otherwise read nothing and fall back to the screen.
-      sessionId: inst.claudeSessionId || findLatestSessionId(inst.worktreePath),
-      // Claude's hook hands us the exact path; codex's is resolved by cwd.
-      transcriptFile: inst.transcriptPath || inst.codexRollout || inst.agyConversation,
+      transcriptFile: file,
       cursor: inst.transcriptCursor || 0,
+      sinceMs: inst.spawnTime,
     });
+    // A reader that answered is the whole answer. Falling through to the screen
+    // when it had nothing new posts the turn a second time, mangled by the
+    // repaint the transcript exists to avoid reading.
     if (read) {
-      inst.transcriptCursor = read.cursor;
-      return read.text;
+      if (read.cursor != null) inst.transcriptCursor = read.cursor;
+      traceMirror(inst, providerId, read.text ? 'transcript' : 'transcript-silent', read.text);
+      return read.text || '';
     }
   }
-  return takeNewOutput(inst.id, inst.recentOutput);
+  const scraped = takeNewOutput(inst.id, inst.recentOutput);
+  traceMirror(inst, providerId, 'screen', scraped);
+  return scraped;
 }
 
 function stripAnsi(str) {
@@ -370,8 +509,16 @@ function processIdleDetection(inst, data) {
   // recognising prompt shapes.
   if (inst.turnTimer) clearTimeout(inst.turnTimer);
   inst.turnTimer = setTimeout(() => {
-    if (!inst.alive || !isAgentMode(inst.mode)) return;
-    if (inst.notifyWebhookEnabled !== true) return;
+    if (!inst.alive || !isAgentMode(inst.mode)) {
+      traceMirror(inst, inst.mode, inst.alive ? 'not-an-agent' : 'not-alive', '');
+      return;
+    }
+    // The bell decides whether a turn is mirrored at all, so a silent session
+    // looks the same here as a broken one until this says which it is.
+    if (inst.notifyWebhookEnabled !== true) {
+      traceMirror(inst, inst.mode, 'bell-off', '');
+      return;
+    }
     try {
       const body = newAgentSpeech(inst);
       if (!body) return;
@@ -851,7 +998,14 @@ function isAgentInstance(inst) {
 function notifyingAgentInstances() {
   const out = [];
   for (const [, inst] of instances) {
-    if (isAgentInstance(inst) && inst.notifyWebhookEnabled === true) out.push(inst);
+    if (!inst.notifyWebhookEnabled) continue;
+    if (isAgentInstance(inst)) out.push(inst);
+    // A second agent in the session answers for itself, so it counts as its own
+    // candidate — otherwise a reply meant for it is read as unambiguous and
+    // handed to the agent that owns the task.
+    for (const sub of (inst.subTerminals || [])) {
+      if (sub.alive && isAgentMode(sub.mode) && sub.mirror) out.push(sub.mirror);
+    }
   }
   return out.sort((a, b) => (b.spawnTime || 0) - (a.spawnTime || 0));
 }
@@ -872,6 +1026,7 @@ module.exports = {
   detectClaudeSessionId,
   findLatestSessionId,
   processIdleDetection,
+  processSubOutput,
   clearIdleTimer,
   spawnInWorktree,
   convertInstanceToShell,

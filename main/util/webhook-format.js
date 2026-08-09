@@ -149,8 +149,13 @@ function formatSlack(event) {
           type: 'context',
           elements: [{ type: 'mrkdwn', text: '_More options exist — answer in Klaussy to see them all._' }],
         });
+      } else if (event.isMultiSelect) {
+        blocks.push({
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: '_Select choices by clicking buttons or reply with option numbers (e.g. 1, 2)._' }],
+        });
       }
-    } else if (event.approvalToken && !event.menuPrompt) {
+    } else if (event.approvalToken && !event.menuPrompt && !event.isMultiSelect) {
       blocks.push({
         type: 'actions',
         block_id: 'klaussy_approval',
@@ -170,7 +175,7 @@ function formatSlack(event) {
     } else {
       blocks.push({
         type: 'context',
-        elements: [{ type: 'mrkdwn', text: 'Respond in Klaussy to *Approve* or *Reject* this step.' }],
+        elements: [{ type: 'mrkdwn', text: (event.menuPrompt || event.isMultiSelect) ? 'Reply in chat with your option choice(s).' : 'Respond in Klaussy to *Approve* or *Reject* this step.' }],
       });
     }
   }
@@ -215,7 +220,10 @@ function formatDiscord(event) {
   const parts = [];
   const interactive = event.type === EVENT_TYPES.APPROVAL_REQUIRED && event.approvalToken;
   if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && !interactive) {
-    parts.push('Respond in Klaussy to **Approve** or **Reject** this step.');
+    parts.push((event.menuPrompt || event.isMultiSelect) ? 'Reply in chat with your option choice(s).' : 'Respond in Klaussy to **Approve** or **Reject** this step.');
+  }
+  if (interactive && event.isMultiSelect) {
+    parts.push('_Select choices below or reply in chat with option numbers (e.g. 1 2)._');
   }
   if (event.promptQuestion) parts.push(fenceSafe(event.promptQuestion));
   const logs = screenExcerpt(event);
@@ -242,7 +250,7 @@ function formatDiscord(event) {
         label: `${o.key}. ${o.label}`.slice(0, 80),
         custom_id: `klaussy_choice:${event.approvalToken}:${o.key}`,
       }))
-      : (event.menuPrompt ? [] : [
+      : ((event.menuPrompt || event.isMultiSelect) ? [] : [
         { type: 2, style: 3, label: 'Approve', custom_id: 'klaussy_approve:' + event.approvalToken },
         { type: 2, style: 4, label: 'Reject', custom_id: 'klaussy_reject:' + event.approvalToken },
       ]);

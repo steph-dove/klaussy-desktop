@@ -19,12 +19,12 @@ const MAX_OPTIONS = 5;
 
 // A TUI prints this under a selection menu; its presence is what makes a
 // numbered list selectable rather than prose.
-const SELECTION_FOOTER = /(enter to select|esc to cancel|↑\/↓)/i;
+const SELECTION_FOOTER = /(enter to select|esc to cancel|↑\/↓|select (one|an|options|choices|multiple|all|features|several)|choice|choose|input choice|\[\d+-\d+\]|\(select)/i;
 const MENU_LOOKBACK_LINES = 30;
 // A repaint can lay out columns with cursor moves rather than spaces, so the
 // space is optional; the label may not start with a digit, or "1.5 seconds"
 // would read as option 1.
-const OPTION_LINE = /^\s*[❯>»*]?\s*(\d{1,2})[.)]\s*(?!\d)(\S.*)$/;
+const OPTION_LINE = /^\s*(?:[❯>»*|]|\[[ xX_]\])?\s*\[?(\d{1,2})[.)\]]\s*(?!\d)(\S.*)$/;
 
 function footerLines(tail) {
   const lines = String(tail || '').split('\n');
@@ -50,7 +50,10 @@ function hasSelectionFooter(tail) {
 // have redraw fragments above it rather than the menu.
 function menuRegions(tail) {
   const { lines, at } = footerLines(tail);
-  return at.map((i) => lines.slice(Math.max(0, i - MENU_LOOKBACK_LINES), i));
+  if (at.length) {
+    return at.map((i) => lines.slice(Math.max(0, i - MENU_LOOKBACK_LINES), i));
+  }
+  return [];
 }
 
 // The prose directly above a menu's first option, sent instead of the whole
@@ -99,10 +102,10 @@ function parseRegion(region) {
   return { options: all.slice(0, MAX_OPTIONS), truncated: all.length > MAX_OPTIONS };
 }
 
-// Toggle-style prompts need several keystrokes and a confirm, which a single
-// button can't express — better to say so than to send one wrong key.
+// Multi-select or choice prompts need options buttons or contextual selection hints
 function isMultiSelect(tail) {
-  return /space to (toggle|select)/i.test(String(tail || ''));
+  const s = String(tail || '');
+  return /(space to (toggle|select)|select (one or more|all that apply|multiple|one or several)|select all|check all|separated by (space|comma)|multi-select)/i.test(s);
 }
 
 // Claude Code draws a numbered menu where 'y' does nothing, while other agents
@@ -136,12 +139,28 @@ function isAllowed(userId, allowList) {
 
 // The isAgentInstance check is load-bearing: a converted tab keeps its id and
 // alive flag but runs a login shell, where a reply would execute as a command.
+//
+// "<task>:<sub>" is a second agent running as a tab on that task. Sending its
+// reply to the task's main agent answers the wrong one, and leaves the tab that
+// asked still sitting at its prompt.
 function liveInstance(taskId) {
   const { instances, isAgentInstance } = require('../state/instances');
-  const inst = instances.get(Number(taskId));
-  if (!inst || !inst.alive || !inst.pty) return null;
-  if (!isAgentInstance(inst)) return null;
-  return inst;
+  const raw = String(taskId);
+  const sep = raw.indexOf(':');
+  if (sep === -1) {
+    const inst = instances.get(Number(raw));
+    if (!inst || !inst.alive || !inst.pty) return null;
+    if (!isAgentInstance(inst)) return null;
+    return inst;
+  }
+  const parent = instances.get(Number(raw.slice(0, sep)));
+  if (!parent || !parent.alive) return null;
+  const subId = Number(raw.slice(sep + 1));
+  const sub = (parent.subTerminals || []).find((s) => s.subId === subId);
+  if (!sub || !sub.alive || !sub.pty) return null;
+  const { isAgentMode } = require('../state/ai-providers');
+  if (!isAgentMode(sub.mode)) return null;
+  return sub;
 }
 
 // Shared gate for every button click; returns { error } or { claim, inst }.

@@ -5,6 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { claudeProjectDir } = require('./claude-paths');
 const { stringsAt, scan } = require('./protobuf-scan');
 
@@ -50,17 +51,28 @@ function claudeTranscriptPath(worktreePath, sessionId) {
   return path.join(claudeProjectDir(worktreePath), `${sessionId}.jsonl`);
 }
 
-function readClaude({ worktreePath, sessionId, cursor, transcriptFile }) {
+// Adopting a transcript already under way: take its end without reading, so a
+// session that started before this one does not post its history.
+function endOf(file) {
+  try { return { text: '', cursor: fs.statSync(file).size }; } catch { return null; }
+}
+
+function readClaude({ worktreePath, sessionId, cursor, transcriptFile, fromEnd, sinceMs }) {
   // An explicit path wins: Claude Code's own hook payloads carry one, and it
   // saves re-deriving the encoded project directory.
   const file = transcriptFile || claudeTranscriptPath(worktreePath, sessionId);
   if (!file || !fs.existsSync(file)) return null;
+  if (fromEnd) return endOf(file);
   const read = readAppendedLines(file, cursor);
   if (!read) return null;
 
   const parts = [];
   for (const rec of parseLines(read.lines)) {
     if (rec.type !== 'assistant') continue;
+    // Resuming appends to the transcript the session already had. Every record
+    // is stamped, so what predates this run is dropped by age — skipping the
+    // file wholesale would swallow the first thing it goes on to say.
+    if (sinceMs && rec.timestamp && Date.parse(rec.timestamp) < sinceMs) continue;
     const content = (rec.message && rec.message.content) || [];
     for (const block of content) {
       // thinking is skipped: it is the agent's scratchpad, not something it said.
@@ -74,8 +86,9 @@ function readClaude({ worktreePath, sessionId, cursor, transcriptFile }) {
 
 // ---- Codex: ~/.codex/sessions/<y>/<m>/<d>/rollout-*.jsonl ----
 
-function readCodex({ transcriptFile, cursor }) {
+function readCodex({ transcriptFile, cursor, fromEnd }) {
   if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+  if (fromEnd) return endOf(transcriptFile);
   const read = readAppendedLines(transcriptFile, cursor);
   if (!read) return null;
 
@@ -138,6 +151,7 @@ function rolloutCwd(file) {
 const AGY_SPEECH_STEP = 15;
 const AGY_SPEECH_FIELD = '20.1';
 const AGY_DIR = path.join(process.env.HOME || '', '.gemini', 'antigravity-cli', 'conversations');
+const AGY_BRAIN_DIR = path.join(process.env.HOME || '', '.gemini', 'antigravity-cli', 'brain');
 
 // step_payload comes back as a Buffer, or as the byte list SQLite hands over
 // for a blob bound from JS.
@@ -170,56 +184,154 @@ function antigravityWorkspace(file) {
   finally { if (db) try { db.close(); } catch { /* already closed */ } }
 }
 
-function findAntigravityConversation(worktreePath, sinceMs) {
+// Returns { file, exact }. `exact` means the conversation named this worktree
+// itself; anything else is the unclaimed-newest guess below, which the caller
+// must keep re-resolving rather than settling on.
+//
+// `taken` holds the files other live sessions are already reading, so two
+// sessions can never mirror one conversation into two different chat threads.
+function findAntigravityConversation(worktreePath, sinceMs, taken) {
   let entries = [];
-  try { entries = fs.readdirSync(AGY_DIR); } catch { return ''; }
+  try { entries = fs.readdirSync(AGY_DIR); } catch { return { file: '', exact: false }; }
   let matched = null;
-  let newest = null;
+  let unclaimed = null;
   for (const name of entries) {
     if (!name.endsWith('.db')) continue;
     const full = path.join(AGY_DIR, name);
+    if (taken && taken.has(full)) continue;
     let st;
     try { st = fs.statSync(full); } catch { continue; }
     // Only conversations touched since this session started can be its own.
     if (sinceMs && st.mtimeMs < sinceMs) continue;
-    if (!newest || st.mtimeMs > newest.mtimeMs) newest = { file: full, mtimeMs: st.mtimeMs };
-    if (antigravityWorkspace(full) === worktreePath
-      && (!matched || st.mtimeMs > matched.mtimeMs)) {
-      matched = { file: full, mtimeMs: st.mtimeMs };
+    const workspace = antigravityWorkspace(full);
+    // A conversation naming someone else's worktree is someone else's, however
+    // recently it was written.
+    if (workspace && workspace !== worktreePath) continue;
+    if (workspace === worktreePath) {
+      if (!matched || st.mtimeMs > matched.mtimeMs) matched = { file: full, mtimeMs: st.mtimeMs };
+    } else if (!unclaimed || st.mtimeMs > unclaimed.mtimeMs) {
+      unclaimed = { file: full, mtimeMs: st.mtimeMs };
     }
   }
+  if (matched) return { file: matched.file, exact: true };
   // A conversation only records its workspace once it settles, so a live one has
-  // none to match on — hence the fallback to the newest touched since we spawned.
-  return (matched || newest || {}).file || '';
+  // nothing to match on yet — hence the guess at the newest that names nobody.
+  return { file: (unclaimed || {}).file || '', exact: false };
 }
 
-// The cursor is the last step index read, since rows are appended in order.
-function readAntigravity({ transcriptFile, cursor }) {
-  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+function antigravityJsonlPath(transcriptFile) {
+  if (!transcriptFile) return '';
+  if (transcriptFile.endsWith('.jsonl') && fs.existsSync(transcriptFile)) return transcriptFile;
+  const id = path.basename(transcriptFile, '.db');
+  const jsonlPath = path.join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript.jsonl');
+  if (fs.existsSync(jsonlPath)) return jsonlPath;
+  const fullPath = path.join(AGY_BRAIN_DIR, id, '.system_generated', 'logs', 'transcript_full.jsonl');
+  if (fs.existsSync(fullPath)) return fullPath;
+  return '';
+}
+
+// Antigravity keeps only the turn in progress: the jsonl log and the steps table
+// are both rewritten each reply and idx restarts at 0, so a position is
+// meaningless. The cursor names the last turn posted, by its content.
+function turnId(kind, stamp, text) {
+  const digest = crypto.createHash('sha1').update(text).digest('hex').slice(0, 12);
+  return `${kind}:${stamp || ''}:${digest}`;
+}
+
+// Tool output carried on a MODEL step: file content, not something it said.
+const AGY_TOOL_OUTPUT = /^Created At: \d{4}-/;
+const AGY_SPOKEN_TYPES = new Set(['PLANNER_RESPONSE', 'ASK_QUESTION', 'GENERIC']);
+
+// A question the agent puts to the user is not prose on the record: it is an
+// ask_question tool call whose `questions` argument is itself a JSON string.
+function questionsFromCall(call) {
+  if (!call || call.name !== 'ask_question' || !call.args) return [];
+  const raw = call.args.questions || call.args.question;
+  if (!raw) return [];
+  let list = raw;
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list); } catch { return [String(raw).trim()]; }
+  }
+  const out = [];
+  for (const q of Array.isArray(list) ? list : [list]) {
+    if (typeof q === 'string') { out.push(q.trim()); continue; }
+    if (!q || !q.question) continue;
+    // The options are numbered the way the terminal numbers them, so an answer
+    // typed back in chat means the same thing in both places.
+    const options = Array.isArray(q.options)
+      ? q.options.map((o, i) => `${i + 1}. ${o}`).join('\n')
+      : '';
+    out.push(options ? `${q.question}\n\n${options}` : String(q.question).trim());
+  }
+  return out;
+}
+
+// `thinking` is never included: it is the agent's scratchpad, not its answer.
+function agySpeech(rec) {
+  const out = [];
+  const content = typeof rec.content === 'string' ? rec.content.trim() : '';
+  if (content && !AGY_TOOL_OUTPUT.test(content)) out.push(content);
+  for (const call of Array.isArray(rec.tool_calls) ? rec.tool_calls : []) {
+    out.push(...questionsFromCall(call));
+  }
+  return out.filter(Boolean);
+}
+
+// Structured text the CLI writes for itself, so it beats the protobuf rows
+// below, which were read off the wire and can change under us.
+function readAntigravityJsonl(file, cursor, fromEnd) {
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const parts = [];
+  let stamp = '';
+  for (const rec of parseLines(raw.split('\n').filter(Boolean))) {
+    if (rec.source !== 'MODEL' || !AGY_SPOKEN_TYPES.has(rec.type)) continue;
+    if (rec.created_at) stamp = rec.created_at;
+    for (const said of agySpeech(rec)) {
+      if (parts[parts.length - 1] !== said) parts.push(said);
+    }
+  }
+  const text = parts.join('\n\n').slice(0, MAX_TEXT);
+  const id = turnId('j', stamp, text);
+  if (fromEnd || !text || id === cursor) return { text: '', cursor: id };
+  return { text, cursor: id };
+}
+
+function readAntigravitySqlite(file, cursor, fromEnd) {
   let db;
   try {
-    db = openDb(transcriptFile);
+    db = openDb(file);
     const rows = db.prepare(
-      'select idx, step_payload from steps where step_type = ? and idx > ? order by idx',
-    ).all(AGY_SPEECH_STEP, Number(cursor) || 0);
+      'select idx, step_payload from steps where step_type = ? order by idx',
+    ).all(AGY_SPEECH_STEP);
 
     const parts = [];
-    let last = Number(cursor) || 0;
     for (const row of rows) {
-      last = row.idx;
-      for (const text of stringsAt(toBuffer(row.step_payload), AGY_SPEECH_FIELD)) {
-        const t = text.trim();
-        // The same turn is stored more than once as it streams.
+      for (const said of stringsAt(toBuffer(row.step_payload), AGY_SPEECH_FIELD)) {
+        const t = said.trim();
         if (t && parts[parts.length - 1] !== t) parts.push(t);
       }
     }
-    return { text: parts.join('\n\n').slice(0, MAX_TEXT), cursor: last };
+    const text = parts.join('\n\n').slice(0, MAX_TEXT);
+    const id = turnId('s', '', text);
+    if (fromEnd || !text || id === cursor) return { text: '', cursor: id };
+    return { text, cursor: id };
   } catch (err) {
     console.warn('[agent-transcript] antigravity read failed:', err.message);
     return null;
   } finally {
     if (db) try { db.close(); } catch { /* already closed */ }
   }
+}
+
+// `fromEnd` adopts the turn on record without posting it: a conversation picked
+// up mid-flight must not repeat what was said before this session claimed it.
+function readAntigravity({ transcriptFile, cursor, fromEnd }) {
+  if (!transcriptFile) return null;
+  const jsonlFile = antigravityJsonlPath(transcriptFile);
+  if (jsonlFile) return readAntigravityJsonl(jsonlFile, cursor, fromEnd);
+  if (!fs.existsSync(transcriptFile)) return null;
+  return readAntigravitySqlite(transcriptFile, cursor, fromEnd);
 }
 
 const READERS = { claude: readClaude, codex: readCodex, antigravity: readAntigravity };

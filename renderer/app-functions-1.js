@@ -244,8 +244,19 @@ window.App = window.App || {};
     });
     if (sessions.length === 0) return;
 
+    // A worktree can have had several agents open at once. They belong to one
+    // row, and every one of them comes back when it is resumed — keeping only
+    // the first is what made a Claude+Antigravity session return as Claude.
+    var byWorktree = {};
+    var order = [];
     sessions.forEach(function (s) {
-      var exists = AppState.inactiveWorktrees.find(function(x) { return x.path === s.worktreePath; });
+      if (!byWorktree[s.worktreePath]) { byWorktree[s.worktreePath] = []; order.push(s.worktreePath); }
+      byWorktree[s.worktreePath].push(s);
+    });
+    order.forEach(function (wtPath) {
+      var group = byWorktree[wtPath];
+      var s = group[0];
+      var exists = AppState.inactiveWorktrees.find(function(x) { return x.path === wtPath; });
       if (!exists) {
         AppState.inactiveWorktrees.push({
           path: s.worktreePath,
@@ -256,13 +267,43 @@ window.App = window.App || {};
           isSavedSession: true,
           mode: s.mode,
           savedAt: s.savedAt,
-          sessionId: s.sessionId
+          sessionId: s.sessionId,
+          savedAgents: group,
+          subAgents: s.subAgents || []
         });
       }
     });
     if (window.Sidebar && window.Sidebar.rebuild) {
       window.Sidebar.rebuild();
     }
+  };
+
+  // The resume dialog's "reopen every agent" box. Absent (other callers, older
+  // markup) means yes: bringing a session back whole is the expectation the
+  // dialog sets, and picking an agent turns it off explicitly.
+  App.resumeAllAgentsWanted = function() {
+    var box = document.getElementById('resume-all-agents-check');
+    if (!box) return true;
+    return !!box.checked;
+  };
+
+  // Every agent a saved worktree had, restored one at a time: each spawn
+  // rewrites the saved snapshot, and two landing together lose one of the tabs
+  // they were meant to record.
+  App.resumeAllSavedAgents = async function(wt) {
+    var agents = wt.savedAgents || [];
+    var first = null;
+    for (var i = 0; i < agents.length; i++) {
+      var s = agents[i];
+      var res = s.mode === 'shell'
+        ? await window.klaus.task.attachWorktree(s.worktreePath, 'shell', s.repoPath, s.branch)
+        : await window.klaus.session.resume(s);
+      if (res && res.id && s.subAgents && s.subAgents.length && window.TerminalManager) {
+        await TerminalManager.reopenSubAgents(res.id, s.subAgents);
+      }
+      if (i === 0) first = res;
+    }
+    return first;
   };
 
   App.restoreUIState = async function(task) {
@@ -564,11 +605,41 @@ window.App = window.App || {};
     });
   };
 
-  // Resume one worktree of a session: prefer the saved session entry (carries
-  // the agent + exact session id), else the worktree's latest Claude session,
-  // else a fresh spawn — resume-session handles a null sessionId gracefully.
+  // Resume every agent a worktree had open, not just the first one saved: a
+  // session is often a Claude tab plus a second agent, and coming back to only
+  // one of them loses the other's place.
   App.resumeSessionWorktree = async function(wt, sessionName, savedList, mode) {
-    var saved = (savedList || []).find(function (s) { return s && s.worktreePath === wt.path; });
+    var savedForWt = (savedList || []).filter(function (s) { return s && s.worktreePath === wt.path; });
+    // Two saves of the same tab can both survive; the same agent on the same
+    // session id is one tab, not two.
+    var seen = {};
+    savedForWt = savedForWt.filter(function (s) {
+      var key = (s.mode || '') + '|' + (s.sessionId || '');
+      if (seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+    // Unticking the box, or picking an agent while it is off, is a deliberate
+    // choice about this open: one agent, handed off to when it isn't the one
+    // that started the session.
+    var all = App.resumeAllAgentsWanted();
+    if (!all || savedForWt.length <= 1) {
+      return App.resumeSavedAgent(wt, sessionName, savedForWt[0] || null, mode, true);
+    }
+    var first = null;
+    for (var i = 0; i < savedForWt.length; i++) {
+      // One at a time: each spawn writes the session snapshot, and two landing
+      // together lose one of the tabs they were meant to record.
+      var res = await App.resumeSavedAgent(wt, sessionName, savedForWt[i], null, false);
+      if (i === 0) first = res;
+    }
+    return first;
+  };
+
+  // One agent of a session. `lookupLatest` falls back to the worktree's newest
+  // session, which only makes sense when this is its sole agent — otherwise
+  // every tab resumes the same one.
+  App.resumeSavedAgent = async function(wt, sessionName, saved, mode, lookupLatest) {
     var savedMode = saved && saved.mode;
     // Default to the agent that started the session (native resume). The picker
     // only overrides it when the user deliberately chose an agent for this open
@@ -583,7 +654,7 @@ window.App = window.App || {};
       return window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
     }
     var sessionId = saved && saved.sessionId;
-    if (!sessionId) {
+    if (!sessionId && lookupLatest) {
       try { sessionId = await window.klaus.session.getLatest(wt.path); } catch (e) { sessionId = null; }
     }
     // Cross-agent handoff summarization runs in main and can take a few seconds;
@@ -600,6 +671,15 @@ window.App = window.App || {};
       mode: target,
       originalMode: savedMode || null,
       repoPath: wt.repoPath || (saved && saved.repoPath) || null,
+      notifyWebhook: saved && typeof saved.notifyWebhook === 'boolean' ? saved.notifyWebhook : undefined,
+    }).then(function (res) {
+      // The session's other agents were tabs on this task, not sessions of
+      // their own, so they are reopened as tabs once it is back.
+      var extras = (saved && saved.subAgents) || [];
+      if (res && res.id && extras.length && window.TerminalManager) {
+        return TerminalManager.reopenSubAgents(res.id, extras).then(function () { return res; });
+      }
+      return res;
     });
   };
 

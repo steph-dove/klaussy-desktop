@@ -17,7 +17,7 @@ const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
-  processIdleDetection, clearIdleTimer, convertInstanceToShell,
+  processIdleDetection, processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, makeAgentExitHandler,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
@@ -249,7 +249,25 @@ function trackedLatestSession(provider, worktreePath) {
   return null;
 }
 
-ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath, branch, mode, originalMode, repoPath }) => {
+// The bell as the session was left. Applied after the spawn, which sets it from
+// the global default and the by-name preference; neither knows which of a
+// worktree's agents this is.
+function applySavedBell(result, notifyWebhook) {
+  if (typeof notifyWebhook !== 'boolean' || !result || result.error) return result;
+  const inst = result.id != null ? instances.get(result.id) : null;
+  if (!inst || !isAgentMode(inst.mode)) return result;
+  inst.notifyWebhookEnabled = notifyWebhook;
+  if (notifyWebhook) {
+    try { require('../util/notification-gateway').ensureStarted(); } catch (err) {
+      console.warn('[resume-session] gateway start failed:', err.message);
+    }
+  }
+  return result;
+}
+
+ipcMain.handle('resume-session', async (_event, {
+  sessionId, name, worktreePath, branch, mode, originalMode, repoPath, notifyWebhook,
+}) => {
   // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
   // exactly what made it a phantom (undiscoverable yet blocking re-create), so
   // resuming it should clear that state.
@@ -278,7 +296,10 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
       console.warn('[resume-session] handoff seed failed:', err && err.message);
     }
     try {
-      return spawnInWorktree(name, worktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined);
+      return applySavedBell(
+        spawnInWorktree(name, worktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined),
+        notifyWebhook,
+      );
     } catch (err) {
       console.error('[resume-session] handoff spawn failed:', err);
       return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -297,7 +318,7 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
   }
   if (!exactId) exactId = trackedLatestSession(provider, worktreePath);
   try {
-    return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);
+    return applySavedBell(spawnInWorktree(name, worktreePath, branch, resumeMode, exactId), notifyWebhook);
   } catch (err) {
     console.error('[resume-session] spawnInWorktree failed:', err);
     return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -1144,10 +1165,17 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
 
   ptyProc.onData((data) => {
     sendToTerminalSubscribers(`terminal-data-${taskId}-${subId}`, data);
+    // A second agent in the session is still the session talking.
+    try { processSubOutput(inst, sub, data); } catch { /* never break the terminal */ }
   });
 
   ptyProc.onExit(() => {
     sub.alive = false;
+    if (sub.turnTimer) { clearTimeout(sub.turnTimer); sub.turnTimer = null; }
+    // This tab had its own thread in chat; nothing typed there reaches it now.
+    if (sub.mirror) {
+      try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+    }
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch {} }
     sendToTerminalSubscribers(`terminal-exit-${taskId}-${subId}`);

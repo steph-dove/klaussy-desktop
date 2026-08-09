@@ -92,6 +92,7 @@ async function dispatchEvent(event, cfg) {
   let promptOptions = [];
   let optionsTruncated = false;
   let menuPrompt = false;
+  let isMultiSelect = false;
   let promptQuestion = '';
   const wantsButtons = event.type === EVENT_TYPES.APPROVAL_REQUIRED
     && (cfg.slackInteractive || cfg.discordInteractive)
@@ -100,14 +101,13 @@ async function dispatchEvent(event, cfg) {
     // logsTail still holds the prompt, so the options and answering keystrokes
     // are read here and stored with the token rather than guessed at click time.
     const reply = require('./chat-reply');
-    if (!reply.isMultiSelect(event.logsTail)) {
-      const parsed = reply.parsePromptOptions(event.logsTail);
-      promptOptions = parsed.options;
-      optionsTruncated = parsed.truncated;
-    }
+    const parsed = reply.parsePromptOptions(event.logsTail);
+    promptOptions = parsed.options;
+    optionsTruncated = parsed.truncated;
+    isMultiSelect = reply.isMultiSelect(event.logsTail);
     // A menu ignores y/n, so Approve/Reject for one would be dead buttons; none
     // is better, since the mirrored turn still shows the choices.
-    menuPrompt = reply.hasSelectionFooter(event.logsTail);
+    menuPrompt = reply.hasSelectionFooter(event.logsTail) || promptOptions.length > 0 || isMultiSelect;
     promptQuestion = reply.parsePromptQuestion(event.logsTail);
     if (menuPrompt && !promptOptions.length) {
       console.warn('[notification-gateway] selection prompt with no readable options');
@@ -119,7 +119,7 @@ async function dispatchEvent(event, cfg) {
     );
   }
   const decorated = approvalToken
-    ? { ...event, approvalToken, options: promptOptions, optionsTruncated, menuPrompt, promptQuestion }
+    ? { ...event, approvalToken, options: promptOptions, optionsTruncated, menuPrompt, promptQuestion, isMultiSelect }
     : event;
 
   const jobs = [];
@@ -137,7 +137,10 @@ async function dispatchEvent(event, cfg) {
   } else if (cfg.slackWebhookUrl) {
     jobs.push(safePost('slack', cfg.slackWebhookUrl, formatSlack(slackEvent)));
   }
-  if (cfg.discordInteractive && (approvalToken || !cfg.discordWebhookUrl)) {
+  // Prefer the bot whenever there is one, as Slack does above: a webhook cannot
+  // post into a thread and its posts carry no id to reply to, so a webhook url
+  // beside a bot cost every non-approval message its thread.
+  if (cfg.discordInteractive) {
     jobs.push(threads.ensureDiscordThread(cfg, event)
       .then((id) => postDiscordAsBot(cfg, formatDiscord(discordEvent), id)));
   } else if (cfg.discordWebhookUrl) {
@@ -282,8 +285,24 @@ function startInboundSockets() {
 // exercises the outbound webhook.
 const _socketStatus = { slack: null, discord: null };
 
-// The message map lives in memory, so a restart loses it; dropping what someone
-// typed is worse than answering the only session that could have meant it.
+const STALE_THREAD_NOTE = 'This thread is no longer connected to a running session, so nothing was sent. Reply in the session’s current thread, or in Klaussy.';
+
+// One note per thread rather than one per message: someone can type several
+// lines before they read the first answer.
+const _notedThreads = new Set();
+const MAX_NOTED_THREADS = 200;
+
+function noteOnce(threadId) {
+  const key = String(threadId || '');
+  if (!key || _notedThreads.has(key)) return false;
+  if (_notedThreads.size >= MAX_NOTED_THREADS) _notedThreads.clear();
+  _notedThreads.add(key);
+  return true;
+}
+
+// Only reached from the alerts channel itself, where an alert posts flat
+// because the bot can't open threads. A thread always identifies its own
+// session, so an unrecognised one is never resolved this way.
 function fallbackTask() {
   try {
     const { notifyingAgentInstances } = require('../state/instances');
@@ -346,17 +365,16 @@ function handleSlackFrame(parsed) {
   }
 
   if (parsed.kind === 'message' && parsed.threadTs) {
-    let taskId = threads.taskForSlackThread(parsed.threadTs)
-      || threads.taskForMessage(parsed.threadTs);
+    const taskId = threads.taskForSlackThread(parsed.threadTs)
+      || threads.taskForMessage(parsed.threadTs)
+      // A restart empties the map but not the channel, so a thread it no longer
+      // knows is reattached to whatever is running in the session it was for.
+      || threads.reattachThread(parsed.threadTs);
     if (!taskId) {
-      const fb = fallbackTask();
-      if (fb.ambiguous) {
-        replyInSlackThread(cfg, parsed.channel, parsed.threadTs,
-          `${fb.ambiguous} sessions are running — reply in the one you mean.`);
-        return;
+      if (noteOnce(parsed.threadTs)) {
+        replyInSlackThread(cfg, parsed.channel, parsed.threadTs, STALE_THREAD_NOTE);
       }
-      if (!fb.taskId) return;
-      taskId = fb.taskId;
+      return;
     }
     const res = applyText({ taskId, text: parsed.text, userId: parsed.userId, allowList: cfg.allowList });
     // Silence would look identical to "delivered", so say when it wasn't.
@@ -413,7 +431,19 @@ function handleDiscordFrame(parsed) {
   // the sender to reply to a specific alert.
   if (parsed.kind === 'message') {
     let taskId = threads.taskForDiscordThread(parsed.channel)
-      || threads.taskForMessage(parsed.referencedMessageId);
+      || threads.taskForMessage(parsed.referencedMessageId)
+      // A restart empties the map but not the channel, so a thread it no longer
+      // knows is reattached to whatever is running in the session it was for.
+      || threads.reattachThread(parsed.channel);
+    // Anywhere but the alerts channel, this is a thread we have no record of:
+    // another session's, or one orphaned by a restart. Its session is not
+    // whichever one happens to be running now.
+    if (!taskId && String(parsed.channel) !== String(cfg.discordChannel || '')) {
+      if (noteOnce(parsed.channel)) {
+        replyInDiscordChannel(cfg, parsed.channel, parsed.messageId, STALE_THREAD_NOTE);
+      }
+      return;
+    }
     if (!taskId) {
       const fb = fallbackTask();
       if (fb.ambiguous) {
@@ -445,19 +475,21 @@ function replyInDiscordChannel(cfg, channel, replyToId, text) {
 
 // Tear down (tests / shutdown). Restores the pre-started state so ensureStarted
 // can wire up cleanly again.
-function stop() {
+function stop({ keepThreads = false } = {}) {
   if (_unsubscribe) { try { _unsubscribe(); } catch {} _unsubscribe = null; }
   if (_connection) { try { _connection.close(); } catch {} _connection = null; }
   if (_slack) { try { _slack.close(); } catch {} _slack = null; }
   if (_discord) { try { _discord.close(); } catch {} _discord = null; }
-  threads._reset();
+  if (!keepThreads) threads._reset();
+  _notedThreads.clear();
   _started = false;
 }
 
-// Re-read config and rebuild the sockets — called after a prefs save so new
-// tokens take effect without restarting the app.
+// Re-read config and rebuild the sockets after a prefs save. The thread map
+// outlives them: its sessions are still running, and forgetting them would
+// strand their threads and open a second one for each.
 function restart() {
-  stop();
+  stop({ keepThreads: true });
   ensureStarted();
 }
 

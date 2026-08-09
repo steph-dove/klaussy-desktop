@@ -122,6 +122,48 @@ test('an event with no session id gets no thread', async () => {
   assert.equal(await threads.ensureDiscordThread(CFG, { agentName: 'X' }), '');
 });
 
+// The thread stays in the channel across a restart, but the instance id it was
+// opened against does not. Replying in it then reached nothing at all.
+test('a thread survives the restart that forgot it', async () => {
+  threads._reset();
+  const { instances } = require('../../main/state/instances');
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T77' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, { ...EVENT, agentName: 'Claude Code' });
+    await require('../../main/util/config').flushSaveConfig();
+    // Losing the in-memory map is exactly what a restart does.
+    threads._reset();
+    assert.equal(threads.taskForDiscordThread('T77'), undefined);
+
+    instances.set(9001, {
+      id: 9001, alive: true, mode: 'claude', originalMode: 'claude',
+      worktreePath: '/work/auth-refactor', pty: { write: () => {} },
+    });
+    try {
+      assert.equal(threads.reattachThread('T77'), '9001',
+        'the thread reattaches to what is running in that session now');
+    } finally {
+      instances.delete(9001);
+    }
+  } finally {
+    f.restore();
+  }
+});
+
+test('a thread whose session is gone reattaches to nothing', async () => {
+  threads._reset();
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T78' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, { ...EVENT, agentName: 'Claude Code' });
+    await require('../../main/util/config').flushSaveConfig();
+    threads._reset();
+    assert.equal(threads.reattachThread('T78'), '', 'no session, no routing');
+    assert.equal(threads.reattachThread('never-opened'), '');
+  } finally {
+    f.restore();
+  }
+});
+
 // A rejection here used to reject the whole dispatch, taking the Discord post
 // down with it: being offline should cost one thread, not every alert.
 test('a network failure opening a slack thread does not sink the dispatch', async () => {

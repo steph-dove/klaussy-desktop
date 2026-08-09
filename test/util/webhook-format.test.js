@@ -252,6 +252,28 @@ test('an unreadable screen is not pasted into the alert', () => {
   assert.match(flat, /waiting for approval/, 'it still says what happened');
 });
 
+test('a multi-select prompt renders choice buttons and hints without approve/reject fallback', () => {
+  const evt = {
+    ...APPROVAL,
+    approvalToken: 'tok',
+    options: [
+      { key: '1', label: 'Feature A' },
+      { key: '2', label: 'Feature B' },
+    ],
+    menuPrompt: true,
+    isMultiSelect: true,
+  };
+  const slack = formatSlack(evt);
+  const actions = slack.blocks.find((b) => b.type === 'actions');
+  assert.equal(actions.elements.length, 2);
+  assert.equal(actions.elements[0].text.text, '1. Feature A');
+  assert.match(JSON.stringify(slack), /Select choices by clicking buttons/);
+
+  const discord = formatDiscord(evt);
+  assert.equal(discord.components[0].components.length, 2);
+  assert.match(JSON.stringify(discord), /Select choices below or reply in chat/);
+});
+
 test('a screen with real prose is still worth showing', () => {
   const screen = [
     'I found three issues in the design spec.',

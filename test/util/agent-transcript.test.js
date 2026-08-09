@@ -103,7 +103,116 @@ test('claude: several turns arrive separated, not run together', () => {
   assert.equal(r.text, 'First thing.\n\nSecond thing.');
 });
 
+test('antigravity: model planner responses are read from jsonl transcript', () => {
+  const file = tmpFile('transcript.jsonl', [
+    { step_index: 0, source: 'USER_EXPLICIT', type: 'USER_INPUT', content: 'hello' },
+    { step_index: 1, source: 'MODEL', type: 'PLANNER_RESPONSE', content: 'I have analyzed the codebase.' },
+    { step_index: 2, source: 'MODEL', type: 'VIEW_FILE', content: 'Created At: 2026-08-09T12:00:00-07:00\ncontent of file' },
+    { step_index: 3, source: 'MODEL', type: 'PLANNER_RESPONSE', content: 'Here is the fix.' },
+  ]);
+  const r = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'I have analyzed the codebase.\n\nHere is the fix.');
+  assert.doesNotMatch(r.text, /Created At/, 'tool output is filtered out');
+});
+
+// Verbatim shape from a live session: what the agent asks is not prose on the
+// record, it is an ask_question call whose `questions` argument is itself JSON.
+test('antigravity: a question and its options are what the agent said', () => {
+  const file = tmpFile('transcript.jsonl', [
+    {
+      source: 'MODEL',
+      type: 'PLANNER_RESPONSE',
+      created_at: '2026-08-09T20:52:03Z',
+      thinking: 'the user probably wants a hard one',
+      tool_calls: [{
+        name: 'ask_question',
+        args: {
+          questions: JSON.stringify([{
+            is_multi_select: false,
+            options: ['Merge Sort', 'Quick Sort'],
+            question: 'Which sort is O(n log n) worst case?',
+          }]),
+        },
+      }],
+    },
+  ]);
+  const r = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'Which sort is O(n log n) worst case?\n\n1. Merge Sort\n2. Quick Sort');
+  assert.doesNotMatch(r.text, /probably wants/, 'thinking is never posted');
+});
+
+// The jsonl holds only the turn in progress and is rewritten each reply, so a
+// position in it is meaningless: the same turn was posted over and over.
+test('antigravity: a turn already posted is not posted again when rewritten', () => {
+  const file = tmpFile('transcript.jsonl', [
+    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T1', content: 'First answer.' },
+  ]);
+  const first = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0 });
+  assert.equal(first.text, 'First answer.');
+  assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: first.cursor }).text, '',
+    'the same turn on disk says nothing new');
+
+  // The next reply replaces the file rather than appending to it.
+  fs.writeFileSync(file, JSON.stringify(
+    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T2', content: 'Second answer.' },
+  ) + '\n');
+  assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: first.cursor }).text,
+    'Second answer.', 'a rewritten file still yields the new turn');
+});
+
+// Adopting a conversation already under way must not repeat what it said before
+// this session claimed it.
+test('antigravity: fromEnd adopts the turn on record without posting it', () => {
+  const file = tmpFile('transcript.jsonl', [
+    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T1', content: 'Said before we bound.' },
+  ]);
+  const r = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0, fromEnd: true });
+  assert.equal(r.text, '');
+
+  fs.writeFileSync(file, JSON.stringify(
+    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T2', content: 'Ours.' },
+  ) + '\n');
+  assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: r.cursor }).text, 'Ours.');
+});
+
+// Resuming appends to the transcript the session already had, so the old turns
+// have to go — but by age, or the first thing it says next goes with them.
+test('claude: resuming skips the old turns and still reports the first new one', () => {
+  const at = (ts, text) => ({ ...claudeSay(text), timestamp: ts });
+  const file = tmpFile('resumed.jsonl', [
+    at('2026-08-09T10:00:00.000Z', 'Said before the resume.'),
+    at('2026-08-09T12:00:00.000Z', 'Said right after it.'),
+  ]);
+  const spawn = Date.parse('2026-08-09T11:00:00.000Z');
+  const r = t.readNewMessages('claude', { transcriptFile: file, cursor: 0, sinceMs: spawn });
+  assert.equal(r.text, 'Said right after it.');
+});
+
+// A worktree can hold more than one claude session, and the newest flips between
+// them; a byte offset measured in one names an arbitrary point in the other.
+test('claude: fromEnd adopts a transcript without posting what it already holds', () => {
+  const file = tmpFile('other-session.jsonl', [claudeSay('Belongs to another session.')]);
+  const r = t.readNewMessages('claude', { transcriptFile: file, cursor: 0, fromEnd: true });
+  assert.equal(r.text, '');
+  assert.equal(r.cursor, fs.statSync(file).size, 'the cursor is the end of that file');
+
+  appendLine(file, claudeSay('Said after we adopted it.'));
+  assert.equal(t.readNewMessages('claude', { transcriptFile: file, cursor: r.cursor }).text,
+    'Said after we adopted it.');
+});
+
+test('codex: fromEnd adopts a rollout without posting what it already holds', () => {
+  const file = tmpFile('rollout-adopt.jsonl', [
+    { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ text: 'Earlier.' }] } },
+  ]);
+  const r = t.readNewMessages('codex', { transcriptFile: file, cursor: 0, fromEnd: true });
+  assert.equal(r.text, '');
+  appendLine(file, { type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ text: 'Later.' }] } });
+  assert.equal(t.readNewMessages('codex', { transcriptFile: file, cursor: r.cursor }).text, 'Later.');
+});
+
 test('a missing transcript returns null rather than throwing', () => {
   assert.equal(t.readNewMessages('codex', { transcriptFile: '/nope/missing.jsonl', cursor: 0 }), null);
   assert.equal(t.readNewMessages('claude', { worktreePath: '', sessionId: '', cursor: 0 }), null);
+  assert.equal(t.readNewMessages('antigravity', { transcriptFile: '/nope/missing.jsonl', cursor: 0 }), null);
 });

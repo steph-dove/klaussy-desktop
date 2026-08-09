@@ -97,6 +97,44 @@ test('a live agent session does accept chat input', () => {
   }
 });
 
+// A session's second agent runs as a tab on the same task. Answering what it
+// asked used to write to the task's main agent, which replied instead — leaving
+// the tab that asked the question still sitting at its prompt.
+test('a reply to a second agent reaches that agent, not the one owning the task', () => {
+  const { instances } = require('../../main/state/instances');
+  const main = [];
+  const sub = [];
+  instances.set(4244, {
+    id: 4244, alive: true, mode: 'claude', originalMode: 'claude',
+    pty: { write: (d) => main.push(d) },
+    subTerminals: [{ subId: 1, alive: true, mode: 'antigravity', pty: { write: (d) => sub.push(d) } }],
+  });
+  try {
+    const res = applyText({ taskId: '4244:1', text: 'mars', userId: 'U1', allowList: ['U1'] });
+    assert.equal(res.ok, true);
+    assert.ok(sub.join('').includes('mars'), 'the agent that asked got the answer');
+    assert.deepEqual(main, [], 'the task’s own agent was not answered for it');
+  } finally {
+    instances.delete(4244);
+  }
+});
+
+test('a reply to a tab that has closed reaches nothing', () => {
+  const { instances } = require('../../main/state/instances');
+  instances.set(4245, {
+    id: 4245, alive: true, mode: 'claude', originalMode: 'claude',
+    pty: { write: () => {} },
+    subTerminals: [{ subId: 1, alive: false, mode: 'antigravity', pty: { write: () => {} } }],
+  });
+  try {
+    assert.equal(applyText({ taskId: '4245:1', text: 'hi', userId: 'U1', allowList: ['U1'] }).reason, 'gone');
+    assert.equal(applyText({ taskId: '4245:9', text: 'hi', userId: 'U1', allowList: ['U1'] }).reason, 'gone',
+      'and neither does one to a tab that never existed');
+  } finally {
+    instances.delete(4245);
+  }
+});
+
 test('control characters cannot escape bracketed paste', () => {
   const { sanitizeForPaste } = require('../../main/util/chat-reply');
   // A literal ESC would close paste mode early and leave the rest as keystrokes.

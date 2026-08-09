@@ -21,11 +21,24 @@ function trim(text, max) {
   // Cut at a line boundary so a sentence isn't sheared mid-word.
   const cut = s.slice(0, max);
   const nl = cut.lastIndexOf('\n');
-  return (nl > max * 0.6 ? cut.slice(0, nl) : cut) + '\n…';
+  let result = nl > max * 0.6 ? cut.slice(0, nl) : cut;
+
+  // If cut inside an open code fence, close it so markdown doesn't leak in Discord.
+  const fenceMatches = result.match(/```/g);
+  const hasOpenFence = fenceMatches && fenceMatches.length % 2 !== 0;
+  if (hasOpenFence) {
+    result += '\n```';
+  }
+
+  return result + '\n…';
 }
 
 function forDiscord(text) {
-  return trim(unwrapHtml(text), DISCORD_MAX);
+  const unwrapped = unwrapHtml(text)
+    // Discord won't render file:// links, so the raw markdown shows through —
+    // keep the label as code instead.
+    .replace(/\[([^\]]+)\]\(file:\/\/\/[^\)]+\)/g, '`$1`');
+  return trim(unwrapped, DISCORD_MAX);
 }
 
 // Slack's mrkdwn predates commonmark: bold is *one* asterisk, italic is

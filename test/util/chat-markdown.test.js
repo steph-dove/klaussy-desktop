@@ -41,6 +41,17 @@ test('long text is cut at a line boundary, not mid-word', () => {
   assert.equal(lastContent, line);
 });
 
+test('discord strips unrenderable file:// markdown links into inline code', () => {
+  const out = md.forDiscord('Inspect [main.js](file:///Users/steph/klaussy/main.js#L10) for details.');
+  assert.equal(out, 'Inspect `main.js` for details.');
+});
+
+test('discord closes open code fence when trimming long messages', () => {
+  const longCode = 'Here is code:\n```js\n' + 'console.log("hello");\n'.repeat(150) + '```';
+  const out = md.forDiscord(longCode);
+  assert.ok(out.endsWith('```\n…'));
+});
+
 test('empty input is handled', () => {
   assert.equal(md.forDiscord(''), '');
   assert.equal(md.forSlack(null), '');
