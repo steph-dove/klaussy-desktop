@@ -56,24 +56,32 @@ Continue with the app you made above.
    - It prompts you to create an **app-level token**. Name it anything, add the
      `connections:write` scope, and **Generate**.
    - Copy the `xapp-…` token into **Slack app-level token**.
-2. **OAuth & Permissions** → **Scopes → Bot Token Scopes**, add:
+2. **Interactivity & Shortcuts** → toggle **Interactivity** on. Socket Mode
+   means there is no Request URL to fill in, but Slack will not deliver a button
+   click at all until this switch is on — the alerts still arrive, and pressing
+   **Approve** does nothing.
+3. **OAuth & Permissions** → **Scopes → Bot Token Scopes**, add:
    - `chat:write` — post the alerts
    - `channels:history` (public channels) or `groups:history` (private) — read
      your threaded replies
-3. **Install App** → **Install to Workspace** → **Allow**.
+4. **Install App** → **Install to Workspace** → **Allow**.
    - Copy the **Bot User OAuth Token** (`xoxb-…`) into **Slack bot token**.
-4. **Event Subscriptions** → toggle on, then under **Subscribe to bot events**
+   - Adding a scope later needs a reinstall before it takes effect.
+5. **Event Subscriptions** → toggle on, then under **Subscribe to bot events**
    add `message.channels` (or `message.groups` for a private channel).
    *Skip this if you only want buttons, not text replies.*
-5. Invite the bot to the channel. Installing the app to the workspace does not
+6. Invite the bot to the channel. Installing the app to the workspace does not
    put it in any channel — open the channel in Slack and send `/invite @Klaussy`
    (use whatever you named the app). Without this, posting fails with
    `not_in_channel`.
-6. Copy the **channel ID** into **Slack channel**: right-click the channel →
+7. Copy the **channel ID** into **Slack channel**: right-click the channel →
    **View channel details** → scroll to the bottom, where the ID reads `C0…`.
    That's the ID, not the `#name`.
-7. Get your own **member ID**: click your avatar → **Profile** → the **⋯**
+8. Get your own **member ID**: click your avatar → **Profile** → the **⋯**
    button → **Copy member ID** (`U0…`). Put it in **Who may approve**.
+
+Leave **Slack webhook URL** empty once the bot is set up. Klaussy prefers the
+bot whenever there is one, since a webhook cannot post into a thread.
 
 ### Discord two-way
 
@@ -192,6 +200,8 @@ refused rather than typed into your shell.
 | "That request was already answered" | Single-use by design — someone clicked first, or the prompt was answered in the app. |
 | Discord replies arrive empty | **MESSAGE CONTENT INTENT** is off. |
 | Slack thread replies do nothing | Missing `message.channels` / `message.groups` event subscription, or the bot isn't in the channel. |
+| Slack buttons do nothing | **Interactivity & Shortcuts** is off. Socket Mode needs no Request URL, but the toggle still has to be on. |
+| A reply typed in the Slack channel does nothing | Slack routes by thread — answer inside the session's thread, not at channel level. |
 | Discord alerts post flat, with no thread | The bot lacks **Create Public Threads**. Re-open the `permissions=292057844736` link to re-authorize. |
 | Replies in an old thread are ignored | Threads stop routing once their agent exits — the thread stays as history. |
 | Nothing arrives at all | Check the session's 🔔 is on and the event type isn't unticked. |

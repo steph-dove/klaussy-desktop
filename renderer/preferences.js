@@ -469,18 +469,24 @@
     };
   }
 
-  var notifyDocsLink = document.getElementById('notify-docs-link');
-  if (notifyDocsLink) {
-    notifyDocsLink.addEventListener('click', function (e) {
+  // The guide is long; someone stuck on a token wants their platform's section.
+  var NOTIFY_GUIDE = 'https://github.com/steph-dove/klaussy-desktop/blob/main/docs/notifications-setup.md';
+  [
+    ['notify-docs-link', ''],
+    ['slack-docs-link', '#slack-two-way'],
+    ['discord-docs-link', '#discord-two-way'],
+  ].forEach(function (pair) {
+    var link = document.getElementById(pair[0]);
+    if (!link) return;
+    link.addEventListener('click', function (e) {
       e.preventDefault();
       try {
-        window.klaus.gh.openExternal(
-          'https://github.com/steph-dove/klaussy-desktop/blob/main/docs/notifications-setup.md');
+        window.klaus.gh.openExternal(NOTIFY_GUIDE + pair[1]);
       } catch (err) {
         notifyTestStatus.textContent = 'Could not open the guide: ' + (err && err.message);
       }
     });
-  }
+  });
 
   var notifyTestBtn = document.getElementById('pref-notify-test');
   var notifyTestStatus = document.getElementById('notify-test-status');

@@ -609,6 +609,8 @@
       <div class="field-hint">A webhook only sends one way. To get <strong>Approve</strong>/<strong>Reject</strong> buttons and to answer an agent by typing in the channel, Klaussy needs a Slack app or Discord bot — it opens an outgoing connection, so there's no public URL or tunnel involved. <a href="#" id="notify-docs-link" class="nemesis-docs">Step-by-step setup guide ↗</a></div>
       <div class="field-hint"><strong>Read before enabling:</strong> anyone you allow below can approve a permission prompt on this machine — including an agent asking to run something destructive. Use a private channel. Approvals are single-use and expire after 30 minutes.</div>
 
+      <div class="field-hint"><strong>Slack</strong> — create an app, turn on Socket Mode <em>and</em> Interactivity, add the <code>chat:write</code> and <code>channels:history</code> scopes, then <code>/invite</code> the bot to the channel. <a href="#" id="slack-docs-link" class="nemesis-docs">Slack setup steps ↗</a></div>
+
       <div class="field field-full">
         <label>Slack app-level token (xapp-…)</label>
         <input type="password" id="pref-slack-app-token" placeholder="from Socket Mode" spellcheck="false" autocomplete="off" />
@@ -621,6 +623,8 @@
         <label>Slack channel ID</label>
         <input type="text" id="pref-slack-channel" placeholder="C01ABCDEFGH" spellcheck="false" autocomplete="off" />
       </div>
+
+      <div class="field-hint"><strong>Discord</strong> — create a bot, turn on the <em>Message Content</em> intent, and invite it with permission to read, post and create threads. <a href="#" id="discord-docs-link" class="nemesis-docs">Discord setup steps ↗</a></div>
 
       <div class="field field-full">
         <label>Discord bot token</label>
