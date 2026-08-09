@@ -96,7 +96,11 @@ test('a very long tool name never overflows the slack header limit', () => {
 
 test('triple backticks in logs cannot break the code fence', () => {
   // An approval still carries its screen; an ended session deliberately doesn't.
-  const evt = { ...APPROVAL, logsTail: 'before ``` after' };
+  // Needs enough real words to survive the chrome filter.
+  const evt = {
+    ...APPROVAL,
+    logsTail: 'the agent wrote before ``` here\nand carried on after that line',
+  };
   // The log section is the block whose text is fenced with ```.
   const section = formatSlack(evt).blocks.find(
     (b) => b.text && typeof b.text.text === 'string' && b.text.text.startsWith('```'),
@@ -197,7 +201,7 @@ test('a stale alert says how long it has been quiet', () => {
     workspacePath: '/work/feature-x',
     agentName: 'Claude',
     quietMs: 180000,
-    logsTail: 'Here is a long summary you should read.',
+    logsTail: 'Here is a long summary you should read.\nIt continues onto a second line of prose.',
   };
   const flat = JSON.stringify(formatSlack(stale));
   assert.match(flat, /gone quiet/);
@@ -234,4 +238,27 @@ test('a plain y/n prompt still gets Approve and Reject', () => {
   const actions = formatSlack(evt).blocks.find((b) => b.type === 'actions');
   assert.deepEqual(actions.elements.map((e) => e.action_id), ['klaussy_approve', 'klaussy_reject']);
   assert.equal(formatDiscord(evt).components[0].components.length, 2);
+});
+
+// Captured from a live Antigravity screen: rules, prompts and a half-typed word.
+test('an unreadable screen is not pasted into the alert', () => {
+  const screen = [
+    '────────────', '>', '────────────',
+    '(Google AI Pro)', 's', '', '  ⋮  Generating...',
+    'esc to cancel', 'Gemini 3.6 Flash · high',
+  ].join('\n');
+  const flat = JSON.stringify(formatSlack({ ...APPROVAL, promptQuestion: '', logsTail: screen }));
+  assert.doesNotMatch(flat, /Google AI Pro|esc to cancel|Generating/, 'no framebuffer');
+  assert.match(flat, /waiting for approval/, 'it still says what happened');
+});
+
+test('a screen with real prose is still worth showing', () => {
+  const screen = [
+    'I found three issues in the design spec.',
+    'The first is a missing token in the light preset.',
+  ].join('\n');
+  assert.match(
+    JSON.stringify(formatSlack({ ...APPROVAL, promptQuestion: '', logsTail: screen })),
+    /three issues/,
+  );
 });

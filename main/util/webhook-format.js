@@ -53,12 +53,25 @@ function agentLabel(event) {
   return event.sessionName ? `${agent} on “${event.sessionName}”` : agent;
 }
 
-// Only for a session that has actually ended — on an approval prompt the agent
-// is still alive and waiting, so restart steps would misrepresent it.
+// What of the terminal is worth showing: a framebuffer of box drawing and
+// half-typed words tells the reader nothing.
+function screenExcerpt(event) {
+  if (ended(event) || event.promptQuestion) return '';
+  const cleaned = truncateLogs(event.logsTail);
+  if (!cleaned) return '';
+  const lines = cleaned.split('\n').filter((l) => l.trim());
+  // Prose, not chrome: a screen of rules and stubs has almost no real words.
+  const wordy = lines.filter((l) => (l.match(/[A-Za-z]{3,}/g) || []).length >= 3);
+  if (wordy.length < 2) return '';
+  return wordy.slice(-12).join('\n');
+}
+
 function ended(event) {
   return event.type === EVENT_TYPES.COMPLETED || event.type === EVENT_TYPES.FAILED;
 }
 
+// Only for an ended session: on an approval the agent is still waiting, so
+// restart steps would misrepresent it.
 function restartSteps(event) {
   if (!ended(event) || !event.resumeCommand) return '';
   const lines = [];
@@ -165,9 +178,7 @@ function formatSlack(event) {
   if (event.promptQuestion) {
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: fenceSafe(event.promptQuestion) } });
   }
-  // Only when there is nothing better to show: an ended session was already
-  // mirrored, and a parsed question beats the screen it came from.
-  const logs = (ended(event) || event.promptQuestion) ? '' : truncateLogs(event.logsTail);
+  const logs = screenExcerpt(event);
   if (logs) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: '```' + fenceSafe(logs) + '```' } });
 
   const steps = restartSteps(event);
@@ -207,7 +218,7 @@ function formatDiscord(event) {
     parts.push('Respond in Klaussy to **Approve** or **Reject** this step.');
   }
   if (event.promptQuestion) parts.push(fenceSafe(event.promptQuestion));
-  const logs = (ended(event) || event.promptQuestion) ? '' : truncateLogs(event.logsTail);
+  const logs = screenExcerpt(event);
   if (logs) parts.push('```\n' + fenceSafe(logs) + '\n```');
 
   const steps = restartSteps(event);

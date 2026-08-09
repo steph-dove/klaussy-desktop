@@ -324,9 +324,13 @@ test('a menu is found even when a later footer has only repaint noise above it',
   assert.deepEqual(parsePromptOptions(buffer).options.map((o) => o.key), ['1', '2', '3']);
 });
 
-test('a selection prompt is recognised as one even when unparsable', () => {
+// Some TUIs print "esc to cancel" as a permanent idle footer, so the footer
+// alone flagged an approval with no question and no options — which then fell
+// through to pasting the whole screen.
+test('a footer only means a menu when options sit above it', () => {
   const { hasSelectionFooter } = require('../../main/util/chat-reply');
-  assert.equal(hasSelectionFooter('whatever\nEnter to select · Esc to cancel'), true);
+  assert.equal(hasSelectionFooter('Pick one\n 1. Alpha\n 2. Beta\nEnter to select'), true);
+  assert.equal(hasSelectionFooter('⋮ Generating...\nesc to cancel\nGemini 3.6 Flash'), false);
   assert.equal(hasSelectionFooter('Overwrite? (y/n)'), false);
 });
 

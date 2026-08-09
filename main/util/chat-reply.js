@@ -36,9 +36,14 @@ function footerLines(tail) {
 }
 
 // True even when the options can't be read, because the caller must not offer
-// y/n buttons for a menu.
+// y/n buttons for a menu. "esc to cancel" alone is not enough: some TUIs print
+// it as a permanent idle footer, so a menu also has to have options above it.
 function hasSelectionFooter(tail) {
-  return footerLines(tail).at.length > 0;
+  const { lines, at } = footerLines(tail);
+  if (!at.length) return false;
+  return at.some((i) => lines
+    .slice(Math.max(0, i - MENU_LOOKBACK_LINES), i)
+    .some((l) => OPTION_LINE.test(l)));
 }
 
 // Newest first: a repaint leaves several footers behind, and the newest can
