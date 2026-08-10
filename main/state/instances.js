@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { Notification } = require('electron');
-const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile, getNotificationConfig } = require('../util/config');
 const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
@@ -25,6 +25,10 @@ const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
 const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { agentExitAction } = require('../util/agent-exit');
+const nemesisEvents = require('../util/nemesis-events');
+const { isChromeOnly } = require('../util/terminal-excerpt');
+const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
+const agentTranscript = require('../util/agent-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -145,8 +149,12 @@ function detectClaudeSessionId(inst, claimed) {
   return files.length > 0 ? files[0].sessionId : null;
 }
 
-function findLatestSessionId(worktreePath) {
-  const files = listSessionFiles(worktreePath).sort((a, b) => b.mtime - a.mtime);
+// `sinceMs` narrows the answer to transcripts written during a given session; a
+// worktree accumulates them, and the newest overall is often an older session's.
+function findLatestSessionId(worktreePath, sinceMs) {
+  const files = listSessionFiles(worktreePath)
+    .filter((f) => !sinceMs || f.mtime >= sinceMs)
+    .sort((a, b) => b.mtime - a.mtime);
   return files.length > 0 ? files[0].sessionId : null;
 }
 
@@ -154,7 +162,9 @@ function findLatestSessionId(worktreePath) {
 
 const IDLE_TIMEOUT_MS = 15000;
 const NOTIFY_COOLDOWN_MS = 30000;
-const ROLLING_BUFFER_SIZE = 500;
+// Holds enough of the screen for a full selection menu with its per-option
+// descriptions; 500 clipped the "1. Yes" line that says how to answer it.
+const ROLLING_BUFFER_SIZE = 2000;
 
 const PROMPT_PATTERNS = [
   /\(y\/n\)\s*$/i,
@@ -166,8 +176,249 @@ const PROMPT_PATTERNS = [
   /❯\s*$/,
 ];
 
+// Matching the TUI's own selection footer catches any wording; listing
+// phrasings missed plain questions entirely.
+const APPROVAL_PROMPT_PATTERNS = [
+  /Enter to select/i,
+  /\(y\/n\)\s*$/i,
+  /\(Y\/n\)\s*$/,
+  /\(yes\/no\)\s*$/i,
+  /\[y\/n\]\s*$/i,
+  /Do you want to proceed/i,
+  /Allow\s.*\?/i,
+];
+
+// A menu's option descriptions run well past the 200 chars the idle check
+// reads, and the answering keystroke sits on the "1. Yes" line near its top.
+const APPROVAL_TAIL_CHARS = 1500;
+
+// A single approval prompt can repaint many times per second; only publish one
+// approval webhook per instance per this window even if the flag re-arms.
+const APPROVAL_NOTIFY_COOLDOWN_MS = 30000;
+
+// Long enough to span the gaps inside one turn, short enough to feel like
+// following along.
+const TURN_SETTLE_MS = 4000;
+
+// loadConfig() reads config.json synchronously and the stale timer reschedules
+// on every pty chunk, so reading the pref there would put a blocking disk read
+// in the terminal's hot path.
+const STALE_CFG_TTL_MS = 10000;
+let _staleCfgReadAt = 0;
+let _staleAfterMs = 120000;
+
+function staleAfterMs() {
+  const now = Date.now();
+  if (now - _staleCfgReadAt > STALE_CFG_TTL_MS) {
+    try { _staleAfterMs = getNotificationConfig().staleAfterMs; } catch { /* keep the last value */ }
+    _staleCfgReadAt = now;
+  }
+  return _staleAfterMs;
+}
+
+// A Klaussy launched from inside a Claude Code session inherits that session's
+// markers, and a child that sees them turns transcript saving off — costing the
+// session both its resume id and its readable history.
+const INHERITED_SESSION_MARKERS = [
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+];
+
+function agentSpawnEnv() {
+  const env = { ...process.env };
+  for (const key of INHERITED_SESSION_MARKERS) delete env[key];
+  return env;
+}
+
+// A conversation that has not recorded its workspace yet can only be guessed
+// at, and the newest file is often a previous session's — so the guess is
+// re-made each poll until one names this worktree.
+function bindAgyConversation(inst) {
+  if (inst.agyConversationExact) return;
+  const taken = new Set();
+  for (const other of instances.values()) {
+    if (other !== inst && other.agyConversation) taken.add(other.agyConversation);
+  }
+  const found = agentTranscript.findAntigravityConversation(inst.worktreePath, inst.spawnTime, taken);
+  if (!found.file) return;
+  inst.agyConversationExact = found.exact;
+  inst.agyConversation = found.file;
+}
+
+// Which file this session's speech is read from, resolved fresh each poll: a
+// session id can arrive late, and Antigravity only names its conversation once
+// it settles.
+function transcriptFileFor(inst, providerId) {
+  if (providerId === 'claude') {
+    // Claude Code's own hook payload carries the exact path.
+    if (inst.transcriptPath) return inst.transcriptPath;
+    // Until the 10s sweep names the session, the transcript is found by the
+    // worktree — bounded to those written since it began, or the newest is
+    // whichever agent last wrote there.
+    const sessionId = inst.claudeSessionId || findLatestSessionId(inst.worktreePath, inst.spawnTime);
+    if (!sessionId) return '';
+    return agentTranscript.claudeTranscriptPath(inst.worktreePath, sessionId);
+  }
+  if (providerId === 'codex') {
+    if (!inst.codexRollout) {
+      inst.codexRollout = agentTranscript.findCodexRollout(inst.worktreePath, inst.spawnTime);
+    }
+    return inst.codexRollout;
+  }
+  if (providerId === 'antigravity') {
+    bindAgyConversation(inst);
+    return inst.agyConversation;
+  }
+  return '';
+}
+
+// A cursor only means something in the file it was measured in: carried over to
+// another, it reads from an arbitrary point and posts whatever follows.
+function repointTranscript(inst, file, providerId) {
+  if (file === inst.transcriptFile) return false;
+  const hadOne = !!inst.transcriptFile;
+  inst.transcriptFile = file;
+  inst.transcriptCursor = 0;
+  // Switching away from a file we were reading: what is in the new one was said
+  // to whoever was reading it before.
+  if (hadOne) return true;
+  // Claude stamps every record, so its reader drops the old ones by age and
+  // still reports the first thing this run says.
+  if (providerId === 'claude') return false;
+  return predatesSession(file, inst.spawnTime);
+}
+
+function predatesSession(file, spawnTime) {
+  if (!spawnTime) return false;
+  try { return fs.statSync(file).birthtimeMs < spawnTime; } catch { return false; }
+}
+
+// A session's second agent is a tab on the task, not an instance of its own. It
+// speaks for itself, so it mirrors for itself: its own buffer and cursor.
+function subMirrorTarget(inst, sub) {
+  if (!sub.mirror) {
+    sub.mirror = {
+      // Distinct from the task id, which keys the parent's own screen buffer.
+      id: `${inst.id}:${sub.subId}`,
+      name: sub.label || displayNameFor(sub.mode),
+      mode: sub.mode,
+      originalMode: sub.mode,
+      worktreePath: inst.worktreePath,
+      spawnTime: sub.spawnTime || Date.now(),
+      recentOutput: '',
+      alive: true,
+    };
+  }
+  return sub.mirror;
+}
+
+// The sub-terminal half of processIdleDetection: mirroring only, since the
+// desktop notifications and approval prompts belong to the task's own agent.
+function processSubOutput(inst, sub, data) {
+  if (!inst || !sub || !isAgentMode(sub.mode)) return;
+  const target = subMirrorTarget(inst, sub);
+  target.alive = sub.alive !== false;
+  target.recentOutput = (target.recentOutput + stripAnsi(data)).slice(-ROLLING_BUFFER_SIZE);
+  // The bell belongs to the session, and this tab is part of it.
+  if (inst.notifyWebhookEnabled !== true) return;
+
+  if (sub.turnTimer) clearTimeout(sub.turnTimer);
+  sub.turnTimer = setTimeout(() => {
+    if (!sub.alive) return;
+    try {
+      const body = newAgentSpeech(target);
+      if (!body) return;
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+        // Its own id, not the task's: an answer typed under what this agent
+        // said has to reach this agent, not whichever one owns the session.
+        containerId: target.id,
+        sessionName: `${inst.name} · ${target.name}`,
+        workspacePath: inst.worktreePath,
+        sessionBranch: inst.branch || '',
+        agentName: displayNameFor(sub.mode),
+        body,
+        ts: Date.now(),
+        notify: true,
+      });
+    } catch { /* never let a publish break the terminal path */ }
+  }, TURN_SETTLE_MS);
+  sub.turnTimer.unref?.();
+}
+
+function fileSize(file) {
+  if (!file) return 0;
+  try { return fs.statSync(file).size; } catch { return -1; }
+}
+
+// Set KLAUSSY_DEBUG_MIRROR to tell a transcript read from a screen scrape, which
+// look identical once the text reaches chat.
+function traceMirror(inst, providerId, source, text) {
+  if (!process.env.KLAUSSY_DEBUG_MIRROR) return;
+  console.warn('[mirror] ' + JSON.stringify({
+    id: inst.id,
+    mode: inst.mode,
+    originalMode: inst.originalMode,
+    providerId,
+    source,
+    file: inst.transcriptFile || '',
+    size: fileSize(inst.transcriptFile),
+    cursor: inst.transcriptCursor,
+    chars: (text || '').length,
+    head: (text || '').slice(0, 120),
+  }));
+}
+
+// Prefer the agent's own session store; a screen scrape has to guess at redraws.
+function newAgentSpeech(inst) {
+  const providerId = isAgentMode(inst.originalMode) ? inst.originalMode : inst.mode;
+  const file = agentTranscript.hasReader(providerId) ? transcriptFileFor(inst, providerId) : '';
+  if (file) {
+    const read = agentTranscript.readNewMessages(providerId, {
+      fromEnd: repointTranscript(inst, file, providerId),
+      worktreePath: inst.worktreePath,
+      transcriptFile: file,
+      cursor: inst.transcriptCursor || 0,
+      sinceMs: inst.spawnTime,
+    });
+    // A reader that answered is the whole answer. Falling through to the screen
+    // when it had nothing new posts the turn a second time, mangled by the
+    // repaint the transcript exists to avoid reading.
+    if (read) {
+      if (read.cursor != null) inst.transcriptCursor = read.cursor;
+      traceMirror(inst, providerId, read.text ? 'transcript' : 'transcript-silent', read.text);
+      return read.text || '';
+    }
+  }
+  const scraped = takeNewOutput(inst.id, inst.recentOutput);
+  traceMirror(inst, providerId, 'screen', scraped);
+  return scraped;
+}
+
 function stripAnsi(str) {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]/g, '');
+  return str
+    // Cursor-forward is how a TUI lays out columns; dropping it with the rest of
+    // the escapes ran words together ("1.Yes"), which then matched nothing.
+    .replace(/\x1b\[(\d*)C/g, (_m, n) => ' '.repeat(Math.min(parseInt(n || '1', 10), 80)))
+    // OSC (window title and friends), ended by BEL or ST.
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
+    // Full CSI: parameter bytes are 0x30-0x3F, including the '?' of private
+    // modes like ESC[?25l, which a digits-only class left as literal text.
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    // Charset selection and the single-character escapes a TUI emits.
+    .replace(/\x1b[()][0-9A-B]/g, '')
+    .replace(/\x1b[=>78MENOc]/g, '');
+}
+
+// Best-effort: pull the tool awaiting authorization out of an approval prompt
+// ("Allow <tool>?" / "Do you want to <verb>…"); '' when nothing recognizable.
+function extractApprovalTool(tail) {
+  const allow = tail.match(/Allow\s+([^\n?]+?)\s*\?/i);
+  if (allow) return allow[1].trim();
+  const wants = tail.match(/Do you want to\s+([^\n?]+?)\s*\??\s*$/i);
+  if (wants) return wants[1].trim();
+  return '';
 }
 
 function isAnyWindowFocused() {
@@ -255,6 +506,70 @@ function processIdleDetection(inst, data) {
     }
   }, IDLE_TIMEOUT_MS);
 
+  // Mirroring the agent's own words means following along doesn't depend on
+  // recognising prompt shapes.
+  if (inst.turnTimer) clearTimeout(inst.turnTimer);
+  inst.turnTimer = setTimeout(() => {
+    if (!inst.alive || !isAgentMode(inst.mode)) {
+      traceMirror(inst, inst.mode, inst.alive ? 'not-an-agent' : 'not-alive', '');
+      return;
+    }
+    // The bell decides whether a turn is mirrored at all, so a silent session
+    // looks the same here as a broken one until this says which it is.
+    if (inst.notifyWebhookEnabled !== true) {
+      traceMirror(inst, inst.mode, 'bell-off', '');
+      return;
+    }
+    try {
+      const body = newAgentSpeech(inst);
+      if (!body) return;
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+        containerId: inst.id,
+        sessionName: inst.name,
+        workspacePath: inst.worktreePath,
+        sessionBranch: inst.branch || '',
+        agentName,
+        body,
+        ts: Date.now(),
+        notify: true,
+      });
+    } catch { /* never let a publish break the terminal path */ }
+  }, TURN_SETTLE_MS);
+  inst.turnTimer.unref?.();
+
+  // A longer quiet stretch, reported to chat rather than the desktop: the agent
+  // has stopped without asking anything, usually with output waiting to be read.
+  if (inst.staleTimer) clearTimeout(inst.staleTimer);
+  // An idle agent still repaints its spinner and input box; counting that as
+  // activity re-armed the alert forever for a session that had done nothing.
+  if (!isChromeOnly(stripped)) inst.staleNotified = false;
+  const quietMs = staleAfterMs();
+  inst.staleTimer = setTimeout(() => {
+    if (!inst.alive || !isAgentMode(inst.mode)) return;
+    // An approval prompt already told them, and more precisely.
+    if (inst.approvalPending || inst.staleNotified) return;
+    // Mirroring already delivered whatever the agent said, so announcing the
+    // silence after it would just repeat the same turn.
+    try { if (getNotificationConfig().events.message) return; } catch { /* fall through */ }
+    inst.staleNotified = true;
+    try {
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.STALE,
+        containerId: inst.id,
+        sessionName: inst.name,
+        workspacePath: inst.worktreePath,
+        sessionBranch: inst.branch || '',
+        agentName,
+        quietMs,
+        logsTail: inst.recentOutput,
+        ts: Date.now(),
+        notify: inst.notifyWebhookEnabled === true,
+      });
+    } catch { /* never let a publish break the terminal path */ }
+  }, quietMs);
+  inst.staleTimer.unref?.();
+
   // Check prompt patterns against recent output tail
   const tail = inst.recentOutput.slice(-200);
   for (const pattern of PROMPT_PATTERNS) {
@@ -262,6 +577,39 @@ function processIdleDetection(inst, data) {
       sendIdleNotification(inst, `${agentName} is waiting for input`);
       break;
     }
+  }
+
+  // Publish approval-required on the transition into a waiting state. The
+  // approvalPending flag + cooldown stop a repainting TUI from storming the webhook.
+  const approvalTail = inst.recentOutput.slice(-APPROVAL_TAIL_CHARS);
+  const needsApproval = APPROVAL_PROMPT_PATTERNS.some((p) => p.test(approvalTail));
+  if (needsApproval) {
+    const now = Date.now();
+    if (!inst.approvalPending && now - inst.lastApprovalPublishTime >= APPROVAL_NOTIFY_COOLDOWN_MS) {
+      inst.approvalPending = true;
+      inst.lastApprovalPublishTime = now;
+      try {
+        nemesisEvents.publish({
+          type: nemesisEvents.EVENT_TYPES.APPROVAL_REQUIRED,
+          containerId: inst.id,
+          sessionName: inst.name,
+          workspacePath: inst.worktreePath,
+          sessionBranch: inst.branch || '',
+          agentName,
+          tool: extractApprovalTool(approvalTail),
+          logsTail: inst.recentOutput,
+          ts: now,
+          notify: inst.notifyWebhookEnabled === true,
+        });
+      } catch { /* never let a publish break the terminal path */ }
+    }
+  } else {
+    // The prompt is gone (answered locally or the agent moved on), so any
+    // Approve/Reject button still sitting in chat now refers to nothing.
+    if (inst.approvalPending) {
+      try { require('../util/approval-registry').revokeForTask(inst.id); } catch { /* non-fatal */ }
+    }
+    inst.approvalPending = false;
   }
 }
 
@@ -277,17 +625,36 @@ function initIdleDetectionFields(inst) {
     inst.notifyEnabled = pref !== false;
     inst.notifyCIEnabled = true;
   }
+  // Webhook bell: an explicit per-task choice wins, otherwise the global
+  // "notify new sessions" default. Shells never post regardless.
+  const webhookPref = (typeof pref === 'object' && pref !== null) ? pref.webhook : undefined;
+  inst.notifyWebhookEnabled = isAgentMode(inst.mode) && (typeof webhookPref === 'boolean'
+    ? webhookPref
+    : getNotificationConfig(config).notifyNewSessions);
   inst.lastDataTime = 0;
   inst.quietTimer = null;
   inst.notifiedIdle = false;
   inst.lastNotifyTime = 0;
   inst.recentOutput = '';
+  inst.approvalPending = false;
+  inst.lastApprovalPublishTime = 0;
+  inst.staleTimer = null;
+  inst.staleNotified = false;
+  inst.turnTimer = null;
 }
 
 function clearIdleTimer(inst) {
   if (inst.quietTimer) {
     clearTimeout(inst.quietTimer);
     inst.quietTimer = null;
+  }
+  if (inst.staleTimer) {
+    clearTimeout(inst.staleTimer);
+    inst.staleTimer = null;
+  }
+  if (inst.turnTimer) {
+    clearTimeout(inst.turnTimer);
+    inst.turnTimer = null;
   }
 }
 
@@ -345,7 +712,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     cols: 120,
     rows: 30,
     cwd: worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
+    env: { ...agentSpawnEnv(), TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to
@@ -439,6 +806,21 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     } catch {}
   }
 
+  // Start the webhook notification gateway once an agent (not a plain shell) is
+  // running. Idempotent and pref-gated inside — a no-op unless the user has
+  // configured a Slack/Discord webhook URL.
+  if (isAgentMode(mode)) {
+    try { require('../util/notification-gateway').ensureStarted(); } catch (e) {
+      console.warn('[notification-gateway] start failed:', e.message);
+    }
+    // Claude reports its own permission prompts and turn ends, which the
+    // terminal can only be pattern-matched for.
+    if (mode === 'claude') {
+      const r = require('../util/claude-hooks').installForWorktree(worktreePath);
+      if (!r.ok) console.warn('[claude-hook] install failed:', r.error);
+    }
+  }
+
   ptyProc.onData((data) => {
     processIdleDetection(instance, data);
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
@@ -451,6 +833,36 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   _startCIPolling(id, worktreePath, branch);
 
   return { id, name, worktreePath, branch, mode, repoPath };
+}
+
+// Built by the provider itself so the hint can't drift from what restart-task
+// runs. `trust` is deliberately omitted — a permission-bypass flag shouldn't be
+// pasted into a chat channel.
+function resumeHintFor(inst) {
+  try {
+    const mode = isAgentMode(inst.originalMode) ? inst.originalMode : inst.mode;
+    const provider = getProvider(mode);
+    if (!provider || typeof provider.buildInteractiveCmd !== 'function') return {};
+    const config = loadConfig();
+    const bin = binFor(provider.id, config);
+    const profile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
+    const model = profile ? (profile.model || '') : ((config.agentModel || {})[provider.id] || '');
+    const sessionId = inst.claudeSessionId
+      || (provider.supportsExactResume ? findLatestSessionId(inst.worktreePath) : '')
+      || '';
+    const command = provider.buildInteractiveCmd(bin, {
+      resumeSessionId: sessionId || undefined,
+      resumeLatest: !sessionId,
+      model,
+      profile,
+    });
+    // resumeExact drives the wording: only an id guarantees the same
+    // conversation comes back, so everything else is offered as a fresh start.
+    return { sessionId, resumeCommand: command, resumeExact: Boolean(sessionId) };
+  } catch (err) {
+    console.warn('[instances] resume hint failed:', err.message);
+    return {};
+  }
 }
 
 // Shared by spawn and restart: a copy that dropped the quit/kill/restart guards
@@ -469,7 +881,31 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
       restarting: !!instance.restarting,
     });
     if (action === 'ignore') return;
-    if (action === 'convert') { convertInstanceToShell(instance, exitCode); return; }
+    if (action === 'convert') {
+      // 'convert' is exactly the agent's own natural exit — not a stale pty, a
+      // user kill/restart, or app quit — so it's the one place to publish the
+      // terminal lifecycle event the notification gateway webhooks on.
+      try {
+        nemesisEvents.publish({
+          type: exitCode === 0 ? nemesisEvents.EVENT_TYPES.COMPLETED : nemesisEvents.EVENT_TYPES.FAILED,
+          containerId: instance.id,
+          sessionName: instance.name,
+          workspacePath: instance.worktreePath,
+          agentName: displayNameFor(instance.originalMode || instance.mode),
+          exitCode,
+          logsTail: instance.recentOutput || '',
+          ts: Date.now(),
+          notify: instance.notifyWebhookEnabled === true,
+          ...resumeHintFor(instance),
+        });
+      } catch { /* never let a publish break teardown */ }
+      // The tab becomes a shell next, so nothing in chat should still route here.
+      try { require('../util/approval-registry').revokeForTask(instance.id); } catch { /* non-fatal */ }
+      try { require('../util/notification-gateway').forgetTask(instance.id); } catch { /* non-fatal */ }
+      try { forgetTranscript(instance.id); } catch { /* non-fatal */ }
+      convertInstanceToShell(instance, exitCode);
+      return;
+    }
     instance.alive = false;
     sendToTerminalSubscribers(`terminal-exit-${id}`, exitCode);
   };
@@ -557,8 +993,34 @@ function reclaimOrphanedTasks(closingWc) {
   }
 }
 
+// True only while this instance is still running its agent CLI. False once it
+// has been converted to a plain shell, which keeps the same id and alive flag.
+function isAgentInstance(inst) {
+  return Boolean(inst && inst.alive && isAgentMode(inst.mode));
+}
+
+function notifyingAgentInstances() {
+  const out = [];
+  for (const [, inst] of instances) {
+    if (!inst.notifyWebhookEnabled) continue;
+    if (isAgentInstance(inst)) out.push(inst);
+    // A second agent in the session answers for itself, so it counts as its own
+    // candidate — otherwise a reply meant for it is read as unambiguous and
+    // handed to the agent that owns the task.
+    for (const sub of (inst.subTerminals || [])) {
+      if (sub.alive && isAgentMode(sub.mode) && sub.mirror) out.push(sub.mirror);
+    }
+  }
+  return out.sort((a, b) => (b.spawnTime || 0) - (a.spawnTime || 0));
+}
+
 module.exports = {
   instances,
+  isAgentInstance,
+  notifyingAgentInstances,
+  stripAnsi,
+  APPROVAL_PROMPT_PATTERNS,
+  ROLLING_BUFFER_SIZE,
   reclaimOrphanedTasks,
   subscribeTerminalChannel,
   unsubscribeTerminalChannel,
@@ -568,6 +1030,7 @@ module.exports = {
   detectClaudeSessionId,
   findLatestSessionId,
   processIdleDetection,
+  processSubOutput,
   clearIdleTimer,
   spawnInWorktree,
   convertInstanceToShell,

@@ -24,6 +24,22 @@ function loadConfig() {
 // `saveConfig` has ~64 call sites including a 10s auto-save timer, prefs
 // changes, PR-review cache writes, and notify-pref updates. Previously this was
 // read-modify-write into the final path with no locking: two overlapping calls
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+// Merge one level rather than replacing: a writer that never mentions a nested
+// object should not wipe the fields it doesn't know about.
+function mergeConfig(existing, incoming) {
+  const out = { ...existing };
+  for (const [key, value] of Object.entries(incoming)) {
+    out[key] = (isPlainObject(value) && isPlainObject(existing[key]))
+      ? { ...existing[key], ...value }
+      : value;
+  }
+  return out;
+}
+
 let _saveConfigQueue = Promise.resolve();
 function saveConfig(config) {
   _saveConfigQueue = _saveConfigQueue.then(() => {
@@ -32,7 +48,7 @@ function saveConfig(config) {
       let merged;
       try {
         const existing = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-        merged = Object.assign(existing, config);
+        merged = mergeConfig(existing, config);
       } catch {
         merged = config;
       }
@@ -50,6 +66,59 @@ function saveConfig(config) {
 // shutdownAndSave awaits this promise before quitting so the final write
 // (which may still be in-flight when Cmd+Q fires) has a chance to land.
 function flushSaveConfig() { return _saveConfigQueue; }
+
+// Webhook notification-gateway prefs (config.notificationGateway), read here so
+// the gateway and PTY publisher share defaults. Off unless a webhook URL is set.
+function getNotificationConfig(config = loadConfig()) {
+  const ng = (config && typeof config.notificationGateway === 'object' && config.notificationGateway) || {};
+  const slackWebhookUrl = typeof ng.slackWebhookUrl === 'string' ? ng.slackWebhookUrl.trim() : '';
+  const discordWebhookUrl = typeof ng.discordWebhookUrl === 'string' ? ng.discordWebhookUrl.trim() : '';
+  const nemesisUrl = typeof ng.nemesisUrl === 'string' ? ng.nemesisUrl.trim() : '';
+  const events = (ng.events && typeof ng.events === 'object') ? ng.events : {};
+  const str = (v) => (typeof v === 'string' ? v.trim() : '');
+  const slackAppToken = str(ng.slackAppToken);
+  const slackBotToken = str(ng.slackBotToken);
+  const slackChannel = str(ng.slackChannel);
+  const discordBotToken = str(ng.discordBotToken);
+  const discordChannel = str(ng.discordChannel);
+  // Only these ids may approve or send text. Empty = nobody; see chat-reply.
+  const allowList = Array.isArray(ng.allowList) ? ng.allowList.map(String).filter(Boolean) : [];
+  // Floored at 30s — an alert every time an agent pauses to think is worse
+  // than none.
+  const staleAfterSeconds = Math.max(30, Number(ng.staleAfterSeconds) || 120);
+  return {
+    // Explicit `enabled: false` hard-disables; otherwise presence of any
+    // webhook URL or bot channel turns it on.
+    enabled: ng.enabled === false
+      ? false
+      : Boolean(slackWebhookUrl || discordWebhookUrl || (slackBotToken && slackChannel) || (discordBotToken && discordChannel)),
+    slackWebhookUrl,
+    discordWebhookUrl,
+    nemesisUrl,
+    slackAppToken,
+    slackBotToken,
+    slackChannel,
+    discordBotToken,
+    discordChannel,
+    allowList,
+    // Buttons and text replies need a socket back from the platform, which
+    // needs the tokens above. Without them the alerts stay read-only.
+    slackInteractive: Boolean(slackAppToken && slackBotToken && slackChannel),
+    discordInteractive: Boolean(discordBotToken && discordChannel),
+    // Seeds each new session's per-task bell; the task can then override it.
+    notifyNewSessions: ng.notifyNewSessions !== false,
+    events: {
+      completed: events.completed !== false,
+      failed: events.failed !== false,
+      approvalRequired: events.approvalRequired !== false,
+      stale: events.stale !== false,
+      message: events.message !== false,
+    },
+    // Both units: ms for the timer, seconds so the prefs field round-trips.
+    staleAfterSeconds: staleAfterSeconds,
+    staleAfterMs: staleAfterSeconds * 1000,
+  };
+}
 
 // Legacy single-gateway accessor, kept for back-compat surfaces. New code uses
 // getNemesisProfiles()/getNemesisProfile() — Klaussy supports several named
@@ -209,5 +278,6 @@ module.exports = {
   getNemesisProfiles,
   getNemesisProfile,
   runConfigMigrations,
+  getNotificationConfig,
   CURRENT_SCHEMA_VERSION,
 };

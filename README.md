@@ -29,6 +29,8 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
     Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
     Type one prompt and send it to every agent in a session at once — kick off the same task across each worktree without retyping.
+*   **🔔 Answer Agents from Slack & Discord**
+    Get a message when an agent finishes, fails, or stops to ask permission — then hit **Approve**/**Reject** or reply with text right there, and it goes straight to the agent's terminal. Klaussy dials out over Socket Mode / the Discord Gateway, so there's no public URL, tunnel, or open port. Approvals are limited to an allow-list you name, single-use, and expire. Set it up under **Preferences → Slack & Discord Notifications** ([step-by-step guide](./docs/notifications-setup.md)).
 *   **🔌 Multi-Agent MCP Manager**
     Connect Model Context Protocol servers (GitHub, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Gemini, and the rest — from one catalog, with a single add fanning out to every agent you pick.
 *   **🛠️ Workflow-Oriented Tools**

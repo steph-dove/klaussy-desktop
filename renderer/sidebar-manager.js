@@ -123,11 +123,13 @@ window.Sidebar = (function () {
       '<span class="ci-status-icon" title="CI status"></span>' +
       '<span class="dirty-indicator"></span>' +
       '<span class="unread-badge"></span>' +
+      '<button class="task-notify-btn" title="Slack/Discord notifications">&#128276;</button>' +
       '<button class="task-note-btn" title="Notes">&#9998;</button>' +
       '<button class="task-close" title="Remove">&times;</button>';
 
     item.addEventListener('click', function (e) {
-      if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')) return;
+      if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')
+          || e.target.classList.contains('task-notify-btn')) return;
       if (e.target.classList.contains('ci-status-icon')) {
         var url = e.target.dataset.url;
         if (url) window.klaus.gh.openExternal(url);
@@ -150,6 +152,44 @@ window.Sidebar = (function () {
 
       if (wt.branch) window._addWorktreeToSidebar(wt);
       rebuild();
+    });
+
+    var notifyBtn = item.querySelector('.task-notify-btn');
+    function paintBell(on) {
+      notifyBtn.classList.toggle('notifying', !!on);
+      notifyBtn.innerHTML = on ? '&#128276;' : '&#128277;';
+      notifyBtn.title = on
+        ? 'Posting this session to Slack/Discord — click to stop'
+        : 'Not posting this session — click to send it to Slack/Discord';
+    }
+    window.klaus.ui.getPreferences().then(function (p) {
+      var ng = (p && p.notificationGateway) || {};
+      // Mirror getNotificationConfig's `enabled`: a bot token + channel is a
+      // complete setup on its own, so gating on a webhook URL would hide the bell.
+      if (!ng.enabled) {
+        notifyBtn.style.display = 'none';
+        return;
+      }
+      return window.klaus.task.getNotifyEnabled(task.id).then(function (state) {
+        paintBell(state && state.webhook);
+      });
+    }).catch(function () {
+      notifyBtn.style.display = 'none'; // can't tell: don't show a bell that may do nothing
+    });
+    notifyBtn.addEventListener('click', async function (e) {
+      e.stopPropagation();
+      var turningOn = !notifyBtn.classList.contains('notifying');
+      paintBell(turningOn); // optimistic; reverted below if the main side refuses
+      try {
+        var res = await window.klaus.task.setNotifyEnabled(task.id, turningOn, 'webhook');
+        if (!res || res.error) {
+          paintBell(!turningOn);
+          if (res && res.error && window.toast) window.toast.error(res.error);
+        }
+      } catch (err) {
+        paintBell(!turningOn);
+        if (window.toast) window.toast.error('Could not change notifications: ' + (err && err.message));
+      }
     });
 
     // Task notes
@@ -181,8 +221,17 @@ window.Sidebar = (function () {
     if (wt.isSavedSession) {
       var age = window.App && window.App.formatAge ? window.App.formatAge(wt.savedAt) : '';
       var pathShort = wt.path ? wt.path.split('/').slice(-2).join('/') : '';
+      var agents = wt.savedAgents || [];
       var modeLabel = wt.mode === 'shell' ? 'SH' : AppUtils.modeShortLabel(wt.mode);
       var modeTitle = wt.mode === 'shell' ? 'Previous shell session' : 'Previous ' + AppUtils.modeDisplayName(wt.mode) + ' session';
+      // A row stands for every agent the worktree had, so say so rather than
+      // naming only the first and bringing back more than the label promised.
+      if (agents.length > 1) {
+        modeLabel = agents.length + '×';
+        modeTitle = 'Previous session: ' + agents.map(function (a) {
+          return a.mode === 'shell' ? 'Shell' : AppUtils.modeDisplayName(a.mode);
+        }).join(' + ');
+      }
       
       item.innerHTML =
         '<span class="status-dot saved"></span>' +
@@ -207,7 +256,9 @@ window.Sidebar = (function () {
         btn.textContent = '...';
         var result;
         try {
-          if (wt.mode === 'shell') {
+          if (wt.savedAgents && wt.savedAgents.length > 1) {
+            result = await window.App.resumeAllSavedAgents(wt);
+          } else if (wt.mode === 'shell') {
             result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
           } else {
             result = await window.klaus.session.resume(wt);
@@ -233,6 +284,12 @@ window.Sidebar = (function () {
         window.App.addTaskToUI(result);
         window.App.switchToTask(result.id);
         window.App.restoreUIState(result);
+        // The session's other agents were tabs on this task, so they come back
+        // as tabs rather than as sessions of their own.
+        var extras = (wt.savedAgents && wt.savedAgents[0] && wt.savedAgents[0].subAgents) || wt.subAgents;
+        if (extras && extras.length && window.TerminalManager) {
+          TerminalManager.reopenSubAgents(result.id, extras);
+        }
       });
 
       var newBtn = item.querySelector('.saved-session-new');

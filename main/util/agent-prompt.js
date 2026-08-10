@@ -76,4 +76,4 @@ function stageInitialPrompt(provider, agentCmd, prompt, tag = 'prompt', shellPat
   }
 }
 
-module.exports = { stageInitialPrompt, promptFileArg, schedulePromptPaste };
+module.exports = { stageInitialPrompt, promptFileArg, schedulePromptPaste, pastePromptInto };
