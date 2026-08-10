@@ -147,7 +147,7 @@ test('a thread survives the restart that forgot it', async () => {
 
     instances.set(9001, {
       id: 9001, alive: true, mode: 'claude', originalMode: 'claude',
-      worktreePath: '/work/auth-refactor', pty: { write: () => {} },
+      worktreePath: '/work/auth-refactor', branch: 'add-oauth', pty: { write: () => {} },
     });
     try {
       assert.equal(threads.reattachThread('T77'), '9001',
@@ -185,5 +185,42 @@ test('a network failure opening a slack thread does not sink the dispatch', asyn
     assert.equal(ts, '', 'resolves empty so the caller posts flat');
   } finally {
     global.fetch = real;
+  }
+});
+
+// Two reviews of one repo look identical by worktree and agent, so reattaching on
+// those alone sent a reply meant for one PR into whichever review shared the checkout.
+test('a thread reattaches to its own branch, not whatever shares the checkout', async () => {
+  threads._reset();
+  const { instances } = require('../../main/state/instances');
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T80' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, {
+      containerId: '7',
+      workspacePath: '/checkouts/owner-repo',
+      sessionBranch: 'pr-38',
+      agentName: 'Claude Code',
+    });
+    await require('../../main/util/config').flushSaveConfig();
+    threads._reset();
+
+    instances.set(9100, {
+      id: 9100, alive: true, mode: 'claude', originalMode: 'claude',
+      worktreePath: '/checkouts/owner-repo', branch: 'pr-42', pty: { write: () => {} },
+    });
+    try {
+      assert.equal(threads.reattachThread('T80'), '', 'the other review is not this thread’s session');
+
+      instances.set(9101, {
+        id: 9101, alive: true, mode: 'claude', originalMode: 'claude',
+        worktreePath: '/checkouts/owner-repo', branch: 'pr-38', pty: { write: () => {} },
+      });
+      assert.equal(threads.reattachThread('T80'), '9101', 'the review it was opened for');
+    } finally {
+      instances.delete(9100);
+      instances.delete(9101);
+    }
+  } finally {
+    f.restore();
   }
 });

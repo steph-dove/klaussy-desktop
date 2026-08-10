@@ -62,6 +62,7 @@ function rememberThreadOwner(threadId, event) {
   _threadOwners.set(String(threadId), {
     worktreePath: event.workspacePath,
     agentName: event.agentName || '',
+    branch: event.sessionBranch || '',
   });
   try {
     const config = loadConfig();
@@ -69,6 +70,7 @@ function rememberThreadOwner(threadId, event) {
     kept[String(threadId)] = {
       worktreePath: event.workspacePath,
       agentName: event.agentName || '',
+      branch: event.sessionBranch || '',
       at: new Date().toISOString(),
     };
     const ids = Object.keys(kept);
@@ -90,9 +92,17 @@ function rememberThreadOwner(threadId, event) {
   }
 }
 
+// Every PR review of one repo shares a checkout directory, so only the branch names
+// the session; records written before it existed carry none and match on worktree alone.
+function sameSession(record, inst) {
+  if (inst.worktreePath !== record.worktreePath) return false;
+  if (!record.branch) return true;
+  return String(inst.branch || '') === record.branch;
+}
+
 // Reattaches a thread the running app has no memory of to whatever is now
-// running in the worktree and agent it was opened for. Returns '' when nothing
-// there matches, so the caller says so rather than answering someone else.
+// running in the session it was opened for. Returns '' when nothing there
+// matches, so the caller says so rather than answering someone else.
 function reattachThread(threadId) {
   let record = _threadOwners.get(String(threadId));
   if (!record) {
@@ -102,7 +112,7 @@ function reattachThread(threadId) {
   const { instances } = require('../state/instances');
   const { isAgentMode, displayNameFor } = require('../state/ai-providers');
   for (const [, inst] of instances) {
-    if (!inst.alive || inst.worktreePath !== record.worktreePath) continue;
+    if (!inst.alive || !sameSession(record, inst)) continue;
     const mode = inst.originalMode || inst.mode;
     if (isAgentMode(mode) && displayNameFor(mode) === record.agentName) {
       _discordThreadToTask.set(String(threadId), String(inst.id));
