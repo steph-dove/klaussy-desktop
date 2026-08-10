@@ -17,7 +17,7 @@ const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
-  processIdleDetection, clearIdleTimer, convertInstanceToShell,
+  processIdleDetection, processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, makeAgentExitHandler,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
@@ -249,7 +249,25 @@ function trackedLatestSession(provider, worktreePath) {
   return null;
 }
 
-ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath, branch, mode, originalMode, repoPath }) => {
+// The bell as the session was left. Applied after the spawn, which sets it from
+// the global default and the by-name preference; neither knows which of a
+// worktree's agents this is.
+function applySavedBell(result, notifyWebhook) {
+  if (typeof notifyWebhook !== 'boolean' || !result || result.error) return result;
+  const inst = result.id != null ? instances.get(result.id) : null;
+  if (!inst || !isAgentMode(inst.mode)) return result;
+  inst.notifyWebhookEnabled = notifyWebhook;
+  if (notifyWebhook) {
+    try { require('../util/notification-gateway').ensureStarted(); } catch (err) {
+      console.warn('[resume-session] gateway start failed:', err.message);
+    }
+  }
+  return result;
+}
+
+ipcMain.handle('resume-session', async (_event, {
+  sessionId, name, worktreePath, branch, mode, originalMode, repoPath, notifyWebhook,
+}) => {
   // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
   // exactly what made it a phantom (undiscoverable yet blocking re-create), so
   // resuming it should clear that state.
@@ -278,7 +296,10 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
       console.warn('[resume-session] handoff seed failed:', err && err.message);
     }
     try {
-      return spawnInWorktree(name, worktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined);
+      return applySavedBell(
+        spawnInWorktree(name, worktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined),
+        notifyWebhook,
+      );
     } catch (err) {
       console.error('[resume-session] handoff spawn failed:', err);
       return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -297,7 +318,7 @@ ipcMain.handle('resume-session', async (_event, { sessionId, name, worktreePath,
   }
   if (!exactId) exactId = trackedLatestSession(provider, worktreePath);
   try {
-    return spawnInWorktree(name, worktreePath, branch, resumeMode, exactId);
+    return applySavedBell(spawnInWorktree(name, worktreePath, branch, resumeMode, exactId), notifyWebhook);
   } catch (err) {
     console.error('[resume-session] spawnInWorktree failed:', err);
     return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -1144,10 +1165,17 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
 
   ptyProc.onData((data) => {
     sendToTerminalSubscribers(`terminal-data-${taskId}-${subId}`, data);
+    // A second agent in the session is still the session talking.
+    try { processSubOutput(inst, sub, data); } catch { /* never break the terminal */ }
   });
 
   ptyProc.onExit(() => {
     sub.alive = false;
+    if (sub.turnTimer) { clearTimeout(sub.turnTimer); sub.turnTimer = null; }
+    // This tab had its own thread in chat; nothing typed there reaches it now.
+    if (sub.mirror) {
+      try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+    }
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch {} }
     sendToTerminalSubscribers(`terminal-exit-${taskId}-${subId}`);
@@ -1228,6 +1256,18 @@ ipcMain.handle('kill-task', (_event, { id }) => {
     try { sub.pty.kill(); } catch {}
   }
   inst.alive = false;
+
+  // A kill takes the 'exit' path, which skips the chat teardown 'convert' does.
+  // Its thread then outranks reattachThread and answers "no longer running"
+  // forever, even once the same session is back.
+  try { require('../util/notification-gateway').forgetTask(id); } catch { /* non-fatal */ }
+  try { require('../util/session-transcript').forgetTask(id); } catch { /* non-fatal */ }
+  try { require('../util/approval-registry').revokeForTask(id); } catch { /* non-fatal */ }
+  for (const sub of (inst.subTerminals || [])) {
+    if (!sub.mirror) continue;
+    try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+    try { require('../util/session-transcript').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+  }
 
   // Never delete worktrees or branches — only kill the process
   instances.delete(id);
@@ -1324,11 +1364,21 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
-  // `kind` lets the renderer toggle idle vs CI independently. Default 'idle'
-  // matches the legacy single-flag callers.
-  const which = kind === 'ci' ? 'ci' : 'idle';
+  // Default 'idle' matches the legacy single-flag callers.
+  const which = kind === 'ci' ? 'ci' : (kind === 'webhook' ? 'webhook' : 'idle');
   if (which === 'ci') inst.notifyCIEnabled = enabled;
-  else inst.notifyEnabled = enabled;
+  else if (which === 'webhook') {
+    // Arm the gateway here too, so turning the bell on mid-session works even
+    // if no agent has spawned since the webhook URL was configured. If it can't
+    // start, report that instead of leaving a lit bell that never posts.
+    if (enabled) {
+      try { require('../util/notification-gateway').ensureStarted(); } catch (e) {
+        console.warn('[notification-gateway] start failed:', e.message);
+        return { error: 'Could not start the notification gateway: ' + e.message };
+      }
+    }
+    inst.notifyWebhookEnabled = enabled;
+  } else inst.notifyEnabled = enabled;
   const config = loadConfig();
   if (!config.notifyPrefs) config.notifyPrefs = {};
   // Migrate legacy boolean entries to the {idle, ci} shape on first write.
@@ -1344,8 +1394,13 @@ ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
 
 ipcMain.handle('get-notify-enabled', (_event, { id }) => {
   const inst = instances.get(id);
-  if (!inst) return { idle: true, ci: true };
-  return { idle: inst.notifyEnabled !== false, ci: inst.notifyCIEnabled !== false };
+  if (!inst) return { idle: true, ci: true, webhook: false };
+  return {
+    idle: inst.notifyEnabled !== false,
+    ci: inst.notifyCIEnabled !== false,
+    // Unlike idle/ci this defaults off — it posts outside the app.
+    webhook: inst.notifyWebhookEnabled === true,
+  };
 });
 
 ipcMain.handle('rename-task', (_event, { id, newName }) => {

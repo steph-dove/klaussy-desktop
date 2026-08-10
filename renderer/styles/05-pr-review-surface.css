@@ -5740,6 +5740,36 @@ body.task-branchless .file-viewer-blame-btn {
   color: var(--accent);
 }
 
+/* ---- Per-session webhook bell ---- */
+
+.task-notify-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+
+.task-item:hover .task-notify-btn {
+  opacity: 0.7;
+}
+
+.task-notify-btn:hover {
+  color: var(--accent);
+  opacity: 1 !important;
+}
+
+/* An armed bell stays visible without hover — this session posts outside the
+   app, so it shouldn't be a hidden state. */
+.task-notify-btn.notifying {
+  opacity: 0.9;
+  color: var(--accent);
+}
+
 .note-popover {
   background: var(--surface);
   border: 1px solid var(--border);

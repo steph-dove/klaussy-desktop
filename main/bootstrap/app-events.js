@@ -246,7 +246,6 @@ function saveSessions() {
     }
   }
 
-  const config = loadConfig();
   const sessions = [];
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
@@ -261,11 +260,22 @@ function saveSessions() {
       branch: inst.branch,
       mode: saveMode,
       repoPath: inst.repoPath || null,
+      // notifyPrefs also holds the bell, but keyed by tab name — which two
+      // agents on one worktree can share. Recorded per session as well, so a
+      // resumed tab comes back the way it was left.
+      notifyWebhook: inst.notifyWebhookEnabled === true,
+      // A second agent opens as a tab on this task rather than a task of its
+      // own, so it has no entry here to be resumed from — it rides on the one
+      // belonging to the agent that started the session.
+      subAgents: (inst.subTerminals || [])
+        .filter((s) => s && s.alive && isAgentMode(s.mode))
+        .map((s) => ({ mode: s.mode, label: s.label || null })),
       savedAt: new Date().toISOString(),
     });
   }
-  config.savedSessions = sessions;
-  saveConfig(config);
+  // saveConfig's write is queued, so passing a whole snapshot would revert
+  // anything saved between this function starting and landing.
+  saveConfig({ savedSessions: sessions });
 }
 
 function shutdownAndSave() {

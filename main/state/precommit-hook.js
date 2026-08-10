@@ -589,7 +589,14 @@ function reallyStartServer(sock) {
       try {
         const req = JSON.parse(buf.slice(0, nl));
         const cwd = typeof req.cwd === 'string' ? req.cwd : null;
-        if (req.kind === 'plan-approval') {
+        if (req.kind === 'claude-hook') {
+          // Claude Code reporting on itself; never blocks, so acknowledge and
+          // let the agent carry on regardless of what we do with it.
+          try { require('./agent-hook-router').handleClaudeHook(req.payload); } catch (e) {
+            console.warn('[claude-hook] handling failed:', e.message);
+          }
+          reply = { ok: true };
+        } else if (req.kind === 'plan-approval') {
           if (!cwd || !fs.existsSync(cwd)) {
             reply = { error: 'unknown cwd' };
           } else {

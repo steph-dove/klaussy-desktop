@@ -1,3 +1,7 @@
+/* global window, AppState */
+// These are used inside page.evaluate callbacks (renderer context); the e2e
+// eslint override is node-only.
+//
 // Inline diff annotations end-to-end against a live worktree: the comment
 // callback is swapped for a capturing stub so we can assert the exact prompt
 // without spawning an agent. Step screenshots land in QA_SHOT_DIR (default: tmp).

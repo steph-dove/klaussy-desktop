@@ -677,6 +677,10 @@ window.App = window.App || {};
       // its original agent (triggering a cross-agent handoff) only when the
       // user actually chose a different one — not just from the default.
       App.shellUserPicked = true;
+      // Naming one agent and asking for all of them are contradictory answers
+      // to the same question, so choosing here clears the resume-all box.
+      var resumeAll = document.getElementById('resume-all-agents-check');
+      if (resumeAll) resumeAll.checked = false;
       App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
       // If they picked an agent whose CLI isn't installed, offer to set it up
       // now instead of letting the eventual spawn fail with "command not found".

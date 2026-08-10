@@ -197,3 +197,115 @@ test('loadConfig returns {} when the file is malformed JSON', () => {
     assert.deepEqual(config.loadConfig(), {});
   } finally { restore(); }
 });
+
+test('getNotificationConfig: off with no webhook URL, on once one is set', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).enabled, false);
+  assert.equal(getNotificationConfig({
+    notificationGateway: { slackWebhookUrl: 'https://hooks.slack.com/x' },
+  }).enabled, true);
+  // An explicit false is a hard off, even with a URL present.
+  assert.equal(getNotificationConfig({
+    notificationGateway: { slackWebhookUrl: 'https://hooks.slack.com/x', enabled: false },
+  }).enabled, false);
+});
+
+test('getNotificationConfig: notifyNewSessions defaults on, respects explicit false', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).notifyNewSessions, true);
+  assert.equal(getNotificationConfig({
+    notificationGateway: { notifyNewSessions: false },
+  }).notifyNewSessions, false);
+});
+
+test('getNotificationConfig: whitespace-only URLs do not enable the gateway', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  const cfg = getNotificationConfig({
+    notificationGateway: { slackWebhookUrl: '   ', discordWebhookUrl: '\t' },
+  });
+  assert.equal(cfg.slackWebhookUrl, '');
+  assert.equal(cfg.enabled, false);
+});
+
+test('getNotificationConfig: stale threshold round-trips and has a floor', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).staleAfterSeconds, 120, 'default');
+  assert.equal(getNotificationConfig({}).staleAfterMs, 120000);
+
+  const set = getNotificationConfig({ notificationGateway: { staleAfterSeconds: 300 } });
+  assert.equal(set.staleAfterSeconds, 300, 'the prefs field can read back what it saved');
+  assert.equal(set.staleAfterMs, 300000);
+
+  // A chat alert every few seconds is worse than none, so tiny values are floored.
+  assert.equal(getNotificationConfig({
+    notificationGateway: { staleAfterSeconds: 1 },
+  }).staleAfterSeconds, 30);
+});
+
+test('getNotificationConfig: the stale event defaults on and can be muted', () => {
+  const { getNotificationConfig } = require('../../main/util/config');
+  assert.equal(getNotificationConfig({}).events.stale, true);
+  assert.equal(getNotificationConfig({
+    notificationGateway: { events: { stale: false } },
+  }).events.stale, false);
+});
+
+// A 10s session-saver passing a whole snapshot silently ate credentials saved
+// in between.
+test('a partial save leaves other keys alone', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { discordBotToken: 'keep-me' }, savedSessions: ['old'] });
+  await flushSaveConfig();
+
+  saveConfig({ savedSessions: ['new'] });
+  await flushSaveConfig();
+
+  const after = loadConfig();
+  assert.deepEqual(after.savedSessions, ['new']);
+  assert.equal(after.notificationGateway.discordBotToken, 'keep-me',
+    'an unrelated writer must not revert credentials');
+});
+
+// Callers pass whole snapshots and the write is queued, so replacing a nested
+// object let a stale save revert credentials typed in between.
+test('saveConfig merges nested objects instead of replacing them', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { discordBotToken: 'a', discordChannel: 'c' } });
+  await flushSaveConfig();
+
+  saveConfig({ notificationGateway: { discordBotToken: 'b' } });
+  await flushSaveConfig();
+
+  const ng = loadConfig().notificationGateway;
+  assert.equal(ng.discordBotToken, 'b', 'the written field updates');
+  assert.equal(ng.discordChannel, 'c', 'its siblings survive');
+});
+
+// Merging protects what a writer never mentions, not a field it explicitly
+// carries a stale value for — hence saveSessions now passes only its own keys.
+test('merging protects keys a writer never mentions', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { discordBotToken: 'live', discordChannel: 'c' } });
+  await flushSaveConfig();
+
+  saveConfig({ savedSessions: ['tick'] });
+  await flushSaveConfig();
+
+  assert.equal(loadConfig().notificationGateway.discordBotToken, 'live');
+
+  saveConfig({ notificationGateway: { allowList: ['U1'] } });
+  await flushSaveConfig();
+  const ng = loadConfig().notificationGateway;
+  assert.equal(ng.discordBotToken, 'live', 'untouched by an unrelated field');
+  assert.deepEqual(ng.allowList, ['U1']);
+});
+
+// Arrays are values, not things to merge: appending would be surprising.
+test('arrays are replaced wholesale', async () => {
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  saveConfig({ notificationGateway: { allowList: ['U1', 'U2'] } });
+  await flushSaveConfig();
+  saveConfig({ notificationGateway: { allowList: ['U3'] } });
+  await flushSaveConfig();
+  assert.deepEqual(loadConfig().notificationGateway.allowList, ['U3']);
+});

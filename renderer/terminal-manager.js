@@ -777,6 +777,26 @@ window.TerminalManager = (function () {
     return { ok: true };
   }
 
+  // A session's second agent lived as a tab on this task, not as a task of its
+  // own, so bringing the session back recreates it the same way.
+  async function reopenSubAgents(taskId, subAgents) {
+    var taskEntry = tasks.get(taskId);
+    if (!taskEntry || !subAgents || !subAgents.length) return { ok: true };
+    for (var i = 0; i < subAgents.length; i++) {
+      var agent = subAgents[i];
+      if (!agent || !agent.mode) continue;
+      var label = agent.label || (window.AppUtils ? AppUtils.modeDisplayName(agent.mode) : agent.mode);
+      try {
+        var result = await window.klaus.terminal.addSub(taskId, label, agent.mode);
+        if (!result || result.error || result.cancelled) continue;
+        addSubTerminalTab(taskEntry, result.subId, result.label, agent.mode, true);
+      } catch (err) {
+        console.warn('[resume] could not reopen', agent.mode, err);
+      }
+    }
+    return { ok: true };
+  }
+
   // ---- buildActionsDropdown (worktree header) ----
 
   // Open menus are tracked globally so the outside-click handler can close
@@ -1097,6 +1117,7 @@ window.TerminalManager = (function () {
     zoomReset: zoomReset,
     runInSubTerminal: runInSubTerminal,
     openClaudeSubTerminal: openClaudeSubTerminal,
+    reopenSubAgents: reopenSubAgents,
     // For callers that change a task's mode after creation (agent → shell
     // conversion, sidebar Resume) so the primary tab's agent label stays
     // truthful.
