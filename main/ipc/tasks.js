@@ -1257,6 +1257,18 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   }
   inst.alive = false;
 
+  // A kill takes the 'exit' path, which skips the chat teardown 'convert' does.
+  // Its thread then outranks reattachThread and answers "no longer running"
+  // forever, even once the same session is back.
+  try { require('../util/notification-gateway').forgetTask(id); } catch { /* non-fatal */ }
+  try { require('../util/session-transcript').forgetTask(id); } catch { /* non-fatal */ }
+  try { require('../util/approval-registry').revokeForTask(id); } catch { /* non-fatal */ }
+  for (const sub of (inst.subTerminals || [])) {
+    if (!sub.mirror) continue;
+    try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+    try { require('../util/session-transcript').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+  }
+
   // Never delete worktrees or branches — only kill the process
   instances.delete(id);
   return { ok: true };

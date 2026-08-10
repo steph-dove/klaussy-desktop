@@ -11,20 +11,32 @@ const DEFAULT_TTL_MS = 30 * 60 * 1000;
 
 const pending = new Map(); // token -> { taskId, tool, createdAt, expiresAt }
 
+// What the prompt looked like when the token was minted. A token names only a
+// session, so without this it answers whatever that session happens to be asking
+// when the button is finally pressed.
+function fingerprint(text) {
+  const prompt = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!prompt) return '';
+  return crypto.createHash('sha1').update(prompt).digest('hex').slice(0, 16);
+}
+
 function issue(taskId, tool, {
-  ttlMs = DEFAULT_TTL_MS, approveKeys = '', rejectKeys = '', options = [],
+  ttlMs = DEFAULT_TTL_MS, approveKeys = '', rejectKeys = '', options = [], prompt = '',
 } = {}) {
   const token = crypto.randomBytes(16).toString('hex');
   const now = Date.now();
   // Prompts that are never clicked would otherwise sit here forever; minting is
   // rare enough that sweeping on each one costs nothing.
   sweepExpired(now);
+  // A session asks one question at a time, so an older token for it points at a
+  // question that has been answered or moved past.
+  revokeForTask(taskId);
   // Task ids arrive as a number from instances.js and as a string from a
   // normalized event's containerId. Store one canonical form or revokeForTask
   // silently matches nothing.
   pending.set(token, {
     token, taskId: String(taskId), tool: tool || '',
-    approveKeys, rejectKeys, options,
+    approveKeys, rejectKeys, options, prompt: fingerprint(prompt),
     createdAt: now, expiresAt: now + ttlMs,
   });
   return token;
@@ -44,7 +56,18 @@ function redeem(token) {
     approveKeys: entry.approveKeys,
     rejectKeys: entry.rejectKeys,
     options: entry.options,
+    prompt: entry.prompt,
   };
+}
+
+// True when the screen still shows the question this token was minted for. An
+// empty fingerprint on either side means we never had one to compare, and the
+// answer stands on the session alone as it did before.
+function stillAsking(claim, currentPrompt) {
+  if (!claim || !claim.prompt) return true;
+  const now = fingerprint(currentPrompt);
+  if (!now) return true;
+  return claim.prompt === now;
 }
 
 // Drop every outstanding token for a session — called when the agent exits or
@@ -66,4 +89,6 @@ function size() { return pending.size; }
 
 function _reset() { pending.clear(); }
 
-module.exports = { issue, redeem, revokeForTask, sweepExpired, size, DEFAULT_TTL_MS, _reset };
+module.exports = {
+  issue, redeem, revokeForTask, sweepExpired, size, fingerprint, stillAsking, DEFAULT_TTL_MS, _reset,
+};

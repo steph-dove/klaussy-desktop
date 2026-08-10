@@ -120,6 +120,7 @@ test('antigravity: model planner responses are read from jsonl transcript', () =
 test('antigravity: a question and its options are what the agent said', () => {
   const file = tmpFile('transcript.jsonl', [
     {
+      step_index: 0,
       source: 'MODEL',
       type: 'PLANNER_RESPONSE',
       created_at: '2026-08-09T20:52:03Z',
@@ -141,37 +142,59 @@ test('antigravity: a question and its options are what the agent said', () => {
   assert.doesNotMatch(r.text, /probably wants/, 'thinking is never posted');
 });
 
-// The jsonl holds only the turn in progress and is rewritten each reply, so a
-// position in it is meaningless: the same turn was posted over and over.
-test('antigravity: a turn already posted is not posted again when rewritten', () => {
-  const file = tmpFile('transcript.jsonl', [
-    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T1', content: 'First answer.' },
-  ]);
+// The store accumulates (measured: 1039 rows, step_index 0-1038, monotonic).
+// Deduping on a digest of the first 4000 characters froze once a conversation
+// passed 4000 characters, and the session went silent for good.
+const agySay = (step_index, content) => ({ step_index, source: 'MODEL', type: 'PLANNER_RESPONSE', content });
+
+test('antigravity: only what was said after the cursor is posted', () => {
+  const file = tmpFile('transcript.jsonl', [agySay(0, 'First answer.')]);
   const first = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0 });
   assert.equal(first.text, 'First answer.');
   assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: first.cursor }).text, '',
-    'the same turn on disk says nothing new');
+    'nothing new to say');
 
-  // The next reply replaces the file rather than appending to it.
-  fs.writeFileSync(file, JSON.stringify(
-    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T2', content: 'Second answer.' },
-  ) + '\n');
-  assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: first.cursor }).text,
-    'Second answer.', 'a rewritten file still yields the new turn');
+  appendLine(file, agySay(1, 'Second answer.'));
+  const next = t.readNewMessages('antigravity', { transcriptFile: file, cursor: first.cursor });
+  assert.equal(next.text, 'Second answer.', 'the new turn only, not the conversation');
+});
+
+// A digest of the head stops changing once a conversation is long enough, which
+// is what silenced it; and the head is the wrong half to keep, since a question
+// and its numbered options sit at the end of a turn.
+test('antigravity: a long conversation keeps saying new things, and keeps the end', () => {
+  const lines = [];
+  for (let i = 0; i < 60; i++) lines.push(agySay(i, `Paragraph ${i}. ` + 'x'.repeat(200)));
+  const file = tmpFile('transcript.jsonl', lines);
+  const first = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0 });
+  assert.ok(first.text.length > 0, 'a conversation past 4000 chars still reports');
+  assert.match(first.text, /Paragraph 59/, 'the end is kept, not the opening');
+
+  appendLine(file, agySay(60, 'Which option do you want?'));
+  const next = t.readNewMessages('antigravity', { transcriptFile: file, cursor: first.cursor });
+  assert.equal(next.text, 'Which option do you want?', 'and the next turn still arrives');
+});
+
+// protobuf-scan's contract: a miss means "cannot read this", never "the agent
+// said nothing". Reporting silence would suppress the screen fallback and leave
+// the session permanently mute after any upstream rename.
+test('antigravity: an unrecognised record shape falls back rather than reporting silence', () => {
+  const file = tmpFile('transcript.jsonl', [
+    { step_index: 0, source: 'MODEL', type: 'RENAMED_UPSTREAM', content: 'Something it said.' },
+    { step_index: 1, source: 'SYSTEM', type: 'CONVERSATION_HISTORY' },
+  ]);
+  assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0 }), null,
+    'null, so the caller falls back to the screen');
 });
 
 // Adopting a conversation already under way must not repeat what it said before
 // this session claimed it.
-test('antigravity: fromEnd adopts the turn on record without posting it', () => {
-  const file = tmpFile('transcript.jsonl', [
-    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T1', content: 'Said before we bound.' },
-  ]);
+test('antigravity: fromEnd adopts the conversation without posting it', () => {
+  const file = tmpFile('transcript.jsonl', [agySay(0, 'Said before we bound.')]);
   const r = t.readNewMessages('antigravity', { transcriptFile: file, cursor: 0, fromEnd: true });
   assert.equal(r.text, '');
 
-  fs.writeFileSync(file, JSON.stringify(
-    { source: 'MODEL', type: 'PLANNER_RESPONSE', created_at: 'T2', content: 'Ours.' },
-  ) + '\n');
+  appendLine(file, agySay(1, 'Ours.'));
   assert.equal(t.readNewMessages('antigravity', { transcriptFile: file, cursor: r.cursor }).text, 'Ours.');
 });
 

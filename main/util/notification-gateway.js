@@ -108,14 +108,22 @@ async function dispatchEvent(event, cfg) {
     // A menu ignores y/n, so Approve/Reject for one would be dead buttons; none
     // is better, since the mirrored turn still shows the choices.
     menuPrompt = reply.hasSelectionFooter(event.logsTail) || promptOptions.length > 0 || isMultiSelect;
-    promptQuestion = reply.parsePromptQuestion(event.logsTail);
+    // A hook said what it wants in the agent's own words; the screen is only
+    // guessed at when nothing authoritative came with the event.
+    promptQuestion = event.promptQuestion || reply.parsePromptQuestion(event.logsTail);
     if (menuPrompt && !promptOptions.length) {
       console.warn('[notification-gateway] selection prompt with no readable options');
     }
     approvalToken = require('./approval-registry').issue(
       event.containerId,
       event.tool || event.step,
-      { ...reply.keysForPrompt(event.logsTail), options: promptOptions },
+      {
+        ...reply.keysForPrompt(event.logsTail),
+        options: promptOptions,
+        // Records which question these keys answer, so the button refuses if the
+        // agent has moved on to a different one by the time it is pressed.
+        prompt: reply.approvalTail({ recentOutput: event.logsTail }),
+      },
     );
   }
   const decorated = approvalToken

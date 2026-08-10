@@ -230,12 +230,26 @@ function antigravityJsonlPath(transcriptFile) {
   return '';
 }
 
-// Antigravity keeps only the turn in progress: the jsonl log and the steps table
-// are both rewritten each reply and idx restarts at 0, so a position is
-// meaningless. The cursor names the last turn posted, by its content.
-function turnId(kind, stamp, text) {
-  const digest = crypto.createHash('sha1').update(text).digest('hex').slice(0, 12);
-  return `${kind}:${stamp || ''}:${digest}`;
+// Both Antigravity stores accumulate and their index is monotonic, so the cursor
+// is that index, tagged with the reader that issued it: a jsonl position read as
+// a row id skips or replays arbitrarily.
+function stepCursor(kind, index) { return `${kind}:${index}`; }
+
+// The index this reader last posted, or -1 when the cursor came from the other
+// one (or from nothing yet), which means start from the beginning.
+function stepIndexFrom(kind, cursor) {
+  const s = String(cursor == null ? '' : cursor);
+  const sep = s.indexOf(':');
+  if (sep === -1 || s.slice(0, sep) !== kind) return -1;
+  const n = Number(s.slice(sep + 1));
+  return Number.isFinite(n) ? n : -1;
+}
+
+// Keeps the end rather than the start: the question and the numbered options a
+// chat reply has to answer with are at the bottom of a turn.
+function capFromEnd(text) {
+  if (text.length <= MAX_TEXT) return text;
+  return '…\n' + text.slice(-MAX_TEXT);
 }
 
 // Tool output carried on a MODEL step: file content, not something it said.
@@ -282,40 +296,57 @@ function agySpeech(rec) {
 function readAntigravityJsonl(file, cursor, fromEnd) {
   let raw;
   try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const records = parseLines(raw.split('\n').filter(Boolean));
+  if (!records.length) return { text: '', cursor: cursor || stepCursor('j', -1) };
+
+  const from = stepIndexFrom('j', cursor);
   const parts = [];
-  let stamp = '';
-  for (const rec of parseLines(raw.split('\n').filter(Boolean))) {
+  let last = from;
+  let spoken = 0;
+  for (const rec of records) {
+    const index = Number(rec.step_index);
+    if (!Number.isFinite(index)) continue;
     if (rec.source !== 'MODEL' || !AGY_SPOKEN_TYPES.has(rec.type)) continue;
-    if (rec.created_at) stamp = rec.created_at;
+    spoken += 1;
+    if (index > last) last = index;
+    if (fromEnd || index <= from) continue;
     for (const said of agySpeech(rec)) {
       if (parts[parts.length - 1] !== said) parts.push(said);
     }
   }
-  const text = parts.join('\n\n').slice(0, MAX_TEXT);
-  const id = turnId('j', stamp, text);
-  if (fromEnd || !text || id === cursor) return { text: '', cursor: id };
-  return { text, cursor: id };
+  // Records parsed but none was the agent speaking: the shape has moved under
+  // us, which is not the same as the agent having said nothing.
+  if (!spoken) return null;
+  return { text: fromEnd ? '' : capFromEnd(parts.join('\n\n')), cursor: stepCursor('j', last) };
 }
 
 function readAntigravitySqlite(file, cursor, fromEnd) {
   let db;
   try {
     db = openDb(file);
+    const from = stepIndexFrom('s', cursor);
     const rows = db.prepare(
-      'select idx, step_payload from steps where step_type = ? order by idx',
-    ).all(AGY_SPEECH_STEP);
+      'select idx, step_payload from steps where step_type = ? and idx > ? order by idx',
+    ).all(AGY_SPEECH_STEP, from);
+    if (!rows.length) return { text: '', cursor: stepCursor('s', from) };
 
+    let last = from;
     const parts = [];
     for (const row of rows) {
+      last = row.idx;
+      if (fromEnd) continue;
       for (const said of stringsAt(toBuffer(row.step_payload), AGY_SPEECH_FIELD)) {
         const t = said.trim();
         if (t && parts[parts.length - 1] !== t) parts.push(t);
       }
     }
-    const text = parts.join('\n\n').slice(0, MAX_TEXT);
-    const id = turnId('s', '', text);
-    if (fromEnd || !text || id === cursor) return { text: '', cursor: id };
-    return { text, cursor: id };
+    // Rows at the speech step, but nothing readable at the field path: the wire
+    // format has moved. Fall back rather than reporting silence forever.
+    if (!fromEnd && !parts.length) {
+      console.warn(`[agent-transcript] antigravity: ${rows.length} step-${AGY_SPEECH_STEP} rows, nothing at field ${AGY_SPEECH_FIELD}`);
+      return null;
+    }
+    return { text: fromEnd ? '' : capFromEnd(parts.join('\n\n')), cursor: stepCursor('s', last) };
   } catch (err) {
     console.warn('[agent-transcript] antigravity read failed:', err.message);
     return null;

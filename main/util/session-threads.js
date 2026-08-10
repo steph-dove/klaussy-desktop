@@ -72,12 +72,19 @@ function rememberThreadOwner(threadId, event) {
       at: new Date().toISOString(),
     };
     const ids = Object.keys(kept);
+    const dropped = [];
     if (ids.length > MAX_REMEMBERED_THREADS) {
       ids.sort((a, b) => String(kept[a].at).localeCompare(String(kept[b].at)));
-      for (const id of ids.slice(0, ids.length - MAX_REMEMBERED_THREADS)) delete kept[id];
+      for (const id of ids.slice(0, ids.length - MAX_REMEMBERED_THREADS)) {
+        delete kept[id];
+        dropped.push(id);
+      }
     }
-    config.notificationThreads = kept;
-    saveConfig(config);
+    // Only this writer's key: a whole snapshot would carry stale copies of
+    // everything else over a prefs save landing meanwhile. Pruned ids go as
+    // undefined, which JSON.stringify drops, or the merge restores them.
+    for (const id of dropped) kept[id] = undefined;
+    saveConfig({ notificationThreads: kept });
   } catch (err) {
     console.error('[session-threads] could not record thread owner:', err.message);
   }
@@ -183,6 +190,9 @@ async function ensureDiscordThread(cfg, event) {
   if (!taskId) return '';
   const entry = entryFor(taskId);
   if (entry.discordThreadId) return entry.discordThreadId;
+  // The anchor goes into the channel before the thread can hang off it, so a bot
+  // that can post but not open threads would leave one behind on every alert.
+  if (entry.discordThreadRefused) return '';
 
   return once('discord:' + taskId, async () => {
     const existing = entryFor(taskId).discordThreadId;
@@ -208,6 +218,7 @@ async function ensureDiscordThread(cfg, event) {
         },
       );
       if (!threadRes.ok) {
+        entryFor(taskId).discordThreadRefused = true;
         console.error('[session-threads] discord thread failed: HTTP', threadRes.status,
           threadRes.status === 403
             ? '— the bot lacks Create Public Threads; re-invite with permissions=292057844736'

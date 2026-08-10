@@ -4,7 +4,7 @@
 // Everything here is reached from a network socket, so each entry point
 // re-checks that the responder is allowed and that the session is still alive.
 
-const { redeem, revokeForTask } = require('./approval-registry');
+const { redeem, revokeForTask, stillAsking } = require('./approval-registry');
 const { pastePromptInto } = require('./agent-prompt');
 
 const DEFAULT_APPROVE_KEYS = 'y\r';
@@ -18,9 +18,13 @@ const OPTION_LABEL_MAX = 70;
 const MAX_OPTIONS = 5;
 
 // A TUI prints this under a selection menu; its presence is what makes a
-// numbered list selectable rather than prose.
-const SELECTION_FOOTER = /(enter to select|esc to cancel|↑\/↓|select (one|an|options|choices|multiple|all|features|several)|choice|choose|input choice|\[\d+-\d+\]|\(select)/i;
+// numbered list selectable rather than prose. Every alternative is a phrase a TUI
+// draws: bare "choice" and "choose" are not, and turned prose into buttons.
+const SELECTION_FOOTER = /(enter to (select|confirm)|esc to cancel|↑\/↓|space to (toggle|select)|select (one|an|option|options|choice|choices)|input choice|\[\d+-\d+\]|\(select)/i;
 const MENU_LOOKBACK_LINES = 30;
+// How far the footer may sit below the last option. A menu draws them together;
+// prose puts a sentence in between.
+const FOOTER_GAP_LINES = 2;
 // A repaint can lay out columns with cursor moves rather than spaces, so the
 // space is optional; the label may not start with a digit, or "1.5 seconds"
 // would read as option 1.
@@ -35,25 +39,35 @@ function footerLines(tail) {
   return { lines, at };
 }
 
+// Newest first, since a repaint leaves stale footers behind; and the footer has
+// to sit directly under the options, or numbered prose becomes buttons that
+// answer whatever prompt is really on screen.
+function menuRegions(tail) {
+  return menusWithFooter(tail).map((m) => m.region);
+}
+
+function menusWithFooter(tail) {
+  const { lines, at } = footerLines(tail);
+  const menus = [];
+  for (const i of at) {
+    const region = lines.slice(Math.max(0, i - MENU_LOOKBACK_LINES), i);
+    let last = region.length - 1;
+    while (last >= 0 && !region[last].trim()) last--;
+    if (last < 0) continue;
+    let optionAt = last;
+    while (optionAt >= 0 && optionAt > last - FOOTER_GAP_LINES && !OPTION_LINE.test(region[optionAt])) {
+      optionAt--;
+    }
+    if (optionAt >= 0 && OPTION_LINE.test(region[optionAt])) menus.push({ region, footer: lines[i] });
+  }
+  return menus;
+}
+
 // True even when the options can't be read, because the caller must not offer
 // y/n buttons for a menu. "esc to cancel" alone is not enough: some TUIs print
 // it as a permanent idle footer, so a menu also has to have options above it.
 function hasSelectionFooter(tail) {
-  const { lines, at } = footerLines(tail);
-  if (!at.length) return false;
-  return at.some((i) => lines
-    .slice(Math.max(0, i - MENU_LOOKBACK_LINES), i)
-    .some((l) => OPTION_LINE.test(l)));
-}
-
-// Newest first: a repaint leaves several footers behind, and the newest can
-// have redraw fragments above it rather than the menu.
-function menuRegions(tail) {
-  const { lines, at } = footerLines(tail);
-  if (at.length) {
-    return at.map((i) => lines.slice(Math.max(0, i - MENU_LOOKBACK_LINES), i));
-  }
-  return [];
+  return menuRegions(tail).length > 0;
 }
 
 // The prose directly above a menu's first option, sent instead of the whole
@@ -102,10 +116,14 @@ function parseRegion(region) {
   return { options: all.slice(0, MAX_OPTIONS), truncated: all.length > MAX_OPTIONS };
 }
 
-// Multi-select or choice prompts need options buttons or contextual selection hints
+// Scoped to the menu itself: "I'll select all the failing tests" is the agent
+// talking, and reading it as a multi-select strips the Approve/Reject buttons
+// off whatever prompt is really waiting.
+const MULTI_SELECT_IDIOM = /(space to (toggle|select)|select (one or more|all that apply|multiple|one or several)|separated by (spaces?|commas?)|multi-select)/i;
+
 function isMultiSelect(tail) {
-  const s = String(tail || '');
-  return /(space to (toggle|select)|select (one or more|all that apply|multiple|one or several)|select all|check all|separated by (space|comma)|multi-select)/i.test(s);
+  return menusWithFooter(tail).some(({ region, footer }) => MULTI_SELECT_IDIOM.test(footer)
+    || region.some((l) => MULTI_SELECT_IDIOM.test(l)));
 }
 
 // Claude Code draws a numbered menu where 'y' does nothing, while other agents
@@ -163,6 +181,14 @@ function liveInstance(taskId) {
   return sub;
 }
 
+// The same slice instances.js matches an approval prompt against, so the token
+// is fingerprinted over the same text when minted and when clicked.
+const APPROVAL_TAIL_CHARS = 1500;
+
+function approvalTail(inst) {
+  return String((inst && inst.recentOutput) || '').slice(-APPROVAL_TAIL_CHARS);
+}
+
 // Shared gate for every button click; returns { error } or { claim, inst }.
 function claimForClick({ token, userId, allowList }) {
   if (!isAllowed(userId, allowList)) {
@@ -178,6 +204,18 @@ function claimForClick({ token, userId, allowList }) {
   const inst = liveInstance(claim.taskId);
   if (!inst) {
     return { error: { ok: false, reason: 'gone', message: 'That session is no longer running.' } };
+  }
+  // The keys were captured against the question that was on screen when the
+  // button was posted. If the agent has moved on, pressing it now answers a
+  // question nobody in the channel has read.
+  if (!stillAsking(claim, approvalTail(inst))) {
+    return {
+      error: {
+        ok: false,
+        reason: 'moved-on',
+        message: 'That prompt has changed — answer the current one in Klaussy.',
+      },
+    };
   }
   return { claim, inst };
 }
@@ -245,5 +283,5 @@ function applyText({ taskId, text, userId, allowList }) {
 module.exports = {
   applyDecision, applyChoice, applyText,
   isAllowed, sanitizeForPaste, keysForPrompt, parsePromptOptions, isMultiSelect,
-  hasSelectionFooter, parsePromptQuestion, MAX_OPTIONS,
+  hasSelectionFooter, parsePromptQuestion, approvalTail, MAX_OPTIONS,
 };

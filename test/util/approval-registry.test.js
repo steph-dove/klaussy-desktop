@@ -74,3 +74,34 @@ test('sweepExpired clears stale entries without touching live ones', () => {
   assert.equal(registry.size(), 1);
   assert.equal(registry.redeem(live).ok, true);
 });
+
+// A token names a session, and a session is asked many questions. Without a
+// record of which one it was minted for, a button posted for "Allow git status?"
+// answers whatever the agent is asking by the time someone clicks it.
+test('a token refuses once the prompt it was minted for is gone', () => {
+  registry._reset();
+  const asked = 'Allow Bash(git status)?\n  1. Yes\n  2. No';
+  const token = registry.issue(1, 'Bash', { approveKeys: '1', prompt: asked });
+  const claim = registry.redeem(token);
+  assert.equal(claim.ok, true);
+  assert.equal(registry.stillAsking(claim, asked), true, 'same prompt still answerable');
+  assert.equal(registry.stillAsking(claim, 'Allow Bash(rm -rf build)?\n  1. Yes\n  2. No'), false,
+    'a different question is not what this button was for');
+});
+
+test('a token minted without a prompt is answered on the session alone', () => {
+  registry._reset();
+  const claim = registry.redeem(registry.issue(1, 'Bash', { approveKeys: 'y\r' }));
+  assert.equal(registry.stillAsking(claim, 'anything at all'), true);
+  assert.equal(registry.stillAsking(claim, ''), true);
+});
+
+// One question at a time: a token still live from the previous prompt would
+// otherwise sit in chat with working buttons.
+test('minting a token retires the session previous one', () => {
+  registry._reset();
+  const first = registry.issue(3, 'Bash', { prompt: 'first?' });
+  const second = registry.issue(3, 'Bash', { prompt: 'second?' });
+  assert.equal(registry.redeem(first).ok, false, 'the superseded token no longer works');
+  assert.equal(registry.redeem(second).ok, true);
+});
