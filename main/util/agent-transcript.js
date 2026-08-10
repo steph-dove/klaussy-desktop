@@ -4,6 +4,7 @@
 // providers with no readable store return null and the caller falls back.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { claudeProjectDir } = require('./claude-paths');
@@ -11,6 +12,12 @@ const { stringsAt, scan } = require('./protobuf-scan');
 
 // Enough for a chat message; the caller trims further for platform limits.
 const MAX_TEXT = 4000;
+
+// HOME is not set on Windows, and `path.join('', …)` resolves against the cwd
+// rather than failing, so these stores would be searched for in the worktree.
+function home() {
+  return process.env.HOME || os.homedir();
+}
 
 function readAppendedLines(file, cursor) {
   let stat;
@@ -108,7 +115,7 @@ function readCodex({ transcriptFile, cursor, fromEnd }) {
 // Codex names rollouts by date, not by worktree, so the session is identified by
 // the cwd recorded in its opening session_meta record.
 function findCodexRollout(worktreePath, sinceMs) {
-  const root = path.join(process.env.HOME || '', '.codex', 'sessions');
+  const root = path.join(home(), '.codex', 'sessions');
   let best = null;
   const walk = (dir, depth) => {
     let entries = [];
@@ -150,8 +157,8 @@ function rolloutCwd(file) {
 // bytes sit at that offset.
 const AGY_SPEECH_STEP = 15;
 const AGY_SPEECH_FIELD = '20.1';
-const AGY_DIR = path.join(process.env.HOME || '', '.gemini', 'antigravity-cli', 'conversations');
-const AGY_BRAIN_DIR = path.join(process.env.HOME || '', '.gemini', 'antigravity-cli', 'brain');
+const AGY_DIR = path.join(home(), '.gemini', 'antigravity-cli', 'conversations');
+const AGY_BRAIN_DIR = path.join(home(), '.gemini', 'antigravity-cli', 'brain');
 
 // step_payload comes back as a Buffer, or as the byte list SQLite hands over
 // for a blob bound from JS.
