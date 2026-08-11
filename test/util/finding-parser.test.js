@@ -125,3 +125,56 @@ test('a backtick-wrapped JSON path is de-wrapped so it can anchor inline', () =>
   assert.equal(r.findings.length, 1);
   assert.equal(r.findings[0].path, 'src/server/index.js');
 });
+
+// A suggestion that quotes code inline inside a sentence used to be fenced as a
+// code block, because the braces in `[\p{L}\p{N}_]` matched the code heuristic.
+// The result rendered monospace and scrolled sideways instead of wrapping.
+function suggestionText(suggestion) {
+  const inner = JSON.stringify({
+    findings: [{ severity: 'Low', category: 'Readability', path: 'a.js', line: 1, side: 'RIGHT', title: 'T', code: 'x', body: 'Because it breaks on unicode.', suggestion }],
+    summary: { verdict: 'Comment', highestRisk: [], testCoverage: 'n/a' },
+  });
+  return FP.parseReviewFindings(wrap(inner)).findings[0].text;
+}
+
+test('a sentence quoting code inline stays prose', () => {
+  const text = suggestionText('Use `[\\p{L}\\p{N}_]` with the `u` flag in place of `\\w` for the lookbehinds here.');
+  assert.doesNotMatch(text, /```/, 'prose must not be fenced');
+  assert.match(text, /Use `\[/);
+});
+
+test('real code with braces is still fenced', () => {
+  const text = suggestionText('if (!user) {\n  return null;\n}');
+  assert.match(text, /```/);
+});
+
+test('a bare inline-code suggestion is judged on its own text', () => {
+  // Almost no words outside the span, so the span itself decides.
+  const text = suggestionText('`const cfg = { retries: 3 };`');
+  assert.match(text, /```/);
+});
+
+test('a plain sentence with no code stays prose', () => {
+  const text = suggestionText('Guard the null case before dereferencing.');
+  assert.doesNotMatch(text, /```/);
+});
+
+test('prose wrapped around a fenced block passes through intact', () => {
+  // Wrapping this in another fence made the inner ```js close the outer one,
+  // leaking "js" and a trailing ``` as literal text in the card.
+  const text = suggestionText("Add to the same block:\n```js\nassert.equal(f('a'), 'b');\n```");
+  assert.match(text, /Add to the same block:/);
+  assert.match(text, /```js\n/, 'inner fence keeps its language tag');
+  assert.equal((text.match(/```/g) || []).length, 2, 'exactly one fence pair');
+});
+
+test('an already-fenced suggestion is not double-fenced', () => {
+  const text = suggestionText('```\nconst x = 1;\n```');
+  assert.equal((text.match(/```/g) || []).length, 2);
+});
+
+test('an unbalanced fence is closed so the renderer can match it', () => {
+  const text = suggestionText('```js\nconst x = 1;');
+  assert.equal((text.match(/```/g) || []).length, 2);
+  assert.match(text, /```$/);
+});

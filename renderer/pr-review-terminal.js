@@ -462,6 +462,17 @@
       + (f.copyStatus === 'copied' ? '✓ Copied' : 'Copy')
     + '</button>';
 
+    // Humanize runs klaussy's four passes over the finding text. Three are
+    // model calls, so the label carries the pass number rather than a bare
+    // spinner.
+    var humanizeBtn = f.humanizeBusy
+      ? '<button class="pr-ai-finding-humanize" type="button" disabled>' + PR.escHtml(f.humanizeBusy) + '</button>'
+        + '<button class="pr-ai-finding-humanize-cancel" type="button">Cancel</button>'
+      : '<button class="pr-ai-finding-humanize" type="button" title="Cut, rewrite in a human voice, check nothing changed meaning, then scrub">Humanize</button>'
+        + (f.humanizeBefore != null
+            ? '<button class="pr-ai-finding-humanize-revert" type="button" title="Restore the text from before humanizing">Revert</button>'
+            : '');
+
     // Ask-Claude button. Toggles the inline chat panel so reviewers can
     // discuss the finding without leaving the card (e.g., "is this
     // actually a bug?", "what's the simplest fix?").
@@ -490,6 +501,13 @@
           + '<div class="pr-ai-finding-comment-error-body">' + PR.escHtml(f.commentError) + '</div>'
         + '</div>'
       : '';
+    // A failed pass leaves the text untouched, so this reports rather than warns.
+    if (f.humanizeError) {
+      errorBlock += '<div class="pr-ai-finding-comment-error">'
+          + '<div class="pr-ai-finding-comment-error-head">Humanize stopped, text unchanged</div>'
+          + '<div class="pr-ai-finding-comment-error-body">' + PR.escHtml(f.humanizeError) + '</div>'
+        + '</div>';
+    }
 
     var actions;
     if (f.ignored) {
@@ -498,11 +516,11 @@
       actions = commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
-        + commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
+        + commentBadge + editedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
         + commentBtn
         + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
     } else {
-      actions = commentBadge + editedBadge + copyBtn + investigateBtn + discussBtn + editCommentBtn
+      actions = commentBadge + editedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
         + '<button class="pr-ai-finding-implement" type="button" title="The agent updates the file and drafts a follow-up PR comment for your approval">Implement</button>';
@@ -798,6 +816,19 @@
       var copyBtnEl = card.querySelector('.pr-ai-finding-copy');
       if (copyBtnEl) copyBtnEl.addEventListener('click', function () { PR.copyFindingAsMarkdown(f); });
 
+      var humanizeBtnEl = card.querySelector('.pr-ai-finding-humanize');
+      if (humanizeBtnEl && !f.humanizeBusy) {
+        humanizeBtnEl.addEventListener('click', function () { PR.humanizeFinding(f); });
+      }
+      var humanizeRevertEl = card.querySelector('.pr-ai-finding-humanize-revert');
+      if (humanizeRevertEl) {
+        humanizeRevertEl.addEventListener('click', function () { PR.revertHumanize(f); });
+      }
+      var humanizeCancelEl = card.querySelector('.pr-ai-finding-humanize-cancel');
+      if (humanizeCancelEl) {
+        humanizeCancelEl.addEventListener('click', function () { PR.cancelHumanize(f); });
+      }
+
       // "Ask Claude" button toggles the inline chat panel.
       var discussBtnEl = card.querySelector('.pr-ai-finding-discuss');
       if (discussBtnEl) discussBtnEl.addEventListener('click', function () {
@@ -930,11 +961,82 @@
     if (PR.activeTab !== 'ai-review') return;
     var tab = PR.hostEl.querySelector('.pr-review-ai-tab');
     if (!tab) return;
+    // A repaint replaces the tab's HTML, including any chat composer the user
+    // is mid-sentence in. Carry the focused one's text and caret across.
+    var draft = PR.captureChatComposer(tab);
     tab.innerHTML = PR.renderAiReviewTab();
     PR.bindAiReviewTab();
+    PR.restoreChatComposer(tab, draft);
     // Update tab count badge as findings change.
     var tabBtn = PR.hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
     if (tabBtn) tabBtn.innerHTML = 'AI Review' + PR.renderAiReviewTabCount();
+  };
+
+  // Read the focused chat composer's unsent text + caret, keyed by finding so
+  // it can be put back on the matching card after the repaint.
+  PR.captureChatComposer = function(tab) {
+    var el = tab.querySelector('.pr-ai-finding-chat-input');
+    var active = document.activeElement;
+    var focused = tab.contains(active) && active.classList
+      && active.classList.contains('pr-ai-finding-chat-input') ? active : null;
+    var target = focused || (el && el.value ? el : null);
+    if (!target) return null;
+    var card = target.closest('.pr-ai-finding');
+    return {
+      findingId: card && card.getAttribute('data-finding-id'),
+      value: target.value,
+      start: target.selectionStart,
+      end: target.selectionEnd,
+      focused: !!focused,
+    };
+  };
+
+  PR.restoreChatComposer = function(tab, draft) {
+    if (!draft || !draft.findingId || !draft.value) return;
+    var card = tab.querySelector('.pr-ai-finding[data-finding-id="' + draft.findingId + '"]');
+    var input = card && card.querySelector('.pr-ai-finding-chat-input');
+    if (!input) return;
+    input.value = draft.value;
+    if (draft.focused) {
+      input.focus();
+      try { input.setSelectionRange(draft.start, draft.end); } catch (_) {}
+    }
+  };
+
+  // Update only the streaming assistant bubble for one finding. Called per
+  // stream chunk instead of repaintAiReviewTab, which would rebuild the tab
+  // (and the composer) many times a second while the agent is talking.
+  PR.updateChatStreamingBubble = function(f) {
+    if (PR.activeTab !== 'ai-review' || !PR.hostEl) return;
+    var card = PR.hostEl.querySelector('.pr-ai-finding[data-finding-id="' + f.id + '"]');
+    var chat = card && card.querySelector('.pr-ai-finding-chat');
+    if (!chat) return; // panel isn't open; the done-handler's repaint will catch up
+    var list = chat.querySelector('.pr-ai-finding-chat-messages');
+    if (!list) {
+      var hint = chat.querySelector('.pr-ai-finding-chat-hint');
+      list = document.createElement('div');
+      list.className = 'pr-ai-finding-chat-messages';
+      if (hint) chat.replaceChild(list, hint);
+      else chat.insertBefore(list, chat.firstChild);
+    }
+    // Measure before mutating: only keep following the stream if the user
+    // hasn't scrolled up to re-read something.
+    var nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
+    var bubble = list.querySelector('.pr-ai-finding-chat-msg.assistant.streaming');
+    if (!bubble) {
+      bubble = document.createElement('div');
+      bubble.className = 'pr-ai-finding-chat-msg assistant streaming';
+      list.appendChild(bubble);
+    }
+    var text = (f.chatStreaming || '').trim();
+    if (text) {
+      bubble.classList.remove('status-pulse');
+      bubble.innerHTML = PR.renderMarkdown(f.chatStreaming);
+    } else {
+      bubble.classList.add('status-pulse');
+      bubble.textContent = 'Thinking…';
+    }
+    if (nearBottom) list.scrollTop = list.scrollHeight;
   };
 
   // Repaint just the Terminal tab body — used while the implement run's

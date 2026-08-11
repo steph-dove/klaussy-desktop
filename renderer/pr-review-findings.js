@@ -233,19 +233,23 @@
   // override the hint and post the comment on the wrong line).
   //
   // Returns { line } if a confident match is found, null otherwise.
-  PR.findSnippetLineAcrossCandidates = function(fileContent, hintLine, candidates) {
+  PR.findSnippetLineAcrossCandidates = function(fileContent, hintLine, candidates, prefer) {
     var lines = fileContent.split('\n');
     var validCandidates = candidates
       .map(function (s) { return PR.normalizeLine(s); })
       .filter(function (s) { return s && s.length >= 4; });
     if (validCandidates.length === 0) return null;
 
-    // Direct hit: any candidate's text appears on the hint line itself.
-    if (hintLine && lines[hintLine - 1] != null) {
+    // Direct hit: any candidate's text appears on the hint line itself. When a
+    // preference is given and the hint line fails it (not part of the diff, so
+    // GitHub won't take it), keep looking — the scan below still ranks the hint
+    // line first among equals, so an unacceptable hit costs nothing.
+    if (hintLine && lines[hintLine - 1] != null
+        && (typeof prefer !== 'function' || prefer(hintLine))) {
       var hintLineContent = PR.normalizeLine(lines[hintLine - 1]);
       for (var c = 0; c < validCandidates.length; c++) {
         if (hintLineContent.indexOf(validCandidates[c]) !== -1) {
-          return { line: hintLine };
+          return { line: hintLine, preferred: true };
         }
       }
     }
@@ -268,7 +272,16 @@
     if (near.length === 0) return null;
     if (!hintLine) return { line: near[0] };
     near.sort(function (a, b) { return Math.abs(a - hintLine) - Math.abs(b - hintLine); });
-    return { line: near[0] };
+    // `prefer` (optional) marks which lines are usable anchors. Candidates come
+    // from every line of the finding's code block, so the closest match is often
+    // a neighbour sitting outside the diff, which costs the finding its inline
+    // anchor; take the closest match the caller accepts, else the closest overall.
+    if (typeof prefer === 'function') {
+      for (var pi = 0; pi < near.length; pi++) {
+        if (prefer(near[pi])) return { line: near[pi], preferred: true };
+      }
+    }
+    return { line: near[0], preferred: false };
   };
 
   // Verify each finding's line number by reading the file inside the
@@ -328,12 +341,25 @@
           return s && s.length >= 4 && !/^[\/*#\-]+$/.test(s);
         });
         if (f.locationRaw && f.locationRaw.snippet) candidates.push(f.locationRaw.snippet);
-        var match = PR.findSnippetLineAcrossCandidates(r.content, f.line, candidates);
+        var side = f.side || 'RIGHT';
+        var anchorable = function (ln) { return PR.isLineInDiff(diffText, f.path, ln, side); };
+        // The line the review cited, before any snippet match moves it. When
+        // it's already a valid anchor, no snippet match may cost us inline mode.
+        var citedLine = f.line;
+        var citedInDiff = !!diffText && anchorable(citedLine);
+        var match = PR.findSnippetLineAcrossCandidates(r.content, f.line, candidates, anchorable);
         // A snippet match only proves the line exists in the *current file*;
         // GitHub rejects inline anchors that aren't part of the PR diff (422
         // "line must be part of the diff"). Gate inline mode on the line
         // actually being in the diff and fall back to an issue comment otherwise.
-        var inDiff = match && PR.isLineInDiff(diffText, f.path, match.line, f.side || 'RIGHT');
+        var inDiff = match && PR.isLineInDiff(diffText, f.path, match.line, side);
+        if (match && !inDiff && citedInDiff) {
+          // The snippet resolved off the diff, but the cited line anchors fine.
+          // Keep it: an anchored comment on the reviewed line beats a floating
+          // one on a line GitHub won't take.
+          match = { line: citedLine };
+          inDiff = true;
+        }
         if (match && inDiff) {
           f.line = match.line;
           f.locationVerified = true;
@@ -373,10 +399,21 @@
             endLine: nStart + nLines.length - 1,
             text: nLines.join('\n'),
           };
+        } else if (citedInDiff) {
+          // No snippet match, but the cited line is part of the diff. The
+          // worktree can differ from the PR head (dirty tree, another branch
+          // checked out), so a failed text match isn't proof the location is
+          // wrong; anchor it, without a verified snippet.
+          f.line = citedLine;
+          f.locationVerified = true;
+          f.lineNotInDiff = false;
+          f.postMode = 'inline';
+          f.verifiedSnippet = null;
         } else {
-          // No match anywhere in the file — Claude probably hallucinated
-          // the location. Fall back to issue-comment mode so "Add to PR"
-          // still posts *something* useful rather than a broken inline.
+          // No match anywhere in the file and no anchorable cited line —
+          // Claude probably hallucinated the location. Fall back to
+          // issue-comment mode so "Add to PR" still posts something useful
+          // rather than a broken inline.
           f.locationVerified = false;
           f.lineNotInDiff = false;
           f.postMode = 'issue';

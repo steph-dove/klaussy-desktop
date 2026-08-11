@@ -48,10 +48,12 @@ Structure the final response EXACTLY like this. Emit the review as a SINGLE JSON
 Rules for the JSON (follow exactly, the parser is strict):
 
 - It must be valid JSON: double-quoted keys and string values, no trailing commas, no comments. Escape any newline or double-quote that appears inside a string value so the JSON stays parseable. You may wrap the object in a json code fence; the parser accepts it with or without one.
-- path and line place the inline comment on GitHub, so they must be accurate. line is the line number in the file CURRENT (post-change) state that the comment attaches to. If you are not confident of the exact line, set line to null and the comment posts as a general PR comment instead of an inline one. side is "RIGHT" for added or existing code, "LEFT" only for a removed line.
+- path and line place the inline comment on GitHub, so they must be accurate. line is the line number in the file CURRENT (post-change) state that the comment attaches to. It must be a line the diff above actually touches (an added line, or a context line inside a hunk) — GitHub rejects an anchor outside the diff and the finding degrades to a floating comment. When the problem is on an unchanged line, anchor to the nearest line inside the hunk and say where the real problem sits in the body. If you are not confident of the exact line, set line to null and the comment posts as a general PR comment instead of an inline one. side is "RIGHT" for added or existing code, "LEFT" only for a removed line.
 - title is a short label shown on the card header. Do NOT repeat the severity or location in it.
 - body is the ONLY field posted to GitHub as the comment. Do NOT prefix it with the severity, location, category, or any bracketed header; those render from their own fields. Apply every Voice and style rule to it (no em dashes, no AI tells, terse, opinionated, first person where natural). Write it as if you are the human reviewer leaving the comment.
 - code is the original snippet the comment is about, quoted verbatim. Do NOT put your suggested fix in code; that goes in suggestion.
+- body must open with the reason the change is needed, in one or two sentences, since it is what leads the posted comment above the suggested change. Say what breaks and when, not what the suggestion does — the reader can see that from the diff.
+- suggestion is the change itself: a fenced \`\`\`suggestion block GitHub can apply, or prose when the fix isn't a literal replacement. Do NOT restate the rationale here; it already leads the comment.
 - Sort findings by severity: Blocker, then High, Medium, Low, Warn, Nit.
 - If there are zero findings, emit an empty findings array and still fill in summary.
 - Output nothing after the closing marker.`;

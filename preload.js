@@ -405,6 +405,24 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.once(channel, handler);
       return () => ipcRenderer.removeListener(channel, handler);
     },
+    // The renderer chains cut -> voice -> check, then humanizeScrub for pass 4.
+    humanizePassStart: (requestId, opts) =>
+      ipcRenderer.invoke('humanize-pass-start', { requestId, ...opts }),
+    humanizePassCancel: (requestId) =>
+      ipcRenderer.invoke('humanize-pass-cancel', { requestId }),
+    onHumanizePassData: (requestId, callback) => {
+      const channel = 'humanize-pass-chunk-' + requestId;
+      const handler = (_e, chunk) => callback(chunk);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    onHumanizePassDone: (requestId, callback) => {
+      const channel = 'humanize-pass-done-' + requestId;
+      const handler = (_e, data) => callback(data);
+      ipcRenderer.once(channel, handler);
+      return () => ipcRenderer.removeListener(channel, handler);
+    },
+    humanizeScrub: (text) => ipcRenderer.invoke('humanize-scrub', { text }),
     reviewInvestigateStart: (requestId, findingBody, provider) =>
       ipcRenderer.invoke('pr-review-investigate-start', { requestId, findingBody, provider }),
     reviewInvestigateCancel: (requestId) =>

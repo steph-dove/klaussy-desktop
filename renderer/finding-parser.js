@@ -188,14 +188,21 @@ window.FindingParser = (function () {
   function looksLikeCode(s) {
     if (!s) return false;
     if (/```/.test(s)) return true;                 // agent already fenced it
-    if (/[{}]|=>|===|!==/.test(s)) return true;     // braces, arrows, strict-eq
+    // A sentence that quotes code inline ("use `[\p{L}\p{N}_]` with the `u`
+    // flag") is prose, so run the signal checks with those spans removed and
+    // punctuation inside them can't box an English sentence. Only when real
+    // words remain outside them, so an all-inline-code suggestion is still
+    // judged on its own text.
+    var stripped = s.replace(/`[^`\n]*`/g, ' ');
+    var probe = (stripped.match(/[A-Za-z]{2,}/g) || []).length >= 3 ? stripped : s;
+    if (/[{}]|=>|===|!==/.test(probe)) return true; // braces, arrows, strict-eq
     // A declaration or assignment line: `const x = …`, `foo.bar = …`.
-    if (/^\s*(const|let|var|function|class|import|export)\s/m.test(s)) return true;
-    if (/^\s*[\w$][\w$.[\]]*\s*=\s*\S/m.test(s)) return true;
+    if (/^\s*(const|let|var|function|class|import|export)\s/m.test(probe)) return true;
+    if (/^\s*[\w$][\w$.[\]]*\s*=\s*\S/m.test(probe)) return true;
     // A control-flow statement line — caught only when the line also carries
     // code punctuation before any sentence punctuation, so "If x is null,
     // return early." stays prose while "if (!user) return null;" is code.
-    if (/^\s*(if|for|while|switch|else|return|throw|await)\b[^.!?\n]*[(){};=]/m.test(s)) return true;
+    if (/^\s*(if|for|while|switch|else|return|throw|await)\b[^.!?\n]*[(){};=]/m.test(probe)) return true;
     return false;
   }
 
@@ -207,9 +214,19 @@ window.FindingParser = (function () {
     var body = String(obj.body == null ? '' : obj.body).trim();
     var suggestion = String(obj.suggestion == null ? '' : obj.suggestion).trim();
     if (!suggestion) return body;
-    var block = looksLikeCode(suggestion)
-      ? '```\n' + suggestion.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```$/, '') + '\n```'
-      : suggestion;
+    var block;
+    if (/```/.test(suggestion)) {
+      // Already fenced, possibly as prose wrapped around a code block ("Add to
+      // the same block:" then ```js …); another fence would let the inner one
+      // close it early and leak the markers as text. An unbalanced fence gets
+      // closed, since the renderer only matches complete pairs.
+      block = suggestion;
+      if ((suggestion.match(/```/g) || []).length % 2 === 1) block += '\n```';
+    } else if (looksLikeCode(suggestion)) {
+      block = '```\n' + suggestion + '\n```';
+    } else {
+      block = suggestion;
+    }
     return (body ? body + '\n\n' : '') + 'Suggested change:\n\n' + block;
   }
 
