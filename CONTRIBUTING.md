@@ -12,7 +12,7 @@ npm install      # rebuilds node-pty for Electron; patches the menu-bar name
 npm start        # launches the app
 ```
 
-You'll want **Node.js 18+**, the **GitHub CLI** (`gh`), and at least one
+You'll want **Node.js 24+**, the **GitHub CLI** (`gh`), and at least one
 supported agent CLI (Claude Code by default). See the README for per-OS setup.
 
 ## Before you open a PR

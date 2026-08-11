@@ -73,7 +73,7 @@ Prebuilt, signed, and notarized binaries are available for macOS, Windows, and L
 ## 📋 Prerequisites
 
 Klaussy Desktop automatically detects and configures your local environment. It requires:
-1.  **Node.js 18+**
+1.  **Node.js 24+** (the agent stores are read through `node:sqlite`)
 2.  **GitHub CLI (`gh`)** (with active authentication)
 3.  **An Agent CLI or IDE extension** (Claude Code is the default; also supports Codex, Gemini, Antigravity, Copilot, Cursor, Cline, opencode, Kimi Code, and local models via Ollama + Aider)
 
