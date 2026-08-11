@@ -62,6 +62,7 @@ function rememberThreadOwner(threadId, event) {
   _threadOwners.set(String(threadId), {
     worktreePath: event.workspacePath,
     agentName: event.agentName || '',
+    sessionName: event.sessionName || '',
   });
   try {
     const config = loadConfig();
@@ -69,6 +70,7 @@ function rememberThreadOwner(threadId, event) {
     kept[String(threadId)] = {
       worktreePath: event.workspacePath,
       agentName: event.agentName || '',
+      sessionName: event.sessionName || '',
       at: new Date().toISOString(),
     };
     const ids = Object.keys(kept);
@@ -90,6 +92,35 @@ function rememberThreadOwner(threadId, event) {
   }
 }
 
+// A tab counts as its own candidate, not as part of the task it runs on.
+function reattachCandidates() {
+  const { instances, sessionNameFor } = require('../state/instances');
+  const { isAgentMode, displayNameFor } = require('../state/ai-providers');
+  const out = [];
+  for (const [, inst] of instances) {
+    if (!inst.alive) continue;
+    const mode = inst.originalMode || inst.mode;
+    if (isAgentMode(mode)) {
+      out.push({
+        id: String(inst.id),
+        worktreePath: inst.worktreePath,
+        agentName: displayNameFor(mode),
+        sessionName: sessionNameFor(inst),
+      });
+    }
+    for (const sub of (inst.subTerminals || [])) {
+      if (!sub.alive || !isAgentMode(sub.mode)) continue;
+      out.push({
+        id: `${inst.id}:${sub.subId}`,
+        worktreePath: inst.worktreePath,
+        agentName: displayNameFor(sub.mode),
+        sessionName: sessionNameFor(inst, sub),
+      });
+    }
+  }
+  return out;
+}
+
 // Reattaches a thread the running app has no memory of to whatever is now
 // running in the worktree and agent it was opened for. Returns '' when nothing
 // there matches, so the caller says so rather than answering someone else.
@@ -99,27 +130,19 @@ function reattachThread(threadId) {
     try { record = (loadConfig().notificationThreads || {})[String(threadId)]; } catch { return ''; }
   }
   if (!record) return '';
-  const { instances } = require('../state/instances');
-  const { isAgentMode, displayNameFor } = require('../state/ai-providers');
-  for (const [, inst] of instances) {
-    if (!inst.alive || inst.worktreePath !== record.worktreePath) continue;
-    const mode = inst.originalMode || inst.mode;
-    if (isAgentMode(mode) && displayNameFor(mode) === record.agentName) {
-      _discordThreadToTask.set(String(threadId), String(inst.id));
-      _slackThreadToTask.set(String(threadId), String(inst.id));
-      return String(inst.id);
-    }
-    // The session's other agents run as tabs on it and answer for themselves.
-    for (const sub of (inst.subTerminals || [])) {
-      if (!sub.alive || !isAgentMode(sub.mode)) continue;
-      if (displayNameFor(sub.mode) !== record.agentName) continue;
-      const id = `${inst.id}:${sub.subId}`;
-      _discordThreadToTask.set(String(threadId), id);
-      _slackThreadToTask.set(String(threadId), id);
-      return id;
-    }
-  }
-  return '';
+  const pool = reattachCandidates().filter((c) => c.worktreePath === record.worktreePath
+    && c.agentName === record.agentName);
+  // A task and a tab running the same agent match on everything but the session
+  // name, which records written before it was kept don't have — so those fall
+  // back to agent alone, and only when one candidate makes it unambiguous.
+  const named = record.sessionName
+    ? pool.filter((c) => c.sessionName === record.sessionName)
+    : [];
+  const match = named.length === 1 ? named[0] : (pool.length === 1 ? pool[0] : null);
+  if (!match) return '';
+  _discordThreadToTask.set(String(threadId), match.id);
+  _slackThreadToTask.set(String(threadId), match.id);
+  return match.id;
 }
 
 function once(key, fn) {
