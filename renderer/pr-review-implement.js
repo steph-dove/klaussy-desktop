@@ -325,6 +325,33 @@
     return m ? text.slice(m.index + m[0].length).trim() : text.trim();
   };
 
+  // The prose above the "Suggested change:" label, capped at two sentences: the
+  // "why" that leads the posted comment, not the whole finding.
+  PR.findingWhyText = function(f) {
+    var text = (f && f.text) || '';
+    var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
+    var prose = (m ? text.slice(0, m.index) : text)
+      .replace(/```[\s\S]*?```/g, '')                 // fenced code
+      .replace(/^[ \t]*\*\*[^\n]*\*\*[ \t]*$/gm, '')  // severity/category/location line
+      .trim();
+    if (!prose) return '';
+    var sentences = prose.split(/(?<=[.!?])\s+/).filter(function (s) { return s.trim(); });
+    return sentences.slice(0, 2).join(' ').trim();
+  };
+
+  // What gets posted to GitHub: the why leads, because a reviewer reading the
+  // comment cold needs the reason before the diff.
+  PR.findingCommentBody = function(f) {
+    var why = PR.findingWhyText(f);
+    var suggestion = PR.findingSuggestionText(f);
+    if (!suggestion) return why;
+    // No label in the text at all means findingSuggestionText returned the
+    // whole body, which the why would duplicate.
+    if (!/(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '')) return suggestion;
+    if (!why) return suggestion;
+    return why + '\n\nSuggested change:\n' + suggestion;
+  };
+
   // Add a finding to the pending review. Both paths STAGE into pendingComments
   // (nothing posts until Submit review): verified findings draft inline,
   // unverified ones as an issueComment draft posted after the review.
@@ -341,9 +368,9 @@
       return;
     }
 
-    // Just the suggested change, staged as the reviewer's own words (no bot
-    // attribution). Body/severity/location stay on the card as reference.
-    var attributedBody = PR.findingSuggestionText(f);
+    // The why plus the suggested change, staged as the reviewer's own words
+    // (no bot attribution). Severity/location stay on the card as reference.
+    var attributedBody = PR.findingCommentBody(f);
     var entry = {
       id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
       fromFindingId: f.id,
@@ -412,10 +439,10 @@
     if (PR.lastState) PR.render(PR.lastState);
   };
 
-  // Copy the same suggested-change text Add-to-PR posts, so paste matches send.
+  // Copy the same text Add-to-PR posts, so paste matches send.
   PR.copyFindingAsMarkdown = async function(f) {
     try {
-      await navigator.clipboard.writeText(PR.findingSuggestionText(f));
+      await navigator.clipboard.writeText(PR.findingCommentBody(f));
       f.copyStatus = 'copied';
       PR.repaintAiReviewTab();
       setTimeout(function () {
@@ -462,7 +489,10 @@
           }
         } catch (_) {}
       }
-      PR.repaintAiReviewTab();
+      // Patch just the streaming bubble. A full repaint here would rebuild the
+      // tab's HTML on every chunk, destroying the composer the user is typing
+      // in (losing text, caret, and selection mid-paste).
+      PR.updateChatStreamingBubble(f);
     });
     window.klaus.pr.onReviewChatDone(requestId, function (result) {
       if (unsubData) unsubData();
@@ -547,7 +577,8 @@
           }
         } catch (_) {}
       }
-      PR.repaintAiReviewTab();
+      // Same reason as startChat: patch the bubble, don't rebuild the tab.
+      PR.updateChatStreamingBubble(f);
     });
     window.klaus.pr.onReviewChatDone(agent.id, function (result) {
       if (unsubData) unsubData();

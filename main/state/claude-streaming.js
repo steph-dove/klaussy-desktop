@@ -40,6 +40,7 @@ const aiReviewProcs = new Map();
 const commitMsgProcs = new Map();
 const reviewChatProcs = new Map();
 const investigateProcs = new Map();
+const humanizeProcs = new Map();
 
 // Lazy require to avoid a circular import between this module and windows.js
 // (windows.js doesn't import this today, but defer anyway for robustness).
@@ -311,4 +312,5 @@ module.exports = {
   commitMsgProcs,
   reviewChatProcs,
   investigateProcs,
+  humanizeProcs,
 };

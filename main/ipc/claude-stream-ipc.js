@@ -20,8 +20,10 @@ const {
   spawnClaudeStream, makeClaudeCancelHandler,
   debugCheckProcs, fixCheckProcs, inlineEditProcs, inlineCompleteProcs, reviewSurfaceAiProcs,
   explainStreamProcs, aiReviewProcs, commitMsgProcs, reviewChatProcs,
-  investigateProcs,
+  investigateProcs, humanizeProcs,
 } = require('../state/claude-streaming');
+const { loadRules, cutPrompt, voicePrompt, checkPrompt } = require('../state/humanize-prompts');
+const { humanizeComment } = require('../util/humanize-comment');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
   getImplementSnapshot, getActiveImplementByWorktree,
@@ -764,4 +766,41 @@ SUGGESTED REPLY:
   const win = promptGoesOnStdin(claudeBin);
   return execHeadlessAgent(claudeBin, win ? ['-p'] : ['-p', prompt], { cwd: worktreePath, timeout: 60000 }, win ? prompt : null)
     .then((res) => (res.error ? { error: res.error } : { review: res.stdout.trim() }));
+});
+
+
+// --- Humanize: the model-driven passes of klaussy's humanize skill ------------
+//
+// One handler per pass; the renderer chains them, since main's done payload
+// carries no text. Rules come from the repo's scaffolded humanize skill when it
+// has one, so a repo that upgrades klaussy gets new rules without an app release.
+ipcMain.handle('humanize-pass-start', (event, { requestId, worktreePath, pass, text, question, original, provider } = {}) => {
+  if (!requestId) return { error: 'Missing requestId' };
+  if (!text || !text.trim()) return { error: 'Nothing to humanize' };
+  if (humanizeProcs.has(requestId)) return { error: 'Already running for ' + requestId };
+
+  const rules = loadRules(worktreePath);
+  let instructions;
+  if (pass === 'cut') instructions = cutPrompt(rules, { question });
+  else if (pass === 'voice') instructions = voicePrompt(rules);
+  else if (pass === 'check') instructions = checkPrompt(original || text);
+  else return { error: 'Unknown pass: ' + pass };
+
+  spawnClaudeStream({
+    requestId, procMap: humanizeProcs, channelPrefix: 'humanize-pass',
+    sender: event.sender,
+    cwd: worktreePath || process.cwd(),
+    prompt: instructions + '\n\n--- TEXT ---\n' + text,
+    provider: pickProvider(provider, defaultAgentProvider()),
+  });
+  return { ok: true };
+});
+
+ipcMain.handle('humanize-pass-cancel', makeClaudeCancelHandler(humanizeProcs));
+
+// Pass 4: the same deterministic scrubber the outbound-comment path uses, and
+// the one pass that always runs.
+ipcMain.handle('humanize-scrub', (_event, { text } = {}) => {
+  if (typeof text !== 'string') return { error: 'Nothing to scrub' };
+  return { text: humanizeComment(text) };
 });
