@@ -116,14 +116,20 @@ function parseRegion(region) {
   return { options: all.slice(0, MAX_OPTIONS), truncated: all.length > MAX_OPTIONS };
 }
 
-// Scoped to the menu itself: "I'll select all the failing tests" is the agent
-// talking, and reading it as a multi-select strips the Approve/Reject buttons
-// off whatever prompt is really waiting.
-const MULTI_SELECT_IDIOM = /(space to (toggle|select)|select (one or more|all that apply|multiple|one or several)|separated by (spaces?|commas?)|multi-select)/i;
+// Both wear the same "pick several" wording, but only a typed list — numbers on
+// one line — can be answered from chat; a checkbox menu needs keystrokes.
+const MULTI_SELECT_TYPED = /separated by (spaces?|commas?)/i;
+const MULTI_SELECT_TOGGLE = /(space to (toggle|select)|select (one or more|all that apply|multiple|one or several)|multi-select)/i;
 
-function isMultiSelect(tail) {
-  return menusWithFooter(tail).some(({ region, footer }) => MULTI_SELECT_IDIOM.test(footer)
-    || region.some((l) => MULTI_SELECT_IDIOM.test(l)));
+// Returns 'typed', 'toggle', or '' for one answer; scoped to the menu itself
+// because "I'll select all the failing tests" is the agent talking, not a prompt.
+function multiSelectStyle(tail) {
+  for (const { region, footer } of menusWithFooter(tail)) {
+    const lines = [footer, ...region];
+    if (lines.some((l) => MULTI_SELECT_TYPED.test(l))) return 'typed';
+    if (lines.some((l) => MULTI_SELECT_TOGGLE.test(l))) return 'toggle';
+  }
+  return '';
 }
 
 // Claude Code draws a numbered menu where 'y' does nothing, while other agents
@@ -282,6 +288,6 @@ function applyText({ taskId, text, userId, allowList }) {
 
 module.exports = {
   applyDecision, applyChoice, applyText,
-  isAllowed, sanitizeForPaste, keysForPrompt, parsePromptOptions, isMultiSelect,
+  isAllowed, sanitizeForPaste, keysForPrompt, parsePromptOptions, multiSelectStyle,
   hasSelectionFooter, parsePromptQuestion, approvalTail, MAX_OPTIONS,
 };

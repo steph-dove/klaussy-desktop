@@ -104,6 +104,15 @@ function headline(event, p) {
   return `${agentLabel(event)} ${p.verb}`;
 }
 
+// A typed list is answerable from chat because the reply is pasted as one line,
+// while a checkbox menu needs keystrokes only the terminal can send.
+function answerHint(event, bold) {
+  if (event.multiSelect === 'typed') return 'Reply in chat with the option numbers, e.g. `1, 3`.';
+  if (event.multiSelect) return 'Picking several options needs the terminal — answer in Klaussy.';
+  if (event.menuPrompt) return 'Reply in chat with your option choice(s).';
+  return `Respond in Klaussy to ${bold}Approve${bold} or ${bold}Reject${bold} this step.`;
+}
+
 function formatSlack(event) {
   // A mirrored turn is the agent talking, not an alert about it.
   if (event.type === EVENT_TYPES.MESSAGE) {
@@ -149,13 +158,8 @@ function formatSlack(event) {
           type: 'context',
           elements: [{ type: 'mrkdwn', text: '_More options exist — answer in Klaussy to see them all._' }],
         });
-      } else if (event.isMultiSelect) {
-        blocks.push({
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: '_Select choices by clicking buttons or reply with option numbers (e.g. 1, 2)._' }],
-        });
       }
-    } else if (event.approvalToken && !event.menuPrompt && !event.isMultiSelect) {
+    } else if (event.approvalToken && !event.menuPrompt && !event.multiSelect) {
       blocks.push({
         type: 'actions',
         block_id: 'klaussy_approval',
@@ -175,7 +179,7 @@ function formatSlack(event) {
     } else {
       blocks.push({
         type: 'context',
-        elements: [{ type: 'mrkdwn', text: (event.menuPrompt || event.isMultiSelect) ? 'Reply in chat with your option choice(s).' : 'Respond in Klaussy to *Approve* or *Reject* this step.' }],
+        elements: [{ type: 'mrkdwn', text: answerHint(event, '*') }],
       });
     }
   }
@@ -219,11 +223,8 @@ function formatDiscord(event) {
 
   const parts = [];
   const interactive = event.type === EVENT_TYPES.APPROVAL_REQUIRED && event.approvalToken;
-  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && !interactive) {
-    parts.push((event.menuPrompt || event.isMultiSelect) ? 'Reply in chat with your option choice(s).' : 'Respond in Klaussy to **Approve** or **Reject** this step.');
-  }
-  if (interactive && event.isMultiSelect) {
-    parts.push('_Select choices below or reply in chat with option numbers (e.g. 1 2)._');
+  if (event.type === EVENT_TYPES.APPROVAL_REQUIRED && (!interactive || event.multiSelect)) {
+    parts.push(answerHint(event, '**'));
   }
   if (event.promptQuestion) parts.push(fenceSafe(event.promptQuestion));
   const logs = screenExcerpt(event);
@@ -250,7 +251,7 @@ function formatDiscord(event) {
         label: `${o.key}. ${o.label}`.slice(0, 80),
         custom_id: `klaussy_choice:${event.approvalToken}:${o.key}`,
       }))
-      : ((event.menuPrompt || event.isMultiSelect) ? [] : [
+      : ((event.menuPrompt || event.multiSelect) ? [] : [
         { type: 2, style: 3, label: 'Approve', custom_id: 'klaussy_approve:' + event.approvalToken },
         { type: 2, style: 4, label: 'Reject', custom_id: 'klaussy_reject:' + event.approvalToken },
       ]);
