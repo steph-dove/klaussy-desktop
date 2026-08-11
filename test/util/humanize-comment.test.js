@@ -7,7 +7,14 @@ const { humanizeCommentJs: humanizeComment } = require('../../main/util/humanize
 
 test('normalizes em and en dashes in prose', () => {
   assert.equal(humanizeComment('Leaks a connection — wrap it.'), 'Leaks a connection, wrap it.');
-  assert.equal(humanizeComment('range 1–5 here'), 'range 1 - 5 here');
+  assert.equal(humanizeComment('the fix – finally – landed'), 'the fix - finally - landed');
+});
+
+test('keeps numeric ranges tight', () => {
+  // A dash between digits is a range, not a clause break: "35 - 50 min" reads as
+  // a subtraction or a dropped clause.
+  assert.equal(humanizeComment('parses take 35–50 min'), 'parses take 35-50 min');
+  assert.equal(humanizeComment('pages 3—4 are wrong'), 'pages 3-4 are wrong');
 });
 
 test('strips a leading filler opener and recapitalizes', () => {
@@ -85,6 +92,30 @@ test('strips apologetic throat-clearing at start of line/text or when standalone
 test('replaces leverage and utilize with use', () => {
   assert.equal(humanizeComment('We should utilize the new function.'), 'We should use the new function.');
   assert.equal(humanizeComment('This will leverage caches.'), 'This will use caches.');
+});
+
+test('swaps stiff phrasings for their short equivalent, keeping the capital', () => {
+  assert.equal(humanizeComment('Prior to the retry, flush the buffer.'), 'Before the retry, flush the buffer.');
+  assert.equal(humanizeComment('The client has the ability to refresh it.'), 'The client can refresh it.');
+  assert.equal(humanizeComment('Due to the fact that it expires, we refresh.'), 'Because it expires, we refresh.');
+  assert.equal(humanizeComment('The worker was able to recover.'), 'The worker could recover.');
+});
+
+test('drops empty "actual" and "actually"', () => {
+  assert.equal(humanizeComment('This actually works.'), 'This works.');
+  assert.equal(humanizeComment('It fails, actually.'), 'It fails.');
+  assert.equal(humanizeComment('The actual value is wrong.'), 'The value is wrong.');
+  // "the actual" as a noun keeps its word.
+  assert.equal(
+    humanizeComment('Compare the actual to the expected.'),
+    'Compare the actual to the expected.',
+  );
+});
+
+test('strips editorializing verdict openers', () => {
+  assert.equal(humanizeComment('Personally, I would rethrow here.'), 'I would rethrow here.');
+  assert.equal(humanizeComment('Honestly, this leaks.'), 'This leaks.');
+  assert.equal(humanizeComment('IMO, the lock is too broad.'), 'The lock is too broad.');
 });
 
 test('passes non-strings through unchanged', () => {
