@@ -92,7 +92,7 @@ async function dispatchEvent(event, cfg) {
   let promptOptions = [];
   let optionsTruncated = false;
   let menuPrompt = false;
-  let isMultiSelect = false;
+  let multiSelect = '';
   let promptQuestion = '';
   const wantsButtons = event.type === EVENT_TYPES.APPROVAL_REQUIRED
     && (cfg.slackInteractive || cfg.discordInteractive)
@@ -102,12 +102,14 @@ async function dispatchEvent(event, cfg) {
     // are read here and stored with the token rather than guessed at click time.
     const reply = require('./chat-reply');
     const parsed = reply.parsePromptOptions(event.logsTail);
-    promptOptions = parsed.options;
-    optionsTruncated = parsed.truncated;
-    isMultiSelect = reply.isMultiSelect(event.logsTail);
+    multiSelect = reply.multiSelectStyle(event.logsTail);
+    // A button carries one key, which can't answer a prompt that takes several,
+    // so those get told how to answer instead of a button pressing a wrong key.
+    promptOptions = multiSelect ? [] : parsed.options;
+    optionsTruncated = multiSelect ? false : parsed.truncated;
     // A menu ignores y/n, so Approve/Reject for one would be dead buttons; none
     // is better, since the mirrored turn still shows the choices.
-    menuPrompt = reply.hasSelectionFooter(event.logsTail) || promptOptions.length > 0 || isMultiSelect;
+    menuPrompt = reply.hasSelectionFooter(event.logsTail) || promptOptions.length > 0 || !!multiSelect;
     // A hook said what it wants in the agent's own words; the screen is only
     // guessed at when nothing authoritative came with the event.
     promptQuestion = event.promptQuestion || reply.parsePromptQuestion(event.logsTail);
@@ -127,7 +129,7 @@ async function dispatchEvent(event, cfg) {
     );
   }
   const decorated = approvalToken
-    ? { ...event, approvalToken, options: promptOptions, optionsTruncated, menuPrompt, promptQuestion, isMultiSelect }
+    ? { ...event, approvalToken, options: promptOptions, optionsTruncated, menuPrompt, promptQuestion, multiSelect }
     : event;
 
   const jobs = [];

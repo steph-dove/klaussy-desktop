@@ -252,26 +252,26 @@ test('an unreadable screen is not pasted into the alert', () => {
   assert.match(flat, /waiting for approval/, 'it still says what happened');
 });
 
-test('a multi-select prompt renders choice buttons and hints without approve/reject fallback', () => {
-  const evt = {
-    ...APPROVAL,
-    approvalToken: 'tok',
-    options: [
-      { key: '1', label: 'Feature A' },
-      { key: '2', label: 'Feature B' },
-    ],
-    menuPrompt: true,
-    isMultiSelect: true,
-  };
+// The gateway offers no options for these, so neither platform has a button to draw.
+test('a checkbox menu sends people to the terminal rather than to a button', () => {
+  const evt = { ...APPROVAL, approvalToken: 'tok', options: [], menuPrompt: true, multiSelect: 'toggle' };
+
   const slack = formatSlack(evt);
-  const actions = slack.blocks.find((b) => b.type === 'actions');
-  assert.equal(actions.elements.length, 2);
-  assert.equal(actions.elements[0].text.text, '1. Feature A');
-  assert.match(JSON.stringify(slack), /Select choices by clicking buttons/);
+  assert.equal(slack.blocks.find((b) => b.type === 'actions'), undefined, 'no buttons at all');
+  assert.match(JSON.stringify(slack), /needs the terminal/);
 
   const discord = formatDiscord(evt);
-  assert.equal(discord.components[0].components.length, 2);
-  assert.match(JSON.stringify(discord), /Select choices below or reply in chat/);
+  assert.equal(discord.components, undefined);
+  assert.match(JSON.stringify(discord), /needs the terminal/);
+});
+
+test('a typed list asks for the numbers in chat', () => {
+  const evt = { ...APPROVAL, approvalToken: 'tok', options: [], menuPrompt: true, multiSelect: 'typed' };
+
+  assert.match(JSON.stringify(formatSlack(evt)), /option numbers/);
+  const discord = formatDiscord(evt);
+  assert.equal(discord.components, undefined);
+  assert.match(JSON.stringify(discord), /option numbers/);
 });
 
 test('a screen with real prose is still worth showing', () => {
