@@ -20,7 +20,10 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          # Matches the Node that Electron 41 bundles, which is what the app
+          # actually runs on. The agent stores are read through node:sqlite,
+          # absent before 22 and behind a flag until 23.4.
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
