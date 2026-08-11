@@ -270,6 +270,12 @@ function transcriptFileFor(inst, providerId) {
     bindAgyConversation(inst);
     return inst.agyConversation;
   }
+  if (providerId === 'opencode') {
+    if (!inst.opencodeSession) {
+      inst.opencodeSession = agentTranscript.findOpencodeSession(inst.worktreePath, inst.spawnTime);
+    }
+    return inst.opencodeSession ? agentTranscript.opencodeSource(inst.opencodeSession) : '';
+  }
   return '';
 }
 

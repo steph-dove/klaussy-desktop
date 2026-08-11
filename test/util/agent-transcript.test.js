@@ -234,6 +234,63 @@ test('codex: fromEnd adopts a rollout without posting what it already holds', ()
   assert.equal(t.readNewMessages('codex', { transcriptFile: file, cursor: r.cursor }).text, 'Later.');
 });
 
+function opencodeDb(rows) {
+  const { DatabaseSync } = require('node:sqlite');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-opencode-'));
+  const file = path.join(dir, 'opencode.db');
+  const db = new DatabaseSync(file);
+  db.exec('create table message (id TEXT, session_id TEXT, data TEXT)');
+  db.exec('create table part (id TEXT, message_id TEXT, session_id TEXT, data TEXT)');
+  let n = 0;
+  for (const [role, parts] of rows) {
+    const mid = 'msg_' + (++n);
+    db.prepare('insert into message (id, session_id, data) values (?, ?, ?)')
+      .run(mid, 'ses_x', JSON.stringify({ role }));
+    for (const part of parts) {
+      db.prepare('insert into part (id, message_id, session_id, data) values (?, ?, ?, ?)')
+        .run('prt_' + (++n), mid, 'ses_x', JSON.stringify(part));
+    }
+  }
+  db.close();
+  return file + '#ses_x';
+}
+
+test('opencode: assistant text is read and its reasoning is not', () => {
+  const src = opencodeDb([
+    ['user', [{ type: 'text', text: 'read a.txt' }]],
+    ['assistant', [
+      { type: 'reasoning', text: 'The user wants me to read a file. Let me think.' },
+      { type: 'step-start' },
+      { type: 'text', text: 'The file says hello.' },
+    ]],
+  ]);
+  const r = t.readNewMessages('opencode', { transcriptFile: src, cursor: 0 });
+  assert.equal(r.text, 'The file says hello.');
+  assert.doesNotMatch(r.text, /Let me think/, 'reasoning is the scratchpad, never posted');
+  assert.doesNotMatch(r.text, /read a\.txt/, 'the user is not the agent talking');
+});
+
+test('opencode: the cursor returns only what is new', () => {
+  const src = opencodeDb([['assistant', [{ type: 'text', text: 'First.' }]]]);
+  const first = t.readNewMessages('opencode', { transcriptFile: src, cursor: 0 });
+  assert.equal(first.text, 'First.');
+  assert.equal(t.readNewMessages('opencode', { transcriptFile: src, cursor: first.cursor }).text, '');
+});
+
+test('opencode: a turn with no spoken text is silence, not a failure', () => {
+  const src = opencodeDb([['assistant', [{ type: 'step-start' }, { type: 'step-finish' }]]]);
+  const r = t.readNewMessages('opencode', { transcriptFile: src, cursor: 0 });
+  assert.equal(r.text, '');
+  assert.notEqual(r, null, 'a readable store with nothing said still answers');
+});
+
+test('opencode: fromEnd adopts the session without posting it', () => {
+  const src = opencodeDb([['assistant', [{ type: 'text', text: 'Said before we bound.' }]]]);
+  const r = t.readNewMessages('opencode', { transcriptFile: src, cursor: 0, fromEnd: true });
+  assert.equal(r.text, '');
+  assert.ok(r.cursor > 0, 'but the position is taken');
+});
+
 test('a missing transcript returns null rather than throwing', () => {
   assert.equal(t.readNewMessages('codex', { transcriptFile: '/nope/missing.jsonl', cursor: 0 }), null);
   assert.equal(t.readNewMessages('claude', { worktreePath: '', sessionId: '', cursor: 0 }), null);

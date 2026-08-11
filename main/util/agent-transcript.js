@@ -372,7 +372,84 @@ function readAntigravity({ transcriptFile, cursor, fromEnd }) {
   return readAntigravitySqlite(transcriptFile, cursor, fromEnd);
 }
 
-const READERS = { claude: readClaude, codex: readCodex, antigravity: readAntigravity };
+// ---- opencode: <data home>/opencode/opencode.db ----
+//
+// A message row carries the role, its parts carry the text, and `part.rowid` is
+// monotonic, so it doubles as the cursor.
+function opencodeDbPath() {
+  const { authFilePath } = require('../state/opencode-config');
+  return path.join(path.dirname(authFilePath()), 'opencode.db');
+}
+
+// The source is one string so a change of session repoints the cursor the same
+// way a change of file does for the readers backed by one.
+function opencodeSource(sessionId) {
+  return `${opencodeDbPath()}#${sessionId}`;
+}
+
+function findOpencodeSession(worktreePath, sinceMs) {
+  const dbPath = opencodeDbPath();
+  if (!worktreePath || !fs.existsSync(dbPath)) return '';
+  let db;
+  try {
+    db = openDb(dbPath);
+    const row = db.prepare(
+      'select id from session where directory = ? and time_updated >= ? order by time_updated desc limit 1',
+    ).get(worktreePath, Number(sinceMs) || 0);
+    return row ? row.id : '';
+  } catch (err) {
+    console.warn('[agent-transcript] opencode session lookup failed:', err.message);
+    return '';
+  } finally {
+    if (db) try { db.close(); } catch { /* already closed */ }
+  }
+}
+
+function readOpencode({ transcriptFile, cursor, fromEnd }) {
+  const sep = String(transcriptFile || '').lastIndexOf('#');
+  if (sep === -1) return null;
+  const dbPath = transcriptFile.slice(0, sep);
+  const sessionId = transcriptFile.slice(sep + 1);
+  if (!sessionId || !fs.existsSync(dbPath)) return null;
+
+  const from = Number(cursor) || 0;
+  let db;
+  try {
+    db = openDb(dbPath);
+    const rows = db.prepare(
+      `select p.rowid as seq, p.data as part_data, m.data as message_data
+         from part p join message m on m.id = p.message_id
+        where p.session_id = ? and p.rowid > ?
+        order by p.rowid`,
+    ).all(sessionId, from);
+    if (!rows.length) return { text: '', cursor: from };
+
+    let last = from;
+    const parts = [];
+    for (const row of rows) {
+      last = row.seq;
+      if (fromEnd) continue;
+      let message = {};
+      let part = {};
+      try { message = JSON.parse(row.message_data); } catch { continue; }
+      try { part = JSON.parse(row.part_data); } catch { continue; }
+      // A turn of pure tool calls is silence, not a read failure.
+      if (message.role !== 'assistant' || part.type !== 'text') continue;
+      const text = String(part.text || '').trim();
+      if (text && parts[parts.length - 1] !== text) parts.push(text);
+    }
+    return { text: fromEnd ? '' : capFromEnd(parts.join('\n\n')), cursor: last };
+  } catch (err) {
+    console.warn('[agent-transcript] opencode read failed:', err.message);
+    return null;
+  } finally {
+    if (db) try { db.close(); } catch { /* already closed */ }
+  }
+}
+
+const READERS = {
+  claude: readClaude, codex: readCodex, antigravity: readAntigravity, opencode: readOpencode,
+};
 
 function hasReader(providerId) {
   return Object.prototype.hasOwnProperty.call(READERS, providerId);
@@ -397,6 +474,8 @@ module.exports = {
   claudeTranscriptPath,
   findCodexRollout,
   findAntigravityConversation,
+  findOpencodeSession,
+  opencodeSource,
   antigravityWorkspace,
   MAX_TEXT,
 };
