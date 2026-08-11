@@ -210,10 +210,34 @@ function getKlaussyCli() {
   return p;
 }
 
-// Lowest klaussy-agents version we treat as current — bump on any release we
-// want every repo to pick up, and the desktop prompts a one-click upgrade when
-// the installed CLI is below this floor (regeneration elsewhere keys on equality)
-const KLAUSSY_AGENTS_MIN_VERSION = '0.19.2';
+// "Current" comes from PyPI, not a pinned constant — a constant only moves when
+// the desktop ships, so it sat eight releases behind without telling anyone.
+const PYPI_LATEST_URL = 'https://pypi.org/pypi/klaussy-agents/json';
+const LATEST_TTL_MS = 6 * 60 * 60 * 1000;
+const LATEST_TIMEOUT_MS = 8000;
+let latestCache = { version: '', at: 0 };
+
+// '' when PyPI can't be reached — every caller reads that as "no reason to think
+// they're behind", so an offline launch doesn't nag.
+async function latestKlaussyVersion() {
+  if (latestCache.version && Date.now() - latestCache.at < LATEST_TTL_MS) return latestCache.version;
+  try {
+    const res = await fetch(PYPI_LATEST_URL, { signal: AbortSignal.timeout(LATEST_TIMEOUT_MS) });
+    if (!res.ok) return '';
+    const body = await res.json();
+    const version = (body && body.info && body.info.version) || '';
+    if (!version) return '';
+    latestCache = { version, at: Date.now() };
+    return version;
+  } catch {
+    return '';
+  }
+}
+
+// Tests only: the cache is process-wide and would carry one case into the next.
+function _resetLatestCache() {
+  latestCache = { version: '', at: 0 };
+}
 
 // Pull the first dotted numeric triple out of a `klaussy --version` string
 // ("klaussy, version 0.15.0" / "0.15.0" / "klaussy-agents 0.15.0" all parse).
@@ -470,6 +494,7 @@ async function upgradeReviewToolsIfDue() {
     const installer = await pickInstaller();
     if (!installer) return;
     const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+    let upgradeFailed = false;
     for (const t of TOOLS) {
       const pkg = t.pkg;
       // Upgrade with the manager that OWNS this tool — a blind `pipx upgrade`
@@ -492,13 +517,17 @@ async function upgradeReviewToolsIfDue() {
           }
         }
       } catch (e) {
-        // A single tool failing to upgrade (already latest, offline, etc.) is fine.
+        upgradeFailed = true;
         console.warn('[repo-intel] upgrade skipped for', pkg + ':', (e && e.message) || e);
       }
     }
-    const c2 = loadConfig();
-    c2.reviewToolsCheckedAt = Date.now();
-    saveConfig(c2);
+    // Stamping regardless would let a failed upgrade read as done and sit out
+    // another day, silently — the failures above are only warnings.
+    if (!upgradeFailed) {
+      const c2 = loadConfig();
+      c2.reviewToolsCheckedAt = Date.now();
+      saveConfig(c2);
+    }
     // A new CLI version invalidates the cached intel — bust the version cache so
     // the next ensureRepoIntel regenerates skills with the upgraded templates.
     klaussyCli = { bin: null, version: null, at: 0, promise: null };
@@ -514,17 +543,18 @@ async function upgradeReviewToolsIfDue() {
 // repeating it on every repo-intel run would just be noise.
 let outdatedNotified = false;
 
-// Emit a `tools-outdated` event when the installed klaussy-agents is below the
-// floor, so the renderer can offer a one-click upgrade — a MISSING CLI isn't
-// "outdated" (owned by the tools-failed toast), so stay quiet with no version
+// Offers a one-click upgrade when the install is behind what PyPI publishes. A
+// MISSING CLI isn't "outdated" (the tools-failed toast owns that), so with no
+// version it stays quiet.
 async function warnIfKlaussyOutdated() {
   try {
     if (outdatedNotified) return;
     const cli = await getKlaussyCli();
     if (!cli.version) return;
-    if (!versionBelow(cli.version, KLAUSSY_AGENTS_MIN_VERSION)) return;
+    const latest = await latestKlaussyVersion();
+    if (!latest || !versionBelow(cli.version, latest)) return;
     outdatedNotified = true;
-    notifyWindows({ type: 'tools-outdated', current: cli.version, min: KLAUSSY_AGENTS_MIN_VERSION });
+    notifyWindows({ type: 'tools-outdated', current: cli.version, min: latest });
   } catch { /* best-effort — a version probe hiccup shouldn't crash boot */ }
 }
 
@@ -540,8 +570,10 @@ async function upgradeReviewToolsNow() {
   await upgradeReviewToolsIfDue();
   let version = null;
   try { version = (await getKlaussyCli()).version; } catch { /* probe failed */ }
-  const ok = version ? !versionBelow(version, KLAUSSY_AGENTS_MIN_VERSION) : false;
-  return { version, min: KLAUSSY_AGENTS_MIN_VERSION, ok };
+  const latest = await latestKlaussyVersion();
+  // Unreachable PyPI can't convict a version that is installed and running.
+  const ok = version ? (!latest || !versionBelow(version, latest)) : false;
+  return { version, min: latest, ok };
 }
 
 // Resolve a worktree (or repo) path to its primary checkout — intel belongs
@@ -1285,4 +1317,4 @@ module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, en
   // Exported for unit testing of the prompt-minimization logic (Item 4).
   loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock,
   // Exported for unit testing of the version-floor comparison.
-  versionBelow, KLAUSSY_AGENTS_MIN_VERSION };
+  versionBelow, latestKlaussyVersion, _resetLatestCache };
