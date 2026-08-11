@@ -269,10 +269,15 @@ test('long menus are capped so the message stays readable', () => {
   assert.equal(parsePromptOptions(exact).truncated, false);
 });
 
-test('a toggle prompt offers no buttons rather than pressing one key', () => {
-  const { isMultiSelect } = require('../../main/util/chat-reply');
-  assert.equal(isMultiSelect('Pick files\n 1. a\n 2. b\nSpace to toggle · Enter to confirm'), true);
-  assert.equal(isMultiSelect(HOTDOG_PROMPT), false);
+test('the two multi-select shapes are told apart', () => {
+  const { multiSelectStyle } = require('../../main/util/chat-reply');
+  assert.equal(multiSelectStyle('Pick files\n 1. a\n 2. b\nSpace to toggle · Enter to confirm'), 'toggle');
+  assert.equal(multiSelectStyle('Which features?\n 1. a\n 2. b\nSelect all that apply · Enter to confirm'), 'toggle');
+  assert.equal(multiSelectStyle('Which features?\n 1. a\n 2. b\nEnter to select, separated by commas'), 'typed');
+  assert.equal(multiSelectStyle(HOTDOG_PROMPT), '', 'a single-answer prompt is neither');
+
+  // The agent saying it will select things is not a prompt asking anyone to.
+  assert.equal(multiSelectStyle('I will select all that apply once the tests pass.'), '');
 });
 
 test('a choice can only press an option that was offered', () => {

@@ -265,6 +265,34 @@ test('buttons only go to the platform that can hear them', async () => {
   }
 });
 
+test('a checkbox menu is dispatched with no options to press', async () => {
+  const srv = makeCaptureServer();
+  const base = await srv.start();
+  threads._reset();
+  const realFetch = global.fetch;
+  const botPosts = [];
+  global.fetch = async (url, opts) => {
+    botPosts.push({ url: String(url), body: JSON.parse(opts.body) });
+    return { ok: true, json: async () => ({ ok: true, ts: '1.1' }) };
+  };
+  try {
+    await gateway.dispatchEvent({
+      ...APPROVAL,
+      logsTail: 'Which features?\n 1. Auth\n 2. Billing\nSpace to toggle · Enter to confirm',
+    }, cfg(base, {
+      slackInteractive: true, slackBotToken: 'xoxb-x', slackChannel: 'C1',
+      slackWebhookUrl: '', discordInteractive: false,
+    }));
+    const alert = botPosts.filter((p) => p.url.includes('chat.postMessage')).pop();
+    assert.ok(!alert.body.blocks.some((b) => b.type === 'actions'),
+      'no button can express this answer, so none is drawn');
+    assert.match(JSON.stringify(alert.body), /needs the terminal/);
+  } finally {
+    global.fetch = realFetch;
+    await srv.close();
+  }
+});
+
 // A webhook cannot post into a thread and its posts carry no id to reply to, so
 // anything it sends is unanswerable. With a bot configured, a webhook url on the
 // side used to take every non-approval message down that dead end.
