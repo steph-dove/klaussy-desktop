@@ -300,6 +300,16 @@ function predatesSession(file, spawnTime) {
   try { return fs.statSync(file).birthtimeMs < spawnTime; } catch { return false; }
 }
 
+function subDisplayName(sub) {
+  return sub.label || displayNameFor(sub.mode);
+}
+
+// The name a session answers to in chat, and the only thing that tells two tabs
+// of one agent apart once a restart has voided their instance ids.
+function sessionNameFor(inst, sub) {
+  return sub ? `${inst.name} · ${subDisplayName(sub)}` : inst.name;
+}
+
 // A session's second agent is a tab on the task, not an instance of its own. It
 // speaks for itself, so it mirrors for itself: its own buffer and cursor.
 function subMirrorTarget(inst, sub) {
@@ -307,7 +317,7 @@ function subMirrorTarget(inst, sub) {
     sub.mirror = {
       // Distinct from the task id, which keys the parent's own screen buffer.
       id: `${inst.id}:${sub.subId}`,
-      name: sub.label || displayNameFor(sub.mode),
+      name: subDisplayName(sub),
       mode: sub.mode,
       originalMode: sub.mode,
       worktreePath: inst.worktreePath,
@@ -340,7 +350,7 @@ function processSubOutput(inst, sub, data) {
         // Its own id, not the task's: an answer typed under what this agent
         // said has to reach this agent, not whichever one owns the session.
         containerId: target.id,
-        sessionName: `${inst.name} · ${target.name}`,
+        sessionName: sessionNameFor(inst, sub),
         workspacePath: inst.worktreePath,
         sessionBranch: inst.branch || '',
         agentName: displayNameFor(sub.mode),
@@ -1037,6 +1047,7 @@ module.exports = {
   findLatestSessionId,
   processIdleDetection,
   processSubOutput,
+  sessionNameFor,
   clearIdleTimer,
   spawnInWorktree,
   convertInstanceToShell,
