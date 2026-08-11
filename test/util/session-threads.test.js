@@ -174,6 +174,91 @@ test('a thread whose session is gone reattaches to nothing', async () => {
   }
 });
 
+// A task and a tab running the same agent look identical on worktree and agent
+// name, so the tab's thread reattached to the task and answered the wrong one.
+function withPair(run) {
+  const { instances } = require('../../main/state/instances');
+  instances.set(9002, {
+    id: 9002, name: 'auth', alive: true, mode: 'claude', originalMode: 'claude',
+    worktreePath: '/work/auth-refactor', branch: 'add-oauth', pty: { write: () => {} },
+    subTerminals: [{ subId: 2, alive: true, mode: 'claude', pty: { write: () => {} } }],
+  });
+  try { return run(); } finally { instances.delete(9002); }
+}
+
+test('a tab’s thread comes back to the tab, not to the task it runs on', async () => {
+  threads._reset();
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T79' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, {
+      ...EVENT, agentName: 'Claude Code', sessionName: 'auth · Claude Code',
+    });
+    await require('../../main/util/config').flushSaveConfig();
+    threads._reset();
+    withPair(() => assert.equal(threads.reattachThread('T79'), '9002:2'));
+  } finally {
+    f.restore();
+  }
+});
+
+test('the task’s own thread comes back to the task, tab or no tab', async () => {
+  threads._reset();
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T80' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, {
+      ...EVENT, agentName: 'Claude Code', sessionName: 'auth',
+    });
+    await require('../../main/util/config').flushSaveConfig();
+    threads._reset();
+    withPair(() => assert.equal(threads.reattachThread('T80'), '9002'));
+  } finally {
+    f.restore();
+  }
+});
+
+test('a thread from before names were kept answers nobody rather than guessing', async () => {
+  threads._reset();
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T81' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, { ...EVENT, agentName: 'Claude Code' });
+    await require('../../main/util/config').flushSaveConfig();
+    threads._reset();
+    withPair(() => assert.equal(threads.reattachThread('T81'), '',
+      'a task and its same-agent tab are indistinguishable without one'));
+  } finally {
+    f.restore();
+  }
+});
+
+// Branch and session name each rule out a different impostor, and a tab inherits
+// its task's branch — so dropping either one hands the thread to the wrong agent.
+test('a tab’s thread is refused to the same tab on another branch', async () => {
+  threads._reset();
+  const { instances } = require('../../main/state/instances');
+  const f = stubFetch((url) => (url.endsWith('/threads') ? okJson({ id: 'T82' }) : okJson({ id: 'M1' })));
+  try {
+    await threads.ensureDiscordThread(CFG, {
+      ...EVENT, agentName: 'Claude Code', sessionName: 'auth · Claude Code',
+    });
+    await require('../../main/util/config').flushSaveConfig();
+    threads._reset();
+
+    // Same checkout, same agent, same tab name — a different branch entirely.
+    instances.set(9003, {
+      id: 9003, name: 'auth', alive: true, mode: 'claude', originalMode: 'claude',
+      worktreePath: '/work/auth-refactor', branch: 'other-work', pty: { write: () => {} },
+      subTerminals: [{ subId: 2, alive: true, mode: 'claude', pty: { write: () => {} } }],
+    });
+    try {
+      assert.equal(threads.reattachThread('T82'), '');
+    } finally {
+      instances.delete(9003);
+    }
+  } finally {
+    f.restore();
+  }
+});
+
 // A rejection here used to reject the whole dispatch, taking the Discord post
 // down with it: being offline should cost one thread, not every alert.
 test('a network failure opening a slack thread does not sink the dispatch', async () => {
