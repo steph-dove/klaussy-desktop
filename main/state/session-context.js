@@ -9,6 +9,13 @@ const { gitCommonDir } = require('../util/git-repo');
 
 const notesDirCache = new Map(); // worktreePath -> notes dir
 
+// Nothing marks a session over, and a stale note the reader can't tell is
+// stale is worse than none, so age is the only reliable expiry.
+const NOTE_TTL_MS = 24 * 60 * 60 * 1000;
+// Shares the handoff seed with a transcript and a git brief, so notes take a
+// slice comparable to session-handoff's MAX_TRANSCRIPT_CHARS.
+const MAX_SUMMARY_CHARS = 12000;
+
 // Filenames are agent-supplied, so anything that could climb out of the notes
 // dir (or name a device) is flattened rather than escaped.
 function sanitizeSegment(value, fallback) {
@@ -39,6 +46,20 @@ function ensureSessionNotesDir(worktreePath) {
   }
   fs.mkdirSync(targetDir, { recursive: true });
   return targetDir;
+}
+
+// Returns {} rather than throwing so a notes-dir problem can never stop a
+// terminal from spawning.
+function sessionNotesEnv(worktreePath, terminalId) {
+  if (!worktreePath) return {};
+  try {
+    const env = { KLAUSSY_SESSION_NOTES_DIR: ensureSessionNotesDir(worktreePath) };
+    if (terminalId != null) env.KLAUSSY_SESSION_ID = String(terminalId);
+    return env;
+  } catch (err) {
+    console.warn('[session-context] notes dir unavailable:', err && err.message);
+    return {};
+  }
 }
 
 function serializeFrontmatter(meta) {
@@ -155,15 +176,22 @@ function listSessionNotes(worktreePath) {
       // The documented frontmatter carries no timestamp, so mtime is what keeps
       // newest-first ordering meaningful.
       const stamped = new Date(metadata.timestamp || 0).getTime();
+      const writtenAt = stamped || fs.statSync(filePath).mtimeMs;
+
+      if (Date.now() - writtenAt > NOTE_TTL_MS) {
+        fs.unlinkSync(filePath);
+        continue;
+      }
+
       notes.push({
         id: metadata.id || file.replace(/\.md$/, ''),
         filePath,
         metadata,
         body,
-        writtenAt: stamped || fs.statSync(filePath).mtimeMs,
+        writtenAt,
       });
     } catch {
-      // skip unparseable files
+      // skip unparseable / already-removed files
     }
   }
 
@@ -183,7 +211,6 @@ function buildSessionContextSummary(worktreePath) {
   const notes = listSessionNotes(worktreePath);
   if (!notes.length) return '';
 
-  const header = `=== ACTIVE SESSION CONTEXT NOTES (${notes.length} note${notes.length === 1 ? '' : 's'}) ===\n`;
   const items = notes.map((n, i) => {
     const meta = n.metadata || {};
     const agentInfo = meta.agent ? `[Agent: ${meta.agent}${meta.provider ? ` (${meta.provider})` : ''}]` : '';
@@ -195,7 +222,22 @@ function buildSessionContextSummary(worktreePath) {
     return `--- Note ${i + 1} (${when}) ${agentInfo} ---${filesInfo}${tagsInfo}\n${n.body}`;
   });
 
-  return `${header}${items.join('\n\n')}\n=============================================`;
+  // Drop whole notes from the oldest end rather than truncating mid-note, which
+  // would hand the reader a sentence with no way to tell it was cut.
+  const kept = [];
+  let budget = MAX_SUMMARY_CHARS;
+  for (const item of items) {
+    if (item.length > budget) break;
+    budget -= item.length;
+    kept.push(item);
+  }
+  if (!kept.length) kept.push(`${items[0].slice(0, MAX_SUMMARY_CHARS)}\n[note truncated]`);
+
+  const dropped = notes.length - kept.length;
+  const header = `=== ACTIVE SESSION CONTEXT NOTES (${kept.length} note${kept.length === 1 ? '' : 's'}`
+    + `${dropped > 0 ? `, ${dropped} older omitted for length` : ''}) ===\n`;
+
+  return `${header}${kept.join('\n\n')}\n=============================================`;
 }
 
 function clearSessionNotes(worktreePath) {
@@ -213,6 +255,7 @@ function clearSessionNotes(worktreePath) {
 
 module.exports = {
   ensureSessionNotesDir,
+  sessionNotesEnv,
   serializeFrontmatter,
   parseFrontmatter,
   writeSessionNote,

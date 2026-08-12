@@ -8,6 +8,7 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const {
   ensureSessionNotesDir,
+  sessionNotesEnv,
   serializeFrontmatter,
   parseFrontmatter,
   writeSessionNote,
@@ -194,6 +195,58 @@ test('a note id cannot escape the notes directory', () => {
   assert.equal(path.dirname(note.filePath), dir);
   assert.ok(!fs.existsSync(path.join(repo, '..', 'escaped.md')));
   assert.equal(listSessionNotes(repo).length, 1);
+});
+
+test('notes older than the TTL are dropped and deleted', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  const stale = path.join(dir, 'stale.md');
+  const fresh = path.join(dir, 'fresh.md');
+  fs.writeFileSync(stale, '---\nagent: old\n---\nancient\n');
+  fs.writeFileSync(fresh, '---\nagent: new\n---\ncurrent\n');
+  const longAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  fs.utimesSync(stale, longAgo, longAgo);
+
+  const notes = listSessionNotes(repo);
+  assert.deepEqual(notes.map((n) => n.id), ['fresh']);
+  assert.ok(!fs.existsSync(stale), 'expired note should be removed from disk');
+  assert.ok(fs.existsSync(fresh));
+});
+
+test('an explicit timestamp older than the TTL also expires', () => {
+  const repo = makeRepo();
+  const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  writeSessionNote(repo, { id: 'ancient', content: 'x', timestamp: old });
+
+  assert.equal(listSessionNotes(repo).length, 0);
+});
+
+test('the summary drops whole old notes rather than truncating mid-note', () => {
+  const repo = makeRepo();
+  for (let i = 0; i < 30; i++) {
+    writeSessionNote(repo, {
+      id: `note-${String(i).padStart(2, '0')}`,
+      agent: `agent-${i}`,
+      content: 'x'.repeat(1000),
+      timestamp: new Date(Date.now() - (30 - i) * 60000).toISOString(),
+    });
+  }
+
+  const summary = buildSessionContextSummary(repo);
+  assert.ok(summary.length < 15000, `summary was ${summary.length} chars`);
+  assert.ok(summary.includes('older omitted for length'));
+  assert.ok(summary.includes('agent-29'));
+  assert.ok(!summary.includes('agent-0\n'));
+  assert.ok(summary.trimEnd().endsWith('='), 'summary should end on its footer');
+});
+
+test('sessionNotesEnv gives a terminal everything it needs to join the bus', () => {
+  const repo = makeRepo();
+  const env = sessionNotesEnv(repo, 7);
+
+  assert.equal(env.KLAUSSY_SESSION_NOTES_DIR, ensureSessionNotesDir(repo));
+  assert.equal(env.KLAUSSY_SESSION_ID, '7');
+  assert.deepEqual(sessionNotesEnv(null, 1), {}, 'no worktree means no env, not a throw');
 });
 
 test('clearing notes leaves unrelated files alone', () => {

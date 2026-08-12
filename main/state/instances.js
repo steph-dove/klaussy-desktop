@@ -28,7 +28,7 @@ const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
 const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
-const { ensureSessionNotesDir } = require('./session-context');
+const { sessionNotesEnv } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
@@ -231,15 +231,7 @@ const INHERITED_SESSION_MARKERS = [
 function agentSpawnEnv(worktreePath, terminalId) {
   const env = { ...process.env };
   for (const key of INHERITED_SESSION_MARKERS) delete env[key];
-  if (worktreePath) {
-    try {
-      env.KLAUSSY_SESSION_NOTES_DIR = ensureSessionNotesDir(worktreePath);
-      env.KLAUSSY_SESSION_ID = String(terminalId);
-    } catch (err) {
-      console.warn('[session-context] notes dir unavailable:', err && err.message);
-    }
-  }
-  return env;
+  return { ...env, ...sessionNotesEnv(worktreePath, terminalId) };
 }
 
 // A conversation that has not recorded its workspace yet can only be guessed
@@ -953,7 +945,7 @@ function convertInstanceToShell(inst, exitCode) {
     cols: inst.pty.cols || 120,
     rows: inst.pty.rows || 30,
     cwd: inst.worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color' },
+    env: { ...process.env, TERM: 'xterm-256color', ...sessionNotesEnv(inst.worktreePath, id) },
   });
 
   inst.pty = ptyProc;

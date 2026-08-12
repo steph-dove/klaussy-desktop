@@ -43,7 +43,7 @@ const electronStub = {
   shell: { openPath: () => {}, openExternal: () => {} },
   Menu: { setApplicationMenu: () => {}, buildFromTemplate: () => ({}) },
   nativeTheme: { shouldUseDarkColors: false, on: () => {} },
-  Notification: class {},
+  Notification: class { on() {} show() {} close() {} },
   contextBridge: { exposeInMainWorld: () => {} },
   ipcRenderer: { invoke: () => Promise.resolve(), on: () => {}, send: () => {} },
   webUtils: { getPathForFile: () => '' },

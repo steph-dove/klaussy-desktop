@@ -25,6 +25,7 @@ const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
 const { buildHandoffSeed } = require('../state/session-handoff');
+const { sessionNotesEnv } = require('../state/session-context');
 const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -1144,7 +1145,12 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
       cols: 120,
       rows: 30,
       cwd: inst.worktreePath,
-      env: { ...process.env, TERM: 'xterm-256color', ...(inst.extraEnv || {}) },
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        ...sessionNotesEnv(inst.worktreePath, `${taskId}-${subId}`),
+        ...(inst.extraEnv || {}),
+      },
     });
   }
 
@@ -1340,7 +1346,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
     cols: cols || 120,
     rows: rows || 30,
     cwd: inst.worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color' },
+    env: { ...process.env, TERM: 'xterm-256color', ...sessionNotesEnv(inst.worktreePath, inst.id) },
   });
 
   inst.pty = ptyProc;
