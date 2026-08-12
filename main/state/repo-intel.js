@@ -210,10 +210,34 @@ function getKlaussyCli() {
   return p;
 }
 
-// Lowest klaussy-agents version we treat as current — bump on any release we
-// want every repo to pick up, and the desktop prompts a one-click upgrade when
-// the installed CLI is below this floor (regeneration elsewhere keys on equality)
-const KLAUSSY_AGENTS_MIN_VERSION = '0.19.2';
+// "Current" comes from PyPI, not a pinned constant — a constant only moves when
+// the desktop ships, so it sat eight releases behind without telling anyone.
+const PYPI_LATEST_URL = 'https://pypi.org/pypi/klaussy-agents/json';
+const LATEST_TTL_MS = 6 * 60 * 60 * 1000;
+const LATEST_TIMEOUT_MS = 8000;
+let latestCache = { version: '', at: 0 };
+
+// '' when PyPI can't be reached — every caller reads that as "no reason to think
+// they're behind", so an offline launch doesn't nag.
+async function latestKlaussyVersion() {
+  if (latestCache.version && Date.now() - latestCache.at < LATEST_TTL_MS) return latestCache.version;
+  try {
+    const res = await fetch(PYPI_LATEST_URL, { signal: AbortSignal.timeout(LATEST_TIMEOUT_MS) });
+    if (!res.ok) return '';
+    const body = await res.json();
+    const version = (body && body.info && body.info.version) || '';
+    if (!version) return '';
+    latestCache = { version, at: Date.now() };
+    return version;
+  } catch {
+    return '';
+  }
+}
+
+// Tests only: the cache is process-wide and would carry one case into the next.
+function _resetLatestCache() {
+  latestCache = { version: '', at: 0 };
+}
 
 // Pull the first dotted numeric triple out of a `klaussy --version` string
 // ("klaussy, version 0.15.0" / "0.15.0" / "klaussy-agents 0.15.0" all parse).
@@ -268,8 +292,9 @@ let toolsPromise = null;
 // same 1.4.x), so an existing `conventions` already satisfies it; we only
 // install the new dist on machines that lack the command, since reinstalling
 // over it would just collide on the pipx symlink for no behavior change.
+const CONVENTIONS_PKG = 'klaussy-repo-conventions';
 const TOOLS = [
-  { cmd: 'conventions', pkg: 'klaussy-repo-conventions' },
+  { cmd: 'conventions', pkg: CONVENTIONS_PKG },
   { cmd: 'klaussy', pkg: 'klaussy-agents' },
 ];
 
@@ -317,6 +342,16 @@ function listHasPkg(stdout, pkg) {
   return String(stdout || '').split('\n').some((line) => line.trim().split(/\s+/)[0] === pkg);
 }
 
+// The version token from the same two listings: `pipx list --short` prints
+// "<pkg> 1.7.0", `uv tool list` prints "<pkg> v1.7.0".
+function listPkgVersion(stdout, pkg) {
+  for (const line of String(stdout || '').split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts[0] === pkg && parts[1]) return parts[1].replace(/^v/, '');
+  }
+  return '';
+}
+
 // Which isolated manager OWNS an already-installed tool (vs pickInstaller's
 // "what CAN install") — needed because a blind `pipx upgrade` on a uv-installed
 // tool silently no-ops. Returns { kind } or null (no owner); never throws
@@ -330,6 +365,41 @@ async function detectToolOwner(pkg) {
     if (listHasPkg(r.stdout, pkg)) return { kind: 'uv' };
   } catch { /* no uv, or nothing installed via it */ }
   return null;
+}
+
+// The conventions CLI has no --version flag, so its version comes from whichever
+// isolated manager owns it — and from neither on a pip --user install, which
+// answers '' for good.
+let conventionsCli = { version: '', at: 0, promise: null };
+function getConventionsVersion() {
+  if (conventionsCli.promise) return conventionsCli.promise;
+  if (conventionsCli.version) return Promise.resolve(conventionsCli.version);
+  if (Date.now() - conventionsCli.at < KLAUSSY_VERSION_NULL_TTL_MS) return Promise.resolve('');
+  const p = (async () => {
+    let version = '';
+    try {
+      const r = await execFileP('pipx', ['list', '--short'], { timeout: 15000 });
+      version = listPkgVersion(r.stdout, CONVENTIONS_PKG);
+    } catch { /* no pipx, or nothing installed via it */ }
+    if (!version) {
+      try {
+        const r = await execFileP('uv', ['tool', 'list'], { timeout: 15000 });
+        version = listPkgVersion(r.stdout, CONVENTIONS_PKG);
+      } catch { /* no uv either — stamp without it */ }
+    }
+    conventionsCli = { version, at: Date.now(), promise: null };
+    return version;
+  })();
+  conventionsCli.promise = p;
+  return p;
+}
+
+// The regeneration stamp: both CLIs shape the generated intel, so a bump in
+// either has to invalidate it — leaving conventions out held its new detectors
+// back until the weekly staleness window expired.
+function stampFor(cliVersion, conventionsVersion) {
+  if (!cliVersion) return '';
+  return conventionsVersion ? `${cliVersion}+conventions.${conventionsVersion}` : cliVersion;
 }
 
 // Bootstrap pipx itself when the machine has Python but no isolated installer.
@@ -438,6 +508,7 @@ function ensureReviewTools() {
     try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
     // Drop the cached "missing" klaussy CLI so the next ensure re-probes.
     klaussyCli = { bin: null, version: null, at: 0, promise: null };
+    conventionsCli = { version: '', at: 0, promise: null };
 
     const ok = (await Promise.all(missing.map((t) => toolPresent(t.cmd)))).every(Boolean);
     if (ok) {
@@ -470,6 +541,7 @@ async function upgradeReviewToolsIfDue() {
     const installer = await pickInstaller();
     if (!installer) return;
     const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+    let upgradeFailed = false;
     for (const t of TOOLS) {
       const pkg = t.pkg;
       // Upgrade with the manager that OWNS this tool — a blind `pipx upgrade`
@@ -492,16 +564,21 @@ async function upgradeReviewToolsIfDue() {
           }
         }
       } catch (e) {
-        // A single tool failing to upgrade (already latest, offline, etc.) is fine.
+        upgradeFailed = true;
         console.warn('[repo-intel] upgrade skipped for', pkg + ':', (e && e.message) || e);
       }
     }
-    const c2 = loadConfig();
-    c2.reviewToolsCheckedAt = Date.now();
-    saveConfig(c2);
-    // A new CLI version invalidates the cached intel — bust the version cache so
+    // Stamping regardless would let a failed upgrade read as done and sit out
+    // another day, silently — the failures above are only warnings.
+    if (!upgradeFailed) {
+      const c2 = loadConfig();
+      c2.reviewToolsCheckedAt = Date.now();
+      saveConfig(c2);
+    }
+    // A new CLI version invalidates the cached intel — bust the version caches so
     // the next ensureRepoIntel regenerates skills with the upgraded templates.
     klaussyCli = { bin: null, version: null, at: 0, promise: null };
+    conventionsCli = { version: '', at: 0, promise: null };
     try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
     console.log('[repo-intel] checked analysis tools for upgrades');
   } catch (e) {
@@ -514,17 +591,18 @@ async function upgradeReviewToolsIfDue() {
 // repeating it on every repo-intel run would just be noise.
 let outdatedNotified = false;
 
-// Emit a `tools-outdated` event when the installed klaussy-agents is below the
-// floor, so the renderer can offer a one-click upgrade — a MISSING CLI isn't
-// "outdated" (owned by the tools-failed toast), so stay quiet with no version
+// Offers a one-click upgrade when the install is behind what PyPI publishes. A
+// MISSING CLI isn't "outdated" (the tools-failed toast owns that), so with no
+// version it stays quiet.
 async function warnIfKlaussyOutdated() {
   try {
     if (outdatedNotified) return;
     const cli = await getKlaussyCli();
     if (!cli.version) return;
-    if (!versionBelow(cli.version, KLAUSSY_AGENTS_MIN_VERSION)) return;
+    const latest = await latestKlaussyVersion();
+    if (!latest || !versionBelow(cli.version, latest)) return;
     outdatedNotified = true;
-    notifyWindows({ type: 'tools-outdated', current: cli.version, min: KLAUSSY_AGENTS_MIN_VERSION });
+    notifyWindows({ type: 'tools-outdated', current: cli.version, min: latest });
   } catch { /* best-effort — a version probe hiccup shouldn't crash boot */ }
 }
 
@@ -540,8 +618,10 @@ async function upgradeReviewToolsNow() {
   await upgradeReviewToolsIfDue();
   let version = null;
   try { version = (await getKlaussyCli()).version; } catch { /* probe failed */ }
-  const ok = version ? !versionBelow(version, KLAUSSY_AGENTS_MIN_VERSION) : false;
-  return { version, min: KLAUSSY_AGENTS_MIN_VERSION, ok };
+  const latest = await latestKlaussyVersion();
+  // Unreachable PyPI can't convict a version that is installed and running.
+  const ok = version ? (!latest || !versionBelow(version, latest)) : false;
+  return { version, min: latest, ok };
 }
 
 // Resolve a worktree (or repo) path to its primary checkout — intel belongs
@@ -1022,6 +1102,9 @@ function ensureRepoIntel(repoOrWorktreePath) {
       const toolsOk = await ensureReviewTools();
       const cli = await getKlaussyCli();
       const currentVersion = cli.version || '';
+      // currentVersion stays klaussy-only — it also guards the klaussy spawn
+      // below, which must not fire on a conventions-only machine.
+      const stamp = stampFor(currentVersion, await getConventionsVersion());
       const a = artifactPaths(base);
       // Heal a stale klausify-era settings.json on the base repo every run
       // (cache hit or full regen) — klaussy init won't, since it skips existing
@@ -1033,13 +1116,13 @@ function ensureRepoIntel(repoOrWorktreePath) {
 
       const haveArtifacts = fs.existsSync(a.rawJson);
       const freshEnough = haveArtifacts && (Date.now() - srcMtime < STALE_MS);
-      const sameVersion = stampedVersion !== null && stampedVersion === currentVersion;
+      const sameVersion = stampedVersion !== null && stampedVersion === stamp;
 
       if (freshEnough && sameVersion) {
         // Nothing to regenerate — but keep caches coherent, sync worktrees,
         // and STILL tell the user (silent cache hits read as "nothing ran").
         if (!memCache.has(base) || memCache.get(base).srcMtime < srcMtime) {
-          buildBlock(base, currentVersion);
+          buildBlock(base, stamp);
         }
         syncIntelIntoActiveWorktrees(base);
         // Announce the cache hit once per repo per app run — evidence
@@ -1168,7 +1251,7 @@ function ensureRepoIntel(repoOrWorktreePath) {
 
       // Stamp the version only on a fully completed run — an enrichment
       // failure leaves the '' stamp so the next session retries.
-      buildBlock(base, enrichFailed ? '' : currentVersion);
+      buildBlock(base, enrichFailed ? '' : stamp);
       syncIntelIntoActiveWorktrees(base);
       failedAt.delete(base);
       console.log('[repo-intel] generated for', base,
@@ -1285,4 +1368,6 @@ module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, en
   // Exported for unit testing of the prompt-minimization logic (Item 4).
   loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock,
   // Exported for unit testing of the version-floor comparison.
-  versionBelow, KLAUSSY_AGENTS_MIN_VERSION };
+  versionBelow, latestKlaussyVersion, _resetLatestCache,
+  // Exported for unit testing of the regeneration stamp.
+  stampFor, listPkgVersion };
