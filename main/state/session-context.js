@@ -62,6 +62,17 @@ function serializeFrontmatter(meta) {
   return lines.join('\n');
 }
 
+// Notes are hand-written by agents, so a flow sequence arrives as often
+// unquoted (`tags: [ports]`) as valid JSON (`tags: ["ports"]`).
+function parseScalar(raw) {
+  try { return JSON.parse(raw); } catch { /* not JSON — keep reading */ }
+  const flow = raw.match(/^\[(.*)\]$/s);
+  if (!flow) return raw;
+  return flow[1].split(',')
+    .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
+    .filter(Boolean);
+}
+
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
@@ -81,9 +92,7 @@ function parseFrontmatter(content) {
       if (!Array.isArray(metadata[currentKey])) {
         metadata[currentKey] = [];
       }
-      let val = trimmed.slice(2).trim();
-      try { val = JSON.parse(val); } catch { /* leave as string */ }
-      metadata[currentKey].push(val);
+      metadata[currentKey].push(parseScalar(trimmed.slice(2).trim()));
       continue;
     }
 
@@ -93,13 +102,7 @@ function parseFrontmatter(content) {
       const valStr = trimmed.slice(colonIdx + 1).trim();
       currentKey = key;
 
-      if (!valStr) {
-        metadata[key] = [];
-      } else {
-        let parsedVal = valStr;
-        try { parsedVal = JSON.parse(valStr); } catch { /* leave as string */ }
-        metadata[key] = parsedVal;
-      }
+      metadata[key] = valStr ? parseScalar(valStr) : [];
     }
   }
 
@@ -149,24 +152,30 @@ function listSessionNotes(worktreePath) {
       const filePath = path.join(dir, file);
       const content = fs.readFileSync(filePath, 'utf8');
       const { metadata, body } = parseFrontmatter(content);
+      // The documented frontmatter carries no timestamp, so mtime is what keeps
+      // newest-first ordering meaningful.
+      const stamped = new Date(metadata.timestamp || 0).getTime();
       notes.push({
         id: metadata.id || file.replace(/\.md$/, ''),
         filePath,
         metadata,
         body,
+        writtenAt: stamped || fs.statSync(filePath).mtimeMs,
       });
     } catch {
       // skip unparseable files
     }
   }
 
-  notes.sort((a, b) => {
-    const timeA = new Date(a.metadata.timestamp || 0).getTime();
-    const timeB = new Date(b.metadata.timestamp || 0).getTime();
-    return timeB - timeA;
-  });
+  notes.sort((a, b) => b.writtenAt - a.writtenAt);
 
   return notes;
+}
+
+// A hand-written field may arrive as a bare string, which would crash .join().
+function formatList(value) {
+  if (Array.isArray(value)) return value.length ? value.join(', ') : '';
+  return value ? String(value) : '';
 }
 
 /** Flattens the notes into a text block small enough to prepend to an agent prompt. */
@@ -178,9 +187,12 @@ function buildSessionContextSummary(worktreePath) {
   const items = notes.map((n, i) => {
     const meta = n.metadata || {};
     const agentInfo = meta.agent ? `[Agent: ${meta.agent}${meta.provider ? ` (${meta.provider})` : ''}]` : '';
-    const filesInfo = meta.affected_files && meta.affected_files.length ? `\nAffected files: ${meta.affected_files.join(', ')}` : '';
-    const tagsInfo = meta.tags && meta.tags.length ? `\nTags: ${meta.tags.join(', ')}` : '';
-    return `--- Note ${i + 1} (${meta.timestamp || 'recent'}) ${agentInfo} ---${filesInfo}${tagsInfo}\n${n.body}`;
+    const files = formatList(meta.affected_files);
+    const tags = formatList(meta.tags);
+    const filesInfo = files ? `\nAffected files: ${files}` : '';
+    const tagsInfo = tags ? `\nTags: ${tags}` : '';
+    const when = meta.timestamp || new Date(n.writtenAt).toISOString();
+    return `--- Note ${i + 1} (${when}) ${agentInfo} ---${filesInfo}${tagsInfo}\n${n.body}`;
   });
 
   return `${header}${items.join('\n\n')}\n=============================================`;

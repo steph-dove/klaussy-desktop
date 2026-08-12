@@ -53,6 +53,53 @@ test('serializeFrontmatter and parseFrontmatter round-trip', () => {
   assert.equal(parsed.body, '# Header\n\nThis is the note body.');
 });
 
+// The documented example is `tags: [topic]` — unquoted, so not valid JSON, and
+// it used to survive as a string and crash the summary on .join().
+test('a hand-written note using the documented frontmatter is readable', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  fs.writeFileSync(path.join(dir, 'claude-code-1001.md'), [
+    '---',
+    'agent: claude-code',
+    'provider: anthropic',
+    'affected_files: ["main/ipc/auth.js"]',
+    'tags: [ports, breaking_change]',
+    '---',
+    '# Auth port moved',
+    'Mock auth server moved from 3000 to 3005.',
+  ].join('\n'));
+
+  const [note] = listSessionNotes(repo);
+  assert.deepEqual(note.metadata.tags, ['ports', 'breaking_change']);
+  assert.deepEqual(note.metadata.affected_files, ['main/ipc/auth.js']);
+
+  const summary = buildSessionContextSummary(repo);
+  assert.ok(summary.includes('Tags: ports, breaking_change'));
+  assert.ok(summary.includes('Affected files: main/ipc/auth.js'));
+  assert.ok(summary.includes('Mock auth server moved from 3000 to 3005.'));
+});
+
+test('notes without a timestamp still order newest-first', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  // Neither note carries a timestamp, as the documented frontmatter omits it.
+  fs.writeFileSync(path.join(dir, 'older.md'), '---\nagent: a\n---\nfirst\n');
+  fs.writeFileSync(path.join(dir, 'newer.md'), '---\nagent: b\n---\nsecond\n');
+  const now = Date.now();
+  fs.utimesSync(path.join(dir, 'older.md'), new Date(now - 60000), new Date(now - 60000));
+  fs.utimesSync(path.join(dir, 'newer.md'), new Date(now), new Date(now));
+
+  assert.deepEqual(listSessionNotes(repo).map((n) => n.id), ['newer', 'older']);
+});
+
+test('a malformed metadata field degrades instead of throwing', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  fs.writeFileSync(path.join(dir, 'broken.md'), '---\nagent: x\ntags: not-a-list\n---\nbody\n');
+
+  assert.ok(buildSessionContextSummary(repo).includes('Tags: not-a-list'));
+});
+
 test('notes written by one terminal are visible to every other', () => {
   const repo = makeRepo();
 
