@@ -292,8 +292,9 @@ let toolsPromise = null;
 // same 1.4.x), so an existing `conventions` already satisfies it; we only
 // install the new dist on machines that lack the command, since reinstalling
 // over it would just collide on the pipx symlink for no behavior change.
+const CONVENTIONS_PKG = 'klaussy-repo-conventions';
 const TOOLS = [
-  { cmd: 'conventions', pkg: 'klaussy-repo-conventions' },
+  { cmd: 'conventions', pkg: CONVENTIONS_PKG },
   { cmd: 'klaussy', pkg: 'klaussy-agents' },
 ];
 
@@ -341,6 +342,16 @@ function listHasPkg(stdout, pkg) {
   return String(stdout || '').split('\n').some((line) => line.trim().split(/\s+/)[0] === pkg);
 }
 
+// The version token from the same two listings: `pipx list --short` prints
+// "<pkg> 1.7.0", `uv tool list` prints "<pkg> v1.7.0".
+function listPkgVersion(stdout, pkg) {
+  for (const line of String(stdout || '').split('\n')) {
+    const parts = line.trim().split(/\s+/);
+    if (parts[0] === pkg && parts[1]) return parts[1].replace(/^v/, '');
+  }
+  return '';
+}
+
 // Which isolated manager OWNS an already-installed tool (vs pickInstaller's
 // "what CAN install") — needed because a blind `pipx upgrade` on a uv-installed
 // tool silently no-ops. Returns { kind } or null (no owner); never throws
@@ -354,6 +365,41 @@ async function detectToolOwner(pkg) {
     if (listHasPkg(r.stdout, pkg)) return { kind: 'uv' };
   } catch { /* no uv, or nothing installed via it */ }
   return null;
+}
+
+// The conventions CLI has no --version flag, so its version comes from whichever
+// isolated manager owns it — and from neither on a pip --user install, which
+// answers '' for good.
+let conventionsCli = { version: '', at: 0, promise: null };
+function getConventionsVersion() {
+  if (conventionsCli.promise) return conventionsCli.promise;
+  if (conventionsCli.version) return Promise.resolve(conventionsCli.version);
+  if (Date.now() - conventionsCli.at < KLAUSSY_VERSION_NULL_TTL_MS) return Promise.resolve('');
+  const p = (async () => {
+    let version = '';
+    try {
+      const r = await execFileP('pipx', ['list', '--short'], { timeout: 15000 });
+      version = listPkgVersion(r.stdout, CONVENTIONS_PKG);
+    } catch { /* no pipx, or nothing installed via it */ }
+    if (!version) {
+      try {
+        const r = await execFileP('uv', ['tool', 'list'], { timeout: 15000 });
+        version = listPkgVersion(r.stdout, CONVENTIONS_PKG);
+      } catch { /* no uv either — stamp without it */ }
+    }
+    conventionsCli = { version, at: Date.now(), promise: null };
+    return version;
+  })();
+  conventionsCli.promise = p;
+  return p;
+}
+
+// The regeneration stamp: both CLIs shape the generated intel, so a bump in
+// either has to invalidate it — leaving conventions out held its new detectors
+// back until the weekly staleness window expired.
+function stampFor(cliVersion, conventionsVersion) {
+  if (!cliVersion) return '';
+  return conventionsVersion ? `${cliVersion}+conventions.${conventionsVersion}` : cliVersion;
 }
 
 // Bootstrap pipx itself when the machine has Python but no isolated installer.
@@ -462,6 +508,7 @@ function ensureReviewTools() {
     try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
     // Drop the cached "missing" klaussy CLI so the next ensure re-probes.
     klaussyCli = { bin: null, version: null, at: 0, promise: null };
+    conventionsCli = { version: '', at: 0, promise: null };
 
     const ok = (await Promise.all(missing.map((t) => toolPresent(t.cmd)))).every(Boolean);
     if (ok) {
@@ -528,9 +575,10 @@ async function upgradeReviewToolsIfDue() {
       c2.reviewToolsCheckedAt = Date.now();
       saveConfig(c2);
     }
-    // A new CLI version invalidates the cached intel — bust the version cache so
+    // A new CLI version invalidates the cached intel — bust the version caches so
     // the next ensureRepoIntel regenerates skills with the upgraded templates.
     klaussyCli = { bin: null, version: null, at: 0, promise: null };
+    conventionsCli = { version: '', at: 0, promise: null };
     try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
     console.log('[repo-intel] checked analysis tools for upgrades');
   } catch (e) {
@@ -1054,6 +1102,9 @@ function ensureRepoIntel(repoOrWorktreePath) {
       const toolsOk = await ensureReviewTools();
       const cli = await getKlaussyCli();
       const currentVersion = cli.version || '';
+      // currentVersion stays klaussy-only — it also guards the klaussy spawn
+      // below, which must not fire on a conventions-only machine.
+      const stamp = stampFor(currentVersion, await getConventionsVersion());
       const a = artifactPaths(base);
       // Heal a stale klausify-era settings.json on the base repo every run
       // (cache hit or full regen) — klaussy init won't, since it skips existing
@@ -1065,13 +1116,13 @@ function ensureRepoIntel(repoOrWorktreePath) {
 
       const haveArtifacts = fs.existsSync(a.rawJson);
       const freshEnough = haveArtifacts && (Date.now() - srcMtime < STALE_MS);
-      const sameVersion = stampedVersion !== null && stampedVersion === currentVersion;
+      const sameVersion = stampedVersion !== null && stampedVersion === stamp;
 
       if (freshEnough && sameVersion) {
         // Nothing to regenerate — but keep caches coherent, sync worktrees,
         // and STILL tell the user (silent cache hits read as "nothing ran").
         if (!memCache.has(base) || memCache.get(base).srcMtime < srcMtime) {
-          buildBlock(base, currentVersion);
+          buildBlock(base, stamp);
         }
         syncIntelIntoActiveWorktrees(base);
         // Announce the cache hit once per repo per app run — evidence
@@ -1200,7 +1251,7 @@ function ensureRepoIntel(repoOrWorktreePath) {
 
       // Stamp the version only on a fully completed run — an enrichment
       // failure leaves the '' stamp so the next session retries.
-      buildBlock(base, enrichFailed ? '' : currentVersion);
+      buildBlock(base, enrichFailed ? '' : stamp);
       syncIntelIntoActiveWorktrees(base);
       failedAt.delete(base);
       console.log('[repo-intel] generated for', base,
@@ -1317,4 +1368,6 @@ module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, en
   // Exported for unit testing of the prompt-minimization logic (Item 4).
   loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock,
   // Exported for unit testing of the version-floor comparison.
-  versionBelow, latestKlaussyVersion, _resetLatestCache };
+  versionBelow, latestKlaussyVersion, _resetLatestCache,
+  // Exported for unit testing of the regeneration stamp.
+  stampFor, listPkgVersion };
