@@ -226,15 +226,18 @@ const INHERITED_SESSION_MARKERS = [
   'CLAUDE_CODE_ENTRYPOINT',
 ];
 
-function agentSpawnEnv(worktreePath, sessionId) {
+// KLAUSSY_SESSION_ID names this terminal so notes can record who wrote them; it
+// deliberately does not scope the notes dir, which is shared session-wide.
+function agentSpawnEnv(worktreePath, terminalId) {
   const env = { ...process.env };
   for (const key of INHERITED_SESSION_MARKERS) delete env[key];
   if (worktreePath) {
     try {
-      const notesDir = ensureSessionNotesDir(worktreePath, sessionId);
-      env.KLAUSSY_SESSION_NOTES_DIR = notesDir;
-      if (sessionId) env.KLAUSSY_SESSION_ID = sessionId;
-    } catch { /* ignore */ }
+      env.KLAUSSY_SESSION_NOTES_DIR = ensureSessionNotesDir(worktreePath);
+      env.KLAUSSY_SESSION_ID = String(terminalId);
+    } catch (err) {
+      console.warn('[session-context] notes dir unavailable:', err && err.message);
+    }
   }
   return env;
 }

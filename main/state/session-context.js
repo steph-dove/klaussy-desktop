@@ -1,54 +1,46 @@
-// Uncommitted, real-time session context sharing state manager.
-// Manages local, uncommitted OKF notes in .git/klaussy-session/notes/<sessionId>/
-// or ~/.klaussy/sessions/<sessionId>/notes/.
+// Session context sharing: uncommitted OKF notes under
+// <repo>/.git/klaussy-session/notes/, or ~/.klaussy/sessions/<slug>/notes/ off git.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
+const { gitCommonDir } = require('../util/git-repo');
 
-/**
- * Resolve directory path for session context notes.
- * Prefers worktree's .git/klaussy-session/notes/<sessionId> if git root exists,
- * otherwise falls back to ~/.klaussy/sessions/<sessionId>/notes/.
- */
-function ensureSessionNotesDir(worktreePath, sessionId) {
-  const safeSessionId = (sessionId || 'default').replace(/[^a-zA-Z0-9_-]/g, '_');
-  let targetDir = '';
+const notesDirCache = new Map(); // worktreePath -> notes dir
 
-  if (worktreePath && typeof worktreePath === 'string') {
-    const gitDir = path.join(worktreePath, '.git');
-    try {
-      if (fs.existsSync(gitDir)) {
-        // Handle git worktree where .git can be a file pointing to main .git dir
-        const stat = fs.statSync(gitDir);
-        if (stat.isDirectory()) {
-          targetDir = path.join(gitDir, 'klaussy-session', 'notes', safeSessionId);
-        } else if (stat.isFile()) {
-          // In a git worktree, .git is a file containing `gitdir: /path/to/main/.git/worktrees/...`
-          const content = fs.readFileSync(gitDir, 'utf8').trim();
-          const match = content.match(/^gitdir:\s*(.+)$/i);
-          if (match && match[1]) {
-            const resolvedGitDir = path.resolve(worktreePath, match[1]);
-            targetDir = path.join(resolvedGitDir, 'klaussy-session', 'notes', safeSessionId);
-          }
-        }
-      }
-    } catch {
-      // Fall back on error
-    }
-  }
+// Filenames are agent-supplied, so anything that could climb out of the notes
+// dir (or name a device) is flattened rather than escaped.
+function sanitizeSegment(value, fallback) {
+  const safe = String(value == null ? '' : value).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+  return safe.replace(/^_+$/, '') ? safe : fallback;
+}
 
+// Keyed by the *common* git dir: a per-worktree or per-terminal key hands every
+// agent a private directory, which is the exact failure this bus exists to avoid.
+function resolveSessionNotesDir(worktreePath) {
+  const commonDir = typeof worktreePath === 'string' ? gitCommonDir(worktreePath) : null;
+  if (commonDir) return path.join(commonDir, 'klaussy-session', 'notes');
+
+  // Off git there is no shared anchor, so scope to the folder itself; hashing
+  // the path keeps two unrelated folders with the same basename apart.
+  const resolved = worktreePath ? path.resolve(worktreePath) : 'default';
+  const digest = crypto.createHash('sha1').update(resolved).digest('hex').slice(0, 8);
+  const slug = `${sanitizeSegment(path.basename(resolved), 'workspace')}-${digest}`;
+  return path.join(os.homedir(), '.klaussy', 'sessions', slug, 'notes');
+}
+
+function ensureSessionNotesDir(worktreePath) {
+  const key = worktreePath || '';
+  let targetDir = notesDirCache.get(key);
   if (!targetDir) {
-    targetDir = path.join(os.homedir(), '.klaussy', 'sessions', safeSessionId, 'notes');
+    targetDir = resolveSessionNotesDir(worktreePath);
+    notesDirCache.set(key, targetDir);
   }
-
   fs.mkdirSync(targetDir, { recursive: true });
   return targetDir;
 }
 
-/**
- * Format an object into a YAML frontmatter string.
- */
 function serializeFrontmatter(meta) {
   const lines = ['---'];
   for (const [key, value] of Object.entries(meta)) {
@@ -70,9 +62,6 @@ function serializeFrontmatter(meta) {
   return lines.join('\n');
 }
 
-/**
- * Parse Markdown file containing YAML frontmatter.
- */
 function parseFrontmatter(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) {
@@ -117,19 +106,16 @@ function parseFrontmatter(content) {
   return { metadata, body };
 }
 
-/**
- * Write an OKF session note to disk.
- */
-function writeSessionNote(worktreePath, sessionId, noteData) {
-  const dir = ensureSessionNotesDir(worktreePath, sessionId);
+function writeSessionNote(worktreePath, noteData) {
+  const dir = ensureSessionNotesDir(worktreePath);
   const timestamp = noteData.timestamp || new Date().toISOString();
-  const id = noteData.id || `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const filename = `${id}.md`;
-  const filePath = path.join(dir, filename);
+  const generatedId = `note-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const id = sanitizeSegment(noteData.id || generatedId, generatedId);
+  const filePath = path.join(dir, `${id}.md`);
 
   const metadata = {
     id,
-    session_id: sessionId || 'default',
+    session_id: noteData.session_id || 'default',
     agent: noteData.agent || 'unknown',
     provider: noteData.provider || 'unknown',
     worktree: worktreePath || '',
@@ -153,13 +139,8 @@ function writeSessionNote(worktreePath, sessionId, noteData) {
   };
 }
 
-/**
- * List all active session notes for a given session/worktree.
- */
-function listSessionNotes(worktreePath, sessionId) {
-  const dir = ensureSessionNotesDir(worktreePath, sessionId);
-  if (!fs.existsSync(dir)) return [];
-
+function listSessionNotes(worktreePath) {
+  const dir = ensureSessionNotesDir(worktreePath);
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
   const notes = [];
 
@@ -188,11 +169,9 @@ function listSessionNotes(worktreePath, sessionId) {
   return notes;
 }
 
-/**
- * Build a concise text summary of active session notes for injection into agent prompts.
- */
-function buildSessionContextSummary(worktreePath, sessionId) {
-  const notes = listSessionNotes(worktreePath, sessionId);
+/** Flattens the notes into a text block small enough to prepend to an agent prompt. */
+function buildSessionContextSummary(worktreePath) {
+  const notes = listSessionNotes(worktreePath);
   if (!notes.length) return '';
 
   const header = `=== ACTIVE SESSION CONTEXT NOTES (${notes.length} note${notes.length === 1 ? '' : 's'}) ===\n`;
@@ -207,20 +186,15 @@ function buildSessionContextSummary(worktreePath, sessionId) {
   return `${header}${items.join('\n\n')}\n=============================================`;
 }
 
-/**
- * Clear all notes for a session.
- */
-function clearSessionNotes(worktreePath, sessionId) {
+function clearSessionNotes(worktreePath) {
   try {
-    const dir = ensureSessionNotesDir(worktreePath, sessionId);
-    if (fs.existsSync(dir)) {
-      const files = fs.readdirSync(dir);
-      for (const f of files) {
-        fs.unlinkSync(path.join(dir, f));
-      }
+    const dir = ensureSessionNotesDir(worktreePath);
+    for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.md'))) {
+      fs.unlinkSync(path.join(dir, f));
     }
     return true;
-  } catch {
+  } catch (err) {
+    console.warn('[session-context] clear failed:', err && err.message);
     return false;
   }
 }

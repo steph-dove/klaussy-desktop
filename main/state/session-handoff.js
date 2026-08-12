@@ -18,6 +18,7 @@ const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { getProvider, binFor, displayNameFor } = require('./ai-providers');
+const { buildSessionContextSummary } = require('./session-context');
 const { loadConfig } = require('../util/config');
 
 const MAX_TRANSCRIPT_CHARS = 24000; // keep the most-recent tail when longer
@@ -155,12 +156,10 @@ function summarize(material, incomingMode) {
   });
 }
 
-const { buildSessionContextSummary } = require('./session-context');
-
 // Build the seed prompt handed to the incoming agent. Always resolves to a
 // non-empty string so the caller can spawn with it unconditionally.
 async function buildHandoffSeed({ worktreePath, originalMode, sessionId }) {
-  const sessionNotes = buildSessionContextSummary(worktreePath, sessionId);
+  const sessionNotes = buildSessionContextSummary(worktreePath);
   const transcript = originalMode === 'claude' ? readClaudeTranscript(worktreePath, sessionId) : '';
   const brief = gitBrief(worktreePath);
   const material = [

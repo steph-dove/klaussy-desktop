@@ -8,35 +8,39 @@ const {
   clearSessionNotes,
 } = require('../state/session-context');
 
-ipcMain.handle('session-context:list-notes', async (_event, { worktreePath, sessionId } = {}) => {
+ipcMain.handle('session-context:list-notes', async (_event, { worktreePath } = {}) => {
   try {
-    return listSessionNotes(worktreePath, sessionId);
+    return listSessionNotes(worktreePath);
   } catch (err) {
-    return [];
+    console.warn('[session-context] list failed:', err && err.message);
+    return { error: err && err.message || String(err) };
   }
 });
 
-ipcMain.handle('session-context:add-note', async (_event, { worktreePath, sessionId, noteData } = {}) => {
+ipcMain.handle('session-context:add-note', async (_event, { worktreePath, noteData } = {}) => {
   try {
     if (!noteData) throw new Error('Missing noteData');
-    return writeSessionNote(worktreePath, sessionId, noteData);
+    return writeSessionNote(worktreePath, noteData);
   } catch (err) {
-    return { error: err.message };
+    console.warn('[session-context] add failed:', err && err.message);
+    return { error: err && err.message || String(err) };
   }
 });
 
-ipcMain.handle('session-context:get-summary', async (_event, { worktreePath, sessionId } = {}) => {
+ipcMain.handle('session-context:get-summary', async (_event, { worktreePath } = {}) => {
   try {
-    return buildSessionContextSummary(worktreePath, sessionId);
+    return buildSessionContextSummary(worktreePath);
   } catch (err) {
-    return '';
+    console.warn('[session-context] summary failed:', err && err.message);
+    return { error: err && err.message || String(err) };
   }
 });
 
-ipcMain.handle('session-context:clear-notes', async (_event, { worktreePath, sessionId } = {}) => {
+ipcMain.handle('session-context:clear-notes', async (_event, { worktreePath } = {}) => {
   try {
-    return clearSessionNotes(worktreePath, sessionId);
+    return clearSessionNotes(worktreePath);
   } catch (err) {
-    return false;
+    console.warn('[session-context] clear failed:', err && err.message);
+    return { error: err && err.message || String(err) };
   }
 });

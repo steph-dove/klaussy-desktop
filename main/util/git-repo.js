@@ -10,19 +10,26 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 
-function baseRepoForWorktree(worktreePath) {
+// The git dir shared by a repo and all of its linked worktrees. A linked
+// worktree's own git dir is <repo>/.git/worktrees/<name>, so anything that must
+// be visible session-wide has to hang off the common dir, not that one.
+function gitCommonDir(worktreePath) {
   if (!worktreePath) return null;
   try {
     const commonDir = execFileSync(
       'git', ['rev-parse', '--path-format=absolute', '--git-common-dir'],
       { cwd: worktreePath, stdio: ['ignore', 'pipe', 'ignore'] },
     ).toString().trim();
-    if (!commonDir) return null;
-    // commonDir is normally "<repo>/.git"; its parent is the repo root.
-    return path.dirname(commonDir);
+    return commonDir || null;
   } catch {
     return null;
   }
+}
+
+function baseRepoForWorktree(worktreePath) {
+  const commonDir = gitCommonDir(worktreePath);
+  // commonDir is normally "<repo>/.git"; its parent is the repo root.
+  return commonDir ? path.dirname(commonDir) : null;
 }
 
 // Sibling worktrees in the same multi-repo session (absolute paths, excluding
@@ -49,4 +56,4 @@ function sessionSiblingWorktrees(worktreePath) {
   }
 }
 
-module.exports = { baseRepoForWorktree, sessionSiblingWorktrees };
+module.exports = { gitCommonDir, baseRepoForWorktree, sessionSiblingWorktrees };

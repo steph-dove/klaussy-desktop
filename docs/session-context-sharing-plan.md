@@ -42,8 +42,14 @@
 ## 3. Storage & Schema Specification
 
 ### 3.1 Storage Location
-- **Primary:** `.git/klaussy-session/notes/` inside the target workspace (automatically ignored by Git, zero `.gitignore` edits needed).
-- **Fallback / Global:** `~/.klaussy/sessions/<session_id>/notes/` managed by Electron app storage.
+- **Primary:** `.git/klaussy-session/notes/` under the repo's **common** git dir — `git rev-parse --git-common-dir`, not the worktree's own git dir (automatically ignored by Git, zero `.gitignore` edits needed).
+- **Fallback / Global:** `~/.klaussy/sessions/<workspace-slug>/notes/` for folders that aren't git repos.
+
+The channel is deliberately keyed by repository, not by session or terminal. A
+linked worktree's own git dir is `<repo>/.git/worktrees/<name>`, so keying on it
+— or on a per-terminal id — gives every agent a private directory and no two
+ever meet, which is the one thing this feature exists to prevent.
+`KLAUSSY_SESSION_ID` identifies the writing terminal in note metadata only.
 
 ### 3.2 OKF Note Schema (`<agent-name>_<timestamp>.md`)
 Every session note created by an agent or system service adheres to the following specification:
@@ -81,10 +87,10 @@ Refactored token verification in `main/ipc/auth.js`.
 ### 4.1 Main State Module: `main/state/session-context.js`
 Create a new state manager to handle directory creation, reading, and context assembly:
 
-* `ensureSessionDir(sessionId)`: Creates `.git/klaussy-session/notes/<sessionId>` or fallback path.
-* `listNotes(sessionId)`: Scans and parses YAML frontmatter of all active session notes.
-* `buildContextSummary(sessionId)`: Condenses active session notes into a compact text block for prompt injection.
-* `writeNote(sessionId, noteData)`: Helper for programmatically creating OKF notes from IPC or system events.
+* `ensureSessionNotesDir(worktreePath)`: Resolves and creates the session-wide notes dir.
+* `listSessionNotes(worktreePath)`: Scans and parses YAML frontmatter of all active session notes.
+* `buildSessionContextSummary(worktreePath)`: Condenses active session notes into a compact text block for prompt injection.
+* `writeSessionNote(worktreePath, noteData)`: Helper for programmatically creating OKF notes from IPC or system events.
 
 ### 4.2 IPC Layer: `main/ipc/session-context.js`
 Register IPC handlers for the renderer UI and agent runners:
@@ -132,15 +138,26 @@ This workspace uses klaussy-desktop multi-agent session context sharing.
 
 ## 6. Execution Roadmap
 
-- [ ] **Phase 1: Backend Foundation**
+- [x] **Phase 1: Backend Foundation**
   - Implement `main/state/session-context.js` and `.git/klaussy-session/notes/` directory initializer.
   - Add `main/ipc/session-context.js` IPC routes.
-- [ ] **Phase 2: Agent Runner Integration**
-  - Update agent spawn wrappers in `main/state/instances.js` and `ai-providers.js` to set `KLAUSSY_SESSION_NOTES_DIR` and `KLAUSSY_SESSION_ID`.
-  - Add automatic prompt header injection for active session notes.
-- [ ] **Phase 3: Agent Rules & Documentation**
-  - Update `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, and `.antigravityrules` with the session context sharing protocol.
-  - Create custom skill `.agents/skills/klaussy-desktop-session-context/SKILL.md`.
+- [x] **Phase 2: Agent Runner Integration**
+  - Update agent spawn wrappers in `main/state/instances.js` to set `KLAUSSY_SESSION_NOTES_DIR` and `KLAUSSY_SESSION_ID`.
+  - Inject the notes summary into the cross-agent handoff seed (`session-handoff.js`).
+  - [ ] *Deferred:* prompt-header injection on every spawn. The handoff path
+    covers agent-to-agent carryover; doing it for all spawns means reworking the
+    staged-prompt path each TUI already uses, and is a change worth its own PR.
+- [x] **Phase 3: Agent Rules & Documentation**
+  - Session protocol reaches `CLAUDE.md` via `klaussy-repo-conventions`, and
+    `AGENTS.md` / `GEMINI.md` via the `klaussy-agents` backends that re-emit the
+    same conventions doc. These files are git-ignored here and regenerated, so
+    they are not edited by hand in this repo.
+  - Skill template ships from `klaussy-agents` (`templates/skills/session-context`)
+    and scaffolds to `<prefix>-session-context`.
+  - [ ] *Deferred:* `.antigravityrules` — Antigravity reads the cross-tool
+    `AGENTS.md`, so it is already covered; a dedicated file is redundant.
 - [ ] **Phase 4: Verification & UI Integration**
-  - Add a "Session Context Notes" indicator/drawer in `klaussy-desktop` Electron renderer.
+  - Add a "Session Context Notes" indicator/drawer in `klaussy-desktop` Electron
+    renderer. Until this lands the IPC + preload surface has no caller and exists
+    for agents and future UI only.
   - Test multi-terminal execution with Claude Code + Gemini side-by-side to verify live context exchange without Git commits.
