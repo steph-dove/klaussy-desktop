@@ -28,6 +28,7 @@ const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
 const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
+const { ensureSessionNotesDir } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
@@ -225,9 +226,16 @@ const INHERITED_SESSION_MARKERS = [
   'CLAUDE_CODE_ENTRYPOINT',
 ];
 
-function agentSpawnEnv() {
+function agentSpawnEnv(worktreePath, sessionId) {
   const env = { ...process.env };
   for (const key of INHERITED_SESSION_MARKERS) delete env[key];
+  if (worktreePath) {
+    try {
+      const notesDir = ensureSessionNotesDir(worktreePath, sessionId);
+      env.KLAUSSY_SESSION_NOTES_DIR = notesDir;
+      if (sessionId) env.KLAUSSY_SESSION_ID = sessionId;
+    } catch { /* ignore */ }
+  }
   return env;
 }
 
@@ -728,7 +736,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     cols: 120,
     rows: 30,
     cwd: worktreePath,
-    env: { ...agentSpawnEnv(), TERM: 'xterm-256color', ...(extraEnv || {}) },
+    env: { ...agentSpawnEnv(worktreePath, id), TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to

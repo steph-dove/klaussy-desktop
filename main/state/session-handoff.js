@@ -155,12 +155,16 @@ function summarize(material, incomingMode) {
   });
 }
 
+const { buildSessionContextSummary } = require('./session-context');
+
 // Build the seed prompt handed to the incoming agent. Always resolves to a
 // non-empty string so the caller can spawn with it unconditionally.
 async function buildHandoffSeed({ worktreePath, originalMode, sessionId }) {
+  const sessionNotes = buildSessionContextSummary(worktreePath, sessionId);
   const transcript = originalMode === 'claude' ? readClaudeTranscript(worktreePath, sessionId) : '';
   const brief = gitBrief(worktreePath);
   const material = [
+    sessionNotes && `Active Session Context Notes:\n${sessionNotes}`,
     transcript && `Prior conversation (most recent turns):\n${transcript}`,
     brief && `Repository state:\n${brief}`,
   ].filter(Boolean).join('\n\n');
