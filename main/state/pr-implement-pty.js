@@ -28,7 +28,7 @@ const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
 const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
-const { sessionNotesEnv } = require('./session-context');
+const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -245,6 +245,9 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
     console.warn('[pr-implement-pty] mkdir failed for', promptDir, err.message);
   }
   const promptFile = path.join(promptDir, `${requestId}-${crypto.randomBytes(4).toString('hex')}.txt`);
+  // Reassigned so the paste fallbacks below deliver the same text the tempfile
+  // holds, notes included.
+  prompt = withSessionContext(worktreePath, prompt);
   try {
     fs.writeFileSync(promptFile, prompt);
   } catch (err) {

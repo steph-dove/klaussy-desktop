@@ -25,7 +25,7 @@ const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
 const { buildHandoffSeed } = require('../state/session-handoff');
-const { sessionNotesEnv } = require('../state/session-context');
+const { sessionNotesEnv, withSessionContext } = require('../state/session-context');
 const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -1130,7 +1130,8 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
       // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
       // in after boot — shared staging with the cross-agent session-resume
       // handoff (see util/agent-prompt).
-      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `${taskId}-${subId}`, userShell);
+      const seeded = withSessionContext(inst.worktreePath, initialPrompt);
+      const staged = stageInitialPrompt(provider, agentCmd, seeded, `${taskId}-${subId}`, userShell);
       agentCmd = staged.agentCmd;
       promptFile = staged.promptFile;
       needsEnter = staged.needsEnter;

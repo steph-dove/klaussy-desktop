@@ -28,7 +28,7 @@ const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
 const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
-const { sessionNotesEnv } = require('./session-context');
+const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
@@ -717,7 +717,8 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).
     if (initialPrompt) {
-      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
+      const seeded = withSessionContext(worktreePath, initialPrompt);
+      const staged = stageInitialPrompt(provider, agentCmd, seeded, `handoff-${id}`, userShell);
       agentCmd = staged.agentCmd;
       promptFile = staged.promptFile;
       needsEnter = staged.needsEnter;

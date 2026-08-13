@@ -143,10 +143,13 @@ This workspace uses klaussy-desktop multi-agent session context sharing.
   - Add `main/ipc/session-context.js` IPC routes.
 - [x] **Phase 2: Agent Runner Integration**
   - Update agent spawn wrappers in `main/state/instances.js` to set `KLAUSSY_SESSION_NOTES_DIR` and `KLAUSSY_SESSION_ID`.
-  - Inject the notes summary into the cross-agent handoff seed (`session-handoff.js`).
-  - [ ] *Deferred:* prompt-header injection on every spawn. The handoff path
-    covers agent-to-agent carryover; doing it for all spawns means reworking the
-    staged-prompt path each TUI already uses, and is a change worth its own PR.
+  - Prepend the notes summary to every spawn that carries a prompt: the
+    cross-agent handoff, sub-terminal Plan/Debug/Review, PR implement, and PR
+    chat (`withSessionContext`).
+  - Bare terminals are deliberately excluded. No provider exposes a way to seed
+    context without also starting a turn, so injecting there would have every
+    new terminal in the repo open by talking to itself for as long as a note
+    lives. Those agents still find notes through `CLAUDE.md` and the skill.
 - [x] **Phase 3: Agent Rules & Documentation**
   - Session protocol reaches `CLAUDE.md` via `klaussy-repo-conventions`, and
     `AGENTS.md` / `GEMINI.md` via the `klaussy-agents` backends that re-emit the

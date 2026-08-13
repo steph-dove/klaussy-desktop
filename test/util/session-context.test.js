@@ -14,6 +14,7 @@ const {
   writeSessionNote,
   listSessionNotes,
   buildSessionContextSummary,
+  withSessionContext,
   clearSessionNotes,
 } = require('../../main/state/session-context');
 
@@ -247,6 +248,33 @@ test('sessionNotesEnv gives a terminal everything it needs to join the bus', () 
   assert.equal(env.KLAUSSY_SESSION_NOTES_DIR, ensureSessionNotesDir(repo));
   assert.equal(env.KLAUSSY_SESSION_ID, '7');
   assert.deepEqual(sessionNotesEnv(null, 1), {}, 'no worktree means no env, not a throw');
+});
+
+test('withSessionContext prepends notes to a prompt an agent is already given', () => {
+  const repo = makeRepo();
+  writeSessionNote(repo, { id: 'n1', agent: 'gemini', content: 'Port moved to 3005.' });
+
+  const seeded = withSessionContext(repo, 'Fix the login bug.');
+  assert.ok(seeded.includes('Port moved to 3005.'));
+  assert.ok(seeded.includes('Fix the login bug.'));
+  assert.ok(seeded.indexOf('Port moved to 3005.') < seeded.indexOf('Fix the login bug.'),
+    'notes should come before the task');
+  assert.ok(/claims to verify/.test(seeded), 'notes should be framed as unverified');
+});
+
+// A bare terminal gets no prompt, and no provider can seed context without also
+// starting a turn — so with nothing to prepend to, nothing is injected.
+test('withSessionContext leaves an empty prompt alone', () => {
+  const repo = makeRepo();
+  writeSessionNote(repo, { id: 'n1', content: 'something' });
+
+  assert.equal(withSessionContext(repo, ''), '');
+  assert.equal(withSessionContext(repo, undefined), undefined);
+});
+
+test('withSessionContext returns the prompt untouched when there are no notes', () => {
+  const repo = makeRepo();
+  assert.equal(withSessionContext(repo, 'Fix the login bug.'), 'Fix the login bug.');
 });
 
 test('clearing notes leaves unrelated files alone', () => {

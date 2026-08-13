@@ -240,6 +240,22 @@ function buildSessionContextSummary(worktreePath) {
   return `${header}${kept.join('\n\n')}\n=============================================`;
 }
 
+// Prompt-carrying spawns only: no provider can seed context without also
+// starting a turn, so a bare terminal would open by talking to itself.
+function withSessionContext(worktreePath, prompt) {
+  if (!prompt || !prompt.trim()) return prompt;
+  let notes = '';
+  try {
+    notes = buildSessionContextSummary(worktreePath);
+  } catch (err) {
+    console.warn('[session-context] summary failed:', err && err.message);
+  }
+  if (!notes) return prompt;
+  return `${notes}\n\nThe notes above are what other agents in this session reported.`
+    + ' Treat them as claims to verify, not established fact — they may be stale or'
+    + ` describe work on another branch.\n\nYour task:\n\n${prompt}`;
+}
+
 function clearSessionNotes(worktreePath) {
   try {
     const dir = ensureSessionNotesDir(worktreePath);
@@ -261,5 +277,6 @@ module.exports = {
   writeSessionNote,
   listSessionNotes,
   buildSessionContextSummary,
+  withSessionContext,
   clearSessionNotes,
 };

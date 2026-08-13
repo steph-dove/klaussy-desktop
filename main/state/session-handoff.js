@@ -18,7 +18,6 @@ const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { getProvider, binFor, displayNameFor } = require('./ai-providers');
-const { buildSessionContextSummary } = require('./session-context');
 const { loadConfig } = require('../util/config');
 
 const MAX_TRANSCRIPT_CHARS = 24000; // keep the most-recent tail when longer
@@ -156,14 +155,13 @@ function summarize(material, incomingMode) {
   });
 }
 
-// Build the seed prompt handed to the incoming agent. Always resolves to a
-// non-empty string so the caller can spawn with it unconditionally.
+// Always resolves to a non-empty string so the caller can spawn with it
+// unconditionally. Notes are left out — this gets condensed, and
+// spawnInWorktree prepends them verbatim.
 async function buildHandoffSeed({ worktreePath, originalMode, sessionId }) {
-  const sessionNotes = buildSessionContextSummary(worktreePath);
   const transcript = originalMode === 'claude' ? readClaudeTranscript(worktreePath, sessionId) : '';
   const brief = gitBrief(worktreePath);
   const material = [
-    sessionNotes && `Active Session Context Notes:\n${sessionNotes}`,
     transcript && `Prior conversation (most recent turns):\n${transcript}`,
     brief && `Repository state:\n${brief}`,
   ].filter(Boolean).join('\n\n');
