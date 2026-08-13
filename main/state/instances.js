@@ -683,6 +683,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   const id = nextId++;
   const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
+  const spawnEnv = agentSpawnEnv(worktreePath, id);
 
   // An agent mode (claude/codex/gemini/copilot) launches that CLI; 'shell'
   // mode launches a plain login shell. The provider registry owns the exact
@@ -712,7 +713,8 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     if (!session.ok) return { cancelled: true };
     const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
     const sessionDirs = sessionSiblingWorktrees(worktreePath);
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, profile: nemProfile });
+    const notesDir = spawnEnv.KLAUSSY_SESSION_NOTES_DIR;
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, notesDir, profile: nemProfile });
     // Cross-agent resume handoff: seed the incoming agent with a brief distilled
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).
@@ -732,7 +734,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     cols: 120,
     rows: 30,
     cwd: worktreePath,
-    env: { ...agentSpawnEnv(worktreePath, id), TERM: 'xterm-256color', ...(extraEnv || {}) },
+    env: { ...spawnEnv, TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to
