@@ -104,6 +104,9 @@ test('a malformed metadata field degrades instead of throwing', () => {
 
 test('notes written by one terminal are visible to every other', () => {
   const repo = makeRepo();
+  // Relative to now, not fixed dates — a wall-clock timestamp would silently
+  // age past the TTL and start failing a day after it was written.
+  const now = Date.now();
 
   writeSessionNote(repo, {
     id: 'note-1',
@@ -114,7 +117,7 @@ test('notes written by one terminal are visible to every other', () => {
     content: 'Local mock server moved to port 3005.',
     affected_files: ['main/ipc/auth.js'],
     tags: ['auth'],
-    timestamp: '2026-08-12T10:00:00.000Z',
+    timestamp: new Date(now - 120000).toISOString(),
   });
   writeSessionNote(repo, {
     id: 'note-2',
@@ -123,7 +126,7 @@ test('notes written by one terminal are visible to every other', () => {
     provider: 'google',
     title: 'UI Update',
     content: 'Updated header component to show active session notes.',
-    timestamp: '2026-08-12T10:05:00.000Z',
+    timestamp: new Date(now - 60000).toISOString(),
   });
 
   const notes = listSessionNotes(repo);

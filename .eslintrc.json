@@ -89,6 +89,7 @@
         "QuickOpen": "writable",
         "runApp": "writable",
         "SearchBar": "writable",
+        "SessionNotesPanel": "writable",
         "Sidebar": "writable",
         "StashPanel": "writable",
         "TerminalManager": "writable",

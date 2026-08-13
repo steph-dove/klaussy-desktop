@@ -291,6 +291,7 @@
           <button class="diff-tab" data-tab="search">Search</button>
           <button class="diff-tab" data-tab="history">History</button>
           <button class="diff-tab" data-tab="stash">Stash</button>
+          <button class="diff-tab" data-tab="notes" title="Session notes shared between agents in this session">Notes</button>
         </div>
 
         <!-- Changes tab content -->
@@ -395,6 +396,17 @@
             <button id="btn-stash-push">Stash</button>
           </div>
           <div id="stash-list"></div>
+        </div>
+
+        <!-- Session notes tab content: the uncommitted inter-agent notes bus -->
+        <div id="notes-tab-content" style="display: none;">
+          <div id="session-notes-actions">
+            <span id="session-notes-title">Session notes</span>
+            <button id="btn-session-notes-refresh" title="Reload notes">&#8635;</button>
+            <button id="btn-session-notes-clear" title="Delete every note for this repo" disabled>Clear all</button>
+          </div>
+          <div id="session-notes-list"></div>
+          <div id="session-notes-dir" title="Where these notes live (uncommitted)"></div>
         </div>
 
         <!-- Plan tab content -->
@@ -757,6 +769,7 @@
   <script src="conflict-panel.js"></script>
   <script src="file-browser.js"></script>
   <script src="history-panel.js"></script>
+  <script src="session-notes-panel.js"></script>
   <script src="stash-panel.js"></script>
   <script src="search-bar.js"></script>
   <script src="context-menu.js"></script>
