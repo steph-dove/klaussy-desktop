@@ -1,11 +1,11 @@
 // Session context sharing: uncommitted OKF notes under
-// <repo>/.git/klaussy-session/notes/, or ~/.klaussy/sessions/<slug>/notes/ off git.
+// ~/.klaussy/sessions/<channel>/notes/, one channel per klaussy session.
 
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const { gitCommonDir } = require('../util/git-repo');
+const { klaussySessionDir } = require('../util/git-repo');
 
 const notesDirCache = new Map(); // worktreePath -> notes dir
 
@@ -23,18 +23,21 @@ function sanitizeSegment(value, fallback) {
   return safe.replace(/^_+$/, '') ? safe : fallback;
 }
 
-// Keyed by the *common* git dir: a per-worktree or per-terminal key hands every
-// agent a private directory, which is the exact failure this bus exists to avoid.
-function resolveSessionNotesDir(worktreePath) {
-  const commonDir = typeof worktreePath === 'string' ? gitCommonDir(worktreePath) : null;
-  if (commonDir) return path.join(commonDir, 'klaussy-session', 'notes');
+// A session spans several repos with a git dir each, so its one shared channel
+// cannot live under any single repo's .git.
+function sessionChannel(worktreePath) {
+  const session = klaussySessionDir(worktreePath);
+  if (session) return `session-${sanitizeSegment(session.name, 'unnamed')}`;
 
-  // Off git there is no shared anchor, so scope to the folder itself; hashing
-  // the path keeps two unrelated folders with the same basename apart.
+  // Not a session worktree, so the task IS the folder. Hash the path so two
+  // unrelated folders sharing a basename stay apart.
   const resolved = worktreePath ? path.resolve(worktreePath) : 'default';
   const digest = crypto.createHash('sha1').update(resolved).digest('hex').slice(0, 8);
-  const slug = `${sanitizeSegment(path.basename(resolved), 'workspace')}-${digest}`;
-  return path.join(os.homedir(), '.klaussy', 'sessions', slug, 'notes');
+  return `${sanitizeSegment(path.basename(resolved), 'workspace')}-${digest}`;
+}
+
+function resolveSessionNotesDir(worktreePath) {
+  return path.join(os.homedir(), '.klaussy', 'sessions', sessionChannel(worktreePath), 'notes');
 }
 
 function ensureSessionNotesDir(worktreePath) {

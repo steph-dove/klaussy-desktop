@@ -14,7 +14,7 @@
 3. **Git Cleanliness:** Project context sharing must **not** generate transient Git commits or require dirtying the working tree with temporary scratchpad files.
 
 ### Key Goals
-- **Session-Scoped & Uncommitted:** Context lives in local app storage outside of Git tracking (`.git/klaussy-session/notes/` or `~/.klaussy/sessions/<session_id>/notes/`).
+- **Session-Scoped & Uncommitted:** Context lives in local app storage outside of Git tracking (`~/.klaussy/sessions/<channel>/notes/`).
 - **Vendor-Neutral Format:** Use the Open Knowledge Format (OKF) standard—YAML frontmatter + Markdown body—as the inter-agent data exchange contract.
 - **Provider-Agnostic:** Any CLI agent provider spawned by `klaussy-desktop` can easily read and write OKF notes via simple file operations or environment variables.
 
@@ -25,7 +25,7 @@
 ```
         ┌─────────────────────────────────────────────────────────────┐
         │             Electron Main Process State                      │
-        │       .git/klaussy-session/notes/<session_id>/               │
+        │        ~/.klaussy/sessions/<channel>/notes/                  │
         │          (Uncommitted Local OKF Storage)                   │
         └───────┬─────────────────────────────┬─────────────────┬─────┘
                 │                             │                 │
@@ -42,13 +42,23 @@
 ## 3. Storage & Schema Specification
 
 ### 3.1 Storage Location
-- **Primary:** `.git/klaussy-session/notes/` under the repo's **common** git dir — `git rev-parse --git-common-dir`, not the worktree's own git dir (automatically ignored by Git, zero `.gitignore` edits needed).
-- **Fallback / Global:** `~/.klaussy/sessions/<workspace-slug>/notes/` for folders that aren't git repos.
+`~/.klaussy/sessions/<channel>/notes/` — outside every repository, so notes can
+never be committed and never dirty `git status`.
 
-The channel is deliberately keyed by repository, not by session or terminal. A
-linked worktree's own git dir is `<repo>/.git/worktrees/<name>`, so keying on it
-— or on a per-terminal id — gives every agent a private directory and no two
-ever meet, which is the one thing this feature exists to prevent.
+One channel per klaussy **session**, which is the unit agents actually
+collaborate in:
+
+- A session worktree (`~/klaussy/sessions/<name>/<repo>`) uses `session-<name>`,
+  so every repo and terminal in that session shares one channel.
+- Anything else uses the folder itself (basename + a hash of its path), so two
+  unrelated tasks in one repo stay separate and two folders that merely share a
+  basename do not collide.
+
+Keying by repository instead would be wrong in both directions: a session spans
+several repos with different git dirs, and two unrelated tasks in one repo would
+read each other's notes for as long as the TTL allows. Keying by terminal or by
+worktree is worse still — every agent gets a private directory and no two ever
+meet, which is the one thing this feature exists to prevent.
 `KLAUSSY_SESSION_ID` identifies the writing terminal in note metadata only.
 
 ### 3.2 OKF Note Schema (`<agent-name>_<timestamp>.md`)
@@ -119,7 +129,7 @@ To ensure all agent providers (Claude Code, Gemini/Antigravity, Ollama, OpenCode
 
 This workspace uses klaussy-desktop multi-agent session context sharing.
 
-- **Session Notes Location:** `$KLAUSSY_SESSION_NOTES_DIR` (or `.git/klaussy-session/notes/`)
+- **Session Notes Location:** `$KLAUSSY_SESSION_NOTES_DIR` (absolute; skip session notes if unset)
 - **Reading Session Context:** Before starting a complex task or when working in multi-terminal worktrees, check `$KLAUSSY_SESSION_NOTES_DIR` for Markdown notes left by other active agents.
 - **Writing Session Context:** When completing a subtask, changing ports/schemas, or encountering a breaking discovery, create a Markdown file in `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-<timestamp>.md`:
   ```yaml
@@ -131,7 +141,7 @@ This workspace uses klaussy-desktop multi-agent session context sharing.
   ---
   Summary of finding or runtime state update...
   ```
-- **Git Safety:** NEVER commit `$KLAUSSY_SESSION_NOTES_DIR` or `.git/klaussy-session/` to Git. Context is strictly runtime session data.
+- **Git Safety:** notes live outside the repository. Never copy one into the working tree or commit it.
 ```
 
 ---
@@ -139,7 +149,7 @@ This workspace uses klaussy-desktop multi-agent session context sharing.
 ## 6. Execution Roadmap
 
 - [x] **Phase 1: Backend Foundation**
-  - Implement `main/state/session-context.js` and `.git/klaussy-session/notes/` directory initializer.
+  - Implement `main/state/session-context.js` and the per-session notes directory initializer.
   - Add `main/ipc/session-context.js` IPC routes.
 - [x] **Phase 2: Agent Runner Integration**
   - Update agent spawn wrappers in `main/state/instances.js` to set `KLAUSSY_SESSION_NOTES_DIR` and `KLAUSSY_SESSION_ID`.

@@ -5,15 +5,27 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { test, expect } = require('./fixtures');
+// Same resolver the app uses, so the seed lands wherever the channel actually
+// is rather than a path this spec guessed.
+const { ensureSessionNotesDir } = require('../main/state/session-context');
 
 /* global document, window */
 
+const seeded = [];
+
+test.afterAll(() => {
+  for (const dir of seeded) {
+    // Remove the whole channel dir, not just notes/, so no empty husk is left
+    // in the real ~/.klaussy that the app under test uses.
+    try { fs.rmSync(path.dirname(dir), { recursive: true, force: true }); } catch { /* best effort */ }
+  }
+});
+
 function seedRepo() {
   const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-panel-')));
-  const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
-  git('init', '-q');
-  const dir = path.join(repo, '.git', 'klaussy-session', 'notes');
-  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'pipe' });
+  const dir = ensureSessionNotesDir(repo);
+  seeded.push(dir);
   fs.writeFileSync(path.join(dir, 'claude-1.md'), [
     '---',
     'agent: claude-code',
@@ -55,6 +67,10 @@ async function openNotesPanel(mainWindow, worktreePath) {
     });
     document.getElementById('notes-tab-content').style.display = '';
   }, worktreePath);
+  // The panel animates open, so anything measured before it settles is noise.
+  await mainWindow.waitForFunction(
+    () => document.getElementById('diff-tabs').clientWidth > 200,
+  );
   await mainWindow.evaluate(() => window.SessionNotesPanel.loadNotes());
 }
 
@@ -72,7 +88,7 @@ test('the notes drawer renders notes written by other agents', async ({ mainWind
   await expect(mainWindow.locator('.session-note-body').first())
     .toContainText('Mock auth server moved from 3000 to 3005');
   await expect(mainWindow.locator('.session-note-tag').first()).toBeVisible();
-  await expect(mainWindow.locator('#session-notes-dir')).toContainText('klaussy-session');
+  await expect(mainWindow.locator('#session-notes-dir')).toContainText('.klaussy');
 
   // Eight tabs overflow a narrow panel, so the bar scrolls rather than clipping
   // a tab out of reach.
@@ -81,7 +97,9 @@ test('the notes drawer renders notes written by other agents', async ({ mainWind
   const reachable = await mainWindow.evaluate(() => {
     const bar = document.getElementById('diff-tabs');
     const tab = bar.querySelector('.diff-tab[data-tab="notes"]');
-    tab.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    // Notes is the last tab, so scrolling the bar to its end must land it fully
+    // inside; scrollIntoView no-ops on a partly-visible tab.
+    bar.scrollLeft = bar.scrollWidth;
     const t = tab.getBoundingClientRect();
     const b = bar.getBoundingClientRect();
     return t.right <= b.right + 1 && t.left >= b.left - 1;
@@ -96,6 +114,7 @@ test('the notes drawer renders notes written by other agents', async ({ mainWind
 test('the drawer explains itself when there are no notes', async ({ mainWindow }) => {
   const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-empty-')));
   execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'pipe' });
+  seeded.push(ensureSessionNotesDir(repo));
 
   await openNotesPanel(mainWindow, repo);
 

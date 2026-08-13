@@ -143,35 +143,63 @@ test('notes written by one terminal are visible to every other', () => {
   assert.equal(listSessionNotes(repo).length, 0);
 });
 
-// The bus exists to carry notes between agents working the same session, so a
-// linked worktree must land on the main repo's channel, not its own git dir.
-test('a linked worktree shares the main repo notes channel', () => {
-  const repo = makeRepo();
-  const linked = path.join(fs.realpathSync(os.tmpdir()), `klaussy-wt-${Date.now()}`);
-  execFileSync('git', ['worktree', 'add', '-q', '-b', 'feature-x', linked], { cwd: repo, stdio: 'pipe' });
+// A klaussy session spans several repos, so its notes are shared by all of them.
+test('every repo in one klaussy session shares a channel', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-home-')));
+  const api = path.join(root, 'klaussy', 'sessions', 'auth-refactor', 'api');
+  const web = path.join(root, 'klaussy', 'sessions', 'auth-refactor', 'web');
+  fs.mkdirSync(api, { recursive: true });
+  fs.mkdirSync(web, { recursive: true });
 
+  const dir = ensureSessionNotesDir(api);
   try {
-    assert.equal(ensureSessionNotesDir(linked), ensureSessionNotesDir(repo));
+    assert.equal(ensureSessionNotesDir(web), dir);
 
-    writeSessionNote(repo, { id: 'from-main', content: 'port 3005' });
-    const seen = listSessionNotes(linked);
-    assert.equal(seen.length, 1);
-    assert.equal(seen[0].id, 'from-main');
-    assert.ok(buildSessionContextSummary(linked).includes('port 3005'));
+    writeSessionNote(api, { id: 'from-api', content: 'port 3005' });
+    assert.deepEqual(listSessionNotes(web).map((n) => n.id), ['from-api']);
+    assert.ok(buildSessionContextSummary(web).includes('port 3005'));
   } finally {
-    execFileSync('git', ['worktree', 'remove', '--force', linked], { cwd: repo, stdio: 'pipe' });
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('the notes dir hangs off the common git dir', () => {
-  const repo = makeRepo();
-  assert.equal(ensureSessionNotesDir(repo), path.join(repo, '.git', 'klaussy-session', 'notes'));
-  assert.ok(fs.existsSync(ensureSessionNotesDir(repo)));
+// Two unrelated tasks in the same repo would otherwise read each other's notes
+// for as long as the TTL allows.
+test('a different klaussy session gets a different channel', () => {
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-home-')));
+  const one = path.join(root, 'klaussy', 'sessions', 'auth-refactor', 'api');
+  const two = path.join(root, 'klaussy', 'sessions', 'billing-fix', 'api');
+  fs.mkdirSync(one, { recursive: true });
+  fs.mkdirSync(two, { recursive: true });
+
+  const dirOne = ensureSessionNotesDir(one);
+  const dirTwo = ensureSessionNotesDir(two);
+  try {
+    assert.notEqual(dirOne, dirTwo);
+    writeSessionNote(one, { id: 'private', content: 'only for auth-refactor' });
+    assert.equal(listSessionNotes(two).length, 0);
+  } finally {
+    fs.rmSync(dirOne, { recursive: true, force: true });
+    fs.rmSync(dirTwo, { recursive: true, force: true });
+  }
 });
 
-// Off git there is no shared anchor, so two folders that merely share a
-// basename must not read each other's notes.
-test('non-git folders with the same basename get separate channels', () => {
+test('notes live outside the repo, so nothing is written into .git', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  try {
+    assert.ok(dir.startsWith(path.join(os.homedir(), '.klaussy', 'sessions')));
+    assert.ok(!fs.existsSync(path.join(repo, '.git', 'klaussy-session')));
+    writeSessionNote(repo, { id: 'n', content: 'x' });
+    assert.equal(execFileSync('git', ['status', '--porcelain'], { cwd: repo }).toString().trim(), '');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Outside a session the task is the folder itself, so two unrelated folders
+// that merely share a basename must not read each other's notes.
+test('folders with the same basename get separate channels', () => {
   const parentA = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-a-'));
   const parentB = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-b-'));
   const a = path.join(parentA, 'app');

@@ -20,6 +20,11 @@ const Module = require('module');
 // that need isolation should mkdtemp their own subdir.
 const testUserData = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-test-'));
 
+// Redirect HOME too: modules that store under the user's home (session notes)
+// would otherwise litter the real one on every test run.
+process.env.HOME = testUserData;
+process.env.USERPROFILE = testUserData;
+
 const fakeApp = {
   getPath(name) {
     if (name === 'userData') return testUserData;
