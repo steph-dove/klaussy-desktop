@@ -767,6 +767,14 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     console.warn('[repo-intel] env link failed:', e.message);
   }
 
+  // Every session, not just the one that created the worktree — otherwise a
+  // worktree predating the base's last regeneration starts with stale docs.
+  try {
+    require('./repo-intel').syncIntelIntoWorktree(worktreePath);
+  } catch (e) {
+    console.warn('[repo-intel] worktree conventions sync failed:', e.message);
+  }
+
   // Kick off repo-intel generation for the base repo (conventions + import
   // graph for agent prompts). Fire-and-forget: cheap when fresh, never blocks
   // the spawn, degrades silently if the conventions CLI is missing. Lazy

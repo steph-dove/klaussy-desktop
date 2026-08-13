@@ -663,11 +663,15 @@ function defaultBranchOf(repoPath) {
 // committed files would be destructive. For a worktree this writes to the
 // shared common git dir, so the base repo and every sibling worktree inherit it.
 const BOOTSTRAP_EXCLUDE_MARKER = '# klaussy: agent bootstrap (generated, not committed)';
+// Generated root conventions docs — Claude reads CLAUDE.md, Gemini GEMINI.md,
+// everything else AGENTS.md; shared with syncIntelIntoWorktree so the excluded
+// and synced sets can't drift apart.
+const BOOTSTRAP_DOCS = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'GEMINI.md'];
 const BOOTSTRAP_EXCLUDES = [
   '.claude/', '.codex/', '.cursor/', '.gemini/',
   '.github/skills/', '.github/hooks/',   // leave .github/workflows alone
   '.conventions/',
-  'CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'GEMINI.md',
+  ...BOOTSTRAP_DOCS,
 ];
 function excludeBootstrapArtifacts(repoOrWorktreePath) {
   try {
@@ -746,11 +750,21 @@ function ensureEnvLinks(worktreePath) {
   }
 }
 
-// Copy the base repo's intel artifacts into a worktree that lacks them.
-// Worktrees only materialize COMMITTED files; until the user commits
-// CLAUDE.md & co., interactive agents in the worktree would see nothing
-// ("no CLAUDE.md provided"). Copies only what's missing, so committed
-// versions and per-worktree settings.local.json are never touched.
+// Unknown answers count as tracked, so a git hiccup never clobbers a real file.
+function isTrackedInWorktree(worktreePath, relPath) {
+  try {
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', relPath], {
+      cwd: worktreePath, stdio: 'pipe',
+    });
+    return true;
+  } catch (e) {
+    return !/did not match any file/i.test((e.stderr || '').toString());
+  }
+}
+
+// Copy the base repo's intel into a worktree, which holds only COMMITTED files
+// and so has none of the generated conventions. Generated docs refresh when the
+// base moves on; committed docs and settings.local.json are never touched.
 function syncIntelIntoWorktree(worktreePath) {
   try {
     const base = baseFor(worktreePath);
@@ -766,7 +780,7 @@ function syncIntelIntoWorktree(worktreePath) {
     // by relative path; a worktree with the settings but not the scripts blocks
     // every Read/Bash call (missing hook exits 2 = deny).
     const AGENT_SUBS = ['skills', 'commands', 'rules', 'hooks'];
-    const entries = [['CLAUDE.md'], ['.claude', 'settings.json']];
+    const entries = [...BOOTSTRAP_DOCS.map((doc) => [doc]), ['.claude', 'settings.json']];
     for (const root of AGENT_ROOTS) {
       for (const sub of AGENT_SUBS) entries.push([root, sub]);
     }
@@ -789,15 +803,18 @@ function syncIntelIntoWorktree(worktreePath) {
       const dst = path.join(worktreePath, ...segs);
       if (!fs.existsSync(src)) continue;
       const leaf = segs[segs.length - 1];
-      if (leaf === 'CLAUDE.md') {
+      if (BOOTSTRAP_DOCS.includes(leaf)) {
         try {
           if (fs.readFileSync(src, 'utf-8') === CLAUDE_MD_PLACEHOLDER) continue;
         } catch { continue; }
-        // A previous sync may have raced an unfinished generation and seeded
-        // the placeholder — repair it; otherwise never overwrite.
         if (fs.existsSync(dst)) {
+          // A repo that commits its own conventions doc owns it — never clobber.
+          if (isTrackedInWorktree(worktreePath, leaf)) continue;
+          // Otherwise it's klaussy-generated and stale forever once the base
+          // regenerates, so refresh it — which also repairs a placeholder left
+          // by a sync that raced an unfinished generation.
           try {
-            if (fs.readFileSync(dst, 'utf-8') !== CLAUDE_MD_PLACEHOLDER) continue;
+            if (fs.readFileSync(dst, 'utf-8') === fs.readFileSync(src, 'utf-8')) continue;
           } catch { continue; }
         }
         fs.mkdirSync(path.dirname(dst), { recursive: true });
