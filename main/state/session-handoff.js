@@ -114,9 +114,14 @@ ${material}`;
 // (gated agents like Gemini/Antigravity would block on consent in -p). Resolves
 // to '' on any failure/timeout so the caller falls back to the raw material.
 function summarize(material, incomingMode) {
+  return runHeadless(summaryPrompt(material), incomingMode);
+}
+
+// Runs one prompt through a non-gated agent; resolves '' on any failure or timeout.
+function runHeadless(prompt, preferredMode) {
   return new Promise((resolve) => {
     const config = loadConfig();
-    const candidates = ['claude', incomingMode].filter((id, i, a) => id && a.indexOf(id) === i);
+    const candidates = ['claude', preferredMode].filter((id, i, a) => id && a.indexOf(id) === i);
     let prov = null;
     for (const id of candidates) {
       const p = getProvider(id);
@@ -130,7 +135,7 @@ function summarize(material, incomingMode) {
     const bin = binFor(prov.id, config);
     let run;
     try {
-      run = prov.buildHeadlessRun(bin, { prompt: summaryPrompt(material), mode: 'text', model: '' });
+      run = prov.buildHeadlessRun(bin, { prompt, mode: 'text', model: '' });
     } catch {
       return resolve('');
     }
@@ -179,4 +184,4 @@ async function buildHandoffSeed({ worktreePath, originalMode, sessionId }) {
   return `${head}\n\n${body}\n\nPlease continue the work. If anything is ambiguous, ask before making large changes.`;
 }
 
-module.exports = { buildHandoffSeed };
+module.exports = { buildHandoffSeed, runHeadless };

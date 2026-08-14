@@ -933,6 +933,7 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
       try { require('../util/approval-registry').revokeForTask(instance.id); } catch { /* non-fatal */ }
       try { require('../util/notification-gateway').forgetTask(instance.id); } catch { /* non-fatal */ }
       try { forgetTranscript(instance.id); } catch { /* non-fatal */ }
+      try { require('./session-activity').forgetInstance(instance.id); } catch { /* non-fatal */ }
       convertInstanceToShell(instance, exitCode);
       return;
     }

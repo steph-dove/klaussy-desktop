@@ -26,6 +26,7 @@ const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
 const { buildHandoffSeed } = require('../state/session-handoff');
 const { sessionNotesEnv, withSessionContext } = require('../state/session-context');
+const { noteHandoff } = require('../state/session-activity');
 const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-prompt');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -295,6 +296,10 @@ ipcMain.handle('resume-session', async (_event, {
       seed = await buildHandoffSeed({ worktreePath, originalMode: startedBy, sessionId });
     } catch (err) {
       console.warn('[resume-session] handoff seed failed:', err && err.message);
+    }
+    if (seed) {
+      noteHandoff({ worktreePath, fromMode: startedBy, toMode: resumeMode, brief: seed })
+        .catch((err) => console.warn('[resume-session] handoff note failed:', err && err.message));
     }
     try {
       return applySavedBell(
