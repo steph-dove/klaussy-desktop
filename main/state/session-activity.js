@@ -17,13 +17,21 @@ const lastSeen = new Map();
 let timer = null;
 let capturing = false;
 
+// Deliberately a principle, not a list of triggers: when this listed examples,
+// the summarizer declined every change that was not literally one of them.
 function activityPrompt(name, mode, material) {
-  return 'Another AI agent is working in a different terminal of this same session.'
-    + ` Below is recent terminal output from ${displayNameFor(mode) || mode} in "${name}".\n\n`
-    + 'Write a short note ONLY if it contains something that agent would otherwise'
-    + ' discover the hard way: a decision or approach settled on, a file or area now'
-    + ' being restructured, a port/schema/env change, or work they would duplicate.'
-    + ` If there is nothing of that kind, reply with exactly ${NOTHING_MARKER}.\n\n`
+  return 'Other AI agents are working right now on related parts of this same system,'
+    + ' in other repos and other terminals. They cannot see this terminal.\n\n'
+    + `Below is recent output from ${displayNameFor(mode) || mode} in "${name}".`
+    + ' Write a short note telling those agents what changed here that they could'
+    + ' depend on, contradict, or duplicate — anything shared: an interface or'
+    + ' payload shape, a required field or header, the values of an enum, a name,'
+    + ' a port, a config or setup step, a decision about how something is done, or'
+    + ' an area now being restructured. If you are unsure whether it matters,'
+    + ' write the note.\n\n'
+    + `Reply with exactly ${NOTHING_MARKER} only if nothing of substance happened —`
+    + ' the agent was idle, asked a question, or made a purely local edit that'
+    + ' changes nothing another agent could touch.\n\n'
     + 'No preamble. Two or three sentences, written for the other agent.\n\n'
     + `--- output ---\n${material}`;
 }
@@ -149,6 +157,8 @@ function forgetInstance(id) {
 module.exports = {
   noteHandoff,
   captureActivity,
+  // Exported so the efficacy harness measures the prompt actually shipped.
+  activityPrompt,
   start,
   stop,
   forgetInstance,
