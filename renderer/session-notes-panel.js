@@ -5,6 +5,7 @@ window.SessionNotesPanel = (function () {
   var notesDirLabel = document.getElementById('session-notes-dir');
   var btnRefresh = document.getElementById('btn-session-notes-refresh');
   var btnClear = document.getElementById('btn-session-notes-clear');
+  var btnCapture = document.getElementById('btn-session-notes-capture');
 
   // Notes arrive from other agents' processes, not this window, so nothing
   // pushes an update here.
@@ -118,6 +119,31 @@ window.SessionNotesPanel = (function () {
   }
 
   btnRefresh.addEventListener('click', loadNotes);
+
+  btnCapture.addEventListener('click', async function () {
+    // Each eligible agent costs a headless summarizer call, so this can take seconds.
+    btnCapture.disabled = true;
+    btnCapture.textContent = 'Capturing...';
+    var res;
+    try {
+      res = await window.klaus.task.sessionContext.captureNow();
+    } catch (err) {
+      res = { error: (err && err.message) || String(err) };
+    } finally {
+      btnCapture.disabled = false;
+      btnCapture.textContent = 'Capture now';
+    }
+    if (res && res.error) {
+      window.toast.error('Capture failed: ' + res.error);
+    } else if (res && res.written) {
+      window.toast.success('Captured ' + res.written + ' note' + (res.written === 1 ? '' : 's'));
+    } else if (res && !res.eligible) {
+      window.toast.info('Nothing to capture — session notes need two or more agents running at once.');
+    } else {
+      window.toast.info('Nothing new to capture since the last pass.');
+    }
+    loadNotes();
+  });
 
   btnClear.addEventListener('click', async function () {
     var wt = activeWorktree();

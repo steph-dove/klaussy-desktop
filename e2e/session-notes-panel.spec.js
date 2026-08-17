@@ -125,3 +125,18 @@ test('the drawer explains itself when there are no notes', async ({ mainWindow }
 
   await mainWindow.screenshot({ path: 'e2e-artifacts/session-notes-empty.png' });
 });
+
+test('capture now explains itself when no agents are running', async ({ mainWindow }) => {
+  const repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'notes-capture-')));
+  execFileSync('git', ['init', '-q'], { cwd: repo, stdio: 'pipe' });
+  seeded.push(ensureSessionNotesDir(repo));
+
+  await openNotesPanel(mainWindow, repo);
+  const btn = mainWindow.locator('#btn-session-notes-capture');
+  await expect(btn).toBeEnabled();
+  await btn.click();
+
+  await expect(mainWindow.locator('.klaussy-toast')).toContainText(/two or more agents|Nothing/i);
+  await expect(btn).toBeEnabled();
+  await expect(btn).toHaveText('Capture now');
+});

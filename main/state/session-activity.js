@@ -171,6 +171,8 @@ function forgetInstance(id) {
 module.exports = {
   noteHandoff,
   captureActivity,
+  // So the manual capture can say why nothing happened rather than just "0".
+  agentsWithCompany,
   // Exported so the efficacy harness measures the prompt actually shipped.
   activityPrompt,
   start,
