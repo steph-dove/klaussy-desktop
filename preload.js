@@ -85,7 +85,7 @@ contextBridge.exposeInMainWorld('klaus', {
       listNotes: (worktreePath) => ipcRenderer.invoke('session-context:list-notes', { worktreePath }),
       addNote: (worktreePath, noteData) => ipcRenderer.invoke('session-context:add-note', { worktreePath, noteData }),
       getSummary: (worktreePath) => ipcRenderer.invoke('session-context:get-summary', { worktreePath }),
-      captureNow: () => ipcRenderer.invoke('session-context:capture-now'),
+      captureNow: (worktreePath) => ipcRenderer.invoke('session-context:capture-now', { worktreePath }),
       clearNotes: (worktreePath) => ipcRenderer.invoke('session-context:clear-notes', { worktreePath }),
     },
     onRepoIntelEvent: (callback) => {

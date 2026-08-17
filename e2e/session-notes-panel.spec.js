@@ -136,7 +136,7 @@ test('capture now explains itself when no agents are running', async ({ mainWind
   await expect(btn).toBeEnabled();
   await btn.click();
 
-  await expect(mainWindow.locator('.klaussy-toast')).toContainText(/two or more agents|Nothing/i);
+  await expect(mainWindow.locator('.klaussy-toast')).toContainText(/No agent is running in this session/i);
   await expect(btn).toBeEnabled();
   await expect(btn).toHaveText('Capture now');
 });

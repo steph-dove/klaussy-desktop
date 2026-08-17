@@ -36,16 +36,21 @@ ipcMain.handle('session-context:get-summary', async (_event, { worktreePath } = 
   }
 });
 
-// Returns the eligible count too, so the drawer can explain a zero: a lone agent
-// has nobody to tell.
-ipcMain.handle('session-context:capture-now', async () => {
+// Counted per session so the drawer can explain a zero: agents elsewhere are on
+// another channel, so their notes would never show up here.
+ipcMain.handle('session-context:capture-now', async (_event, { worktreePath } = {}) => {
   try {
     const { instances } = require('../state/instances');
-    const { captureActivity, agentsWithCompany } = require('../state/session-activity');
+    const activity = require('../state/session-activity');
     const agents = [...instances.values()];
-    const eligible = agentsWithCompany(agents).length;
-    const written = await captureActivity(agents);
-    return { written: written.length, eligible };
+    const byChannel = activity.liveAgentsByChannel(agents);
+    const here = worktreePath ? activity.channelFor(worktreePath) : null;
+    const inSession = (here && byChannel.get(here)) ? byChannel.get(here).length : 0;
+    const elsewhere = [...byChannel.entries()]
+      .filter(([channel]) => channel !== here)
+      .reduce((sum, [, group]) => sum + group.length, 0);
+    const written = await activity.captureActivity(agents, { worktreePath, requireCompany: false });
+    return { written: written.length, inSession, elsewhere };
   } catch (err) {
     console.warn('[session-context] capture failed:', err && err.message);
     return { error: err && err.message || String(err) };

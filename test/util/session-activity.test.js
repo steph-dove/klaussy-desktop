@@ -147,6 +147,41 @@ test('a handoff is recorded for the rest of the session', async () => {
   }
 });
 
+// The timer skips a lone agent, but pressing Capture now is explicit intent —
+// and a note lives 24h, so an agent that joins later still reads it.
+test('a manual capture summarizes a lone agent, unlike the timer', async () => {
+  const wt = workspace('manual');
+  const dir = ensureSessionNotesDir(wt);
+  try {
+    assert.equal((await activity.captureActivity([agent(1, wt, LOTS)])).length, 0);
+    const written = await activity.captureActivity([agent(2, wt, LOTS)], { requireCompany: false });
+    assert.equal(written.length, 1);
+  } finally {
+    [1, 2].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
+
+test('a scoped capture ignores agents in other sessions', async () => {
+  const mine = workspace('mine');
+  const other = workspace('other');
+  const dirMine = ensureSessionNotesDir(mine);
+  const dirOther = ensureSessionNotesDir(other);
+  try {
+    const written = await activity.captureActivity(
+      [agent(1, mine, LOTS), agent(2, other, LOTS), agent(3, other, LOTS)],
+      { worktreePath: mine, requireCompany: false },
+    );
+    assert.equal(written.length, 1);
+    assert.equal(listSessionNotes(mine).length, 1);
+    assert.equal(listSessionNotes(other).length, 0);
+  } finally {
+    [1, 2, 3].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dirMine), { recursive: true, force: true });
+    fs.rmSync(path.dirname(dirOther), { recursive: true, force: true });
+  }
+});
+
 test('the pref switches it off without a restart', async () => {
   const { loadConfig, saveConfig } = require('../../main/util/config');
   const wt = workspace('off');

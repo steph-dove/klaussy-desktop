@@ -126,7 +126,7 @@ window.SessionNotesPanel = (function () {
     btnCapture.textContent = 'Capturing...';
     var res;
     try {
-      res = await window.klaus.task.sessionContext.captureNow();
+      res = await window.klaus.task.sessionContext.captureNow(activeWorktree());
     } catch (err) {
       res = { error: (err && err.message) || String(err) };
     } finally {
@@ -137,10 +137,15 @@ window.SessionNotesPanel = (function () {
       window.toast.error('Capture failed: ' + res.error);
     } else if (res && res.written) {
       window.toast.success('Captured ' + res.written + ' note' + (res.written === 1 ? '' : 's'));
-    } else if (res && !res.eligible) {
-      window.toast.info('Nothing to capture — session notes need two or more agents running at once.');
+    } else if (res && !res.inSession) {
+      window.toast.info(res.elsewhere
+        ? 'No agent is running in this session. ' + res.elsewhere
+          + ' running elsewhere — notes are shared per session, not across them.'
+        : 'No agent is running in this session.');
     } else {
-      window.toast.info('Nothing new to capture since the last pass.');
+      window.toast.info('Nothing new to capture — the '
+        + res.inSession + ' agent' + (res.inSession === 1 ? '' : 's')
+        + ' here have said nothing since the last pass.');
     }
     loadNotes();
   });

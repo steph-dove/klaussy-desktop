@@ -85,17 +85,28 @@ function channelFor(worktreePath) {
   }
 }
 
-// A lone agent has nobody to tell, so only channels with two or more are worth summarizing.
-function agentsWithCompany(agents) {
+function liveAgentsByChannel(agents) {
   const byChannel = new Map();
-  for (const a of agents) {
+  for (const a of agents || []) {
     if (!a || !a.alive || !a.worktreePath || a.mode === 'shell') continue;
     const channel = channelFor(a.worktreePath);
     if (!channel) continue;
     if (!byChannel.has(channel)) byChannel.set(channel, []);
     byChannel.get(channel).push(a);
   }
-  return [...byChannel.values()].filter((group) => group.length > 1).flat();
+  return byChannel;
+}
+
+// The timer wants company (no point summarizing for nobody); a manual capture
+// passes requireCompany:false, since a note lives 24h for whoever joins later.
+function eligibleAgents(agents, { requireCompany = true, worktreePath = null } = {}) {
+  const byChannel = liveAgentsByChannel(agents);
+  const wanted = worktreePath ? channelFor(worktreePath) : null;
+  return [...byChannel.entries()]
+    .filter(([channel]) => !wanted || channel === wanted)
+    .map(([, group]) => group)
+    .filter((group) => (requireCompany ? group.length > 1 : group.length > 0))
+    .flat();
 }
 
 // Clean before diffing: recentOutput keeps TUI redraws that ANSI-stripping
@@ -117,13 +128,13 @@ function enabled() {
   }
 }
 
-async function captureActivity(agents) {
+async function captureActivity(agents, opts) {
   if (!enabled()) return [];
   if (capturing) return [];
   capturing = true;
   const written = [];
   try {
-    for (const inst of agentsWithCompany(agents)) {
+    for (const inst of eligibleAgents(agents, opts)) {
       const { fresh, current } = freshOutput(inst);
       if (fresh.length < MIN_NEW_OUTPUT_CHARS) continue;
       lastSeen.set(inst.id, current);
@@ -171,8 +182,9 @@ function forgetInstance(id) {
 module.exports = {
   noteHandoff,
   captureActivity,
-  // So the manual capture can say why nothing happened rather than just "0".
-  agentsWithCompany,
+  eligibleAgents,
+  liveAgentsByChannel,
+  channelFor,
   // Exported so the efficacy harness measures the prompt actually shipped.
   activityPrompt,
   start,
