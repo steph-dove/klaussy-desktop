@@ -125,6 +125,47 @@ test('the summarizer can decline and no note is written', async () => {
   }
 });
 
+test('a decline written as prose is not stored as a note', async () => {
+  const wt = workspace('prose');
+  const dir = ensureSessionNotesDir(wt);
+  const prev = summaryReply;
+  const declines = [
+    'No note needed — the agent only wrote a session note about work happening elsewhere; nothing in this repo changed.',
+    'Nothing to report here; the agent only read files and asked a question.',
+    'No changes of note happened in this terminal during that window.',
+    'N/A — no substantive activity to summarize for other agents.',
+  ];
+  try {
+    for (let i = 0; i < declines.length; i++) {
+      summaryReply = declines[i];
+      const written = await activity.captureActivity(
+        [agent(30 + i, wt, LOTS + i), agent(40 + i, wt, LOTS + i)],
+      );
+      assert.equal(written.length, 0, `stored a decline: ${declines[i]}`);
+    }
+    assert.equal(listSessionNotes(wt).length, 0);
+  } finally {
+    summaryReply = prev;
+    [30, 31, 32, 33, 40, 41, 42, 43].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
+
+test('a real summary that merely starts with "no" is still stored', async () => {
+  const wt = workspace('nostart');
+  const dir = ensureSessionNotesDir(wt);
+  const prev = summaryReply;
+  summaryReply = 'No longer using the legacy auth path — server.js now requires X-Request-Id on every call.';
+  try {
+    const written = await activity.captureActivity([agent(50, wt, LOTS), agent(51, wt, LOTS)]);
+    assert.equal(written.length, 2);
+  } finally {
+    summaryReply = prev;
+    [50, 51].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
+
 test('a handoff is recorded for the rest of the session', async () => {
   const wt = workspace('handoff');
   const dir = ensureSessionNotesDir(wt);

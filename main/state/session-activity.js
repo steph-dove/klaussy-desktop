@@ -31,9 +31,10 @@ function activityPrompt(name, mode, material) {
     + ' a port, a config or setup step, a decision about how something is done, or'
     + ' an area now being restructured. If you are unsure whether it matters,'
     + ' write the note.\n\n'
-    + `Reply with exactly ${NOTHING_MARKER} only if nothing of substance happened —`
-    + ' the agent was idle, asked a question, or made a purely local edit that'
-    + ' changes nothing another agent could touch.\n\n'
+    + `If nothing of substance happened — the agent was idle, asked a question,`
+    + ' or made a purely local edit nothing else could touch — reply with the'
+    + ` single word ${NOTHING_MARKER} and nothing else. Do not explain why; an`
+    + ' explanation gets stored as though it were the news.\n\n'
     + 'No preamble. Two or three sentences, written for the other agent.\n\n'
     + `--- output ---\n${material}`;
 }
@@ -47,11 +48,18 @@ function handoffPrompt(fromMode, brief) {
     + `--- brief ---\n${brief}`;
 }
 
+// Models often decline in prose instead of the literal NOTHING ("No note
+// needed — ... nothing in this repo changed"), and that got stored as the news.
+const DECLINE = new RegExp(
+  `^(${NOTHING_MARKER}|no(thing| note| update| notable| changes| news)?\\b[^.]{0,60}(needed|to report|to share|of note|changed|happened)|n/a)\\b`,
+  'i',
+);
+
 function usable(summary) {
   const text = (summary || '').trim();
   if (!text || text.length < 20) return '';
-  // The model was told to say NOTHING; accept that verdict however it phrases it.
   if (new RegExp(`^${NOTHING_MARKER}\\b`, 'i').test(text)) return '';
+  if (DECLINE.test(text)) return '';
   return text;
 }
 
