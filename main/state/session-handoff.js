@@ -156,7 +156,10 @@ function runHeadless(prompt, preferredMode) {
     const timer = setTimeout(() => finish(''), SUMMARY_TIMEOUT_MS);
     proc.stdout.on('data', (d) => { out += d.toString(); });
     proc.on('error', () => { clearTimeout(timer); finish(''); });
-    proc.on('exit', () => { clearTimeout(timer); finish(out.trim()); });
+    // A CLI that fails while still printing to stdout ("Not logged in · Please
+    // run /login") would otherwise have its error written to the notes channel
+    // as the summary.
+    proc.on('exit', (code) => { clearTimeout(timer); finish(code === 0 ? out.trim() : ''); });
   });
 }
 

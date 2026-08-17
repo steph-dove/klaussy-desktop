@@ -5,6 +5,8 @@
 const { writeSessionNote, ensureSessionNotesDir } = require('./session-context');
 const { runHeadless } = require('./session-handoff');
 const { displayNameFor } = require('./ai-providers');
+const { cleanExcerpt } = require('../util/terminal-excerpt');
+const { loadConfig } = require('../util/config');
 
 const ACTIVITY_INTERVAL_MS = 5 * 60 * 1000;
 // Below this an agent has produced nothing worth another agent's context.
@@ -56,7 +58,7 @@ function usable(summary) {
 // The incoming agent already receives the brief as its seed; this note is for the
 // other agents in the session, who never see it.
 async function noteHandoff({ worktreePath, fromMode, toMode, brief }) {
-  if (!worktreePath || !brief) return null;
+  if (!worktreePath || !brief || !enabled()) return null;
   try {
     const summary = usable(await runHeadless(handoffPrompt(fromMode, brief), toMode))
       || brief.slice(0, 1200);
@@ -96,23 +98,35 @@ function agentsWithCompany(agents) {
   return [...byChannel.values()].filter((group) => group.length > 1).flat();
 }
 
+// Clean before diffing: recentOutput keeps TUI redraws that ANSI-stripping
+// leaves behind, and a redraw rewrites lines in place so raw diffs lie.
 function freshOutput(inst) {
-  const current = inst.recentOutput || '';
+  const current = cleanExcerpt(inst.recentOutput || '');
   const seen = lastSeen.get(inst.id) || '';
-  // The buffer is a rolling window, so a prefix mismatch means it scrolled and all of it is new.
   const fresh = current.startsWith(seen) ? current.slice(seen.length) : current;
-  return fresh.trim();
+  return { fresh: fresh.trim(), current };
+}
+
+// Read per pass rather than at startup, so unchecking the pref stops the next
+// one instead of needing a restart.
+function enabled() {
+  try {
+    return loadConfig().sessionActivityNotes !== false;
+  } catch {
+    return true;
+  }
 }
 
 async function captureActivity(agents) {
+  if (!enabled()) return [];
   if (capturing) return [];
   capturing = true;
   const written = [];
   try {
     for (const inst of agentsWithCompany(agents)) {
-      const fresh = freshOutput(inst);
+      const { fresh, current } = freshOutput(inst);
       if (fresh.length < MIN_NEW_OUTPUT_CHARS) continue;
-      lastSeen.set(inst.id, inst.recentOutput || '');
+      lastSeen.set(inst.id, current);
       const material = fresh.slice(-MAX_MATERIAL_CHARS);
       const summary = usable(await runHeadless(activityPrompt(inst.name, inst.mode, material), inst.mode));
       if (!summary) continue;

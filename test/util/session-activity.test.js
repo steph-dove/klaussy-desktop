@@ -147,6 +147,50 @@ test('a handoff is recorded for the rest of the session', async () => {
   }
 });
 
+test('the pref switches it off without a restart', async () => {
+  const { loadConfig, saveConfig } = require('../../main/util/config');
+  const wt = workspace('off');
+  const dir = ensureSessionNotesDir(wt);
+  const cfg = loadConfig();
+  try {
+    // saveConfig is queued and returns a promise; without awaiting, the read
+    // below races the write.
+    await saveConfig({ ...cfg, sessionActivityNotes: false });
+    assert.equal((await activity.captureActivity([agent(1, wt, LOTS), agent(2, wt, LOTS)])).length, 0);
+    assert.equal(await activity.noteHandoff({
+      worktreePath: wt, fromMode: 'claude', toMode: 'codex', brief: 'something',
+    }), null);
+    assert.equal(listSessionNotes(wt).length, 0);
+
+    await saveConfig({ ...cfg, sessionActivityNotes: true });
+    assert.equal((await activity.captureActivity([agent(3, wt, LOTS), agent(4, wt, LOTS)])).length, 2);
+  } finally {
+    await saveConfig(cfg);
+    [1, 2, 3, 4].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
+
+test('terminal redraw noise is cleaned before the summarizer sees it', async () => {
+  const wt = workspace('noisy');
+  const dir = ensureSessionNotesDir(wt);
+  // \r rewrites the line in place: only "Working... done" ever existed on
+  // screen. Real lines are varied because cleanExcerpt also dedupes repeats.
+  const real = Array.from({ length: 30 }, (_, i) => `Changed AUTH_PORT to 3005 in module ${i}.`).join('\n');
+  const noisy = `${'Wo\rWork\rWorking\rWorking... done\n'.repeat(40)}${real}\n`;
+  try {
+    const before = prompts.length;
+    await activity.captureActivity([agent(11, wt, noisy), agent(12, wt, noisy)]);
+    const sent = prompts.slice(before).join('\n');
+    assert.ok(sent.includes('Changed AUTH_PORT to 3005 in module 0.'), 'real content should survive');
+    assert.ok(!/Wo\rWork/.test(sent), 'redraw fragments should not reach the summarizer');
+    assert.ok(!sent.includes('Wo\nWork\n'), 'partial labels should be collapsed');
+  } finally {
+    [11, 12].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
+
 test('a handoff with no brief writes nothing', async () => {
   const wt = workspace('nobrief');
   const dir = ensureSessionNotesDir(wt);
