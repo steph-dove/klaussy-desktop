@@ -65,8 +65,9 @@ window.SessionNotesPanel = (function () {
         + 'No active session notes.<br><br>'
         + 'Agents in this session write notes here when they change a port or schema, '
         + 'hit a breaking change, or find something the next agent would trip over. '
-        + 'Notes are shared by every repo in the session, live outside the repository, '
-        + 'and expire after 24 hours.'
+        + 'Notes are shared by every repo in the session and live outside the repository. '
+        + 'They are kept indefinitely, but only ones from the last few days are '
+        + 'passed on to agents as current.'
         + '</div>';
       return;
     }

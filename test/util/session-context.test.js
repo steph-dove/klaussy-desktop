@@ -15,6 +15,7 @@ const {
   listSessionNotes,
   buildSessionContextSummary,
   withSessionContext,
+  NOTE_FRESH_MS,
   clearSessionNotes,
 } = require('../../main/state/session-context');
 
@@ -229,28 +230,35 @@ test('a note id cannot escape the notes directory', () => {
   assert.equal(listSessionNotes(repo).length, 1);
 });
 
-test('notes older than the TTL are dropped and deleted', () => {
+// Notes are kept: the drawer shows every one with its age, so an old note is
+// history you can read, not something deleted out from under you.
+test('an old note is kept and still listed', () => {
   const repo = makeRepo();
   const dir = ensureSessionNotesDir(repo);
   const stale = path.join(dir, 'stale.md');
-  const fresh = path.join(dir, 'fresh.md');
   fs.writeFileSync(stale, '---\nagent: old\n---\nancient\n');
-  fs.writeFileSync(fresh, '---\nagent: new\n---\ncurrent\n');
-  const longAgo = new Date(Date.now() - 25 * 60 * 60 * 1000);
+  const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   fs.utimesSync(stale, longAgo, longAgo);
 
-  const notes = listSessionNotes(repo);
-  assert.deepEqual(notes.map((n) => n.id), ['fresh']);
-  assert.ok(!fs.existsSync(stale), 'expired note should be removed from disk');
-  assert.ok(fs.existsSync(fresh));
+  assert.deepEqual(listSessionNotes(repo).map((n) => n.id), ['stale']);
+  assert.ok(fs.existsSync(stale), 'notes are never deleted behind your back');
 });
 
-test('an explicit timestamp older than the TTL also expires', () => {
+test('a note past the freshness window is not injected into prompts', () => {
   const repo = makeRepo();
-  const old = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-  writeSessionNote(repo, { id: 'ancient', content: 'x', timestamp: old });
+  const old = new Date(Date.now() - NOTE_FRESH_MS - 60000).toISOString();
+  writeSessionNote(repo, { id: 'ancient', content: 'the port moved to 3005', timestamp: old });
 
-  assert.equal(listSessionNotes(repo).length, 0);
+  assert.equal(listSessionNotes(repo).length, 1, 'still on disk and in the drawer');
+  assert.equal(buildSessionContextSummary(repo), '', 'but not in an agent prompt');
+});
+
+test('a note inside the freshness window is injected', () => {
+  const repo = makeRepo();
+  const recent = new Date(Date.now() - NOTE_FRESH_MS + 3600000).toISOString();
+  writeSessionNote(repo, { id: 'recent', content: 'the port moved to 3005', timestamp: recent });
+
+  assert.match(buildSessionContextSummary(repo), /port moved to 3005/);
 });
 
 test('the summary drops whole old notes rather than truncating mid-note', () => {

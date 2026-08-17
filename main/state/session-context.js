@@ -9,9 +9,10 @@ const { klaussySessionDir } = require('../util/git-repo');
 
 const notesDirCache = new Map(); // worktreePath -> notes dir
 
-// Nothing marks a session over, and a stale note the reader can't tell is
-// stale is worse than none, so age is the only reliable expiry.
-const NOTE_TTL_MS = 24 * 60 * 60 * 1000;
+// Notes are never deleted (the drawer shows each one's age), so this window
+// gates prompt injection only, where an agent mid-task cannot tell a
+// three-week-old claim from a current one.
+const NOTE_FRESH_MS = 72 * 60 * 60 * 1000;
 // Shares the handoff seed with a transcript and a git brief, so notes take a
 // slice comparable to session-handoff's MAX_TRANSCRIPT_CHARS.
 const MAX_SUMMARY_CHARS = 12000;
@@ -181,11 +182,6 @@ function listSessionNotes(worktreePath) {
       const stamped = new Date(metadata.timestamp || 0).getTime();
       const writtenAt = stamped || fs.statSync(filePath).mtimeMs;
 
-      if (Date.now() - writtenAt > NOTE_TTL_MS) {
-        fs.unlinkSync(filePath);
-        continue;
-      }
-
       notes.push({
         id: metadata.id || file.replace(/\.md$/, ''),
         filePath,
@@ -211,7 +207,10 @@ function formatList(value) {
 
 /** Flattens the notes into a text block small enough to prepend to an agent prompt. */
 function buildSessionContextSummary(worktreePath) {
-  const notes = listSessionNotes(worktreePath);
+  // Only the fresh ones: an old note stays readable in the drawer, where its
+  // age is on screen, but must not reach an agent's prompt as current fact.
+  const cutoff = Date.now() - NOTE_FRESH_MS;
+  const notes = listSessionNotes(worktreePath).filter((n) => n.writtenAt >= cutoff);
   if (!notes.length) return '';
 
   const items = notes.map((n, i) => {
@@ -282,4 +281,5 @@ module.exports = {
   buildSessionContextSummary,
   withSessionContext,
   clearSessionNotes,
+  NOTE_FRESH_MS,
 };

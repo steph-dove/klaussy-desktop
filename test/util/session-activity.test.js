@@ -148,7 +148,7 @@ test('a handoff is recorded for the rest of the session', async () => {
 });
 
 // The timer skips a lone agent, but pressing Capture now is explicit intent —
-// and a note lives 24h, so an agent that joins later still reads it.
+// and the note stays, so an agent that joins later still reads it.
 test('a manual capture summarizes a lone agent, unlike the timer', async () => {
   const wt = workspace('manual');
   const dir = ensureSessionNotesDir(wt);

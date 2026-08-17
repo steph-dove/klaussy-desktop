@@ -98,7 +98,7 @@ function liveAgentsByChannel(agents) {
 }
 
 // The timer wants company (no point summarizing for nobody); a manual capture
-// passes requireCompany:false, since a note lives 24h for whoever joins later.
+// passes requireCompany:false, since the note stays for whoever joins later.
 function eligibleAgents(agents, { requireCompany = true, worktreePath = null } = {}) {
   const byChannel = liveAgentsByChannel(agents);
   const wanted = worktreePath ? channelFor(worktreePath) : null;
