@@ -81,6 +81,13 @@ contextBridge.exposeInMainWorld('klaus', {
     getSessionRepos: (worktreePath) => ipcRenderer.invoke('get-session-repos', { worktreePath }),
     precommitReview: (worktreePath, provider) => ipcRenderer.invoke('precommit-review-run', { worktreePath, provider }),
     precommitReviewCancel: (worktreePath) => ipcRenderer.invoke('precommit-review-cancel', { worktreePath }),
+    sessionContext: {
+      listNotes: (worktreePath) => ipcRenderer.invoke('session-context:list-notes', { worktreePath }),
+      addNote: (worktreePath, noteData) => ipcRenderer.invoke('session-context:add-note', { worktreePath, noteData }),
+      getSummary: (worktreePath) => ipcRenderer.invoke('session-context:get-summary', { worktreePath }),
+      captureNow: (worktreePath) => ipcRenderer.invoke('session-context:capture-now', { worktreePath }),
+      clearNotes: (worktreePath) => ipcRenderer.invoke('session-context:clear-notes', { worktreePath }),
+    },
     onRepoIntelEvent: (callback) => {
       const listener = (_event, data) => callback(data);
       ipcRenderer.on('repo-intel-event', listener);

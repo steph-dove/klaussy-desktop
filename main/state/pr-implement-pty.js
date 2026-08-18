@@ -28,6 +28,7 @@ const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
 const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
+const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -244,6 +245,9 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
     console.warn('[pr-implement-pty] mkdir failed for', promptDir, err.message);
   }
   const promptFile = path.join(promptDir, `${requestId}-${crypto.randomBytes(4).toString('hex')}.txt`);
+  // Reassigned so the paste fallbacks below deliver the same text the tempfile
+  // holds, notes included.
+  prompt = withSessionContext(worktreePath, prompt);
   try {
     fs.writeFileSync(promptFile, prompt);
   } catch (err) {
@@ -273,7 +277,12 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
       cols: 120,
       rows: 30,
       cwd: worktreePath,
-      env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        ...sessionNotesEnv(worktreePath, `pr-implement-${requestId}`),
+        ...(extraEnv || {}),
+      },
     });
   } catch (err) {
     // node-pty can throw on missing native bindings / bad shell path.

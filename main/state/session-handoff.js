@@ -15,9 +15,11 @@
 // material verbatim — the user chose "summary + git fallback".
 const fs = require('fs');
 const path = require('path');
-const { execFileSync, spawn } = require('child_process');
+const { execFileSync } = require('child_process');
 const { claudeProjectDir } = require('../util/claude-paths');
-const { getProvider, binFor, displayNameFor } = require('./ai-providers');
+const { spawnHeadlessAgent, promptGoesOnStdin } = require('../util/agent-spawn');
+const { whichBinSync } = require('../util/platform');
+const { getProvider, binFor, displayNameFor, PROVIDER_IDS } = require('./ai-providers');
 const { loadConfig } = require('../util/config');
 
 const MAX_TRANSCRIPT_CHARS = 24000; // keep the most-recent tail when longer
@@ -114,23 +116,56 @@ ${material}`;
 // (gated agents like Gemini/Antigravity would block on consent in -p). Resolves
 // to '' on any failure/timeout so the caller falls back to the raw material.
 function summarize(material, incomingMode) {
+  return runHeadless(summaryPrompt(material), incomingMode);
+}
+
+// Installed as well as suitable: the registry describes claude whether or not
+// it is on the machine, so choosing it blindly left Codex/Kimi users with none.
+function pickSummarizer(preferredMode, config) {
+  const order = ['claude', preferredMode, ...PROVIDER_IDS]
+    .filter((id, i, arr) => id && arr.indexOf(id) === i);
+  for (const id of order) {
+    const p = getProvider(id);
+    if (!p || p.remoteBackend || p.worktreeConsent) continue;
+    // 'ollama' here is aider, which edits files; the models are reached over HTTP below.
+    if (id === 'ollama') continue;
+    if (typeof p.buildHeadlessRun !== 'function') continue;
+    const bin = binFor(id, config);
+    if (!bin) continue;
+    const found = /[\\/]/.test(bin) ? fs.existsSync(bin) : !!whichBinSync(bin);
+    if (found) return { prov: p, bin };
+  }
+  return null;
+}
+
+// Summaries go to the local model first so this routine work stays free and on
+// the machine; an installed agent covers a stopped or base-only Ollama, and
+// `summarizeLocally: false` inverts the order.
+async function runHeadless(prompt, preferredMode) {
+  const cfg = loadConfig();
+  const localFirst = cfg.summarizeLocally !== false;
+  const prefer = (cfg.agentModel || {})[preferredMode];
+  if (localFirst) {
+    const local = await require('./ollama').generateText(prompt, { prefer }).catch(() => '');
+    if (local) return local;
+  }
+  const viaCli = await runViaCli(prompt, preferredMode);
+  if (viaCli || localFirst) return viaCli;
+  return require('./ollama').generateText(prompt, { prefer }).catch(() => '');
+}
+
+// Runs one prompt through a non-gated agent; resolves '' on any failure or timeout.
+function runViaCli(prompt, preferredMode) {
   return new Promise((resolve) => {
-    const config = loadConfig();
-    const candidates = ['claude', incomingMode].filter((id, i, a) => id && a.indexOf(id) === i);
-    let prov = null;
-    for (const id of candidates) {
-      const p = getProvider(id);
-      // skip gated agents as summarizers (they'd prompt for folder trust)
-      if (p && typeof p.buildHeadlessRun === 'function' && (id === 'claude' || !p.worktreeConsent)) {
-        prov = p;
-        break;
-      }
-    }
-    if (!prov) return resolve('');
-    const bin = binFor(prov.id, config);
+    const picked = pickSummarizer(preferredMode, loadConfig());
+    if (!picked) return resolve('');
+    const { prov, bin } = picked;
+    // Windows agent CLIs are .cmd shims: spawn() can't run them, so summaries came
+    // back empty until spawnHeadlessAgent's shell + stdin path.
+    const onStdin = promptGoesOnStdin(bin);
     let run;
     try {
-      run = prov.buildHeadlessRun(bin, { prompt: summaryPrompt(material), mode: 'text', model: '' });
+      run = prov.buildHeadlessRun(bin, { prompt, mode: 'text', model: '', promptOnStdin: onStdin });
     } catch {
       return resolve('');
     }
@@ -144,19 +179,27 @@ function summarize(material, incomingMode) {
       resolve(val);
     };
     try {
-      proc = spawn(bin, run.args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      proc = spawnHeadlessAgent(
+        bin, run.args,
+        { stdio: [onStdin ? 'pipe' : 'ignore', 'pipe', 'ignore'] },
+        run.stdinInput,
+      );
     } catch {
       return resolve('');
     }
     const timer = setTimeout(() => finish(''), SUMMARY_TIMEOUT_MS);
     proc.stdout.on('data', (d) => { out += d.toString(); });
     proc.on('error', () => { clearTimeout(timer); finish(''); });
-    proc.on('exit', () => { clearTimeout(timer); finish(out.trim()); });
+    // A CLI that fails while still printing to stdout ("Not logged in · Please
+    // run /login") would otherwise have its error written to the notes channel
+    // as the summary.
+    proc.on('exit', (code) => { clearTimeout(timer); finish(code === 0 ? out.trim() : ''); });
   });
 }
 
-// Build the seed prompt handed to the incoming agent. Always resolves to a
-// non-empty string so the caller can spawn with it unconditionally.
+// Always resolves to a non-empty string so the caller can spawn with it
+// unconditionally. Notes are left out — this gets condensed, and
+// spawnInWorktree prepends them verbatim.
 async function buildHandoffSeed({ worktreePath, originalMode, sessionId }) {
   const transcript = originalMode === 'claude' ? readClaudeTranscript(worktreePath, sessionId) : '';
   const brief = gitBrief(worktreePath);
@@ -178,4 +221,4 @@ async function buildHandoffSeed({ worktreePath, originalMode, sessionId }) {
   return `${head}\n\n${body}\n\nPlease continue the work. If anything is ambiguous, ask before making large changes.`;
 }
 
-module.exports = { buildHandoffSeed };
+module.exports = { buildHandoffSeed, runHeadless };

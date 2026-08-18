@@ -24,6 +24,7 @@ const { loadConfig } = require('../util/config');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
 const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
+const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
@@ -100,7 +101,10 @@ function startOrAttachChat({ worktreePath, provider = 'claude', seedPrompt, onDa
   }
   const chatKey = chatKeyFor(worktreePath);
   const promptFile = path.join(promptDir, `${chatKey}-${crypto.randomBytes(4).toString('hex')}.txt`);
-  const seed = seedPrompt || 'You are helping me review this pull request. Ask me what I need.';
+  const seed = withSessionContext(
+    worktreePath,
+    seedPrompt || 'You are helping me review this pull request. Ask me what I need.',
+  );
   try {
     fs.writeFileSync(promptFile, seed);
   } catch (err) {
@@ -123,7 +127,12 @@ function startOrAttachChat({ worktreePath, provider = 'claude', seedPrompt, onDa
       cols: 120,
       rows: 30,
       cwd: worktreePath,
-      env: { ...process.env, TERM: 'xterm-256color', ...(extraEnv || {}) },
+      env: {
+        ...process.env,
+        TERM: 'xterm-256color',
+        ...sessionNotesEnv(worktreePath, `pr-chat-${chatKeyFor(worktreePath)}`),
+        ...(extraEnv || {}),
+      },
     });
   } catch (err) {
     try { fs.unlinkSync(promptFile); } catch {}

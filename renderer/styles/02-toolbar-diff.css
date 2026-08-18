@@ -1641,11 +1641,23 @@
   flex-shrink: 0;
   background: color-mix(in srgb, var(--bg) 95%, transparent);
   padding: 0 4px;
+  /* Last resort below ~8 tabs' minimum: scroll rather than clip a tab out of
+     reach. The bar is chromeless, so hide the scrollbar itself. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#diff-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .diff-tab {
-  flex: 1;
-  padding: 8px 12px 10px;
+  /* Natural width, not an equal share: with 8 tabs an equal share is narrower
+     than the longer labels, which either clips the last tab or ellipsises all
+     of them. The bar scrolls instead when the panel is dragged narrow. */
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 8px 7px 10px;
   font-size: 12px;
   font-family: var(--font-sans);
   font-weight: 500;

@@ -261,11 +261,12 @@ const PROVIDERS = {
     // PTY sends Enter once the TUI is up. VERIFIED: codex-cli 0.135.0.
     needsEnterToSubmit: true,
 
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs } = {}) {
-      // `-m` and `--add-dir` are top-level flags, so they go before the `resume`
-      // subcommand. Sibling session worktrees are added so cross-repo edits work.
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs, notesDir } = {}) {
+      // Top-level flags precede the `resume` subcommand. The notes dir is
+      // granted because Codex's sandbox counts `.git` as outside the project.
       const m = model ? ` -m ${model}` : '';
-      const dirs = quotedSessionDirs(sessionDirs).map((d) => ` --add-dir ${d}`).join('');
+      const writable = notesDir ? [...(sessionDirs || []), notesDir] : sessionDirs;
+      const dirs = quotedSessionDirs(writable).map((d) => ` --add-dir ${d}`).join('');
       const top = `${bin}${m}${dirs}`;
       if (resumeSessionId) return `${top} resume ${resumeSessionId}`;
       if (resumeLatest) return `${top} resume --last`;

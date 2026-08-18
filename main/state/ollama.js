@@ -125,6 +125,73 @@ function buildRepoFimPrompt({ repoName, filePath, prefix, suffix, snippets }) {
   return parts.join('\n');
 }
 
+// A `-base` tag is the FIM autocomplete model: it continues text rather than
+// obeying it, so it can never be a summarizer — and it is the tag most likely
+// to be loaded, since inline completion keeps it warm.
+const isBaseModel = (name) => /-base(:|$)/.test(name || '');
+
+// Config stores agent models with a provider prefix in some surfaces.
+const bareModel = (name) => String(name || '').replace(/^ollama\//, '');
+
+async function ollamaGet(endpointPath, timeoutMs = 1500) {
+  try {
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(`${getBaseUrl()}${endpointPath}`, { signal: ctrl.signal });
+    clearTimeout(to);
+    if (!res.ok) return null;
+    const body = await res.json();
+    return (Array.isArray(body.models) ? body.models : []).map((m) => m.name).filter(Boolean);
+  } catch {
+    return null;
+  }
+}
+
+// Prefers a model already in play, since a cold one costs a full load; null
+// when only base models are installed.
+async function pickChatModel({ prefer } = {}) {
+  const cfg = loadConfig();
+  if (cfg.ollamaSummaryModel) return cfg.ollamaSummaryModel;
+
+  const installed = await ollamaGet('/api/tags');
+  if (!installed) return null;
+  const usable = (name) => name && !isBaseModel(name) && installed.includes(name);
+
+  const wanted = bareModel(prefer || (cfg.agentModel && cfg.agentModel.ollama));
+  if (usable(wanted)) return wanted;
+
+  const loaded = (await ollamaGet('/api/ps')) || [];
+  return loaded.find(usable) || installed.find((n) => !isBaseModel(n)) || null;
+}
+
+// Best-effort prose ('' on any failure); num_ctx must be explicit or Ollama caps at 4096.
+async function generateText(prompt, { timeoutMs = 60000, numCtx = DEFAULT_NUM_CTX, numPredict = 400, prefer } = {}) {
+  const model = await pickChatModel({ prefer });
+  if (!model) return '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false,
+        options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.2 },
+      }),
+    });
+    if (!res.ok) return '';
+    const json = await res.json();
+    return ((json && json.response) || '').trim();
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Streams a fill-in-middle completion.
 //
 // Two transports: with filePath/snippets we send the repo-level FIM prompt
@@ -598,6 +665,8 @@ module.exports = {
   probe,
   probeNow,
   generateFIM,
+  generateText,
+  pickChatModel,
   warmup,
   getModel,
   getSetupState,

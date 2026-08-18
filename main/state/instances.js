@@ -28,6 +28,7 @@ const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
 const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
+const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
@@ -225,10 +226,12 @@ const INHERITED_SESSION_MARKERS = [
   'CLAUDE_CODE_ENTRYPOINT',
 ];
 
-function agentSpawnEnv() {
+// KLAUSSY_SESSION_ID names this terminal so notes can record who wrote them; it
+// deliberately does not scope the notes dir, which is shared session-wide.
+function agentSpawnEnv(worktreePath, terminalId) {
   const env = { ...process.env };
   for (const key of INHERITED_SESSION_MARKERS) delete env[key];
-  return env;
+  return { ...env, ...sessionNotesEnv(worktreePath, terminalId) };
 }
 
 // A conversation that has not recorded its workspace yet can only be guessed
@@ -680,6 +683,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   const id = nextId++;
   const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
+  const spawnEnv = agentSpawnEnv(worktreePath, id);
 
   // An agent mode (claude/codex/gemini/copilot) launches that CLI; 'shell'
   // mode launches a plain login shell. The provider registry owns the exact
@@ -709,12 +713,14 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     if (!session.ok) return { cancelled: true };
     const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
     const sessionDirs = sessionSiblingWorktrees(worktreePath);
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, profile: nemProfile });
+    const notesDir = spawnEnv.KLAUSSY_SESSION_NOTES_DIR;
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, notesDir, profile: nemProfile });
     // Cross-agent resume handoff: seed the incoming agent with a brief distilled
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).
     if (initialPrompt) {
-      const staged = stageInitialPrompt(provider, agentCmd, initialPrompt, `handoff-${id}`, userShell);
+      const seeded = withSessionContext(worktreePath, initialPrompt);
+      const staged = stageInitialPrompt(provider, agentCmd, seeded, `handoff-${id}`, userShell);
       agentCmd = staged.agentCmd;
       promptFile = staged.promptFile;
       needsEnter = staged.needsEnter;
@@ -728,7 +734,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     cols: 120,
     rows: 30,
     cwd: worktreePath,
-    env: { ...agentSpawnEnv(), TERM: 'xterm-256color', ...(extraEnv || {}) },
+    env: { ...spawnEnv, TERM: 'xterm-256color', ...(extraEnv || {}) },
   });
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to
@@ -759,6 +765,14 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     require('./repo-intel').ensureEnvLinks(worktreePath);
   } catch (e) {
     console.warn('[repo-intel] env link failed:', e.message);
+  }
+
+  // Every session, not just the one that created the worktree — otherwise a
+  // worktree predating the base's last regeneration starts with stale docs.
+  try {
+    require('./repo-intel').syncIntelIntoWorktree(worktreePath);
+  } catch (e) {
+    console.warn('[repo-intel] worktree conventions sync failed:', e.message);
   }
 
   // Kick off repo-intel generation for the base repo (conventions + import
@@ -919,6 +933,7 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
       try { require('../util/approval-registry').revokeForTask(instance.id); } catch { /* non-fatal */ }
       try { require('../util/notification-gateway').forgetTask(instance.id); } catch { /* non-fatal */ }
       try { forgetTranscript(instance.id); } catch { /* non-fatal */ }
+      try { require('./session-activity').forgetInstance(instance.id); } catch { /* non-fatal */ }
       convertInstanceToShell(instance, exitCode);
       return;
     }
@@ -942,7 +957,7 @@ function convertInstanceToShell(inst, exitCode) {
     cols: inst.pty.cols || 120,
     rows: inst.pty.rows || 30,
     cwd: inst.worktreePath,
-    env: { ...process.env, TERM: 'xterm-256color' },
+    env: { ...process.env, TERM: 'xterm-256color', ...sessionNotesEnv(inst.worktreePath, id) },
   });
 
   inst.pty = ptyProc;

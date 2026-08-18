@@ -28,6 +28,7 @@ Klaussy/
 # Playwright e2e artifacts
 playwright-report/
 test-results/
+e2e-artifacts/
 .playwright/
 # klaussy outputs
 pr-description.md

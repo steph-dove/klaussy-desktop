@@ -51,6 +51,12 @@ require('./main/ipc/pr-review-checks');
 require('./main/ipc/pr-review-comments');
 require('./main/ipc/ollama');
 require('./main/ipc/token-usage');
+require('./main/ipc/session-context');
+
+// Wired here so session-activity never imports the instances map back and closes a cycle.
+require('./main/state/session-activity').start(
+  () => [...require('./main/state/instances').instances.values()],
+);
 
 require('./main/bootstrap/error-reporter').install();
 require('./main/bootstrap/app-events').install();

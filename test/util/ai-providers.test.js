@@ -82,6 +82,24 @@ test('remote backends declare themselves (special sandbox agents)', () => {
   }
 });
 
+// Codex's sandbox counts `.git` as outside the project and rejects the write
+// ("patch rejected: writing outside of the project"), so without this grant it
+// can read session notes but never contribute one.
+test('codex gets the session notes dir as a writable root', () => {
+  const p = providers.getProvider('codex');
+  const cmd = p.buildInteractiveCmd('codex', { notesDir: '/repo/.git/klaussy-session/notes' });
+  assert.match(cmd, /--add-dir "\/repo\/\.git\/klaussy-session\/notes"/);
+
+  const both = p.buildInteractiveCmd('codex', {
+    sessionDirs: ['/repo/sibling'],
+    notesDir: '/repo/.git/klaussy-session/notes',
+  });
+  assert.match(both, /--add-dir "\/repo\/sibling"/);
+  assert.match(both, /--add-dir "\/repo\/\.git\/klaussy-session\/notes"/);
+
+  assert.equal(p.buildInteractiveCmd('codex', {}), 'codex');
+});
+
 test('nemesis8 runs `nemesis8 interactive` from the picked gateway profile', () => {
   const p = providers.getProvider('nemesis8');
   // localhost/empty → local Docker (no --remote); a real host delegates via
