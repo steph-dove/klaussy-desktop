@@ -244,6 +244,81 @@ test('an old note is kept and still listed', () => {
   assert.ok(fs.existsSync(stale), 'notes are never deleted behind your back');
 });
 
+test('provenance is written in the OKF actor convention', () => {
+  const repo = makeRepo();
+  const note = writeSessionNote(repo, { id: 'prov', agent: 'gemini', provider: 'klaussy', content: 'x' });
+
+  assert.equal(note.metadata.generated.by, 'klaussy/gemini');
+  assert.equal(note.metadata.generated.at, note.metadata.timestamp);
+
+  const [read] = listSessionNotes(repo);
+  assert.equal(read.metadata.generated.by, 'klaussy/gemini');
+  assert.equal(read.metadata.agent, 'gemini', 'the drawer still gets an agent');
+  assert.equal(read.metadata.provider, 'klaussy');
+});
+
+test('a note using the legacy agent and provider keys still reads', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  fs.writeFileSync(path.join(dir, 'legacy.md'), [
+    '---', 'agent: claude-code', 'provider: anthropic', '---', 'port moved',
+  ].join('\n'));
+
+  const [note] = listSessionNotes(repo);
+  assert.equal(note.metadata.agent, 'claude-code');
+  assert.equal(note.trust, 'unverified');
+  assert.match(buildSessionContextSummary(repo), /\[Agent: claude-code \(anthropic\)\]/);
+});
+
+// OKF writes provenance as a flow mapping, which an agent will rarely quote.
+test('an unquoted flow mapping parses', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  fs.writeFileSync(path.join(dir, 'flow.md'), [
+    '---',
+    'type: session-note',
+    'generated: { by: reference_agent/gemini-2.5-pro, at: 2026-06-20T22:53:05Z }',
+    '---',
+    'written by another tool',
+  ].join('\n'));
+
+  const [note] = listSessionNotes(repo);
+  assert.equal(note.metadata.generated.by, 'reference_agent/gemini-2.5-pro');
+  assert.equal(note.metadata.generated.at, '2026-06-20T22:53:05Z');
+  assert.equal(note.metadata.agent, 'gemini-2.5-pro', 'actor splits into a display name');
+});
+
+test('trust tiers follow the spec', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  const write = (name, verified) => fs.writeFileSync(path.join(dir, name),
+    `---\ntype: session-note\nagent: a\n${verified}---\nclaim\n`);
+
+  write('none.md', '');
+  write('machine.md', 'verified: { by: process:nightly, at: 2026-08-17T09:00:00Z }\n');
+  write('human.md', 'verified: { by: human:sdover, at: 2026-08-17T09:00:00Z }\n');
+
+  const byId = Object.fromEntries(listSessionNotes(repo).map((n) => [n.id, n.trust]));
+  assert.equal(byId.none, 'unverified');
+  assert.equal(byId.machine, 'machine-confirmed');
+  assert.equal(byId.human, 'human-reviewed');
+
+  const summary = buildSessionContextSummary(repo);
+  assert.match(summary, /\[human-reviewed\]/);
+  assert.ok(!summary.includes('[unverified]'), 'the norm is not worth labelling');
+});
+
+test('a note marked deprecated is kept but withheld from prompts', () => {
+  const repo = makeRepo();
+  writeSessionNote(repo, { id: 'old-plan', content: 'we are going with option A', status: 'deprecated' });
+  writeSessionNote(repo, { id: 'new-plan', content: 'option B in the end' });
+
+  assert.equal(listSessionNotes(repo).length, 2, 'still on disk and in the drawer');
+  const summary = buildSessionContextSummary(repo);
+  assert.match(summary, /option B in the end/);
+  assert.ok(!summary.includes('option A'), 'superseded notes do not reach a prompt');
+});
+
 test('every note carries the one field OKF requires', () => {
   const repo = makeRepo();
   const note = writeSessionNote(repo, { id: 'typed', content: 'x' });

@@ -91,15 +91,30 @@ function serializeFrontmatter(meta) {
   return lines.join('\n');
 }
 
+const unquote = (s) => s.trim().replace(/^['"]|['"]$/g, '');
+
+// A flow mapping is only JSON when an agent quotes it, so split each pair on the
+// FIRST colon — an actor is itself colon-shaped (`human:sdover`).
+function parseFlowMap(body) {
+  const out = {};
+  for (const pair of body.split(',')) {
+    const idx = pair.indexOf(':');
+    if (idx === -1) continue;
+    const key = unquote(pair.slice(0, idx));
+    if (key) out[key] = unquote(pair.slice(idx + 1));
+  }
+  return Object.keys(out).length ? out : body.trim();
+}
+
 // Notes are hand-written by agents, so a flow sequence arrives as often
 // unquoted (`tags: [ports]`) as valid JSON (`tags: ["ports"]`).
 function parseScalar(raw) {
   try { return JSON.parse(raw); } catch { /* not JSON — keep reading */ }
+  const map = raw.match(/^\{(.*)\}$/s);
+  if (map) return parseFlowMap(map[1]);
   const flow = raw.match(/^\[(.*)\]$/s);
   if (!flow) return raw;
-  return flow[1].split(',')
-    .map((item) => item.trim().replace(/^['"]|['"]$/g, ''))
-    .filter(Boolean);
+  return flow[1].split(',').map(unquote).filter(Boolean);
 }
 
 function parseFrontmatter(content) {
@@ -162,12 +177,14 @@ function writeSessionNote(worktreePath, noteData) {
   const id = sanitizeSegment(noteData.id || generatedId, generatedId);
   const filePath = path.join(dir, `${id}.md`);
 
+  const agent = noteData.agent || 'unknown';
+  const provider = noteData.provider || 'unknown';
   const metadata = {
     type: noteData.type || NOTE_TYPE,
     id,
     session_id: noteData.session_id || 'default',
-    agent: noteData.agent || 'unknown',
-    provider: noteData.provider || 'unknown',
+    // OKF's actor convention: one string, `<provider>/<agent>`.
+    generated: { by: `${provider}/${agent}`, at: timestamp },
     worktree: worktreePath || '',
     timestamp,
     stale_after: staleAfter(timestamp),
@@ -175,6 +192,8 @@ function writeSessionNote(worktreePath, noteData) {
     tags: Array.isArray(noteData.tags) ? noteData.tags : [],
   };
   if (noteData.title) metadata.title = noteData.title;
+  if (noteData.status) metadata.status = noteData.status;
+  if (noteData.verified) metadata.verified = noteData.verified;
 
   const titleHeader = noteData.title ? `# ${noteData.title}\n\n` : '';
   const bodyText = noteData.content || noteData.body || '';
@@ -191,6 +210,25 @@ function writeSessionNote(worktreePath, noteData) {
   };
 }
 
+// Back-fill the agent/provider spelling readers still use, leaving a legacy
+// note's own keys intact.
+function normalizeActor(metadata) {
+  const by = metadata.generated && metadata.generated.by;
+  if (!by || metadata.agent) return;
+  const slash = String(by).indexOf('/');
+  metadata.provider = slash === -1 ? '' : by.slice(0, slash);
+  metadata.agent = slash === -1 ? by : by.slice(slash + 1);
+}
+
+// OKF derives trust from `verified` alone: absent means nobody has confirmed it.
+function trustOf(metadata) {
+  const raw = metadata && metadata.verified;
+  const entries = Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  if (!entries.length) return 'unverified';
+  const human = entries.some((e) => /^human:/.test(String((e && e.by) || '')));
+  return human ? 'human-reviewed' : 'machine-confirmed';
+}
+
 function listSessionNotes(worktreePath) {
   const dir = ensureSessionNotesDir(worktreePath);
   const files = fs.readdirSync(dir).filter((f) => f.endsWith('.md'));
@@ -201,9 +239,11 @@ function listSessionNotes(worktreePath) {
       const filePath = path.join(dir, file);
       const content = fs.readFileSync(filePath, 'utf8');
       const { metadata, body } = parseFrontmatter(content);
+      normalizeActor(metadata);
       // The documented frontmatter carries no timestamp, so mtime is what keeps
       // newest-first ordering meaningful.
-      const stamped = new Date(metadata.timestamp || 0).getTime();
+      const generatedAt = metadata.generated && metadata.generated.at;
+      const stamped = new Date(metadata.timestamp || generatedAt || 0).getTime();
       const writtenAt = stamped || fs.statSync(filePath).mtimeMs;
 
       notes.push({
@@ -212,6 +252,7 @@ function listSessionNotes(worktreePath) {
         metadata,
         body,
         writtenAt,
+        trust: trustOf(metadata),
       });
     } catch {
       // skip unparseable / already-removed files
@@ -236,18 +277,23 @@ function buildSessionContextSummary(worktreePath) {
   const now = Date.now();
   const cutoff = now - NOTE_FRESH_MS;
   const notes = listSessionNotes(worktreePath)
-    .filter((n) => n.writtenAt >= cutoff && !declaredStale(n.metadata, now));
+    .filter((n) => n.writtenAt >= cutoff
+      && !declaredStale(n.metadata, now)
+      // A note whose author marked it superseded is history, not current state.
+      && (n.metadata || {}).status !== 'deprecated');
   if (!notes.length) return '';
 
   const items = notes.map((n, i) => {
     const meta = n.metadata || {};
     const agentInfo = meta.agent ? `[Agent: ${meta.agent}${meta.provider ? ` (${meta.provider})` : ''}]` : '';
+    // Unverified is the norm, so labelling it on every note would be noise.
+    const trustInfo = n.trust && n.trust !== 'unverified' ? ` [${n.trust}]` : '';
     const files = formatList(meta.affected_files);
     const tags = formatList(meta.tags);
     const filesInfo = files ? `\nAffected files: ${files}` : '';
     const tagsInfo = tags ? `\nTags: ${tags}` : '';
     const when = meta.timestamp || new Date(n.writtenAt).toISOString();
-    return `--- Note ${i + 1} (${when}) ${agentInfo} ---${filesInfo}${tagsInfo}\n${n.body}`;
+    return `--- Note ${i + 1} (${when}) ${agentInfo}${trustInfo} ---${filesInfo}${tagsInfo}\n${n.body}`;
   });
 
   // Drop whole notes from the oldest end rather than truncating mid-note, which
