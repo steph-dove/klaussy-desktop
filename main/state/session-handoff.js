@@ -142,14 +142,16 @@ function pickSummarizer(preferredMode, config) {
 // the machine; an installed agent covers a stopped or base-only Ollama, and
 // `summarizeLocally: false` inverts the order.
 async function runHeadless(prompt, preferredMode) {
-  const localFirst = loadConfig().summarizeLocally !== false;
+  const cfg = loadConfig();
+  const localFirst = cfg.summarizeLocally !== false;
+  const prefer = (cfg.agentModel || {})[preferredMode];
   if (localFirst) {
-    const local = await require('./ollama').generateText(prompt).catch(() => '');
+    const local = await require('./ollama').generateText(prompt, { prefer }).catch(() => '');
     if (local) return local;
   }
   const viaCli = await runViaCli(prompt, preferredMode);
   if (viaCli || localFirst) return viaCli;
-  return require('./ollama').generateText(prompt).catch(() => '');
+  return require('./ollama').generateText(prompt, { prefer }).catch(() => '');
 }
 
 // Runs one prompt through a non-gated agent; resolves '' on any failure or timeout.

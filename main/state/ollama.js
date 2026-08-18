@@ -125,31 +125,48 @@ function buildRepoFimPrompt({ repoName, filePath, prefix, suffix, snippets }) {
   return parts.join('\n');
 }
 
-// NOT getModel(): that is the `-base` FIM model, which continues text rather than obeying it.
-async function pickChatModel() {
-  const pinned = loadConfig().ollamaSummaryModel;
-  if (pinned) return pinned;
+// A `-base` tag is the FIM autocomplete model: it continues text rather than
+// obeying it, so it can never be a summarizer — and it is the tag most likely
+// to be loaded, since inline completion keeps it warm.
+const isBaseModel = (name) => /-base(:|$)/.test(name || '');
+
+// Config stores agent models with a provider prefix in some surfaces.
+const bareModel = (name) => String(name || '').replace(/^ollama\//, '');
+
+async function ollamaGet(endpointPath, timeoutMs = 1500) {
   try {
-    // Short: this now runs before every summary, so a stopped server must fail
-    // fast enough to fall through to an installed agent rather than stall it.
     const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 1500);
-    const res = await fetch(`${getBaseUrl()}/api/tags`, { signal: ctrl.signal });
+    const to = setTimeout(() => ctrl.abort(), timeoutMs);
+    const res = await fetch(`${getBaseUrl()}${endpointPath}`, { signal: ctrl.signal });
     clearTimeout(to);
     if (!res.ok) return null;
     const body = await res.json();
-    const names = (Array.isArray(body.models) ? body.models : []).map((m) => m.name);
-    const preferred = loadConfig().agentModel && loadConfig().agentModel.ollama;
-    if (preferred && names.includes(preferred) && !/-base\b/.test(preferred)) return preferred;
-    return names.find((n) => !/-base(:|$)/.test(n)) || null;
+    return (Array.isArray(body.models) ? body.models : []).map((m) => m.name).filter(Boolean);
   } catch {
     return null;
   }
 }
 
+// Prefers a model already in play, since a cold one costs a full load; null
+// when only base models are installed.
+async function pickChatModel({ prefer } = {}) {
+  const cfg = loadConfig();
+  if (cfg.ollamaSummaryModel) return cfg.ollamaSummaryModel;
+
+  const installed = await ollamaGet('/api/tags');
+  if (!installed) return null;
+  const usable = (name) => name && !isBaseModel(name) && installed.includes(name);
+
+  const wanted = bareModel(prefer || (cfg.agentModel && cfg.agentModel.ollama));
+  if (usable(wanted)) return wanted;
+
+  const loaded = (await ollamaGet('/api/ps')) || [];
+  return loaded.find(usable) || installed.find((n) => !isBaseModel(n)) || null;
+}
+
 // Best-effort prose ('' on any failure); num_ctx must be explicit or Ollama caps at 4096.
-async function generateText(prompt, { timeoutMs = 60000, numCtx = DEFAULT_NUM_CTX, numPredict = 400 } = {}) {
-  const model = await pickChatModel();
+async function generateText(prompt, { timeoutMs = 60000, numCtx = DEFAULT_NUM_CTX, numPredict = 400, prefer } = {}) {
+  const model = await pickChatModel({ prefer });
   if (!model) return '';
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
