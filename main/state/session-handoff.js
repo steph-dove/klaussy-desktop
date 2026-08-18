@@ -138,14 +138,25 @@ function pickSummarizer(preferredMode, config) {
   return null;
 }
 
+// Summaries go to the local model first so this routine work stays free and on
+// the machine; an installed agent covers a stopped or base-only Ollama, and
+// `summarizeLocally: false` inverts the order.
+async function runHeadless(prompt, preferredMode) {
+  const localFirst = loadConfig().summarizeLocally !== false;
+  if (localFirst) {
+    const local = await require('./ollama').generateText(prompt).catch(() => '');
+    if (local) return local;
+  }
+  const viaCli = await runViaCli(prompt, preferredMode);
+  if (viaCli || localFirst) return viaCli;
+  return require('./ollama').generateText(prompt).catch(() => '');
+}
+
 // Runs one prompt through a non-gated agent; resolves '' on any failure or timeout.
-function runHeadless(prompt, preferredMode) {
+function runViaCli(prompt, preferredMode) {
   return new Promise((resolve) => {
     const picked = pickSummarizer(preferredMode, loadConfig());
-    // No agent installed: summarize locally, so the prompt never leaves the machine.
-    if (!picked) {
-      return resolve(require('./ollama').generateText(prompt).catch(() => ''));
-    }
+    if (!picked) return resolve('');
     const { prov, bin } = picked;
     // Windows agent CLIs are .cmd shims: spawn() can't run them, so summaries came
     // back empty until spawnHeadlessAgent's shell + stdin path.

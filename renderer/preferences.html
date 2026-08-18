@@ -667,6 +667,12 @@
       <div class="field-hint">Right before a commit, your agent tightens the comments it added so they stay short: regular comments to at most two sentences (ideally one), docstrings to at most five — and deletes ones that just restate the code. It only touches comments on the lines you're committing, never your code, and leaves license headers and pragmas (eslint-disable, @ts-ignore, TODOs) alone. Runs through the same pre-commit hook. On by default; uncheck to leave comments as written.</div>
 
       <div class="field">
+        <label>Summarize session notes on this machine</label>
+        <input type="checkbox" id="pref-summarize-locally" />
+      </div>
+      <div class="field-hint">Session notes and cross-agent handoff briefs are written by a model. With this on, that runs against your local Ollama server, so the summarizing costs nothing and the text never leaves this machine — an installed agent (Claude, Codex, …) covers only when Ollama is stopped or has no instruction-following model. Uncheck to use the installed agent first, which gives better summaries at the cost of tokens. On by default.</div>
+
+      <div class="field">
         <label>Share session notes between active agents</label>
         <input type="checkbox" id="pref-session-activity" />
       </div>

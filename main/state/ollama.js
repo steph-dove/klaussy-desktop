@@ -130,7 +130,12 @@ async function pickChatModel() {
   const pinned = loadConfig().ollamaSummaryModel;
   if (pinned) return pinned;
   try {
-    const res = await fetch(`${getBaseUrl()}/api/tags`);
+    // Short: this now runs before every summary, so a stopped server must fail
+    // fast enough to fall through to an installed agent rather than stall it.
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 1500);
+    const res = await fetch(`${getBaseUrl()}/api/tags`, { signal: ctrl.signal });
+    clearTimeout(to);
     if (!res.ok) return null;
     const body = await res.json();
     const names = (Array.isArray(body.models) ? body.models : []).map((m) => m.name);
