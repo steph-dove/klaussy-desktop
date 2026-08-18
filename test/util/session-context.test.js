@@ -244,6 +244,42 @@ test('an old note is kept and still listed', () => {
   assert.ok(fs.existsSync(stale), 'notes are never deleted behind your back');
 });
 
+test('every note carries the one field OKF requires', () => {
+  const repo = makeRepo();
+  const note = writeSessionNote(repo, { id: 'typed', content: 'x' });
+
+  assert.equal(note.metadata.type, 'session-note');
+  const onDisk = parseFrontmatter(fs.readFileSync(note.filePath, 'utf8')).metadata;
+  assert.equal(onDisk.type, 'session-note');
+});
+
+test('the published expiry never precedes the freshness window', () => {
+  const repo = makeRepo();
+  const almostStale = new Date(Date.now() - NOTE_FRESH_MS + 3600000).toISOString();
+  const note = writeSessionNote(repo, { id: 'edge', content: 'still live', timestamp: almostStale });
+
+  assert.match(note.metadata.stale_after, /^\d{4}-\d{2}-\d{2}$/);
+  const declared = new Date(`${note.metadata.stale_after}T00:00:00Z`).getTime();
+  assert.ok(declared > Date.now(), 'a live note must not publish a past expiry');
+  assert.match(buildSessionContextSummary(repo), /still live/);
+});
+
+test('a note that declares itself stale is not injected, whatever its age', () => {
+  const repo = makeRepo();
+  const dir = ensureSessionNotesDir(repo);
+  fs.writeFileSync(path.join(dir, 'expired.md'), [
+    '---',
+    'type: session-note',
+    'agent: some-other-tool',
+    'stale_after: 2020-01-01',
+    '---',
+    'this claim expired years ago',
+  ].join('\n'));
+
+  assert.equal(listSessionNotes(repo).length, 1, 'still on disk and in the drawer');
+  assert.equal(buildSessionContextSummary(repo), '', 'but not in an agent prompt');
+});
+
 test('a note past the freshness window is not injected into prompts', () => {
   const repo = makeRepo();
   const old = new Date(Date.now() - NOTE_FRESH_MS - 60000).toISOString();

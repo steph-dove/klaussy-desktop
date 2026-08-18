@@ -13,6 +13,10 @@ const notesDirCache = new Map(); // worktreePath -> notes dir
 // gates prompt injection only, where an agent mid-task cannot tell a
 // three-week-old claim from a current one.
 const NOTE_FRESH_MS = 72 * 60 * 60 * 1000;
+// OKF requires `type` and nothing else, so a note carrying just this is
+// already conformant (okf.md).
+const NOTE_TYPE = 'session-note';
+const DAY_MS = 24 * 60 * 60 * 1000;
 // Shares the handoff seed with a transcript and a git brief, so notes take a
 // slice comparable to session-handoff's MAX_TRANSCRIPT_CHARS.
 const MAX_SUMMARY_CHARS = 12000;
@@ -134,6 +138,23 @@ function parseFrontmatter(content) {
   return { metadata, body };
 }
 
+// OKF's expiry is a date and the window it describes is not, so round up: a date
+// rounded down calls a note stale while the window still treats it as live.
+function staleAfter(timestamp) {
+  const at = new Date(timestamp).getTime();
+  if (!at) return '';
+  return new Date(at + NOTE_FRESH_MS + DAY_MS).toISOString().slice(0, 10);
+}
+
+// A note may declare its own expiry, including one written by a tool that is not
+// klaussy; an absent or unparseable date just falls through to the window.
+function declaredStale(metadata, now) {
+  const raw = metadata && metadata.stale_after;
+  if (!raw) return false;
+  const day = new Date(`${String(raw).slice(0, 10)}T00:00:00Z`).getTime();
+  return !!day && now >= day;
+}
+
 function writeSessionNote(worktreePath, noteData) {
   const dir = ensureSessionNotesDir(worktreePath);
   const timestamp = noteData.timestamp || new Date().toISOString();
@@ -142,15 +163,18 @@ function writeSessionNote(worktreePath, noteData) {
   const filePath = path.join(dir, `${id}.md`);
 
   const metadata = {
+    type: noteData.type || NOTE_TYPE,
     id,
     session_id: noteData.session_id || 'default',
     agent: noteData.agent || 'unknown',
     provider: noteData.provider || 'unknown',
     worktree: worktreePath || '',
     timestamp,
+    stale_after: staleAfter(timestamp),
     affected_files: Array.isArray(noteData.affected_files) ? noteData.affected_files : [],
     tags: Array.isArray(noteData.tags) ? noteData.tags : [],
   };
+  if (noteData.title) metadata.title = noteData.title;
 
   const titleHeader = noteData.title ? `# ${noteData.title}\n\n` : '';
   const bodyText = noteData.content || noteData.body || '';
@@ -209,8 +233,10 @@ function formatList(value) {
 function buildSessionContextSummary(worktreePath) {
   // Only the fresh ones: an old note stays readable in the drawer, where its
   // age is on screen, but must not reach an agent's prompt as current fact.
-  const cutoff = Date.now() - NOTE_FRESH_MS;
-  const notes = listSessionNotes(worktreePath).filter((n) => n.writtenAt >= cutoff);
+  const now = Date.now();
+  const cutoff = now - NOTE_FRESH_MS;
+  const notes = listSessionNotes(worktreePath)
+    .filter((n) => n.writtenAt >= cutoff && !declaredStale(n.metadata, now));
   if (!notes.length) return '';
 
   const items = notes.map((n, i) => {
