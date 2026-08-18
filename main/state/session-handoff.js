@@ -15,8 +15,9 @@
 // material verbatim — the user chose "summary + git fallback".
 const fs = require('fs');
 const path = require('path');
-const { execFileSync, spawn } = require('child_process');
+const { execFileSync } = require('child_process');
 const { claudeProjectDir } = require('../util/claude-paths');
+const { spawnHeadlessAgent, promptGoesOnStdin } = require('../util/agent-spawn');
 const { getProvider, binFor, displayNameFor } = require('./ai-providers');
 const { loadConfig } = require('../util/config');
 
@@ -133,9 +134,12 @@ function runHeadless(prompt, preferredMode) {
     }
     if (!prov) return resolve('');
     const bin = binFor(prov.id, config);
+    // Windows agent CLIs are .cmd shims: spawn() can't run them, so summaries came
+    // back empty until spawnHeadlessAgent's shell + stdin path.
+    const onStdin = promptGoesOnStdin(bin);
     let run;
     try {
-      run = prov.buildHeadlessRun(bin, { prompt, mode: 'text', model: '' });
+      run = prov.buildHeadlessRun(bin, { prompt, mode: 'text', model: '', promptOnStdin: onStdin });
     } catch {
       return resolve('');
     }
@@ -149,7 +153,11 @@ function runHeadless(prompt, preferredMode) {
       resolve(val);
     };
     try {
-      proc = spawn(bin, run.args, { stdio: ['ignore', 'pipe', 'ignore'] });
+      proc = spawnHeadlessAgent(
+        bin, run.args,
+        { stdio: [onStdin ? 'pipe' : 'ignore', 'pipe', 'ignore'] },
+        run.stdinInput,
+      );
     } catch {
       return resolve('');
     }
