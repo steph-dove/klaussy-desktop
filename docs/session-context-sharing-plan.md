@@ -15,7 +15,7 @@
 
 ### Key Goals
 - **Session-Scoped & Uncommitted:** Context lives in local app storage outside of Git tracking (`~/.klaussy/sessions/<channel>/notes/`).
-- **Vendor-Neutral Format:** Use the Open Knowledge Format (OKF) standard—YAML frontmatter + Markdown body—as the inter-agent data exchange contract.
+- **Vendor-Neutral Format:** Use [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) (OKF) documents—YAML frontmatter + Markdown body—as the inter-agent data exchange contract. OKF requires only `type`; the remaining fields below are our own extensions, which the spec permits (consumers "MUST NOT reject documents with unrecognized fields").
 - **Provider-Agnostic:** Any CLI agent provider spawned by `klaussy-desktop` can easily read and write OKF notes via simple file operations or environment variables.
 
 ---
@@ -62,16 +62,18 @@ meet, which is the one thing this feature exists to prevent.
 `KLAUSSY_SESSION_ID` identifies the writing terminal in note metadata only.
 
 ### 3.2 OKF Note Schema (`<agent-name>_<timestamp>.md`)
-Every session note created by an agent or system service adheres to the following specification:
+Every session note created by an agent or system service carries the following frontmatter. `type` is the OKF-required key; everything else is a klaussy extension.
 
 ```markdown
 ---
+type: session-note
 id: note-1785128240
 session_id: sess_abc123
 agent: claude-code
 provider: anthropic
-worktree: feature/auth-refactor
+worktree: /Users/me/klaussy/sessions/auth-refactor/api
 timestamp: 2026-07-27T10:00:00Z
+stale_after: 2026-07-31
 affected_files:
   - main/ipc/auth.js
   - renderer/components/login.jsx
