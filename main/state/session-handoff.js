@@ -18,7 +18,8 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { spawnHeadlessAgent, promptGoesOnStdin } = require('../util/agent-spawn');
-const { getProvider, binFor, displayNameFor } = require('./ai-providers');
+const { whichBinSync } = require('../util/platform');
+const { getProvider, binFor, displayNameFor, PROVIDER_IDS } = require('./ai-providers');
 const { loadConfig } = require('../util/config');
 
 const MAX_TRANSCRIPT_CHARS = 24000; // keep the most-recent tail when longer
@@ -118,22 +119,29 @@ function summarize(material, incomingMode) {
   return runHeadless(summaryPrompt(material), incomingMode);
 }
 
+// Installed as well as suitable: the registry describes claude whether or not
+// it is on the machine, so choosing it blindly left Codex/Kimi users with none.
+function pickSummarizer(preferredMode, config) {
+  const order = ['claude', preferredMode, ...PROVIDER_IDS]
+    .filter((id, i, arr) => id && arr.indexOf(id) === i);
+  for (const id of order) {
+    const p = getProvider(id);
+    if (!p || p.remoteBackend || p.worktreeConsent) continue;
+    if (typeof p.buildHeadlessRun !== 'function') continue;
+    const bin = binFor(id, config);
+    if (!bin) continue;
+    const found = /[\\/]/.test(bin) ? fs.existsSync(bin) : !!whichBinSync(bin);
+    if (found) return { prov: p, bin };
+  }
+  return null;
+}
+
 // Runs one prompt through a non-gated agent; resolves '' on any failure or timeout.
 function runHeadless(prompt, preferredMode) {
   return new Promise((resolve) => {
-    const config = loadConfig();
-    const candidates = ['claude', preferredMode].filter((id, i, a) => id && a.indexOf(id) === i);
-    let prov = null;
-    for (const id of candidates) {
-      const p = getProvider(id);
-      // skip gated agents as summarizers (they'd prompt for folder trust)
-      if (p && typeof p.buildHeadlessRun === 'function' && (id === 'claude' || !p.worktreeConsent)) {
-        prov = p;
-        break;
-      }
-    }
-    if (!prov) return resolve('');
-    const bin = binFor(prov.id, config);
+    const picked = pickSummarizer(preferredMode, loadConfig());
+    if (!picked) return resolve('');
+    const { prov, bin } = picked;
     // Windows agent CLIs are .cmd shims: spawn() can't run them, so summaries came
     // back empty until spawnHeadlessAgent's shell + stdin path.
     const onStdin = promptGoesOnStdin(bin);

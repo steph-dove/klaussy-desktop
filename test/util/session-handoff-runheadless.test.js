@@ -45,3 +45,29 @@ test('a failed run returns nothing even when it printed to stdout', async () => 
     assert.equal(await runHeadless('anything', 'claude'), '');
   });
 });
+
+// The registry always has a claude provider, so picking it blindly left a
+// machine running only Codex/opencode/Kimi with no summary at all.
+test('falls through to an installed agent when claude is missing', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-fallthrough-'));
+  const bin = path.join(dir, 'stub');
+  fs.writeFileSync(bin, '#!/bin/sh\necho "codex summarized it"\n');
+  fs.chmodSync(bin, 0o755);
+
+  const claude = providers.getProvider('claude');
+  const codex = providers.getProvider('codex');
+  const origClaudeBin = claude.defaultBin;
+  const origCodexBin = codex.defaultBin;
+  const origCodexBuild = codex.buildHeadlessRun;
+  claude.defaultBin = path.join(dir, 'definitely-not-installed');
+  codex.defaultBin = bin;
+  codex.buildHeadlessRun = () => ({ args: [], outputMode: 'passthrough' });
+  try {
+    assert.equal(await runHeadless('anything', 'codex'), 'codex summarized it');
+  } finally {
+    claude.defaultBin = origClaudeBin;
+    codex.defaultBin = origCodexBin;
+    codex.buildHeadlessRun = origCodexBuild;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

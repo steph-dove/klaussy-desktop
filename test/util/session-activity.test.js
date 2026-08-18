@@ -223,6 +223,25 @@ test('a scoped capture ignores agents in other sessions', async () => {
   }
 });
 
+// On by default is a deliberate product decision, not a side effect of the
+// `!== false` check — pin it so nobody flips it by "tidying" that comparison.
+test('it is on when the setting has never been touched', async () => {
+  const { loadConfig, saveConfig } = require('../../main/util/config');
+  const wt = workspace('default');
+  const dir = ensureSessionNotesDir(wt);
+  const cfg = loadConfig();
+  try {
+    const without = { ...cfg };
+    delete without.sessionActivityNotes;
+    await saveConfig(without);
+    assert.equal((await activity.captureActivity([agent(60, wt, LOTS), agent(61, wt, LOTS)])).length, 2);
+  } finally {
+    await saveConfig(cfg);
+    [60, 61].forEach(activity.forgetInstance);
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
+
 test('the pref switches it off without a restart', async () => {
   const { loadConfig, saveConfig } = require('../../main/util/config');
   const wt = workspace('off');
