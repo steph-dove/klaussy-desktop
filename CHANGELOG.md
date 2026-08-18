@@ -2,6 +2,40 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.16.0
+
+### 🔀 Agents in one session can tell each other what they did
+
+Two agents working the same session were blind to each other. One would move a
+port, change a payload shape or settle on a layout, and the other would carry on
+against the old assumption — or redo the same work — because nothing carried
+between them. Klaussy now gives every session a shared notes channel that any
+agent can read and write.
+
+- **Notes tab.** A new tab in the right-hand panel lists what agents in this
+  session have reported: who wrote it, how long ago, the files it touches. The
+  channel is shared by every repo in a session, so a note written in `api` is
+  read in `web`. Notes live outside the repository, so they never dirty
+  `git status` and cannot be committed by accident.
+- **Klaussy writes them too.** Agents volunteer notes for changes they recognise
+  — a port, a schema, a new required env var — but produce nothing for design
+  and spec work, which is often the work most worth handing over. So Klaussy
+  summarizes each active agent for the others every few minutes, and records a
+  note whenever a session is handed to a different agent. **Capture now** in the
+  drawer runs a pass immediately.
+- **Summarized on your machine by default.** That summarizing runs against your
+  local Ollama server, using the model already in play, so it costs nothing and
+  the text never leaves your machine. An installed agent covers when Ollama is
+  stopped or has only autocomplete models. Both behaviours have a switch in
+  Preferences.
+- **Notes are kept.** Nothing is deleted behind your back — the drawer shows
+  every note with its age. Only recent ones are passed to agents as current,
+  since an agent mid-task can't tell a three-week-old claim from a live one.
+
+Agents learn the protocol from their own conventions file, so this needs
+`klaussy-agents` 0.28.0 and `klaussy-repo-conventions` 1.8.0 — Klaussy will
+prompt to upgrade if you are behind.
+
 ## 0.14.1
 
 ### 🪟 Local models get a context window they can actually work in
