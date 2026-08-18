@@ -2,6 +2,27 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.16.1
+
+### 📎 Session notes are real OKF documents now
+
+The notes agents leave for each other were described as [Open Knowledge
+Format](https://okf.md/) documents in every repo's `CLAUDE.md` and in the
+session-context skill. They were not. OKF names `type` as the only key it
+actually requires, and ours carried eight fields of their own and not that one,
+so nothing we wrote would have been readable as OKF by anything else.
+
+- Notes now carry `type`, and an explicit `stale_after` expiry date alongside
+  it. Klaussy fills the date in when it writes the note, since an agent has no
+  idea when its own claim stops being true.
+- A note that carries its own expiry is honoured on read, so a note written by
+  some other tool in the same folder ages out on its own terms rather than on
+  ours.
+- Nothing changes for notes already sitting on disk, and nothing is deleted.
+
+Needs `klaussy-agents` 0.28.1 and `klaussy-repo-conventions` 1.8.1, which teach
+the same field to the agents writing notes by hand.
+
 ## 0.16.0
 
 ### 🔀 Agents in one session can tell each other what they did
