@@ -125,6 +125,51 @@ function buildRepoFimPrompt({ repoName, filePath, prefix, suffix, snippets }) {
   return parts.join('\n');
 }
 
+// NOT getModel(): that is the `-base` FIM model, which continues text rather than obeying it.
+async function pickChatModel() {
+  const pinned = loadConfig().ollamaSummaryModel;
+  if (pinned) return pinned;
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/tags`);
+    if (!res.ok) return null;
+    const body = await res.json();
+    const names = (Array.isArray(body.models) ? body.models : []).map((m) => m.name);
+    const preferred = loadConfig().agentModel && loadConfig().agentModel.ollama;
+    if (preferred && names.includes(preferred) && !/-base\b/.test(preferred)) return preferred;
+    return names.find((n) => !/-base(:|$)/.test(n)) || null;
+  } catch {
+    return null;
+  }
+}
+
+// Best-effort prose ('' on any failure); num_ctx must be explicit or Ollama caps at 4096.
+async function generateText(prompt, { timeoutMs = 60000, numCtx = DEFAULT_NUM_CTX, numPredict = 400 } = {}) {
+  const model = await pickChatModel();
+  if (!model) return '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/generate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      signal: ctrl.signal,
+      body: JSON.stringify({
+        model,
+        prompt,
+        stream: false,
+        options: { num_ctx: numCtx, num_predict: numPredict, temperature: 0.2 },
+      }),
+    });
+    if (!res.ok) return '';
+    const json = await res.json();
+    return ((json && json.response) || '').trim();
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Streams a fill-in-middle completion.
 //
 // Two transports: with filePath/snippets we send the repo-level FIM prompt
@@ -598,6 +643,8 @@ module.exports = {
   probe,
   probeNow,
   generateFIM,
+  generateText,
+  pickChatModel,
   warmup,
   getModel,
   getSetupState,

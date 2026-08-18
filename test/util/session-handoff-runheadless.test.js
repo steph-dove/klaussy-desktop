@@ -71,3 +71,26 @@ test('falls through to an installed agent when claude is missing', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// aider ('ollama' in the registry) is excluded from summarizing because it edits files.
+test('falls back to the local Ollama server when nothing is installed', async () => {
+  const ollama = require('../../main/state/ollama');
+  const providers2 = require('../../main/state/ai-providers');
+  const origGen = ollama.generateText;
+  const missing = path.join(os.tmpdir(), 'no-such-agent-binary');
+  const saved = [];
+  for (const id of providers2.PROVIDER_IDS) {
+    const p = providers2.getProvider(id);
+    saved.push([p, p.defaultBin]);
+    p.defaultBin = missing;
+  }
+  let sawPrompt = null;
+  ollama.generateText = async (prompt) => { sawPrompt = prompt; return 'summarized locally by ollama'; };
+  try {
+    assert.equal(await runHeadless('condense this', 'ollama'), 'summarized locally by ollama');
+    assert.equal(sawPrompt, 'condense this');
+  } finally {
+    ollama.generateText = origGen;
+    for (const [p, bin] of saved) p.defaultBin = bin;
+  }
+});

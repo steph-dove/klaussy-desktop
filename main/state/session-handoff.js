@@ -127,6 +127,8 @@ function pickSummarizer(preferredMode, config) {
   for (const id of order) {
     const p = getProvider(id);
     if (!p || p.remoteBackend || p.worktreeConsent) continue;
+    // 'ollama' here is aider, which edits files; the models are reached over HTTP below.
+    if (id === 'ollama') continue;
     if (typeof p.buildHeadlessRun !== 'function') continue;
     const bin = binFor(id, config);
     if (!bin) continue;
@@ -140,7 +142,10 @@ function pickSummarizer(preferredMode, config) {
 function runHeadless(prompt, preferredMode) {
   return new Promise((resolve) => {
     const picked = pickSummarizer(preferredMode, loadConfig());
-    if (!picked) return resolve('');
+    // No agent installed: summarize locally, so the prompt never leaves the machine.
+    if (!picked) {
+      return resolve(require('./ollama').generateText(prompt).catch(() => ''));
+    }
     const { prov, bin } = picked;
     // Windows agent CLIs are .cmd shims: spawn() can't run them, so summaries came
     // back empty until spawnHeadlessAgent's shell + stdin path.
