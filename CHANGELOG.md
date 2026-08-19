@@ -2,6 +2,35 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.17.0
+
+### 🔏 Notes say who wrote them and whether anyone checked
+
+Session notes carried `type` from 0.16.1 but kept hand-rolled versions of three
+things OKF already defines, so a tool that wasn't ours could read the envelope
+and still miss who wrote a note or whether anyone had confirmed it.
+
+- `agent` and `provider` are now one `generated: { by, at }` key, using OKF's
+  actor convention. Klaussy writes `klaussy/gemini`, the harness and the agent
+  it was driving.
+- Trust comes from `verified` alone. A note with no `verified` key is
+  unverified, which is the right state for one an agent just wrote, and a
+  `human:<id>` actor means a person checked it. Only the exception is labelled
+  in the injected block, since stamping "unverified" on every note is noise an
+  agent learns to skip.
+- `status: deprecated` behaves like an expired note, kept in the drawer and
+  withheld from prompts, so a superseded note can say so instead of waiting out
+  `stale_after`.
+- The frontmatter parser reads flow mappings, since OKF writes provenance as
+  `{ by: x, at: y }` and an agent quotes that into valid JSON roughly never.
+  Splitting each pair on its first colon leaves actors like `human:sdover`
+  intact.
+- The older `agent` and `provider` keys are still read, so notes already on
+  disk stay valid.
+
+Needs `klaussy-agents` 0.29.0 and `klaussy-repo-conventions` 1.9.0, which teach
+the same keys to the agents writing notes by hand.
+
 ## 0.16.1
 
 ### 📎 Session notes are real OKF documents now
