@@ -2,6 +2,31 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.17.1
+
+### 🗣 Review comments say less, and errors say something true
+
+Three fixes to what the app posts and what it tells you when GitHub says no.
+
+- **Add-to-PR posted the whole finding.** A two-sentence reason, a
+  `Suggested change:` label, and the block. It now posts one line saying what
+  breaks, then the change. The label is kept only where GitHub doesn't print
+  its own header — a plain fence or a prose fix — since without it those read
+  as a quote of the existing code rather than the proposal.
+- **An empty review took your comments down with it.** When every draft fell
+  through to an issue comment (their lines weren't in the diff) and the summary
+  was blank, the app posted an empty review, GitHub answered 422 with an errors
+  array holding one empty string, and the early return then skipped the
+  comments entirely. They were dropped, not delayed. There is no review to
+  create in that case, so the comments now post on their own. Approve and
+  Request changes are untouched.
+- **A 404 blamed the wrong thing.** A fine-grained PAT in `GH_TOKEN` only
+  reaches repositories it was granted, and GitHub answers for anything else
+  with a plain 404 — so the app said the wrong account was active and pointed
+  at `gh auth switch`. The account was right, and gh ignores that command while
+  an env token is set. The message now names the token and offers `unset` or
+  granting the repo.
+
 ## 0.17.0
 
 ### 🔏 Notes say who wrote them and whether anyone checked
