@@ -325,8 +325,13 @@
     return m ? text.slice(m.index + m[0].length).trim() : text.trim();
   };
 
-  // The prose above the "Suggested change:" label, capped at two sentences: the
-  // "why" that leads the posted comment, not the whole finding.
+  // Periods that do not end a sentence; breaking after one would post a
+  // comment reading "Use e.g." and nothing more.
+  var ABBREV_END = /(?:\b(?:e\.g|i\.e|vs|etc|cf)|(?:^|\s)[A-Za-z])\.$/i;
+
+  // One line saying what's wrong, taken from the prose above the "Suggested
+  // change:" label. First sentence only, with newlines collapsed, so a wrapped
+  // paragraph still posts as a single line.
   PR.findingWhyText = function(f) {
     var text = (f && f.text) || '';
     var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
@@ -335,21 +340,31 @@
       .replace(/^[ \t]*\*\*[^\n]*\*\*[ \t]*$/gm, '')  // severity/category/location line
       .trim();
     if (!prose) return '';
-    var sentences = prose.split(/(?<=[.!?])\s+/).filter(function (s) { return s.trim(); });
-    return sentences.slice(0, 2).join(' ').trim();
+    var breaks = /(?<=[.!?])\s+(?=[A-Z"'`([])/g;
+    var first = prose;
+    var b;
+    while ((b = breaks.exec(prose))) {
+      if (ABBREV_END.test(prose.slice(0, b.index))) continue;
+      first = prose.slice(0, b.index);
+      break;
+    }
+    return first.replace(/\s+/g, ' ').trim();
   };
 
-  // What gets posted to GitHub: the why leads, because a reviewer reading the
-  // comment cold needs the reason before the diff.
+  // One line of why, then the change. GitHub prints its own header only above a
+  // ```suggestion fence, so every other shape needs our label.
   PR.findingCommentBody = function(f) {
-    var why = PR.findingWhyText(f);
     var suggestion = PR.findingSuggestionText(f);
-    if (!suggestion) return why;
     // No label in the text at all means findingSuggestionText returned the
     // whole body, which the why would duplicate.
     if (!/(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '')) return suggestion;
+    var why = PR.findingWhyText(f);
     if (!why) return suggestion;
-    return why + '\n\nSuggested change:\n' + suggestion;
+    if (!suggestion) return why;
+    var labelled = /^```suggestion\b/.test(suggestion)
+      ? suggestion
+      : 'Suggested change:\n' + suggestion;
+    return why + '\n\n' + labelled;
   };
 
   // Add a finding to the pending review. Both paths STAGE into pendingComments
@@ -368,8 +383,8 @@
       return;
     }
 
-    // The why plus the suggested change, staged as the reviewer's own words
-    // (no bot attribution). Severity/location stay on the card as reference.
+    // One line of why plus the change, staged as the reviewer's own words (no
+    // bot attribution). Severity/location stay on the card as reference.
     var attributedBody = PR.findingCommentBody(f);
     var entry = {
       id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),

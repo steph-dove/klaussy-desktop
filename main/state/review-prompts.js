@@ -52,7 +52,7 @@ Rules for the JSON (follow exactly, the parser is strict):
 - title is a short label shown on the card header. Do NOT repeat the severity or location in it.
 - body is the ONLY field posted to GitHub as the comment. Do NOT prefix it with the severity, location, category, or any bracketed header; those render from their own fields. Apply every Voice and style rule to it (no em dashes, no AI tells, terse, opinionated, first person where natural). Write it as if you are the human reviewer leaving the comment.
 - code is the original snippet the comment is about, quoted verbatim. Do NOT put your suggested fix in code; that goes in suggestion.
-- body must open with the reason the change is needed, in one or two sentences, since it is what leads the posted comment above the suggested change. Say what breaks and when, not what the suggestion does — the reader can see that from the diff.
+- body must open with the reason the change is needed, in a single sentence naming both what breaks and when, since only that first sentence leads the posted comment above the suggested change; a second sentence is dropped. Say what breaks, not what the suggestion does, since the reader can see that from the diff.
 - suggestion is the change itself: a fenced \`\`\`suggestion block GitHub can apply, or prose when the fix isn't a literal replacement. Do NOT restate the rationale here; it already leads the comment.
 - Sort findings by severity: Blocker, then High, Medium, Low, Warn, Nit.
 - If there are zero findings, emit an empty findings array and still fill in summary.
