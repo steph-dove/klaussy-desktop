@@ -325,6 +325,10 @@
     return m ? text.slice(m.index + m[0].length).trim() : text.trim();
   };
 
+  // Periods that do not end a sentence; breaking after one would post a
+  // comment reading "Use e.g." and nothing more.
+  var ABBREV_END = /(?:\b(?:e\.g|i\.e|vs|etc|cf)|(?:^|\s)[A-Za-z])\.$/i;
+
   // One line saying what's wrong, taken from the prose above the "Suggested
   // change:" label. First sentence only, with newlines collapsed, so a wrapped
   // paragraph still posts as a single line.
@@ -336,13 +340,19 @@
       .replace(/^[ \t]*\*\*[^\n]*\*\*[ \t]*$/gm, '')  // severity/category/location line
       .trim();
     if (!prose) return '';
-    var first = prose.split(/(?<=[.!?])\s+/).filter(function (s) { return s.trim(); })[0];
-    return String(first || prose).replace(/\s+/g, ' ').trim();
+    var breaks = /(?<=[.!?])\s+(?=[A-Z"'`([])/g;
+    var first = prose;
+    var b;
+    while ((b = breaks.exec(prose))) {
+      if (ABBREV_END.test(prose.slice(0, b.index))) continue;
+      first = prose.slice(0, b.index);
+      break;
+    }
+    return first.replace(/\s+/g, ' ').trim();
   };
 
-  // What posts to GitHub, and what Copy puts on the clipboard: one line of why,
-  // then the change. No label of our own — GitHub prints its own header above a
-  // ```suggestion block.
+  // One line of why, then the change. GitHub prints its own header only above a
+  // ```suggestion fence, so every other shape needs our label.
   PR.findingCommentBody = function(f) {
     var suggestion = PR.findingSuggestionText(f);
     // No label in the text at all means findingSuggestionText returned the
@@ -351,7 +361,10 @@
     var why = PR.findingWhyText(f);
     if (!why) return suggestion;
     if (!suggestion) return why;
-    return why + '\n\n' + suggestion;
+    var labelled = /^```suggestion\b/.test(suggestion)
+      ? suggestion
+      : 'Suggested change:\n' + suggestion;
+    return why + '\n\n' + labelled;
   };
 
   // Add a finding to the pending review. Both paths STAGE into pendingComments

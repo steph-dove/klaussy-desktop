@@ -101,3 +101,25 @@ test('a suggestion with no prose above it posts just the suggestion', () => {
   const bare = { text: 'Suggested change:\n```suggestion\nx = 1;\n```' };
   assert.equal(PR.findingCommentBody(bare), '```suggestion\nx = 1;\n```');
 });
+
+test('a suggestion GitHub will not label keeps ours', () => {
+  const prose = {
+    text: 'Breaks on empty input.\n\nSuggested change:\nGuard the empty case before the loop.',
+  };
+  assert.equal(
+    PR.findingCommentBody(prose),
+    'Breaks on empty input.\n\nSuggested change:\nGuard the empty case before the loop.',
+  );
+  const fenced = { text: 'Wrong order.\n\nSuggested change:\n```\nb();\na();\n```' };
+  assert.equal(
+    PR.findingCommentBody(fenced),
+    'Wrong order.\n\nSuggested change:\n```\nb();\na();\n```',
+  );
+});
+
+test('an abbreviation does not cut the why short', () => {
+  const abbrev = {
+    text: 'Use e.g. the pooled client here. It leaks otherwise.\n\nSuggested change:\nswap it',
+  };
+  assert.equal(PR.findingWhyText(abbrev), 'Use e.g. the pooled client here.');
+});
