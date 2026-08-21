@@ -35,6 +35,22 @@ function parseGhAccount(text) {
   return m ? m[1] : null;
 }
 
+// gh prefers a token in the environment over every account it has stored, so
+// while one of these is set, `gh auth switch` cannot change which credential
+// is used. Returns the variable name in force, or null.
+function envTokenVar() {
+  if (process.env.GH_TOKEN) return 'GH_TOKEN';
+  if (process.env.GITHUB_TOKEN) return 'GITHUB_TOKEN';
+  return null;
+}
+
+// A repo outside a fine-grained PAT's allow-list answers with a plain 404, the
+// same response GitHub gives for a repo that doesn't exist — which is why the
+// account gets blamed for a token's limits.
+function isFineGrainedPat(value) {
+  return /^github_pat_/.test(String(value == null ? '' : value));
+}
+
 // Classify a raw error message. `ctx` may carry { target: 'owner/repo' } for a
 // more specific summary. Returns { kind, summary, fix, retryable }.
 function classifyGhError(raw, ctx = {}) {
@@ -85,9 +101,25 @@ function classifyGhError(raw, ctx = {}) {
     };
   }
   if (has(/could not resolve to a|http 404|not found|resource not accessible|http 403/i)) {
+    const what = ctx.target || 'this repo';
+    const envVar = envTokenVar();
+    if (envVar) {
+      const fine = isFineGrainedPat(process.env[envVar]);
+      return {
+        kind: 'not-found',
+        summary: `GitHub can't see ${what} with the token in $${envVar}.`
+          + (fine ? ' That is a fine-grained PAT, which only reaches repositories it was granted.' : '')
+          + ` gh uses that token instead of any signed-in account, so switching accounts won't help.`,
+        fix: `unset ${envVar}   # gh falls back to the signed-in account\n`
+          + (fine
+            ? `# or grant ${what} to the token at github.com/settings/personal-access-tokens`
+            : `# or reissue the token with access to ${what}`),
+        retryable: false,
+      };
+    }
     return {
       kind: 'not-found',
-      summary: `GitHub can't see ${ctx.target || 'this repo'} for the signed-in account.${acctNote} Likely the wrong gh account is active, or it lacks access.`,
+      summary: `GitHub can't see ${what} for the signed-in account.${acctNote} Likely the wrong gh account is active, or it lacks access.`,
       fix: acct
         ? `gh auth status            # confirm the account\ngh auth switch            # switch to the account with access`
         : 'gh auth login            # sign in with the account that has access',
@@ -118,4 +150,4 @@ function classifyGhError(raw, ctx = {}) {
   };
 }
 
-module.exports = { classifyGhError, activeGhAccount };
+module.exports = { classifyGhError, activeGhAccount, envTokenVar };
