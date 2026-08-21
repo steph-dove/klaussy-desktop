@@ -6,8 +6,8 @@ const assert = require('node:assert/strict');
 // (snippet matching, comment-body composition) touch no DOM, so a stub object is
 // enough to load them, the same trick finding-parser.test.js uses.
 global.window = global.window || {};
-window.PrReview = window.PrReview || {};
-window.PrReview._FP = {
+global.window.PrReview = global.window.PrReview || {};
+global.window.PrReview._FP = {
   sanitizeAiTone: (s) => s,
   parseReviewFindings: () => ({}),
   severityOf: () => 'low',
@@ -15,7 +15,7 @@ window.PrReview._FP = {
 };
 require('../../renderer/pr-review-findings');
 require('../../renderer/pr-review-implement');
-const PR = window.PrReview;
+const PR = global.window.PrReview;
 
 const FILE = [
   'function retry(attempts) {',        // 1
