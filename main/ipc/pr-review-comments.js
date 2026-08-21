@@ -9,6 +9,7 @@ const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, resolveGhEnv, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { humanizeComment } = require('../util/humanize-comment');
+const { isEmptyReview, ghApiErrorMessage } = require('../util/review-payload');
 const {
   prReview, currentRepoPath, sanitizePrReview, broadcastPrReview, fetchThreadsForActive,
 } = require('../state/pr-review');
@@ -263,6 +264,13 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     }),
   };
 
+  // Every draft may have fallen through to an issue comment, leaving an empty
+  // COMMENT review that 422s and drops the issue comments with it.
+  const skipReview = isEmptyReview(payload);
+  if (skipReview && !issueCommentDrafts.some((d) => d.body && d.body.trim())) {
+    return { error: 'Nothing to submit — add a summary or a comment first.' };
+  }
+
   const cwd = currentRepoPath() || require('os').homedir();
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/reviews`;
   // `spawn` is imported at the top of the file.
@@ -274,7 +282,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
       path: c.path, line: c.line, start_line: c.start_line, side: c.side,
     }))));
 
-  const reviewResult = await new Promise((resolve) => {
+  const reviewResult = skipReview ? { ok: true } : await new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
       env: reviewGhEnv(cwd),
@@ -287,13 +295,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     proc.on('exit', (code) => {
       if (code !== 0) {
         // gh often writes JSON errors to stdout on non-zero exit.
-        let msg = stderrBuf.trim();
-        if (stdoutBuf) {
-          try {
-            const parsed = JSON.parse(stdoutBuf);
-            if (parsed.message) msg = parsed.message + (parsed.errors ? ': ' + JSON.stringify(parsed.errors) : '');
-          } catch (_) {}
-        }
+        let msg = ghApiErrorMessage(stdoutBuf, stderrBuf);
         log.warn('[pr-submit-review] failed code=' + code,
           'stderr=' + stderrBuf.trim(), 'stdout=' + stdoutBuf.trim());
         // GitHub blocks approve / request-changes on your own PR. Surface the
@@ -324,6 +326,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   // can retry manually.
   const issueEndpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
   const issueCommentFailures = [];
+  let issueCommentsPosted = 0;
   for (const draft of issueCommentDrafts) {
     if (!draft.body || !draft.body.trim()) continue;
     const res = await new Promise((resolve) => {
@@ -354,12 +357,19 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
       proc.stdin.end();
     });
     if (res.error) issueCommentFailures.push(res.error);
+    else issueCommentsPosted += 1;
   }
 
   if (issueCommentFailures.length) {
+    // With the review skipped, the comments were the whole submission — if none
+    // landed, nothing reached the PR and this is a failure, not a warning.
+    if (skipReview && issueCommentsPosted === 0) {
+      return { error: `Nothing was posted: ${issueCommentFailures.join('; ')}` };
+    }
+    const led = skipReview ? '' : 'Review posted, but ';
     return {
       ok: true,
-      warning: `Review posted, but ${issueCommentFailures.length} follow-up comment(s) failed: ${issueCommentFailures.join('; ')}`,
+      warning: `${led}${issueCommentFailures.length} follow-up comment(s) failed: ${issueCommentFailures.join('; ')}`,
     };
   }
   return { ok: true };
