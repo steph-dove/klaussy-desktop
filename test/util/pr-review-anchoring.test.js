@@ -66,20 +66,30 @@ const FINDING = {
   ].join('\n'),
 };
 
-test('posted body leads with the why, then the suggested change', () => {
+test('posted body is one line of why, then the change, unlabeled', () => {
   const body = PR.findingCommentBody(FINDING);
-  assert.match(body, /^The retry loop eats the 429/);
-  assert.ok(body.indexOf('Suggested change:') > 0, 'suggestion follows the why');
-  assert.ok(body.indexOf('```suggestion') > body.indexOf('Suggested change:'));
-  // The metadata line renders from its own fields; it must not be repeated.
+  assert.equal(
+    body,
+    'The retry loop eats the 429, so a rate-limited call comes back looking fine.'
+      + '\n\n```suggestion\n    if (attempt === last) throw err;\n```',
+  );
+  // No label of our own, and the card's metadata line never posts.
+  assert.doesNotMatch(body, /[Ss]uggested change/);
   assert.doesNotMatch(body, /High · Correctness/);
 });
 
-test('why is capped at two sentences', () => {
-  const wordy = {
-    text: 'One. Two. Three. Four.\n\nSuggested change:\nrename it',
+test('why is one sentence, on one line', () => {
+  const wordy = { text: 'One. Two. Three.\n\nSuggested change:\nrename it' };
+  assert.equal(PR.findingWhyText(wordy), 'One.');
+  const wrapped = {
+    text: 'It drops\nthe error\nsilently. And more.\n\nSuggested change:\nrethrow',
   };
-  assert.equal(PR.findingWhyText(wordy), 'One. Two.');
+  assert.equal(PR.findingWhyText(wrapped), 'It drops the error silently.');
+});
+
+test('a finding with why but no suggestion posts the why alone', () => {
+  const noSuggestion = { text: 'This leaks a handle.\n\nSuggested change:\n' };
+  assert.equal(PR.findingCommentBody(noSuggestion), 'This leaks a handle.');
 });
 
 test('a finding with no suggestion label posts its text unchanged', () => {
