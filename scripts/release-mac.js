@@ -69,6 +69,8 @@ try {
   console.log(`[release:mac] could not switch gh account to ${ghUser}; using current active account.`);
 }
 
+const pendingPromotion = [];
+
 for (const repo of repos) {
   // Create-if-missing: a freshly-tagged release may have no GitHub release
   // object yet, and `gh release upload` fails with "release not found"
@@ -77,16 +79,43 @@ for (const repo of repos) {
     gh(['release', 'view', tag, '--repo', repo]);
     console.log(`[release:mac] ${repo}: release ${tag} exists`);
   } catch {
-    console.log(`[release:mac] ${repo}: creating release ${tag}`);
+    console.log(`[release:mac] ${repo}: creating release ${tag} (prerelease)`);
     const notes = repo.endsWith('/klaussy-desktop-feedback')
       ? `Mirror of ${owner}/${canonicalRepo} ${tag} for auto-updaters on v0.6.0 and earlier.`
       : `Release ${tag}.`;
-    gh(['release', 'create', tag, '--repo', repo, '--title', tag, '--notes', notes], { stdio: 'inherit' });
+    // Prerelease on purpose: this script uploads macOS only, and klaussy.com's
+    // download.js builds its per-platform links from releases/latest, so
+    // publishing here would 404 Windows and Linux until CI caught up.
+    gh(['release', 'create', tag, '--repo', repo, '--title', tag, '--notes', notes, '--prerelease'],
+      { stdio: 'inherit' });
   }
 
   console.log(`[release:mac] ${repo}: uploading macOS artifacts…`);
   gh(['release', 'upload', tag, ...files, '--repo', repo, '--clobber'], { stdio: 'inherit' });
   console.log(`[release:mac] ${repo}: done`);
+
+  // Ask the release what it is rather than assuming this run created it: CI may
+  // have made the prerelease, so the create branch above never ran. On an
+  // unreadable state, assume it needs promoting — a stale download page costs
+  // more than a needless promote command.
+  let isPrerelease = true;
+  try {
+    isPrerelease = !!JSON.parse(
+      gh(['release', 'view', tag, '--repo', repo, '--json', 'isPrerelease'])
+    ).isPrerelease;
+  } catch {
+    console.log(`[release:mac] ${repo}: could not read release state; assuming it needs promoting.`);
+  }
+  if (isPrerelease) pendingPromotion.push(repo);
 }
 
 console.log(`[release:mac] ${tag} macOS artifacts published to all ${repos.length} repos.`);
+
+if (pendingPromotion.length) {
+  console.log(
+    `\n[release:mac] ${tag} is still a PRERELEASE on ${pendingPromotion.length} repo(s), so nothing\n` +
+    `[release:mac] downloads it yet — klaussy.com follows releases/latest. Check every platform's\n` +
+    `[release:mac] artifacts are attached, then promote:\n` +
+    pendingPromotion.map((r) => `  gh release edit ${tag} --repo ${r} --latest --prerelease=false`).join('\n')
+  );
+}
