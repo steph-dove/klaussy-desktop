@@ -255,9 +255,12 @@ window.Sidebar = (function () {
         btn.disabled = true;
         btn.textContent = '...';
         var result;
+        var extraTasks = [];
+        var resumedAll = false;
         try {
           if (wt.savedAgents && wt.savedAgents.length > 1) {
-            result = await window.App.resumeAllSavedAgents(wt);
+            resumedAll = true;
+            result = await window.App.resumeAllSavedAgents(wt, function (t) { extraTasks.push(t); });
           } else if (wt.mode === 'shell') {
             result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
           } else {
@@ -284,10 +287,16 @@ window.Sidebar = (function () {
         window.App.addTaskToUI(result);
         window.App.switchToTask(result.id);
         window.App.restoreUIState(result);
+        extraTasks.forEach(function (t) { window.App.addTaskToUI(t); });
+        // In single layout the extra agents would run with nothing on screen.
+        if (extraTasks.length && window.TerminalManager && TerminalManager.currentLayout() === 'single') {
+          TerminalManager.setLayout(extraTasks.length >= 2 ? 'grid' : 'columns');
+        }
         // The session's other agents were tabs on this task, so they come back
-        // as tabs rather than as sessions of their own.
+        // as tabs rather than as sessions of their own. resumeAllSavedAgents
+        // has already reopened them, so repeating it here would double the tabs.
         var extras = (wt.savedAgents && wt.savedAgents[0] && wt.savedAgents[0].subAgents) || wt.subAgents;
-        if (extras && extras.length && window.TerminalManager) {
+        if (!resumedAll && extras && extras.length && window.TerminalManager) {
           TerminalManager.reopenSubAgents(result.id, extras);
         }
       });
@@ -445,10 +454,19 @@ window.Sidebar = (function () {
         
         for (var i = 0; i < inactiveList.length; i++) {
           var wt = inactiveList[i];
+          var opened = [];
           try {
-            var result = await window.klaus.task.attachWorktree(wt.path, window.App.defaultAgent(), wt.repoPath, wt.branch);
+            var result;
+            if (wt.isSavedSession && wt.savedAgents && wt.savedAgents.length) {
+              // A plain attach would replace every agent the session had with a
+              // single default-agent terminal.
+              result = await window.App.resumeAllSavedAgents(wt, function (t) { opened.push(t); });
+            } else {
+              result = await window.klaus.task.attachWorktree(wt.path, window.App.defaultAgent(), wt.repoPath, wt.branch);
+            }
             if (result && !result.error) {
               window.App.addTaskToUI(result);
+              opened.forEach(function (t) { window.App.addTaskToUI(t); });
               if (i === 0) window.App.switchToTask(result.id);
             }
           } catch (err) {

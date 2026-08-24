@@ -287,11 +287,23 @@ window.App = window.App || {};
     return !!box.checked;
   };
 
-  // Every agent a saved worktree had, restored one at a time: each spawn
-  // rewrites the saved snapshot, and two landing together lose one of the tabs
-  // they were meant to record.
-  App.resumeAllSavedAgents = async function(wt) {
-    var agents = wt.savedAgents || [];
+  // Two saves of the same tab can both survive a session; the same agent on the
+  // same session id is one tab, not two.
+  App.dedupeSavedAgents = function(list) {
+    var seen = {};
+    return (list || []).filter(function (s) {
+      if (!s) return false;
+      var key = (s.mode || '') + '|' + (s.sessionId || '');
+      if (seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+  };
+
+  // One at a time: each spawn rewrites the saved snapshot. Only the first is
+  // returned, so a caller ignoring onExtra leaves the rest with no terminal.
+  App.resumeAllSavedAgents = async function(wt, onExtra) {
+    var agents = App.dedupeSavedAgents(wt.savedAgents);
     var first = null;
     for (var i = 0; i < agents.length; i++) {
       var s = agents[i];
@@ -301,7 +313,8 @@ window.App = window.App || {};
       if (res && res.id && s.subAgents && s.subAgents.length && window.TerminalManager) {
         await TerminalManager.reopenSubAgents(res.id, s.subAgents);
       }
-      if (i === 0) first = res;
+      if (i === 0) { first = res; continue; }
+      if (res && res.id && onExtra) onExtra(res);
     }
     return first;
   };
@@ -608,17 +621,10 @@ window.App = window.App || {};
   // Resume every agent a worktree had open, not just the first one saved: a
   // session is often a Claude tab plus a second agent, and coming back to only
   // one of them loses the other's place.
-  App.resumeSessionWorktree = async function(wt, sessionName, savedList, mode) {
-    var savedForWt = (savedList || []).filter(function (s) { return s && s.worktreePath === wt.path; });
-    // Two saves of the same tab can both survive; the same agent on the same
-    // session id is one tab, not two.
-    var seen = {};
-    savedForWt = savedForWt.filter(function (s) {
-      var key = (s.mode || '') + '|' + (s.sessionId || '');
-      if (seen[key]) return false;
-      seen[key] = true;
-      return true;
-    });
+  App.resumeSessionWorktree = async function(wt, sessionName, savedList, mode, onExtra) {
+    var savedForWt = App.dedupeSavedAgents(
+      (savedList || []).filter(function (s) { return s && s.worktreePath === wt.path; })
+    );
     // Unticking the box, or picking an agent while it is off, is a deliberate
     // choice about this open: one agent, handed off to when it isn't the one
     // that started the session.
@@ -631,7 +637,8 @@ window.App = window.App || {};
       // One at a time: each spawn writes the session snapshot, and two landing
       // together lose one of the tabs they were meant to record.
       var res = await App.resumeSavedAgent(wt, sessionName, savedForWt[i], null, false);
-      if (i === 0) first = res;
+      if (i === 0) { first = res; continue; }
+      if (res && res.id && onExtra) onExtra(res);
     }
     return first;
   };
