@@ -2,6 +2,14 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.18.0
+
+### 🦊 GitLab Merge Request Review & CLI Integration
+
+- **GitLab MR Reviewing**: Review Merge Requests directly in Klaussy Desktop using `glab`. Full parity with GitHub pull request reviews, including diff inspection, comments, draft reviews, and status checks.
+- **PR Picker Source & Metadata Badges**: Added color-coded forge badges (GitHub, GitLab, Bitbucket), repository labels, and author IDs to the PR/MR picker list.
+- **Forge CLI Error Handling & Auth**: Improved error diagnostics for missing `glab` CLI authentication and OAuth tokens.
+
 ## 0.17.1
 
 ### 🗣 Review comments say less, and errors say something true
