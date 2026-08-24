@@ -616,13 +616,14 @@ window.App = window.App || {};
         repo = it.repository.nameWithOwner || it.repository.name || '';
       }
 
+      var repoName = repo.includes('/') ? repo.split('/').pop() : repo;
       var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
       var forgeClass = 'pr-forge-' + forge.toLowerCase();
 
       return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(url) + '">'
         + '<span class="pr-picker-num">#' + AppUtils.escHtml(it.number) + '</span>'
         + '<span class="pr-picker-title" title="' + AppUtils.escAttr(it.title || '') + '">' + AppUtils.escHtml(it.title || '') + '</span>'
-        + (repo ? '<span class="pr-picker-repo-tag" title="' + AppUtils.escAttr(repo) + '">' + AppUtils.escHtml(repo) + '</span>' : '')
+        + (repoName ? '<span class="pr-picker-repo-tag" title="' + AppUtils.escAttr(repo) + '">' + AppUtils.escHtml(repoName) + '</span>' : '')
         + '<span class="pr-picker-forge ' + AppUtils.escAttr(forgeClass) + '">' + AppUtils.escHtml(forge) + '</span>'
         + (author ? '<span class="pr-picker-author" title="' + AppUtils.escAttr(author) + '">' + AppUtils.escHtml(author) + '</span>' : '')
         + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
