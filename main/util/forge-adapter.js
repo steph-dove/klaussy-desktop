@@ -1,4 +1,4 @@
-// Unified Forge Adapter for PR/MR Review operations across GitHub and GitLab.
+// Reshape GitLab API payloads into the PR-review shapes the GitHub path already produces.
 
 const { ghJson, ghText } = require('./gh-json');
 const { glabJson, glabText } = require('./glab-json');
@@ -90,7 +90,6 @@ function transformGitLabDiscussions(discussions) {
         })),
       });
     } else {
-      // General conversation notes
       for (const n of userNotes) {
         issueComments.push({
           databaseId: n.id,

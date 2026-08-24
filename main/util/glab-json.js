@@ -1,5 +1,4 @@
-// Promise wrappers around `glab` CLI.
-// glabJson parses stdout as JSON; glabText returns raw stdout.
+// Promise wrappers around the `glab` CLI, mirroring gh-json.js.
 
 const { execFile } = require('child_process');
 

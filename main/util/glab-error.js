@@ -46,7 +46,6 @@ function classifyGlabError(raw, ctx = {}) {
 
   const has = (re) => re.test(msg) || re.test(lower);
 
-  // Missing glab CLI binary
   if (has(/enoent|command not found|not recognized as an internal or external command|glab: not found|spawn glab enoent/i)) {
     return {
       kind: 'missing-cli',
@@ -56,7 +55,6 @@ function classifyGlabError(raw, ctx = {}) {
     };
   }
 
-  // 5xx Server Error / Outage
   if (has(/http 5\d\d|service unavailable|bad gateway|502 bad gateway|503 service unavailable/i)) {
     return {
       kind: 'outage',
@@ -68,7 +66,6 @@ function classifyGlabError(raw, ctx = {}) {
     };
   }
 
-  // 401 Unauthorized / Bad credentials
   if (has(/401 unauthorized|unauthorized|bad credentials|invalid token|glab auth login|not logged in|authentication failed|no gitlab hosts/i)) {
     return {
       kind: 'auth',
@@ -78,7 +75,6 @@ function classifyGlabError(raw, ctx = {}) {
     };
   }
 
-  // 403 Forbidden / Missing scope
   if (has(/403 forbidden|insufficient.*scope|missing.*scope|access forbidden|permission denied|insufficient_scope/i)) {
     return {
       kind: 'scope',
@@ -88,7 +84,6 @@ function classifyGlabError(raw, ctx = {}) {
     };
   }
 
-  // 404 Not Found
   if (has(/404 not found|project not found|merge request not found|resource not accessible|cannot find/i)) {
     const what = ctx.target || 'this project';
     const envVar = envGlabTokenVar();
@@ -110,7 +105,6 @@ function classifyGlabError(raw, ctx = {}) {
     };
   }
 
-  // Rate limit
   if (has(/rate limit|too many requests|429/i)) {
     return {
       kind: 'rate-limit',
@@ -120,7 +114,6 @@ function classifyGlabError(raw, ctx = {}) {
     };
   }
 
-  // Network error
   if (has(/timeout|etimedout|enotfound|eai_again|getaddrinfo|econnreset|socket hang up|network/i)) {
     return {
       kind: 'network',

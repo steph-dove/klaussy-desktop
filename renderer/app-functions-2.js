@@ -523,7 +523,6 @@ window.App = window.App || {};
     });
     startBtn.addEventListener('click', startFromUrl);
 
-    // Populate the account dropdown from `gh auth status` and `glab auth status`.
     async function populateAccountSelect() {
       var ghRes = null, glabRes = null;
       try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
@@ -733,8 +732,8 @@ window.App = window.App || {};
       }
 
       selectedAccount = target;
-      // Browsing only — do NOT switch gh/glab global active account. We list as
-      // `target` via its token. The global switch happens later when a review is opened.
+      // Browsing only — we list as `target` via its token; the global gh/glab
+      // account switch happens later, when a review is actually opened.
       var opt = accountSelect.options[accountSelect.selectedIndex];
       var needsSignIn = opt && opt.dataset.valid === 'false';
       if (needsSignIn) {

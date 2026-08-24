@@ -4,7 +4,7 @@ const { execFile, execFileSync } = require('child_process');
 const execFileP = require('util').promisify(execFile);
 const { detectForgeFromRemote } = require('./forge-url');
 
-const GLAB_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
+const GLAB_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000;
 const glabTokenCache = new Map(); // key -> { token: string|null, at: ms }
 
 function clearGlabTokenCache() {

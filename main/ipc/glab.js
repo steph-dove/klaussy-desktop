@@ -1,4 +1,4 @@
-// GitLab CLI (glab) IPC surface: account list, switch account, and installation discovery.
+// GitLab CLI (glab) IPC surface: list accounts and switch the active one.
 
 const { execFileSync } = require('child_process');
 const { ipcMain } = require('electron');

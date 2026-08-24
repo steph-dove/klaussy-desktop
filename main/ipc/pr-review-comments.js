@@ -31,7 +31,6 @@ function reviewGlabEnv(cwd) {
   return env;
 }
 
-// General comment on the PR/MR — no line context, just a body.
 ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   const { baseOwner, baseRepo, number, forge, projectPath } = prReview.active;
@@ -103,7 +102,6 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   });
 });
 
-// Patch an existing issue comment.
 ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   const { baseOwner, baseRepo, number, forge, projectPath } = prReview.active;
@@ -167,7 +165,6 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   });
 });
 
-// Patch an existing inline/review comment.
 ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   const { baseOwner, baseRepo, number, forge, projectPath } = prReview.active;
@@ -260,7 +257,6 @@ ipcMain.handle('pr-current-user', async () => {
   }
 });
 
-// Reply to a specific review comment / thread.
 ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   const { baseOwner, baseRepo, number, forge, projectPath, threads } = prReview.active;
@@ -341,7 +337,6 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
   });
 });
 
-// Resolve / unresolve a review thread.
 ipcMain.handle('pr-review-resolve-thread', async (_event, { threadId, resolve }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   if (!threadId) return { error: 'Missing thread id' };
@@ -402,7 +397,6 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     const errors = [];
     let postedCount = 0;
 
-    // Post inline comments via discussions
     for (const c of inlineComments) {
       if (!c.body || !c.body.trim()) continue;
       const pos = {
@@ -478,7 +472,6 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
       }
     }
 
-    // Top-level review body (if provided)
     if (body && body.trim()) {
       const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes`;
       const res = await new Promise((resolve) => {
@@ -507,7 +500,6 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
       else postedCount += 1;
     }
 
-    // Post follow-up issue comments
     for (const draft of issueCommentDrafts) {
       if (!draft.body || !draft.body.trim()) continue;
       const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes`;

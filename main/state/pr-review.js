@@ -137,9 +137,8 @@ function restoreGlabAfterReview() {
   } catch (_) {}
 }
 
-// GitHub PR URLs and GitLab MR URLs encode the base repo/project.
-// Using parseForgeUrl avoids an extra CLI call and works for both the picker path
-// and the paste-URL path.
+// PR/MR URLs already encode the base repo, so the picker and paste-URL paths
+// both get it without an extra CLI call.
 function parseBaseFromUrl(url) {
   if (!url) return null;
   const parsed = parseForgeUrl(url);
@@ -252,7 +251,6 @@ async function fetchThreadsForActive() {
     return;
   }
 
-  // GitHub GraphQL path
   const query = 'query($owner: String!, $repo: String!, $number: Int!) {'
     + '  repository(owner: $owner, name: $repo) {'
     + '    pullRequest(number: $number) {'

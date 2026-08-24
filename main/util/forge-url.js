@@ -1,5 +1,4 @@
-// Forge URL & remote detection utility.
-// Parses and normalizes URLs and git remotes across GitHub, GitLab, and Bitbucket.
+// Parse and normalize PR/MR URLs and git remotes across GitHub, GitLab, and Bitbucket.
 
 function stripGitSuffix(s) {
   return String(s || '').replace(/\.git$/, '');
@@ -11,11 +10,7 @@ function parseForgeUrl(url) {
   if (!url || typeof url !== 'string') return null;
   const trimmed = url.trim();
 
-  // 1. GitLab Merge Request
-  // Formats:
-  // - https://gitlab.com/group/project/-/merge_requests/123
-  // - https://gitlab.com/group/subgroup/project/-/merge_requests/123
-  // - https://gitlab.corp.internal/group/project/merge_requests/123
+  // Project path is greedy so nested subgroups survive; `/-/` is optional on self-hosted.
   const glMatch = trimmed.match(/^https?:\/\/([^/]+)\/(.+?)\/(?:-\/)?merge_requests\/(\d+)(?:[/?#]|$)/i);
   if (glMatch) {
     const host = glMatch[1];
@@ -35,8 +30,7 @@ function parseForgeUrl(url) {
     };
   }
 
-  // 2. GitHub Pull Request
-  // Format: https://github.com/owner/repo/pull/123 (or enterprise github.corp.com)
+  // Host is unanchored so GitHub Enterprise hosts match too.
   const ghMatch = trimmed.match(/^https?:\/\/([^/]+)\/([^/]+)\/([^/]+?)\/pull\/(\d+)(?:[/?#]|$)/i);
   if (ghMatch) {
     const host = ghMatch[1];
@@ -54,8 +48,6 @@ function parseForgeUrl(url) {
     };
   }
 
-  // 3. Bitbucket Pull Request
-  // Format: https://bitbucket.org/workspace/repo/pull-requests/123
   const bbMatch = trimmed.match(/^https?:\/\/([^/]+)\/([^/]+)\/([^/]+?)\/pull-requests\/(\d+)(?:[/?#]|$)/i);
   if (bbMatch) {
     const host = bbMatch[1];
@@ -76,18 +68,11 @@ function parseForgeUrl(url) {
   return null;
 }
 
-// Detect the forge and project path from a git remote URL (SSH or HTTPS).
-// Examples:
-// - git@gitlab.com:org/subgroup/project.git
-// - https://gitlab.com/org/subgroup/project.git
-// - git@github.com:owner/repo.git
-// - https://github.com/owner/repo.git
-// - git@bitbucket.org:workspace/repo.git
+// Detect forge + project path from a git remote URL (SSH or HTTPS form).
 function detectForgeFromRemote(remoteUrl) {
   if (!remoteUrl || typeof remoteUrl !== 'string') return null;
   const trimmed = remoteUrl.trim();
 
-  // HTTPS form: https://<host>/<path>.git
   if (/^https?:\/\//i.test(trimmed)) {
     try {
       const parsed = new URL(trimmed);
@@ -109,7 +94,6 @@ function detectForgeFromRemote(remoteUrl) {
     }
   }
 
-  // SSH form: git@<host>:<path>.git or ssh://git@<host>/<path>.git
   const sshMatch = trimmed.match(/^(?:ssh:\/\/)?(?:[^@]+@)?([^/:]+)[:/](.+)$/i);
   if (sshMatch) {
     const host = sshMatch[1].toLowerCase();

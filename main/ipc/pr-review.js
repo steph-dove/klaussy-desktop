@@ -253,7 +253,6 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     }
   }
 
-  // GitHub path
   if (acctUser) switchGhForReview(acctUser);
   try {
     const [meta, diff] = await Promise.all([
