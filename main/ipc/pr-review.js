@@ -18,9 +18,15 @@ const {
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr, switchGhForReview, restoreGhAfterReview,
+  switchGlabForReview, restoreGlabAfterReview,
 } = require('../state/pr-review');
 const { ghJson, ghText } = require('../util/gh-json');
+const { glabJson, glabText } = require('../util/glab-json');
 const { classifyGhError } = require('../util/gh-error');
+const { classifyGlabError } = require('../util/glab-error');
+const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
+const { normalizeGitLabMr } = require('../util/forge-adapter');
+const { glabEnvForAccount, getGlabToken } = require('../util/glab-exec');
 const { humanizeComment } = require('../util/humanize-comment');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
@@ -35,6 +41,39 @@ require('../state/pr-review').setDeps({ ghJson });
 ipcMain.handle('pr-list', async () => {
   const cwd = currentRepoPath();
   if (!cwd) return { error: 'No active project. Add a project first.' };
+
+  let remoteUrl = '';
+  try {
+    remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString().trim();
+  } catch (_) {}
+  const info = detectForgeFromRemote(remoteUrl);
+
+  if (info && info.forge === 'gitlab') {
+    try {
+      const raw = await glabJson(['mr', 'list', '--output', 'json'], cwd);
+      const prs = (Array.isArray(raw) ? raw : []).map((mr) => {
+        const norm = normalizeGitLabMr(mr, info.host);
+        return {
+          number: norm.number,
+          title: norm.title,
+          author: norm.author,
+          state: norm.state,
+          updatedAt: norm.updatedAt,
+          headRefName: norm.headRefName,
+          baseRefName: norm.baseRefName,
+          isDraft: norm.isDraft,
+          reviewDecision: norm.reviewDecision,
+          url: norm.url,
+        };
+      });
+      return { prs };
+    } catch (err) {
+      const raw = (err.stderr || err.message || '').trim();
+      const cls = classifyGlabError(raw, { target: info.projectPath, host: info.host });
+      return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
+    }
+  }
+
   try {
     const prs = await ghJson([
       'pr', 'list',
@@ -43,9 +82,6 @@ ipcMain.handle('pr-list', async () => {
     ], cwd);
     return { prs };
   } catch (err) {
-    // Classify so the picker can render an access failure (the active gh
-    // account can't see this project's repo) as a soft hint rather than a
-    // scary GraphQL error — the recent list still works regardless.
     const raw = (err.stderr || err.message || '').trim();
     const cls = classifyGhError(raw, {});
     return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
@@ -108,10 +144,18 @@ ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
 });
 
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
-  // gh just needs a valid cwd (any git repo or non-repo dir works for a
-  // URL-targeted call). Falling back to homedir lets reviewers use Klaussy
-  // without first adding a klaussy project.
   const cwd = currentRepoPath() || require('os').homedir();
+  const parsed = parseForgeUrl(url);
+  if (parsed && parsed.forge === 'gitlab') {
+    try {
+      const raw = await glabJson(['mr', 'view', url, '--output', 'json'], cwd);
+      const meta = normalizeGitLabMr(raw, parsed.host);
+      return { meta };
+    } catch (err) {
+      return { error: (err.stderr || err.message || '').trim() };
+    }
+  }
+
   try {
     const meta = await ghJson([
       'pr', 'view', url,
@@ -124,18 +168,92 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
 });
 
 ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
-  // URL-form calls don't need an active project — gh derives the repo from
-  // the URL. The number-only form (used by the picker's "open in current
-  // project" list) does, since gh resolves it against the cwd's origin.
   if (!url && !currentRepoPath()) {
-    return { error: 'Add a project to look up PRs by number, or paste a full PR URL.' };
+    return { error: 'Add a project to look up PRs/MRs by number, or paste a full URL.' };
   }
-  // Opening a review: make the chosen account globally active for the session
-  // (the agent terminals + git need the ambient account). The prior account is
-  // remembered and restored when the review closes.
-  if (account) switchGhForReview(account);
+
   const cwd = currentRepoPath() || require('os').homedir();
+  let forge = 'github';
+  let host = 'github.com';
+  let projectPath = '';
   const target = url || String(number);
+
+  if (url) {
+    const parsed = parseForgeUrl(url);
+    if (parsed) {
+      forge = parsed.forge;
+      host = parsed.host;
+      projectPath = parsed.projectPath;
+    }
+  } else if (cwd) {
+    try {
+      const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString().trim();
+      const info = detectForgeFromRemote(remoteUrl);
+      if (info && info.forge === 'gitlab') {
+        forge = 'gitlab';
+        host = info.host;
+        projectPath = info.projectPath;
+      }
+    } catch (_) {}
+  }
+
+  let acctUser = typeof account === 'string' ? account : (account && account.username);
+  if (typeof account === 'string' && account.startsWith('gitlab:')) {
+    const parts = account.split(':');
+    host = parts[1] || host;
+    acctUser = parts[2] || parts[1];
+    forge = 'gitlab';
+  } else if (typeof account === 'string' && account.startsWith('github:')) {
+    acctUser = account.slice('github:'.length);
+    forge = 'github';
+  }
+
+  if (forge === 'gitlab') {
+    if (acctUser) switchGlabForReview(acctUser, host);
+    try {
+      const [rawMr, diff] = await Promise.all([
+        glabJson(['mr', 'view', target, '--output', 'json'], cwd),
+        glabText(['mr', 'diff', target], cwd),
+      ]);
+      const meta = normalizeGitLabMr(rawMr, host);
+      const base = parseBaseFromUrl(meta.url);
+      const repo = base ? base.projectPath : (projectPath || null);
+
+      const prev = prReview.active;
+      if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
+        const prevWc = webContents.fromId(prev.ownerWcId);
+        if (prevWc && !prevWc.isDestroyed()) { try { prevWc.send('pr-review-state', null); } catch (_) {} }
+        if (prev.popout && !prev.popout.isDestroyed()) { try { prev.popout.webContents.send('pr-review-state', null); } catch (_) {} }
+      }
+
+      prReview.active = {
+        repo,
+        number: meta.number,
+        meta,
+        diff,
+        forge: 'gitlab',
+        host,
+        projectPath: repo,
+        account: acctUser || null,
+        baseOwner: base ? base.owner : null,
+        baseRepo: base ? base.name : null,
+        threads: null,
+        threadsError: null,
+        popout: null,
+        ownerWcId: event.sender.id,
+      };
+      broadcastPrReview();
+      try { pushReviewHistory(meta); } catch (_) {}
+      fetchThreadsForActive();
+      return { ok: true };
+    } catch (err) {
+      const raw = (err.stderr || err.message || '').trim();
+      const cls = classifyGlabError(raw, { target: projectPath, host });
+      return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
+    }
+  }
+
+  if (acctUser) switchGhForReview(acctUser);
   try {
     const [meta, diff] = await Promise.all([
       ghJson([
@@ -146,9 +264,7 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     ]);
     const base = parseBaseFromUrl(meta.url);
     const repo = base ? `${base.owner}/${base.name}` : null;
-    // If a DIFFERENT window owned the previous review, tell it (and its
-    // pop-out) to exit — the review is single-active global state, so it can't
-    // keep showing a review it no longer owns.
+
     const prev = prReview.active;
     if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
       const prevWc = webContents.fromId(prev.ownerWcId);
@@ -157,35 +273,24 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     }
     prReview.active = {
       repo, number: meta.number, meta, diff,
-      account: account || null, // gh account this review is being run under
+      forge: 'github',
+      host: 'github.com',
+      projectPath: repo,
+      account: acctUser || null,
       baseOwner: base ? base.owner : null,
       baseRepo: base ? base.name : null,
-      threads: null, // null = loading, [] = loaded-empty
+      threads: null,
       threadsError: null,
       popout: null,
-      // The window that opened this review owns it — broadcastPrReview targets
-      // only this window (+ its pop-out), so other windows aren't pulled into
-      // PR-review mode.
       ownerWcId: event.sender.id,
     };
     broadcastPrReview();
-
-    // Record this PR in review history (most recent first, deduped by URL,
-    // capped at 20). Separate from load-path so a storage hiccup can't break
-    // the review UI.
     try { pushReviewHistory(meta); } catch (_) {}
-
-    // Fire-and-forget thread fetch; broadcasts again when ready so the renderer
-    // can paint the shell immediately without waiting on the GraphQL round-trip.
     fetchThreadsForActive();
 
     return { ok: true };
   } catch (err) {
     const raw = (err.stderr || err.message || '').trim();
-    // "Could not resolve to a Repository" almost always means the active gh
-    // account can't see the repo (wrong account for a work/org PR). Classify so
-    // the picker can show an account-aware, actionable message + fix instead of
-    // the raw GraphQL error.
     const m = (url || '').match(/[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/pull\/\d+/);
     const cls = classifyGhError(raw, { target: m ? m[1] + '/' + m[2] : null });
     return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
@@ -203,42 +308,51 @@ ipcMain.handle('pr-refresh-threads', async () => {
   return { ok: true };
 });
 
-// "Pull updates" — re-fetch meta+diff from GitHub, refresh comment threads,
-// and (if the PR has an existing worktree) fast-forward it to the latest
-// commit. Single round-trip the renderer can wire to a button.
+// "Pull updates" — re-fetch meta+diff, refresh comment threads,
+// and (if the PR has an existing worktree) fast-forward it.
 ipcMain.handle('pr-pull-updates', async () => {
   if (!prReview.active) return { error: 'No active PR review' };
   const url = prReview.active.meta && prReview.active.meta.url;
   if (!url) return { error: 'Active PR has no URL' };
   const cwd = currentRepoPath() || require('os').homedir();
+  const forge = prReview.active.forge || 'github';
+  const host = prReview.active.host || 'gitlab.com';
 
   let metaError = null;
   try {
-    const [meta, diff] = await Promise.all([
-      ghJson([
-        'pr', 'view', url,
-        '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-      ], cwd),
-      ghText(['pr', 'diff', url], cwd),
-    ]);
-    // Bail if the active PR changed underneath us mid-fetch.
-    if (!prReview.active || prReview.active.meta.url !== url) {
-      return { error: 'Active PR changed during refresh' };
+    if (forge === 'gitlab') {
+      const [rawMr, diff] = await Promise.all([
+        glabJson(['mr', 'view', url, '--output', 'json'], cwd),
+        glabText(['mr', 'diff', url], cwd),
+      ]);
+      if (!prReview.active || prReview.active.meta.url !== url) {
+        return { error: 'Active PR changed during refresh' };
+      }
+      const meta = normalizeGitLabMr(rawMr, host);
+      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
+      prReview.active.diff = diff;
+      broadcastPrReview();
+    } else {
+      const [meta, diff] = await Promise.all([
+        ghJson([
+          'pr', 'view', url,
+          '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
+        ], cwd),
+        ghText(['pr', 'diff', url], cwd),
+      ]);
+      if (!prReview.active || prReview.active.meta.url !== url) {
+        return { error: 'Active PR changed during refresh' };
+      }
+      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
+      prReview.active.diff = diff;
+      broadcastPrReview();
     }
-    prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
-    prReview.active.diff = diff;
-    broadcastPrReview();
   } catch (err) {
     metaError = (err.stderr || err.message || '').trim();
   }
 
-  // Threads — fire-and-await so the toast we return reflects post-refresh state.
   try { await fetchThreadsForActive(); } catch (_) {}
 
-  // Worktree refresh — only if one already exists. We reach into
-  // ensureWorktreeForActivePr's "existing worktree" branch by calling it; it
-  // returns refreshed: 'updated' | 'up-to-date' | 'kept-local' | 'fetch-failed'
-  // when existed=true, undefined when it had to create one.
   let worktreeRefreshed = 'no-worktree';
   try {
     const ensured = await ensureWorktreeForActivePr();
@@ -253,14 +367,28 @@ ipcMain.handle('pr-pull-updates', async () => {
 
 ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
-  if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
-  const { meta } = prReview.active;
+  const forge = prReview.active.forge || 'github';
+  const { meta, number } = prReview.active;
   if (!meta || !meta.url) return { error: 'Could not determine PR URL' };
   const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'gitlab') {
+    const flag = { merge: '', squash: '--squash', rebase: '--rebase' }[strategy];
+    const args = ['mr', 'merge', String(number)];
+    if (flag) args.push(flag);
+    try {
+      execFileSync('glab', args, { cwd, stdio: 'pipe', timeout: 30000 });
+      await reloadActivePrReviewMeta();
+      fetchThreadsForActive();
+      return { ok: true };
+    } catch (err) {
+      return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
+    }
+  }
+
+  const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
+  if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
   try {
-    // URL form bypasses gh's buggy -R repo resolution (see pr-review-checks
-    // for the failure mode we're avoiding).
     ghExec(['pr', 'merge', meta.url, flag], {
       cwd, stdio: 'pipe', timeout: 30000,
     });
@@ -306,8 +434,13 @@ ipcMain.handle('pr-checkout-locally', async () => {
   if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
     prReview.active.popout.close();
   }
+  const isGitLab = prReview.active && prReview.active.forge === 'gitlab';
   prReview.active = null;
-  restoreGhAfterReview();
+  if (isGitLab) {
+    restoreGlabAfterReview();
+  } else {
+    restoreGhAfterReview();
+  }
   broadcastPrReview();
 
   for (const win of BrowserWindow.getAllWindows()) {
@@ -391,8 +524,13 @@ ipcMain.handle('pr-review-close', () => {
   if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
     prReview.active.popout.close();
   }
+  const isGitLab = prReview.active && prReview.active.forge === 'gitlab';
   prReview.active = null;
-  restoreGhAfterReview();
+  if (isGitLab) {
+    restoreGlabAfterReview();
+  } else {
+    restoreGhAfterReview();
+  }
   broadcastPrReview();
   return { ok: true };
 });
@@ -974,13 +1112,22 @@ ipcMain.handle('pr-review-push-local', async (_event, args) => {
     return { error: 'PR head repository/branch missing from metadata — cannot determine push target.' };
   }
 
+  const forge = (prReview.active && prReview.active.forge) || 'github';
+  const host = (prReview.active && prReview.active.host) || (forge === 'gitlab' ? 'gitlab.com' : 'github.com');
   let token = '';
-  try {
-    token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
-  } catch (_) {
-    return { error: 'Could not read gh auth token — run `gh auth login` first.' };
+  if (forge === 'gitlab') {
+    token = getGlabToken(host);
+    if (!token) {
+      return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
+    }
+  } else {
+    try {
+      token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
+    } catch (_) {
+      return { error: 'Could not read gh auth token — run `gh auth login` first.' };
+    }
   }
-  const authedUrl = `https://oauth2:${token}@github.com/${headOwner}/${headRepoName}.git`;
+  const authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
   const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
   const target = `${headOwner}/${headRepoName}:${headBranch}`;
 

@@ -9,25 +9,61 @@ const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { prReview, currentRepoPath, ensureWorktreeForActivePr } = require('../state/pr-review');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
+const { bucketFromGitLabStatus } = require('../util/forge-adapter');
+const { resolveGlabEnv } = require('../util/glab-exec');
 
-// G6: CI checks scoped to the PR review surface. `gh pr checks -R …`
-// mangles the repo name in its GraphQL query on some gh versions. Using
-// `gh pr view -R … --json statusCheckRollup` reads the same rollup through a
-// different code path that handles the -R flag cleanly, and reshapes to the
-// { name, state, bucket, link, workflow, description } shape the renderer
-// already knows how to draw.
+// G6: CI checks scoped to the PR review surface.
 ipcMain.handle('pr-review-checks', async () => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
-  const sha = meta && meta.headRefOid;
-  if (!sha) return { checks: [], error: 'Missing head commit sha' };
+  const { meta, baseOwner, baseRepo, forge, projectPath, number, account, host } = prReview.active;
+  if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   const cwd = currentRepoPath() || require('os').homedir();
 
+  if (forge === 'gitlab') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const glabEnv = { ...process.env, ...resolveGlabEnv({ account, host, cwd }) };
+    delete glabEnv.GITLAB_TOKEN;
+    try {
+      const pipelines = await new Promise((resolve) => {
+        execFile('glab', ['api', `projects/${encodeURIComponent(target)}/merge_requests/${number}/pipelines`], { cwd, env: glabEnv, maxBuffer: 10 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
+          if (err) return resolve([]);
+          try { resolve(JSON.parse(stdout)); } catch (_) { resolve([]); }
+        });
+      });
+
+      if (!Array.isArray(pipelines) || pipelines.length === 0) {
+        return { checks: [] };
+      }
+
+      const latestPipeline = pipelines[0];
+      const jobs = await new Promise((resolve) => {
+        execFile('glab', ['api', `projects/${encodeURIComponent(target)}/pipelines/${latestPipeline.id}/jobs`], { cwd, env: glabEnv, maxBuffer: 10 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
+          if (err) return resolve([]);
+          try { resolve(JSON.parse(stdout)); } catch (_) { resolve([]); }
+        });
+      });
+
+      const checks = (Array.isArray(jobs) ? jobs : []).map((job) => ({
+        name: job.name,
+        state: job.status,
+        bucket: bucketFromGitLabStatus(job.status),
+        link: job.web_url,
+        workflow: job.stage,
+        description: job.stage + (job.duration ? ` (${Math.round(job.duration)}s)` : ''),
+        runId: job.id,
+        jobId: job.id,
+      }));
+
+      return { checks };
+    } catch (err) {
+      return { checks: [], error: err.message };
+    }
+  }
+
+  const sha = meta && meta.headRefOid;
+  if (!sha) return { checks: [], error: 'Missing head commit sha' };
+
   // REST endpoint is more forgiving than gh's GraphQL path for this repo
-  // (which throws "Could not resolve to a Repository" on both `gh pr checks`
-  // and a custom gh api graphql call). Runs + statuses are separate APIs,
-  // so we fetch both in parallel and merge.
   async function run(args) {
     return new Promise((resolve) => {
       execFile('gh', ['api'].concat(args), { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15000 },
@@ -35,10 +71,6 @@ ipcMain.handle('pr-review-checks', async () => {
     });
   }
   const [runsRes, statusRes] = await Promise.all([
-    // `--jq '.check_runs[]'` → one check-run per line (JSONL), merged across
-    // pages; plain `--paginate` concatenates a JSON object per page, which
-    // JSON.parse can't read once a commit has >30 check runs. See
-    // parseCheckRunsJsonl.
     run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate', '--jq', '.check_runs[]']),
     run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/status`]),
   ]);

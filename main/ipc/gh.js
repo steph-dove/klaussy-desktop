@@ -519,6 +519,7 @@ ipcMain.handle('check-dependencies', async () => {
   }
 
   const ghVersion = probe('gh', ['--version']);
+  const glabVersion = probe('glab', ['--version']);
   // Don't trust gh's exit code — it returns 1 if any account has a bad
   // token, even when others are fine. Treat gh as authed if at least one
   // account in the parsed status output is valid.
@@ -528,6 +529,17 @@ ipcMain.handle('check-dependencies', async () => {
   // Accounts gh called invalid that GitHub still accepts — the user is signed
   // in and must not be prompted, but calls may fail while the outage lasts.
   const outage = validAccounts.some((a) => a.outage);
+
+  let glabStatus = { accounts: [], error: 'glab not installed' };
+  if (glabVersion.ok) {
+    try {
+      const { readGlabAccounts } = require('./glab');
+      glabStatus = readGlabAccounts();
+    } catch (_) {}
+  }
+  const glabValidAccounts = (glabStatus.accounts || []).filter((a) => a.valid !== false);
+  const glabAuthed = glabValidAccounts.length > 0;
+
   const claudeVersion = probe(claudeBin, ['--version']);
 
   // Probe every supported AI CLI so the Setup Check can list install status +
@@ -583,6 +595,13 @@ ipcMain.handle('check-dependencies', async () => {
       authError: authed ? null : (ghStatus.error || null),
       accounts: ghStatus.accounts,
     },
+    glab: {
+      installed: glabVersion.ok,
+      authed: glabAuthed,
+      version: glabVersion.ok ? glabVersion.output.split('\n')[0] : null,
+      authError: glabAuthed ? null : (glabStatus.error || null),
+      accounts: glabStatus.accounts || [],
+    },
     claude: {
       installed: claudeVersion.ok,
       version: claudeVersion.ok ? claudeVersion.output : null,
@@ -600,7 +619,7 @@ ipcMain.handle('check-dependencies', async () => {
 // Each script is idempotent — guarded with `command -v` (or `Get-Command`)
 // so re-running it after a partial install just fills in the missing pieces.
 
-// The bundle installs Node, gh, Ollama, and EVERY agent CLI (`agents`: array of
+// The bundle installs Node, gh, glab, Ollama, and EVERY agent CLI (`agents`: array of
 // { displayName, bin, installCommand, loginCommand }) — so whichever agent the
 // user picks later already works, with no extra setup. Each agent install is
 // guarded (skip if already present) and non-fatal (a single failure doesn't
@@ -615,7 +634,7 @@ fi`).join('\n\n');
   return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, GitLab CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
 echo
 
 if ! command -v brew >/dev/null 2>&1; then
@@ -629,8 +648,8 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 # brew install is idempotent — safe to call on already-installed formulas.
-echo "→ brew install node gh ollama"
-brew install node gh ollama
+echo "→ brew install node gh glab ollama"
+brew install node gh glab ollama
 
 # Make brew's bins reachable in this shell before invoking npm —
 # fresh installs add to PATH via shell rc files this subshell hasn't sourced.
@@ -644,7 +663,8 @@ echo "✓ All requirements installed."
 echo
 echo "Next steps:"
 echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
-echo "  2. Sign in to the agent(s) you'll use — run each once:"
+echo "  2. Run 'glab auth login' to authenticate GitLab (if you use GitLab)"
+echo "  3. Sign in to the agent(s) you'll use — run each once:"
 ${logins}
 echo
 read -p "Press Enter to close this window…"
@@ -677,10 +697,11 @@ function Sync-Path {
 }
 Sync-Path
 
-Write-Host '→ winget install Node, GitHub CLI, Ollama'
-winget install --id OpenJS.NodeJS  -e --accept-source-agreements --accept-package-agreements
-winget install --id GitHub.cli     -e --accept-source-agreements --accept-package-agreements
-winget install --id Ollama.Ollama  -e --accept-source-agreements --accept-package-agreements
+Write-Host '→ winget install Node, GitHub CLI, GitLab CLI, Ollama'
+winget install --id OpenJS.NodeJS   -e --accept-source-agreements --accept-package-agreements
+winget install --id GitHub.cli      -e --accept-source-agreements --accept-package-agreements
+try { winget install --id GitLab.glab -e --accept-source-agreements --accept-package-agreements } catch {}
+winget install --id Ollama.Ollama   -e --accept-source-agreements --accept-package-agreements
 
 Sync-Path
 
@@ -691,7 +712,8 @@ Write-Host '✓ All requirements installed.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:'
 Write-Host '  1. Run ''gh auth login'' to authenticate GitHub (or use Klaussy''s Sign in button)'
-Write-Host '  2. Sign in to the agent(s) you''ll use — run each once:'
+Write-Host '  2. Run ''glab auth login'' to authenticate GitLab (if you use GitLab)'
+Write-Host '  3. Sign in to the agent(s) you''ll use — run each once:'
 ${logins}
 Write-Host ''
 Read-Host 'Press Enter to close this window'
@@ -715,13 +737,16 @@ fi`;
   return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, GitLab CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
 echo "(sudo password may be required)"
 echo
 
-echo "→ apt install nodejs, npm, gh"
+echo "→ apt install nodejs, npm, gh, glab"
 sudo apt update
-sudo apt install -y nodejs npm gh
+sudo apt install -y nodejs npm gh || sudo apt install -y nodejs npm
+if ! command -v glab >/dev/null 2>&1; then
+  sudo apt install -y glab || echo "⚠ glab not found in apt repo — install from gitlab.com/gitlab-org/cli"
+fi
 hash -r
 
 ${installs}
@@ -737,7 +762,8 @@ echo "✓ All requirements installed."
 echo
 echo "Next steps:"
 echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
-echo "  2. Sign in to the agent(s) you'll use — run each once:"
+echo "  2. Run 'glab auth login' to authenticate GitLab (if you use GitLab)"
+echo "  3. Sign in to the agent(s) you'll use — run each once:"
 ${logins}
 echo
 read -p "Press Enter to close this window…"

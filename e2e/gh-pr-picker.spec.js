@@ -1,4 +1,5 @@
-// 'Review a Pull Request' picker, driven entirely through the FAKE gh on PATH.
+// 'Review a Pull Request or Merge Request' picker, driven entirely through the
+// FAKE gh on PATH.
 // Proves clicking #btn-review-pr (App.showPrPicker) opens the picker overlay
 // and that its three gh-backed sections populate from fixtures:
 //   - "Recent pull requests"  <- gh api /user/repos  +  gh pr list  (pr-recent-repos)
@@ -56,7 +57,7 @@ test('PR picker lists mocked PRs from the fake gh', async ({ mainWindow }) => {
 
   const overlay = mainWindow.locator('.pr-picker-overlay');
   await expect(overlay).toBeVisible();
-  await expect(overlay.locator('.pr-picker-header')).toHaveText('Review a Pull Request');
+  await expect(overlay.locator('.pr-picker-header')).toHaveText('Review a Pull Request or Merge Request');
 
   // "Recent pull requests" — grouped by repo (gh api /user/repos -> gh pr list).
   const list = overlay.locator('.pr-picker-list');

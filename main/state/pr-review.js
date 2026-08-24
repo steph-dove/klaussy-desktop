@@ -16,7 +16,11 @@ const { execFile, execFileSync } = require('child_process');
 const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { classifyGhError } = require('../util/gh-error');
+const { classifyGlabError } = require('../util/glab-error');
 const { clearGhTokenCache } = require('../util/exec');
+const { clearGlabTokenCache, getGlabToken, resolveGlabEnv } = require('../util/glab-exec');
+const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
+const { transformGitLabDiscussions } = require('../util/forge-adapter');
 const { instances } = require('./instances');
 
 // Reviewing a PR for a repo only the non-active gh account can see requires
@@ -113,15 +117,41 @@ function currentRepoPath() {
   return config.repoPath || null;
 }
 
-// GitHub PR URLs always encode the base repo: /{owner}/{repo}/pull/{n}.
-// Using the URL avoids an extra gh call and works for both the picker path
-// and the paste-URL path, since `gh pr view --json url` is always populated.
+let _savedGlabAccount = null;
+
+function switchGlabForReview(account, host = 'gitlab.com') {
+  if (!account) return;
+  try {
+    execFileSync('glab', ['auth', 'switch', '--hostname', host, '--user', account], { stdio: 'pipe', timeout: 5000 });
+    clearGlabTokenCache();
+  } catch (_) {}
+}
+
+function restoreGlabAfterReview() {
+  if (_savedGlabAccount === null) return;
+  const restoreTo = _savedGlabAccount;
+  _savedGlabAccount = null;
+  try {
+    execFileSync('glab', ['auth', 'switch', '--hostname', restoreTo.host, '--user', restoreTo.account], { stdio: 'pipe', timeout: 5000 });
+    clearGlabTokenCache();
+  } catch (_) {}
+}
+
+// PR/MR URLs already encode the base repo, so the picker and paste-URL paths
+// both get it without an extra CLI call.
 function parseBaseFromUrl(url) {
   if (!url) return null;
-  // Match any host (github.com, github.corp.example, etc.) so GHE works too.
-  const m = url.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/\d+/);
-  if (!m) return null;
-  return { owner: m[1], name: m[2].replace(/\.git$/, '') };
+  const parsed = parseForgeUrl(url);
+  if (parsed) {
+    return {
+      forge: parsed.forge,
+      host: parsed.host,
+      owner: parsed.owner,
+      name: parsed.repo,
+      projectPath: parsed.projectPath,
+    };
+  }
+  return null;
 }
 
 function pushReviewHistory(meta) {
@@ -154,26 +184,73 @@ let _threadsFetchEpoch = 0;
 async function fetchThreadsForActive() {
   if (!prReview.active) return;
   const epoch = ++_threadsFetchEpoch;
-  // gh api graphql doesn't need to run inside the target repo — owner/repo
-  // are passed as query variables. Falling back to homedir means reviewers
-  // without an active klaussy project still get threads + comments.
   const cwd = currentRepoPath() || require('os').homedir();
-  if (!prReview.active.baseOwner || !prReview.active.baseRepo) {
-    prReview.active.threadsError = 'Could not parse base repo from PR url';
+  const forge = prReview.active.forge || 'github';
+  const number = prReview.active.number;
+  const owner = prReview.active.baseOwner;
+  const repo = prReview.active.baseRepo;
+  const projectPath = prReview.active.projectPath || (owner && repo ? `${owner}/${repo}` : null);
+
+  if (!owner && !projectPath) {
+    prReview.active.threadsError = 'Could not parse base repo from PR/MR url';
     broadcastPrReview();
     return;
   }
-  const owner = prReview.active.baseOwner;
-  const repo = prReview.active.baseRepo;
-  const number = prReview.active.number;
+
   const stale = () => epoch !== _threadsFetchEpoch
     || !prReview.active
     || prReview.active.number !== number;
 
-  // One round trip for threads + issue-comments + reviews. Conversation tab
-  // reads from comments + reviews; Files tab reads from reviewThreads. There's
-  // duplication between review.comments and reviewThreads.comments, but the
-  // two consumers render different shapes, so we keep both and let them pick.
+  if (forge === 'gitlab') {
+    const host = prReview.active.host || 'gitlab.com';
+    const account = prReview.active.account;
+    const target = projectPath || `${owner}/${repo}`;
+    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/discussions`;
+    const glabEnv = { ...process.env, ...resolveGlabEnv({ account, host, cwd }) };
+    delete glabEnv.GITLAB_TOKEN;
+
+    const runGitLabOnce = () => new Promise((resolve) => {
+      execFile('glab', ['api', endpoint, '--paginate'], { cwd, env: glabEnv, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
+        if (err) {
+          return resolve({ errorRaw: (stderr || '').toString().trim() || err.message });
+        }
+        try {
+          const raw = JSON.parse(stdout);
+          return resolve({ data: raw });
+        } catch (_) {
+          return resolve({ errorRaw: 'glab returned non-JSON: ' + String(stdout).slice(0, 200) });
+        }
+      });
+    });
+
+    let res = await runGitLabOnce();
+    if (res.errorRaw && classifyGlabError(res.errorRaw, { target, host }).retryable) {
+      await new Promise((r) => setTimeout(r, 900));
+      if (stale()) return;
+      res = await runGitLabOnce();
+    }
+    if (stale()) return;
+
+    if (res.errorRaw) {
+      const cls = classifyGlabError(res.errorRaw, { target, host });
+      prReview.active.threadsError = cls.summary;
+      prReview.active.threadsErrorFix = cls.fix;
+      prReview.active.threadsErrorRaw = res.errorRaw;
+      broadcastPrReview();
+      return;
+    }
+
+    const { threads, issueComments } = transformGitLabDiscussions(res.data);
+    prReview.active.threads = threads;
+    prReview.active.issueComments = issueComments;
+    prReview.active.reviews = [];
+    prReview.active.threadsError = null;
+    prReview.active.threadsErrorFix = null;
+    prReview.active.threadsErrorRaw = null;
+    broadcastPrReview();
+    return;
+  }
+
   const query = 'query($owner: String!, $repo: String!, $number: Int!) {'
     + '  repository(owner: $owner, name: $repo) {'
     + '    pullRequest(number: $number) {'
@@ -203,9 +280,6 @@ async function fetchThreadsForActive() {
     '-f', 'repo=' + repo,
     '-F', 'number=' + number,
   ];
-  // One round trip. Resolves to { data } on success or { errorRaw } on any
-  // failure (gh writes GraphQL error JSON to stdout even on non-zero exit, so
-  // we dig it out of both stdout and stderr).
   const runOnce = () => new Promise((resolve) => {
     execFile('gh', ghArgs, { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
       const fromBody = (s) => {
@@ -224,8 +298,6 @@ async function fetchThreadsForActive() {
 
   const target = owner + '/' + repo;
   let res = await runOnce();
-  // Auto-retry once on transient failures (network blip, rate limit). Auth /
-  // scope / not-found errors won't fix themselves, so don't waste a round trip.
   if (res.errorRaw && classifyGhError(res.errorRaw, { target }).retryable) {
     await new Promise((r) => setTimeout(r, 900));
     if (stale()) return;
@@ -268,22 +340,22 @@ async function reloadActivePrReviewMeta() {
 }
 
 // Walk the user's klaussy projects and return the first whose `origin`
-// remote points at <owner>/<repo> (GitHub URL, either SSH or HTTPS form).
-// Returns null when no project matches — the caller surfaces an explicit
-// "add this repo as a project" error.
+// remote points at the repo (GitHub, GitLab, or Bitbucket).
+// Returns null when no project matches.
 function findProjectForRepo(owner, repo) {
   const config = loadConfig();
   const projects = config.projects || [];
-  const needle = `${owner}/${repo}`;
+  const targetPath = `${owner}/${repo}`.replace(/^\//, '');
   for (const p of projects) {
     if (!p || !p.path) continue;
     try {
       const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
         cwd: p.path, stdio: 'pipe',
       }).toString().trim();
-      // Accept https://github.com/owner/repo(.git)? and git@github.com:owner/repo(.git)?
-      const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
-      if (m && `${m[1]}/${m[2]}` === needle) return p.path;
+      const info = detectForgeFromRemote(url);
+      if (info && (info.projectPath === targetPath || (info.owner === owner && info.repo === repo))) {
+        return p.path;
+      }
     } catch (_) { /* skip */ }
   }
   return null;
@@ -310,14 +382,16 @@ function findWorktreeForBranch(cwd, branch) {
   return null;
 }
 
-// Does `cwd`'s `origin` remote point at the given owner/repo on github?
+// Does `cwd`'s `origin` remote point at the given repo?
 function originMatchesRepo(cwd, owner, repo) {
   try {
     const url = execFileSync('git', ['remote', 'get-url', 'origin'], {
       cwd, stdio: 'pipe',
     }).toString().trim();
-    const m = url.match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?$/);
-    return !!(m && `${m[1]}/${m[2]}` === `${owner}/${repo}`);
+    const info = detectForgeFromRemote(url);
+    if (!info) return false;
+    const targetPath = `${owner}/${repo}`.replace(/^\//, '');
+    return info.projectPath === targetPath || (info.owner === owner && info.repo === repo);
   } catch (_) { return false; }
 }
 
@@ -421,52 +495,54 @@ function resolveFallbackBaseBranch(worktreePath) {
 // create one.
 async function ensureWorktreeForActivePr() {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { number, meta, baseOwner, baseRepo } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo from PR metadata' };
+  const { number, meta, baseOwner, baseRepo, forge: activeForge, host: activeHost, projectPath: activeProjectPath } = prReview.active;
+  if (!baseOwner && !activeProjectPath) return { error: 'Could not determine base repo from PR/MR metadata' };
 
-  const localBranch = (meta && meta.headRefName) || `pr-${number}`;
+  const forge = activeForge || 'github';
+  const host = activeHost || (forge === 'gitlab' ? 'gitlab.com' : 'github.com');
+  const projectPath = activeProjectPath || `${baseOwner}/${baseRepo}`;
+  const localBranch = (meta && meta.headRefName) || (forge === 'gitlab' ? `mr-${number}` : `pr-${number}`);
   const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
+  const sanitizedForClone = projectPath.replace(/[^a-zA-Z0-9_.-]/g, '_');
 
   let token = '';
-  try {
-    token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
-  } catch (_) {
-    return { error: 'Could not read gh auth token — run `gh auth login` first.' };
+  if (forge === 'gitlab') {
+    token = getGlabToken(host);
+    if (!token) {
+      return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
+    }
+  } else {
+    try {
+      token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
+    } catch (_) {
+      return { error: 'Could not read gh auth token — run `gh auth login` first.' };
+    }
   }
-  const authedUrl = `https://oauth2:${token}@github.com/${baseOwner}/${baseRepo}.git`;
-  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
 
-  // Token-bearing remote URL: DON'T let git persist this into .git/config.
-  // Instead we pass it only for the single clone/fetch call (via argv), then
-  // immediately rewrite the stored remote URL to the clean form. This way
-  // the token isn't in .git/config forever — and `ps` exposure is bounded
-  // to the lifetime of the single operation.
-  const cleanUrl = `https://github.com/${baseOwner}/${baseRepo}.git`;
+  const authedUrl = `https://oauth2:${token}@${host}/${projectPath}.git`;
+  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
+  const cleanUrl = `https://${host}/${projectPath}.git`;
+  const fetchRef = forge === 'gitlab'
+    ? `+refs/merge-requests/${number}/head:refs/heads/${localBranch}`
+    : `+refs/pull/${number}/head:refs/heads/${localBranch}`;
+  const fetchHeadTarget = forge === 'gitlab'
+    ? `merge-requests/${number}/head`
+    : `pull/${number}/head`;
 
   // Step 1: reuse any existing worktree on this branch across every clone
-  // we know about. This must come BEFORE cwd resolution — if the user's
-  // worktree is registered to a clone other than the active project,
-  // single-cwd lookup misses it and we'd create a duplicate.
   const existingMatch = findWorktreeForBranchAcrossClones(baseOwner, baseRepo, localBranch);
   if (existingMatch) {
     const existingWorktreePath = existingMatch.worktreePath;
     const cwd = existingMatch.baseRepoCwd;
-    // Refresh the existing worktree against the PR's latest commit. We fetch
-    // into FETCH_HEAD (not into the branch ref) so this is safe even though
-    // the worktree currently has the branch checked out — git refuses to
-    // force-update a branch that's checked out anywhere. Then we attempt a
-    // fast-forward merge: succeeds when the user has no local commits and a
-    // clean working tree, fails (and we leave the worktree alone) when the
-    // user has local changes we shouldn't destroy.
     let beforeSha = '';
     try {
       beforeSha = execFileSync('git', ['rev-parse', 'HEAD'], {
         cwd: existingWorktreePath, stdio: 'pipe',
       }).toString().trim();
     } catch (_) {}
-    let refreshed = 'none'; // 'updated' | 'up-to-date' | 'kept-local' | 'fetch-failed'
+    let refreshed = 'none';
     try {
-      execFileSync('git', ['fetch', authedUrl, `pull/${number}/head`], {
+      execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], {
         cwd: existingWorktreePath, stdio: 'pipe',
       });
       try {
@@ -496,9 +572,7 @@ async function ensureWorktreeForActivePr() {
     };
   }
 
-  // Step 2: no existing worktree on this branch — resolve a base clone to
-  // create one in. Order: active project → first matching configured project
-  // → auto-clone under userData/pr-checkouts.
+  // Step 2: resolve a base clone to create one in.
   let cwd = null;
   const active = currentRepoPath();
   if (active && originMatchesRepo(active, baseOwner, baseRepo)) cwd = active;
@@ -506,7 +580,7 @@ async function ensureWorktreeForActivePr() {
 
   if (!cwd) {
     const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
-    const clonePath = path.join(cloneBase, `${baseOwner}-${baseRepo}`);
+    const clonePath = path.join(cloneBase, `${host}-${sanitizedForClone}`);
     if (!fs.existsSync(clonePath)) {
       try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
       try {
@@ -515,7 +589,6 @@ async function ensureWorktreeForActivePr() {
         const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
         return { error: 'Clone failed: ' + scrub(raw) };
       }
-      // Strip token from persisted origin URL.
       try {
         execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe' });
       } catch {}
@@ -524,7 +597,7 @@ async function ensureWorktreeForActivePr() {
   }
 
   try {
-    execFileSync('git', ['fetch', authedUrl, `+refs/pull/${number}/head:refs/heads/${localBranch}`], {
+    execFileSync('git', ['fetch', authedUrl, fetchRef], {
       cwd, stdio: 'pipe',
     });
   } catch (err) {
@@ -537,8 +610,6 @@ async function ensureWorktreeForActivePr() {
   const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitizedForPath);
 
   if (fs.existsSync(worktreePath)) {
-    // Stale dir from a prior run we never wired up — reuse silently rather
-    // than failing. git worktree add would error if it's still registered.
     return {
       worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true,
       baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName),
@@ -574,4 +645,6 @@ module.exports = {
   ensureWorktreeForActivePr,
   switchGhForReview,
   restoreGhAfterReview,
+  switchGlabForReview,
+  restoreGlabAfterReview,
 };

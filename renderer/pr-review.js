@@ -44,6 +44,12 @@ window.PrReview = window.PrReview || {};
   PR.selectedFile = null;
   PR.activeTab = 'files'; // 'files' | 'conversation' | 'checks' | 'ai-review' | 'terminal'
 
+  PR.forgeName = function (state) {
+    var s = state || PR.lastState || {};
+    if (s.forge === 'gitlab' || (s.meta && s.meta.url && /gitlab/i.test(s.meta.url))) return 'GitLab';
+    return 'GitHub';
+  };
+
   // Per-render IPC subscriptions for rehydrated explain agents. render() blows
   // away hostEl.innerHTML, which orphans these listeners — we clear them each
   // time so chunks don't pile up onto detached DOM.
@@ -400,6 +406,9 @@ window.PrReview = window.PrReview || {};
     var stateBadge = meta.isDraft ? 'DRAFT' : (meta.state || '').toUpperCase();
     var reviewDecision = meta.reviewDecision || '';
 
+    var forgeName = PR.forgeName(state);
+    var itemType = forgeName === 'GitLab' ? 'MR' : 'PR';
+
     PR.hostEl.innerHTML =
       '<div class="pr-review-header">'
         + '<div class="pr-review-title">'
@@ -414,10 +423,10 @@ window.PrReview = window.PrReview || {};
           + '<span class="pr-review-checks-slot"></span>'
         + '</div>'
         + '<div class="pr-review-actions">'
-          + '<a href="#" class="pr-review-external" data-url="' + PR.escHtml(meta.url || '') + '">Open on GitHub</a>'
-          + '<button class="pr-review-btn js-pull-updates" title="Re-fetch PR data + advance the local worktree to the PR’s latest commit">Pull updates</button>'
-          + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this PR">Review</button>'
-          + '<button class="pr-review-btn js-checkout-local" title="Fetch this PR into a new worktree and spawn a task">Check out locally</button>'
+          + '<a href="#" class="pr-review-external" data-url="' + PR.escHtml(meta.url || '') + '">Open on ' + PR.escHtml(forgeName) + '</a>'
+          + '<button class="pr-review-btn js-pull-updates" title="Re-fetch ' + itemType + ' data + advance the local worktree to the ' + itemType + '’s latest commit">Pull updates</button>'
+          + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this ' + itemType + '">Review</button>'
+          + '<button class="pr-review-btn js-checkout-local" title="Fetch this ' + itemType + ' into a new worktree and spawn a task">Check out locally</button>'
           + PR.renderMergeControl(state)
           + (PR.isPopout
               ? '<button class="pr-review-btn js-pop-in" title="Return to main window">\u21B2 Pop back in</button>'

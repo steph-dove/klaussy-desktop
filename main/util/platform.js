@@ -12,6 +12,7 @@
 // contexts (e.g. lsp-manager.js) once §3 lands.
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
 
 const IS_WIN = process.platform === 'win32';
 
@@ -44,6 +45,10 @@ function whichBinSync(name) {
 
 function defaultShell() {
   if (!IS_WIN) {
+    if (process.env.SHELL && fs.existsSync(process.env.SHELL)) return process.env.SHELL;
+    if (fs.existsSync('/bin/zsh')) return '/bin/zsh';
+    if (fs.existsSync('/bin/bash')) return '/bin/bash';
+    if (fs.existsSync('/bin/sh')) return '/bin/sh';
     return process.env.SHELL || '/bin/zsh';
   }
   return whichBinSync('pwsh.exe') || 'powershell.exe';
