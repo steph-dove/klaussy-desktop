@@ -170,7 +170,7 @@ contextBridge.exposeInMainWorld('klaus', {
         ipcRenderer.send('unsubscribe-terminal', channel);
       };
     },
-    addSub: (taskId, label, mode, initialPrompt) => ipcRenderer.invoke('add-sub-terminal', { taskId, label, mode, initialPrompt }),
+    addSub: (taskId, label, mode, initialPrompt, resumeSessionId) => ipcRenderer.invoke('add-sub-terminal', { taskId, label, mode, initialPrompt, resumeSessionId }),
     killSub: (taskId, subId) => ipcRenderer.invoke('kill-sub-terminal', { taskId, subId }),
     onSubData: (taskId, subId, callback) => {
       const channel = `terminal-data-${taskId}-${subId}`;

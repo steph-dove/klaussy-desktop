@@ -1102,7 +1102,7 @@ ipcMain.on('resize-terminal', (_event, { id, cols, rows, subId }) => {
   }
 });
 
-ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt }) => {
+ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt, resumeSessionId }) => {
   const inst = instances.get(taskId);
   if (!inst) return { error: 'Instance not found' };
 
@@ -1117,6 +1117,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   let needsEnter = false;    // codex-style TUIs pre-fill but wait for Enter
   let pasteText = null;      // kimi-style TUIs take no spawn-time prompt at all
   let ptyProc;
+  let preSpawnSessions = new Set();
   {
     if (isAgentMode(mode)) {
       const config = loadConfig();
@@ -1131,7 +1132,13 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
       if (!session.ok) return { cancelled: true };
       const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
       const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
-      let agentCmd = provider.buildInteractiveCmd(bin, { trust: consent.trust, model, sessionDirs, profile: nemProfile });
+      // Deliberately not resumeLatest: that adopts whatever ran last in this
+      // worktree, which is another tab as often as this one.
+      preSpawnSessions = provider.snapshotSessions ? provider.snapshotSessions() : new Set();
+      let agentCmd = provider.buildInteractiveCmd(bin, {
+        trust: consent.trust, model, sessionDirs, profile: nemProfile,
+        resumeSessionId: resumeSessionId || null,
+      });
       // Seed an initial prompt (Plan/Debug/Review) at spawn rather than typing it
       // in after boot — shared staging with the cross-agent session-resume
       // handoff (see util/agent-prompt).
@@ -1160,7 +1167,11 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     });
   }
 
-  const sub = { subId, label: label || displayNameFor(mode || 'shell'), pty: ptyProc, alive: true, mode: mode || 'shell' };
+  const sub = {
+    subId, label: label || displayNameFor(mode || 'shell'), pty: ptyProc, alive: true, mode: mode || 'shell',
+    preSpawnSessions,
+    sessionId: resumeSessionId || null,
+  };
   inst.subTerminals.push(sub);
 
   // codex pre-fills its positional prompt but waits for an Enter to submit

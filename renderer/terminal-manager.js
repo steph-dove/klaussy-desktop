@@ -787,7 +787,7 @@ window.TerminalManager = (function () {
       if (!agent || !agent.mode) continue;
       var label = agent.label || (window.AppUtils ? AppUtils.modeDisplayName(agent.mode) : agent.mode);
       try {
-        var result = await window.klaus.terminal.addSub(taskId, label, agent.mode);
+        var result = await window.klaus.terminal.addSub(taskId, label, agent.mode, null, agent.sessionId || null);
         if (!result || result.error || result.cancelled) continue;
         addSubTerminalTab(taskEntry, result.subId, result.label, agent.mode, true);
       } catch (err) {

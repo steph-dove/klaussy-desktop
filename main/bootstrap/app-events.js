@@ -12,6 +12,7 @@ const { execToolSync } = require('../util/exec');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const lspManager = require('../../lsp-manager');
 const { loadConfig, saveConfig, flushSaveConfig, runConfigMigrations } = require('../util/config');
+const { mergeSavedSessions } = require('../util/saved-sessions');
 const {
   allWindows, getMainWindow, createWindow, setWindowCloseHook,
 } = require('../state/windows');
@@ -212,6 +213,21 @@ function checkExternalCLIs() {
   agents.forEach((a) => binPresent(a.bin, (ok) => { if (ok) anyAgent = true; finish(); }));
 }
 
+// A fresh tab has no id until its agent writes the transcript, so it resolves on
+// a later save; `claimed` stops two tabs on one worktree adopting the same id.
+function resolveSubSessionId(inst, sub, claimed) {
+  if (sub.sessionId) return sub.sessionId;
+  const provider = getProvider(sub.mode);
+  if (!provider || typeof provider.findNewSession !== 'function') return null;
+  let found = null;
+  try {
+    found = provider.findNewSession(inst.worktreePath, sub.preSpawnSessions || new Set());
+  } catch { return null; } // a session store we cannot read is not worth failing the save
+  if (!found || !found.sessionId || claimed.has(found.sessionId)) return null;
+  sub.sessionId = found.sessionId;
+  return sub.sessionId;
+}
+
 function saveSessions() {
   // Only overwrite savedSessions if there are active instances;
   // otherwise keep whatever was previously saved
@@ -247,6 +263,7 @@ function saveSessions() {
   }
 
   const sessions = [];
+  const claimedSubSessions = new Set();
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
     const provider = getProvider(saveMode);
@@ -269,13 +286,17 @@ function saveSessions() {
       // belonging to the agent that started the session.
       subAgents: (inst.subTerminals || [])
         .filter((s) => s && s.alive && isAgentMode(s.mode))
-        .map((s) => ({ mode: s.mode, label: s.label || null })),
+        .map((s) => {
+          const subSessionId = resolveSubSessionId(inst, s, claimedSubSessions);
+          if (subSessionId) claimedSubSessions.add(subSessionId);
+          return { mode: s.mode, label: s.label || null, sessionId: subSessionId };
+        }),
       savedAt: new Date().toISOString(),
     });
   }
   // saveConfig's write is queued, so passing a whole snapshot would revert
   // anything saved between this function starting and landing.
-  saveConfig({ savedSessions: sessions });
+  saveConfig({ savedSessions: mergeSavedSessions(sessions, loadConfig().savedSessions) });
 }
 
 function shutdownAndSave() {
