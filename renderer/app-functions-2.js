@@ -583,6 +583,52 @@ window.App = window.App || {};
       accountSelect.innerHTML = options.join('');
     }
 
+    function renderPrPickerItem(it, defaultRepo) {
+      var url = it.url || '';
+      var forge = 'GitHub';
+      var repo = it.repo || defaultRepo || '';
+      var author = it.author || '';
+      if (author && typeof author === 'object') {
+        author = author.login || author.name || author.username || '';
+      }
+      if (!author && it.authorLogin) author = it.authorLogin;
+      if (!author && selectedAccount && !selectedAccount.startsWith('__')) {
+        author = selectedAccount.split('@')[0];
+      }
+
+      if (url) {
+        if (/gitlab/i.test(url) || /merge_requests/i.test(url)) {
+          forge = 'GitLab';
+          var glM = url.match(/https?:\/\/[^/]+\/(.+?)\/(?:-\/)?merge_requests\/\d+/i);
+          if (glM && !repo) repo = glM[1];
+        } else if (/bitbucket/i.test(url) || /pull-requests/i.test(url)) {
+          forge = 'Bitbucket';
+          var bbM = url.match(/https?:\/\/[^/]+\/([^/]+\/[^/]+?)\/pull-requests\/\d+/i);
+          if (bbM && !repo) repo = bbM[1];
+        } else {
+          forge = 'GitHub';
+          var ghM = url.match(/https?:\/\/[^/]+\/([^/]+\/[^/]+?)\/pull\/\d+/i);
+          if (ghM && !repo) repo = ghM[1];
+        }
+      }
+
+      if (!repo && it.repository) {
+        repo = it.repository.nameWithOwner || it.repository.name || '';
+      }
+
+      var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
+      var forgeClass = 'pr-forge-' + forge.toLowerCase();
+
+      return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(url) + '">'
+        + '<span class="pr-picker-num">#' + AppUtils.escHtml(it.number) + '</span>'
+        + '<span class="pr-picker-title" title="' + AppUtils.escAttr(it.title || '') + '">' + AppUtils.escHtml(it.title || '') + '</span>'
+        + (repo ? '<span class="pr-picker-repo-tag" title="' + AppUtils.escAttr(repo) + '">' + AppUtils.escHtml(repo) + '</span>' : '')
+        + '<span class="pr-picker-forge ' + AppUtils.escAttr(forgeClass) + '">' + AppUtils.escHtml(forge) + '</span>'
+        + (author ? '<span class="pr-picker-author" title="' + AppUtils.escAttr(author) + '">' + AppUtils.escHtml(author) + '</span>' : '')
+        + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
+      + '</div>';
+    }
+
     // Recent + project-open lists, extracted so account-switch can re-run it.
     async function refreshLists() {
       recentEl.innerHTML = '';
@@ -593,15 +639,7 @@ window.App = window.App || {};
         var items = (r && r.items) || [];
         if (items.length === 0) { recentEl.style.display = 'none'; return; }
         recentEl.innerHTML = '<div class="pr-picker-section-head">Recently reviewed</div>'
-          + items.map(function (it) {
-            var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
-            return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(it.url || '') + '">'
-              + '<span class="pr-picker-num">#' + AppUtils.escHtml(it.number) + '</span>'
-              + '<span class="pr-picker-title">' + AppUtils.escHtml(it.title || '') + '</span>'
-              + '<span class="pr-picker-author">' + AppUtils.escHtml(it.author || '') + '</span>'
-              + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
-            + '</div>';
-          }).join('');
+          + items.map(function (it) { return renderPrPickerItem(it); }).join('');
         recentEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
           row.addEventListener('click', async function () {
             row.style.opacity = '0.5';
@@ -625,16 +663,7 @@ window.App = window.App || {};
         if (!prs.length) { authoredEl.style.display = 'none'; return; }
         authoredEl.style.display = '';
         authoredEl.innerHTML = '<div class="pr-picker-section-head">Opened by you</div>'
-          + prs.map(function (pr) {
-            var stateLabel = pr.isDraft ? 'draft' : (pr.state || 'open').toLowerCase();
-            var repo = (pr.repository && pr.repository.nameWithOwner) || '';
-            return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(pr.url || '') + '">'
-              + '<span class="pr-picker-num">#' + AppUtils.escHtml(pr.number) + '</span>'
-              + '<span class="pr-picker-title">' + AppUtils.escHtml(pr.title || '') + '</span>'
-              + '<span class="pr-picker-author">' + AppUtils.escHtml(repo) + '</span>'
-              + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
-            + '</div>';
-          }).join('');
+          + prs.map(function (pr) { return renderPrPickerItem(pr); }).join('');
         authoredEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
           row.addEventListener('click', async function () {
             row.style.opacity = '0.5';
@@ -679,14 +708,7 @@ window.App = window.App || {};
         + repos.map(function (r) {
           return '<div class="pr-picker-repo">' + AppUtils.escHtml(r.repo) + '</div>'
             + r.prs.map(function (pr) {
-              var author = (pr.author && (pr.author.login || pr.author.name)) || '';
-              var stateLabel = pr.isDraft ? 'draft' : (pr.state || 'open').toLowerCase();
-              return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(pr.url || '') + '">'
-                + '<span class="pr-picker-num">#' + AppUtils.escHtml(pr.number) + '</span>'
-                + '<span class="pr-picker-title">' + AppUtils.escHtml(pr.title || '') + '</span>'
-                + '<span class="pr-picker-author">' + AppUtils.escHtml(author) + '</span>'
-                + '<span class="pr-picker-state pr-state-' + AppUtils.escAttr(stateLabel) + '">' + AppUtils.escHtml(stateLabel) + '</span>'
-              + '</div>';
+              return renderPrPickerItem(pr, r.repo);
             }).join('');
         }).join('');
       listEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
