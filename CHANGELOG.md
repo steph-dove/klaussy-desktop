@@ -2,6 +2,15 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.18.1
+
+### 🔁 Resuming a session brings back what you left
+
+- **Every agent comes back, not just the first.** Resuming a worktree spawned all of its saved agents but handed the renderer only the first one, so the rest ran with no terminal on screen. The extras now get a terminal, and the layout switches out of single so they are visible.
+- **A closed session keeps the agent it ran.** The session saver replaced the whole stored list with whatever was open at that moment, so closing one session dropped its entry while another stayed open. The worktree was then rediscovered from disk with no record of its agent and labelled Claude — a closed Copilot session resumed as Claude. Sessions now last until you delete them.
+- **A second agent resumes its conversation.** Reopened agent tabs carried no session id and always started fresh. They now come back where they left off, including Antigravity, whose conversation is identified by the workspace it ran in.
+- **Resume-all-inactive no longer replaces saved agents.** It attached every inactive worktree with the default agent, wiping a saved session's agents in favour of one fresh terminal.
+
 ## 0.18.0
 
 ### 🦊 GitLab Merge Request Review & CLI Integration
