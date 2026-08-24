@@ -845,6 +845,8 @@ window.App = window.App || {};
     var fanoutResume = [];
     var fanoutSavedList = [];
     var fanoutSessionName = '';
+    var resumedExtras = [];
+    var collectExtra = function (t) { resumedExtras.push(t); };
     var fanoutName = App.modalInput.value.trim();
     var fanoutBase = App.selectedBaseBranch;
     // Sessions live in the default ~/klaussy/sessions/<session>/<repo> layout
@@ -943,7 +945,7 @@ window.App = window.App || {};
         fanoutSavedList = [];
       }
       fanoutSessionName = sessName;
-      result = await App.resumeSessionWorktree(sessWts[0], sessName, fanoutSavedList, App.selectedMode);
+      result = await App.resumeSessionWorktree(sessWts[0], sessName, fanoutSavedList, App.selectedMode, collectExtra);
       fanoutResume = sessWts.slice(1);
     }
 
@@ -1033,10 +1035,19 @@ window.App = window.App || {};
       App.switchToTask(result.id);
     }
 
+    var flushResumedExtras = function () {
+      var pending = resumedExtras.splice(0, resumedExtras.length);
+      pending.forEach(function (t) {
+        if (newWindowIds) newWindowIds.push(t.id); else App.addTaskToUI(t);
+      });
+      return pending.length;
+    };
+    var extraAgents = flushResumedExtras();
+
     // Multi-repo / session-resume creates open side by side immediately — in
     // single layout the extra tasks would spawn invisibly and look like they
     // failed. Columns for two terminals, grid once there are three or more.
-    var extraCount = fanoutRepos.length + fanoutResume.length;
+    var extraCount = fanoutRepos.length + fanoutResume.length + extraAgents;
     if (!newWindowIds && extraCount > 0 && TerminalManager.currentLayout() === 'single') {
       TerminalManager.setLayout(extraCount >= 2 ? 'grid' : 'columns');
     }
@@ -1111,8 +1122,11 @@ window.App = window.App || {};
       var rsResumed = 0;
       var rsFanout = fanoutResume.reduce(function (chain, wt) {
         return chain.then(function () {
-          return App.resumeSessionWorktree(wt, fanoutSessionName, fanoutSavedList, fanoutMode).then(function (res) {
+          return App.resumeSessionWorktree(wt, fanoutSessionName, fanoutSavedList, fanoutMode, collectExtra).then(function (res) {
             try {
+              // Before the outcome branches: a worktree whose first agent failed
+              // can still have opened the rest.
+              flushResumedExtras();
               if (!res || res.error) {
                 rsFailures.push(wt.repoName + ': ' + ((res && res.error) || 'failed'));
                 return;
