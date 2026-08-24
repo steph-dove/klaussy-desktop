@@ -301,7 +301,7 @@ window.App = window.App || {};
       }
     });
 
-    commands.push({ label: 'Review Pull Request\u2026', action: function () { App.showPrPicker(); } });
+    commands.push({ label: 'Review Pull Request / Merge Request…', action: function () { App.showPrPicker(); } });
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
     commands.push({ label: 'Run Slash Command…', action: function () { Dialogs.showSlashLauncher(); } });
@@ -309,8 +309,8 @@ window.App = window.App || {};
     commands.push({ label: 'Memory (CLAUDE.md)', action: function () { Dialogs.showMemory(); } });
     commands.push({ label: 'MCP Servers', action: function () { Dialogs.showMcpServers(); } });
     commands.push({ label: 'Plugins', action: function () { Dialogs.showPlugins(); } });
-    commands.push({ label: 'GitHub accounts', action: function () { Dialogs.showGhAccounts(); } });
-    commands.push({ label: 'Check dependencies\u2026', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
+    commands.push({ label: 'Git accounts (GitHub & GitLab)', action: function () { Dialogs.showGhAccounts(); } });
+    commands.push({ label: 'Check dependencies…', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: App.showLogViewer });
     commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
     commands.push({ label: 'About Klaussy', action: App.showAboutDialog });
@@ -368,18 +368,18 @@ window.App = window.App || {};
     overlay.className = 'pr-picker-overlay';
     overlay.innerHTML =
       '<div class="pr-picker">'
-        + '<div class="pr-picker-header">Review a Pull Request</div>'
+        + '<div class="pr-picker-header">Review a Pull Request or Merge Request</div>'
         + '<div class="pr-picker-account-row">'
           + '<label class="pr-picker-account-label">Account:</label>'
           + '<select class="pr-picker-account"><option>Loading…</option></select>'
           + '<span class="pr-picker-account-hint" aria-live="polite"></span>'
         + '</div>'
         + '<div class="pr-picker-url-row">'
-          + '<input type="text" class="pr-picker-url" placeholder="Paste a GitHub PR URL" />'
+          + '<input type="text" class="pr-picker-url" placeholder="Paste a GitHub PR or GitLab MR URL" />'
           + '<button class="pr-picker-start" type="button" disabled>Start review</button>'
         + '</div>'
         + '<div class="pr-picker-search-row">'
-          + '<input type="text" class="pr-picker-search" placeholder="Search loaded PRs by title, number, author or repo\u2026" autocomplete="off" spellcheck="false" />'
+          + '<input type="text" class="pr-picker-search" placeholder="Search loaded PRs/MRs by title, number, author or repo…' + '" autocomplete="off" spellcheck="false" />'
         + '</div>'
         + '<div class="pr-picker-recent"></div>'
         + '<div class="pr-picker-list"><div class="pr-picker-loading">Loading open PRs\u2026</div></div>'
@@ -458,30 +458,40 @@ window.App = window.App || {};
     function updateStartEnabled() { startBtn.disabled = !urlInput.value.trim(); }
     urlInput.addEventListener('input', function () {
       updateStartEnabled();
-      // Typing/pasting a new URL invalidates any "Switched to X" hint.
-      accountHint.textContent = '';
+      var url = urlInput.value.trim();
+      var parsed = parsePrUrl(url);
+      if (parsed && parsed.forge === 'gitlab' && (!accountSelect || !accountSelect.querySelector('option[value^="gitlab:"]'))) {
+        accountHint.textContent = 'GitLab MR detected. Run "glab auth login" to sign in (or "brew install glab").';
+        accountHint.classList.remove('pr-picker-account-hint-error');
+      } else {
+        accountHint.textContent = '';
+      }
     });
 
-    // Parse {owner, repo, number} from a GitHub PR URL for autodetect.
+    // Parse {owner, repo, number, forge} from a PR or MR URL for autodetect.
     function parsePrUrl(s) {
       if (!s) return null;
-      var m = s.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-      if (!m) return null;
-      return { owner: m[1], repo: m[2].replace(/\.git$/, ''), number: parseInt(m[3], 10) };
+      var gh = s.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+      if (gh) return { forge: 'github', owner: gh[1], repo: gh[2].replace(/\.git$/, ''), number: parseInt(gh[3], 10) };
+      var gl = s.match(/https?:\/\/[^/]+\/(.+?)(?:\/-)?\/merge_requests\/(\d+)/);
+      if (gl) return { forge: 'gitlab', projectPath: gl[1].replace(/^\//, ''), number: parseInt(gl[2], 10) };
+      return null;
     }
 
-    // Pick the gh account to open a pasted URL under: if a different logged-in
+    // Pick the account to open a pasted URL under: if a different logged-in
     // account can see the repo, target that one. Does NOT switch the global
-    // account \u2014 pr.load switches (and restores on close).
+    // account — pr.load switches (and restores on close).
     async function ensureAccountCanSeeUrl(url) {
       var parsed = parsePrUrl(url);
       if (!parsed) return;
-      var det = await window.klaus.gh.detectAccountForRepo(parsed.owner, parsed.repo, parsed.number);
-      if (!det || det.error || !det.username) return;
-      selectedAccount = det.username;
-      accountHint.textContent = 'Will use ' + det.username;
-      accountHint.classList.remove('pr-picker-account-hint-error');
-      if (accountSelect) accountSelect.value = det.username;
+      if (parsed.forge === 'github') {
+        var det = await window.klaus.gh.detectAccountForRepo(parsed.owner, parsed.repo, parsed.number);
+        if (!det || det.error || !det.username) return;
+        selectedAccount = 'github:' + det.username;
+        accountHint.textContent = 'Will use ' + det.username;
+        accountHint.classList.remove('pr-picker-account-hint-error');
+        if (accountSelect) accountSelect.value = selectedAccount;
+      }
     }
 
     async function startFromUrl() {
@@ -490,20 +500,18 @@ window.App = window.App || {};
       try { await ensureAccountCanSeeUrl(url); } catch (_) {}
       urlInput.disabled = true;
       startBtn.disabled = true;
-      startBtn.textContent = 'Loading\u2026';
+      startBtn.textContent = 'Loading…';
       var result = await window.klaus.pr.load({ url: url, account: selectedAccount });
       if (result.error) {
         urlInput.disabled = false;
         startBtn.textContent = 'Start review';
         updateStartEnabled();
         if (result.errorSummary) {
-          // Account/auth failure (e.g. wrong gh account for a work-org repo).
-          // Surface it next to the account switcher so the fix is right there.
           accountHint.textContent = result.errorSummary;
           accountHint.classList.add('pr-picker-account-hint-error');
           window.toast.error(result.errorSummary + (result.errorFix ? '\n\n' + result.errorFix : ''));
         } else {
-          window.toast.error('Failed to load PR:\n' + result.error);
+          window.toast.error('Failed to load PR/MR:\n' + result.error);
         }
         return;
       }
@@ -515,34 +523,65 @@ window.App = window.App || {};
     });
     startBtn.addEventListener('click', startFromUrl);
 
-    // Populate the account dropdown from `gh auth status`. Active account is
-    // the selected option. Hide the row when there's only one account (or
-    // gh isn't authed) so the UI doesn't get cluttered.
+    // Populate the account dropdown from `gh auth status` and `glab auth status`.
     async function populateAccountSelect() {
-      var res = await window.klaus.gh.listAccounts();
-      var accounts = (res && res.accounts) || [];
-      if (accounts.length === 0) {
+      var ghRes = null, glabRes = null;
+      try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
+      try { if (window.klaus.glab) glabRes = await window.klaus.glab.listAccounts(); } catch (_) {}
+
+      var ghAccounts = (ghRes && ghRes.accounts) || [];
+      var glabAccounts = (glabRes && glabRes.accounts) || [];
+
+      var allAccounts = [];
+      ghAccounts.forEach(function (a) {
+        allAccounts.push({
+          id: 'github:' + a.username,
+          username: a.username,
+          forge: 'github',
+          host: 'github.com',
+          active: a.active,
+          valid: a.valid,
+          outage: a.outage,
+          label: (glabAccounts.length > 0 ? 'GitHub: ' : '') + a.username,
+        });
+      });
+      glabAccounts.forEach(function (a) {
+        var hostLabel = a.hostname && a.hostname !== 'gitlab.com' ? ' (' + a.hostname + ')' : '';
+        allAccounts.push({
+          id: 'gitlab:' + (a.hostname || 'gitlab.com') + ':' + a.username,
+          username: a.username,
+          forge: 'gitlab',
+          host: a.hostname || 'gitlab.com',
+          active: a.active,
+          valid: a.valid,
+          label: 'GitLab' + hostLabel + ': ' + a.username,
+        });
+      });
+
+      if (allAccounts.length === 0) {
         var row = overlay.querySelector('.pr-picker-account-row');
         if (row) row.style.display = 'none';
         return;
       }
-      // Keep the user's chosen account selected across re-populates (e.g. after
-      // a sign-in); otherwise default to whichever account gh has active.
-      var active = accounts.find(function (a) { return a.active; });
-      if (!selectedAccount || !accounts.some(function (a) { return a.username === selectedAccount; })) {
-        selectedAccount = active ? active.username : (accounts[0] && accounts[0].username) || null;
-      }
-      accountSelect.innerHTML = accounts.map(function (a) {
-        var sel = a.username === selectedAccount ? ' selected' : '';
+
+      var options = allAccounts.map(function (a) {
+        var sel = (a.id === selectedAccount || a.username === selectedAccount) ? ' selected' : '';
         var suffix = a.active ? ' (active)' : '';
-        // `outage` = gh called the token invalid but GitHub still accepts it.
-        // The account is fine; don't imply the user has to do anything.
         if (a.valid === false) suffix = ' (needs sign-in)';
-        else if (a.outage) suffix += ' (GitHub degraded)';
-        return '<option value="' + AppUtils.escAttr(a.username) + '"' + sel + ' data-valid="' + (a.valid === false ? 'false' : 'true') + '">'
-          + AppUtils.escHtml(a.username) + suffix
+        else if (a.outage) suffix += ' (degraded)';
+        return '<option value="' + AppUtils.escAttr(a.id) + '"' + sel + ' data-valid="' + (a.valid === false ? 'false' : 'true') + '">'
+          + AppUtils.escHtml(a.label) + suffix
           + '</option>';
-      }).join('');
+      });
+
+      if (glabAccounts.length === 0) {
+        options.push('<option value="__connect_gitlab__">+ Connect GitLab (glab auth login)…</option>');
+      }
+      if (ghAccounts.length === 0) {
+        options.push('<option value="__connect_github__">+ Connect GitHub account…</option>');
+      }
+
+      accountSelect.innerHTML = options.join('');
     }
 
     // Recent + project-open lists, extracted so account-switch can re-run it.
@@ -669,16 +708,40 @@ window.App = window.App || {};
     accountSelect.addEventListener('change', async function () {
       var target = accountSelect.value;
       if (!target) return;
-      selectedAccount = target;
       accountHint.textContent = '';
       accountHint.classList.remove('pr-picker-account-hint-error');
-      // Browsing only — do NOT switch gh's global active account. We list as
-      // `target` via its token (recentRepos/authored accept the account). The
-      // global switch happens later, only when a review is actually opened.
+
+      if (target === '__connect_gitlab__') {
+        accountHint.textContent = 'Run "glab auth login" to sign in (or "brew install glab"). Copied to clipboard.';
+        try { await navigator.clipboard.writeText('glab auth login'); } catch (_) {}
+        if (window.toast && window.toast.info) {
+          window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this picker.");
+        }
+        return;
+      }
+
+      if (target === '__connect_github__') {
+        Dialogs.showGhLogin({
+          onSuccess: async function () {
+            accountHint.textContent = 'Signed in';
+            await populateAccountSelect();
+            await refreshLists();
+          },
+          onCancel: async function () { accountHint.textContent = ''; await populateAccountSelect(); },
+        });
+        return;
+      }
+
+      selectedAccount = target;
+      // Browsing only — do NOT switch gh/glab global active account. We list as
+      // `target` via its token. The global switch happens later when a review is opened.
       var opt = accountSelect.options[accountSelect.selectedIndex];
       var needsSignIn = opt && opt.dataset.valid === 'false';
       if (needsSignIn) {
-        // No usable token for this account → can't list as it; sign in first.
+        if (target.startsWith('gitlab:')) {
+          accountHint.textContent = 'Run "glab auth login" to re-authenticate this account.';
+          return;
+        }
         accountHint.textContent = 'Signing in to ' + target + '…';
         Dialogs.showGhLogin({
           onSuccess: async function () {

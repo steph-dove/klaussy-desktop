@@ -810,6 +810,12 @@ contextBridge.exposeInMainWorld('klaus', {
     },
   },
 
+  // ---- glab: GitLab CLI accounts and host management ----
+  glab: {
+    listAccounts: () => ipcRenderer.invoke('glab-list-accounts'),
+    switchAccount: (username, hostname) => ipcRenderer.invoke('glab-switch-account', { username, hostname }),
+  },
+
   // ---- skills: Claude skills / commands / memory / MCP / plugins inventory ----
   skills: {
     listSkills: () => ipcRenderer.invoke('list-skills'),

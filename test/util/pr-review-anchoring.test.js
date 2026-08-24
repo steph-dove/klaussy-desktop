@@ -102,18 +102,18 @@ test('a suggestion with no prose above it posts just the suggestion', () => {
   assert.equal(PR.findingCommentBody(bare), '```suggestion\nx = 1;\n```');
 });
 
-test('a suggestion GitHub will not label keeps ours', () => {
+test('a suggestion is posted without extra Suggested change label', () => {
   const prose = {
     text: 'Breaks on empty input.\n\nSuggested change:\nGuard the empty case before the loop.',
   };
   assert.equal(
     PR.findingCommentBody(prose),
-    'Breaks on empty input.\n\nSuggested change:\nGuard the empty case before the loop.',
+    'Breaks on empty input.\n\nGuard the empty case before the loop.',
   );
   const fenced = { text: 'Wrong order.\n\nSuggested change:\n```\nb();\na();\n```' };
   assert.equal(
     PR.findingCommentBody(fenced),
-    'Wrong order.\n\nSuggested change:\n```\nb();\na();\n```',
+    'Wrong order.\n\n```\nb();\na();\n```',
   );
 });
 

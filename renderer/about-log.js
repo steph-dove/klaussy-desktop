@@ -315,6 +315,19 @@ window.Dialogs = (function () {
       } : null,
     });
 
+    var glabRow = deps.glab ? depRow({
+      name: 'GitLab CLI (glab)',
+      ok: deps.glab.installed && deps.glab.authed,
+      missing: !deps.glab.installed,
+      version: deps.glab.version,
+      problem: !deps.glab.installed ? 'Optional — not installed.'
+              : !deps.glab.authed ? 'Installed, but not authenticated.'
+              : null,
+      fixes: !deps.glab.installed
+        ? [(deps.platform === 'darwin' ? 'brew install glab' : deps.platform === 'win32' ? 'winget install GitLab.glab' : 'sudo apt install glab')]
+        : (!deps.glab.authed ? ['glab auth login'] : []),
+    }) : '';
+
     // One row per agent. The required Claude CLI is covered by the bundled
     // "Install requirements" button; optional agents get a copyable
     // `npm install -g …` command inline.
@@ -355,10 +368,11 @@ window.Dialogs = (function () {
     var defaultAgent = agentList.filter(function (a) { return a.isDefault; })[0] || agentList[0] || {};
     var defaultAgentName = defaultAgent.name || 'your AI agent';
     var requirements = [
-      { name: 'Node.js + npm',  why: 'Runtime for the agent CLIs and other npm-installed tools.' },
-      { name: 'GitHub CLI (gh)', why: 'PR review, CI status, and GitHub auth (the Sign-in button uses gh under the hood).' },
-      { name: defaultAgentName, why: 'Your current default AI agent. You can install another any time from the rows above.' },
-      { name: 'Ollama',           why: 'Local model server for inline tab-autocomplete. Runs on your machine — no code leaves your laptop. ~2 GB.' },
+      { name: 'Node.js + npm',     why: 'Runtime for the agent CLIs and other npm-installed tools.' },
+      { name: 'GitHub CLI (gh)',   why: 'GitHub PR review, CI status, and auth.' },
+      { name: 'GitLab CLI (glab)', why: 'GitLab MR review, CI status, and auth.' },
+      { name: defaultAgentName,    why: 'Your current default AI agent. You can install another any time from the rows above.' },
+      { name: 'Ollama',              why: 'Local model server for inline tab-autocomplete. Runs on your machine — no code leaves your laptop. ~2 GB.' },
     ];
     var requirementList = requirements.map(function (r) {
       return '<li><strong>' + escHtml(r.name) + '</strong> — ' + escHtml(r.why) + '</li>';
@@ -385,7 +399,7 @@ window.Dialogs = (function () {
       + '</div>'
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
-      + '<div class="deps-rows">' + ghRow + agentRows + '</div>'
+      + '<div class="deps-rows">' + ghRow + glabRow + agentRows + '</div>'
       + installSection
       + '<div class="deps-actions">'
         + '<button class="deps-recheck" type="button">Re-check</button>'
@@ -924,7 +938,7 @@ window.Dialogs = (function () {
     });
   }
 
-  // ---- GitHub accounts ----
+  // ---- Git accounts (GitHub & GitLab) ----
   // opts.onChange (optional) fires after a switch/re-auth so a caller showing
   // stale data can reload without waiting for the dialog to close.
   function showGhAccounts(opts) {
@@ -935,87 +949,157 @@ window.Dialogs = (function () {
     dialog.className = 'gh-accounts-dialog';
     dialog.innerHTML =
       '<div class="skills-head">'
-        + '<h2>GitHub accounts</h2>'
+        + '<h2>Git accounts</h2>'
         + '<button class="skills-close" type="button" title="Close">&times;</button>'
       + '</div>'
-      + '<div class="gh-accounts-body"><div class="skills-loading">Reading gh auth status\u2026</div></div>';
+      + '<div class="gh-accounts-body"><div class="skills-loading">Reading accounts…</div></div>';
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
     var body = dialog.querySelector('.gh-accounts-body');
 
-    function refresh() {
-      body.innerHTML = '<div class="skills-loading">Reading gh auth status\u2026</div>';
-      window.klaus.gh.listAccounts().then(function (r) {
-        var accounts = (r && r.accounts) || [];
-        if (accounts.length === 0) {
-          body.innerHTML = '<div class="skills-empty">'
-            + '<p>No gh accounts found.</p>'
-            + '<button class="gh-account-add" type="button">Sign in to GitHub</button>'
-          + '</div>';
-          body.querySelector('.gh-account-add').addEventListener('click', function () {
-            showGhLogin({ onSuccess: refresh });
-          });
-          return;
-        }
-        // Each row: active+valid \u2192 "active" badge; inactive+valid \u2192 "Switch";
-        // any+invalid \u2192 "Re-auth". Keeping invalids in the list (not dropping
-        // them) is the point \u2014 one bad token shouldn't hide the other accounts.
-        body.innerHTML = '<p class="gh-accounts-intro">Klaussy uses whichever gh account is active. Click another to switch.</p>'
-          + accounts.map(function (a) {
-            var classes = 'gh-account-row';
-            if (a.active) classes += ' active';
-            if (!a.valid) classes += ' invalid';
-            var status;
-            if (!a.valid) status = '<span class="gh-account-status invalid" title="' + escHtml(a.reason || 'Token invalid') + '">' + escHtml(a.reason || 'Token invalid') + '</span><span class="gh-account-action">Re-auth</span>';
-            else if (a.active) status = '<span class="gh-account-badge">active</span>';
-            else status = '<span class="gh-account-action">Switch</span>';
-            var disabledAttr = (a.active && a.valid) ? ' disabled' : '';
-            var actionAttr = !a.valid ? 'reauth' : 'switch';
-            return '<button class="' + classes + '" type="button"'
-              + ' data-username="' + escHtml(a.username) + '"'
-              + ' data-action="' + actionAttr + '"' + disabledAttr + '>'
-              + '<span class="gh-account-name">' + escHtml(a.username) + '</span>'
-              + status
-            + '</button>';
-          }).join('')
-          + '<div class="gh-accounts-foot">'
-            + '<button class="gh-account-add" type="button">+ Add another account</button>'
-          + '</div>';
+    async function refresh() {
+      body.innerHTML = '<div class="skills-loading">Reading accounts…</div>';
+      var ghRes = null, glabRes = null;
+      try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
+      try { if (window.klaus.glab) glabRes = await window.klaus.glab.listAccounts(); } catch (_) {}
 
-        body.querySelector('.gh-account-add').addEventListener('click', function () {
+      var ghAccounts = (ghRes && ghRes.accounts) || [];
+      var glabAccounts = (glabRes && glabRes.accounts) || [];
+
+      var html = '<p class="gh-accounts-intro">Klaussy uses whichever account is active for GitHub and GitLab operations.</p>';
+
+      // Section: GitHub
+      html += '<h3 class="git-accounts-section-title">GitHub</h3>';
+      if (ghAccounts.length === 0) {
+        html += '<div class="git-accounts-empty-hint">'
+          + '<p style="margin: 0 0 6px 0;">No GitHub accounts signed in.</p>'
+          + '<button class="gh-account-add" id="gh-signin-btn" type="button">Sign in to GitHub</button>'
+        + '</div>';
+      } else {
+        html += ghAccounts.map(function (a) {
+          var classes = 'gh-account-row';
+          if (a.active) classes += ' active';
+          if (!a.valid) classes += ' invalid';
+          var status;
+          if (!a.valid) status = '<span class="gh-account-status invalid" title="' + escHtml(a.reason || 'Token invalid') + '">' + escHtml(a.reason || 'Token invalid') + '</span><span class="gh-account-action">Re-auth</span>';
+          else if (a.active) status = '<span class="gh-account-badge">active</span>';
+          else status = '<span class="gh-account-action">Switch</span>';
+          var disabledAttr = (a.active && a.valid) ? ' disabled' : '';
+          var actionAttr = !a.valid ? 'reauth' : 'switch';
+          return '<button class="' + classes + '" type="button"'
+            + ' data-forge="github" data-username="' + escHtml(a.username) + '"'
+            + ' data-action="' + actionAttr + '"' + disabledAttr + '>'
+            + '<span class="gh-account-name">' + escHtml(a.username) + '</span>'
+            + status
+          + '</button>';
+        }).join('')
+        + '<div class="gh-accounts-foot">'
+          + '<button class="gh-account-add" id="gh-signin-btn" type="button">+ Add GitHub account</button>'
+        + '</div>';
+      }
+
+      // Section: GitLab
+      html += '<h3 class="git-accounts-section-title">GitLab</h3>';
+      if (glabAccounts.length === 0) {
+        html += '<div class="git-accounts-empty-hint">'
+          + '<p style="margin: 0 0 6px 0;">No GitLab accounts connected. Connect via GitLab CLI (<code>glab</code>) to review MRs.</p>'
+          + '<button class="gh-account-add" id="glab-add-btn" type="button">+ Connect GitLab (glab auth login)</button>'
+        + '</div>';
+      } else {
+        html += glabAccounts.map(function (a) {
+          var classes = 'gh-account-row';
+          if (a.active) classes += ' active';
+          if (a.valid === false) classes += ' invalid';
+          var status;
+          if (a.valid === false) status = '<span class="gh-account-status invalid">Token invalid</span><span class="gh-account-action">Sign in</span>';
+          else if (a.active) status = '<span class="gh-account-badge">active</span>';
+          else status = '<span class="gh-account-action">Switch</span>';
+          var disabledAttr = (a.active && a.valid !== false) ? ' disabled' : '';
+          var hostLabel = a.hostname && a.hostname !== 'gitlab.com' ? ' (' + a.hostname + ')' : '';
+          return '<button class="' + classes + '" type="button"'
+            + ' data-forge="gitlab" data-username="' + escHtml(a.username) + '" data-hostname="' + escHtml(a.hostname || 'gitlab.com') + '"'
+            + ' data-action="' + (a.valid === false ? 'glab-reauth' : 'glab-switch') + '"' + disabledAttr + '>'
+            + '<span class="gh-account-name">' + escHtml(a.username) + '<span style="font-weight:normal;color:var(--text-dim);font-size:11px;">' + escHtml(hostLabel) + '</span></span>'
+            + status
+          + '</button>';
+        }).join('')
+        + '<div class="gh-accounts-foot">'
+          + '<button class="gh-account-add" id="glab-add-btn" type="button">+ Add another GitLab account</button>'
+        + '</div>';
+      }
+
+      body.innerHTML = html;
+
+      var ghAddBtn = body.querySelector('#gh-signin-btn');
+      if (ghAddBtn) {
+        ghAddBtn.addEventListener('click', function () {
           showGhLogin({ onSuccess: refresh });
         });
+      }
 
-        body.querySelectorAll('.gh-account-row[data-username]').forEach(function (btn) {
-          btn.addEventListener('click', async function () {
-            if (btn.disabled) return;
-            var username = btn.dataset.username;
-            var action = btn.dataset.action;
-            if (action === 'reauth') {
-              showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
-              return;
-            }
-            btn.disabled = true;
-            var orig = btn.querySelector('.gh-account-action');
-            if (orig) orig.textContent = 'Switching\u2026';
-            var result = await window.klaus.gh.switchAccount(username);
-            // The switch handler in main returns needsLogin when the
-            // target's token is stale \u2014 route to the login modal instead
-            // of toasting a confusing error.
-            if (result && result.needsLogin) {
-              showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
-              return;
-            }
-            if (result && result.error) {
-              window.toast.error('Switch failed: ' + result.error);
-              refresh();
-              return;
-            }
+      var glabAddBtn = body.querySelector('#glab-add-btn');
+      if (glabAddBtn) {
+        glabAddBtn.addEventListener('click', async function () {
+          try { await navigator.clipboard.writeText('glab auth login'); } catch (_) {}
+          if (window.toast && window.toast.info) {
+            window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this dialog.");
+          }
+        });
+      }
+
+      body.querySelectorAll('.gh-account-row[data-forge="github"]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (btn.disabled) return;
+          var username = btn.dataset.username;
+          var action = btn.dataset.action;
+          if (action === 'reauth') {
+            showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
+            return;
+          }
+          btn.disabled = true;
+          var orig = btn.querySelector('.gh-account-action');
+          if (orig) orig.textContent = 'Switching…';
+          var result = await window.klaus.gh.switchAccount(username);
+          if (result && result.needsLogin) {
+            showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
+            return;
+          }
+          if (result && result.error) {
+            window.toast.error('Switch failed: ' + result.error);
             refresh();
-            if (opts.onChange) try { opts.onChange(); } catch (_) {}
-          });
+            return;
+          }
+          refresh();
+          if (opts.onChange) try { opts.onChange(); } catch (_) {}
+        });
+      });
+
+      body.querySelectorAll('.gh-account-row[data-forge="gitlab"]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (btn.disabled) return;
+          var username = btn.dataset.username;
+          var hostname = btn.dataset.hostname;
+          var action = btn.dataset.action;
+          if (action === 'glab-reauth') {
+            try { await navigator.clipboard.writeText('glab auth login --hostname ' + hostname); } catch (_) {}
+            if (window.toast && window.toast.info) {
+              window.toast.info("Copied 'glab auth login --hostname " + hostname + "' to clipboard. Run it in your terminal.");
+            }
+            return;
+          }
+          btn.disabled = true;
+          var orig = btn.querySelector('.gh-account-action');
+          if (orig) orig.textContent = 'Switching…';
+          var result = await window.klaus.glab.switchAccount(username, hostname);
+          if (result && result.error) {
+            window.toast.error('Switch failed: ' + result.error);
+            refresh();
+            return;
+          }
+          refresh();
+          if (opts.onChange) try { opts.onChange(); } catch (_) {}
         });
       });
     }

@@ -351,8 +351,7 @@
     return first.replace(/\s+/g, ' ').trim();
   };
 
-  // One line of why, then the change. GitHub prints its own header only above a
-  // ```suggestion fence, so every other shape needs our label.
+  // One line of why, then the change (unlabeled so comments read naturally).
   PR.findingCommentBody = function(f) {
     var suggestion = PR.findingSuggestionText(f);
     // No label in the text at all means findingSuggestionText returned the
@@ -361,10 +360,7 @@
     var why = PR.findingWhyText(f);
     if (!why) return suggestion;
     if (!suggestion) return why;
-    var labelled = /^```suggestion\b/.test(suggestion)
-      ? suggestion
-      : 'Suggested change:\n' + suggestion;
-    return why + '\n\n' + labelled;
+    return why + '\n\n' + suggestion;
   };
 
   // Add a finding to the pending review. Both paths STAGE into pendingComments
@@ -1047,7 +1043,9 @@
     }
     var ownPr = PR.isOwnPullRequest();
     var selfDisabled = ownPr ? ' disabled' : '';
-    var selfHint = ownPr ? 'GitHub doesn’t allow this on your own PR' : '';
+    var forgeName = PR.forgeName ? PR.forgeName() : 'GitHub';
+    var itemType = forgeName === 'GitLab' ? 'MR' : 'PR';
+    var selfHint = ownPr ? (forgeName + ' doesn’t allow this on your own ' + itemType) : '';
     var overlay = document.createElement('div');
     overlay.className = 'pr-submit-overlay';
     overlay.innerHTML =

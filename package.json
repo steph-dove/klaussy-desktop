@@ -20,7 +20,7 @@
   "scripts": {
     "start": "electron .",
     "lint": "eslint \"main/**/*.js\" main.js preload.js \"renderer/**/*.js\"",
-    "test": "node --test test/util/*.test.js",
+    "test": "node --require ./test/setup.js --test test/util/*.test.js",
     "test:e2e": "playwright test",
     "rebuild": "electron-rebuild",
     "dist": "electron-builder --mac --arm64 --x64 --publish never && npm run rebuild",

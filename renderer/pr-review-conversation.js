@@ -566,10 +566,11 @@
     // render an "unknown" gate explicitly. Silently rendering as "no required
     // checks" would falsely green-light merges.
     var requiredGate = '';
+    var forgeName = PR.forgeName ? PR.forgeName() : 'GitHub';
     if (PR.currentRequiredChecksError) {
       requiredGate = '<div class="pr-required-gate pr-required-unknown" title="' + PR.escHtml(PR.currentRequiredChecksError) + '">'
         + '<div class="pr-required-summary">'
-          + 'Required checks: <strong>unknown</strong> — could not load branch protection rules. Verify on GitHub before merging.'
+          + 'Required checks: <strong>unknown</strong> — could not load branch protection rules. Verify on ' + PR.escHtml(forgeName) + ' before merging.'
         + '</div>'
       + '</div>';
     } else if (PR.currentRequiredChecks && PR.currentRequiredChecks.length > 0) {
@@ -601,7 +602,7 @@
       var b = bucketOf(c);
       var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
       // Failing checks with an id can expand their file:line annotations inline
-      // \u2014 the whole row is the toggle (chevron rotates), so no separate button.
+      // — the whole row is the toggle (chevron rotates), so no separate button.
       var expandable = b === 'fail' && c.id != null && c.id !== '';
       var debugBtn = (b === 'fail' && c.link)
         ? '<button class="pr-check-debug-btn" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(c.id ? String(c.id) : '') + '" title="Use the agent to diagnose this failure">Debug</button>'
@@ -622,7 +623,7 @@
         ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Stream the workflow log live">Watch log</button>'
         : '';
       var openBtn = c.link
-        ? '<button class="pr-check-open" type="button" data-link="' + PR.escHtml(c.link) + '" title="Open on GitHub">\u2197</button>'
+        ? '<button class="pr-check-open" type="button" data-link="' + PR.escHtml(c.link) + '" title="Open on ' + PR.escHtml(forgeName) + '">\u2197</button>'
         : '';
       var dur = formatDur(c.startedAt, c.completedAt);
       var durHtml = dur ? '<span class="pr-check-dur">' + dur + '</span>' : '';

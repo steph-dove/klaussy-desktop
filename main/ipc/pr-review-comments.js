@@ -7,37 +7,73 @@ const { ipcMain } = require('electron');
 const log = require('electron-log');
 const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, resolveGhEnv, appendStderr, execFileP } = require('../util/exec');
+const { resolveGlabEnv } = require('../util/glab-exec');
 const { ghJson, ghText } = require('../util/gh-json');
+const { glabJson, glabText } = require('../util/glab-json');
 const { humanizeComment } = require('../util/humanize-comment');
 const { isEmptyReview, ghApiErrorMessage } = require('../util/review-payload');
 const {
   prReview, currentRepoPath, sanitizePrReview, broadcastPrReview, fetchThreadsForActive,
 } = require('../state/pr-review');
 
-// Pin every gh call in an active review to the account it runs under, so
-// posting survives global-account drift and works for org repos. Falls back to
-// the ambient account when there's no pinned account or its token won't read.
+// Pin every gh/glab call in an active review to the account it runs under.
 function reviewGhEnv(cwd) {
   const account = prReview.active && prReview.active.account;
   return { ...process.env, ...resolveGhEnv({ account, cwd }) };
 }
 
-// G4: post all pending review comments + decision as one review. The GitHub
-// REST endpoint accepts `comments` inline so we only make one network call.
-// Piping JSON on stdin avoids shell-escaping pain for multiline comment
-// bodies.
-// General issue comment on the PR — no line context, just a body.
+function reviewGlabEnv(cwd) {
+  const account = prReview.active && prReview.active.account;
+  const host = prReview.active && prReview.active.host;
+  const resolved = resolveGlabEnv({ account, host, cwd });
+  const env = { ...process.env, ...resolved };
+  delete env.GITLAB_TOKEN;
+  return env;
+}
+
+// General comment on the PR/MR — no line context, just a body.
 ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo, number } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const { baseOwner, baseRepo, number, forge, projectPath } = prReview.active;
+  if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
-  body = humanizeComment(body); // strip agent tells + filler before posting
-  const endpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
+  body = humanizeComment(body);
   const cwd = currentRepoPath() || require('os').homedir();
-  // `spawn` is imported at the top of the file.
 
+  if (forge === 'gitlab') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes`;
+    return new Promise((resolve) => {
+      const proc = spawn('glab', ['api', endpoint, '--method', 'POST', '--input', '-', '--header', 'Content-Type: application/json'], {
+        cwd,
+        env: reviewGlabEnv(cwd),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdoutBuf = '', stderrBuf = '';
+      proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+      proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
+      proc.on('error', (err) => resolve({ error: err.message }));
+      proc.on('exit', (code) => {
+        if (code !== 0) {
+          let msg = stderrBuf.trim();
+          if (stdoutBuf) {
+            try {
+              const parsed = JSON.parse(stdoutBuf);
+              if (parsed.message) msg = parsed.message;
+            } catch (_) {}
+          }
+          resolve({ error: msg || ('glab exited with code ' + code) });
+          return;
+        }
+        resolve({ ok: true });
+      });
+      proc.stdin.write(JSON.stringify({ body }));
+      proc.stdin.end();
+    });
+  }
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/issues/${number}/comments`;
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
       cwd,
@@ -67,21 +103,46 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
   });
 });
 
-// Patch an existing issue comment. `commentId` is the REST numeric id
-// (GraphQL exposes it as databaseId). Posts to the `/issues/comments/{id}`
-// REST endpoint — distinct from review comments which live under `/pulls/`.
+// Patch an existing issue comment.
 ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const { baseOwner, baseRepo, number, forge, projectPath } = prReview.active;
+  if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   const id = parseInt(commentId, 10);
   if (!id) return { error: 'Missing or invalid comment id' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
   body = humanizeComment(body);
-  const endpoint = `repos/${baseOwner}/${baseRepo}/issues/comments/${id}`;
   const cwd = currentRepoPath() || require('os').homedir();
-  // `spawn` is imported at the top of the file.
+
+  if (forge === 'gitlab') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes/${id}`;
+    return new Promise((resolve) => {
+      const proc = spawn('glab', ['api', endpoint, '--method', 'PUT', '--input', '-', '--header', 'Content-Type: application/json'], {
+        cwd, env: reviewGlabEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdoutBuf = '', stderrBuf = '';
+      proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+      proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
+      proc.on('error', (err) => resolve({ error: err.message }));
+      proc.on('exit', (code) => {
+        if (code !== 0) {
+          let msg = stderrBuf.trim();
+          if (stdoutBuf) {
+            try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+          }
+          resolve({ error: msg || ('glab exited with code ' + code) });
+          return;
+        }
+        resolve({ ok: true, body });
+      });
+      proc.stdin.write(JSON.stringify({ body }));
+      proc.stdin.end();
+    });
+  }
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/issues/comments/${id}`;
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
       cwd, env: reviewGhEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
@@ -106,20 +167,46 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   });
 });
 
-// Patch an existing inline/review comment. Separate endpoint from issue
-// comments: `/repos/{o}/{r}/pulls/comments/{id}`.
+// Patch an existing inline/review comment.
 ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const { baseOwner, baseRepo, number, forge, projectPath } = prReview.active;
+  if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   const id = parseInt(commentId, 10);
   if (!id) return { error: 'Missing or invalid comment id' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
   body = humanizeComment(body);
-  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/comments/${id}`;
   const cwd = currentRepoPath() || require('os').homedir();
-  // `spawn` is imported at the top of the file.
+
+  if (forge === 'gitlab') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes/${id}`;
+    return new Promise((resolve) => {
+      const proc = spawn('glab', ['api', endpoint, '--method', 'PUT', '--input', '-', '--header', 'Content-Type: application/json'], {
+        cwd, env: reviewGlabEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdoutBuf = '', stderrBuf = '';
+      proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+      proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
+      proc.on('error', (err) => resolve({ error: err.message }));
+      proc.on('exit', (code) => {
+        if (code !== 0) {
+          let msg = stderrBuf.trim();
+          if (stdoutBuf) {
+            try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+          }
+          resolve({ error: msg || ('glab exited with code ' + code) });
+          return;
+        }
+        resolve({ ok: true, body });
+      });
+      proc.stdin.write(JSON.stringify({ body }));
+      proc.stdin.end();
+    });
+  }
+
+  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/comments/${id}`;
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'PATCH', '--input', '-'], {
       cwd, env: reviewGhEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
@@ -144,15 +231,27 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
   });
 });
 
-// Cache the current gh-authed user so we only show the edit control on
-// comments this user can actually modify. gh api /user is the cheap
-// canonical endpoint; we call it once per review session.
 let cachedCurrentUser = null;
 ipcMain.handle('pr-current-user', async () => {
   if (cachedCurrentUser) return { login: cachedCurrentUser };
+  const cwd = currentRepoPath() || require('os').homedir();
+  const forge = (prReview.active && prReview.active.forge) || 'github';
+
+  if (forge === 'gitlab') {
+    try {
+      const out = execFileSync('glab', ['api', 'user', '--jq', '.username'], {
+        stdio: 'pipe', timeout: 10000, env: reviewGlabEnv(cwd),
+      }).toString().trim();
+      if (out) cachedCurrentUser = out;
+      return { login: cachedCurrentUser };
+    } catch (err) {
+      return { error: err.stderr ? err.stderr.toString() : err.message };
+    }
+  }
+
   try {
     const out = execFileSync('gh', ['api', 'user', '--jq', '.login'], {
-      stdio: 'pipe', timeout: 10000, env: reviewGhEnv(currentRepoPath() || require('os').homedir()),
+      stdio: 'pipe', timeout: 10000, env: reviewGhEnv(cwd),
     }).toString().trim();
     if (out) cachedCurrentUser = out;
     return { login: cachedCurrentUser };
@@ -161,22 +260,57 @@ ipcMain.handle('pr-current-user', async () => {
   }
 });
 
-// Reply to a specific review comment (threaded). `inReplyTo` is the parent
-// comment's REST databaseId — the same id GraphQL returns on each review
-// comment so we can thread using data we already fetch. Uses GitHub's
-// dedicated replies endpoint so we don't have to fake a new-comment shape.
+// Reply to a specific review comment / thread.
 ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo, number } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
-  const parentId = parseInt(inReplyTo, 10);
-  if (!parentId) return { error: 'Missing or invalid parent comment id' };
+  const { baseOwner, baseRepo, number, forge, projectPath, threads } = prReview.active;
+  if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   if (!body || !body.trim()) return { error: 'Reply body is empty' };
 
   body = humanizeComment(body);
-  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/comments/${parentId}/replies`;
   const cwd = currentRepoPath() || require('os').homedir();
-  // `spawn` is imported at the top of the file.
+
+  if (forge === 'gitlab') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    // Find the thread id: inReplyTo might be thread id or comment id
+    let discussionId = inReplyTo;
+    if (threads && Array.isArray(threads)) {
+      const matchingThread = threads.find((t) => t.id === inReplyTo || (t.comments && t.comments.some((c) => String(c.databaseId) === String(inReplyTo))));
+      if (matchingThread) discussionId = matchingThread.id;
+    }
+    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/discussions/${encodeURIComponent(discussionId)}/notes`;
+    return new Promise((resolve) => {
+      const proc = spawn('glab', ['api', endpoint, '--method', 'POST', '--input', '-', '--header', 'Content-Type: application/json'], {
+        cwd,
+        env: reviewGlabEnv(cwd),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      let stdoutBuf = '', stderrBuf = '';
+      proc.stdout.on('data', (c) => { stdoutBuf += c.toString(); });
+      proc.stderr.on('data', (c) => { stderrBuf = appendStderr(stderrBuf, c); });
+      proc.on('error', (err) => resolve({ error: err.message }));
+      proc.on('exit', (code) => {
+        if (code !== 0) {
+          let msg = stderrBuf.trim();
+          if (stdoutBuf) {
+            try {
+              const parsed = JSON.parse(stdoutBuf);
+              if (parsed.message) msg = parsed.message;
+            } catch (_) {}
+          }
+          resolve({ error: msg || ('glab exited with code ' + code) });
+          return;
+        }
+        resolve({ ok: true });
+      });
+      proc.stdin.write(JSON.stringify({ body }));
+      proc.stdin.end();
+    });
+  }
+
+  const parentId = parseInt(inReplyTo, 10);
+  if (!parentId) return { error: 'Missing or invalid parent comment id' };
+  const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/comments/${parentId}/replies`;
 
   return new Promise((resolve) => {
     const proc = spawn('gh', ['api', endpoint, '--method', 'POST', '--input', '-'], {
@@ -207,17 +341,30 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
   });
 });
 
-// Resolve / unresolve a review thread from the review surface. Keyed by the
-// global GraphQL thread id, so it needs no worktree/PR context beyond an active
-// review (which scopes the gh account). Re-fetches threads on success so the
-// conversation re-renders with the new resolved state.
+// Resolve / unresolve a review thread.
 ipcMain.handle('pr-review-resolve-thread', async (_event, { threadId, resolve }) => {
   if (!prReview.active) return { error: 'No active PR review' };
   if (!threadId) return { error: 'Missing thread id' };
+  const cwd = currentRepoPath() || require('os').homedir();
+  const forge = prReview.active.forge || 'github';
+
+  if (forge === 'gitlab') {
+    const target = prReview.active.projectPath || `${prReview.active.baseOwner}/${prReview.active.baseRepo}`;
+    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${prReview.active.number}/discussions/${encodeURIComponent(threadId)}`;
+    try {
+      execFileSync('glab', ['api', endpoint, '-X', 'PUT', '-F', `resolved=${resolve ? 'true' : 'false'}`], {
+        cwd, env: reviewGlabEnv(cwd), stdio: 'pipe', timeout: 15000,
+      });
+      try { await fetchThreadsForActive(); } catch (_) {}
+      return { ok: true };
+    } catch (err) {
+      return { error: err.stderr ? err.stderr.toString() : err.message };
+    }
+  }
+
   const mutation = resolve
     ? 'mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }'
     : 'mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }';
-  const cwd = currentRepoPath() || require('os').homedir();
   try {
     ghExec([
       'api', 'graphql',
@@ -227,15 +374,14 @@ ipcMain.handle('pr-review-resolve-thread', async (_event, { threadId, resolve })
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
   }
-  // Re-broadcast updated threads so the Conversation tab reflects the change.
   try { await fetchThreadsForActive(); } catch (_) {}
   return { ok: true };
 });
 
 ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { baseOwner, baseRepo, number } = prReview.active;
-  if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
+  const { baseOwner, baseRepo, number, forge, projectPath, meta } = prReview.active;
+  if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   if (!event) return { error: 'Missing review event (APPROVE / REQUEST_CHANGES / COMMENT)' };
 
   // Split incoming drafts: inline review comments go in the review payload;
@@ -244,6 +390,169 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   const rawComments = comments || [];
   const inlineComments = rawComments.filter((c) => !c.issueComment);
   const issueCommentDrafts = rawComments.filter((c) => c.issueComment);
+
+  const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'gitlab') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const headSha = meta && (meta.headRefOid || (meta.diff_refs && meta.diff_refs.head_sha) || '');
+    const baseSha = meta && ((meta.diff_refs && meta.diff_refs.base_sha) || headSha);
+    const startSha = meta && ((meta.diff_refs && meta.diff_refs.start_sha) || baseSha);
+
+    const errors = [];
+    let postedCount = 0;
+
+    // Post inline comments via discussions
+    for (const c of inlineComments) {
+      if (!c.body || !c.body.trim()) continue;
+      const pos = {
+        base_sha: baseSha,
+        start_sha: startSha,
+        head_sha: headSha,
+        position_type: 'text',
+        new_path: c.path,
+        old_path: c.path,
+      };
+      if (c.side === 'LEFT' && typeof c.line === 'number') {
+        pos.old_line = c.line;
+      } else if (typeof c.line === 'number') {
+        pos.new_line = c.line;
+      }
+      const discPayload = {
+        body: humanizeComment(c.body),
+        position: pos,
+      };
+      const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/discussions`;
+      const res = await new Promise((resolve) => {
+        const proc = spawn('glab', ['api', endpoint, '--method', 'POST', '--input', '-', '--header', 'Content-Type: application/json'], {
+          cwd, env: reviewGlabEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let stdoutBuf = '', stderrBuf = '';
+        proc.stdout.on('data', (d) => { stdoutBuf += d.toString(); });
+        proc.stderr.on('data', (d) => { stderrBuf = appendStderr(stderrBuf, d); });
+        proc.on('error', (err) => resolve({ error: err.message }));
+        proc.on('exit', (code) => {
+          if (code !== 0) {
+            let msg = stderrBuf.trim();
+            if (stdoutBuf) {
+              try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+            }
+            resolve({ error: msg || ('glab exited with code ' + code) });
+            return;
+          }
+          resolve({ ok: true });
+        });
+        proc.stdin.write(JSON.stringify(discPayload));
+        proc.stdin.end();
+      });
+      if (res.error) {
+        // Fallback: post as an MR note with file & line reference
+        const fallbackBody = `**[${c.path}${typeof c.line === 'number' ? `:${c.line}` : ''}]**\n\n${c.body}`;
+        const noteEndpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes`;
+        const noteRes = await new Promise((resolve) => {
+          const proc = spawn('glab', ['api', noteEndpoint, '--method', 'POST', '--input', '-', '--header', 'Content-Type: application/json'], {
+            cwd, env: reviewGlabEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          let stdoutBuf = '', stderrBuf = '';
+          proc.stdout.on('data', (d) => { stdoutBuf += d.toString(); });
+          proc.stderr.on('data', (d) => { stderrBuf = appendStderr(stderrBuf, d); });
+          proc.on('error', (err) => resolve({ error: err.message }));
+          proc.on('exit', (code) => {
+            if (code !== 0) {
+              let msg = stderrBuf.trim();
+              if (stdoutBuf) {
+                try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+              }
+              resolve({ error: msg || ('glab exited with code ' + code) });
+              return;
+            }
+            resolve({ ok: true });
+          });
+          proc.stdin.write(JSON.stringify({ body: humanizeComment(fallbackBody) }));
+          proc.stdin.end();
+        });
+        if (noteRes.error) errors.push(res.error);
+        else postedCount += 1;
+      } else {
+        postedCount += 1;
+      }
+    }
+
+    // Top-level review body (if provided)
+    if (body && body.trim()) {
+      const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes`;
+      const res = await new Promise((resolve) => {
+        const proc = spawn('glab', ['api', endpoint, '--method', 'POST', '--input', '-', '--header', 'Content-Type: application/json'], {
+          cwd, env: reviewGlabEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let stdoutBuf = '', stderrBuf = '';
+        proc.stdout.on('data', (d) => { stdoutBuf += d.toString(); });
+        proc.stderr.on('data', (d) => { stderrBuf = appendStderr(stderrBuf, d); });
+        proc.on('error', (err) => resolve({ error: err.message }));
+        proc.on('exit', (code) => {
+          if (code !== 0) {
+            let msg = stderrBuf.trim();
+            if (stdoutBuf) {
+              try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+            }
+            resolve({ error: msg || ('glab exited with code ' + code) });
+            return;
+          }
+          resolve({ ok: true });
+        });
+        proc.stdin.write(JSON.stringify({ body: humanizeComment(body) }));
+        proc.stdin.end();
+      });
+      if (res.error) errors.push(res.error);
+      else postedCount += 1;
+    }
+
+    // Post follow-up issue comments
+    for (const draft of issueCommentDrafts) {
+      if (!draft.body || !draft.body.trim()) continue;
+      const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes`;
+      const res = await new Promise((resolve) => {
+        const proc = spawn('glab', ['api', endpoint, '--method', 'POST', '--input', '-', '--header', 'Content-Type: application/json'], {
+          cwd, env: reviewGlabEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        let stdoutBuf = '', stderrBuf = '';
+        proc.stdout.on('data', (d) => { stdoutBuf += d.toString(); });
+        proc.stderr.on('data', (d) => { stderrBuf = appendStderr(stderrBuf, d); });
+        proc.on('error', (err) => resolve({ error: err.message }));
+        proc.on('exit', (code) => {
+          if (code !== 0) {
+            let msg = stderrBuf.trim();
+            if (stdoutBuf) {
+              try { const p = JSON.parse(stdoutBuf); if (p.message) msg = p.message; } catch (_) {}
+            }
+            resolve({ error: msg || ('glab exited with code ' + code) });
+            return;
+          }
+          resolve({ ok: true });
+        });
+        proc.stdin.write(JSON.stringify({ body: humanizeComment(draft.body) }));
+        proc.stdin.end();
+      });
+      if (res.error) errors.push(res.error);
+      else postedCount += 1;
+    }
+
+    if (event === 'APPROVE') {
+      try {
+        execFileSync('glab', ['mr', 'approve', String(number)], {
+          cwd, env: reviewGlabEnv(cwd), stdio: 'pipe', timeout: 15000,
+        });
+      } catch (err) {
+        errors.push((err.stderr ? err.stderr.toString() : err.message).trim());
+      }
+    }
+
+    if (errors.length) {
+      if (postedCount === 0) return { error: `Nothing was posted: ${errors.join('; ')}` };
+      return { ok: true, warning: `Review posted, but some actions had warnings: ${errors.join('; ')}` };
+    }
+    return { ok: true };
+  }
 
   const payload = {
     event,
@@ -254,7 +563,6 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
         body: humanizeComment(c.body),
         side: c.side || 'RIGHT',
       };
-      // GitHub requires `line` always; `start_line` only for multi-line.
       if (typeof c.line === 'number') out.line = c.line;
       if (typeof c.startLine === 'number' && c.startLine !== c.line) {
         out.start_line = c.startLine;
@@ -264,19 +572,13 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     }),
   };
 
-  // Every draft may have fallen through to an issue comment, leaving an empty
-  // COMMENT review that 422s and drops the issue comments with it.
   const skipReview = isEmptyReview(payload);
   if (skipReview && !issueCommentDrafts.some((d) => d.body && d.body.trim())) {
     return { error: 'Nothing to submit — add a summary or a comment first.' };
   }
 
-  const cwd = currentRepoPath() || require('os').homedir();
   const endpoint = `repos/${baseOwner}/${baseRepo}/pulls/${number}/reviews`;
-  // `spawn` is imported at the top of the file.
 
-  // Diagnostic: log each comment's anchor (path/line/side, not the body) so a
-  // position-resolution failure can be matched against the PR diff.
   log.info('[pr-submit-review] POST', endpoint, 'event=' + event,
     'anchors=' + JSON.stringify(payload.comments.map((c) => ({
       path: c.path, line: c.line, start_line: c.start_line, side: c.side,

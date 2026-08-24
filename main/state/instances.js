@@ -729,13 +729,19 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   }
 
   const args = agentCmd ? shellRunCmdArgs(userShell, agentCmd) : shellLoginArgs(userShell);
-  ptyProc = pty.spawn(userShell, args, {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
-    cwd: worktreePath,
-    env: { ...spawnEnv, TERM: 'xterm-256color', ...(extraEnv || {}) },
-  });
+  try {
+    ptyProc = pty.spawn(userShell, args, {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      cwd: worktreePath,
+      env: { ...spawnEnv, TERM: 'xterm-256color', ...(extraEnv || {}) },
+    });
+  } catch (err) {
+    if (session && session.release) session.release();
+    if (promptFile) { try { fs.unlinkSync(promptFile); } catch (_) {} }
+    return { error: `Failed to spawn terminal process (${userShell}): ${err.message}` };
+  }
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to
   // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is

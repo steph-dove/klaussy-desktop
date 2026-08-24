@@ -401,10 +401,13 @@ window.PRPanel = (function () {
     }
     html += '</div>';
     if (pr.url) {
+      var isGitLab = pr.forge === 'gitlab' || (pr.url && /gitlab/i.test(pr.url));
+      var forgeLabel = isGitLab ? 'GitLab' : 'GitHub';
+      var itemLabel = isGitLab ? 'MR' : 'PR';
       html += '<div class="pr-url">';
-      html += '<a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on GitHub</a>';
-      html += ' <button type="button" class="pr-open-review-btn" title="Open this PR in the full PR review window">Open in PR Review</button>';
-      html += ' <button type="button" class="pr-ai-review-btn" title="Ask Claude for a structured review of the whole PR">Review with Claude</button>';
+      html += '<a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on ' + escHtml(forgeLabel) + '</a>';
+      html += ' <button type="button" class="pr-open-review-btn" title="Open this ' + itemLabel + ' in the full PR review window">Open in PR Review</button>';
+      html += ' <button type="button" class="pr-ai-review-btn" title="Ask AI for a structured review of the whole ' + itemLabel + '">Review with Claude</button>';
       html += '</div>';
     }
     if (pr.body) {

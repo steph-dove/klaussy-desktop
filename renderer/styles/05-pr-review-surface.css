@@ -4096,9 +4096,32 @@ body.pr-review-popout #pr-review-root {
   font-weight: 600;
 }
 .gh-accounts-foot {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 8px;
+}
+.git-accounts-section-title {
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.git-accounts-section-title:first-of-type {
+  margin-top: 0;
+}
+.git-accounts-empty-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  margin: 4px 0 8px;
+  line-height: 1.4;
 }
 .gh-account-add {
   background: transparent;
