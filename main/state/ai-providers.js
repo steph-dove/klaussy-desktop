@@ -5,6 +5,7 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { fileURLToPath } = require('url');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { loadConfig } = require('../util/config');
 
@@ -12,10 +13,8 @@ function home() {
   return process.env.HOME || os.homedir();
 }
 
-// List *.jsonl files under `dir` (recursively if `recursive`), each with
-// nanosecond ctime + mtime for stable ordering. Used by the implement-PTY
-// session detection. Missing dirs yield [].
-function listJsonlFiles(dir, recursive) {
+// Nanosecond ctime + mtime give callers stable ordering; missing dirs yield [].
+function listFilesByExt(dir, ext, recursive) {
   if (!dir) return [];
   const out = [];
   const walk = (d) => {
@@ -24,7 +23,7 @@ function listJsonlFiles(dir, recursive) {
     for (const e of ents) {
       const full = path.join(d, e.name);
       if (e.isDirectory()) { if (recursive) walk(full); }
-      else if (e.name.endsWith('.jsonl')) {
+      else if (e.name.endsWith(ext)) {
         try {
           const st = fs.statSync(full, { bigint: true });
           out.push({ path: full, mtimeMs: Number(st.mtimeMs), ctimeNs: st.ctimeNs });
@@ -34,6 +33,10 @@ function listJsonlFiles(dir, recursive) {
   };
   walk(dir);
   return out;
+}
+
+function listJsonlFiles(dir, recursive) {
+  return listFilesByExt(dir, '.jsonl', recursive);
 }
 
 // Resolve a path through symlinks for comparison (macOS /tmp → /private/tmp).
@@ -560,9 +563,48 @@ const PROVIDERS = {
     },
     sessionDir() {
       // CONFIRMED on a real install: agy's home is ~/.gemini/antigravity-cli/.
-      // Resumable transcripts live in its conversations/ subdir, but the file
-      // format isn't verified yet, so no tail is wired (see snapshotSessions).
       return path.join(home(), '.gemini', 'antigravity-cli');
+    },
+    // conversations/<conversation-id>.db, and that filename is the id
+    // `--conversation` takes (verified against the trajectory_meta row inside).
+    conversationsDir() {
+      return path.join(this.sessionDir(), 'conversations');
+    },
+    snapshotSessions() {
+      return new Set(listFilesByExt(this.conversationsDir(), '.db').map(f => f.path));
+    },
+    // agy reattaches to the workspace's existing conversation rather than
+    // starting one per launch, so there is no new file to spot; the snapshot is
+    // unused and the workspace recorded in conversation_summaries.db is the key.
+    findNewSession(worktreePath) {
+      const target = realPath(worktreePath);
+      let db = null;
+      try {
+        const { DatabaseSync } = require('node:sqlite');
+        db = new DatabaseSync(path.join(this.sessionDir(), 'conversation_summaries.db'), { readOnly: true });
+        const rows = db.prepare(
+          'select conversation_id, workspace_uris from conversation_summaries order by last_modified_time desc'
+        ).all();
+        for (const row of rows) {
+          if (!row.conversation_id) continue;
+          let uris = [];
+          try { uris = JSON.parse(row.workspace_uris || '[]'); } catch { continue; }
+          const match = uris.some((u) => {
+            try { return realPath(fileURLToPath(u)) === target; } catch { return false; }
+          });
+          if (match) {
+            return {
+              filePath: path.join(this.conversationsDir(), row.conversation_id + '.db'),
+              sessionId: row.conversation_id,
+            };
+          }
+        }
+        return null;
+      } catch {
+        return null; // agy not installed, or its summary db is locked mid-write
+      } finally {
+        if (db) { try { db.close(); } catch { /* already gone */ } }
+      }
     },
     // agy emits plain text (no JSON lines), so there is nothing to parse for the
     // stream/usage surfaces. No-ops keep the provider contract intact and let
@@ -570,8 +612,6 @@ const PROVIDERS = {
     parseStreamLine() { return []; },
     usageFromSessionLine() { return null; },
     sessionLineToEvents() { return []; },
-    snapshotSessions() { return new Set(); },
-    findNewSession() { return null; },
   },
 
   copilot: {
