@@ -1,5 +1,6 @@
 window.Dialogs = (function () {
   var escHtml = AppUtils.escHtml;
+  var escAttr = AppUtils.escAttr;
 
   // Write a slash command into the active task's terminal. `run` appends a
   // carriage return to execute immediately. Routes to the active sub-terminal
@@ -328,6 +329,19 @@ window.Dialogs = (function () {
         : (!deps.glab.authed ? ['glab auth login'] : []),
     }) : '';
 
+    var bitbucketRow = deps.bitbucket ? depRow({
+      name: 'Bitbucket (API / App Password)',
+      ok: deps.bitbucket.authed,
+      missing: false,
+      version: null,
+      problem: !deps.bitbucket.authed ? 'Optional — no account connected.' : null,
+      fixes: !deps.bitbucket.authed ? ['Set $BITBUCKET_TOKEN or connect an App Password in Git Accounts'] : [],
+      action: !deps.bitbucket.authed ? {
+        label: 'Connect Bitbucket',
+        kind: 'bb-connect',
+      } : null,
+    }) : '';
+
     // One row per agent. The required Claude CLI is covered by the bundled
     // "Install requirements" button; optional agents get a copyable
     // `npm install -g …` command inline.
@@ -399,7 +413,7 @@ window.Dialogs = (function () {
       + '</div>'
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
-      + '<div class="deps-rows">' + ghRow + glabRow + agentRows + '</div>'
+      + '<div class="deps-rows">' + ghRow + glabRow + bitbucketRow + agentRows + '</div>'
       + installSection
       + '<div class="deps-actions">'
         + '<button class="deps-recheck" type="button">Re-check</button>'
@@ -430,6 +444,17 @@ window.Dialogs = (function () {
     if (ghSigninBtn) {
       ghSigninBtn.addEventListener('click', function () {
         showGhLogin({
+          onSuccess: function () {
+            overlay.remove();
+            checkAndPromptDeps({ force: true });
+          },
+        });
+      });
+    }
+    var bbConnectBtn = dialog.querySelector('[data-action="bb-connect"]');
+    if (bbConnectBtn) {
+      bbConnectBtn.addEventListener('click', function () {
+        showBitbucketLogin({
           onSuccess: function () {
             overlay.remove();
             checkAndPromptDeps({ force: true });
@@ -938,7 +963,98 @@ window.Dialogs = (function () {
     });
   }
 
-  // ---- Git accounts (GitHub & GitLab) ----
+  // ---- Bitbucket App Password / Token dialog ----
+  function showBitbucketLogin(opts) {
+    opts = opts || {};
+    var onSuccess = opts.onSuccess || function () {};
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'deps-dialog gh-login-dialog';
+    dialog.innerHTML =
+      '<div class="deps-head">'
+        + '<h2>Connect Bitbucket</h2>'
+        + '<button class="deps-close" type="button" title="Close">&times;</button>'
+      + '</div>'
+      + '<div class="deps-body" style="padding: 16px;">'
+        + '<p style="margin: 0 0 12px 0; color: var(--text-dim); font-size: 13px;">'
+          + 'Enter your Bitbucket username and an App Password or Bearer Token. App Passwords need <code>Repositories: Read/Write</code> and <code>Pull requests: Read/Write</code> permissions.'
+        + '</p>'
+        + '<div style="display: flex; flex-direction: column; gap: 10px;">'
+          + '<label style="font-size: 12px; font-weight: 500;">Username'
+            + '<input type="text" id="bb-username-input" placeholder="e.g. atlassian_user" style="display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input); color: inherit;" />'
+          + '</label>'
+          + '<label style="font-size: 12px; font-weight: 500;">App Password or Token'
+            + '<input type="password" id="bb-password-input" placeholder="App password or bearer token" style="display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input); color: inherit;" />'
+          + '</label>'
+          + '<label style="font-size: 12px; font-weight: 500;">Host (default: bitbucket.org)'
+            + '<input type="text" id="bb-host-input" value="' + escAttr(opts.hostname || 'bitbucket.org') + '" style="display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input); color: inherit;" />'
+          + '</label>'
+          + '<div id="bb-login-error" style="display: none; color: var(--danger, #ff5555); font-size: 12px;"></div>'
+        + '</div>'
+        + '<div class="deps-actions" style="margin-top: 16px;">'
+          + '<button class="gh-login-open" id="bb-save-btn" type="button">Save Account</button>'
+          + '<button class="deps-skip" id="bb-cancel-btn" type="button">Cancel</button>'
+        + '</div>'
+      + '</div>';
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    function cleanup() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) cleanup(); });
+    dialog.querySelector('.deps-close').addEventListener('click', cleanup);
+    dialog.querySelector('#bb-cancel-btn').addEventListener('click', cleanup);
+
+    var saveBtn = dialog.querySelector('#bb-save-btn');
+    var userInput = dialog.querySelector('#bb-username-input');
+    var passInput = dialog.querySelector('#bb-password-input');
+    var hostInput = dialog.querySelector('#bb-host-input');
+    var errEl = dialog.querySelector('#bb-login-error');
+
+    saveBtn.addEventListener('click', async function () {
+      var username = userInput.value.trim();
+      var password = passInput.value.trim();
+      var hostname = hostInput.value.trim() || 'bitbucket.org';
+      if (!username) {
+        errEl.textContent = 'Please enter a username.';
+        errEl.style.display = 'block';
+        return;
+      }
+      if (!password) {
+        errEl.textContent = 'Please enter an App Password or Token.';
+        errEl.style.display = 'block';
+        return;
+      }
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Saving…';
+      try {
+        var res = await window.klaus.bitbucket.saveAccount({
+          username: username,
+          appPassword: password,
+          hostname: hostname,
+          active: true,
+        });
+        if (res && res.error) {
+          errEl.textContent = res.error;
+          errEl.style.display = 'block';
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save Account';
+          return;
+        }
+        if (window.toast && window.toast.success) window.toast.success('Bitbucket account saved');
+        cleanup();
+        try { onSuccess(); } catch (_) {}
+      } catch (err) {
+        errEl.textContent = err.message || 'Failed to save account.';
+        errEl.style.display = 'block';
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Account';
+      }
+    });
+  }
+
+  // ---- Git accounts (GitHub, GitLab & Bitbucket) ----
   // opts.onChange (optional) fires after a switch/re-auth so a caller showing
   // stale data can reload without waiting for the dialog to close.
   function showGhAccounts(opts) {
@@ -961,14 +1077,16 @@ window.Dialogs = (function () {
 
     async function refresh() {
       body.innerHTML = '<div class="skills-loading">Reading accounts…</div>';
-      var ghRes = null, glabRes = null;
+      var ghRes = null, glabRes = null, bbRes = null;
       try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
       try { if (window.klaus.glab) glabRes = await window.klaus.glab.listAccounts(); } catch (_) {}
+      try { if (window.klaus.bitbucket) bbRes = await window.klaus.bitbucket.listAccounts(); } catch (_) {}
 
       var ghAccounts = (ghRes && ghRes.accounts) || [];
       var glabAccounts = (glabRes && glabRes.accounts) || [];
+      var bbAccounts = (bbRes && bbRes.accounts) || [];
 
-      var html = '<p class="gh-accounts-intro">Klaussy uses whichever account is active for GitHub and GitLab operations.</p>';
+      var html = '<p class="gh-accounts-intro">Klaussy uses whichever account is active for GitHub, GitLab, and Bitbucket operations.</p>';
 
       // Section: GitHub
       html += '<h3 class="git-accounts-section-title">GitHub</h3>';
@@ -1030,6 +1148,34 @@ window.Dialogs = (function () {
         + '</div>';
       }
 
+      // Section: Bitbucket
+      html += '<h3 class="git-accounts-section-title">Bitbucket</h3>';
+      if (bbAccounts.length === 0) {
+        html += '<div class="git-accounts-empty-hint">'
+          + '<p style="margin: 0 0 6px 0;">No Bitbucket accounts connected.</p>'
+          + '<button class="gh-account-add" id="bb-add-btn" type="button">+ Connect Bitbucket (App Password / Token)</button>'
+        + '</div>';
+      } else {
+        html += bbAccounts.map(function (a) {
+          var classes = 'gh-account-row';
+          if (a.active) classes += ' active';
+          var status;
+          if (a.active) status = '<span class="gh-account-badge">active</span>';
+          else status = '<span class="gh-account-action">Switch</span>';
+          var disabledAttr = a.active ? ' disabled' : '';
+          var hostLabel = a.hostname && a.hostname !== 'bitbucket.org' ? ' (' + a.hostname + ')' : '';
+          return '<button class="' + classes + '" type="button"'
+            + ' data-forge="bitbucket" data-username="' + escHtml(a.username) + '" data-hostname="' + escHtml(a.hostname || 'bitbucket.org') + '"'
+            + ' data-action="bb-switch"' + disabledAttr + '>'
+            + '<span class="gh-account-name">' + escHtml(a.username) + '<span style="font-weight:normal;color:var(--text-dim);font-size:11px;">' + escHtml(hostLabel) + '</span></span>'
+            + status
+          + '</button>';
+        }).join('')
+        + '<div class="gh-accounts-foot">'
+          + '<button class="gh-account-add" id="bb-add-btn" type="button">+ Add Bitbucket account</button>'
+        + '</div>';
+      }
+
       body.innerHTML = html;
 
       var ghAddBtn = body.querySelector('#gh-signin-btn');
@@ -1046,6 +1192,13 @@ window.Dialogs = (function () {
           if (window.toast && window.toast.info) {
             window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this dialog.");
           }
+        });
+      }
+
+      var bbAddBtn = body.querySelector('#bb-add-btn');
+      if (bbAddBtn) {
+        bbAddBtn.addEventListener('click', function () {
+          showBitbucketLogin({ onSuccess: refresh });
         });
       }
 
@@ -1093,6 +1246,25 @@ window.Dialogs = (function () {
           var orig = btn.querySelector('.gh-account-action');
           if (orig) orig.textContent = 'Switching…';
           var result = await window.klaus.glab.switchAccount(username, hostname);
+          if (result && result.error) {
+            window.toast.error('Switch failed: ' + result.error);
+            refresh();
+            return;
+          }
+          refresh();
+          if (opts.onChange) try { opts.onChange(); } catch (_) {}
+        });
+      });
+
+      body.querySelectorAll('.gh-account-row[data-forge="bitbucket"]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (btn.disabled) return;
+          var username = btn.dataset.username;
+          var hostname = btn.dataset.hostname;
+          btn.disabled = true;
+          var orig = btn.querySelector('.gh-account-action');
+          if (orig) orig.textContent = 'Switching…';
+          var result = await window.klaus.bitbucket.switchAccount(username, hostname);
           if (result && result.error) {
             window.toast.error('Switch failed: ' + result.error);
             refresh();
@@ -1899,5 +2071,6 @@ window.Dialogs = (function () {
     showPlugins: showPlugins,
     showGhAccounts: showGhAccounts,
     showGhLogin: showGhLogin,
+    showBitbucketLogin: showBitbucketLogin,
   };
 })();

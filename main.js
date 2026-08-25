@@ -41,6 +41,7 @@ require('./main/ipc/mcp');
 require('./main/ipc/files');
 require('./main/ipc/gh');
 require('./main/ipc/glab');
+require('./main/ipc/bitbucket');
 require('./main/ipc/git');
 require('./main/ipc/tasks');
 require('./main/ipc/repo');

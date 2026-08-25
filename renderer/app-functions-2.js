@@ -463,6 +463,9 @@ window.App = window.App || {};
       if (parsed && parsed.forge === 'gitlab' && (!accountSelect || !accountSelect.querySelector('option[value^="gitlab:"]'))) {
         accountHint.textContent = 'GitLab MR detected. Run "glab auth login" to sign in (or "brew install glab").';
         accountHint.classList.remove('pr-picker-account-hint-error');
+      } else if (parsed && parsed.forge === 'bitbucket' && (!accountSelect || !accountSelect.querySelector('option[value^="bitbucket:"]'))) {
+        accountHint.textContent = 'Bitbucket PR detected. Connect a Bitbucket App Password in Git Accounts or set $BITBUCKET_TOKEN.';
+        accountHint.classList.remove('pr-picker-account-hint-error');
       } else {
         accountHint.textContent = '';
       }
@@ -475,6 +478,8 @@ window.App = window.App || {};
       if (gh) return { forge: 'github', owner: gh[1], repo: gh[2].replace(/\.git$/, ''), number: parseInt(gh[3], 10) };
       var gl = s.match(/https?:\/\/[^/]+\/(.+?)(?:\/-)?\/merge_requests\/(\d+)/);
       if (gl) return { forge: 'gitlab', projectPath: gl[1].replace(/^\//, ''), number: parseInt(gl[2], 10) };
+      var bb = s.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull-requests\/(\d+)/);
+      if (bb) return { forge: 'bitbucket', projectPath: bb[1] + '/' + bb[2].replace(/\.git$/, ''), owner: bb[1], repo: bb[2].replace(/\.git$/, ''), number: parseInt(bb[3], 10) };
       return null;
     }
 
@@ -524,12 +529,14 @@ window.App = window.App || {};
     startBtn.addEventListener('click', startFromUrl);
 
     async function populateAccountSelect() {
-      var ghRes = null, glabRes = null;
+      var ghRes = null, glabRes = null, bbRes = null;
       try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
       try { if (window.klaus.glab) glabRes = await window.klaus.glab.listAccounts(); } catch (_) {}
+      try { if (window.klaus.bitbucket) bbRes = await window.klaus.bitbucket.listAccounts(); } catch (_) {}
 
       var ghAccounts = (ghRes && ghRes.accounts) || [];
       var glabAccounts = (glabRes && glabRes.accounts) || [];
+      var bbAccounts = (bbRes && bbRes.accounts) || [];
 
       var allAccounts = [];
       ghAccounts.forEach(function (a) {
@@ -541,7 +548,7 @@ window.App = window.App || {};
           active: a.active,
           valid: a.valid,
           outage: a.outage,
-          label: (glabAccounts.length > 0 ? 'GitHub: ' : '') + a.username,
+          label: (glabAccounts.length > 0 || bbAccounts.length > 0 ? 'GitHub: ' : '') + a.username,
         });
       });
       glabAccounts.forEach(function (a) {
@@ -554,6 +561,18 @@ window.App = window.App || {};
           active: a.active,
           valid: a.valid,
           label: 'GitLab' + hostLabel + ': ' + a.username,
+        });
+      });
+      bbAccounts.forEach(function (a) {
+        var hostLabel = a.hostname && a.hostname !== 'bitbucket.org' ? ' (' + a.hostname + ')' : '';
+        allAccounts.push({
+          id: 'bitbucket:' + (a.hostname || 'bitbucket.org') + ':' + a.username,
+          username: a.username,
+          forge: 'bitbucket',
+          host: a.hostname || 'bitbucket.org',
+          active: a.active,
+          valid: a.valid,
+          label: 'Bitbucket' + hostLabel + ': ' + a.username,
         });
       });
 
@@ -573,6 +592,9 @@ window.App = window.App || {};
           + '</option>';
       });
 
+      if (bbAccounts.length === 0) {
+        options.push('<option value="__connect_bitbucket__">+ Connect Bitbucket account…</option>');
+      }
       if (glabAccounts.length === 0) {
         options.push('<option value="__connect_gitlab__">+ Connect GitLab (glab auth login)…</option>');
       }
@@ -732,6 +754,17 @@ window.App = window.App || {};
       if (!target) return;
       accountHint.textContent = '';
       accountHint.classList.remove('pr-picker-account-hint-error');
+
+      if (target === '__connect_bitbucket__') {
+        Dialogs.showBitbucketLogin({
+          onSuccess: async function () {
+            accountHint.textContent = 'Bitbucket account connected';
+            await populateAccountSelect();
+            await refreshLists();
+          },
+        });
+        return;
+      }
 
       if (target === '__connect_gitlab__') {
         accountHint.textContent = 'Run "glab auth login" to sign in (or "brew install glab"). Copied to clipboard.';

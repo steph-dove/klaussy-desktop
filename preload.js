@@ -816,6 +816,14 @@ contextBridge.exposeInMainWorld('klaus', {
     switchAccount: (username, hostname) => ipcRenderer.invoke('glab-switch-account', { username, hostname }),
   },
 
+  // ---- bitbucket: Bitbucket accounts management ----
+  bitbucket: {
+    listAccounts: () => ipcRenderer.invoke('bitbucket-list-accounts'),
+    switchAccount: (username, hostname) => ipcRenderer.invoke('bitbucket-switch-account', { username, hostname }),
+    saveAccount: (account) => ipcRenderer.invoke('bitbucket-save-account', account),
+    removeAccount: (username, hostname) => ipcRenderer.invoke('bitbucket-remove-account', { username, hostname }),
+  },
+
   // ---- skills: Claude skills / commands / memory / MCP / plugins inventory ----
   skills: {
     listSkills: () => ipcRenderer.invoke('list-skills'),

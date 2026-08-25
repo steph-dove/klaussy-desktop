@@ -106,7 +106,7 @@ function installAppMenu() {
           },
         },
         {
-          label: 'Git Accounts (GitHub & GitLab)',
+          label: 'Git Accounts (GitHub, GitLab & Bitbucket)',
           click: (_item, focusedWindow) => {
             const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
             if (win && !win.isDestroyed()) win.webContents.send('show-gh-accounts');

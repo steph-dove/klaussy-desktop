@@ -17,10 +17,17 @@ const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { classifyGhError } = require('../util/gh-error');
 const { classifyGlabError } = require('../util/glab-error');
+const { classifyBitbucketError } = require('../util/bitbucket-error');
 const { clearGhTokenCache } = require('../util/exec');
 const { clearGlabTokenCache, getGlabToken, resolveGlabEnv } = require('../util/glab-exec');
+const { getBitbucketAuth, bitbucketJson, switchBitbucketAccount } = require('../util/bitbucket-api');
 const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
-const { transformGitLabDiscussions } = require('../util/forge-adapter');
+const {
+  transformGitLabDiscussions,
+  transformBitbucketComments,
+  normalizeBitbucketPr,
+  normalizeGitLabMr,
+} = require('../util/forge-adapter');
 const { instances } = require('./instances');
 
 // Reviewing a PR for a repo only the non-active gh account can see requires
@@ -137,6 +144,26 @@ function restoreGlabAfterReview() {
   } catch (_) {}
 }
 
+let _savedBitbucketAccount = null;
+
+function switchBitbucketForReview(account, host = 'bitbucket.org') {
+  if (!account) return;
+  const config = loadConfig();
+  const accounts = config.bitbucketAccounts || [];
+  const currentActive = accounts.find((a) => a.active && (!a.hostname || a.hostname === host));
+  if (_savedBitbucketAccount === null && currentActive) {
+    _savedBitbucketAccount = { account: currentActive.username, host: currentActive.hostname || host };
+  }
+  switchBitbucketAccount(account, host);
+}
+
+function restoreBitbucketAfterReview() {
+  if (_savedBitbucketAccount === null) return;
+  const restoreTo = _savedBitbucketAccount;
+  _savedBitbucketAccount = null;
+  switchBitbucketAccount(restoreTo.account, restoreTo.host);
+}
+
 // PR/MR URLs already encode the base repo, so the picker and paste-URL paths
 // both get it without an extra CLI call.
 function parseBaseFromUrl(url) {
@@ -200,6 +227,37 @@ async function fetchThreadsForActive() {
   const stale = () => epoch !== _threadsFetchEpoch
     || !prReview.active
     || prReview.active.number !== number;
+
+  if (forge === 'bitbucket') {
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    const target = projectPath || `${owner}/${repo}`;
+
+    try {
+      const res = await bitbucketJson(`/repositories/${target}/pullrequests/${number}/comments?pagelen=100`, {
+        account, host, cwd,
+      });
+      if (stale()) return;
+      const { threads, issueComments } = transformBitbucketComments(res.values || res);
+      prReview.active.threads = threads;
+      prReview.active.issueComments = issueComments;
+      prReview.active.reviews = [];
+      prReview.active.threadsError = null;
+      prReview.active.threadsErrorFix = null;
+      prReview.active.threadsErrorRaw = null;
+      broadcastPrReview();
+      return;
+    } catch (err) {
+      if (stale()) return;
+      const raw = (err.responseBody || err.message || '').trim();
+      const cls = classifyBitbucketError(raw, { target, host, account });
+      prReview.active.threadsError = cls.summary;
+      prReview.active.threadsErrorFix = cls.fix;
+      prReview.active.threadsErrorRaw = raw;
+      broadcastPrReview();
+      return;
+    }
+  }
 
   if (forge === 'gitlab') {
     const host = prReview.active.host || 'gitlab.com';
@@ -325,10 +383,24 @@ async function fetchThreadsForActive() {
 
 async function reloadActivePrReviewMeta() {
   if (!prReview.active) return;
-  const { meta: existingMeta } = prReview.active;
+  const { meta: existingMeta, forge, host } = prReview.active;
   if (!existingMeta || !existingMeta.url) return;
   const cwd = currentRepoPath() || require('os').homedir();
   try {
+    if (forge === 'bitbucket') {
+      const parsed = parseForgeUrl(existingMeta.url);
+      const proj = (parsed && parsed.projectPath) || prReview.active.projectPath;
+      const num = (parsed && parsed.number) || prReview.active.number;
+      const raw = await bitbucketJson(`/repositories/${proj}/pullrequests/${num}`, {
+        account: prReview.active.account,
+        host: host || 'bitbucket.org',
+      });
+      const meta = normalizeBitbucketPr(raw, host || 'bitbucket.org');
+      if (!prReview.active || prReview.active.number !== meta.number) return;
+      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
+      broadcastPrReview();
+      return;
+    }
     const meta = await _ghJson([
       'pr', 'view', existingMeta.url,
       '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
@@ -415,8 +487,18 @@ function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
     if (originMatchesRepo(p.path, baseOwner, baseRepo)) cwds.push(p.path);
   }
   try {
-    const clonePath = path.join(app.getPath('userData'), 'pr-checkouts', `${baseOwner}-${baseRepo}`);
-    if (fs.existsSync(clonePath) && !cwds.includes(clonePath)) cwds.push(clonePath);
+    const prCheckoutsDir = path.join(app.getPath('userData'), 'pr-checkouts');
+    if (fs.existsSync(prCheckoutsDir)) {
+      const entries = fs.readdirSync(prCheckoutsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const dirPath = path.join(prCheckoutsDir, entry.name);
+          if (!cwds.includes(dirPath) && originMatchesRepo(dirPath, baseOwner, baseRepo)) {
+            cwds.push(dirPath);
+          }
+        }
+      }
+    }
   } catch (_) {}
 
   const seenGitDirs = new Set();
@@ -426,14 +508,11 @@ function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
       gitDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
         cwd, stdio: 'pipe',
       }).toString().trim();
-      if (!path.isAbsolute(gitDir)) gitDir = path.resolve(cwd, gitDir);
-      gitDir = fs.realpathSync(gitDir);
     } catch (_) { continue; }
     if (seenGitDirs.has(gitDir)) continue;
     seenGitDirs.add(gitDir);
-
-    const wt = findWorktreeForBranch(cwd, branch);
-    if (wt) return { worktreePath: wt, baseRepoCwd: cwd };
+    const wtPath = findWorktreeForBranch(cwd, branch);
+    if (wtPath) return { worktreePath: wtPath, baseRepoCwd: cwd };
   }
   return null;
 }
@@ -446,16 +525,18 @@ function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
 // before the PR branched — changes that are NOT part of this PR. Returns the
 // merge-base SHA, or '' on any failure so callers can fall back to the branch
 // name (degrading to today's behavior rather than erroring).
+const gitEnv = Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' });
+
 function resolveBaseShaForWorktree(worktreePath, authedUrl, baseRefName) {
   if (!worktreePath || !baseRefName) return '';
   try {
     // Fetch the base tip into FETCH_HEAD without touching any local branch ref
     // (safe even though that branch may be checked out elsewhere).
     execFileSync('git', ['fetch', authedUrl, baseRefName], {
-      cwd: worktreePath, stdio: 'pipe',
+      cwd: worktreePath, stdio: 'pipe', env: gitEnv,
     });
     return execFileSync('git', ['merge-base', 'FETCH_HEAD', 'HEAD'], {
-      cwd: worktreePath, stdio: 'pipe',
+      cwd: worktreePath, stdio: 'pipe', env: gitEnv,
     }).toString().trim();
   } catch (_) {
     return '';
@@ -475,7 +556,7 @@ function resolveFallbackBaseBranch(worktreePath) {
     for (const ref of [name, `origin/${name}`]) {
       try {
         execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], {
-          cwd: worktreePath, stdio: 'pipe',
+          cwd: worktreePath, stdio: 'pipe', env: gitEnv,
         });
         return ref;
       } catch (_) { /* not this ref — try the next */ }
@@ -499,17 +580,28 @@ async function ensureWorktreeForActivePr() {
   if (!baseOwner && !activeProjectPath) return { error: 'Could not determine base repo from PR/MR metadata' };
 
   const forge = activeForge || 'github';
-  const host = activeHost || (forge === 'gitlab' ? 'gitlab.com' : 'github.com');
+  const host = activeHost || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
   const projectPath = activeProjectPath || `${baseOwner}/${baseRepo}`;
-  const localBranch = (meta && meta.headRefName) || (forge === 'gitlab' ? `mr-${number}` : `pr-${number}`);
+  const localBranch = (meta && meta.headRefName) || (forge === 'gitlab' ? `mr-${number}` : forge === 'bitbucket' ? `bb-${number}` : `pr-${number}`);
   const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
   const sanitizedForClone = projectPath.replace(/[^a-zA-Z0-9_.-]/g, '_');
 
   let token = '';
+  let authedUrl = '';
   if (forge === 'gitlab') {
     token = getGlabToken(host);
     if (!token) {
       return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
+    }
+    authedUrl = `https://oauth2:${token}@${host}/${projectPath}.git`;
+  } else if (forge === 'bitbucket') {
+    const auth = getBitbucketAuth({ host, account: prReview.active.account });
+    if (auth && auth.username && (auth.password || auth.token)) {
+      authedUrl = `https://${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password || auth.token)}@${host}/${projectPath}.git`;
+    } else if (auth && auth.token) {
+      authedUrl = `https://x-token-auth:${auth.token}@${host}/${projectPath}.git`;
+    } else {
+      authedUrl = `https://${host}/${projectPath}.git`;
     }
   } else {
     try {
@@ -517,17 +609,24 @@ async function ensureWorktreeForActivePr() {
     } catch (_) {
       return { error: 'Could not read gh auth token — run `gh auth login` first.' };
     }
+    authedUrl = `https://oauth2:${token}@${host}/${projectPath}.git`;
   }
 
-  const authedUrl = `https://oauth2:${token}@${host}/${projectPath}.git`;
-  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
+  const scrub = (s) => (s || '')
+    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
+    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
+    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
   const cleanUrl = `https://${host}/${projectPath}.git`;
   const fetchRef = forge === 'gitlab'
     ? `+refs/merge-requests/${number}/head:refs/heads/${localBranch}`
-    : `+refs/pull/${number}/head:refs/heads/${localBranch}`;
+    : forge === 'bitbucket'
+      ? `+refs/heads/${(meta && meta.headRefName) || localBranch}:refs/heads/${localBranch}`
+      : `+refs/pull/${number}/head:refs/heads/${localBranch}`;
   const fetchHeadTarget = forge === 'gitlab'
     ? `merge-requests/${number}/head`
-    : `pull/${number}/head`;
+    : forge === 'bitbucket'
+      ? ((meta && meta.headRefName) || localBranch)
+      : `pull/${number}/head`;
 
   // Step 1: reuse any existing worktree on this branch across every clone
   const existingMatch = findWorktreeForBranchAcrossClones(baseOwner, baseRepo, localBranch);
@@ -537,22 +636,22 @@ async function ensureWorktreeForActivePr() {
     let beforeSha = '';
     try {
       beforeSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-        cwd: existingWorktreePath, stdio: 'pipe',
+        cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
       }).toString().trim();
     } catch (_) {}
     let refreshed = 'none';
     try {
       execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], {
-        cwd: existingWorktreePath, stdio: 'pipe',
+        cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
       });
       try {
         execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], {
-          cwd: existingWorktreePath, stdio: 'pipe',
+          cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
         });
         let afterSha = '';
         try {
           afterSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-            cwd: existingWorktreePath, stdio: 'pipe',
+            cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
           }).toString().trim();
         } catch (_) {}
         refreshed = (beforeSha && afterSha && beforeSha !== afterSha) ? 'updated' : 'up-to-date';
@@ -584,25 +683,16 @@ async function ensureWorktreeForActivePr() {
     if (!fs.existsSync(clonePath)) {
       try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
       try {
-        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe' });
+        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe', env: gitEnv });
       } catch (err) {
         const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
         return { error: 'Clone failed: ' + scrub(raw) };
       }
       try {
-        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe' });
+        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe', env: gitEnv });
       } catch {}
     }
     cwd = clonePath;
-  }
-
-  try {
-    execFileSync('git', ['fetch', authedUrl, fetchRef], {
-      cwd, stdio: 'pipe',
-    });
-  } catch (err) {
-    const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-    return { error: 'Fetch failed: ' + scrub(raw) };
   }
 
   const repoBasename = path.basename(cwd);
@@ -610,6 +700,12 @@ async function ensureWorktreeForActivePr() {
   const worktreePath = path.join(worktreeDir, repoBasename + '-' + sanitizedForPath);
 
   if (fs.existsSync(worktreePath)) {
+    try {
+      execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], { cwd: worktreePath, stdio: 'pipe', env: gitEnv });
+      try {
+        execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: worktreePath, stdio: 'pipe', env: gitEnv });
+      } catch (_) {}
+    } catch (_) {}
     return {
       worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true,
       baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName),
@@ -617,7 +713,16 @@ async function ensureWorktreeForActivePr() {
   }
 
   try {
-    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['fetch', authedUrl, fetchRef], {
+      cwd, stdio: 'pipe', env: gitEnv,
+    });
+  } catch (err) {
+    const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
+    return { error: 'Fetch failed: ' + scrub(raw) };
+  }
+
+  try {
+    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], { cwd, stdio: 'pipe', env: gitEnv });
   } catch (err) {
     return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
@@ -647,4 +752,6 @@ module.exports = {
   restoreGhAfterReview,
   switchGlabForReview,
   restoreGlabAfterReview,
+  switchBitbucketForReview,
+  restoreBitbucketAfterReview,
 };

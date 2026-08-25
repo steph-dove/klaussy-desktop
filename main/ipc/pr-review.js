@@ -19,13 +19,16 @@ const {
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr, switchGhForReview, restoreGhAfterReview,
   switchGlabForReview, restoreGlabAfterReview,
+  switchBitbucketForReview, restoreBitbucketAfterReview,
 } = require('../state/pr-review');
 const { ghJson, ghText } = require('../util/gh-json');
 const { glabJson, glabText } = require('../util/glab-json');
+const { bitbucketJson, bitbucketText, bitbucketFetch, getBitbucketAuth } = require('../util/bitbucket-api');
 const { classifyGhError } = require('../util/gh-error');
 const { classifyGlabError } = require('../util/glab-error');
+const { classifyBitbucketError } = require('../util/bitbucket-error');
 const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
-const { normalizeGitLabMr } = require('../util/forge-adapter');
+const { normalizeGitLabMr, normalizeBitbucketPr } = require('../util/forge-adapter');
 const { glabEnvForAccount, getGlabToken } = require('../util/glab-exec');
 const { humanizeComment } = require('../util/humanize-comment');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
@@ -47,6 +50,33 @@ ipcMain.handle('pr-list', async () => {
     remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString().trim();
   } catch (_) {}
   const info = detectForgeFromRemote(remoteUrl);
+
+  if (info && info.forge === 'bitbucket') {
+    try {
+      const raw = await bitbucketJson(`/repositories/${encodeURIComponent(info.projectPath)}/pullrequests?state=OPEN&pagelen=50`, { host: info.host });
+      const values = (raw && Array.isArray(raw.values)) ? raw.values : (Array.isArray(raw) ? raw : []);
+      const prs = values.map((pr) => {
+        const norm = normalizeBitbucketPr(pr, info.host);
+        return {
+          number: norm.number,
+          title: norm.title,
+          author: norm.author,
+          state: norm.state,
+          updatedAt: norm.updatedAt,
+          headRefName: norm.headRefName,
+          baseRefName: norm.baseRefName,
+          isDraft: norm.isDraft,
+          reviewDecision: norm.reviewDecision,
+          url: norm.url,
+        };
+      });
+      return { prs };
+    } catch (err) {
+      const raw = (err.responseBody || err.message || '').trim();
+      const cls = classifyBitbucketError(raw, { target: info.projectPath, host: info.host });
+      return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
+    }
+  }
 
   if (info && info.forge === 'gitlab') {
     try {
@@ -146,6 +176,16 @@ ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   const cwd = currentRepoPath() || require('os').homedir();
   const parsed = parseForgeUrl(url);
+  if (parsed && parsed.forge === 'bitbucket') {
+    try {
+      const raw = await bitbucketJson(`/repositories/${parsed.projectPath}/pullrequests/${parsed.number}`, { host: parsed.host });
+      const meta = normalizeBitbucketPr(raw, parsed.host);
+      return { meta };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
+
   if (parsed && parsed.forge === 'gitlab') {
     try {
       const raw = await glabJson(['mr', 'view', url, '--output', 'json'], cwd);
@@ -193,6 +233,10 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
         forge = 'gitlab';
         host = info.host;
         projectPath = info.projectPath;
+      } else if (info && info.forge === 'bitbucket') {
+        forge = 'bitbucket';
+        host = info.host;
+        projectPath = info.projectPath;
       }
     } catch (_) {}
   }
@@ -203,9 +247,68 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     host = parts[1] || host;
     acctUser = parts[2] || parts[1];
     forge = 'gitlab';
+  } else if (typeof account === 'string' && account.startsWith('bitbucket:')) {
+    const parts = account.split(':');
+    host = parts[1] || host;
+    acctUser = parts[2] || parts[1];
+    forge = 'bitbucket';
   } else if (typeof account === 'string' && account.startsWith('github:')) {
     acctUser = account.slice('github:'.length);
     forge = 'github';
+  }
+
+  if (forge === 'bitbucket') {
+    if (acctUser) switchBitbucketForReview(acctUser, host);
+    try {
+      let targetNumber = target;
+      if (typeof targetNumber === 'string' && targetNumber.includes('/')) {
+        const p = parseForgeUrl(targetNumber);
+        if (p) {
+          targetNumber = String(p.number);
+          projectPath = p.projectPath;
+          host = p.host;
+        }
+      }
+      const [rawPr, diff] = await Promise.all([
+        bitbucketJson(`/repositories/${projectPath}/pullrequests/${targetNumber}`, { account: acctUser, host }),
+        bitbucketText(`/repositories/${projectPath}/pullrequests/${targetNumber}/diff`, { account: acctUser, host }),
+      ]);
+      const meta = normalizeBitbucketPr(rawPr, host);
+      const base = parseBaseFromUrl(meta.url);
+      const repo = base ? base.projectPath : (projectPath || null);
+
+      const prev = prReview.active;
+      if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
+        const prevWc = webContents.fromId(prev.ownerWcId);
+        if (prevWc && !prevWc.isDestroyed()) { try { prevWc.send('pr-review-state', null); } catch (_) {} }
+        if (prev.popout && !prev.popout.isDestroyed()) { try { prev.popout.webContents.send('pr-review-state', null); } catch (_) {} }
+      }
+
+      prReview.active = {
+        repo,
+        number: meta.number,
+        meta,
+        diff,
+        forge: 'bitbucket',
+        host,
+        projectPath: repo,
+        account: acctUser || null,
+        baseOwner: base ? base.owner : (repo ? repo.split('/')[0] : null),
+        baseRepo: base ? base.name : (repo ? repo.split('/')[1] : null),
+        threads: null,
+        threadsError: null,
+        popout: null,
+        ownerWcId: event.sender.id,
+      };
+      broadcastPrReview();
+      try { pushReviewHistory(meta); } catch (_) {}
+      fetchThreadsForActive();
+      return { ok: true };
+    } catch (err) {
+      const raw = (err.responseBody || err.message || '').trim();
+      const cls = classifyBitbucketError(raw, { target: projectPath, host });
+      return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
+    }
   }
 
   if (forge === 'gitlab') {
@@ -316,11 +419,26 @@ ipcMain.handle('pr-pull-updates', async () => {
   if (!url) return { error: 'Active PR has no URL' };
   const cwd = currentRepoPath() || require('os').homedir();
   const forge = prReview.active.forge || 'github';
-  const host = prReview.active.host || 'gitlab.com';
+  const host = prReview.active.host || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
 
   let metaError = null;
   try {
-    if (forge === 'gitlab') {
+    if (forge === 'bitbucket') {
+      const parsed = parseForgeUrl(url);
+      const proj = (parsed && parsed.projectPath) || prReview.active.projectPath;
+      const num = (parsed && parsed.number) || prReview.active.number;
+      const [rawPr, diff] = await Promise.all([
+        bitbucketJson(`/repositories/${proj}/pullrequests/${num}`, { account: prReview.active.account, host }),
+        bitbucketText(`/repositories/${proj}/pullrequests/${num}/diff`, { account: prReview.active.account, host }),
+      ]);
+      if (!prReview.active || prReview.active.meta.url !== url) {
+        return { error: 'Active PR changed during refresh' };
+      }
+      const meta = normalizeBitbucketPr(rawPr, host);
+      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
+      prReview.active.diff = diff;
+      broadcastPrReview();
+    } else if (forge === 'gitlab') {
       const [rawMr, diff] = await Promise.all([
         glabJson(['mr', 'view', url, '--output', 'json'], cwd),
         glabText(['mr', 'diff', url], cwd),
@@ -348,7 +466,7 @@ ipcMain.handle('pr-pull-updates', async () => {
       broadcastPrReview();
     }
   } catch (err) {
-    metaError = (err.stderr || err.message || '').trim();
+    metaError = (err.stderr || err.responseBody || err.message || '').trim();
   }
 
   try { await fetchThreadsForActive(); } catch (_) {}
@@ -371,6 +489,24 @@ ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   const { meta, number } = prReview.active;
   if (!meta || !meta.url) return { error: 'Could not determine PR URL' };
   const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'bitbucket') {
+    const proj = prReview.active.projectPath || `${prReview.active.baseOwner}/${prReview.active.baseRepo}`;
+    const strat = strategy === 'squash' ? 'squash' : strategy === 'rebase' ? 'fast_forward' : 'merge_commit';
+    try {
+      await bitbucketFetch(`/repositories/${proj}/pullrequests/${number}/merge`, {
+        method: 'POST',
+        account: prReview.active.account,
+        host: prReview.active.host,
+        body: { merge_strategy: strat, close_source_branch: false },
+      });
+      await reloadActivePrReviewMeta();
+      fetchThreadsForActive();
+      return { ok: true };
+    } catch (err) {
+      return { error: err.message };
+    }
+  }
 
   if (forge === 'gitlab') {
     const flag = { merge: '', squash: '--squash', rebase: '--rebase' }[strategy];
@@ -435,9 +571,12 @@ ipcMain.handle('pr-checkout-locally', async () => {
     prReview.active.popout.close();
   }
   const isGitLab = prReview.active && prReview.active.forge === 'gitlab';
+  const isBitbucket = prReview.active && prReview.active.forge === 'bitbucket';
   prReview.active = null;
   if (isGitLab) {
     restoreGlabAfterReview();
+  } else if (isBitbucket) {
+    restoreBitbucketAfterReview();
   } else {
     restoreGhAfterReview();
   }
@@ -525,9 +664,12 @@ ipcMain.handle('pr-review-close', () => {
     prReview.active.popout.close();
   }
   const isGitLab = prReview.active && prReview.active.forge === 'gitlab';
+  const isBitbucket = prReview.active && prReview.active.forge === 'bitbucket';
   prReview.active = null;
   if (isGitLab) {
     restoreGlabAfterReview();
+  } else if (isBitbucket) {
+    restoreBitbucketAfterReview();
   } else {
     restoreGhAfterReview();
   }
@@ -1113,12 +1255,23 @@ ipcMain.handle('pr-review-push-local', async (_event, args) => {
   }
 
   const forge = (prReview.active && prReview.active.forge) || 'github';
-  const host = (prReview.active && prReview.active.host) || (forge === 'gitlab' ? 'gitlab.com' : 'github.com');
+  const host = (prReview.active && prReview.active.host) || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
   let token = '';
+  let authedUrl = '';
   if (forge === 'gitlab') {
     token = getGlabToken(host);
     if (!token) {
       return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
+    }
+    authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
+  } else if (forge === 'bitbucket') {
+    const auth = getBitbucketAuth({ host, account: prReview.active && prReview.active.account });
+    if (auth && auth.username && (auth.password || auth.token)) {
+      authedUrl = `https://${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password || auth.token)}@${host}/${headOwner}/${headRepoName}.git`;
+    } else if (auth && auth.token) {
+      authedUrl = `https://x-token-auth:${auth.token}@${host}/${headOwner}/${headRepoName}.git`;
+    } else {
+      authedUrl = `https://${host}/${headOwner}/${headRepoName}.git`;
     }
   } else {
     try {
@@ -1126,9 +1279,12 @@ ipcMain.handle('pr-review-push-local', async (_event, args) => {
     } catch (_) {
       return { error: 'Could not read gh auth token — run `gh auth login` first.' };
     }
+    authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
   }
-  const authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
-  const scrub = (s) => (s || '').replace(/oauth2:[^@]+@/g, 'oauth2:***@');
+  const scrub = (s) => (s || '')
+    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
+    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
+    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
   const target = `${headOwner}/${headRepoName}:${headBranch}`;
 
   const wtCwd = wt.worktreePath;

@@ -9,8 +9,9 @@ const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { prReview, currentRepoPath, ensureWorktreeForActivePr } = require('../state/pr-review');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
-const { bucketFromGitLabStatus } = require('../util/forge-adapter');
+const { bucketFromGitLabStatus, bucketFromBitbucketStatus } = require('../util/forge-adapter');
 const { resolveGlabEnv } = require('../util/glab-exec');
+const { bitbucketJson } = require('../util/bitbucket-api');
 
 // G6: CI checks scoped to the PR review surface.
 ipcMain.handle('pr-review-checks', async () => {
@@ -18,6 +19,33 @@ ipcMain.handle('pr-review-checks', async () => {
   const { meta, baseOwner, baseRepo, forge, projectPath, number, account, host } = prReview.active;
   if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'bitbucket') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const sha = meta && (meta.headRefOid || (meta.diff_refs && meta.diff_refs.head_sha) || '');
+    if (!sha) return { checks: [], error: 'Missing head commit sha' };
+    try {
+      const res = await bitbucketJson(`/repositories/${target}/commit/${sha}/statuses`, {
+        host: host || 'bitbucket.org',
+        account,
+        cwd,
+      });
+      const values = (res && Array.isArray(res.values)) ? res.values : (Array.isArray(res) ? res : []);
+      const checks = values.map((st) => ({
+        name: st.name || st.key || 'Bitbucket Check',
+        state: st.state,
+        bucket: bucketFromBitbucketStatus(st.state),
+        link: (st.links && st.links.html && st.links.html.href) || st.url || '',
+        workflow: st.key || '',
+        description: st.description || (st.state ? String(st.state) : ''),
+        runId: st.uuid || st.key || '',
+        jobId: st.uuid || st.key || '',
+      }));
+      return { checks };
+    } catch (err) {
+      return { checks: [], error: (err.responseBody || err.message || '').trim() };
+    }
+  }
 
   if (forge === 'gitlab') {
     const target = projectPath || `${baseOwner}/${baseRepo}`;

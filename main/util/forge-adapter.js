@@ -105,8 +105,154 @@ function transformGitLabDiscussions(discussions) {
   return { threads, issueComments };
 }
 
+// Map Bitbucket commit/pipeline status to Klaussy check bucket ('pass' | 'fail' | 'pending' | 'cancel')
+function bucketFromBitbucketStatus(status) {
+  const s = String(status || '').toUpperCase();
+  if (s === 'SUCCESSFUL' || s === 'SUCCESS' || s === 'PASSED') return 'pass';
+  if (s === 'FAILED' || s === 'FAILURE' || s === 'ERROR') return 'fail';
+  if (s === 'STOPPED' || s === 'CANCELLED' || s === 'CANCELED') return 'cancel';
+  if (s === 'INPROGRESS' || s === 'PENDING' || s === 'CREATED' || s === 'RUNNING' || s === 'QUEUED') {
+    return 'pending';
+  }
+  return 'pending';
+}
+
+// Normalize Bitbucket PR JSON into unified PR metadata shape
+function normalizeBitbucketPr(pr, host = 'bitbucket.org') {
+  const number = pr.id;
+  const state = (pr.state === 'OPEN' || pr.state === 'open') ? 'OPEN' : (pr.state || '').toUpperCase();
+  const authorUser = pr.author || {};
+  const authorLogin = authorUser.nickname || authorUser.username || authorUser.display_name || 'unknown';
+  const authorName = authorUser.display_name || authorLogin;
+
+  const source = pr.source || {};
+  const dest = pr.destination || {};
+  const srcRepo = source.repository || {};
+  const destRepo = dest.repository || {};
+
+  const headOwner = srcRepo.full_name ? srcRepo.full_name.split('/')[0] : '';
+  const headRepoName = srcRepo.name || (srcRepo.full_name ? srcRepo.full_name.split('/')[1] : '');
+
+  const body = (pr.summary && pr.summary.raw)
+    || (pr.description && pr.description.raw)
+    || (typeof pr.description === 'string' ? pr.description : '')
+    || '';
+
+  const htmlUrl = (pr.links && pr.links.html && pr.links.html.href)
+    || `https://${host}/${destRepo.full_name || ''}/pull-requests/${number}`;
+
+  return {
+    forge: 'bitbucket',
+    host,
+    number,
+    title: pr.title || '',
+    author: { login: authorLogin, name: authorName },
+    state,
+    createdAt: pr.created_on || '',
+    updatedAt: pr.updated_on || '',
+    headRefName: (source.branch && source.branch.name) || '',
+    baseRefName: (dest.branch && dest.branch.name) || '',
+    headRefOid: (source.commit && source.commit.hash) || '',
+    isDraft: !!(pr.draft || /^draft:/i.test(pr.title || '')),
+    reviewDecision: (pr.state === 'MERGED') ? 'MERGED' : 'REVIEW_REQUIRED',
+    url: htmlUrl,
+    body,
+    mergeable: 'MERGEABLE',
+    mergeStateStatus: pr.state || '',
+    headRepositoryOwner: headOwner ? { login: headOwner } : null,
+    headRepository: headRepoName ? { name: headRepoName } : null,
+  };
+}
+
+// Transform Bitbucket comments into unified { threads, issueComments }
+function transformBitbucketComments(comments) {
+  const threads = [];
+  const issueComments = [];
+
+  const rawList = Array.isArray(comments) ? comments : (comments && Array.isArray(comments.values) ? comments.values : []);
+  if (rawList.length === 0) return { threads, issueComments };
+
+  const commentMap = new Map();
+  const replies = [];
+
+  for (const c of rawList) {
+    if (!c || c.deleted) continue;
+    const user = c.user || {};
+    const authorLogin = user.nickname || user.username || user.display_name || 'unknown';
+    const normComment = {
+      databaseId: c.id,
+      author: { login: authorLogin },
+      createdAt: c.created_on || '',
+      body: (c.content && c.content.raw) || (typeof c.content === 'string' ? c.content : '') || '',
+      diffHunk: '',
+    };
+
+    if (c.parent && c.parent.id) {
+      replies.push({ parentId: c.parent.id, comment: normComment, raw: c });
+    } else if (c.inline && (c.inline.path || c.inline.to || c.inline.from)) {
+      const line = c.inline.to || c.inline.from || 1;
+      const diffSide = c.inline.to ? 'RIGHT' : 'LEFT';
+      const isResolved = !!(c.resolved || (c.resolution && c.resolution.resolved));
+      const thread = {
+        id: String(c.id),
+        isResolved,
+        isOutdated: false,
+        path: c.inline.path || '',
+        line,
+        originalLine: line,
+        startLine: null,
+        originalStartLine: null,
+        diffSide,
+        comments: [normComment],
+      };
+      threads.push(thread);
+      commentMap.set(c.id, thread);
+    } else {
+      issueComments.push({
+        databaseId: c.id,
+        author: { login: authorLogin },
+        createdAt: c.created_on || '',
+        body: normComment.body,
+        url: (c.links && c.links.html && c.links.html.href) || '',
+      });
+    }
+  }
+
+  // Attach replies
+  for (const reply of replies) {
+    const thread = commentMap.get(reply.parentId);
+    if (thread) {
+      thread.comments.push(reply.comment);
+      if (reply.raw.resolved || (reply.raw.resolution && reply.raw.resolution.resolved)) {
+        thread.isResolved = true;
+      }
+    } else {
+      const matchedThread = threads.find((t) => t.comments.some((tc) => tc.databaseId === reply.parentId));
+      if (matchedThread) {
+        matchedThread.comments.push(reply.comment);
+        if (reply.raw.resolved || (reply.raw.resolution && reply.raw.resolution.resolved)) {
+          matchedThread.isResolved = true;
+        }
+      } else {
+        issueComments.push({
+          databaseId: reply.comment.databaseId,
+          author: reply.comment.author,
+          createdAt: reply.comment.createdAt,
+          body: reply.comment.body,
+          url: (reply.raw.links && reply.raw.links.html && reply.raw.links.html.href) || '',
+        });
+      }
+    }
+  }
+
+  return { threads, issueComments };
+}
+
 module.exports = {
   bucketFromGitLabStatus,
   normalizeGitLabMr,
   transformGitLabDiscussions,
+  bucketFromBitbucketStatus,
+  normalizeBitbucketPr,
+  transformBitbucketComments,
 };

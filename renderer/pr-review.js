@@ -47,6 +47,7 @@ window.PrReview = window.PrReview || {};
   PR.forgeName = function (state) {
     var s = state || PR.lastState || {};
     if (s.forge === 'gitlab' || (s.meta && s.meta.url && /gitlab/i.test(s.meta.url))) return 'GitLab';
+    if (s.forge === 'bitbucket' || (s.meta && s.meta.url && (/bitbucket/i.test(s.meta.url) || /pull-requests/i.test(s.meta.url)))) return 'Bitbucket';
     return 'GitHub';
   };
 

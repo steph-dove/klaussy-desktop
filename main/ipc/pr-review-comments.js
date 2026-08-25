@@ -10,6 +10,7 @@ const { ghExec, ghExecP, resolveGhEnv, appendStderr, execFileP } = require('../u
 const { resolveGlabEnv } = require('../util/glab-exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { glabJson, glabText } = require('../util/glab-json');
+const { bitbucketFetch, bitbucketJson } = require('../util/bitbucket-api');
 const { humanizeComment } = require('../util/humanize-comment');
 const { isEmptyReview, ghApiErrorMessage } = require('../util/review-payload');
 const {
@@ -39,6 +40,22 @@ ipcMain.handle('pr-add-issue-comment', async (_event, { body }) => {
 
   body = humanizeComment(body);
   const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'bitbucket') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    try {
+      await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
+        method: 'POST',
+        account, host, cwd,
+        body: { content: { raw: body } },
+      });
+      return { ok: true };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
 
   if (forge === 'gitlab') {
     const target = projectPath || `${baseOwner}/${baseRepo}`;
@@ -113,6 +130,22 @@ ipcMain.handle('pr-edit-issue-comment', async (_event, { commentId, body }) => {
   body = humanizeComment(body);
   const cwd = currentRepoPath() || require('os').homedir();
 
+  if (forge === 'bitbucket') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    try {
+      await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments/${id}`, {
+        method: 'PUT',
+        account, host, cwd,
+        body: { content: { raw: body } },
+      });
+      return { ok: true, body };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
+
   if (forge === 'gitlab') {
     const target = projectPath || `${baseOwner}/${baseRepo}`;
     const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes/${id}`;
@@ -176,6 +209,22 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
   body = humanizeComment(body);
   const cwd = currentRepoPath() || require('os').homedir();
 
+  if (forge === 'bitbucket') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    try {
+      await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments/${id}`, {
+        method: 'PUT',
+        account, host, cwd,
+        body: { content: { raw: body } },
+      });
+      return { ok: true, body };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
+
   if (forge === 'gitlab') {
     const target = projectPath || `${baseOwner}/${baseRepo}`;
     const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/notes/${id}`;
@@ -234,6 +283,19 @@ ipcMain.handle('pr-current-user', async () => {
   const cwd = currentRepoPath() || require('os').homedir();
   const forge = (prReview.active && prReview.active.forge) || 'github';
 
+  if (forge === 'bitbucket') {
+    try {
+      const host = (prReview.active && prReview.active.host) || 'bitbucket.org';
+      const account = prReview.active && prReview.active.account;
+      const res = await bitbucketJson('/user', { host, account, cwd });
+      const login = res.nickname || res.username || res.display_name;
+      if (login) cachedCurrentUser = login;
+      return { login: cachedCurrentUser };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
+
   if (forge === 'gitlab') {
     try {
       const out = execFileSync('glab', ['api', 'user', '--jq', '.username'], {
@@ -265,6 +327,32 @@ ipcMain.handle('pr-reply-to-review-comment', async (_event, { inReplyTo, body })
 
   body = humanizeComment(body);
   const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'bitbucket') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    let parentCommentId = parseInt(inReplyTo, 10);
+    if (!parentCommentId && threads && Array.isArray(threads)) {
+      const matchingThread = threads.find((t) => t.id === inReplyTo || (t.comments && t.comments.some((c) => String(c.databaseId) === String(inReplyTo))));
+      if (matchingThread && matchingThread.comments && matchingThread.comments.length > 0) {
+        parentCommentId = matchingThread.comments[0].databaseId;
+      }
+    }
+    try {
+      await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
+        method: 'POST',
+        account, host, cwd,
+        body: {
+          content: { raw: body },
+          parent: { id: parentCommentId },
+        },
+      });
+      return { ok: true };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
 
   if (forge === 'gitlab') {
     const target = projectPath || `${baseOwner}/${baseRepo}`;
@@ -343,6 +431,23 @@ ipcMain.handle('pr-review-resolve-thread', async (_event, { threadId, resolve })
   const cwd = currentRepoPath() || require('os').homedir();
   const forge = prReview.active.forge || 'github';
 
+  if (forge === 'bitbucket') {
+    const target = prReview.active.projectPath || `${prReview.active.baseOwner}/${prReview.active.baseRepo}`;
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    try {
+      const method = resolve ? 'POST' : 'DELETE';
+      await bitbucketFetch(`/repositories/${target}/pullrequests/${prReview.active.number}/comments/${threadId}/resolve`, {
+        method,
+        account, host, cwd,
+      });
+      try { await fetchThreadsForActive(); } catch (_) {}
+      return { ok: true };
+    } catch (err) {
+      return { error: (err.responseBody || err.message || '').trim() };
+    }
+  }
+
   if (forge === 'gitlab') {
     const target = prReview.active.projectPath || `${prReview.active.baseOwner}/${prReview.active.baseRepo}`;
     const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${prReview.active.number}/discussions/${encodeURIComponent(threadId)}`;
@@ -387,6 +492,101 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
   const issueCommentDrafts = rawComments.filter((c) => c.issueComment);
 
   const cwd = currentRepoPath() || require('os').homedir();
+
+  if (forge === 'bitbucket') {
+    const target = projectPath || `${baseOwner}/${baseRepo}`;
+    const host = prReview.active.host || 'bitbucket.org';
+    const account = prReview.active.account;
+    const errors = [];
+    let postedCount = 0;
+
+    for (const c of inlineComments) {
+      if (!c.body || !c.body.trim()) continue;
+      const inlineData = { path: c.path };
+      if (c.side === 'LEFT' && typeof c.line === 'number') {
+        inlineData.from = c.line;
+      } else if (typeof c.line === 'number') {
+        inlineData.to = c.line;
+      }
+      try {
+        await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
+          method: 'POST',
+          account, host, cwd,
+          body: {
+            content: { raw: humanizeComment(c.body) },
+            inline: inlineData,
+          },
+        });
+        postedCount += 1;
+      } catch (err) {
+        // Fallback: general comment with line ref
+        const fallbackBody = `**[${c.path}${typeof c.line === 'number' ? `:${c.line}` : ''}]**\n\n${c.body}`;
+        try {
+          await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
+            method: 'POST',
+            account, host, cwd,
+            body: { content: { raw: humanizeComment(fallbackBody) } },
+          });
+          postedCount += 1;
+        } catch (fbErr) {
+          errors.push(err.message || fbErr.message);
+        }
+      }
+    }
+
+    if (body && body.trim()) {
+      try {
+        await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
+          method: 'POST',
+          account, host, cwd,
+          body: { content: { raw: humanizeComment(body) } },
+        });
+        postedCount += 1;
+      } catch (err) {
+        errors.push(err.message);
+      }
+    }
+
+    for (const draft of issueCommentDrafts) {
+      if (!draft.body || !draft.body.trim()) continue;
+      try {
+        await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
+          method: 'POST',
+          account, host, cwd,
+          body: { content: { raw: humanizeComment(draft.body) } },
+        });
+        postedCount += 1;
+      } catch (err) {
+        errors.push(err.message);
+      }
+    }
+
+    if (event === 'APPROVE') {
+      try {
+        await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/approve`, {
+          method: 'POST',
+          account, host, cwd,
+        });
+      } catch (err) {
+        errors.push(err.message);
+      }
+    } else if (event === 'REQUEST_CHANGES') {
+      try {
+        await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/request-changes`, {
+          method: 'POST',
+          account, host, cwd,
+        });
+      } catch (err) {
+        errors.push(err.message);
+      }
+    }
+
+    if (errors.length) {
+      if (postedCount === 0) return { error: `Nothing was posted: ${errors.join('; ')}` };
+      return { ok: true, warning: `Review posted, but some actions had warnings: ${errors.join('; ')}` };
+    }
+    return { ok: true };
+  }
 
   if (forge === 'gitlab') {
     const target = projectPath || `${baseOwner}/${baseRepo}`;
