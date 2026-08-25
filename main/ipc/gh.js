@@ -602,6 +602,21 @@ ipcMain.handle('check-dependencies', async () => {
       authError: glabAuthed ? null : (glabStatus.error || null),
       accounts: glabStatus.accounts || [],
     },
+    bitbucket: {
+      installed: true,
+      authed: (() => {
+        try {
+          const { listBitbucketAccounts, getBitbucketAuth } = require('../util/bitbucket-api');
+          return listBitbucketAccounts().length > 0 || !!getBitbucketAuth();
+        } catch (_) { return false; }
+      })(),
+      accounts: (() => {
+        try {
+          const { listBitbucketAccounts } = require('../util/bitbucket-api');
+          return listBitbucketAccounts();
+        } catch (_) { return []; }
+      })(),
+    },
     claude: {
       installed: claudeVersion.ok,
       version: claudeVersion.ok ? claudeVersion.output : null,
