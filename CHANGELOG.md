@@ -2,6 +2,15 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.19.0
+
+### 🪣 Bitbucket Cloud & Data Center Pull Request Review
+
+- **Bitbucket PR Reviewing**: Complete pull request review support for Bitbucket Cloud and self-hosted Bitbucket Data Center / Server repositories. Includes diff viewing, line commenting, discussion thread trees, thread resolution, approval, and merging.
+- **Git Accounts & Multi-Tier Auth**: Manage Bitbucket App Passwords, Personal Access Tokens, and Atlassian API tokens directly in the Git Accounts modal with multi-account switching and setup dependency checks.
+- **CI / Commit Status Integration**: Integrated Bitbucket commit status checks (`/statuses`) into the Checks tab mapped to Pass/Fail/Pending/Cancel buckets.
+- **Worktree Lifecycle**: Branch-isolated review worktrees with automatic cross-clone discovery and non-interactive Git credential resolution.
+
 ## 0.18.1
 
 ### 🔁 Resuming a session brings back what you left
