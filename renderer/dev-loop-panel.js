@@ -196,8 +196,8 @@ window.DevLoopPanel = (function () {
     var state = getOrCreateState(id, 'Active Dev Loop');
     var changed = false;
 
-    // Explicit headers: "## Phase 1 — Plan", "Starting Phase 4".
-    var phaseRegex = /(?:##\s*|Starting\s+|Entering\s+|Moving to\s+|Executing\s+|Beginning\s+)?Phase\s*([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
+    // Explicit action headers emitted during execution: "## Phase 1 — Plan", "Starting Phase 4".
+    var phaseRegex = /(?:##\s*|(?:Starting|Entering|Moving to|Executing|Beginning|Working on|Now on)\s+)Phase\s*([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
     var match;
     while ((match = phaseRegex.exec(clean)) !== null) {
       var phaseNum = parseInt(match[1], 10);
@@ -207,41 +207,44 @@ window.DevLoopPanel = (function () {
       }
     }
 
-    // Todo checklists: "- [x] Phase 1", "[ ] 4. QA".
-    var todoRegex = /\[([ xX✓])\]\s*(?:Phase\s*)?([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
-    var todoMatch;
-    while ((todoMatch = todoRegex.exec(clean)) !== null) {
-      var isDone = todoMatch[1] === 'x' || todoMatch[1] === 'X' || todoMatch[1] === '✓';
-      var num = parseInt(todoMatch[2], 10);
-      var text = (todoMatch[3] || '').trim();
-      if (isDone) {
-        if (num < 9) {
-          if (advancePhase(state, num + 1, '')) changed = true;
-        } else {
-          state.phaseStatuses[9].status = 'completed';
-          changed = true;
-        }
+    // Todo checklists: "- [x] Phase 1", "[>] Phase 2", "(in progress) Phase 3".
+    // Unchecked items "[ ]" are pending and must NOT advance phases.
+    var doneTodoRegex = /\[([xX✓])\]\s*(?:Phase\s*)?([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
+    var doneMatch;
+    while ((doneMatch = doneTodoRegex.exec(clean)) !== null) {
+      var num = parseInt(doneMatch[2], 10);
+      if (num < 9) {
+        if (advancePhase(state, num + 1, '')) changed = true;
       } else {
-        if (advancePhase(state, num, text)) changed = true;
+        state.phaseStatuses[9].status = 'completed';
+        changed = true;
       }
     }
 
-    // Milestone phrasing the agents actually print, newest phase first.
-    if (/(?:All CI checks green|landing the owl|PR is ready for human merge|ready for merge|merge gate reached|dev loop complete)/i.test(clean)) {
+    var activeTodoRegex = /\[([>•~]|in[ _-]progress|running)\]\s*(?:Phase\s*)?([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
+    var activeMatch;
+    while ((activeMatch = activeTodoRegex.exec(clean)) !== null) {
+      var activeNum = parseInt(activeMatch[2], 10);
+      var activeText = (activeMatch[3] || '').trim();
+      if (advancePhase(state, activeNum, activeText)) changed = true;
+    }
+
+    // Milestone action phrases emitted during actual execution.
+    if (/(?:All CI checks green|Landing the owl|PR is ready for (?:human )?merge|Merge gate reached|Dev loop complete)/i.test(clean)) {
       if (advancePhase(state, 9, 'CI green & ready to merge')) changed = true;
-    } else if (/(?:gh pr view\s+--comments|polling for code review|review comments? resolved|review feedback resolved|pulling review comments)/i.test(clean)) {
+    } else if (/(?:gh pr view\s+--comments|polling for (?:code )?review|review comments? resolved|review feedback resolved|pulling review comments)/i.test(clean)) {
       if (advancePhase(state, 8, 'Resolving review comments')) changed = true;
-    } else if (/(?:gh pr checks|polling CI|monitoring CI|CI checks?\s+(?:passing|passed|green|failed|pending)|waiting for CI|CI is green)/i.test(clean)) {
+    } else if (/(?:gh pr checks|polling CI checks|monitoring CI checks|waiting for CI)/i.test(clean)) {
       if (advancePhase(state, 7, 'Polling CI checks')) changed = true;
-    } else if (/(?:Re-review(?:ing)?\s+(?:the\s+)?PR|reviewing published PR|inspecting PR diff|checking remote PR)/i.test(clean)) {
+    } else if (/(?:Re-review(?:ing)?\s+(?:the\s+)?PR|reviewing published PR|inspecting remote PR diff)/i.test(clean)) {
       if (advancePhase(state, 6, 'Reviewing published PR')) changed = true;
-    } else if (/(?:Drafting (?:the )?PR body|pr-body\.md|gh pr create|glab mr create|Creating (?:the )?pull request|Opening (?:the )?PR|Pushed\.\s+Drafting)/i.test(clean)) {
+    } else if (/(?:gh pr create\b|glab mr create\b|Creating (?:the )?pull request|Opening (?:the )?PR\b)/i.test(clean)) {
       if (advancePhase(state, 5, 'Creating pull request')) changed = true;
-    } else if (/(?:QA is clean|QA clean|Capturing artifacts for the PR|scroll-through recording|Capturing screenshots?|Recording (?:screen|proof|flow)|Playwright screen recording|klaussy-qa-|\.mp4\b|Running QA|QA the change)/i.test(clean)) {
+    } else if (/(?:Capturing artifacts for the PR|scroll-through recording|Playwright screen recording|Capturing QA recording)/i.test(clean)) {
       if (advancePhase(state, 4, 'Running QA & capturing media')) changed = true;
-    } else if (/(?:git diff main\.\.\.HEAD|Local review and fix|Self-review pass|Reviewing the working diff|reviewing diff for bugs)/i.test(clean)) {
+    } else if (/(?:Reviewing the working diff|git diff main\.\.\.HEAD|Running self-review pass)/i.test(clean)) {
       if (advancePhase(state, 3, 'Local review & self-review')) changed = true;
-    } else if (/(?:Implementing the solution|TDD|test-driven development|Writing implementation|Applying changes|batch of edits)/i.test(clean)) {
+    } else if (/(?:Starting implementation|Implementing with TDD|Writing implementation batches)/i.test(clean)) {
       if (advancePhase(state, 2, 'Implementing solution')) changed = true;
     }
 
