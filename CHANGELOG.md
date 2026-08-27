@@ -2,6 +2,15 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.20.0
+
+### 🔍 PR Review Finding Cards & Multi-Agent Token Usage
+
+- **AI PR Review Card & Comment Alignment**: Finding cards now display the exact concise why + suggestion that gets posted to GitHub on "Add to PR" / "Copy".
+- **Expandable Explanation**: Longer multi-sentence analyses, edge cases, and reasoning from the AI are preserved in an expandable `<details>` section within the finding card.
+- **Agents Panel Review Routing & Auth Fix**: Directly opening PR review tasks from the Agents panel reliably loads the PR with full URL and account credentials across GitHub organizations.
+- **Token Usage Aggregation**: Unified token usage and cost metrics across Antigravity, Copilot, and OpenCode sessions.
+
 ## 0.19.0
 
 ### 🪣 Bitbucket Cloud & Data Center Pull Request Review
