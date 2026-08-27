@@ -31,8 +31,8 @@ window.AgentRouter = (function () {
     }
   }
 
-  async function openPrReview(prNumber, navIntent) {
-    if (!prNumber) return;
+  async function openPrReview(prNumber, navIntent, opts) {
+    if (!prNumber && !(opts && opts.url)) return;
     // Stash the navigation intent so pr-review.js's render() can pick it up
     // once the surface is mounted (load + mount is async, can't push directly).
     if (navIntent) {
@@ -43,7 +43,7 @@ window.AgentRouter = (function () {
     // pr-review-state broadcast triggers enterPrReviewMode.
     try {
       var state = await window.klaus.pr.reviewState();
-      var matchesActive = state && state.meta && state.meta.number === prNumber;
+      var matchesActive = state && state.meta && (state.meta.number === prNumber || (opts && opts.url && state.meta.url === opts.url));
       if (matchesActive) {
         if (typeof window.enterPrReviewMode === 'function') window.enterPrReviewMode();
         // PR is already mounted — applyPendingNav doesn't fire on its own
@@ -53,7 +53,12 @@ window.AgentRouter = (function () {
         }
         return;
       }
-      var loaded = await window.klaus.pr.load({ number: prNumber });
+      var loadPayload = { number: prNumber };
+      if (opts) {
+        if (opts.url) loadPayload.url = opts.url;
+        if (opts.account) loadPayload.account = opts.account;
+      }
+      var loaded = await window.klaus.pr.load(loadPayload);
       if (loaded && loaded.error && window.toast) {
         window.toast.error('Could not open PR #' + prNumber + ': ' + loaded.error);
       }
@@ -65,13 +70,15 @@ window.AgentRouter = (function () {
   function open(agent) {
     if (!agent) return;
     var ctx = agent.sourceContext || {};
+    var prUrl = ctx.url || (ctx.baseOwner && ctx.baseRepo && ctx.prNumber ? ('https://github.com/' + ctx.baseOwner + '/' + ctx.baseRepo + '/pull/' + ctx.prNumber) : null);
+    var prOpts = { url: prUrl, account: ctx.account };
     switch (agent.kind) {
       case 'explain-diff':
         // PR-originated explains have prNumber but no worktreePath; route to
         // the PR review surface and ask it to focus the right file +
         // scroll to the rehydrated explanation. Worktree-originated explains
         // route to the task + diff panel.
-        if (ctx.prNumber) openPrReview(ctx.prNumber, { file: ctx.file, agentId: agent.id });
+        if (ctx.prNumber) openPrReview(ctx.prNumber, { file: ctx.file, agentId: agent.id }, prOpts);
         else openTaskAndDiff(ctx.worktreePath);
         return;
       case 'pr-ai-review':
@@ -81,13 +88,14 @@ window.AgentRouter = (function () {
       case 'pr-review-ai':
         // AI review lives on the Review tab; ask the surface to switch tabs
         // and rehydrate the in-flight review state from the registry.
-        openPrReview(ctx.prNumber, { tab: 'ai-review', agentId: agent.id });
+        openPrReview(ctx.prNumber, { tab: 'ai-review', agentId: agent.id }, prOpts);
         return;
       case 'pr-debug-check':
+      case 'pr-fix-check':
       case 'pr-review-implement':
       case 'pr-review-investigate':
       case 'pr-review-chat':
-        openPrReview(ctx.prNumber);
+        openPrReview(ctx.prNumber, null, prOpts);
         return;
       default:
         // Unknown kind — log and bail; the panel still marks it read.

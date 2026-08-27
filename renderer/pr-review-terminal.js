@@ -554,36 +554,6 @@
           + '</div>'
         + '</div>';
     } else {
-      // Render in three parts so the original-code block lands at a fixed
-      // position regardless of what Claude wrote:
-      //   [Severity / Location / Category]
-      //   <verified original code from the file>
-      //   [Comment + prose + Suggested change]
-      // Splits f.text on the first "Comment:" marker (case-insensitive,
-      // tolerant of 0-2 leading asterisks like `**Comment:**`). When
-      // verifiedSnippet is set, also strip any fenced code block from the
-      // pre-Comment chunk so we don't duplicate Claude's pasted original
-      // code with our own. The full f.text (including the pasted block) is
-      // still posted to GitHub when the user submits — this stripping only
-      // affects the in-card render.
-      var displayText = f.text || '';
-      var commentMatch = displayText.match(/^\s*\*{0,2}Comment\*{0,2}\s*:/im);
-      var preText, postText;
-      if (commentMatch) {
-        preText = displayText.slice(0, commentMatch.index).trim();
-        postText = displayText.slice(commentMatch.index);
-      } else {
-        preText = '';
-        postText = displayText;
-      }
-      // The bracketed metadata now renders as the dot/tag/location label, so
-      // strip it from the prose. Run the full strip on BOTH chunks — the
-      // metadata (and its orphan `**` markers) can land before OR after the
-      // Comment: marker depending on how the agent formatted the block.
-      postText = postText.replace(/^\s*\*{0,2}Comment\*{0,2}\s*:[^\S\n]*\n?/i, '');
-      preText = PR.stripFindingHeaders(preText);
-      postText = PR.stripFindingHeaders(postText);
-
       // The de-bracketed location, shown above the code snippet it describes.
       var loc = PR.parseLocation(f.text);
       var locText = '';
@@ -616,21 +586,35 @@
             + '<pre class="pr-ai-finding-original-code"><code>' + PR.escHtml(f.verifiedSnippet.text) + '</code></pre>'
           + '</div>'
         + '</div>';
-        // Drop redundant fenced code block(s) from pre-Comment text — those
-        // are Claude's pasted "original code" which we now show verbatim
-        // from the file. Don't touch postText: a Suggested change block
-        // there is intentional.
-        preText = preText.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
       } else if (locHeadHtml) {
         // No verified snippet — still surface the location above the body.
         originalSnippetHtml = locHeadHtml;
       }
 
+      // Card body must show the exact comment that "Add to PR" / "Copy" posts.
+      var commentBody = PR.findingCommentBody ? PR.findingCommentBody(f) : (f.text || '');
+      var explanationText = PR.findingExplanationText ? PR.findingExplanationText(f) : '';
+      var whyText = PR.findingWhyText ? PR.findingWhyText(f) : '';
+
+      var normExp = explanationText.replace(/\s+/g, ' ').trim();
+      var normWhy = whyText.replace(/\s+/g, ' ').trim();
+      var normComment = (commentBody || '').replace(/\s+/g, ' ').trim();
+      var hasLongerExplanation = !!(explanationText && normExp !== normWhy && normExp !== normComment);
+
+      var explanationHtml = hasLongerExplanation
+        ? '<details class="pr-ai-finding-explanation">'
+            + '<summary class="pr-ai-finding-explanation-summary">Explanation</summary>'
+            + '<div class="pr-ai-finding-explanation-body">'
+              + PR.renderMarkdown(explanationText)
+            + '</div>'
+          + '</details>'
+        : '';
+
       bodyHtml = PR.renderFindingHeader(f)
         + '<div class="pr-ai-finding-body">'
-        + (preText ? PR.renderMarkdown(preText) : '')
         + originalSnippetHtml
-        + (postText ? PR.renderMarkdown(postText) : '')
+        + (commentBody ? PR.renderMarkdown(commentBody) : '')
+        + explanationHtml
       + '</div>';
     }
 

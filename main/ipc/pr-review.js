@@ -9,7 +9,7 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow, webContents, nativeTheme } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount } = require('../util/exec');
+const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount, resolveGhEnv } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
 const {
@@ -197,10 +197,11 @@ ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   }
 
   try {
+    const extraEnv = resolveGhEnv({ cwd });
     const meta = await ghJson([
       'pr', 'view', url,
       '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
-    ], cwd);
+    ], cwd, extraEnv);
     return { meta };
   } catch (err) {
     return { error: (err.stderr || err.message || '').trim() };
@@ -357,13 +358,14 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   }
 
   if (acctUser) switchGhForReview(acctUser);
+  const extraEnv = resolveGhEnv({ account: acctUser, cwd });
   try {
     const [meta, diff] = await Promise.all([
       ghJson([
         'pr', 'view', target,
         '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-      ], cwd),
-      ghText(['pr', 'diff', target], cwd),
+      ], cwd, extraEnv),
+      ghText(['pr', 'diff', target], cwd, extraEnv),
     ]);
     const base = parseBaseFromUrl(meta.url);
     const repo = base ? `${base.owner}/${base.name}` : null;
@@ -451,12 +453,13 @@ ipcMain.handle('pr-pull-updates', async () => {
       prReview.active.diff = diff;
       broadcastPrReview();
     } else {
+      const extraEnv = resolveGhEnv({ account: prReview.active.account, cwd });
       const [meta, diff] = await Promise.all([
         ghJson([
           'pr', 'view', url,
           '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-        ], cwd),
-        ghText(['pr', 'diff', url], cwd),
+        ], cwd, extraEnv),
+        ghText(['pr', 'diff', url], cwd, extraEnv),
       ]);
       if (!prReview.active || prReview.active.meta.url !== url) {
         return { error: 'Active PR changed during refresh' };

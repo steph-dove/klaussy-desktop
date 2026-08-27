@@ -123,3 +123,71 @@ test('an abbreviation does not cut the why short', () => {
   };
   assert.equal(PR.findingWhyText(abbrev), 'Use e.g. the pooled client here.');
 });
+
+// --- finding explanation (longer output) --------------------------------------
+
+test('explanation preserves the full prose above the suggestion', () => {
+  const explanation = PR.findingExplanationText(FINDING);
+  assert.equal(
+    explanation,
+    'The retry loop eats the 429, so a rate-limited call comes back looking fine.\nIt only shows up under load.',
+  );
+  assert.doesNotMatch(explanation, /High · Correctness/);
+  assert.doesNotMatch(explanation, /[Ss]uggested change/);
+});
+
+test('explanation preserves multi-line and markdown details', () => {
+  const multi = {
+    text: [
+      '**Medium · Performance · `src/cache.js:15`**',
+      '',
+      'Cache keys are computed synchronously.',
+      '- Blocks event loop for 15ms.',
+      '- Degrades throughput under load.',
+      '',
+      'Suggested change:',
+      '```js',
+      'const key = fastHash(id);',
+      '```',
+    ].join('\n'),
+  };
+  assert.equal(
+    PR.findingExplanationText(multi),
+    'Cache keys are computed synchronously.\n- Blocks event loop for 15ms.\n- Degrades throughput under load.',
+  );
+});
+
+test('explanation strips bracketed metadata and Comment: headers', () => {
+  const bracketed = {
+    text: [
+      '[Severity: High]',
+      '[Location: api.js:88]',
+      '[Category: Security]',
+      'Comment: Token expiration check is insecure.',
+      'An attacker can forge tokens.',
+      '',
+      'Suggested change:',
+      'fix',
+    ].join('\n'),
+  };
+  assert.equal(
+    PR.findingExplanationText(bracketed),
+    'Token expiration check is insecure.\nAn attacker can forge tokens.',
+  );
+});
+
+test('explanation returns full body when no suggestion label is present', () => {
+  const noSuggestion = {
+    text: [
+      '**High · Correctness · `src/db.js:10`**',
+      '',
+      'The connection pool is never closed on shutdown.',
+      'This causes socket leaks.',
+    ].join('\n'),
+  };
+  assert.equal(
+    PR.findingExplanationText(noSuggestion),
+    'The connection pool is never closed on shutdown.\nThis causes socket leaks.',
+  );
+});
+
