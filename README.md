@@ -20,11 +20,11 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 *   **🧪 Sandboxed Agents (Nemesis8)**
     Optionally run an agent inside an isolated [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) Docker sandbox instead of directly on your machine. Add a gateway under **Preferences → Nemesis8 Sandboxes** (one click sets one up locally), then pick **Nemesis8 Sandbox** as the agent for any tab. Keeps the agent's blast radius off your host, and works against a local or remote gateway.
 *   **📂 Multi-Repo Git Sessions**
-    Coordinate changes across multiple microservices or repositories on a shared task branch. Each repository spins up its own isolated worktree so agents can safely collaborate.
+    Coordinate changes across multiple microservices or repositories on a shared task branch across GitHub, GitLab, and Bitbucket. Each repository spins up its own isolated worktree so agents can safely collaborate.
 *   **🛡️ Commit-Time Review Gate**
     A built-in pre-commit and pre-push hook runs an agent-powered audit looking for silent failures, leaked credentials, debug leftovers, correctness bugs, and overly verbose comments. Auto-tidies code before committing.
-*   **🔍 PR Reviews Without Local Checkout**
-    Paste a GitHub Pull Request URL to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
+*   **🔍 PR & MR Reviews Without Local Checkout**
+    Paste a GitHub Pull Request, GitLab Merge Request, or Bitbucket Pull Request URL to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
 *   **🔄 Cross-Agent Session Resuming**
     Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
@@ -32,7 +32,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 *   **🔔 Answer Agents from Slack & Discord**
     Get a message when an agent finishes, fails, or stops to ask permission — then hit **Approve**/**Reject** or reply with text right there, and it goes straight to the agent's terminal. Klaussy dials out over Socket Mode / the Discord Gateway, so there's no public URL, tunnel, or open port. Approvals are limited to an allow-list you name, single-use, and expire. Set it up under **Preferences → Slack & Discord Notifications** ([step-by-step guide](./docs/notifications-setup.md)).
 *   **🔌 Multi-Agent MCP Manager**
-    Connect Model Context Protocol servers (GitHub, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Gemini, and the rest — from one catalog, with a single add fanning out to every agent you pick.
+    Connect Model Context Protocol servers (GitHub, GitLab, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Gemini, and the rest — from one catalog, with a single add fanning out to every agent you pick.
 *   **🛠️ Workflow-Oriented Tools**
     Fuzzy command palette (`Cmd+K`), pop-out task windows, and built-in flows for planning, debugging, and humanizing prose.
 
@@ -56,11 +56,11 @@ Prebuilt, signed, and notarized binaries are available for macOS, Windows, and L
 
 ![Multi-agent, multi-repo workspace](./docs/klaussy_multi_agent_workspace.png)
 
-**Conventions-aware PR review** — paste a pull request and get a structured AI review: findings ranked by severity, suggested changes, and one-click Implement / Add to PR.
+**Conventions-aware PR & MR review** — paste a pull request or merge request (GitHub, GitLab, Bitbucket) and get a structured AI review: findings ranked by severity, suggested changes, and one-click Implement / Add to PR.
 
 ![AI-powered PR review with structured findings](./docs/klaussy_pr_ai_review.png)
 
-**CI debugging built in** — when a check fails, Klaussy pulls the logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
+**CI debugging built in** — when a check fails on GitHub Actions, GitLab CI/CD, or Bitbucket Pipelines, Klaussy pulls the logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
 
 ![Agent-assisted CI failure debugging](./docs/klaussy_ci_debug.png)
 
@@ -74,7 +74,7 @@ Prebuilt, signed, and notarized binaries are available for macOS, Windows, and L
 
 Klaussy Desktop automatically detects and configures your local environment. It requires:
 1.  **Node.js 24+** (the agent stores are read through `node:sqlite`)
-2.  **GitHub CLI (`gh`)** (with active authentication)
+2.  **Git Forge Tools / Credentials** (GitHub CLI `gh`, GitLab CLI `glab`, or Bitbucket credentials)
 3.  **An Agent CLI or IDE extension** (Claude Code is the default; also supports Codex, Gemini, Antigravity, Copilot, Cursor, Cline, opencode, Kimi Code, and local models via Ollama + Aider)
 
 Optional: **Docker + a [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) gateway** if you want to run agents sandboxed rather than directly on your machine, and **Ollama** for local inline autocomplete.
@@ -83,25 +83,30 @@ Optional: **Docker + a [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) 
 
 #### macOS
 ```bash
-brew install node gh
+brew install node gh glab
 gh auth login
+glab auth login
 npm install -g @anthropic-ai/claude-code && claude
 ```
 
 #### Windows
 ```powershell
-winget install OpenJS.NodeJS GitHub.cli
+winget install OpenJS.NodeJS GitHub.cli GitLab.glab
 gh auth login
+glab auth login
 npm install -g @anthropic-ai/claude-code
 claude
 ```
 
 #### Linux
 ```bash
-sudo apt install nodejs npm gh
+sudo apt install nodejs npm gh glab
 gh auth login
+glab auth login
 npm install -g @anthropic-ai/claude-code && claude
 ```
+
+*For Bitbucket repositories, connect an App Password or token under **Preferences → Git Accounts**.*
 
 ---
 
