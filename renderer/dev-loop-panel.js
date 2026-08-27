@@ -277,9 +277,7 @@ window.DevLoopPanel = (function () {
               path: file,
               type: isVideo ? 'video' : 'image',
             });
-            if (advancePhase(state, 4, 'QA media recorded')) {
-              changed = true;
-            }
+            changed = true;
           }
         }
       });
@@ -418,17 +416,7 @@ window.DevLoopPanel = (function () {
         if (prRes && prRes.pr) {
           state.prUrl = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
           state.prNumber = prRes.pr.number;
-          advancePhase(state, 6, 'PR #' + (prRes.pr.number || '') + ' active on forge');
         }
-      }
-
-      // Artifacts already on disk imply how far a resumed loop got.
-      if (state.currentPhase < 4 && qaMedia.length > 0) {
-        advancePhase(state, 4, 'QA media captured');
-      } else if (state.currentPhase < 4 && docs.some(function (d) { return d.name === 'REVIEW_OUTPUT.md'; })) {
-        advancePhase(state, 4, 'Local review output generated');
-      } else if (state.currentPhase < 2 && docs.length > 0) {
-        advancePhase(state, 2, 'Plan established');
       }
 
       renderActiveView();
