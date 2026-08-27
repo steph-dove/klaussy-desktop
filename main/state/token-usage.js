@@ -14,13 +14,19 @@
 //     per-turn delta; `total_token_usage` is cumulative, so we sum `last_`.
 //   - gemini: ~/.gemini/tmp/<project>/chats/session-*.jsonl — each assistant
 //     message line carries `tokens: { input, output, cached, thoughts, total }`.
-// Copilot doesn't log token usage, so it's omitted.
+//   - copilot: ~/.copilot/session-state/**/events.jsonl — events carry `usage`
+//     ({ input_tokens, output_tokens, total_tokens, ... }).
+//   - antigravity: ~/.gemini/antigravity-cli/conversations/*.db — generation
+//     turn metadata in `gen_metadata` carrying protobuf-encoded token usage
+//     (prompt_token_count, candidates_token_count, cached_content_token_count).
+//   - opencode: ~/.local/share/opencode/opencode.db — `part` table records
+//     carrying `tokens` metadata on step-finish turns.
 // Other line types (permission-mode, summary, user input, tool results) carry
 // no usage field and are skipped.
 //
 // The full transcript collection is hundreds of MB and grows daily, so we
 // keep an incremental cache keyed by absolute file path:
-//   { version, files: { <path>: { mtimeMs, size, offset, days, requestIds } } }
+//   { version, files: { <path>: { mtimeMs, size, offset, days, requestIds, agent } } }
 // On rescan, files unchanged since their cached mtime+size are skipped
 // entirely; files that grew are read from cached `offset` forward; files
 // that shrank or rotated are re-scanned from byte 0.
@@ -38,12 +44,25 @@ const os = require('os');
 const readline = require('readline');
 const { app } = require('electron');
 
-// Bumped to 2 when requestId dedup landed — v1 caches over-counted by ~2x,
-// so we discard them and rescan from scratch.
-const CACHE_VERSION = 2;
-const CLAUDE_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
-const CODEX_SESSIONS = path.join(os.homedir(), '.codex', 'sessions');
-const GEMINI_TMP = path.join(os.homedir(), '.gemini', 'tmp');
+// Bump whenever a new agent starts being counted: older caches lack its
+// history, so they're discarded and rescanned from scratch.
+const CACHE_VERSION = 3;
+
+function home() {
+  return process.env.HOME || os.homedir();
+}
+
+function claudeProjectsDir() { return path.join(home(), '.claude', 'projects'); }
+function codexSessionsDir() { return path.join(home(), '.codex', 'sessions'); }
+function geminiTmpDir() { return path.join(home(), '.gemini', 'tmp'); }
+function copilotDir() { return path.join(home(), '.copilot'); }
+function antigravityConversationsDir() { return path.join(home(), '.gemini', 'antigravity-cli', 'conversations'); }
+function opencodeDbPath() {
+  const xdg = process.env.XDG_DATA_HOME
+    || (process.platform === 'win32' ? process.env.LOCALAPPDATA : null)
+    || path.join(home(), '.local', 'share');
+  return path.join(xdg, 'opencode', 'opencode.db');
+}
 
 function cachePath() {
   return path.join(app.getPath('userData'), 'token-usage-cache.json');
@@ -84,6 +103,7 @@ function saveCache() {
 
 // YYYY-MM-DD in the user's local timezone, derived from an ISO-UTC string.
 function localDay(iso) {
+  if (!iso) return null;
   const d = new Date(iso);
   if (isNaN(d.getTime())) return null;
   const y = d.getFullYear();
@@ -100,7 +120,7 @@ function tokensFromUsage(u) {
     + (u.output_tokens || 0);
 }
 
-// Per-agent line extractors. Each returns { key, day, tokens } for a usage-
+// Per-agent line extractors. Each returns { key, day, tokens, timestamp } for a usage-
 // bearing line, or null to skip. `key` dedupes re-emitted lines within a file.
 function extractClaude(obj) {
   const usage = obj && obj.message && obj.message.usage;
@@ -108,8 +128,10 @@ function extractClaude(obj) {
   // Lines without a requestId are rare (early CLI versions / stray entries) —
   // fall back to uuid so we still dedupe re-emitted content blocks.
   const key = obj.requestId || obj.uuid;
-  return { key, day: localDay(obj.timestamp), tokens: tokensFromUsage(usage) };
+  const timestamp = obj.timestamp;
+  return { key, day: localDay(timestamp), tokens: tokensFromUsage(usage), timestamp };
 }
+
 function extractCodex(obj) {
   if (!obj || obj.type !== 'event_msg') return null;
   const payload = obj.payload;
@@ -119,30 +141,270 @@ function extractCodex(obj) {
   const tokens = last.total_tokens != null
     ? last.total_tokens
     : (last.input_tokens || 0) + (last.output_tokens || 0);
+  const timestamp = obj.timestamp;
   // Codex has no requestId; token_count events are one-per-turn with distinct
   // timestamps, so timestamp+value is a stable dedupe key across rescans.
-  return { key: 'cx:' + obj.timestamp + ':' + tokens, day: localDay(obj.timestamp), tokens };
+  return { key: 'cx:' + timestamp + ':' + tokens, day: localDay(timestamp), tokens, timestamp };
 }
 
 function extractGemini(obj) {
   const t = obj && obj.tokens;
   if (!t || typeof t !== 'object') return null;
-  const tokens = t.total != null ? t.total : (t.input || 0) + (t.output || 0);
+  const tokens = t.total != null ? t.total : (t.input || 0) + (t.output || 0) + (t.cached || 0);
+  const timestamp = obj.timestamp;
   // Each assistant message has a stable id; fall back to timestamp.
-  return { key: 'gm:' + (obj.id || obj.timestamp), day: localDay(obj.timestamp), tokens };
+  return { key: 'gm:' + (obj.id || timestamp), day: localDay(timestamp), tokens, timestamp };
 }
 
-const EXTRACTORS = { claude: extractClaude, codex: extractCodex, gemini: extractGemini };
+function extractCopilot(obj) {
+  if (!obj || typeof obj !== 'object') return null;
+  const inner = obj.data || obj.payload || obj.event || obj.message || obj;
+  const u = obj.usage || (obj.data && obj.data.usage) || (obj.payload && obj.payload.usage)
+    || (obj.info && obj.info.last_token_usage) || obj.tokens || (inner && inner.usage) || (inner && inner.tokens);
+  if (!u) return null;
+
+  let tokens = 0;
+  if (typeof u === 'number') {
+    tokens = u;
+  } else if (typeof u === 'object') {
+    if (u.total_tokens != null) tokens = u.total_tokens;
+    else if (u.total != null) tokens = u.total;
+    else {
+      const inp = u.input_tokens || u.prompt_tokens || u.input || u.tokens_in || 0;
+      const out = u.output_tokens || u.completion_tokens || u.output || u.tokens_out || 0;
+      const cached = u.cache_read_input_tokens || u.cached || 0;
+      const cacheWrite = u.cache_creation_input_tokens || 0;
+      tokens = inp + out + cached + cacheWrite;
+    }
+  }
+  if (!tokens || tokens <= 0) return null;
+
+  const timestamp = obj.timestamp || obj.created_at || obj.time || obj.at
+    || (obj.data && (obj.data.timestamp || obj.data.created_at))
+    || (obj.payload && (obj.payload.timestamp || obj.payload.created_at))
+    || (inner && (inner.timestamp || inner.created_at));
+  const day = localDay(timestamp);
+  if (!day) return null;
+
+  const key = obj.id || obj.uuid || obj.requestId || (obj.data && obj.data.id) || ('cp:' + timestamp + ':' + tokens);
+  return { key, day, tokens, timestamp };
+}
+
+// Minimal protobuf wire decoder for Antigravity's gen_metadata binary records.
+function parseProto(buf) {
+  let pos = 0;
+  const out = [];
+  while (pos < buf.length) {
+    const key = buf[pos++];
+    const wireType = key & 7;
+    const fieldNum = key >> 3;
+    if (wireType === 0) { // varint
+      let val = 0n, shift = 0n;
+      while (pos < buf.length) {
+        const b = buf[pos++];
+        val |= BigInt(b & 0x7f) << shift;
+        if (!(b & 0x80)) break;
+        shift += 7n;
+        if (shift > 63n) return out;
+      }
+      out.push({ fieldNum, wireType, val: Number(val) });
+    } else if (wireType === 2) { // length-delimited
+      let len = 0, shift = 0;
+      while (pos < buf.length) {
+        const b = buf[pos++];
+        len |= (b & 0x7f) << shift;
+        if (!(b & 0x80)) break;
+        shift += 7;
+        if (shift > 28) return out;
+      }
+      if (pos + len > buf.length) return out;
+      const data = buf.subarray(pos, pos + len);
+      pos += len;
+      out.push({ fieldNum, wireType, data });
+    } else if (wireType === 1) { pos += 8; }
+    else if (wireType === 5) { pos += 4; }
+    else break;
+  }
+  return out;
+}
+
+function extractAntigravityRow(rowBuf) {
+  try {
+    const top = parseProto(rowBuf);
+    const f1 = top.find((x) => x.fieldNum === 1 && x.wireType === 2);
+    if (!f1) return null;
+    const sub1 = parseProto(f1.data);
+
+    let ts = null;
+    const f9 = sub1.find((x) => x.fieldNum === 9 && x.wireType === 2);
+    if (f9) {
+      const sub9 = parseProto(f9.data);
+      const f4 = sub9.find((x) => x.fieldNum === 4 && x.wireType === 2);
+      if (f4) {
+        const sub4 = parseProto(f4.data);
+        const sec = sub4.find((x) => x.fieldNum === 1 && x.wireType === 0);
+        if (sec && sec.val > 0) ts = new Date(sec.val * 1000).toISOString();
+      }
+    }
+
+    const usageMsg = sub1.find((x) => x.fieldNum === 4 && x.wireType === 2) || sub1.find((x) => x.fieldNum === 2 && x.wireType === 2);
+    if (!usageMsg) return null;
+    const u = parseProto(usageMsg.data);
+    const prompt = u.find((x) => x.fieldNum === 2 && x.wireType === 0)?.val || 0;
+    const candidates = u.find((x) => x.fieldNum === 3 && x.wireType === 0)?.val || 0;
+    const cached = u.find((x) => x.fieldNum === 5 && x.wireType === 0)?.val || 0;
+    const respId = u.find((x) => x.fieldNum === 11 && x.wireType === 2)?.data.toString('utf8');
+    const tokens = prompt + candidates + cached;
+    if (tokens <= 0) return null;
+    return { timestamp: ts, tokens, respId };
+  } catch {
+    return null;
+  }
+}
+
+function scanAntigravityFile(filePath, fromIdx, seenKeys, onTurn) {
+  let db = null;
+  try {
+    const stat = fs.statSync(filePath);
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(filePath, { readOnly: true });
+    const rows = db.prepare('SELECT idx, data FROM gen_metadata WHERE idx >= ? ORDER BY idx').all(fromIdx || 0);
+    let maxIdx = (fromIdx || 0) - 1;
+    const baseName = path.basename(filePath, '.db');
+    for (const r of rows) {
+      if (r.idx > maxIdx) maxIdx = r.idx;
+      if (!r.data) continue;
+      const rec = extractAntigravityRow(Buffer.from(r.data));
+      if (!rec || !rec.tokens) continue;
+      const key = rec.respId || ('ag:' + baseName + ':' + r.idx);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      const day = localDay(rec.timestamp) || localDay(stat.mtime.toISOString());
+      if (!day) continue;
+      onTurn(day, rec.tokens, key);
+    }
+    return { offset: maxIdx + 1, mtimeMs: stat.mtimeMs };
+  } finally {
+    if (db) { try { db.close(); } catch {} }
+  }
+}
+
+function scanAntigravityToday(filePath, today, seen, onHour) {
+  let db = null;
+  try {
+    const stat = fs.statSync(filePath);
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(filePath, { readOnly: true });
+    const rows = db.prepare('SELECT idx, data FROM gen_metadata ORDER BY idx').all();
+    const baseName = path.basename(filePath, '.db');
+    for (const r of rows) {
+      if (!r.data) continue;
+      const rec = extractAntigravityRow(Buffer.from(r.data));
+      if (!rec || !rec.tokens) continue;
+      const key = rec.respId || ('ag:' + baseName + ':' + r.idx);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const ts = rec.timestamp || stat.mtime.toISOString();
+      const day = localDay(ts);
+      if (day !== today) continue;
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) continue;
+      onHour(d.getHours(), rec.tokens);
+    }
+  } catch {}
+  finally {
+    if (db) { try { db.close(); } catch {} }
+  }
+}
+
+function scanOpencodeFile(filePath, fromRowid, seenKeys, onTurn) {
+  let db = null;
+  try {
+    const stat = fs.statSync(filePath);
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(filePath, { readOnly: true });
+    const rows = db.prepare(`
+      SELECT rowid, id, time_created, data FROM part
+       WHERE rowid >= ? AND data LIKE '%tokens%'
+       ORDER BY rowid
+    `).all(fromRowid || 0);
+    let maxRowid = (fromRowid || 0) - 1;
+    for (const r of rows) {
+      if (r.rowid > maxRowid) maxRowid = r.rowid;
+      if (!r.data) continue;
+      let part;
+      try { part = JSON.parse(r.data); } catch { continue; }
+      const t = part.tokens;
+      if (!t || typeof t !== 'object') continue;
+      const tokens = t.total != null
+        ? t.total
+        : ((t.input || 0) + (t.output || 0) + ((t.cache && t.cache.read) || 0) + ((t.cache && t.cache.write) || 0));
+      if (!tokens || tokens <= 0) continue;
+      const key = r.id || ('oc:' + r.time_created + ':' + tokens);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      const day = localDay(new Date(r.time_created).toISOString());
+      if (!day) continue;
+      onTurn(day, tokens, key);
+    }
+    return { offset: maxRowid + 1, mtimeMs: stat.mtimeMs };
+  } finally {
+    if (db) { try { db.close(); } catch {} }
+  }
+}
+
+function scanOpencodeToday(filePath, today, seen, onHour) {
+  let db = null;
+  try {
+    const { DatabaseSync } = require('node:sqlite');
+    db = new DatabaseSync(filePath, { readOnly: true });
+    const rows = db.prepare(`
+      SELECT id, time_created, data FROM part
+       WHERE data LIKE '%tokens%'
+       ORDER BY rowid
+    `).all();
+    for (const r of rows) {
+      if (!r.data) continue;
+      let part;
+      try { part = JSON.parse(r.data); } catch { continue; }
+      const t = part.tokens;
+      if (!t || typeof t !== 'object') continue;
+      const tokens = t.total != null
+        ? t.total
+        : ((t.input || 0) + (t.output || 0) + ((t.cache && t.cache.read) || 0) + ((t.cache && t.cache.write) || 0));
+      if (!tokens || tokens <= 0) continue;
+      const key = r.id || ('oc:' + r.time_created + ':' + tokens);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const d = new Date(r.time_created);
+      if (isNaN(d.getTime())) continue;
+      const day = localDay(d.toISOString());
+      if (day !== today) continue;
+      onHour(d.getHours(), tokens);
+    }
+  } catch {}
+  finally {
+    if (db) { try { db.close(); } catch {} }
+  }
+}
+
+const EXTRACTORS = {
+  claude: extractClaude,
+  codex: extractCodex,
+  gemini: extractGemini,
+  copilot: extractCopilot,
+};
 
 // Walk Claude's per-project dirs (one level) for *.jsonl.
 function* claudeFiles() {
+  const root = claudeProjectsDir();
   let projects;
   try {
-    projects = fs.readdirSync(CLAUDE_PROJECTS, { withFileTypes: true });
+    projects = fs.readdirSync(root, { withFileTypes: true });
   } catch { return; }
   for (const ent of projects) {
     if (!ent.isDirectory()) continue;
-    const dir = path.join(CLAUDE_PROJECTS, ent.name);
+    const dir = path.join(root, ent.name);
     let files;
     try { files = fs.readdirSync(dir); } catch { continue; }
     for (const name of files) {
@@ -151,7 +413,6 @@ function* claudeFiles() {
   }
 }
 
-// Codex nests sessions under YYYY/MM/DD/, so walk recursively for *.jsonl.
 function* walkJsonl(dir) {
   let ents;
   try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
@@ -162,13 +423,28 @@ function* walkJsonl(dir) {
   }
 }
 
+function* antigravityFiles() {
+  const root = antigravityConversationsDir();
+  let files;
+  try {
+    files = fs.readdirSync(root);
+  } catch { return; }
+  for (const name of files) {
+    if (name.endsWith('.db')) yield path.join(root, name);
+  }
+}
+
 // All session files across agents, each tagged with its agent.
 function* sessionFiles() {
   for (const file of claudeFiles()) yield { file, agent: 'claude' };
-  for (const file of walkJsonl(CODEX_SESSIONS)) yield { file, agent: 'codex' };
+  for (const file of walkJsonl(codexSessionsDir())) yield { file, agent: 'codex' };
   // Gemini's *.jsonl under tmp are the chat sessions; non-usage lines (e.g.
   // `$set` snapshots) are simply skipped by extractGemini.
-  for (const file of walkJsonl(GEMINI_TMP)) yield { file, agent: 'gemini' };
+  for (const file of walkJsonl(geminiTmpDir())) yield { file, agent: 'gemini' };
+  for (const file of walkJsonl(copilotDir())) yield { file, agent: 'copilot' };
+  for (const file of antigravityFiles()) yield { file, agent: 'antigravity' };
+  const ocDb = opencodeDbPath();
+  if (fs.existsSync(ocDb)) yield { file: ocDb, agent: 'opencode' };
 }
 
 // Stream a single file from `fromOffset` forward, line-by-line, applying
@@ -230,22 +506,59 @@ async function rescan() {
         if (Array.isArray(cached.requestIds)) seenRequestIds = new Set(cached.requestIds);
       }
 
-      const extract = EXTRACTORS[agent];
-      try {
-        const { offset, mtimeMs } = await scanFile(file, fromOffset, seenRequestIds, extract, (day, tokens) => {
-          days[day] = (days[day] || 0) + tokens;
-        });
-        cache.files[file] = {
-          mtimeMs,
-          size: offset,
-          offset,
-          days,
-          requestIds: Array.from(seenRequestIds),
-          agent,
-        };
-        dirty = true;
-      } catch (err) {
-        console.error('[token-usage] scan failed', file, err.message);
+      if (agent === 'antigravity') {
+        try {
+          const { offset, mtimeMs } = scanAntigravityFile(file, fromOffset, seenRequestIds, (day, tokens) => {
+            days[day] = (days[day] || 0) + tokens;
+          });
+          cache.files[file] = {
+            mtimeMs,
+            size: stat.size,
+            offset,
+            days,
+            requestIds: Array.from(seenRequestIds),
+            agent,
+          };
+          dirty = true;
+        } catch (err) {
+          console.error('[token-usage] scan failed', file, err.message);
+        }
+      } else if (agent === 'opencode') {
+        try {
+          const { offset, mtimeMs } = scanOpencodeFile(file, fromOffset, seenRequestIds, (day, tokens) => {
+            days[day] = (days[day] || 0) + tokens;
+          });
+          cache.files[file] = {
+            mtimeMs,
+            size: stat.size,
+            offset,
+            days,
+            requestIds: Array.from(seenRequestIds),
+            agent,
+          };
+          dirty = true;
+        } catch (err) {
+          console.error('[token-usage] scan failed', file, err.message);
+        }
+      } else {
+        const extract = EXTRACTORS[agent];
+        if (!extract) continue;
+        try {
+          const { offset, mtimeMs } = await scanFile(file, fromOffset, seenRequestIds, extract, (day, tokens) => {
+            days[day] = (days[day] || 0) + tokens;
+          });
+          cache.files[file] = {
+            mtimeMs,
+            size: offset,
+            offset,
+            days,
+            requestIds: Array.from(seenRequestIds),
+            agent,
+          };
+          dirty = true;
+        } catch (err) {
+          console.error('[token-usage] scan failed', file, err.message);
+        }
       }
     }
 
@@ -319,7 +632,27 @@ async function todayByHour() {
     let stat;
     try { stat = fs.statSync(file); } catch { continue; }
     if (stat.mtimeMs < startMs) continue; // can't contain today's entries
+
+    if (agent === 'antigravity') {
+      const seen = new Set();
+      scanAntigravityToday(file, today, seen, (h, tokens) => {
+        hours[h] += tokens;
+        byAgent[agent] = (byAgent[agent] || 0) + tokens;
+      });
+      continue;
+    }
+
+    if (agent === 'opencode') {
+      const seen = new Set();
+      scanOpencodeToday(file, today, seen, (h, tokens) => {
+        hours[h] += tokens;
+        byAgent[agent] = (byAgent[agent] || 0) + tokens;
+      });
+      continue;
+    }
+
     const extract = EXTRACTORS[agent];
+    if (!extract) continue;
     const seen = new Set();
     await new Promise((resolve) => {
       const rl = readline.createInterface({
@@ -334,7 +667,8 @@ async function todayByHour() {
         if (!rec || !rec.key || seen.has(rec.key)) return;
         seen.add(rec.key);
         if (rec.day !== today || !rec.tokens) return;
-        const d = new Date(obj.timestamp);
+        const ts = rec.timestamp || obj.timestamp || obj.created_at || (obj.data && (obj.data.timestamp || obj.data.created_at)) || (obj.payload && (obj.payload.timestamp || obj.payload.created_at));
+        const d = new Date(ts);
         if (isNaN(d.getTime())) return;
         hours[d.getHours()] += rec.tokens;
         byAgent[agent] = (byAgent[agent] || 0) + rec.tokens;
@@ -356,4 +690,18 @@ module.exports = {
   snapshotByAgent,
   todayByHour,
   todayKey,
+  _test: {
+    extractClaude,
+    extractCodex,
+    extractGemini,
+    extractCopilot,
+    extractAntigravityRow,
+    parseProto,
+    scanFile,
+    scanAntigravityFile,
+    scanAntigravityToday,
+    scanOpencodeFile,
+    scanOpencodeToday,
+  },
 };
+

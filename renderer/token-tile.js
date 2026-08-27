@@ -20,7 +20,7 @@
   // Per-agent dot colors. Names come from the provider registry via AppUtils.
   const AGENT_COLORS = {
     claude: '#d97757', codex: '#10a37f', gemini: '#4285f4', antigravity: '#5e35b1', copilot: '#8957e5',
-    cursor: '#00b8d9', cline: '#e8a13a',
+    opencode: '#00dc82', cursor: '#00b8d9', cline: '#e8a13a', kimi: '#7c3aed', ollama: '#ffffff',
   };
   function agentName(id) {
     return (window.AppUtils && AppUtils.modeDisplayName)
