@@ -3,7 +3,6 @@ require('../setup');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// We can test the phase extraction and keyword matching logic
 test('dev loop phase detection: matches explicit phase headers', () => {
   const phaseRegex = /(?:##\s*|Starting\s+|Entering\s+|Moving to\s+|Executing\s+|Beginning\s+)?Phase\s*([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
 

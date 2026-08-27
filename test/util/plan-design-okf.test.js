@@ -29,7 +29,6 @@ test('findPlanDoc: falls back to OKF session notes when root plan is absent', as
   const worktreeDir = path.join(tempRoot, 'my-repo');
   fs.mkdirSync(worktreeDir, { recursive: true });
 
-  // Write an OKF note with plan tag
   writeSessionNote(worktreeDir, {
     id: 'agent-plan-note',
     agent: 'claude',
@@ -53,7 +52,6 @@ test('findDesignDoc: falls back to OKF session notes when root design is absent'
   const worktreeDir = path.join(tempRoot, 'my-repo');
   fs.mkdirSync(worktreeDir, { recursive: true });
 
-  // Write an OKF note with design tag
   writeSessionNote(worktreeDir, {
     id: 'agent-design-note',
     agent: 'gemini',

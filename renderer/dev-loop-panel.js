@@ -226,7 +226,7 @@ window.DevLoopPanel = (function () {
       }
     }
 
-    // 3. Keyword / Milestone Pattern Detection
+    // Milestone phrasing the agents actually print, newest phase first.
     if (/(?:All CI checks green|landing the owl|PR is ready for human merge|ready for merge|merge gate reached|dev loop complete)/i.test(clean)) {
       if (advancePhase(state, 9, 'CI green & ready to merge')) changed = true;
     } else if (/(?:gh pr view\s+--comments|polling for code review|review comments? resolved|review feedback resolved|pulling review comments)/i.test(clean)) {
@@ -245,7 +245,6 @@ window.DevLoopPanel = (function () {
       if (advancePhase(state, 2, 'Implementing solution')) changed = true;
     }
 
-    // 4. Detect PR creation URL (GitHub / GitLab)
     var prMatch = clean.match(/https:\/\/(?:github\.com|gitlab\.com)\/([^\s\n\r/]+)\/([^\s\n\r/]+)\/(?:pull|merge_requests)\/(\d+)/i);
     if (prMatch) {
       var fullUrl = prMatch[0];
@@ -259,7 +258,7 @@ window.DevLoopPanel = (function () {
       }
     }
 
-    // 5. Detect QA media files (recordings or screenshots)
+    // QA media paths mentioned in the stream, skipping app assets.
     var mediaMatch = clean.match(/(?:[a-zA-Z0-9_.~/-]+\.(?:mp4|webm|mov|png|jpg|jpeg|webp))/gi);
     if (mediaMatch) {
       mediaMatch.forEach(function (file) {
@@ -288,7 +287,7 @@ window.DevLoopPanel = (function () {
     }
   }
 
-  // Auto-hydrate state by scanning worktree files on disk
+  // Hydrates phase state from what's on disk, so a reopened task isn't stuck at Phase 1.
   async function load(worktreePath) {
     if (!worktreePath) {
       currentWorktreePath = null;
@@ -300,7 +299,6 @@ window.DevLoopPanel = (function () {
     var state = getOrCreateState(taskId, 'Active Dev Loop');
 
     try {
-      // 1. Scan for Design & Plan markdown docs
       var docs = [];
       var planRes = await window.klaus.fs.findPlanFile(worktreePath);
       if (planRes && !planRes.error && planRes.content) {
@@ -312,7 +310,6 @@ window.DevLoopPanel = (function () {
         docs.push({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
       }
 
-      // Check root files for task-*.md, REVIEW_OUTPUT.md, etc.
       if (window.klaus.fs.listFiles) {
         var filesRes = await window.klaus.fs.listFiles(worktreePath);
         var fileList = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
@@ -374,7 +371,6 @@ window.DevLoopPanel = (function () {
         selectedDocPath = docs[0].path;
       }
 
-      // 2. Scan for QA Screenshots & Recordings in worktree + Downloads/
       var qaMedia = [];
       if (window.klaus && window.klaus.fs && window.klaus.fs.findQaMedia) {
         var qaRes = await window.klaus.fs.findQaMedia(worktreePath);
@@ -405,7 +401,6 @@ window.DevLoopPanel = (function () {
         });
       }
 
-      // Also merge any stream-captured artifacts
       if (state && state.qaArtifacts) {
         state.qaArtifacts.forEach(function (art) {
           if (!qaMedia.some(function (m) { return m.path === art.path || m.name === art.name; })) {
@@ -415,7 +410,6 @@ window.DevLoopPanel = (function () {
       }
       cachedQaMedia = qaMedia;
 
-      // 3. Fetch PR info for branch
       if (window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
         if (prRes && prRes.pr) {
@@ -425,7 +419,7 @@ window.DevLoopPanel = (function () {
         }
       }
 
-      // 4. Infer Phase based on existing artifacts
+      // Artifacts already on disk imply how far a resumed loop got.
       if (state.currentPhase < 4 && qaMedia.length > 0) {
         advancePhase(state, 4, 'QA media captured');
       } else if (state.currentPhase < 4 && docs.some(function (d) { return d.name === 'REVIEW_OUTPUT.md'; })) {
@@ -492,7 +486,6 @@ window.DevLoopPanel = (function () {
 
     var currentPhaseObj = PHASES.find(function (p) { return p.id === state.currentPhase; }) || PHASES[0];
 
-    // Header & Subnav
     var html =
       '<div class="devloop-header">' +
         '<div class="devloop-header-title">' +
@@ -517,7 +510,6 @@ window.DevLoopPanel = (function () {
         '</div>' +
       '</div>';
 
-    // Top Sub-Tabs: [ 📊 Progress ] [ 📐 Designs & Plan (N) ] [ 🎥 QA Screenshots (N) ]
     var docCount = cachedDocs.length;
     var qaCount = cachedQaMedia.length;
 
@@ -528,7 +520,6 @@ window.DevLoopPanel = (function () {
         '<button type="button" class="devloop-subtab ' + (currentSubTab === 'qa' ? 'active' : '') + '" data-sub="qa">🎥 QA Screenshots <span class="devloop-badge">' + qaCount + '</span></button>' +
       '</div>';
 
-    // Sub-view contents
     html += '<div class="devloop-body">';
 
     if (currentSubTab === 'progress') {
@@ -543,7 +534,6 @@ window.DevLoopPanel = (function () {
 
     containerEl.innerHTML = html;
 
-    // Attach click listeners for sub-tabs
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
       tab.addEventListener('click', function () {
         currentSubTab = tab.dataset.sub;
@@ -567,7 +557,6 @@ window.DevLoopPanel = (function () {
     var esc = AppUtils.escHtml;
     var html = '';
 
-    // PR banner
     if (state.prUrl) {
       html +=
         '<div class="devloop-pr-banner">' +
@@ -577,7 +566,6 @@ window.DevLoopPanel = (function () {
         '</div>';
     }
 
-    // 9-Phase Stepper list
     html += '<div class="devloop-stepper">';
     PHASES.forEach(function (phase) {
       var pState = state.phaseStatuses[phase.id] || { status: 'pending', summary: '' };
@@ -600,7 +588,6 @@ window.DevLoopPanel = (function () {
     });
     html += '</div>';
 
-    // Merge Gate Card (Phase 9 or ready to merge)
     html +=
       '<div class="devloop-merge-gate-card">' +
         '<div class="devloop-merge-gate-head">' +
@@ -635,7 +622,6 @@ window.DevLoopPanel = (function () {
 
     var html = '<div class="devloop-design-pane">';
 
-    // Document Selector Switcher
     if (cachedDocs.length > 1) {
       html += '<div class="devloop-doc-switch">';
       cachedDocs.forEach(function (doc) {
@@ -645,7 +631,6 @@ window.DevLoopPanel = (function () {
       html += '</div>';
     }
 
-    // Markdown preview
     var renderedMarkdown = '';
     if (window.MarkdownPreview && typeof window.MarkdownPreview.render === 'function') {
       renderedMarkdown = window.MarkdownPreview.render(selectedDoc.content || '');
@@ -758,7 +743,6 @@ window.DevLoopPanel = (function () {
   }
 
   function attachContentListeners(container, state) {
-    // Document selector buttons
     container.querySelectorAll('.devloop-doc-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         selectedDocPath = btn.dataset.docPath;
@@ -775,7 +759,6 @@ window.DevLoopPanel = (function () {
       });
     }
 
-    // PR link
     var prLink = container.querySelector('.devloop-pr-link');
     if (prLink) {
       prLink.addEventListener('click', function (e) {
@@ -785,7 +768,6 @@ window.DevLoopPanel = (function () {
       });
     }
 
-    // Copy Markdown button
     container.querySelectorAll('.devloop-copy-md-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var name = btn.dataset.name || 'screenshot';
@@ -800,7 +782,6 @@ window.DevLoopPanel = (function () {
       });
     });
 
-    // Open file in Finder
     container.querySelectorAll('.devloop-open-finder-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var filePath = btn.dataset.path;
@@ -812,7 +793,6 @@ window.DevLoopPanel = (function () {
       });
     });
 
-    // Merge button
     var mergeBtn = container.querySelector('#btn-devloop-merge');
     if (mergeBtn) {
       mergeBtn.addEventListener('click', function () {
@@ -827,7 +807,6 @@ window.DevLoopPanel = (function () {
     }
   }
 
-  // Mini-HUD rendered on terminal container
   function renderMiniHud(hostEl, taskId) {
     if (!hostEl) return;
     var state = getOrCreateState(taskId, 'Active Dev Loop');

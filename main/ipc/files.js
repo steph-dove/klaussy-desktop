@@ -376,7 +376,6 @@ async function findDesignDoc(worktreePath) {
 ipcMain.handle('find-plan-file', async (_event, { worktreePath }) => findPlanDoc(worktreePath));
 ipcMain.handle('find-design-file', async (_event, { worktreePath }) => findDesignDoc(worktreePath));
 
-// QA / Dev Loop Media discovery
 const QA_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
 const QA_VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov']);
 
@@ -484,7 +483,6 @@ async function findQaMediaFiles(worktreePath) {
     } catch {}
   }
 
-  // Well-known temp dirs agents write shots to.
   const tmpDir = os.tmpdir();
   if (fs.existsSync(tmpDir)) {
     const specificTmpDirs = [

@@ -18,7 +18,6 @@ test('findQaMediaFiles: discovers screenshots in e2e-artifacts and Downloads', a
   fs.mkdirSync(srcAssetsDir, { recursive: true });
   fs.mkdirSync(downloadsDir, { recursive: true });
 
-  // QA screenshots and recordings
   fs.writeFileSync(path.join(e2eDir, '01-login-screen.png'), 'fake-png-data');
   fs.writeFileSync(path.join(e2eDir, 'flow-recording.mp4'), 'fake-video-data');
   fs.writeFileSync(path.join(downloadsDir, '02-checkout-success.png'), 'fake-png-data-2');
@@ -31,11 +30,9 @@ test('findQaMediaFiles: discovers screenshots in e2e-artifacts and Downloads', a
   try {
     const results = await findQaMediaFiles(worktreeDir);
 
-    // Should find the 3 QA files, NOT the general assets
     const names = results.map(r => r.name).sort();
     assert.deepEqual(names, ['01-login-screen.png', '02-checkout-success.png', 'flow-recording.mp4']);
 
-    // Check classification
     const video = results.find(r => r.name === 'flow-recording.mp4');
     assert.equal(video.type, 'video');
 

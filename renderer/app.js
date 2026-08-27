@@ -1263,7 +1263,6 @@ window.App = window.App || {};
   var cardNewSession = document.getElementById('card-new-session');
   var cardOpenFolder = document.getElementById('card-open-folder');
   var cardReviewPr = document.getElementById('card-review-pr');
-  var cardManageSessions = document.getElementById('card-manage-sessions');
 
   App.modalDevLoopCheck = document.getElementById('modal-devloop-check');
   App.modalDevLoopFields = document.getElementById('modal-devloop-fields');
@@ -1310,12 +1309,6 @@ window.App = window.App || {};
     cardReviewPr.addEventListener('click', function () {
       var btnReview = document.getElementById('btn-review-pr');
       if (btnReview) btnReview.click();
-    });
-  }
-  if (cardManageSessions) {
-    cardManageSessions.addEventListener('click', function () {
-      var btnManage = document.getElementById('btn-manage-sessions');
-      if (btnManage) btnManage.click();
     });
   }
   // Empty state stays in sync with project changes — the project-switcher
