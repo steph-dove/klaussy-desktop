@@ -107,23 +107,74 @@ window.DevLoopPanel = (function () {
     };
   }
 
+  var STORAGE_KEY_PREFIX = 'klaussy-devloop:';
+  var WT_KEY_PREFIX = 'klaussy-devloop-wt:';
+
+  function saveState(id, state) {
+    if (!state) return;
+    try {
+      var serialized = JSON.stringify(state);
+      if (id) {
+        localStorage.setItem(STORAGE_KEY_PREFIX + id, serialized);
+      }
+      var wt = currentWorktreePath || getActiveWorktreePath();
+      if (wt) {
+        localStorage.setItem(WT_KEY_PREFIX + wt, serialized);
+      }
+    } catch (e) {
+      console.warn('[dev-loop-panel saveState]', e);
+    }
+  }
+
+  function loadState(id) {
+    try {
+      if (id) {
+        var raw = localStorage.getItem(STORAGE_KEY_PREFIX + id);
+        if (raw) return JSON.parse(raw);
+      }
+      var wt = currentWorktreePath || getActiveWorktreePath();
+      if (wt) {
+        var wtRaw = localStorage.getItem(WT_KEY_PREFIX + wt);
+        if (wtRaw) return JSON.parse(wtRaw);
+      }
+    } catch (e) {
+      console.warn('[dev-loop-panel loadState]', e);
+    }
+    return null;
+  }
+
   function getState(taskId) {
     var id = normId(taskId || activeTaskId());
-    if (!id) return null;
-    return devLoopStates.get(id) || null;
+    if (id && devLoopStates.has(id)) return devLoopStates.get(id);
+    var persisted = loadState(id);
+    if (persisted) {
+      if (id) devLoopStates.set(id, persisted);
+      return persisted;
+    }
+    return null;
   }
 
   function getOrCreateState(taskId, taskDescription) {
     var id = normId(taskId || activeTaskId());
-    if (!id) return defaultState('default', taskDescription);
-    if (!devLoopStates.has(id)) {
-      devLoopStates.set(id, defaultState(id, taskDescription));
+    if (id && devLoopStates.has(id)) {
+      return devLoopStates.get(id);
     }
-    return devLoopStates.get(id);
+    var persisted = loadState(id);
+    if (persisted) {
+      if (id) devLoopStates.set(id, persisted);
+      return persisted;
+    }
+    var state = defaultState(id || 'default', taskDescription);
+    if (id) {
+      devLoopStates.set(id, state);
+      saveState(id, state);
+    }
+    return state;
   }
 
   function advancePhase(state, targetPhase, summary) {
     if (!state || targetPhase < 1 || targetPhase > 9) return false;
+    var changed = false;
     if (targetPhase > state.currentPhase) {
       for (var p = 1; p < targetPhase; p++) {
         if (state.phaseStatuses[p].status !== 'completed') {
@@ -142,26 +193,49 @@ window.DevLoopPanel = (function () {
         state.phaseStatuses[targetPhase].summary = summary;
       }
       state.updatedAt = Date.now();
-      return true;
+      changed = true;
     } else if (targetPhase === state.currentPhase) {
       if (state.phaseStatuses[targetPhase].status !== 'in_progress') {
         state.phaseStatuses[targetPhase].status = 'in_progress';
         state.updatedAt = Date.now();
-        return true;
+        changed = true;
       }
       if (summary && !state.phaseStatuses[targetPhase].summary) {
         state.phaseStatuses[targetPhase].summary = summary;
         state.updatedAt = Date.now();
-        return true;
+        changed = true;
       }
     }
-    return false;
+    if (changed) {
+      saveState(state.taskId, state);
+    }
+    return changed;
+  }
+
+  function resumeDevLoop(taskId) {
+    var id = normId(taskId || activeTaskId());
+    var state = getState(id) || getOrCreateState(id);
+    var curPhase = state.currentPhase || 1;
+    var phaseObj = PHASES.find(function (p) { return p.id === curPhase; }) || PHASES[0];
+    var task = AppState.tasks.get(id);
+    var taskDesc = (task && (task.name || task.initialPrompt)) || state.taskDescription || 'this task';
+
+    var resumePrompt = 'Resume the autonomous Dev Loop for ' + taskDesc + ' starting at Phase ' + curPhase + ' (' + phaseObj.name + '). Continue executing through all remaining phases to completion.';
+
+    if (window.klaus && window.klaus.terminal && window.klaus.terminal.write && id) {
+      window.klaus.terminal.write(id, resumePrompt + '\n');
+    }
+    state.updatedAt = Date.now();
+    saveState(id, state);
+    emitUpdate(id);
+    renderActiveView();
   }
 
   function startDevLoop(taskId, taskDescription) {
     var id = normId(taskId || activeTaskId());
     var state = defaultState(id, taskDescription);
     devLoopStates.set(id, state);
+    saveState(id, state);
     emitUpdate(id);
     switchDiffTabToDevLoop();
     load(currentWorktreePath);
@@ -175,8 +249,10 @@ window.DevLoopPanel = (function () {
 
   function emitUpdate(taskId) {
     var id = normId(taskId || activeTaskId());
+    var state = getState(id);
+    if (state) saveState(id, state);
     if (window.Events && window.Events.emit) {
-      window.Events.emit('dev-loop:updated', { taskId: id, state: getState(id) });
+      window.Events.emit('dev-loop:updated', { taskId: id, state: state });
     }
     renderActiveView();
     updateMiniHuds(id);
@@ -458,6 +534,11 @@ window.DevLoopPanel = (function () {
       window.Events.on('task:switched', function (detail) {
         var task = detail && detail.task;
         currentWorktreePath = task ? task.worktreePath : null;
+        var taskId = task ? task.id : activeTaskId();
+        var existing = getState(taskId);
+        if (existing && existing.currentPhase > 0) {
+          switchDiffTabToDevLoop();
+        }
         load(currentWorktreePath);
       });
     }
@@ -510,7 +591,10 @@ window.DevLoopPanel = (function () {
           '</div>' +
         '</div>' +
         '<div class="devloop-header-actions">' +
-          '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Start/Restart Full Dev Loop on this task">🚀 Relaunch Loop</button>' +
+          (state.currentPhase < 9
+            ? '<button class="klaus-btn klaus-btn-primary devloop-resume-btn" type="button" title="Resume dev loop from Phase ' + state.currentPhase + '">▶ Resume Loop (Phase ' + state.currentPhase + ')</button>'
+            : '') +
+          '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Restart Full Dev Loop from Phase 1">🔄 Restart Loop</button>' +
         '</div>' +
       '</div>' +
       '<div class="devloop-intro-banner">' +
@@ -762,6 +846,24 @@ window.DevLoopPanel = (function () {
       });
     });
 
+    var resumeBtn = container.querySelector('.devloop-resume-btn');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', function () {
+        var taskId = activeTaskId();
+        resumeDevLoop(taskId);
+      });
+    }
+
+    var relaunchBtn = container.querySelector('.devloop-relaunch-btn');
+    if (relaunchBtn) {
+      relaunchBtn.addEventListener('click', function () {
+        var taskId = activeTaskId();
+        if (window.ActionModal && window.ActionModal.run && taskId) {
+          window.ActionModal.run(taskId, 'rest-of-the-owl');
+        }
+      });
+    }
+
     var createPlanBtn = container.querySelector('.devloop-create-plan-btn');
     if (createPlanBtn) {
       createPlanBtn.addEventListener('click', function () {
@@ -896,6 +998,7 @@ window.DevLoopPanel = (function () {
     init: init,
     load: load,
     startDevLoop: startDevLoop,
+    resumeDevLoop: resumeDevLoop,
     getState: getState,
     feedTerminalData: feedTerminalData,
     renderActiveView: renderActiveView,
