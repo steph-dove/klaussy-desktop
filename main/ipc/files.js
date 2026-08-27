@@ -9,7 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { ipcMain, shell, clipboard } = require('electron');
-const { execFileP } = require('../util/exec');
+const { execFileP, ghExecP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
 const { worktreeWatchers, startWorktreeWatcher, stopWorktreeWatcher } = require('../state/watcher');
 
@@ -464,35 +464,17 @@ async function findQaMediaFiles(worktreePath) {
         candidateDirs.add(path.join(downloadsDir, `${repoName}-${safeBranch}`));
       }
     }
-    if (repoName) {
-      candidateDirs.add(path.join(downloadsDir, repoName));
-      candidateDirs.add(path.join(downloadsDir, path.basename(worktreePath)));
-    }
-
-    try {
-      const dlEntries = fs.readdirSync(downloadsDir, { withFileTypes: true });
-      for (const ent of dlEntries) {
-        if (ent.isDirectory()) {
-          const lower = ent.name.toLowerCase();
-          if ((repoName && lower.startsWith(repoName.toLowerCase() + '-')) ||
-              lower.startsWith('klaussy-qa-') ||
-              lower.startsWith('klauss-qa-') ||
-              lower.startsWith('klaussy-')) {
-            candidateDirs.add(path.join(downloadsDir, ent.name));
-          }
-        }
-      }
-    } catch {}
+    // Exact branch-named folders only: a `klaussy-*` / `<repo>-*` prefix sweep
+    // pulls in every other branch's QA run.
   }
 
   const tmpDir = os.tmpdir();
-  if (fs.existsSync(tmpDir)) {
-    const specificTmpDirs = [
-      path.join(tmpDir, `klaussy-qa-${repoName}`),
-      path.join(tmpDir, `${repoName}-qa`),
-      path.join(tmpDir, 'klaussy-qa-diff-annotations'),
-    ];
-    for (const sDir of specificTmpDirs) {
+  if (branch && fs.existsSync(tmpDir)) {
+    const safeBranch = branch.replace(/[^a-zA-Z0-9._-]/g, '-');
+    for (const sDir of [
+      path.join(tmpDir, `klaussy-qa-${repoName}-${safeBranch}`),
+      path.join(tmpDir, `${repoName}-${safeBranch}-qa`),
+    ]) {
       if (fs.existsSync(sDir)) {
         candidateDirs.add(sDir);
       }
@@ -504,6 +486,30 @@ async function findQaMediaFiles(worktreePath) {
     if (fs.existsSync(absQDir)) {
       candidateDirs.add(absQDir);
     }
+  }
+
+  // Media in a shared folder like Downloads must also be newer than the branch
+  // start, or a re-used branch name resurrects the previous run's screenshots.
+  let branchStartMs = 0;
+  for (const baseRef of ['origin/HEAD', 'origin/main', 'main', 'origin/master', 'master']) {
+    try {
+      const { stdout } = await execFileP(
+        'git',
+        ['log', '--reverse', '--format=%ct', '--max-count=1', `${baseRef}..HEAD`],
+        { cwd: worktreePath, maxBuffer: 1024 * 1024 },
+      );
+      const secs = parseInt(stdout.trim().split('\n')[0], 10);
+      if (secs) {
+        branchStartMs = secs * 1000;
+        break;
+      }
+    } catch {}
+  }
+  // A branch with no commits of its own yet still has a session behind it.
+  if (!branchStartMs) {
+    try {
+      branchStartMs = fs.statSync(worktreePath).birthtimeMs || 0;
+    } catch {}
   }
 
   function scanDirectory(dirPath, maxDepth = 3) {
@@ -534,7 +540,9 @@ async function findQaMediaFiles(worktreePath) {
           if (type) {
             try {
               const stat = fs.statSync(absChild);
-              const rel = absChild.startsWith(worktreePath)
+              const inWorktree = absChild.startsWith(worktreePath);
+              if (!inWorktree && branchStartMs && stat.mtimeMs < branchStartMs) continue;
+              const rel = inWorktree
                 ? path.relative(worktreePath, absChild)
                 : ent.name;
               foundFiles.set(absChild, {
@@ -588,6 +596,80 @@ async function findQaMediaFiles(worktreePath) {
   results.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
   return results;
 }
+
+// Phase 3 (local review) and Phase 6 (re-review) leave nothing on disk, so the
+// floor steps over them; the terminal parser fills those in.
+function phaseFromEvidence(ev) {
+  let phase = 1;
+  const atLeast = (n) => { if (n > phase) phase = n; };
+
+  if (ev.hasPlan) atLeast(2);
+  if (ev.commits > 0) atLeast(2);
+  if (ev.qaMedia > 0) atLeast(4);
+  if (ev.prNumber) atLeast(6);
+  if (ev.checksTotal > 0) atLeast(7);
+  if (ev.reviewThreads > 0) atLeast(8);
+  if (ev.checksTotal > 0 && ev.checksPassed === ev.checksTotal) atLeast(9);
+
+  return phase;
+}
+
+async function devLoopEvidence(worktreePath) {
+  const ev = {
+    hasPlan: false, commits: 0, qaMedia: 0,
+    prNumber: null, prUrl: null,
+    checksTotal: 0, checksPassed: 0, checksFailed: 0,
+    reviewThreads: 0,
+  };
+  if (!worktreePath) return ev;
+
+  for (const name of ['plan.md', 'docs/plan.md', 'design.md', 'docs/design.md']) {
+    if (fs.existsSync(path.join(worktreePath, name))) { ev.hasPlan = true; break; }
+  }
+
+  for (const baseRef of ['origin/HEAD', 'origin/main', 'main', 'origin/master', 'master']) {
+    try {
+      const { stdout } = await execFileP('git', ['rev-list', '--count', `${baseRef}..HEAD`], {
+        cwd: worktreePath, maxBuffer: 1024 * 1024,
+      });
+      const n = parseInt(stdout.trim(), 10);
+      if (Number.isFinite(n)) { ev.commits = n; break; }
+    } catch {}
+  }
+
+  try {
+    ev.qaMedia = (await findQaMediaFiles(worktreePath)).length;
+  } catch {}
+
+  // No PR yet is the normal early state, so a failure here is not an error.
+  try {
+    const { stdout } = await ghExecP(
+      ['pr', 'view', '--json', 'number,url,statusCheckRollup,reviews'],
+      { cwd: worktreePath, timeout: 10000 },
+    );
+    const pr = JSON.parse(stdout);
+    if (pr && pr.number) {
+      ev.prNumber = pr.number;
+      ev.prUrl = pr.url || null;
+      const checks = Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [];
+      ev.checksTotal = checks.length;
+      ev.checksPassed = checks.filter((c) => c.conclusion === 'SUCCESS').length;
+      ev.checksFailed = checks.filter((c) => c.conclusion === 'FAILURE' || c.conclusion === 'TIMED_OUT').length;
+      ev.reviewThreads = Array.isArray(pr.reviews) ? pr.reviews.length : 0;
+    }
+  } catch {}
+
+  return ev;
+}
+
+ipcMain.handle('dev-loop-evidence', async (_event, { worktreePath }) => {
+  try {
+    const evidence = await devLoopEvidence(worktreePath);
+    return { evidence, phase: phaseFromEvidence(evidence) };
+  } catch (err) {
+    return { evidence: null, phase: 0, error: err.message };
+  }
+});
 
 ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
   if (!worktreePath) return { media: [] };
@@ -787,6 +869,8 @@ ipcMain.handle('clipboard-write-text', async (_event, { text }) => {
 
 module.exports = {
   findQaMediaFiles,
+  devLoopEvidence,
+  phaseFromEvidence,
   findRootDoc,
   findPlanDoc,
   findDesignDoc,

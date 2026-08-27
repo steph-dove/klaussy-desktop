@@ -74,6 +74,7 @@ window.DevLoopPanel = (function () {
   var currentSubTab = 'progress'; // 'progress' | 'design' | 'qa'
   var selectedDocPath = null;
   var cachedDocs = [];
+  var evidenceTimer = null;
   var cachedQaMedia = [];
   var containerEl = null;
   var reloadTimer = null;
@@ -258,6 +259,47 @@ window.DevLoopPanel = (function () {
     updateMiniHuds(id);
   }
 
+  // Shown alongside the phase so a jump in the HUD is traceable.
+  function evidenceSummary(ev) {
+    if (!ev) return '';
+    var parts = [];
+    if (ev.commits) parts.push(ev.commits + (ev.commits === 1 ? ' commit' : ' commits'));
+    if (ev.qaMedia) parts.push(ev.qaMedia + ' QA file' + (ev.qaMedia === 1 ? '' : 's'));
+    if (ev.prNumber) parts.push('PR #' + ev.prNumber);
+    if (ev.checksTotal) parts.push(ev.checksPassed + '/' + ev.checksTotal + ' checks green');
+    if (ev.reviewThreads) parts.push(ev.reviewThreads + ' review' + (ev.reviewThreads === 1 ? '' : 's'));
+    return parts.join(' · ');
+  }
+
+  async function applyEvidence(worktreePath, state) {
+    if (!worktreePath || !state) return false;
+    if (!(window.klaus && window.klaus.fs && window.klaus.fs.devLoopEvidence)) return false;
+    try {
+      var res = await window.klaus.fs.devLoopEvidence(worktreePath);
+      if (!res || !(res.phase > 0)) return false;
+      state.evidence = res.evidence || null;
+      if (res.evidence && res.evidence.prUrl && !state.prUrl) {
+        state.prUrl = res.evidence.prUrl;
+        state.prNumber = res.evidence.prNumber;
+      }
+      return advancePhase(state, res.phase, evidenceSummary(res.evidence));
+    } catch (err) {
+      console.warn('[dev-loop-panel evidence]', err);
+      return false;
+    }
+  }
+
+  // Without a poll the HUD only catches up when the user switches tabs.
+  async function pollEvidence() {
+    if (!currentWorktreePath) return;
+    var id = normId(activeTaskId());
+    var state = getState(id);
+    if (!state || state.currentPhase >= 9) return;
+    if (await applyEvidence(currentWorktreePath, state)) {
+      emitUpdate(id);
+    }
+  }
+
   function feedTerminalData(taskId, rawData) {
     if (!rawData) return;
     var signals = DevLoopDetect.detect(rawData);
@@ -400,6 +442,9 @@ window.DevLoopPanel = (function () {
         advancePhase(state, 2, 'Implementation plan created & saved');
       }
 
+      // Runs after the plan check so artifacts outrank terminal narration.
+      await applyEvidence(worktreePath, state);
+
       var qaMedia = [];
       if (window.klaus && window.klaus.fs && window.klaus.fs.findQaMedia) {
         var qaRes = await window.klaus.fs.findQaMedia(worktreePath);
@@ -461,6 +506,10 @@ window.DevLoopPanel = (function () {
     window.addEventListener('load-devloop', function () {
       load(currentWorktreePath || getActiveWorktreePath());
     });
+
+    // Long enough not to hammer `gh` on a loop that runs for an hour.
+    if (evidenceTimer) clearInterval(evidenceTimer);
+    evidenceTimer = setInterval(pollEvidence, 45000);
 
     if (window.Events && window.Events.on) {
       window.Events.on('task:switched', function (detail) {

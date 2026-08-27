@@ -663,6 +663,7 @@ contextBridge.exposeInMainWorld('klaus', {
     findPlanFile: (worktreePath) => ipcRenderer.invoke('find-plan-file', { worktreePath }),
     findDesignFile: (worktreePath) => ipcRenderer.invoke('find-design-file', { worktreePath }),
     findQaMedia: (worktreePath) => ipcRenderer.invoke('find-qa-media', { worktreePath }),
+    devLoopEvidence: (worktreePath) => ipcRenderer.invoke('dev-loop-evidence', { worktreePath }),
     readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
       ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),
     searchFiles: (worktreePath, query, maxPerFile) =>
