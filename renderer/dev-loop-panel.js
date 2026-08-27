@@ -1,8 +1,6 @@
-// DevLoopPanel module — manages the 9-phase "Rest of the Owl" autonomous dev loop
-// in Klaussy Desktop. Operates entirely inside the user's interactive CLI terminal
-// (PTY) with zero extra API billing, auto-hydrating from local worktree files
-// (plan.md, design.md, task specs, QA video/screenshots, PR state) to provide
-// live progress tracking, design spec rendering, and QA media previews.
+// Tracks the 9-phase "Rest of the Owl" dev loop by reading the agent's own PTY
+// output plus on-disk artifacts (plan/design docs, QA media, PR state), so
+// progress costs no extra API calls.
 
 window.DevLoopPanel = (function () {
   var PHASES = [
@@ -198,7 +196,7 @@ window.DevLoopPanel = (function () {
     var state = getOrCreateState(id, 'Active Dev Loop');
     var changed = false;
 
-    // 1. Explicit Phase headers / indicators: e.g. "Phase 1 — Plan", "Phase 2: Implement", "Starting Phase 4", "Executing Phase 4"
+    // Explicit headers: "## Phase 1 — Plan", "Starting Phase 4".
     var phaseRegex = /(?:##\s*|Starting\s+|Entering\s+|Moving to\s+|Executing\s+|Beginning\s+)?Phase\s*([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
     var match;
     while ((match = phaseRegex.exec(clean)) !== null) {
@@ -209,7 +207,7 @@ window.DevLoopPanel = (function () {
       }
     }
 
-    // 2. Todo checklist items: e.g. "[x] Phase 1", "[x] 1. Plan", "[ ] Phase 4", "- [x] Phase 3"
+    // Todo checklists: "- [x] Phase 1", "[ ] 4. QA".
     var todoRegex = /\[([ xX✓])\]\s*(?:Phase\s*)?([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
     var todoMatch;
     while ((todoMatch = todoRegex.exec(clean)) !== null) {

@@ -415,7 +415,6 @@ async function findQaMediaFiles(worktreePath) {
   const foundFiles = new Map();
   const candidateDirs = new Set();
 
-  // 1. Determine git branch and repo name
   let branch = '';
   let repoName = path.basename(worktreePath);
   try {
@@ -436,7 +435,7 @@ async function findQaMediaFiles(worktreePath) {
     }
   } catch {}
 
-  // 2. Look in Downloads directory (cross-platform: macOS, Windows, Linux)
+  // Agents save QA media to Downloads/klaussy-qa-<branch>, so probe every branch-name spelling.
   let downloadsDir;
   try {
     const { app } = require('electron');
@@ -485,7 +484,7 @@ async function findQaMediaFiles(worktreePath) {
     } catch {}
   }
 
-  // 3. Look in os.tmpdir() for specific QA shot dirs
+  // Well-known temp dirs agents write shots to.
   const tmpDir = os.tmpdir();
   if (fs.existsSync(tmpDir)) {
     const specificTmpDirs = [
@@ -500,7 +499,6 @@ async function findQaMediaFiles(worktreePath) {
     }
   }
 
-  // 4. Look in worktree QA directories
   for (const qDir of QA_REL_DIRS) {
     const absQDir = path.join(worktreePath, qDir);
     if (fs.existsSync(absQDir)) {
@@ -508,7 +506,6 @@ async function findQaMediaFiles(worktreePath) {
     }
   }
 
-  // Helper to walk a QA directory and collect media
   function scanDirectory(dirPath, maxDepth = 3) {
     if (!fs.existsSync(dirPath)) return;
     const stack = [{ p: dirPath, depth: 0 }];
@@ -559,7 +556,7 @@ async function findQaMediaFiles(worktreePath) {
     scanDirectory(cDir);
   }
 
-  // 5. Also check root files or files matching QA screenshot pattern in worktree
+  // Loose shots in the worktree root: name pattern only, so repo artwork isn't picked up.
   try {
     const rootEntries = fs.readdirSync(worktreePath, { withFileTypes: true });
     for (const ent of rootEntries) {

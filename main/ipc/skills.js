@@ -281,13 +281,12 @@ ipcMain.handle('resolve-skill', (_event, { worktreePath, agentId, kind } = {}) =
 
     if (entries.includes(kind)) return kind;
 
-    // Derive base repo name to find exact `<repo>-<kind>` (e.g. klaussy-desktop-review)
+    // Prefer this repo's own `<repo>-<kind>` skill (e.g. klaussy-desktop-review).
     const baseDir = path.basename(worktreePath).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
     const exactName = `${baseDir}-${kind}`;
     if (entries.includes(exactName)) return exactName;
 
-    // Filter to entries where the suffix is strictly "-<kind>" without extra words in the kind
-    // e.g. `<repo>-review`, not `<repo>-feedback-review`
+    // Last segment must be exactly <kind>: `<repo>-review`, not `<repo>-feedback-review`.
     const exactSuffixMatches = entries.filter((name) => {
       const parts = name.split('-');
       return parts.length >= 2 && parts[parts.length - 1] === kind;
