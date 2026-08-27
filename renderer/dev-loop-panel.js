@@ -249,11 +249,11 @@ window.DevLoopPanel = (function () {
       if (advancePhase(state, 6, 'Reviewing published PR')) changed = true;
     } else if (/(?:gh pr create\b|glab mr create\b|Creating (?:the )?pull request|Opening (?:the )?PR\b)/i.test(clean)) {
       if (advancePhase(state, 5, 'Creating pull request')) changed = true;
-    } else if (/(?:Capturing artifacts for the PR|scroll-through recording|Playwright screen recording|Capturing QA recording)/i.test(clean)) {
+    } else if (/(?:Capturing artifacts for the PR|scroll-through recording|Playwright screen recording|Capturing QA recording|Running QA|Starting Phase 4|Starting QA|QA the change|Capturing (?:before and after|screenshot)|Recording (?:full-flow|video|demo|walkthrough|interaction|screen)|screencapture\b|ffmpeg\b|test:e2e|playwright test|cypress run|Testing (?:the )?(?:changes|implementation|UI)|Verifying (?:the )?changes|QA verification)/i.test(clean)) {
       if (advancePhase(state, 4, 'Running QA & capturing media')) changed = true;
-    } else if (/(?:Reviewing the working diff|git diff main\.\.\.HEAD|Running self-review pass)/i.test(clean)) {
+    } else if (/(?:Reviewing the working diff|git diff main\.\.\.HEAD|Running self-review pass|Local review and fix|Reviewing (?:the )?changes for bugs|Self-review pass)/i.test(clean)) {
       if (advancePhase(state, 3, 'Local review & self-review')) changed = true;
-    } else if (/(?:Starting implementation|Implementing with TDD|Writing implementation batches|Beginning implementation|Implementing the solution|Working on implementation|Writing tests for)/i.test(clean)) {
+    } else if (/(?:Starting implementation|Implementing with TDD|Writing implementation batches|Beginning implementation|Implementing the solution|Working on implementation|Writing tests for|Applying changes|Writing implementation)/i.test(clean)) {
       if (advancePhase(state, 2, 'Implementing solution')) changed = true;
     }
 
@@ -357,13 +357,13 @@ window.DevLoopPanel = (function () {
               var displayName = note.title || (meta.title) || (tags.length ? ('OKF: ' + tags.join(', ')) : (note.id + '.md'));
               var agentSuffix = meta.agent ? (' (' + meta.agent + ')') : '';
               var cleanName = '🦉 ' + displayName + agentSuffix;
-
+              var bodyText = (note.body || note.content || '').trim();
               if (!docs.some(function (d) { return d.path === note.filePath; })) {
                 if (isPlanOrDesign || docs.length === 0) {
                   docs.push({
                     name: cleanName,
                     path: note.filePath,
-                    content: note.body || '',
+                    content: bodyText,
                     type: 'okf-note',
                     metadata: meta,
                     isSessionNote: true,
@@ -642,11 +642,12 @@ window.DevLoopPanel = (function () {
       html += '</div>';
     }
 
+    var cleanBody = (selectedDoc.content || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
     var renderedMarkdown = '';
     if (window.MarkdownPreview && typeof window.MarkdownPreview.render === 'function') {
-      renderedMarkdown = window.MarkdownPreview.render(selectedDoc.content || '');
+      renderedMarkdown = window.MarkdownPreview.render(cleanBody || selectedDoc.content || '');
     } else {
-      renderedMarkdown = '<pre class="devloop-raw-doc">' + esc(selectedDoc.content || '') + '</pre>';
+      renderedMarkdown = '<div class="devloop-raw-markdown">' + esc(cleanBody || selectedDoc.content || '') + '</div>';
     }
 
     var metaBadges = '';
@@ -816,6 +817,33 @@ window.DevLoopPanel = (function () {
         }
       });
     }
+
+    var docBodyEl = container.querySelector('.devloop-doc-body');
+    if (docBodyEl) {
+      if (window.MarkdownPreview && window.MarkdownPreview.attachLinkInterceptor) {
+        window.MarkdownPreview.attachLinkInterceptor(docBodyEl);
+      }
+      enhanceTaskItems(docBodyEl);
+    }
+  }
+
+  function enhanceTaskItems(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('li').forEach(function (li) {
+      var first = li.firstChild;
+      if (!first || first.nodeType !== 3) return;
+      var m = first.nodeValue.match(/^\s*\[([ xX✓])\]\s+/);
+      if (!m) return;
+      var checked = m[1].toLowerCase() === 'x' || m[1] === '✓';
+      first.nodeValue = first.nodeValue.slice(m[0].length);
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.disabled = true;
+      cb.checked = checked;
+      li.classList.add('plan-task');
+      if (checked) li.classList.add('is-done');
+      li.insertBefore(cb, first);
+    });
   }
 
   function renderMiniHud(hostEl, taskId) {

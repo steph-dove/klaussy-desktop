@@ -331,13 +331,14 @@ async function findPlanDoc(worktreePath) {
       const tags = Array.isArray(meta.tags) ? meta.tags : [];
       const isPlan = tags.some((t) => /plan/i.test(t))
         || /plan/i.test(note.id || '')
+        || /plan/i.test(note.filePath || '')
         || /plan/i.test(meta.title || '')
         || /^#+\s*(?:Plan|Implementation)/i.test(note.body || '');
-      if (isPlan && note.body) {
+      if (isPlan && (note.body || note.content)) {
         return {
-          name: (meta.title || note.id || 'plan') + '.md',
+          name: (meta.title || note.id || path.basename(note.filePath, '.md') || 'plan') + '.md',
           path: note.filePath,
-          content: note.body,
+          content: note.body || note.content || '',
         };
       }
     }
@@ -358,11 +359,12 @@ async function findDesignDoc(worktreePath) {
       const tags = Array.isArray(meta.tags) ? meta.tags : [];
       const isDesign = tags.some((t) => /design/i.test(t))
         || /design/i.test(note.id || '')
+        || /design/i.test(note.filePath || '')
         || /design/i.test(meta.title || '')
         || /^#+\s*Design/i.test(note.body || '');
-      if (isDesign && note.body) {
+      if (isDesign && (note.body || note.content)) {
         return {
-          name: (meta.title || note.id || 'design') + '.md',
+          name: (meta.title || note.id || path.basename(note.filePath, '.md') || 'design') + '.md',
           path: note.filePath,
           content: note.body,
         };
