@@ -363,6 +363,29 @@
     return why + '\n\n' + suggestion;
   };
 
+  // Full explanation prose above the "Suggested change:" label (or the whole
+  // body if no suggestion is present), stripped of metadata headers and quoted
+  // code blocks so it can be viewed in an expandable Explanation section.
+  PR.findingExplanationText = function(f) {
+    var text = (f && f.text) || (typeof f === 'string' ? f : '');
+    var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
+    var prose = (m ? text.slice(0, m.index) : text)
+      .replace(/^[ \t]*\*\*[^\n]*\*\*[ \t]*$/gm, '');
+    if (PR.stripFindingHeaders) {
+      prose = PR.stripFindingHeaders(prose);
+    }
+    prose = prose
+      .replace(/\*{0,2}\[(?:Severity|Location|Category)\s*:[\s\S]*?\]\*{0,2}/gi, '')
+      .replace(/^[^\S\n]*\*{0,2}Comment\*{0,2}\s*:\s*/gim, '')
+      .replace(/^[^\S\n]*\*{1,3}[^\S\n]*$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (f && f.verifiedSnippet && f.verifiedSnippet.text) {
+      prose = prose.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
+    }
+    return prose.trim();
+  };
+
   // Add a finding to the pending review. Both paths STAGE into pendingComments
   // (nothing posts until Submit review): verified findings draft inline,
   // unverified ones as an issueComment draft posted after the review.
