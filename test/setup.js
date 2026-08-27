@@ -29,6 +29,7 @@ const fakeApp = {
   getPath(name) {
     if (name === 'userData') return testUserData;
     if (name === 'documents') return path.join(testUserData, 'Documents');
+    if (name === 'downloads') return path.join(testUserData, 'Downloads');
     if (name === 'home') return os.homedir();
     return testUserData;
   },

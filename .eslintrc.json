@@ -60,6 +60,7 @@
         "CommandPalette": "writable",
         "ConflictPanel": "writable",
         "ContextMenu": "writable",
+        "DevLoopPanel": "writable",
         "Dialogs": "writable",
         "DiffPanel": "writable",
         "enterPrReviewMode": "writable",

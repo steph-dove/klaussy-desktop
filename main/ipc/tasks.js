@@ -268,21 +268,24 @@ function applySavedBell(result, notifyWebhook) {
 }
 
 ipcMain.handle('resume-session', async (_event, {
-  sessionId, name, worktreePath, branch, mode, originalMode, repoPath, notifyWebhook,
-}) => {
+  sessionId, name, worktreePath, path: inputPath, branch, mode, originalMode, repoPath, notifyWebhook,
+} = {}) => {
+  const actualWorktreePath = worktreePath || inputPath;
+  if (!actualWorktreePath) return { error: 'No worktree path provided' };
+
   // Opening a session un-hides its worktree: a hidden-but-on-disk worktree is
   // exactly what made it a phantom (undiscoverable yet blocking re-create), so
   // resuming it should clear that state.
   try {
     const cfg = loadConfig();
-    if (Array.isArray(cfg.hiddenWorktrees) && cfg.hiddenWorktrees.includes(worktreePath)) {
-      cfg.hiddenWorktrees = cfg.hiddenWorktrees.filter((p) => p !== worktreePath);
+    if (Array.isArray(cfg.hiddenWorktrees) && cfg.hiddenWorktrees.includes(actualWorktreePath)) {
+      cfg.hiddenWorktrees = cfg.hiddenWorktrees.filter((p) => p !== actualWorktreePath);
       saveConfig(cfg);
     }
   } catch { /* best-effort un-hide */ }
   // The worktree directory may have been deleted since the session was saved.
   // Recreate it from its branch so the session stays resumable.
-  const ensured = ensureWorktreeOnDisk(worktreePath, repoPath, branch);
+  const ensured = ensureWorktreeOnDisk(actualWorktreePath, repoPath, branch);
   if (ensured.error) return { error: ensured.error };
   const resumeMode = mode || 'claude';
   const startedBy = originalMode || resumeMode;
@@ -293,17 +296,17 @@ ipcMain.handle('resume-session', async (_event, {
   if (isAgentMode(resumeMode) && isAgentMode(startedBy) && resumeMode !== startedBy) {
     let seed = '';
     try {
-      seed = await buildHandoffSeed({ worktreePath, originalMode: startedBy, sessionId });
+      seed = await buildHandoffSeed({ worktreePath: actualWorktreePath, originalMode: startedBy, sessionId });
     } catch (err) {
       console.warn('[resume-session] handoff seed failed:', err && err.message);
     }
     if (seed) {
-      noteHandoff({ worktreePath, fromMode: startedBy, toMode: resumeMode, brief: seed })
+      noteHandoff({ worktreePath: actualWorktreePath, fromMode: startedBy, toMode: resumeMode, brief: seed })
         .catch((err) => console.warn('[resume-session] handoff note failed:', err && err.message));
     }
     try {
       return applySavedBell(
-        spawnInWorktree(name, worktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined),
+        spawnInWorktree(name, actualWorktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined),
         notifyWebhook,
       );
     } catch (err) {
@@ -319,12 +322,18 @@ ipcMain.handle('resume-session', async (_event, {
   let exactId = provider && provider.supportsExactResume ? sessionId : null;
   if (exactId && provider && provider.sessionTracking === 'opencode-cli') {
     const bin = binFor(provider.id, loadConfig());
-    const validIds = require('../state/opencode-sessions').listSessionIds(bin, worktreePath);
+    const validIds = require('../state/opencode-sessions').listSessionIds(bin, actualWorktreePath);
     if (!validIds || !validIds.includes(exactId)) exactId = null;
   }
-  if (!exactId) exactId = trackedLatestSession(provider, worktreePath);
+  if (!exactId && provider && provider.supportsExactResume && provider.id === 'claude') {
+    exactId = findLatestSessionId(actualWorktreePath);
+  }
+  if (!exactId) exactId = trackedLatestSession(provider, actualWorktreePath);
   try {
-    return applySavedBell(spawnInWorktree(name, worktreePath, branch, resumeMode, exactId), notifyWebhook);
+    return applySavedBell(
+      spawnInWorktree(name, actualWorktreePath, branch, resumeMode, exactId, undefined, undefined, undefined, undefined, /* resumeLatest */ !exactId),
+      notifyWebhook,
+    );
   } catch (err) {
     console.error('[resume-session] spawnInWorktree failed:', err);
     return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -424,7 +433,13 @@ function seedSessionMemory({ worktreePath, memoryFile, sessionName, branch, this
   } catch { /* best-effort */ }
 }
 
-ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase, baseBranchFallback, sessionRepos }) => {
+ipcMain.handle('grant-worktree-permissions', (_event, { worktreePath } = {}) => {
+  if (!worktreePath) return { applied: false, reason: 'No worktree path provided' };
+  const { applyWorktreePermissions } = require('../util/worktree-permissions');
+  return applyWorktreePermissions(worktreePath);
+});
+
+ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, envVars, baseBranch: requestedBase, baseBranchFallback, sessionRepos, initialPrompt, grantPermissions }) => {
   // Validate repoPath is a git repo
   try {
     execFileSync('git', ['rev-parse', '--git-dir'], { cwd: repoPath, stdio: 'pipe' });
@@ -574,6 +589,16 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     console.warn('[repo-intel] pre-spawn sync failed:', e.message);
   }
 
+  // Pre-grant routine dev permissions if requested (prevents Y/N prompt spam)
+  if (grantPermissions) {
+    try {
+      const { applyWorktreePermissions } = require('../util/worktree-permissions');
+      applyWorktreePermissions(worktreePath);
+    } catch (e) {
+      console.warn('[worktree-permissions] pre-spawn grant failed:', e.message);
+    }
+  }
+
   // Multi-repo session: make this agent aware of its sibling repos (same branch,
   // their own worktrees) via its native memory file. Sibling worktree paths use
   // the same layout as this one. No-op for single-repo sessions.
@@ -597,7 +622,7 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
   const warning = [fallbackWarning, freshenWarning, reusedBranchWarning].filter(Boolean).join(' ') || null;
   // A freshen warning is non-fatal, so keep the chosen agent instead of
   // downgrading to a shell (which mislabeled agent tabs as "Shell").
-  const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars, undefined, undefined, freshenWarning);
+  const result = spawnInWorktree(name, worktreePath, branch, mode || 'claude', null, envVars, undefined, initialPrompt, freshenWarning);
   if (result && !result.error) {
     if (warning) result.warning = warning;
     if (freshen.info) result.freshenInfo = freshen.info;

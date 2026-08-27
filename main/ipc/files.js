@@ -7,6 +7,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { ipcMain, shell, clipboard } = require('electron');
 const { execFileP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
@@ -316,14 +317,289 @@ function findRootDoc(worktreePath, keywordRe, preferred) {
   }
 }
 
-ipcMain.handle('find-plan-file', async (_event, { worktreePath }) => {
-  if (!worktreePath) return { error: 'no worktreePath' };
-  return findRootDoc(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
-});
+const { listSessionNotes } = require('../state/session-context');
 
-ipcMain.handle('find-design-file', async (_event, { worktreePath }) => {
+async function findPlanDoc(worktreePath) {
   if (!worktreePath) return { error: 'no worktreePath' };
-  return findRootDoc(worktreePath, /design/i, ['design.md', 'design_doc.md', 'design-doc.md']);
+  const rootRes = findRootDoc(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
+  if (!rootRes.error && rootRes.content) return rootRes;
+
+  try {
+    const notes = listSessionNotes(worktreePath);
+    for (const note of notes) {
+      const meta = note.metadata || {};
+      const tags = Array.isArray(meta.tags) ? meta.tags : [];
+      const isPlan = tags.some((t) => /plan/i.test(t))
+        || /plan/i.test(note.id || '')
+        || /plan/i.test(meta.title || '')
+        || /^#+\s*(?:Plan|Implementation)/i.test(note.body || '');
+      if (isPlan && note.body) {
+        return {
+          name: (meta.title || note.id || 'plan') + '.md',
+          path: note.filePath,
+          content: note.body,
+        };
+      }
+    }
+  } catch {}
+
+  return rootRes;
+}
+
+async function findDesignDoc(worktreePath) {
+  if (!worktreePath) return { error: 'no worktreePath' };
+  const rootRes = findRootDoc(worktreePath, /design/i, ['design.md', 'design_doc.md', 'design-doc.md']);
+  if (!rootRes.error && rootRes.content) return rootRes;
+
+  try {
+    const notes = listSessionNotes(worktreePath);
+    for (const note of notes) {
+      const meta = note.metadata || {};
+      const tags = Array.isArray(meta.tags) ? meta.tags : [];
+      const isDesign = tags.some((t) => /design/i.test(t))
+        || /design/i.test(note.id || '')
+        || /design/i.test(meta.title || '')
+        || /^#+\s*Design/i.test(note.body || '');
+      if (isDesign && note.body) {
+        return {
+          name: (meta.title || note.id || 'design') + '.md',
+          path: note.filePath,
+          content: note.body,
+        };
+      }
+    }
+  } catch {}
+
+  return rootRes;
+}
+
+ipcMain.handle('find-plan-file', async (_event, { worktreePath }) => findPlanDoc(worktreePath));
+ipcMain.handle('find-design-file', async (_event, { worktreePath }) => findDesignDoc(worktreePath));
+
+// QA / Dev Loop Media discovery
+const QA_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
+const QA_VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov']);
+
+const QA_REL_DIRS = [
+  'e2e-artifacts',
+  'e2e-screenshots',
+  'qa-artifacts',
+  'qa-screenshots',
+  'screenshots',
+  'qa',
+  'e2e/screenshots',
+  'e2e/artifacts',
+  'playwright-report/data',
+  'playwright-report',
+  'test-results',
+  'cypress/screenshots',
+  'cypress/videos',
+  'tmp/screenshots',
+  'tmp/qa',
+  'tmp/e2e',
+  'artifacts',
+];
+
+const QA_FILE_NAME_PATTERN = /(?:^|[\\/._-])(?:screenshot|screen-shot|screen_shot|qa[-_]|test[-_]shot|recording|proof)(?:[\\/._-]|$)/i;
+
+const QA_IGNORE_DIRS_IN_WALK = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', '.next', '.nuxt',
+  '__pycache__', '.pytest_cache', '.mypy_cache', '.turbo', 'target',
+  '.DS_Store', '.venv', 'venv', '.tox', 'coverage',
+  'src/assets', 'assets', 'public', 'static', 'images', 'img', 'styles', 'icons',
+]);
+
+async function findQaMediaFiles(worktreePath) {
+  if (!worktreePath) return [];
+
+  const foundFiles = new Map();
+  const candidateDirs = new Set();
+
+  // 1. Determine git branch and repo name
+  let branch = '';
+  let repoName = path.basename(worktreePath);
+  try {
+    const { stdout: branchOut } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: worktreePath, maxBuffer: 1024 * 1024,
+    });
+    branch = branchOut.trim();
+  } catch {}
+
+  try {
+    const { stdout: rootOut } = await execFileP('git', ['rev-parse', '--show-toplevel'], {
+      cwd: worktreePath, maxBuffer: 1024 * 1024,
+    });
+    const rootPath = rootOut.trim();
+    if (rootPath && (worktreePath === rootPath || worktreePath.startsWith(rootPath + path.sep))) {
+      const rootName = path.basename(rootPath);
+      if (rootName) repoName = rootName;
+    }
+  } catch {}
+
+  // 2. Look in Downloads directory (cross-platform: macOS, Windows, Linux)
+  let downloadsDir;
+  try {
+    const { app } = require('electron');
+    if (app && typeof app.getPath === 'function') {
+      downloadsDir = app.getPath('downloads');
+    }
+  } catch {}
+  if (!downloadsDir) {
+    const homeDir = process.env.HOME || process.env.USERPROFILE || os.homedir();
+    downloadsDir = path.join(homeDir, 'Downloads');
+  }
+  if (fs.existsSync(downloadsDir)) {
+    if (branch) {
+      const cleanBranch = branch.replace(/\//g, '-');
+      const safeBranch = branch.replace(/[^a-zA-Z0-9._-]/g, '-');
+      candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${branch}`));
+      candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${cleanBranch}`));
+      candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${safeBranch}`));
+      candidateDirs.add(path.join(downloadsDir, `klauss-qa-${branch}`));
+      candidateDirs.add(path.join(downloadsDir, `klauss-qa-${cleanBranch}`));
+      candidateDirs.add(path.join(downloadsDir, `klauss-qa-${safeBranch}`));
+      if (repoName) {
+        candidateDirs.add(path.join(downloadsDir, `${repoName}-${branch}`));
+        candidateDirs.add(path.join(downloadsDir, `${repoName}-${cleanBranch}`));
+        candidateDirs.add(path.join(downloadsDir, `${repoName}-${safeBranch}`));
+      }
+    }
+    if (repoName) {
+      candidateDirs.add(path.join(downloadsDir, repoName));
+      candidateDirs.add(path.join(downloadsDir, path.basename(worktreePath)));
+    }
+
+    try {
+      const dlEntries = fs.readdirSync(downloadsDir, { withFileTypes: true });
+      for (const ent of dlEntries) {
+        if (ent.isDirectory()) {
+          const lower = ent.name.toLowerCase();
+          if ((repoName && lower.startsWith(repoName.toLowerCase() + '-')) ||
+              lower.startsWith('klaussy-qa-') ||
+              lower.startsWith('klauss-qa-') ||
+              lower.startsWith('klaussy-')) {
+            candidateDirs.add(path.join(downloadsDir, ent.name));
+          }
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Look in os.tmpdir() for specific QA shot dirs
+  const tmpDir = os.tmpdir();
+  if (fs.existsSync(tmpDir)) {
+    const specificTmpDirs = [
+      path.join(tmpDir, `klaussy-qa-${repoName}`),
+      path.join(tmpDir, `${repoName}-qa`),
+      path.join(tmpDir, 'klaussy-qa-diff-annotations'),
+    ];
+    for (const sDir of specificTmpDirs) {
+      if (fs.existsSync(sDir)) {
+        candidateDirs.add(sDir);
+      }
+    }
+  }
+
+  // 4. Look in worktree QA directories
+  for (const qDir of QA_REL_DIRS) {
+    const absQDir = path.join(worktreePath, qDir);
+    if (fs.existsSync(absQDir)) {
+      candidateDirs.add(absQDir);
+    }
+  }
+
+  // Helper to walk a QA directory and collect media
+  function scanDirectory(dirPath, maxDepth = 3) {
+    if (!fs.existsSync(dirPath)) return;
+    const stack = [{ p: dirPath, depth: 0 }];
+    while (stack.length) {
+      const item = stack.pop();
+      const curDir = item.p;
+      const depth = item.depth;
+      let entries;
+      try {
+        entries = fs.readdirSync(curDir, { withFileTypes: true });
+      } catch { continue; }
+
+      for (const ent of entries) {
+        if (ent.name.startsWith('.')) continue;
+        const absChild = path.join(curDir, ent.name);
+        if (ent.isDirectory()) {
+          if (depth < maxDepth && !QA_IGNORE_DIRS_IN_WALK.has(ent.name)) {
+            stack.push({ p: absChild, depth: depth + 1 });
+          }
+        } else if (ent.isFile()) {
+          const ext = path.extname(ent.name).toLowerCase();
+          let type = null;
+          if (QA_VIDEO_EXTS.has(ext)) type = 'video';
+          else if (QA_IMAGE_EXTS.has(ext)) type = 'image';
+
+          if (type) {
+            try {
+              const stat = fs.statSync(absChild);
+              const rel = absChild.startsWith(worktreePath)
+                ? path.relative(worktreePath, absChild)
+                : ent.name;
+              foundFiles.set(absChild, {
+                name: ent.name,
+                path: absChild,
+                relPath: rel,
+                type: type,
+                mtimeMs: stat.mtimeMs,
+                size: stat.size,
+              });
+            } catch {}
+          }
+        }
+      }
+    }
+  }
+
+  for (const cDir of candidateDirs) {
+    scanDirectory(cDir);
+  }
+
+  // 5. Also check root files or files matching QA screenshot pattern in worktree
+  try {
+    const rootEntries = fs.readdirSync(worktreePath, { withFileTypes: true });
+    for (const ent of rootEntries) {
+      if (ent.isFile()) {
+        const ext = path.extname(ent.name).toLowerCase();
+        let type = null;
+        if (QA_VIDEO_EXTS.has(ext)) type = 'video';
+        else if (QA_IMAGE_EXTS.has(ext)) type = 'image';
+
+        if (type && QA_FILE_NAME_PATTERN.test(ent.name)) {
+          const absChild = path.join(worktreePath, ent.name);
+          try {
+            const stat = fs.statSync(absChild);
+            foundFiles.set(absChild, {
+              name: ent.name,
+              path: absChild,
+              relPath: ent.name,
+              type: type,
+              mtimeMs: stat.mtimeMs,
+              size: stat.size,
+            });
+          } catch {}
+        }
+      }
+    }
+  } catch {}
+
+  const results = Array.from(foundFiles.values());
+  results.sort((a, b) => (b.mtimeMs || 0) - (a.mtimeMs || 0));
+  return results;
+}
+
+ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
+  if (!worktreePath) return { media: [] };
+  try {
+    const media = await findQaMediaFiles(worktreePath);
+    return { media };
+  } catch (err) {
+    return { media: [], error: err.message };
+  }
 });
 
 // ---- H3: Worktree file watcher for instant diff refresh ----
@@ -511,3 +787,12 @@ ipcMain.handle('clipboard-write-text', async (_event, { text }) => {
     return { error: err.message };
   }
 });
+
+module.exports = {
+  findQaMediaFiles,
+  findRootDoc,
+  findPlanDoc,
+  findDesignDoc,
+};
+
+

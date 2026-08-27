@@ -289,6 +289,9 @@ window.TerminalManager = (function () {
     var cleanup = [];
     var removeDataListener = window.klaus.terminal.onData(id, function (data) {
       terminal.write(data);
+      if (window.DevLoopPanel && window.DevLoopPanel.feedTerminalData) {
+        window.DevLoopPanel.feedTerminalData(id, data);
+      }
       if (AppState.activeTaskId !== id) {
         Sidebar.showUnreadBadge(id);
       }
@@ -348,6 +351,23 @@ window.TerminalManager = (function () {
       '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)">+</button></span>';
     container.insertBefore(subTabBar, label.nextSibling);
     updatePrimaryAgentTab(taskEntry);
+
+    var quickChips = document.createElement('div');
+    quickChips.className = 'terminal-quick-chips';
+    quickChips.innerHTML =
+      '<button type="button" class="quick-chip quick-chip-featured" data-action="rest-of-the-owl" title="🦉 Full Dev Loop (Rest of the Owl): Plan ➔ Code ➔ Review ➔ QA &amp; Video ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green">🦉 Full Dev Loop</button>' +
+      '<button type="button" class="quick-chip" data-action="plan" title="Plan and implement a task">📋 Plan</button>' +
+      '<button type="button" class="quick-chip" data-action="debug" title="Debug and fix an issue">🐞 Debug</button>' +
+      '<button type="button" class="quick-chip" data-action="review" title="Review working diff">🔍 Review</button>';
+    quickChips.addEventListener('click', function (e) {
+      var chip = e.target.closest('.quick-chip');
+      if (!chip) return;
+      var action = chip.dataset.action;
+      if (action && window.ActionModal && window.ActionModal.run) {
+        window.ActionModal.run(id, action);
+      }
+    });
+    container.insertBefore(quickChips, subTabBar.nextSibling);
 
     subTabBar.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -825,6 +845,8 @@ window.TerminalManager = (function () {
       return '<button class="actions-dropdown-item" data-run-in="' + p.id + '">Run in ' + escHtml(p.displayName) + '</button>';
     }).join('');
     menu.innerHTML =
+      '<button class="actions-dropdown-item actions-featured" data-action="rest-of-the-owl">🦉 Full Dev Loop (Rest of the Owl)...</button>' +
+      '<button class="actions-dropdown-item" data-action="grant-permissions">🛡️ Grant Agent Permissions...</button>' +
       '<button class="actions-dropdown-item" data-action="plan">Plan</button>' +
       '<button class="actions-dropdown-item" data-action="debug">Debug</button>' +
       '<button class="actions-dropdown-item" data-action="review">Review</button>' +
@@ -907,6 +929,9 @@ window.TerminalManager = (function () {
     task.cleanup = [];
     var removeDataListener = window.klaus.terminal.onData(id, function (data) {
       task.terminal.write(data);
+      if (window.DevLoopPanel && window.DevLoopPanel.feedTerminalData) {
+        window.DevLoopPanel.feedTerminalData(id, data);
+      }
       if (AppState.activeTaskId !== id) {
         Sidebar.showUnreadBadge(id);
       }
