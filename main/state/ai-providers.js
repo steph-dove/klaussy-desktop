@@ -679,8 +679,32 @@ const PROVIDERS = {
       }
       return events;
     },
-    usageFromSessionLine() {
-      return null; // VERIFY: deferred to Phase 4 (schema unknown).
+    usageFromSessionLine(obj) {
+      if (!obj || typeof obj !== 'object') return null;
+      const inner = obj.data || obj.payload || obj.event || obj.message || obj;
+      const u = obj.usage || (obj.data && obj.data.usage) || (obj.payload && obj.payload.usage)
+        || (obj.info && obj.info.last_token_usage) || obj.tokens || (inner && inner.usage) || (inner && inner.tokens);
+      if (!u) return null;
+      const inp = u.input_tokens || u.prompt_tokens || u.input || u.tokens_in || 0;
+      const out = u.output_tokens || u.completion_tokens || u.output || u.tokens_out || 0;
+      const cached = u.cache_read_input_tokens || u.cached || 0;
+      const cacheWrite = u.cache_creation_input_tokens || 0;
+      const total = u.total_tokens || u.total || (inp + out + cached + cacheWrite);
+      const ts = obj.timestamp || obj.created_at || obj.time || obj.at
+        || (obj.data && (obj.data.timestamp || obj.data.created_at))
+        || (obj.payload && (obj.payload.timestamp || obj.payload.created_at))
+        || (inner && (inner.timestamp || inner.created_at)) || null;
+      return {
+        requestId: obj.id || obj.uuid || obj.requestId || (obj.data && obj.data.id) || null,
+        timestamp: ts,
+        usage: {
+          inputTokens: inp,
+          cacheCreationInputTokens: cacheWrite,
+          cacheReadInputTokens: cached,
+          outputTokens: out,
+          totalTokens: total,
+        },
+      };
     },
     // VERIFY: Copilot events.jsonl schema undocumented. Stubs so the implement
     // PTY degrades gracefully (no tail attached) instead of crashing.
