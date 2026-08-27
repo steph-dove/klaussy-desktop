@@ -850,4 +850,13 @@ contextBridge.exposeInMainWorld('klaus', {
     status: () => ipcRenderer.invoke('mcp-status'),
     loginTerminal: (name) => ipcRenderer.invoke('mcp-login-terminal', { name }),
   },
+
+  // ---- sessionContext: OKF uncommitted session notes & cross-agent context sharing ----
+  sessionContext: {
+    listNotes: (worktreePath) => ipcRenderer.invoke('session-context:list-notes', { worktreePath }),
+    addNote: (worktreePath, noteData) => ipcRenderer.invoke('session-context:add-note', { worktreePath, noteData }),
+    getSummary: (worktreePath) => ipcRenderer.invoke('session-context:get-summary', { worktreePath }),
+    captureNow: (worktreePath) => ipcRenderer.invoke('session-context:capture-now', { worktreePath }),
+    clearNotes: (worktreePath) => ipcRenderer.invoke('session-context:clear-notes', { worktreePath }),
+  },
 });

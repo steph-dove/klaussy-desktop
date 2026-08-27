@@ -230,6 +230,15 @@ window.DevLoopPanel = (function () {
     }
 
     // Milestone action phrases emitted during actual execution.
+    if (/(?:Write\([^)]*plan\.md\)|Wrote \d+ lines to [^\n\r]*plan\.md|Saved (?:the )?plan|Plan established|Plan approved|Plan completed|Implementation plan created)/i.test(clean)) {
+      if (advancePhase(state, 2, 'Implementation plan created & saved')) {
+        changed = true;
+      }
+      if (currentWorktreePath) {
+        load(currentWorktreePath);
+      }
+    }
+
     if (/(?:All CI checks green|Landing the owl|PR is ready for (?:human )?merge|Merge gate reached|Dev loop complete)/i.test(clean)) {
       if (advancePhase(state, 9, 'CI green & ready to merge')) changed = true;
     } else if (/(?:gh pr view\s+--comments|polling for (?:code )?review|review comments? resolved|review feedback resolved|pulling review comments)/i.test(clean)) {
@@ -244,7 +253,7 @@ window.DevLoopPanel = (function () {
       if (advancePhase(state, 4, 'Running QA & capturing media')) changed = true;
     } else if (/(?:Reviewing the working diff|git diff main\.\.\.HEAD|Running self-review pass)/i.test(clean)) {
       if (advancePhase(state, 3, 'Local review & self-review')) changed = true;
-    } else if (/(?:Starting implementation|Implementing with TDD|Writing implementation batches)/i.test(clean)) {
+    } else if (/(?:Starting implementation|Implementing with TDD|Writing implementation batches|Beginning implementation|Implementing the solution|Working on implementation|Writing tests for)/i.test(clean)) {
       if (advancePhase(state, 2, 'Implementing solution')) changed = true;
     }
 
@@ -330,9 +339,10 @@ window.DevLoopPanel = (function () {
       }
 
       // Pull from OKF session context sharing folder ($KLAUSSY_SESSION_NOTES_DIR)
-      if (window.klaus && window.klaus.sessionContext && window.klaus.sessionContext.listNotes) {
+      var sessionCtxApi = (window.klaus && (window.klaus.task && window.klaus.task.sessionContext || window.klaus.sessionContext));
+      if (sessionCtxApi && sessionCtxApi.listNotes) {
         try {
-          var sessionNotes = await window.klaus.sessionContext.listNotes(worktreePath);
+          var sessionNotes = await sessionCtxApi.listNotes(worktreePath);
           if (Array.isArray(sessionNotes)) {
             sessionNotes.forEach(function (note) {
               var meta = note.metadata || {};
@@ -341,7 +351,8 @@ window.DevLoopPanel = (function () {
                 return /^(plan|design|spec|architecture|task|devloop)/i.test(String(t));
               }) || /(?:^|[\\/._-])(?:plan|design|spec|task|devloop)/i.test(note.id || '')
                  || /(?:^#+\s*(?:Plan|Design|Implementation Plan|Architecture|Task))/i.test(note.body || '')
-                 || (note.title && /(?:Plan|Design|Implementation|Architecture|Spec)/i.test(note.title));
+                 || (note.title && /(?:Plan|Design|Implementation|Architecture|Spec)/i.test(note.title))
+                 || /(?:plan|design)/i.test(note.filePath || '');
 
               var displayName = note.title || (meta.title) || (tags.length ? ('OKF: ' + tags.join(', ')) : (note.id + '.md'));
               var agentSuffix = meta.agent ? (' (' + meta.agent + ')') : '';
@@ -370,6 +381,15 @@ window.DevLoopPanel = (function () {
       cachedDocs = docs;
       if (!selectedDocPath && docs.length > 0) {
         selectedDocPath = docs[0].path;
+      }
+
+      // If an implementation plan document is now established and we are still in Phase 1,
+      // mark Phase 1 as completed and advance active phase to Phase 2 (Implementation).
+      var hasPlan = docs.some(function (d) {
+        return d.type === 'plan' || d.type === 'design' || d.type === 'okf-note' || /plan/i.test(d.name || '') || /plan/i.test(d.path || '');
+      });
+      if (hasPlan && state.currentPhase === 1) {
+        advancePhase(state, 2, 'Implementation plan created & saved');
       }
 
       var qaMedia = [];
