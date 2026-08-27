@@ -136,8 +136,7 @@ npm run dist:linux    # Linux AppImage + DEB (requires Linux host)
 
 *   [`main/`](file:///Users/stephaniedover/projects/klaussy-desktop/main): Electron main process. Manages PTY terminals, file watching, git worktrees, and the pre-commit review server.
 *   [`preload.js`](file:///Users/stephaniedover/projects/klaussy-desktop/preload.js): Context-isolated IPC bridge.
-*   [`renderer/`](file:///Users/stephaniedover/projects/klaussy-desktop/renderer): Tailwind-free vanilla CSS/JS UI components (`diff-panel.js`, `pr-review.js`).
-*   [`docs/`](file:///Users/stephaniedover/projects/klaussy-desktop/docs): Engineering design docs, competitive analysis, and positioning strategies.
+*   [`docs/`](file:///Users/stephaniedover/projects/klaussy-desktop/docs): User setup guides, notification workflows, and legal policies (EULA, Privacy).
 
 ---
 

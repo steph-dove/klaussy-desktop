@@ -10,13 +10,14 @@ Klaussy is a desktop application. It does not host a backend service of its own.
 Information you interact with from within Klaussy goes to third parties whose
 policies govern what they collect:
 
-- **Claude Code / Anthropic API.** When you use the terminal, the Plan / Debug
+- **Your AI coding agent.** When you use the terminal, the Plan / Debug
   / Review actions, "Explain diff", inline AI edit, or AI commit-message
-  generation, Claude reads the prompt and repository context you provide.
-  See Anthropic's privacy policy.
-- **GitHub.** When you view / comment on / merge PRs or run CI checks through
-  Klaussy, those requests go through your local `gh` CLI to GitHub.
-  See GitHub's privacy policy.
+  generation, your selected agent reads the prompt and repository context you provide.
+  See the provider's privacy policy.
+- **Git Forges (GitHub, GitLab, Bitbucket).** When you view / comment on / merge
+  PRs/MRs or run CI checks through Klaussy, those requests go through your local
+  CLIs (`gh`, `glab`) or direct forge authentication to GitHub, GitLab, or Bitbucket.
+  See their respective privacy policies.
 - **Ollama (optional).** If you enable inline AI completion, Klaussy runs
   `qwen2.5-coder:1.5b` locally via Ollama. No data leaves your machine.
 - **Paddle.** If you purchase a license, Paddle processes your payment and
@@ -54,7 +55,11 @@ features you use, what projects you open, or how often you launch the app.
 Klaussy orchestrates several tools you choose to use. Their policies apply:
 
 - Anthropic (Claude): https://www.anthropic.com/legal/privacy
+- OpenAI: https://openai.com/policies/privacy-policy
+- Google: https://policies.google.com/privacy
 - GitHub: https://docs.github.com/en/site-policy/privacy-policies
+- GitLab: https://about.gitlab.com/privacy/
+- Atlassian (Bitbucket): https://www.atlassian.com/legal/privacy-policy
 - Paddle: https://www.paddle.com/legal/privacy
 - Ollama (local, no data sent off-device)
 

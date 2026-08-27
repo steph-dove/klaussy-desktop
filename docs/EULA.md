@@ -2,9 +2,8 @@
 
 **RETIRED as the operative license.** Klaussy is now distributed under the
 Sustainable Use License — see [`/LICENSE`](../LICENSE). This proprietary EULA is
-retained only as a starting point for future commercial / enterprise terms (the
-paid tier in [`docs/strategy/open-core.md`](strategy/open-core.md)); it does NOT
-govern the open distribution.
+retained only as a starting point for future commercial / enterprise terms;
+it does NOT govern the open distribution.
 
 **Draft — requires legal review before publication.**
 
