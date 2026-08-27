@@ -258,115 +258,47 @@ window.DevLoopPanel = (function () {
     updateMiniHuds(id);
   }
 
-  function stripAnsi(str) {
-    if (!str) return '';
-    return str.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
-  }
-
   function feedTerminalData(taskId, rawData) {
     if (!rawData) return;
-    var clean = stripAnsi(rawData);
-    if (!clean) return;
+    var signals = DevLoopDetect.detect(rawData);
 
     var id = normId(taskId || activeTaskId());
     var state = getOrCreateState(id, 'Active Dev Loop');
     var changed = false;
 
-    // Explicit action headers emitted during execution: "## Phase 1 — Plan", "Starting Phase 4".
-    var phaseRegex = /(?:##\s*|(?:Starting|Entering|Moving to|Executing|Beginning|Working on|Now on)\s+)Phase\s*([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
-    var match;
-    while ((match = phaseRegex.exec(clean)) !== null) {
-      var phaseNum = parseInt(match[1], 10);
-      var phaseTitle = (match[2] || '').trim();
-      if (advancePhase(state, phaseNum, phaseTitle)) {
+    signals.advances.forEach(function (advance) {
+      if (advancePhase(state, advance.phase, advance.summary)) changed = true;
+    });
+
+    signals.completions.forEach(function (phase) {
+      if (state.phaseStatuses[phase].status !== 'completed') {
+        state.phaseStatuses[phase].status = 'completed';
+        changed = true;
+      }
+    });
+
+    // A written plan means new docs on disk worth re-reading.
+    if (signals.planWritten && currentWorktreePath) {
+      load(currentWorktreePath);
+    }
+
+    if (signals.prUrl && state.prUrl !== signals.prUrl) {
+      state.prUrl = signals.prUrl;
+      state.prNumber = signals.prNumber;
+      if (advancePhase(state, 6, 'PR #' + signals.prNumber + ' opened')) {
         changed = true;
       }
     }
 
-    // Todo checklists: "- [x] Phase 1", "[>] Phase 2", "(in progress) Phase 3".
-    // Unchecked items "[ ]" are pending and must NOT advance phases.
-    var doneTodoRegex = /\[([xX✓])\]\s*(?:Phase\s*)?([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
-    var doneMatch;
-    while ((doneMatch = doneTodoRegex.exec(clean)) !== null) {
-      var num = parseInt(doneMatch[2], 10);
-      if (num < 9) {
-        if (advancePhase(state, num + 1, '')) changed = true;
-      } else {
-        state.phaseStatuses[9].status = 'completed';
-        changed = true;
-      }
-    }
-
-    var activeTodoRegex = /\[([>•~]|in[ _-]progress|running)\]\s*(?:Phase\s*)?([1-9])(?:\s*[-—:.]\s*|\.|\s+)([^\n\r]*)/gi;
-    var activeMatch;
-    while ((activeMatch = activeTodoRegex.exec(clean)) !== null) {
-      var activeNum = parseInt(activeMatch[2], 10);
-      var activeText = (activeMatch[3] || '').trim();
-      if (advancePhase(state, activeNum, activeText)) changed = true;
-    }
-
-    // Milestone action phrases emitted during actual execution.
-    if (/(?:Write\([^)]*plan\.md\)|Wrote \d+ lines to [^\n\r]*plan\.md|Saved (?:the )?plan|Plan established|Plan approved|Plan completed|Implementation plan created)/i.test(clean)) {
-      if (advancePhase(state, 2, 'Implementation plan created & saved')) {
-        changed = true;
-      }
-      if (currentWorktreePath) {
-        load(currentWorktreePath);
-      }
-    }
-
-    if (/(?:All CI checks green|Landing the owl|PR is ready for (?:human )?merge|Merge gate reached|Dev loop complete)/i.test(clean)) {
-      if (advancePhase(state, 9, 'CI green & ready to merge')) changed = true;
-    } else if (/(?:gh pr view\s+--comments|polling for (?:code )?review|review comments? resolved|review feedback resolved|pulling review comments)/i.test(clean)) {
-      if (advancePhase(state, 8, 'Resolving review comments')) changed = true;
-    } else if (/(?:gh pr checks|polling CI checks|monitoring CI checks|waiting for CI)/i.test(clean)) {
-      if (advancePhase(state, 7, 'Polling CI checks')) changed = true;
-    } else if (/(?:Re-review(?:ing)?\s+(?:the\s+)?PR|reviewing published PR|inspecting remote PR diff)/i.test(clean)) {
-      if (advancePhase(state, 6, 'Reviewing published PR')) changed = true;
-    } else if (/(?:gh pr create\b|glab mr create\b|Creating (?:the )?pull request|Opening (?:the )?PR\b)/i.test(clean)) {
-      if (advancePhase(state, 5, 'Creating pull request')) changed = true;
-    } else if (/(?:Capturing artifacts for the PR|scroll-through recording|Playwright screen recording|Capturing QA recording|Running QA|Starting Phase 4|Starting QA|QA the change|Capturing (?:before and after|screenshot)|Recording (?:full-flow|video|demo|walkthrough|interaction|screen)|screencapture\b|ffmpeg\b|test:e2e|playwright test|cypress run|Testing (?:the )?(?:changes|implementation|UI)|Verifying (?:the )?changes|QA verification)/i.test(clean)) {
-      if (advancePhase(state, 4, 'Running QA & capturing media')) changed = true;
-    } else if (/(?:Reviewing the working diff|git diff main\.\.\.HEAD|Running self-review pass|Local review and fix|Reviewing (?:the )?changes for bugs|Self-review pass)/i.test(clean)) {
-      if (advancePhase(state, 3, 'Local review & self-review')) changed = true;
-    } else if (/(?:Starting implementation|Implementing with TDD|Writing implementation batches|Beginning implementation|Implementing the solution|Working on implementation|Writing tests for|Applying changes|Writing implementation)/i.test(clean)) {
-      if (advancePhase(state, 2, 'Implementing solution')) changed = true;
-    }
-
-    var prMatch = clean.match(/https:\/\/(?:github\.com|gitlab\.com)\/([^\s\n\r/]+)\/([^\s\n\r/]+)\/(?:pull|merge_requests)\/(\d+)/i);
-    if (prMatch) {
-      var fullUrl = prMatch[0];
-      var prNum = prMatch[3];
-      if (state.prUrl !== fullUrl) {
-        state.prUrl = fullUrl;
-        state.prNumber = prNum;
-        if (advancePhase(state, 6, 'PR #' + prNum + ' opened')) {
-          changed = true;
-        }
-      }
-    }
-
-    // QA media paths mentioned in the stream, skipping app assets.
-    var mediaMatch = clean.match(/(?:[a-zA-Z0-9_.~/-]+\.(?:mp4|webm|mov|png|jpg|jpeg|webp))/gi);
-    if (mediaMatch) {
-      mediaMatch.forEach(function (file) {
-        var isVideo = /\.(mp4|webm|mov)$/i.test(file);
-        var isImg = /\.(png|jpg|jpeg|webp)$/i.test(file);
-        var isQaPath = /(?:Downloads|e2e|qa|screenshot|screen-shot|screen_shot|artifact|test-result|cypress)/i.test(file);
-        var isNonAsset = !/(?:node_modules|\.git|src[\\/]assets|public[\\/]|styles[\\/]|icons[\\/]|renderer[\\/])/i.test(file);
-
-        if ((isVideo || (isImg && isQaPath)) && isNonAsset) {
-          if (!state.qaArtifacts.some(function (a) { return a.path === file || a.name === file; })) {
-            state.qaArtifacts.push({
-              name: file.split('/').pop(),
-              path: file,
-              type: isVideo ? 'video' : 'image',
-            });
-            changed = true;
-          }
-        }
+    signals.artifacts.forEach(function (artifact) {
+      var known = state.qaArtifacts.some(function (a) {
+        return a.path === artifact.path || a.name === artifact.name;
       });
-    }
+      if (!known) {
+        state.qaArtifacts.push(artifact);
+        changed = true;
+      }
+    });
 
     if (changed) {
       emitUpdate(id);
