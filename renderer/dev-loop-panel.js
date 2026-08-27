@@ -578,6 +578,26 @@ window.DevLoopPanel = (function () {
 
     var currentPhaseObj = PHASES.find(function (p) { return p.id === state.currentPhase; }) || PHASES[0];
 
+    var isTaskAlive = task ? (task.alive !== false) : false;
+    var isCompleted = state.phaseStatuses[9] && state.phaseStatuses[9].status === 'completed';
+    var isLoopActive = isTaskAlive && !isCompleted;
+
+    var headerActionsHtml = '';
+    if (!isLoopActive) {
+      if (!isCompleted && state.currentPhase >= 1) {
+        headerActionsHtml =
+          '<div class="devloop-header-actions">' +
+            '<button class="klaus-btn klaus-btn-primary devloop-resume-btn" type="button" title="Resume dev loop from Phase ' + state.currentPhase + '">▶ Resume Loop (Phase ' + state.currentPhase + ')</button>' +
+            '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Restart Full Dev Loop from Phase 1">🔄 Restart Loop</button>' +
+          '</div>';
+      } else if (isCompleted) {
+        headerActionsHtml =
+          '<div class="devloop-header-actions">' +
+            '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Start a new Dev Loop on this task">🔄 New Dev Loop</button>' +
+          '</div>';
+      }
+    }
+
     var html =
       '<div class="devloop-header">' +
         '<div class="devloop-header-title">' +
@@ -590,12 +610,7 @@ window.DevLoopPanel = (function () {
             '</div>' +
           '</div>' +
         '</div>' +
-        '<div class="devloop-header-actions">' +
-          (state.currentPhase < 9
-            ? '<button class="klaus-btn klaus-btn-primary devloop-resume-btn" type="button" title="Resume dev loop from Phase ' + state.currentPhase + '">▶ Resume Loop (Phase ' + state.currentPhase + ')</button>'
-            : '') +
-          '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Restart Full Dev Loop from Phase 1">🔄 Restart Loop</button>' +
-        '</div>' +
+        headerActionsHtml +
       '</div>' +
       '<div class="devloop-intro-banner">' +
         '<div class="devloop-intro-owl">🦉</div>' +
@@ -635,15 +650,6 @@ window.DevLoopPanel = (function () {
         renderActiveView();
       });
     });
-
-    var relaunchBtn = containerEl.querySelector('.devloop-relaunch-btn');
-    if (relaunchBtn) {
-      relaunchBtn.addEventListener('click', function () {
-        if (window.ActionModal && window.ActionModal.run && taskId) {
-          window.ActionModal.run(taskId, 'rest-of-the-owl');
-        }
-      });
-    }
 
     attachContentListeners(containerEl, state);
   }
