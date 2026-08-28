@@ -37,7 +37,7 @@ const { app } = require('electron');
 // this file on Windows — where.exe/PATHEXT resolution + `.cmd`/`.bat` shim
 // support + windowsHide — while staying a pure passthrough on macOS/Linux.
 const { execToolP: execFileP } = require('../util/exec');
-const { baseRepoForWorktree } = require('../util/git-repo');
+const { baseRepoForWorktree, defaultBranchOf } = require('../util/git-repo');
 const { loadConfig, saveConfig } = require('../util/config');
 
 const inflight = new Map();  // base repo path -> Promise
@@ -635,23 +635,6 @@ function baseFor(repoOrWorktreePath) {
   const base = baseRepoForWorktree(repoOrWorktreePath) || repoOrWorktreePath;
   baseCache.set(repoOrWorktreePath, base);
   return base;
-}
-
-// klaussy init prompts interactively for the base branch unless -b is
-// passed — resolve it the same way create-task does.
-function defaultBranchOf(repoPath) {
-  try {
-    return execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], {
-      cwd: repoPath, stdio: 'pipe',
-    }).toString().trim().replace(/^origin\//, '');
-  } catch { /* no origin/HEAD — probe the usual names */ }
-  for (const c of ['main', 'master', 'dev', 'develop']) {
-    try {
-      execFileSync('git', ['rev-parse', '--verify', c], { cwd: repoPath, stdio: 'pipe' });
-      return c;
-    } catch { /* try next */ }
-  }
-  return 'main';
 }
 
 // The agent bootstrap klaussy generates is scaffolding, not source — it
