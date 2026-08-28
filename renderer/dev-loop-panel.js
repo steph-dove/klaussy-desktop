@@ -669,6 +669,10 @@ window.DevLoopPanel = (function () {
     });
 
     attachContentListeners(containerEl, state);
+
+    // Same render and id as the panel, so the dots can't resolve a separate
+    // copy of the state.
+    updateMiniHuds(taskId);
   }
 
   function renderProgressView(state) {
@@ -1034,6 +1038,9 @@ window.DevLoopPanel = (function () {
 
   function updateMiniHuds(taskId) {
     if (!taskId) return;
+    // getState, not getOrCreate: a terminal with no dev loop must not sprout
+    // one just because the panel repainted.
+    if (!getState(taskId)) return;
     var task = AppState.tasks.get(taskId);
     if (task && task.container) {
       renderMiniHud(task.container, taskId);

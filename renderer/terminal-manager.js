@@ -369,6 +369,11 @@ window.TerminalManager = (function () {
     });
     container.insertBefore(quickChips, subTabBar.nextSibling);
 
+    // A rebuilt container starts with no dots.
+    if (window.DevLoopPanel && window.DevLoopPanel.getState && window.DevLoopPanel.getState(id)) {
+      window.DevLoopPanel.renderMiniHud(container, id);
+    }
+
     subTabBar.addEventListener('click', function (e) {
       e.stopPropagation();
       // Only emit when the task actually changed; re-emitting on the active
