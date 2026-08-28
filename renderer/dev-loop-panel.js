@@ -265,6 +265,7 @@ window.DevLoopPanel = (function () {
     if (!ev) return '';
     var parts = [];
     if (ev.commits) parts.push(ev.commits + (ev.commits === 1 ? ' commit' : ' commits'));
+    else if (ev.commitsError) parts.push('base branch unknown');
     if (ev.qaMedia) parts.push(ev.qaMedia + ' QA file' + (ev.qaMedia === 1 ? '' : 's'));
     else if (ev.qaMediaError) parts.push('QA scan failed');
     if (ev.prNumber) parts.push('PR #' + ev.prNumber);

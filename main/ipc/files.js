@@ -621,7 +621,7 @@ async function devLoopEvidence(worktreePath) {
     prNumber: null, prUrl: null,
     checksTotal: 0, checksPassed: 0, checksFailed: 0,
     reviewThreads: 0,
-    qaMediaError: null, prError: null,
+    qaMediaError: null, prError: null, commitsError: null,
   };
   if (!worktreePath) return ev;
 
@@ -629,14 +629,23 @@ async function devLoopEvidence(worktreePath) {
     if (fs.existsSync(path.join(worktreePath, name))) { ev.hasPlan = true; break; }
   }
 
+  // If no base ref resolves we cannot tell "no commits yet" from "cannot read
+  // this repo", and the floor would sit at Phase 1 either way.
+  let baseRefFound = false;
+  let lastBaseErr = '';
   for (const baseRef of ['origin/HEAD', 'origin/main', 'main', 'origin/master', 'master']) {
     try {
       const { stdout } = await execFileP('git', ['rev-list', '--count', `${baseRef}..HEAD`], {
         cwd: worktreePath, maxBuffer: 1024 * 1024,
       });
       const n = parseInt(stdout.trim(), 10);
-      if (Number.isFinite(n)) { ev.commits = n; break; }
-    } catch {}
+      if (Number.isFinite(n)) { ev.commits = n; baseRefFound = true; break; }
+    } catch (err) {
+      lastBaseErr = String((err && err.stderr) || (err && err.message) || '').trim().split('\n')[0];
+    }
+  }
+  if (!baseRefFound) {
+    ev.commitsError = lastBaseErr || 'could not determine a base branch';
   }
 
   // A failed scan and an empty one both leave qaMedia at 0, so say which.
