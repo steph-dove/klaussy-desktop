@@ -43,7 +43,13 @@ app.whenReady().then(() => {
     if (!target || !allowed.has(path.resolve(target))) {
       return new Response('not allowed', { status: 403 });
     }
-    return net.fetch(pathToFileURL(target).toString());
+    // QA media lives in Downloads and tmp, which get cleaned up between the
+    // scan and the render; a rejection here would just be a broken tile.
+    try {
+      return await net.fetch(pathToFileURL(target).toString());
+    } catch (err) {
+      return new Response('unavailable: ' + ((err && err.message) || String(err)), { status: 404 });
+    }
   });
 }).catch((err) => {
   registrationError = (err && err.message) || String(err);
