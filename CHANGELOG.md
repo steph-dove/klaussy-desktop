@@ -2,6 +2,24 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.21.1
+
+### 🦉 Dev Loop Plan Resolution, Universal QA Media & UI Polish
+
+- **Session Plan & Spec Discovery**: Automatically resolves implementation plans, architecture specs, and OKF inter-agent session notes from workspace roots, child repositories, and the session notes bus.
+- **Universal QA Media Support**: Expanded discovery and gallery rendering to support `.gif`, `.jpg`, `.jpeg`, `.webp`, `.avif`, `.bmp`, `.mp4`, `.webm`, `.mov`, `.m4v`, and `.mkv`. Pre-commit baseline captures are preserved with an expanded timestamp window.
+- **PTY Media Protocol URLs**: Real-time terminal media detection mints servable `klaussy-qa://` URLs on the fly so live artifacts render without broken tiles.
+- **Streamlined Diff Tabs**: Removed the legacy Stash tab to clean up the side panel layout.
+- **Default Branch Protection**: Refuses to check out the repo's default branch into a session worktree to prevent uncommitted collision.
+
+## 0.21.0
+
+### 🦉 9-Phase Autonomous Dev Loop ("Rest of the Owl")
+
+- **Autonomous Dev Loop Stepper**: 9-phase lifecycle tracking: Plan ➔ Code with TDD ➔ Local Self-Review ➔ QA Proof Capture ➔ Humanized PR Creation ➔ CI Monitoring ➔ PR Review Comment Resolution.
+- **Live Mini-HUD & Gallery**: Real-time status indicators in diff tabs, subtab switching for progress, designs/plans, and QA screenshots/videos.
+- **Automated Permissions Management**: Grant permissions flow allowing routine dev tool commands without interrupting prompts.
+
 ## 0.20.0
 
 ### 🔍 PR Review Finding Cards & Multi-Agent Token Usage
