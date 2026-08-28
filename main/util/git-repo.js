@@ -57,4 +57,36 @@ function sessionSiblingWorktrees(worktreePath) {
   }
 }
 
-module.exports = { gitCommonDir, baseRepoForWorktree, klaussySessionDir, sessionSiblingWorktrees };
+// The repo's default branch, from origin/HEAD when the remote publishes it,
+// otherwise the first of the usual names that exists locally.
+function defaultBranchOf(repoPath) {
+  try {
+    return execFileSync('git', ['symbolic-ref', 'refs/remotes/origin/HEAD', '--short'], {
+      cwd: repoPath, stdio: 'pipe',
+    }).toString().trim().replace(/^origin\//, '');
+  } catch { /* no origin/HEAD — probe the usual names */ }
+  for (const c of ['main', 'master', 'dev', 'develop']) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', c], { cwd: repoPath, stdio: 'pipe' });
+      return c;
+    } catch { /* try next */ }
+  }
+  return 'main';
+}
+
+// git allows a branch in one worktree only, so a session holding the default
+// branch strands the base checkout. Returns a message, or null if it's fine.
+function defaultBranchRefusal(repoPath, branch) {
+  if (!repoPath || !branch) return null;
+  let def;
+  try {
+    def = defaultBranchOf(repoPath);
+  } catch {
+    return null;
+  }
+  if (!def || String(branch).trim().toLowerCase() !== String(def).trim().toLowerCase()) return null;
+  return '"' + branch + '" is this repo\'s default branch, so it has to stay in the base checkout — '
+    + 'a session worktree would take it away from there. Pick a different name to branch off "' + def + '" instead.';
+}
+
+module.exports = { gitCommonDir, baseRepoForWorktree, klaussySessionDir, sessionSiblingWorktrees, defaultBranchOf, defaultBranchRefusal };

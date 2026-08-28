@@ -12,7 +12,7 @@ const { app, ipcMain, dialog, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
 const nemesis = require('../util/nemesis-client');
 const { execFileP } = require('../util/exec');
-const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
+const { baseRepoForWorktree, sessionSiblingWorktrees, defaultBranchRefusal } = require('../util/git-repo');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
@@ -149,6 +149,8 @@ function recreateMissingWorktree(repoPath, worktreePath, branch) {
   } catch {
     return { error: 'Cannot reopen "' + branch + '": its working directory and branch are both gone.' };
   }
+  const recreateRefusal = defaultBranchRefusal(repoPath, branch);
+  if (recreateRefusal) return { error: recreateRefusal };
   try { execFileSync('git', ['worktree', 'prune'], { cwd: repoPath, stdio: 'pipe' }); } catch { /* nothing to prune */ }
   try {
     fs.mkdirSync(path.dirname(worktreePath), { recursive: true });
@@ -558,6 +560,11 @@ ipcMain.handle('create-task', async (_event, { name, repoPath, mode, basePath, e
     // name hits "a branch named 'x' already exists". Continue that branch
     // instead of failing — and say so.
     if (/branch named .* already exists/i.test(msg)) {
+      const refusal = defaultBranchRefusal(repoPath, branch);
+      if (refusal) {
+        cleanupSessionDir();
+        return { error: refusal };
+      }
       try {
         execFileSync('git', ['worktree', 'add', worktreePath, branch], {
           cwd: repoPath,
@@ -996,6 +1003,9 @@ ipcMain.handle('checkout-branch', async (_event, { repoPath, branch, mode, baseP
   } catch (e) {
     return { error: 'Could not create the worktree location ' + worktreeDir + ': ' + e.message };
   }
+
+  const pickedRefusal = defaultBranchRefusal(repoPath, branch);
+  if (pickedRefusal) return { error: pickedRefusal };
 
   // Freshen the branch from origin before checking it out (non-fatal; also
   // creates the local branch from origin when it doesn't exist yet).
