@@ -296,8 +296,12 @@ window.DevLoopPanel = (function () {
       }
       return advancePhase(state, res.phase, evidenceSummary(res.evidence)) || failureChanged;
     } catch (err) {
+      var msg = (err && err.message) || String(err);
+      var changed = state.evidenceError !== msg;
+      state.evidenceError = msg;
       console.warn('[dev-loop-panel evidence]', err);
-      return false;
+      if (changed) saveState(state.taskId, state);
+      return changed;
     }
   }
 
