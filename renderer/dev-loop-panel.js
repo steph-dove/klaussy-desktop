@@ -279,8 +279,15 @@ window.DevLoopPanel = (function () {
     if (!(window.klaus && window.klaus.fs && window.klaus.fs.devLoopEvidence)) return false;
     try {
       var res = await window.klaus.fs.devLoopEvidence(worktreePath);
-      if (res && res.error) console.warn('[dev-loop-panel evidence]', res.error);
-      if (!res || !(res.phase > 0)) return false;
+      var failure = (res && res.error) || null;
+      var failureChanged = state.evidenceError !== failure;
+      state.evidenceError = failure;
+      if (failure) console.warn('[dev-loop-panel evidence]', failure);
+      // A truthy return is what repaints, so a changed error must report true even with no phase advance.
+      if (!res || !(res.phase > 0)) {
+        if (failureChanged) saveState(state.taskId, state);
+        return failureChanged;
+      }
       state.evidence = res.evidence || null;
       if (res.evidence && res.evidence.prUrl && !state.prUrl) {
         state.prUrl = res.evidence.prUrl;
@@ -645,6 +652,11 @@ window.DevLoopPanel = (function () {
   function renderProgressView(state) {
     var esc = AppUtils.escHtml;
     var html = '';
+
+    if (state.evidenceError) {
+      html += '<div class="devloop-qa-error">⚠️ Progress cannot be verified: '
+        + esc(state.evidenceError) + '. The phase below may be out of date.</div>';
+    }
 
     if (state.prUrl) {
       html +=
