@@ -215,3 +215,22 @@ test('findQaMediaFiles: handles null or empty worktree gracefully', async () => 
   const r2 = await findQaMediaFiles('');
   assert.deepEqual(r2, []);
 });
+
+test('isInside does not count a sibling directory as inside the worktree', () => {
+  const { isInside } = require('../../main/ipc/files');
+  const wt = path.join(os.tmpdir(), 'klaussy-inside', 'repo');
+
+  assert.equal(isInside(wt, path.join(wt, 'e2e', 'shot.png')), true);
+  // The bug startsWith had: a sibling sharing the name as a prefix.
+  assert.equal(isInside(wt, path.join(os.tmpdir(), 'klaussy-inside', 'repo-old', 'shot.png')), false);
+  assert.equal(isInside(wt, path.join(os.tmpdir(), 'elsewhere', 'shot.png')), false);
+  assert.equal(isInside(wt, wt), false);
+});
+
+test('isInside tolerates a trailing separator and non-normalised input', () => {
+  const { isInside } = require('../../main/ipc/files');
+  const wt = path.join(os.tmpdir(), 'klaussy-inside2', 'repo');
+
+  assert.equal(isInside(wt + path.sep, path.join(wt, 'qa', 'a.png')), true);
+  assert.equal(isInside(wt, path.join(wt, 'sub', '..', 'qa', 'b.png')), true);
+});

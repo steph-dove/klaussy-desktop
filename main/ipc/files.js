@@ -411,6 +411,18 @@ const QA_IGNORE_DIRS_IN_WALK = new Set([
   'src/assets', 'assets', 'public', 'static', 'images', 'img', 'styles', 'icons',
 ]);
 
+// startsWith counts /repo-old as inside /repo, and Windows (plus a
+// case-insensitive macOS volume) can hand back the same path in another case.
+function isInside(parent, child) {
+  const norm = (p) => {
+    const abs = path.resolve(p);
+    return process.platform === 'win32' ? abs.toLowerCase() : abs;
+  };
+  const rel = path.relative(norm(parent), norm(child));
+  if (!rel || path.isAbsolute(rel)) return false;
+  return rel !== '..' && !rel.startsWith('..' + path.sep);
+}
+
 async function findQaMediaFiles(worktreePath, meta = {}) {
   if (!worktreePath) return [];
 
@@ -546,7 +558,7 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
           if (type) {
             try {
               const stat = fs.statSync(absChild);
-              const inWorktree = absChild.startsWith(worktreePath);
+              const inWorktree = isInside(worktreePath, absChild);
               if (!inWorktree && branchStartMs && stat.mtimeMs < branchStartMs) continue;
               const rel = inWorktree
                 ? path.relative(worktreePath, absChild)
@@ -902,6 +914,7 @@ ipcMain.handle('clipboard-write-text', async (_event, { text }) => {
 
 module.exports = {
   findQaMediaFiles,
+  isInside,
   devLoopEvidence,
   phaseFromEvidence,
   findRootDoc,
