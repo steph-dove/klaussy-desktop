@@ -226,7 +226,7 @@ window.ActionModal = (function () {
     '  - Run the relevant test suites, linters, and capture execution output.',
     '',
     '## Phase 5 — Open the PR (humanized)',
-    'Commit on a topic branch, write a clear humanized PR description summarizing changes with visual proof, and open the PR with `gh pr create` / `glab mr create`:',
+    'Commit on the branch this session is already on — Klaussy created it for this task, so do not cut another one; branch only if you find yourself on `main`/`master`. Then write a clear humanized PR description summarizing changes with visual proof, and open the PR with `gh pr create` / `glab mr create`:',
     '- **For Frontend / UI PRs**:',
     '  - Include a **Before vs. After** Markdown table in the PR description:',
     '    ```markdown',
