@@ -54,7 +54,7 @@ test('diff panel tab strip switches panes and defaults to Changes', async ({ mai
     await expect(mainWindow.locator('#diff-tabs .diff-tab[data-tab="changes"]')).toHaveClass(/active/);
     await expect(mainWindow.locator('#changes-tab-content')).toBeVisible();
 
-    const tabs = ['plan', 'changes', 'pr', 'files', 'search', 'history', 'stash'];
+    const tabs = ['plan', 'changes', 'pr', 'files', 'search', 'history'];
     for (const tab of tabs) {
       await mainWindow.locator(`#diff-tabs .diff-tab[data-tab="${tab}"]`).click();
       await expect(mainWindow.locator(`#diff-tabs .diff-tab[data-tab="${tab}"]`)).toHaveClass(/active/);

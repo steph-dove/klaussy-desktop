@@ -61,7 +61,7 @@ async function openNotesPanel(mainWindow, worktreePath) {
     document.querySelectorAll('#diff-tabs .diff-tab').forEach((t) => t.classList.remove('active'));
     const tab = document.querySelector('#diff-tabs .diff-tab[data-tab="notes"]');
     tab.classList.add('active');
-    ['changes', 'pr', 'files', 'search', 'history', 'stash', 'plan'].forEach((id) => {
+    ['changes', 'pr', 'files', 'search', 'history', 'plan'].forEach((id) => {
       const el = document.getElementById(id + '-tab-content');
       if (el) el.style.display = 'none';
     });

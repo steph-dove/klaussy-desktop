@@ -1948,7 +1948,6 @@ body.custom-titlebar #titlebar-content {
 body.task-branchless .diff-tab[data-tab="changes"],
 body.task-branchless .diff-tab[data-tab="pr"],
 body.task-branchless .diff-tab[data-tab="history"],
-body.task-branchless .diff-tab[data-tab="stash"],
 body.task-branchless .diff-tab[data-tab="plan"],
 body.task-branchless #btn-fetch,
 body.task-branchless #btn-pull,
