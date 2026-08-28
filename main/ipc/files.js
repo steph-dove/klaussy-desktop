@@ -706,7 +706,7 @@ ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
     const protoErr = protocolError();
     if (protoErr) return { media, error: 'QA media cannot be displayed: ' + protoErr };
     if (meta.branchStartUnknown) {
-      return { media, error: 'This list may include older runs: the branch start could not be determined.' };
+      return { media, warning: 'This list may include older runs: the branch start could not be determined.' };
     }
     return { media };
   } catch (err) {

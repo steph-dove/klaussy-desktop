@@ -77,6 +77,7 @@ window.DevLoopPanel = (function () {
   var evidenceTimer = null;
   var cachedQaMedia = [];
   var qaMediaError = null;
+  var qaMediaWarning = null;
   var containerEl = null;
   var reloadTimer = null;
 
@@ -280,7 +281,16 @@ window.DevLoopPanel = (function () {
     if (!(window.klaus && window.klaus.fs && window.klaus.fs.devLoopEvidence)) return false;
     try {
       var res = await window.klaus.fs.devLoopEvidence(worktreePath);
-      var failure = (res && res.error) || null;
+      // Per-field errors otherwise ride on advancePhase's summary, which is
+      // dropped when the phase does not move -- exactly when they matter.
+      var ev = (res && res.evidence) || null;
+      var fieldErrors = [];
+      if (ev) {
+        if (ev.commitsError) fieldErrors.push('base branch: ' + ev.commitsError);
+        if (ev.prError) fieldErrors.push('PR lookup: ' + ev.prError);
+        if (ev.qaMediaError) fieldErrors.push('QA scan: ' + ev.qaMediaError);
+      }
+      var failure = (res && res.error) || (fieldErrors.length ? fieldErrors.join('; ') : null);
       var failureChanged = state.evidenceError !== failure;
       state.evidenceError = failure;
       if (failure) console.warn('[dev-loop-panel evidence]', failure);
@@ -471,6 +481,7 @@ window.DevLoopPanel = (function () {
       if (window.klaus && window.klaus.fs && window.klaus.fs.findQaMedia) {
         var qaRes = await window.klaus.fs.findQaMedia(worktreePath);
         qaMediaError = (qaRes && qaRes.error) || null;
+        qaMediaWarning = (qaRes && qaRes.warning) || null;
         if (qaRes && Array.isArray(qaRes.media)) {
           qaMedia = qaRes.media;
         }
@@ -782,6 +793,9 @@ window.DevLoopPanel = (function () {
     var errorBanner = qaMediaError
       ? ('<div class="devloop-qa-error">⚠️ QA media could not be loaded: ' + esc(qaMediaError) + '</div>')
       : '';
+    if (!qaMediaError && qaMediaWarning) {
+      errorBanner = '<div class="devloop-qa-warning">' + esc(qaMediaWarning) + '</div>';
+    }
 
     if (!cachedQaMedia || cachedQaMedia.length === 0) {
       if (qaMediaError) {

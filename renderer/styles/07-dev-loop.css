@@ -638,6 +638,17 @@
   gap: 16px;
 }
 
+.devloop-qa-warning {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--warning, #c8951b);
+  border-radius: 4px;
+  background: rgba(200, 149, 27, 0.08);
+  color: var(--warning, #c8951b);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .devloop-qa-error {
   margin: 0 0 10px;
   padding: 8px 10px;
