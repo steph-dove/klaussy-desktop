@@ -294,7 +294,7 @@ window.DevLoopPanel = (function () {
         state.prUrl = res.evidence.prUrl;
         state.prNumber = res.evidence.prNumber;
       }
-      return advancePhase(state, res.phase, evidenceSummary(res.evidence));
+      return advancePhase(state, res.phase, evidenceSummary(res.evidence)) || failureChanged;
     } catch (err) {
       console.warn('[dev-loop-panel evidence]', err);
       return false;
