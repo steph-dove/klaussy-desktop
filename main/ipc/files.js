@@ -411,7 +411,7 @@ const QA_IGNORE_DIRS_IN_WALK = new Set([
   'src/assets', 'assets', 'public', 'static', 'images', 'img', 'styles', 'icons',
 ]);
 
-async function findQaMediaFiles(worktreePath) {
+async function findQaMediaFiles(worktreePath, meta = {}) {
   if (!worktreePath) return [];
 
   const foundFiles = new Map();
@@ -514,6 +514,9 @@ async function findQaMediaFiles(worktreePath) {
       branchStartMs = fs.statSync(worktreePath).birthtimeMs || 0;
     } catch {}
   }
+  // birthtime is 0 on filesystems that don't record it, so the staleness filter
+  // is skipped and a reused branch name brings back old media.
+  meta.branchStartUnknown = !branchStartMs;
 
   function scanDirectory(dirPath, maxDepth = 3) {
     if (!fs.existsSync(dirPath)) return;
@@ -696,11 +699,15 @@ ipcMain.handle('dev-loop-evidence', async (_event, { worktreePath }) => {
 ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
   if (!worktreePath) return { media: [] };
   try {
-    const media = await findQaMediaFiles(worktreePath);
+    const meta = {};
+    const media = await findQaMediaFiles(worktreePath, meta);
     allowQaPaths(media.map((m) => m.path));
     for (const m of media) m.url = qaMediaUrl(m.path);
     const protoErr = protocolError();
     if (protoErr) return { media, error: 'QA media cannot be displayed: ' + protoErr };
+    if (meta.branchStartUnknown) {
+      return { media, error: 'This list may include older runs: the branch start could not be determined.' };
+    }
     return { media };
   } catch (err) {
     return { media: [], error: err.message };
