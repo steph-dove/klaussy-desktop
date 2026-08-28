@@ -156,8 +156,8 @@ const PROVIDERS = {
     perWorktreeSessions: true,
     supportsExactResume: true,
 
-    buildInteractiveCmd(bin, { resumeSessionId, model, sessionDirs } = {}) {
-      let base = resumeSessionId ? `${bin} --resume ${resumeSessionId}` : bin;
+    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs } = {}) {
+      let base = resumeSessionId ? `${bin} --resume ${resumeSessionId}` : (resumeLatest ? `${bin} --resume` : bin);
       if (model) base += ` --model ${model}`; // alias (opus/sonnet/haiku) or full id
       // Grant access to sibling session worktrees so cross-repo edits work.
       const dirs = quotedSessionDirs(sessionDirs);

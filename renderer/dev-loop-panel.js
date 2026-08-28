@@ -1,0 +1,1062 @@
+// Tracks the 9-phase "Rest of the Owl" dev loop by reading the agent's own PTY
+// output plus on-disk artifacts (plan/design docs, QA media, PR state), so
+// progress costs no extra API calls.
+
+window.DevLoopPanel = (function () {
+  var PHASES = [
+    {
+      id: 1,
+      name: 'Plan & Discovery',
+      shortName: 'Plan',
+      icon: '📋',
+      description: 'Analyze task requirements, check ambiguities, and construct the build sequence.',
+    },
+    {
+      id: 2,
+      name: 'Implementation',
+      shortName: 'Implement',
+      icon: '🔨',
+      description: 'Work through the plan in small test-driven batches, keeping test suite green.',
+    },
+    {
+      id: 3,
+      name: 'Local Review & Humanize',
+      shortName: 'Review',
+      icon: '🔍',
+      description: 'Review working diff for bugs and apply self-review humanization.',
+    },
+    {
+      id: 4,
+      name: 'QA & Evidence Recording',
+      shortName: 'QA',
+      icon: '🎥',
+      description: 'Capture before/after screenshots, record responsive flow video (.mp4), and upload QA proof.',
+    },
+    {
+      id: 5,
+      name: 'Create PR (Humanized)',
+      shortName: 'Create PR',
+      icon: '🚀',
+      description: 'Commit changes, format before/after table & video proof in PR description, and open PR.',
+    },
+    {
+      id: 6,
+      name: 'Re-review Remote PR',
+      shortName: 'PR Review',
+      icon: '🔍',
+      description: 'Inspect full remote PR diff on forge for integration seams and push fixes.',
+    },
+    {
+      id: 7,
+      name: 'Pull & Fix CI Failures',
+      shortName: 'Fix CI',
+      icon: '⏳',
+      description: 'Monitor CI checks, pull failure logs, diagnose real root causes, and auto-fix until green.',
+    },
+    {
+      id: 8,
+      name: 'Pull & Resolve Review Comments',
+      shortName: 'Feedback',
+      icon: '💬',
+      description: 'Poll reviewer feedback, apply code adjustments, and resolve comment threads.',
+    },
+    {
+      id: 9,
+      name: 'Notify when Green (Merge Gate)',
+      shortName: 'Green PR',
+      icon: '🦉',
+      description: 'Notify that CI is green, tests pass, and reviews are resolved. You retain the merge button.',
+    },
+  ];
+
+  var devLoopStates = new Map();
+  var currentWorktreePath = null;
+  var currentSubTab = 'progress'; // 'progress' | 'design' | 'qa'
+  var selectedDocPath = null;
+  var cachedDocs = [];
+  var evidenceTimer = null;
+  var cachedQaMedia = [];
+  var qaMediaError = null;
+  var qaMediaWarning = null;
+  var containerEl = null;
+  var reloadTimer = null;
+
+  function normId(id) {
+    if (id == null) return '';
+    return String(id);
+  }
+
+  function defaultState(taskId, taskDescription) {
+    var phaseStatuses = {};
+    for (var i = 1; i <= 9; i++) {
+      phaseStatuses[i] = {
+        status: i === 1 ? 'in_progress' : 'pending',
+        summary: '',
+        startedAt: i === 1 ? Date.now() : null,
+        completedAt: null,
+      };
+    }
+    return {
+      taskId: normId(taskId),
+      taskDescription: taskDescription || '',
+      active: true,
+      currentPhase: 1,
+      phaseStatuses: phaseStatuses,
+      qaArtifacts: [],
+      prUrl: null,
+      prNumber: null,
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+  }
+
+  var STORAGE_KEY_PREFIX = 'klaussy-devloop:';
+  var WT_KEY_PREFIX = 'klaussy-devloop-wt:';
+
+  function saveState(id, state) {
+    if (!state) return;
+    try {
+      var serialized = JSON.stringify(state);
+      if (id) {
+        localStorage.setItem(STORAGE_KEY_PREFIX + id, serialized);
+      }
+      var wt = currentWorktreePath || getActiveWorktreePath();
+      if (wt) {
+        localStorage.setItem(WT_KEY_PREFIX + wt, serialized);
+      }
+    } catch (e) {
+      console.warn('[dev-loop-panel saveState]', e);
+    }
+  }
+
+  function loadState(id) {
+    try {
+      if (id) {
+        var raw = localStorage.getItem(STORAGE_KEY_PREFIX + id);
+        if (raw) return JSON.parse(raw);
+      }
+      var wt = currentWorktreePath || getActiveWorktreePath();
+      if (wt) {
+        var wtRaw = localStorage.getItem(WT_KEY_PREFIX + wt);
+        if (wtRaw) return JSON.parse(wtRaw);
+      }
+    } catch (e) {
+      console.warn('[dev-loop-panel loadState]', e);
+    }
+    return null;
+  }
+
+  function getState(taskId) {
+    var id = normId(taskId || activeTaskId());
+    if (id && devLoopStates.has(id)) return devLoopStates.get(id);
+    var persisted = loadState(id);
+    if (persisted) {
+      if (id) devLoopStates.set(id, persisted);
+      return persisted;
+    }
+    return null;
+  }
+
+  function getOrCreateState(taskId, taskDescription) {
+    var id = normId(taskId || activeTaskId());
+    if (id && devLoopStates.has(id)) {
+      return devLoopStates.get(id);
+    }
+    var persisted = loadState(id);
+    if (persisted) {
+      if (id) devLoopStates.set(id, persisted);
+      return persisted;
+    }
+    var state = defaultState(id || 'default', taskDescription);
+    if (id) {
+      devLoopStates.set(id, state);
+      saveState(id, state);
+    }
+    return state;
+  }
+
+  function advancePhase(state, targetPhase, summary) {
+    if (!state || targetPhase < 1 || targetPhase > 9) return false;
+    var changed = false;
+    if (targetPhase > state.currentPhase) {
+      for (var p = 1; p < targetPhase; p++) {
+        if (state.phaseStatuses[p].status !== 'completed') {
+          state.phaseStatuses[p].status = 'completed';
+          if (!state.phaseStatuses[p].completedAt) {
+            state.phaseStatuses[p].completedAt = Date.now();
+          }
+        }
+      }
+      state.currentPhase = targetPhase;
+      state.phaseStatuses[targetPhase].status = 'in_progress';
+      if (!state.phaseStatuses[targetPhase].startedAt) {
+        state.phaseStatuses[targetPhase].startedAt = Date.now();
+      }
+      if (summary) {
+        state.phaseStatuses[targetPhase].summary = summary;
+      }
+      state.updatedAt = Date.now();
+      changed = true;
+    } else if (targetPhase === state.currentPhase) {
+      if (state.phaseStatuses[targetPhase].status !== 'in_progress') {
+        state.phaseStatuses[targetPhase].status = 'in_progress';
+        state.updatedAt = Date.now();
+        changed = true;
+      }
+      if (summary && !state.phaseStatuses[targetPhase].summary) {
+        state.phaseStatuses[targetPhase].summary = summary;
+        state.updatedAt = Date.now();
+        changed = true;
+      }
+    }
+    if (changed) {
+      saveState(state.taskId, state);
+    }
+    return changed;
+  }
+
+  function resumeDevLoop(taskId) {
+    var id = normId(taskId || activeTaskId());
+    var state = getState(id) || getOrCreateState(id);
+    var curPhase = state.currentPhase || 1;
+    var phaseObj = PHASES.find(function (p) { return p.id === curPhase; }) || PHASES[0];
+    var task = AppState.tasks.get(id);
+    var taskDesc = (task && (task.name || task.initialPrompt)) || state.taskDescription || 'this task';
+
+    var resumePrompt = 'Resume the autonomous Dev Loop for ' + taskDesc + ' starting at Phase ' + curPhase + ' (' + phaseObj.name + '). Continue executing through all remaining phases to completion.';
+
+    if (window.klaus && window.klaus.terminal && window.klaus.terminal.write && id) {
+      window.klaus.terminal.write(id, resumePrompt + '\n');
+    }
+    state.updatedAt = Date.now();
+    saveState(id, state);
+    emitUpdate(id);
+    renderActiveView();
+  }
+
+  function startDevLoop(taskId, taskDescription) {
+    var id = normId(taskId || activeTaskId());
+    var state = defaultState(id, taskDescription);
+    devLoopStates.set(id, state);
+    saveState(id, state);
+    emitUpdate(id);
+    switchDiffTabToDevLoop();
+    load(currentWorktreePath);
+    return state;
+  }
+
+  function switchDiffTabToDevLoop() {
+    var tabBtn = document.querySelector('#diff-tabs .diff-tab[data-tab="devloop"]');
+    if (tabBtn) tabBtn.click();
+  }
+
+  function emitUpdate(taskId) {
+    var id = normId(taskId || activeTaskId());
+    var state = getState(id);
+    if (state) saveState(id, state);
+    if (window.Events && window.Events.emit) {
+      window.Events.emit('dev-loop:updated', { taskId: id, state: state });
+    }
+    renderActiveView();
+    updateMiniHuds(id);
+  }
+
+  // Shown alongside the phase so a jump in the HUD is traceable.
+  function evidenceSummary(ev) {
+    if (!ev) return '';
+    var parts = [];
+    if (ev.commits) parts.push(ev.commits + (ev.commits === 1 ? ' commit' : ' commits'));
+    else if (ev.commitsError) parts.push('base branch unknown');
+    if (ev.qaMedia) parts.push(ev.qaMedia + ' QA file' + (ev.qaMedia === 1 ? '' : 's'));
+    else if (ev.qaMediaError) parts.push('QA scan failed');
+    if (ev.prNumber) parts.push('PR #' + ev.prNumber);
+    else if (ev.prError) parts.push('PR lookup failed');
+    if (ev.checksTotal) parts.push(ev.checksPassed + '/' + ev.checksTotal + ' checks green');
+    if (ev.reviewThreads) parts.push(ev.reviewThreads + ' review' + (ev.reviewThreads === 1 ? '' : 's'));
+    return parts.join(' · ');
+  }
+
+  async function applyEvidence(worktreePath, state) {
+    if (!worktreePath || !state) return false;
+    if (!(window.klaus && window.klaus.fs && window.klaus.fs.devLoopEvidence)) return false;
+    try {
+      var res = await window.klaus.fs.devLoopEvidence(worktreePath);
+      // Per-field errors otherwise ride on advancePhase's summary, which is
+      // dropped when the phase does not move -- exactly when they matter.
+      var ev = (res && res.evidence) || null;
+      var fieldErrors = [];
+      if (ev) {
+        if (ev.commitsError) fieldErrors.push('base branch: ' + ev.commitsError);
+        if (ev.prError) fieldErrors.push('PR lookup: ' + ev.prError);
+        if (ev.qaMediaError) fieldErrors.push('QA scan: ' + ev.qaMediaError);
+      }
+      var failure = (res && res.error) || (fieldErrors.length ? fieldErrors.join('; ') : null);
+      var failureChanged = state.evidenceError !== failure;
+      state.evidenceError = failure;
+      if (failure) console.warn('[dev-loop-panel evidence]', failure);
+      // A truthy return is what repaints, so a changed error must report true even with no phase advance.
+      if (!res || !(res.phase > 0)) {
+        if (failureChanged) saveState(state.taskId, state);
+        return failureChanged;
+      }
+      state.evidence = res.evidence || null;
+      var prChanged = false;
+      if (res.evidence && res.evidence.prUrl && !state.prUrl) {
+        state.prUrl = res.evidence.prUrl;
+        state.prNumber = res.evidence.prNumber;
+        prChanged = true;
+      }
+      var advanced = advancePhase(state, res.phase, evidenceSummary(res.evidence));
+      // advancePhase only saves when it moves, so a PR found at a phase we are
+      // already past would be lost on reload.
+      if (!advanced && prChanged) saveState(state.taskId, state);
+      return advanced || prChanged || failureChanged;
+    } catch (err) {
+      var msg = (err && err.message) || String(err);
+      var changed = state.evidenceError !== msg;
+      state.evidenceError = msg;
+      console.warn('[dev-loop-panel evidence]', err);
+      if (changed) saveState(state.taskId, state);
+      return changed;
+    }
+  }
+
+  // Without a poll the HUD only catches up when the user switches tabs.
+  async function pollEvidence() {
+    if (!currentWorktreePath) return;
+    var id = normId(activeTaskId());
+    var state = getState(id);
+    if (!state || state.currentPhase >= 9) return;
+    if (await applyEvidence(currentWorktreePath, state)) {
+      emitUpdate(id);
+    }
+  }
+
+  function feedTerminalData(taskId, rawData) {
+    if (!rawData) return;
+    var signals = DevLoopDetect.detect(rawData);
+
+    var id = normId(taskId || activeTaskId());
+    var state = getOrCreateState(id, 'Active Dev Loop');
+    var changed = false;
+
+    signals.advances.forEach(function (advance) {
+      if (advancePhase(state, advance.phase, advance.summary)) changed = true;
+    });
+
+    signals.completions.forEach(function (phase) {
+      if (state.phaseStatuses[phase].status !== 'completed') {
+        state.phaseStatuses[phase].status = 'completed';
+        changed = true;
+      }
+    });
+
+    // A written plan means new docs on disk worth re-reading.
+    if (signals.planWritten && currentWorktreePath) {
+      load(currentWorktreePath);
+    }
+
+    if (signals.prUrl && state.prUrl !== signals.prUrl) {
+      state.prUrl = signals.prUrl;
+      state.prNumber = signals.prNumber;
+      if (advancePhase(state, 6, 'PR #' + signals.prNumber + ' opened')) {
+        changed = true;
+      }
+    }
+
+    signals.artifacts.forEach(function (artifact) {
+      var known = state.qaArtifacts.some(function (a) {
+        return a.path === artifact.path || a.name === artifact.name;
+      });
+      if (!known) {
+        state.qaArtifacts.push(artifact);
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      emitUpdate(id);
+    }
+  }
+
+  // Hydrates phase state from what's on disk, so a reopened task isn't stuck at Phase 1.
+  async function load(worktreePath) {
+    if (!worktreePath) {
+      currentWorktreePath = null;
+      renderActiveView();
+      return;
+    }
+    currentWorktreePath = worktreePath;
+    var taskId = activeTaskId();
+    var state = getOrCreateState(taskId, 'Active Dev Loop');
+
+    try {
+      var docs = [];
+      var planRes = await window.klaus.fs.findPlanFile(worktreePath);
+      if (planRes && !planRes.error && planRes.content) {
+        docs.push({ name: planRes.name || 'plan.md', path: planRes.path || (worktreePath + '/plan.md'), content: planRes.content, type: 'plan' });
+      }
+
+      var designRes = await window.klaus.fs.findDesignFile(worktreePath);
+      if (designRes && !designRes.error && designRes.content) {
+        docs.push({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
+      }
+
+      if (window.klaus.fs.listFiles) {
+        var filesRes = await window.klaus.fs.listFiles(worktreePath);
+        var fileList = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
+        for (var i = 0; i < fileList.length; i++) {
+          var f = fileList[i];
+          var rel = typeof f === 'string' ? f : (f.path || f.name || '');
+          if (/^(task-.*|REVIEW_OUTPUT)\.md$/i.test(rel)) {
+            var fullPath = worktreePath + '/' + rel;
+            var readRes = await window.klaus.fs.readFile(fullPath);
+            if (readRes && !readRes.error && typeof readRes.content === 'string') {
+              if (!docs.some(function (d) { return d.name === rel; })) {
+                docs.push({ name: rel, path: fullPath, content: readRes.content, type: 'spec' });
+              }
+            }
+          }
+        }
+      }
+
+      // Pull from OKF session context sharing folder ($KLAUSSY_SESSION_NOTES_DIR)
+      var sessionCtxApi = (window.klaus && (window.klaus.task && window.klaus.task.sessionContext || window.klaus.sessionContext));
+      if (sessionCtxApi && sessionCtxApi.listNotes) {
+        try {
+          var sessionNotes = await sessionCtxApi.listNotes(worktreePath);
+          if (Array.isArray(sessionNotes)) {
+            sessionNotes.forEach(function (note) {
+              var meta = note.metadata || {};
+              var tags = Array.isArray(meta.tags) ? meta.tags : [];
+              var isPlanOrDesign = tags.some(function (t) {
+                return /^(plan|design|spec|architecture|task|devloop)/i.test(String(t));
+              }) || /(?:^|[\\/._-])(?:plan|design|spec|task|devloop)/i.test(note.id || '')
+                 || /(?:^#+\s*(?:Plan|Design|Implementation Plan|Architecture|Task))/i.test(note.body || '')
+                 || (note.title && /(?:Plan|Design|Implementation|Architecture|Spec)/i.test(note.title))
+                 || /(?:plan|design)/i.test(note.filePath || '');
+
+              var displayName = note.title || (meta.title) || (tags.length ? ('OKF: ' + tags.join(', ')) : (note.id + '.md'));
+              var agentSuffix = meta.agent ? (' (' + meta.agent + ')') : '';
+              var cleanName = '🦉 ' + displayName + agentSuffix;
+              var bodyText = (note.body || note.content || '').trim();
+              if (!docs.some(function (d) { return d.path === note.filePath; })) {
+                if (isPlanOrDesign || docs.length === 0) {
+                  docs.push({
+                    name: cleanName,
+                    path: note.filePath,
+                    content: bodyText,
+                    type: 'okf-note',
+                    metadata: meta,
+                    isSessionNote: true,
+                    writtenAt: note.writtenAt,
+                  });
+                }
+              }
+            });
+          }
+        } catch (noteErr) {
+          console.warn('[dev-loop-panel session notes load]', noteErr);
+        }
+      }
+
+      cachedDocs = docs;
+      if (!selectedDocPath && docs.length > 0) {
+        selectedDocPath = docs[0].path;
+      }
+
+      // If an implementation plan document is now established and we are still in Phase 1,
+      // mark Phase 1 as completed and advance active phase to Phase 2 (Implementation).
+      var hasPlan = docs.some(function (d) {
+        return d.type === 'plan' || d.type === 'design' || d.type === 'okf-note' || /plan/i.test(d.name || '') || /plan/i.test(d.path || '');
+      });
+      if (hasPlan && state.currentPhase === 1) {
+        advancePhase(state, 2, 'Implementation plan created & saved');
+      }
+
+      // Runs after the plan check so artifacts outrank terminal narration.
+      await applyEvidence(worktreePath, state);
+
+      var qaMedia = [];
+      if (window.klaus && window.klaus.fs && window.klaus.fs.findQaMedia) {
+        var qaRes = await window.klaus.fs.findQaMedia(worktreePath);
+        qaMediaError = (qaRes && qaRes.error) || null;
+        qaMediaWarning = (qaRes && qaRes.warning) || null;
+        if (qaRes && Array.isArray(qaRes.media)) {
+          qaMedia = qaRes.media;
+        }
+      }
+
+      // Fallback in case findQaMedia IPC is not active
+      if (!qaMedia.length && window.klaus && window.klaus.fs && window.klaus.fs.listFiles) {
+        var allFiles = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
+        allFiles.forEach(function (f) {
+          var rel = typeof f === 'string' ? f : (f.path || f.name || '');
+          var isVideo = /\.(mp4|webm|mov)$/i.test(rel);
+          var isImg = /\.(png|jpg|jpeg|webp)$/i.test(rel);
+          var isQaDir = /^(?:e2e-artifacts|e2e-screenshots|qa-artifacts|qa-screenshots|screenshots|qa|e2e\/screenshots|test-results|playwright-report|cypress\/screenshots|cypress\/videos|tmp\/qa|tmp\/screenshots)\//i.test(rel);
+          var isQaName = /(?:^|[\\/._-])(?:screenshot|screen-shot|screen_shot|qa[-_]|test[-_]shot|recording)(?:[\\/._-]|$)/i.test(rel);
+          var isNonAsset = !/(?:node_modules|\.git|src[\\/]assets|public[\\/]|styles[\\/]|icons[\\/]|renderer[\\/])/i.test(rel);
+
+          if ((isVideo || isImg) && (isQaDir || isQaName) && isNonAsset) {
+            qaMedia.push({
+              name: rel.split('/').pop(),
+              relPath: rel,
+              path: worktreePath + '/' + rel,
+              type: isVideo ? 'video' : 'image',
+            });
+          }
+        });
+      }
+
+      if (state && state.qaArtifacts) {
+        state.qaArtifacts.forEach(function (art) {
+          if (!qaMedia.some(function (m) { return m.path === art.path || m.name === art.name; })) {
+            qaMedia.push(art);
+          }
+        });
+      }
+      // Only the scanner mints a servable URL, so anything it didn't resolve
+      // would render as a broken tile.
+      cachedQaMedia = qaMedia.filter(function (m) { return m && m.url; });
+
+      if (window.klaus.pr && window.klaus.pr.forBranch) {
+        var prRes = await window.klaus.pr.forBranch(worktreePath);
+        if (prRes && prRes.pr) {
+          state.prUrl = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
+          state.prNumber = prRes.pr.number;
+        }
+      }
+
+      renderActiveView();
+      updateMiniHuds(taskId);
+    } catch (err) {
+      console.warn('[dev-loop-panel load]', err);
+      renderActiveView();
+    }
+  }
+
+  function init() {
+    containerEl = document.getElementById('devloop-tab-content');
+
+    window.addEventListener('load-devloop', function () {
+      load(currentWorktreePath || getActiveWorktreePath());
+    });
+
+    // Long enough not to hammer `gh` on a loop that runs for an hour.
+    if (evidenceTimer) clearInterval(evidenceTimer);
+    evidenceTimer = setInterval(pollEvidence, 45000);
+
+    if (window.Events && window.Events.on) {
+      window.Events.on('task:switched', function (detail) {
+        var task = detail && detail.task;
+        currentWorktreePath = task ? task.worktreePath : null;
+        var taskId = task ? task.id : activeTaskId();
+        var existing = getState(taskId);
+        if (existing && existing.currentPhase > 0) {
+          switchDiffTabToDevLoop();
+        }
+        load(currentWorktreePath);
+      });
+    }
+
+    if (window.klaus && window.klaus.fs && window.klaus.fs.onWorktreeChanged) {
+      window.klaus.fs.onWorktreeChanged(function (data) {
+        if (!data || !currentWorktreePath || data.worktreePath !== currentWorktreePath) return;
+        if (reloadTimer) clearTimeout(reloadTimer);
+        reloadTimer = setTimeout(function () { load(currentWorktreePath); }, 300);
+      });
+    }
+  }
+
+  function getActiveWorktreePath() {
+    var task = AppState.tasks.get(AppState.activeTaskId);
+    return task ? task.worktreePath : null;
+  }
+
+  function setWorktree(wt) {
+    currentWorktreePath = wt;
+    load(wt);
+  }
+
+  function activeTaskId() {
+    return AppState.activeTaskId || null;
+  }
+
+  function renderActiveView() {
+    if (!containerEl) containerEl = document.getElementById('devloop-tab-content');
+    if (!containerEl) return;
+
+    var taskId = activeTaskId();
+    var state = getOrCreateState(taskId, 'Active Dev Loop');
+    var esc = AppUtils.escHtml;
+    var task = AppState.tasks.get(taskId);
+    var taskName = (task && task.name) || (currentWorktreePath ? currentWorktreePath.split('/').pop() : 'Active Task');
+
+    var currentPhaseObj = PHASES.find(function (p) { return p.id === state.currentPhase; }) || PHASES[0];
+
+    var isTaskAlive = task ? (task.alive !== false) : false;
+    var isCompleted = state.phaseStatuses[9] && state.phaseStatuses[9].status === 'completed';
+    var isLoopActive = isTaskAlive && !isCompleted;
+
+    var headerActionsHtml = '';
+    if (!isLoopActive) {
+      if (!isCompleted && state.currentPhase >= 1) {
+        headerActionsHtml =
+          '<div class="devloop-header-actions">' +
+            '<button class="klaus-btn klaus-btn-primary devloop-resume-btn" type="button" title="Resume dev loop from Phase ' + state.currentPhase + '">▶ Resume Loop (Phase ' + state.currentPhase + ')</button>' +
+            '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Restart Full Dev Loop from Phase 1">🔄 Restart Loop</button>' +
+          '</div>';
+      } else if (isCompleted) {
+        headerActionsHtml =
+          '<div class="devloop-header-actions">' +
+            '<button class="klaus-btn klaus-btn-secondary devloop-relaunch-btn" type="button" title="Start a new Dev Loop on this task">🔄 New Dev Loop</button>' +
+          '</div>';
+      }
+    }
+
+    var html =
+      '<div class="devloop-header">' +
+        '<div class="devloop-header-title">' +
+          '<span class="devloop-header-icon">🦉</span>' +
+          '<div class="devloop-header-text">' +
+            '<h3>Full Dev Loop: ' + esc(taskName) + '</h3>' +
+            '<div class="devloop-phase-badge">' +
+              '<span class="devloop-pulse-dot"></span>' +
+              'Phase ' + state.currentPhase + ' of 9: ' + esc(currentPhaseObj.name) +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+        headerActionsHtml +
+      '</div>' +
+      '<div class="devloop-intro-banner">' +
+        '<div class="devloop-intro-owl">🦉</div>' +
+        '<div class="devloop-intro-text">' +
+          '<strong>Full Dev Loop ("Rest of the Owl")</strong>' +
+          '<span>An autonomous 9-phase workflow: Plan ➔ Code with TDD ➔ Local Review ➔ QA Video ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green. You retain the merge button.</span>' +
+        '</div>' +
+      '</div>';
+
+    var docCount = cachedDocs.length;
+    var qaCount = cachedQaMedia.length;
+
+    html +=
+      '<div class="devloop-subnav">' +
+        '<button type="button" class="devloop-subtab ' + (currentSubTab === 'progress' ? 'active' : '') + '" data-sub="progress">📊 Progress (' + state.currentPhase + '/9)</button>' +
+        '<button type="button" class="devloop-subtab ' + (currentSubTab === 'design' ? 'active' : '') + '" data-sub="design">📐 Designs &amp; Plan <span class="devloop-badge">' + docCount + '</span></button>' +
+        '<button type="button" class="devloop-subtab ' + (currentSubTab === 'qa' ? 'active' : '') + '" data-sub="qa">🎥 QA Screenshots <span class="devloop-badge">' + qaCount + '</span></button>' +
+      '</div>';
+
+    html += '<div class="devloop-body">';
+
+    if (currentSubTab === 'progress') {
+      html += renderProgressView(state);
+    } else if (currentSubTab === 'design') {
+      html += renderDesignView();
+    } else if (currentSubTab === 'qa') {
+      html += renderQaView();
+    }
+
+    html += '</div>';
+
+    containerEl.innerHTML = html;
+
+    containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        currentSubTab = tab.dataset.sub;
+        renderActiveView();
+      });
+    });
+
+    attachContentListeners(containerEl, state);
+
+    // Same render and id as the panel, so the dots can't resolve a separate
+    // copy of the state.
+    updateMiniHuds(taskId);
+  }
+
+  function renderProgressView(state) {
+    var esc = AppUtils.escHtml;
+    var html = '';
+
+    if (state.evidenceError) {
+      html += '<div class="devloop-qa-error">⚠️ Progress cannot be verified: '
+        + esc(state.evidenceError) + '. The phase below may be out of date.</div>';
+    }
+
+    if (state.prUrl) {
+      html +=
+        '<div class="devloop-pr-banner">' +
+          '<span class="devloop-pr-icon">🚀</span>' +
+          '<span class="devloop-pr-text">Pull Request <strong>#' + esc(state.prNumber || '') + '</strong> active on forge.</span>' +
+          '<a href="#" class="devloop-pr-link" data-url="' + esc(state.prUrl) + '">View PR ↗</a>' +
+        '</div>';
+    }
+
+    html += '<div class="devloop-stepper">';
+    PHASES.forEach(function (phase) {
+      var pState = state.phaseStatuses[phase.id] || { status: 'pending', summary: '' };
+      var statusCls = pState.status;
+      var statusIcon = statusCls === 'completed' ? '✓' : (statusCls === 'in_progress' ? '⏳' : '○');
+
+      html +=
+        '<div class="devloop-step ' + statusCls + '" data-phase="' + phase.id + '">' +
+          '<div class="devloop-step-line"></div>' +
+          '<div class="devloop-step-indicator">' + statusIcon + '</div>' +
+          '<div class="devloop-step-body">' +
+            '<div class="devloop-step-header">' +
+              '<span class="devloop-step-title">' + phase.icon + ' Phase ' + phase.id + ': ' + esc(phase.name) + '</span>' +
+              '<span class="devloop-step-status-tag ' + statusCls + '">' + (statusCls === 'in_progress' ? 'In Progress' : (statusCls === 'completed' ? 'Done' : 'Pending')) + '</span>' +
+            '</div>' +
+            '<div class="devloop-step-desc">' + esc(phase.description) + '</div>' +
+            (pState.summary ? ('<div class="devloop-step-summary">' + esc(pState.summary) + '</div>') : '') +
+          '</div>' +
+        '</div>';
+    });
+    html += '</div>';
+
+    html +=
+      '<div class="devloop-merge-gate-card">' +
+        '<div class="devloop-merge-gate-head">' +
+          '<span class="devloop-merge-gate-owl">🦉</span>' +
+          '<div>' +
+            '<h4>Human Merge Control</h4>' +
+            '<p>The agent completes all planning, TDD, code review, QA, and CI polling. The merge button always stays with the human.</p>' +
+          '</div>' +
+        '</div>' +
+        '<div class="devloop-merge-actions">' +
+          '<button type="button" class="klaus-btn klaus-btn-primary devloop-btn-merge" id="btn-devloop-merge">Merge PR (When Ready)</button>' +
+        '</div>' +
+      '</div>';
+
+    return html;
+  }
+
+  function renderDesignView() {
+    var esc = AppUtils.escHtml;
+    if (!cachedDocs || cachedDocs.length === 0) {
+      return (
+        '<div class="devloop-empty">' +
+          '<div class="devloop-empty-icon">📐</div>' +
+          '<h3>No Design Documents Found</h3>' +
+          '<p>Create a <code>plan.md</code>, <code>design.md</code>, or an OKF session note (tagged <code>plan</code> in <code>$KLAUSSY_SESSION_NOTES_DIR</code>) to view and track requirements here.</p>' +
+          '<button class="klaus-btn klaus-btn-primary devloop-create-plan-btn" type="button">+ Plan a Task</button>' +
+        '</div>'
+      );
+    }
+
+    var selectedDoc = cachedDocs.find(function (d) { return d.path === selectedDocPath; }) || cachedDocs[0];
+
+    var html = '<div class="devloop-design-pane">';
+
+    if (cachedDocs.length > 1) {
+      html += '<div class="devloop-doc-switch">';
+      cachedDocs.forEach(function (doc) {
+        var isSel = doc.path === selectedDoc.path;
+        html += '<button type="button" class="devloop-doc-btn ' + (isSel ? 'active' : '') + '" data-doc-path="' + esc(doc.path) + '">' + esc(doc.name) + '</button>';
+      });
+      html += '</div>';
+    }
+
+    var cleanBody = (selectedDoc.content || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+    var renderedMarkdown = '';
+    if (window.MarkdownPreview && typeof window.MarkdownPreview.render === 'function') {
+      renderedMarkdown = window.MarkdownPreview.render(cleanBody || selectedDoc.content || '');
+    } else {
+      renderedMarkdown = '<div class="devloop-raw-markdown">' + esc(cleanBody || selectedDoc.content || '') + '</div>';
+    }
+
+    var metaBadges = '';
+    if (selectedDoc.isSessionNote && selectedDoc.metadata) {
+      var m = selectedDoc.metadata;
+      var tags = Array.isArray(m.tags) ? m.tags : [];
+      metaBadges = '<div class="devloop-doc-meta-bar">' +
+        '<span class="devloop-meta-badge okf">OKF Note</span>' +
+        (m.agent ? ('<span class="devloop-meta-badge agent">Agent: ' + esc(m.agent) + (m.provider ? (' / ' + esc(m.provider)) : '') + '</span>') : '') +
+        (tags.length ? ('<span class="devloop-meta-badge tags">' + esc(tags.join(', ')) + '</span>') : '') +
+      '</div>';
+    }
+
+    html +=
+      '<div class="devloop-doc-card">' +
+        '<div class="devloop-doc-title">' +
+          '<span>📄 ' + esc(selectedDoc.name) + '</span>' +
+          metaBadges +
+        '</div>' +
+        '<div class="markdown-body devloop-doc-body">' + renderedMarkdown + '</div>' +
+      '</div>' +
+    '</div>';
+
+    return html;
+  }
+
+  function renderQaView() {
+    var esc = AppUtils.escHtml;
+    // Also shown above a populated gallery: a scheme that failed to register
+    // still returns tiles, they just never load.
+    var errorBanner = qaMediaError
+      ? ('<div class="devloop-qa-error">⚠️ QA media could not be loaded: ' + esc(qaMediaError) + '</div>')
+      : '';
+    if (!qaMediaError && qaMediaWarning) {
+      errorBanner = '<div class="devloop-qa-warning">' + esc(qaMediaWarning) + '</div>';
+    }
+
+    if (!cachedQaMedia || cachedQaMedia.length === 0) {
+      if (qaMediaError) {
+        return (
+          '<div class="devloop-empty">' +
+            '<div class="devloop-empty-icon">⚠️</div>' +
+            '<h3>QA Media Could Not Be Loaded</h3>' +
+            '<p>' + esc(qaMediaError) + '</p>' +
+          '</div>'
+        );
+      }
+      return (
+        '<div class="devloop-empty">' +
+          '<div class="devloop-empty-icon">🎥</div>' +
+          '<h3>No QA Screenshots Recorded Yet</h3>' +
+          '<p>During <strong>Phase 4 (QA the change)</strong>, the agent captures before/after screenshots, records full-flow responsive walkthrough videos (.mp4), and uploads QA assets for PR comparison tables in <code>Downloads/klaussy-qa-&lt;branch&gt;</code>.</p>' +
+        '</div>'
+      );
+    }
+
+    var html =
+      '<div class="devloop-qa-pane">' +
+        errorBanner +
+        '<div class="devloop-qa-card-header">' +
+          '<h4>Captured QA Recordings &amp; Screenshots (' + cachedQaMedia.length + ')</h4>' +
+        '</div>' +
+        '<div class="devloop-qa-gallery">';
+
+    cachedQaMedia.forEach(function (art) {
+      // Served over klaussy-qa: — the page CSP blocks file: for img and media.
+      var fileUrl = esc(art.url || '');
+
+      var nameLower = (art.name || '').toLowerCase();
+      var roleBadge = '';
+      if (/before/i.test(nameLower)) {
+        roleBadge = '<span class="devloop-qa-badge before">Before</span>';
+      } else if (/after/i.test(nameLower)) {
+        roleBadge = '<span class="devloop-qa-badge after">After</span>';
+      } else if (art.type === 'video' || /responsive|flow|record/i.test(nameLower)) {
+        roleBadge = '<span class="devloop-qa-badge video">Responsive Flow</span>';
+      }
+
+      if (art.type === 'video') {
+        html +=
+          '<div class="devloop-qa-media-card video-card">' +
+            '<div class="devloop-qa-media-head">' +
+              '<div class="devloop-qa-media-title">' +
+                '<span class="devloop-media-icon">🎥</span>' +
+                '<span class="devloop-media-name" title="' + esc(art.path) + '">' + esc(art.name) + '</span>' +
+                roleBadge +
+              '</div>' +
+              '<div class="devloop-qa-media-actions">' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-copy-md-btn" data-path="' + esc(art.path) + '" data-name="' + esc(art.name) + '">Copy MD</button>' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-open-finder-btn" data-path="' + esc(art.path) + '">Reveal</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="devloop-video-wrap">' +
+              '<video src="' + fileUrl + '" controls preload="metadata" style="max-width: 100%; border-radius: 4px;"></video>' +
+            '</div>' +
+          '</div>';
+      } else {
+        html +=
+          '<div class="devloop-qa-media-card image-card">' +
+            '<div class="devloop-qa-media-head">' +
+              '<div class="devloop-qa-media-title">' +
+                '<span class="devloop-media-icon">🖼️</span>' +
+                '<span class="devloop-media-name" title="' + esc(art.path) + '">' + esc(art.name) + '</span>' +
+                roleBadge +
+              '</div>' +
+              '<div class="devloop-qa-media-actions">' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-copy-md-btn" data-path="' + esc(art.path) + '" data-name="' + esc(art.name) + '">Copy MD</button>' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-open-finder-btn" data-path="' + esc(art.path) + '">Reveal</button>' +
+              '</div>' +
+            '</div>' +
+            '<div class="devloop-img-wrap">' +
+              '<img src="' + fileUrl + '" alt="' + esc(art.name) + '" style="max-width: 100%; max-height: 360px; border-radius: 4px; object-fit: contain;" />' +
+            '</div>' +
+          '</div>';
+      }
+    });
+
+    html +=
+        '</div>' +
+      '</div>';
+
+    return html;
+  }
+
+  function attachContentListeners(container, state) {
+    container.querySelectorAll('.devloop-doc-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        selectedDocPath = btn.dataset.docPath;
+        renderActiveView();
+      });
+    });
+
+    var resumeBtn = container.querySelector('.devloop-resume-btn');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', function () {
+        var taskId = activeTaskId();
+        resumeDevLoop(taskId);
+      });
+    }
+
+    var relaunchBtn = container.querySelector('.devloop-relaunch-btn');
+    if (relaunchBtn) {
+      relaunchBtn.addEventListener('click', function () {
+        var taskId = activeTaskId();
+        if (window.ActionModal && window.ActionModal.run && taskId) {
+          window.ActionModal.run(taskId, 'rest-of-the-owl');
+        }
+      });
+    }
+
+    var createPlanBtn = container.querySelector('.devloop-create-plan-btn');
+    if (createPlanBtn) {
+      createPlanBtn.addEventListener('click', function () {
+        if (window.ActionModal && window.ActionModal.run && activeTaskId()) {
+          window.ActionModal.run(activeTaskId(), 'plan');
+        }
+      });
+    }
+
+    var prLink = container.querySelector('.devloop-pr-link');
+    if (prLink) {
+      prLink.addEventListener('click', function (e) {
+        e.preventDefault();
+        var url = prLink.dataset.url;
+        if (url && window.klaus && window.klaus.gh) window.klaus.gh.openExternal(url);
+      });
+    }
+
+    container.querySelectorAll('.devloop-copy-md-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var name = btn.dataset.name || 'screenshot';
+        var filePath = btn.dataset.path || '';
+        var mdSnippet = '![' + name + '](' + filePath + ')';
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(mdSnippet);
+          var origText = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function () { btn.textContent = origText; }, 1500);
+        }
+      });
+    });
+
+    container.querySelectorAll('.devloop-open-finder-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var filePath = btn.dataset.path;
+        if (filePath && window.klaus && window.klaus.fs && window.klaus.fs.revealInFolder) {
+          window.klaus.fs.revealInFolder(filePath);
+        } else if (filePath && window.klaus && window.klaus.skills && window.klaus.skills.openSkillFile) {
+          window.klaus.skills.openSkillFile(filePath);
+        }
+      });
+    });
+
+    var mergeBtn = container.querySelector('#btn-devloop-merge');
+    if (mergeBtn) {
+      mergeBtn.addEventListener('click', function () {
+        var prBtn = document.getElementById('btn-pr-merge');
+        if (prBtn && !prBtn.disabled) {
+          prBtn.click();
+        } else {
+          var prTab = document.querySelector('#diff-tabs .diff-tab[data-tab="pr"]');
+          if (prTab) prTab.click();
+        }
+      });
+    }
+
+    var docBodyEl = container.querySelector('.devloop-doc-body');
+    if (docBodyEl) {
+      if (window.MarkdownPreview && window.MarkdownPreview.attachLinkInterceptor) {
+        window.MarkdownPreview.attachLinkInterceptor(docBodyEl);
+      }
+      enhanceTaskItems(docBodyEl);
+    }
+  }
+
+  function enhanceTaskItems(rootEl) {
+    if (!rootEl) return;
+    rootEl.querySelectorAll('li').forEach(function (li) {
+      var first = li.firstChild;
+      if (!first || first.nodeType !== 3) return;
+      var m = first.nodeValue.match(/^\s*\[([ xX✓])\]\s+/);
+      if (!m) return;
+      var checked = m[1].toLowerCase() === 'x' || m[1] === '✓';
+      first.nodeValue = first.nodeValue.slice(m[0].length);
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.disabled = true;
+      cb.checked = checked;
+      li.classList.add('plan-task');
+      if (checked) li.classList.add('is-done');
+      li.insertBefore(cb, first);
+    });
+  }
+
+  function renderMiniHud(hostEl, taskId) {
+    if (!hostEl) return;
+    var state = getOrCreateState(taskId, 'Active Dev Loop');
+
+    var minihud = hostEl.querySelector('.terminal-devloop-minihud');
+    if (!minihud) {
+      minihud = document.createElement('div');
+      minihud.className = 'terminal-devloop-minihud';
+      hostEl.insertBefore(minihud, hostEl.firstChild);
+    }
+    minihud.style.display = 'flex';
+
+    var currentPhaseObj = PHASES.find(function (p) { return p.id === state.currentPhase; }) || PHASES[0];
+
+    var dotsHtml = PHASES.map(function (p) {
+      var pState = state.phaseStatuses[p.id] || { status: 'pending' };
+      var dotCls = pState.status;
+      var dotText = dotCls === 'completed' ? '✓' : (p.id === state.currentPhase ? p.id : '○');
+      return '<span class="minihud-dot ' + dotCls + '" title="Phase ' + p.id + ': ' + AppUtils.escHtml(p.name) + '">' + dotText + '</span>';
+    }).join('<span class="minihud-connector"></span>');
+
+    minihud.innerHTML =
+      '<div class="minihud-label">' +
+        '<span class="minihud-icon">🦉</span>' +
+        '<span class="minihud-phase">Phase ' + state.currentPhase + '/9: ' + AppUtils.escHtml(currentPhaseObj.shortName) + '</span>' +
+      '</div>' +
+      '<div class="minihud-stepper">' + dotsHtml + '</div>' +
+      '<button class="minihud-expand-btn" title="Open full Dev Loop details" type="button">Details ↗</button>';
+
+    var expandBtn = minihud.querySelector('.minihud-expand-btn');
+    if (expandBtn) {
+      expandBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        switchDiffTabToDevLoop();
+      });
+    }
+  }
+
+  function updateMiniHuds(taskId) {
+    if (!taskId) return;
+    // getState, not getOrCreate: a terminal with no dev loop must not sprout
+    // one just because the panel repainted.
+    if (!getState(taskId)) return;
+    var task = AppState.tasks.get(taskId);
+    if (task && task.container) {
+      renderMiniHud(task.container, taskId);
+    }
+  }
+
+  return {
+    init: init,
+    load: load,
+    startDevLoop: startDevLoop,
+    resumeDevLoop: resumeDevLoop,
+    getState: getState,
+    feedTerminalData: feedTerminalData,
+    renderActiveView: renderActiveView,
+    renderMiniHud: renderMiniHud,
+    setWorktree: setWorktree,
+    switchDiffTabToDevLoop: switchDiffTabToDevLoop,
+  };
+})();

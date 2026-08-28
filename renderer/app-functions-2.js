@@ -277,6 +277,11 @@ window.App = window.App || {};
     if (AppState.activeTaskId) {
       var task = App.tasks.get(AppState.activeTaskId);
       if (task) {
+        commands.push({ label: 'Run Full Dev Loop (Rest of the Owl)…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'rest-of-the-owl'); } });
+        commands.push({ label: 'Grant Agent Permissions…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'grant-permissions'); } });
+        commands.push({ label: 'Plan a Task…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'plan'); } });
+        commands.push({ label: 'Debug an Issue…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'debug'); } });
+        commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
         commands.push({ label: 'Search in Terminal', action: function () { SearchBar.open(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); App.btnDiff.classList.add('active'); } });
@@ -301,6 +306,13 @@ window.App = window.App || {};
       }
     });
 
+    commands.push({ label: 'Run Full Dev Loop (Rest of the Owl)…', action: function () {
+      if (AppState.activeTaskId && window.ActionModal) {
+        window.ActionModal.run(AppState.activeTaskId, 'rest-of-the-owl');
+      } else {
+        App.btnNewTask.click();
+      }
+    }});
     commands.push({ label: 'Review Pull Request / Merge Request…', action: function () { App.showPrPicker(); } });
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
@@ -918,7 +930,48 @@ window.App = window.App || {};
       if (nameCollision) {
         return App.failValidation('Two repos in this session share the folder name "' + nameCollision + '" — they would collide in the session folder. Rename one clone or create them as separate sessions.', App.multiRepoRow);
       }
+      var isDevLoop = App.modalDevLoopCheck && App.modalDevLoopCheck.checked;
+      var devLoopTask = (App.modalDevLoopPrompt && App.modalDevLoopPrompt.value.trim()) || '';
+      var grantPermissionsCheck = document.getElementById('modal-permissions-check');
+      var grantPermissions = grantPermissionsCheck ? grantPermissionsCheck.checked : false;
       var name = App.modalInput.value.trim();
+
+      if (isDevLoop && !name && devLoopTask) {
+        var issueMatch = devLoopTask.match(/(?:issues|pull|merge_requests)[/](\d+)/i);
+        if (issueMatch) {
+          name = 'issue-' + issueMatch[1];
+        } else {
+          name = devLoopTask.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        }
+      }
+
+      var initialPrompt = undefined;
+      if (isDevLoop && devLoopTask) {
+        var skillName = (window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill)
+          ? await window.klaus.skills.resolveSkill(AppState.repoPath, App.selectedMode, 'rest-of-the-owl')
+          : null;
+        var permSkill = grantPermissions && (window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill)
+          ? await window.klaus.skills.resolveSkill(AppState.repoPath, App.selectedMode, 'grant-permissions')
+          : null;
+
+        var prefix = permSkill
+          ? ('Use your "' + permSkill + '" skill first to grant routine dev permissions so you can work unprompted, then use')
+          : 'Use';
+
+        if (skillName) {
+          initialPrompt = prefix + ' your "' + skillName + '" skill to plan and implement this task end-to-end:\n\n' + devLoopTask;
+        } else {
+          initialPrompt = prefix + ' your rest-of-the-owl skill to plan and implement this task end-to-end:\n\n' + devLoopTask;
+        }
+      } else if (grantPermissions) {
+        var singlePermSkill = (window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill)
+          ? await window.klaus.skills.resolveSkill(AppState.repoPath, App.selectedMode, 'grant-permissions')
+          : null;
+        if (singlePermSkill) {
+          initialPrompt = 'Use your "' + singlePermSkill + '" skill to configure the permissions allow-list for routine development in this repo.';
+        }
+      }
+
       if (name) {
         // The branch name is sanitized to [a-zA-Z0-9_-]; a name with no
         // letters/digits would collapse to an empty branch and fail in git.
@@ -936,6 +989,8 @@ window.App = window.App || {};
           App.selectedBaseBranch || null,
           undefined,
           sessionRepoPaths,
+          initialPrompt,
+          grantPermissions,
         );
       } else if (App.baseBranchUserPicked && App.selectedBaseBranch) {
         // No name, but the user *deliberately* picked a branch: check it out
@@ -1066,6 +1121,9 @@ window.App = window.App || {};
     if (!newWindowIds) {
       App.addTaskToUI(result);
       App.switchToTask(result.id);
+      if (isDevLoop && result && result.id && window.DevLoopPanel && window.DevLoopPanel.startDevLoop) {
+        window.DevLoopPanel.startDevLoop(result.id, devLoopTask);
+      }
     }
 
     var flushResumedExtras = function () {

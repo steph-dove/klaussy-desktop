@@ -679,7 +679,7 @@ function clearIdleTimer(inst) {
 
 // ---- PTY lifecycle ----
 
-function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber, initialPrompt, freshenWarning) {
+function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extraEnv, prNumber, initialPrompt, freshenWarning, resumeLatest) {
   const id = nextId++;
   const userShell = defaultShell();
   extraEnv = sanitizeExtraEnv(extraEnv);
@@ -714,7 +714,15 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     const model = nemProfile ? (nemProfile.model || '') : ((config.agentModel || {})[provider.id] || '');
     const sessionDirs = sessionSiblingWorktrees(worktreePath);
     const notesDir = spawnEnv.KLAUSSY_SESSION_NOTES_DIR;
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId, trust: consent.trust, model, sessionDirs, notesDir, profile: nemProfile });
+    agentCmd = provider.buildInteractiveCmd(bin, {
+      resumeSessionId,
+      resumeLatest: resumeLatest !== undefined ? resumeLatest : (!resumeSessionId && resumeSessionId !== null && resumeSessionId !== undefined),
+      trust: consent.trust,
+      model,
+      sessionDirs,
+      notesDir,
+      profile: nemProfile,
+    });
     // Cross-agent resume handoff: seed the incoming agent with a brief distilled
     // from the prior (different-agent) session, passed at spawn rather than
     // typed in (see util/agent-prompt + state/session-handoff).

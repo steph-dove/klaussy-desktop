@@ -71,8 +71,9 @@ contextBridge.exposeInMainWorld('klaus', {
 
   // ---- task: Task lifecycle, notify, notes, transcripts, dirty-worktree aggregator ----
   task: {
-    create: (name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos) =>
-      ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos }),
+    create: (name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos, initialPrompt, grantPermissions) =>
+      ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos, initialPrompt, grantPermissions }),
+    grantWorktreePermissions: (worktreePath) => ipcRenderer.invoke('grant-worktree-permissions', { worktreePath }),
     listBranches: (repoPath) => ipcRenderer.invoke('list-branches', { repoPath }),
     currentModel: (worktreePath, mode, taskId) => ipcRenderer.invoke('agent-current-model', { worktreePath, mode, taskId }),
     deleteSession: (worktreePaths) => ipcRenderer.invoke('delete-session', { worktreePaths }),
@@ -661,6 +662,8 @@ contextBridge.exposeInMainWorld('klaus', {
     listFiles: (worktreePath) => ipcRenderer.invoke('list-files', { worktreePath }),
     findPlanFile: (worktreePath) => ipcRenderer.invoke('find-plan-file', { worktreePath }),
     findDesignFile: (worktreePath) => ipcRenderer.invoke('find-design-file', { worktreePath }),
+    findQaMedia: (worktreePath) => ipcRenderer.invoke('find-qa-media', { worktreePath }),
+    devLoopEvidence: (worktreePath) => ipcRenderer.invoke('dev-loop-evidence', { worktreePath }),
     readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
       ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),
     searchFiles: (worktreePath, query, maxPerFile) =>
@@ -847,5 +850,14 @@ contextBridge.exposeInMainWorld('klaus', {
     remove: (agentId, scope, name) => ipcRenderer.invoke('mcp-remove', { agentId, scope, name }),
     status: () => ipcRenderer.invoke('mcp-status'),
     loginTerminal: (name) => ipcRenderer.invoke('mcp-login-terminal', { name }),
+  },
+
+  // ---- sessionContext: OKF uncommitted session notes & cross-agent context sharing ----
+  sessionContext: {
+    listNotes: (worktreePath) => ipcRenderer.invoke('session-context:list-notes', { worktreePath }),
+    addNote: (worktreePath, noteData) => ipcRenderer.invoke('session-context:add-note', { worktreePath, noteData }),
+    getSummary: (worktreePath) => ipcRenderer.invoke('session-context:get-summary', { worktreePath }),
+    captureNow: (worktreePath) => ipcRenderer.invoke('session-context:capture-now', { worktreePath }),
+    clearNotes: (worktreePath) => ipcRenderer.invoke('session-context:clear-notes', { worktreePath }),
   },
 });

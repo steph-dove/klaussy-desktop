@@ -1657,7 +1657,7 @@
      of them. The bar scrolls instead when the panel is dragged narrow. */
   flex: 0 0 auto;
   white-space: nowrap;
-  padding: 8px 7px 10px;
+  padding: 8px 6px 10px;
   font-size: 12px;
   font-family: var(--font-sans);
   font-weight: 500;

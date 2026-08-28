@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: klaussy-qa:; media-src 'self' klaussy-qa:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
   <title>Klaussy</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="styles/04-editor.css">
   <link rel="stylesheet" href="styles/05-pr-review-surface.css">
   <link rel="stylesheet" href="styles/06-searchable-select.css">
+  <link rel="stylesheet" href="styles/07-dev-loop.css">
 </head>
 <body>
   <!-- Main app -->
@@ -184,6 +185,22 @@
             </div>
             
             <div class="empty-dashboard-grid">
+              <div class="dashboard-card" id="card-dev-loop">
+                <div class="card-icon" style="color: var(--accent, #a78bfa);">
+                  <span style="font-size: 20px; line-height: 1;" aria-hidden="true">🦉</span>
+                </div>
+                <div class="card-content">
+                  <div style="display: flex; align-items: center; gap: 6px;">
+                    <h3 id="card-dev-loop-title">Full Dev Loop</h3>
+                    <span class="dashboard-card-pill">Rest of the Owl</span>
+                  </div>
+                  <p id="card-dev-loop-desc">Plan ➔ Code ➔ Local Review ➔ QA &amp; Video ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green.</p>
+                </div>
+                <div class="card-arrow">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
+                </div>
+              </div>
+
               <div class="dashboard-card" id="card-new-session">
                 <div class="card-icon">
                   <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -235,23 +252,6 @@
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
                 </div>
               </div>
-
-              <div class="dashboard-card" id="card-manage-sessions">
-                <div class="card-icon">
-                  <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="2.5" y1="12" x2="13.5" y2="12"></line>
-                    <line x1="2.5" y1="8" x2="13.5" y2="8"></line>
-                    <line x1="2.5" y1="4" x2="13.5" y2="4"></line>
-                  </svg>
-                </div>
-                <div class="card-content">
-                  <h3>Manage Sessions</h3>
-                  <p>Review active/inactive sessions, delete worktrees, and branches.</p>
-                </div>
-                <div class="card-arrow">
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 3 11 8 6 13"></polyline></svg>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -284,6 +284,7 @@
           </div>
         </div>
         <div id="diff-tabs">
+          <button class="diff-tab" data-tab="devloop" title="🦉 Full Dev Loop (Rest of the Owl): Plan ➔ Code ➔ Local Review ➔ QA &amp; Video ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green">🦉 Dev Loop</button>
           <button class="diff-tab" data-tab="plan">Plan</button>
           <button class="diff-tab active" data-tab="changes">Changes</button>
           <button class="diff-tab" data-tab="pr">PR</button>
@@ -442,6 +443,9 @@
           </div>
         </div>
 
+        <!-- Dev Loop tab content: 9-phase progress stepper, QA video gallery, and merge gate -->
+        <div id="devloop-tab-content" style="display: none;"></div>
+
         <!-- Search tab content (C3) -->
         <div id="search-tab-content" style="display: none;">
           <div id="project-search-bar">
@@ -491,6 +495,27 @@
         </div>
         <p>Name the session (creates a branch with that name off each repo's selected base).</p>
         <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
+
+        <div id="modal-devloop-section" class="modal-devloop-section">
+          <label id="modal-devloop-toggle" class="modal-devloop-toggle">
+            <input type="checkbox" id="modal-devloop-check">
+            <span class="modal-devloop-title">🦉 Run Full Dev Loop (Rest of the Owl)</span>
+            <span class="modal-devloop-tag">Plan ➔ Code ➔ QA ➔ PR ➔ CI Green</span>
+          </label>
+          <div id="modal-devloop-fields" style="display: none;">
+            <p class="modal-devloop-sub">The Owl executes all 9 phases autonomously: Plan ➔ Code ➔ Review ➔ QA &amp; Screen Recording ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green. Provide an issue link or describe what to build:</p>
+            <textarea id="modal-devloop-prompt" class="modal-devloop-textarea" rows="3" placeholder="e.g. https://github.com/org/repo/issues/123 or Describe the task requirements..."></textarea>
+          </div>
+        </div>
+
+        <div id="modal-permissions-section" class="modal-permissions-section">
+          <label id="modal-permissions-toggle" class="modal-permissions-toggle">
+            <input type="checkbox" id="modal-permissions-check" checked>
+            <span class="modal-permissions-title">🛡️ Grant Agent Permissions</span>
+            <span class="modal-permissions-tag">No Prompt Spam</span>
+          </label>
+          <p class="modal-permissions-sub">Auto-allows routine dev tools (reading/editing files, git, tests, lint, CLI) via <code>klaussy-grant-permissions</code> so you don't spam 'yes'.</p>
+        </div>
       </div>
 
       <!-- Existing worktree tab -->
@@ -609,6 +634,13 @@
         </div>
         <div id="plan-file-list"></div>
         <p class="plan-modal-hint">Any files or folders. Their paths are passed to the agent on submit, and the agent reads them directly.</p>
+      </div>
+
+      <div id="plan-modal-perm-row" class="plan-modal-perm-row">
+        <label id="plan-modal-perm-toggle" class="plan-modal-perm-toggle">
+          <input type="checkbox" id="plan-modal-grant-perms" checked>
+          <span>Allow agent permissions (uses <code>grant-permissions</code> allow-list so you don't spam 'yes')</span>
+        </label>
       </div>
 
       <div id="plan-modal-error"></div>
@@ -767,6 +799,8 @@
   <script src="diff-panel-diff.js"></script>
   <script src="pr-panel.js"></script>
   <script src="plan-panel.js"></script>
+  <script src="dev-loop-detect.js"></script>
+  <script src="dev-loop-panel.js"></script>
   <script src="conflict-panel.js"></script>
   <script src="file-browser.js"></script>
   <script src="history-panel.js"></script>

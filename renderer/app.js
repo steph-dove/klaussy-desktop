@@ -561,6 +561,7 @@ window.App = window.App || {};
     else if (tab === 'stash') App.loadStash(wt);
     else if (tab === 'search') App.doProjectSearch(wt);
     else if (tab === 'plan') { PlanPanel.setWorktree(wt); PlanPanel.load(); }
+    else if (tab === 'devloop') { DevLoopPanel.setWorktree(wt); DevLoopPanel.renderActiveView(); }
   };
 
   App.escHtml = AppUtils.escHtml;
@@ -1258,11 +1259,42 @@ window.App = window.App || {};
   // Empty-state CTA: "Add a worktree" opens the same modal as the sidebar's
   // `+` New Task button, whose Browse/drag/recents flow lets you pick a repo
   // even before any project is added. Empty-state dashboard card handlers:
+  var cardDevLoop = document.getElementById('card-dev-loop');
   var cardNewSession = document.getElementById('card-new-session');
   var cardOpenFolder = document.getElementById('card-open-folder');
   var cardReviewPr = document.getElementById('card-review-pr');
-  var cardManageSessions = document.getElementById('card-manage-sessions');
 
+  App.modalDevLoopCheck = document.getElementById('modal-devloop-check');
+  App.modalDevLoopFields = document.getElementById('modal-devloop-fields');
+  App.modalDevLoopPrompt = document.getElementById('modal-devloop-prompt');
+  App.modalPermissionsCheck = document.getElementById('modal-permissions-check');
+
+  if (App.modalDevLoopCheck && App.modalDevLoopFields) {
+    App.modalDevLoopCheck.addEventListener('change', function () {
+      var isChecked = App.modalDevLoopCheck.checked;
+      App.modalDevLoopFields.style.display = isChecked ? 'block' : 'none';
+      if (isChecked && App.modalDevLoopPrompt) {
+        setTimeout(function () { App.modalDevLoopPrompt.focus(); }, 50);
+        if (App.modalCreate) App.modalCreate.textContent = 'Start Full Dev Loop';
+      } else {
+        if (App.modalCreate) App.modalCreate.textContent = 'Create';
+      }
+    });
+  }
+
+  if (cardDevLoop) {
+    cardDevLoop.addEventListener('click', function () {
+      if (AppState.activeTaskId && window.ActionModal && window.ActionModal.run) {
+        window.ActionModal.run(AppState.activeTaskId, 'rest-of-the-owl');
+      } else {
+        App.btnNewTask.click();
+        if (App.modalDevLoopCheck) {
+          App.modalDevLoopCheck.checked = true;
+          App.modalDevLoopCheck.dispatchEvent(new Event('change'));
+        }
+      }
+    });
+  }
   if (cardNewSession) {
     cardNewSession.addEventListener('click', function () {
       App.btnNewTask.click();
@@ -1277,12 +1309,6 @@ window.App = window.App || {};
     cardReviewPr.addEventListener('click', function () {
       var btnReview = document.getElementById('btn-review-pr');
       if (btnReview) btnReview.click();
-    });
-  }
-  if (cardManageSessions) {
-    cardManageSessions.addEventListener('click', function () {
-      var btnManage = document.getElementById('btn-manage-sessions');
-      if (btnManage) btnManage.click();
     });
   }
   // Empty state stays in sync with project changes — the project-switcher

@@ -2904,7 +2904,7 @@ body.task-branchless #ahead-behind {
 /* Floating Broadcast Command Bar */
 #broadcast-bar {
   position: absolute;
-  bottom: 20px;
+  bottom: 6px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2915,7 +2915,7 @@ body.task-branchless #ahead-behind {
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   border-radius: 9999px;
-  padding: 8px 16px;
+  padding: 5px 14px;
   width: 90%;
   max-width: 650px;
   z-index: 1000;
@@ -2925,7 +2925,7 @@ body.task-branchless #ahead-behind {
 
 #broadcast-bar.hidden {
   opacity: 0;
-  transform: translate(-50%, 20px);
+  transform: translate(-50%, 15px);
   pointer-events: none;
 }
 
@@ -3012,7 +3012,7 @@ body.task-branchless #ahead-behind {
 /* Collapsed launcher — always visible inside a session, click to expand */
 #broadcast-toggle {
   position: absolute;
-  bottom: 20px;
+  bottom: 6px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -3023,7 +3023,7 @@ body.task-branchless #ahead-behind {
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.03);
   border-radius: 9999px;
-  padding: 8px 18px;
+  padding: 5px 14px;
   /* Dark glass background is theme-independent, so keep the label light —
      var(--text) turns dark in the light preset and vanishes into the pill. */
   color: #e8e8ee;
@@ -3044,6 +3044,6 @@ body.task-branchless #ahead-behind {
 
 #broadcast-toggle.hidden {
   opacity: 0;
-  transform: translate(-50%, 20px);
+  transform: translate(-50%, 15px);
   pointer-events: none;
 }

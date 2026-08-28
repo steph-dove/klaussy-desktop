@@ -274,12 +274,31 @@ ipcMain.handle('resolve-skill', (_event, { worktreePath, agentId, kind } = {}) =
   const suffix = '-' + kind;
   try {
     const skillsDir = path.join(worktreePath, ...rel);
-    const matches = fs.readdirSync(skillsDir, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && e.name.endsWith(suffix)
+    const entries = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && (e.name === kind || e.name.endsWith(suffix))
         && fs.existsSync(path.join(skillsDir, e.name, 'SKILL.md')))
-      .map((e) => e.name)
-      .sort((a, b) => a.length - b.length);
-    return matches[0] || null;
+      .map((e) => e.name);
+
+    if (entries.includes(kind)) return kind;
+
+    // Prefer this repo's own `<repo>-<kind>` skill (e.g. klaussy-desktop-review).
+    const baseDir = path.basename(worktreePath).toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const exactName = `${baseDir}-${kind}`;
+    if (entries.includes(exactName)) return exactName;
+
+    // Last segment must be exactly <kind>: `<repo>-review`, not `<repo>-feedback-review`.
+    const exactSuffixMatches = entries.filter((name) => {
+      const parts = name.split('-');
+      return parts.length >= 2 && parts[parts.length - 1] === kind;
+    });
+
+    if (exactSuffixMatches.length > 0) {
+      exactSuffixMatches.sort((a, b) => a.length - b.length);
+      return exactSuffixMatches[0];
+    }
+
+    entries.sort((a, b) => a.length - b.length);
+    return entries[0] || null;
   } catch { /* no skills dir for this agent — not generated yet */ }
   return null;
 });

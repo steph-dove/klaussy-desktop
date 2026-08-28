@@ -120,7 +120,7 @@ window.ActionModal = (function () {
     '',
     '## Phase 5 — Approval gate',
     '',
-    'Still making no edits. Write the chosen plan to a plan file (any filename containing "plan", e.g. `plan.md`), and output the complete plan in your response so the user can see it immediately. Stop here and wait — do NOT run the `ExitPlanMode` command or make any edits yet. Ask the user to confirm the plan. Once the user replies to approve, run the terminal command `ExitPlanMode` (a Klaussy CLI on your PATH — works from any agent) to register the plan with the desktop app, and then proceed to Phase 6.',
+    'Still making no edits. Write the chosen plan to a plan file (e.g. `plan.md`, `design.md`) and/or save it as an uncommitted OKF session note in `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-plan.md` (with YAML frontmatter `type: session-note`, `tags: [plan, design]`), and output the complete plan in your response so the user can see it immediately. Stop here and wait — do NOT run the `ExitPlanMode` command or make any edits yet. Ask the user to confirm the plan. Once the user replies to approve, run the terminal command `ExitPlanMode` (a Klaussy CLI on your PATH — works from any agent) to register the plan with the desktop app, and then proceed to Phase 6.',
     '',
     '## Phase 6 — Implementation',
     '',
@@ -199,11 +199,82 @@ window.ActionModal = (function () {
     '',
   ].join('\n');
 
+  var REST_OF_THE_OWL_PROMPT = [
+    'You are executing the complete end-to-end development loop ("rest of the owl") for this task.',
+    'It does EVERYTHING except merge — the human keeps the merge button.',
+    '',
+    'Follow these 9 phases methodically in order, keeping a running checklist with TodoWrite / task tracking:',
+    '',
+    '## Phase 1 — Plan',
+    'Restate the ask, check ambiguities, and clarify requirements with the user before implementing. Produce a concrete build checklist.',
+    'Save the implementation plan as an uncommitted OKF session note in `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-plan.md` (or `%KLAUSSY_SESSION_NOTES_DIR%\\<agent-name>-plan.md` on Windows, or `plan.md` in worktree root) following the Open Knowledge Format protocol (YAML frontmatter with `type: session-note`, `tags: [plan, design, devloop]`, `generated: { by: <provider-id>/<agent-name>, at: <ISO-8601 timestamp> }`).',
+    '',
+    '## Phase 2 — Implement',
+    'Implement the solution in small batches using test-driven development where appropriate, keeping tests and linter green. Record any breaking changes or shared context notes in `$KLAUSSY_SESSION_NOTES_DIR/` (or `%KLAUSSY_SESSION_NOTES_DIR%` on Windows).',
+    '',
+    '## Phase 3 — Local review and fix',
+    'Review the working diff (`git diff main...HEAD`), fix all valid findings, and perform a self-review pass so the diff reads cleanly.',
+    '',
+    '## Phase 4 — QA the change',
+    'Run right-sized QA appropriate for this change:',
+    '- **UI / Frontend / Visual changes**:',
+    '  - Capture before and after screenshots for visual comparison.',
+    '  - Record a full-flow video (.mp4) showing the complete interaction. The video MUST showcase responsive UI behaviors by resizing (growing and shrinking) the window/viewport.',
+    '  - Save all media in your user Downloads directory under `klaussy-qa-<branch>/` (e.g. `~/Downloads/klaussy-qa-<branch>/` on macOS/Linux or `%USERPROFILE%\\Downloads\\klaussy-qa-<branch>\\` on Windows).',
+    '  - Programmatically upload QA media assets (e.g. using `gh release upload` / `gh api` assets endpoint or image host) so you have direct asset URLs ready to attach to the PR description without requiring manual drag-and-drop.',
+    '- **CLI / Backend changes**:',
+    '  - Run the relevant test suites, linters, and capture execution output.',
+    '',
+    '## Phase 5 — Open the PR (humanized)',
+    'Commit on the branch this session is already on — Klaussy created it for this task, so do not cut another one; branch only if you find yourself on `main`/`master`. Then write a clear humanized PR description summarizing changes with visual proof, and open the PR with `gh pr create` / `glab mr create`:',
+    '- **For Frontend / UI PRs**:',
+    '  - Include a **Before vs. After** Markdown table in the PR description:',
+    '    ```markdown',
+    '    ### Before / After Comparison',
+    '    | Before | After |',
+    '    | :---: | :---: |',
+    '    | ![Before](<before-asset-url>) | ![After](<after-asset-url>) |',
+    '    ```',
+    '  - Embed or link the full-flow responsive walkthrough video (.mp4).',
+    '- **For Backend / CLI PRs**:',
+    '  - Include execution commands, test coverage summary, and CLI output snippets.',
+    '',
+    '## Phase 6 — Re-review the PR and fix',
+    'Review the published PR diff for integration issues, commit and push any fixes.',
+    '',
+    '## Phase 7 — Poll CI and fix failures',
+    'Monitor CI checks via `gh pr checks`. If a check fails, pull logs, diagnose the real root cause, fix, commit, and push until green.',
+    '',
+    '## Phase 8 — Poll for code review and resolve',
+    'Poll for review comments, apply fixes, draft replies, and resolve threads.',
+    '',
+    '## Phase 9 — Land the owl (but don\'t merge)',
+    'When CI is green and review threads are resolved, print the completion summary with the PR link, check status, and QA artifact paths. Leave the final merge to the human.',
+    '',
+    '---',
+    '',
+    '## Task',
+    '',
+    '{{TASK}}',
+  ].join('\n');
+
   // Per-action config — title shown at the top of the modal, the submission
   // builder for the new agent tab, and a human label for the tab itself.
   // Review runs a fixed multi-phase prompt and skips the modal entirely, so
   // it has no entry here.
   var ACTIONS = {
+    'rest-of-the-owl': {
+      label: 'Dev Loop',
+      title: '🦉 Full Dev Loop (Rest of the Owl)',
+      submitLabel: 'Start Full Dev Loop',
+      hint: '<strong>What is the Owl?</strong> The Owl represents the complete autonomous development loop ("Draw the rest of the owl"). It takes your issue link or task description through all 9 phases: <em>Plan ➔ Implement with TDD ➔ Local Review ➔ QA &amp; Video ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green ➔ Human Merge Gate</em>.',
+      skillSeed: function (skillName, content) {
+        return 'Use your "' + skillName + '" skill to plan and implement this task end-to-end:\n\n' + content;
+      },
+      buildSubmission: function (content) {
+        return REST_OF_THE_OWL_PROMPT.replace('{{TASK}}', content);
+      },
+    },
     plan: {
       label: 'Plan',
       title: 'Plan a task',
@@ -217,6 +288,18 @@ window.ActionModal = (function () {
       // Fallback when the repo has no plan skill: the self-contained prompt.
       buildSubmission: function (content) {
         return PLAN_PROMPT.replace('{{TASK}}', content);
+      },
+    },
+    'grant-permissions': {
+      label: 'Permissions',
+      title: '🛡️ Grant Agent Permissions',
+      submitLabel: 'Grant Permissions',
+      hint: '<strong>Grant Agent Permissions</strong>: Configures a curated allow-list via <code>klaussy-grant-permissions</code> for reading, editing files, running tests, linters, git, and forge CLI while keeping secret files denied, eliminating repetitive "yes" prompts.',
+      skillSeed: function (skillName, content) {
+        return 'Use your "' + skillName + '" skill to configure the permissions allow-list for this repo' + (content ? (':\n\n' + content) : '.');
+      },
+      buildSubmission: function (content) {
+        return 'Configure your permissions allow-list for routine development work (files, git, tests, lint, forge CLI) so routine commands run unprompted.' + (content ? ('\n\n' + content) : '');
       },
     },
     debug: {
@@ -699,9 +782,12 @@ window.ActionModal = (function () {
     var cfg = ACTIONS[action];
     reset(action);
     var task = AppState.tasks.get(taskId);
-    titleEl.textContent = task && task.name ? (cfg.title + ' — ' + task.name) : cfg.title;
     if (subHint) {
       subHint.innerHTML = cfg.hint;
+    }
+    var permRow = document.getElementById('plan-modal-perm-row');
+    if (permRow) {
+      permRow.style.display = (action === 'rest-of-the-owl' || action === 'plan') ? 'block' : 'none';
     }
     overlay.style.display = 'flex';
     setTimeout(function () { textarea.focus(); }, 0);
@@ -876,10 +962,31 @@ window.ActionModal = (function () {
     submitBtn.disabled = true;
     submitBtn.textContent = 'Starting…';
     try {
+      var grantPermsEl = document.getElementById('plan-modal-grant-perms');
+      var grantPerms = grantPermsEl ? grantPermsEl.checked : true;
+      var task = AppState.tasks.get(currentTaskId);
+      if (grantPerms && task && task.worktreePath && window.klaus && window.klaus.task && window.klaus.task.grantWorktreePermissions) {
+        try {
+          await window.klaus.task.grantWorktreePermissions(task.worktreePath);
+        } catch (_e) {}
+      }
+
       // Prefer the repo's own <repo>-<action> skill (agent-neutral seed); fall
       // back to the inlined prompt when the agent has no such skill.
       var skillName = cfg.skillSeed ? await resolveSkillFor(currentTaskId, currentAction) : null;
-      var command = skillName ? cfg.skillSeed(skillName, content) : cfg.buildSubmission(content);
+      var permSkill = (grantPerms && currentAction === 'rest-of-the-owl') ? await resolveSkillFor(currentTaskId, 'grant-permissions') : null;
+
+      var command;
+      if (skillName) {
+        if (permSkill) {
+          command = 'Use your "' + permSkill + '" skill first to grant routine dev permissions so you can work unprompted, then use your "' + skillName + '" skill to plan and implement this task end-to-end:\n\n' + content;
+        } else {
+          command = cfg.skillSeed(skillName, content);
+        }
+      } else {
+        command = cfg.buildSubmission(content);
+      }
+
       // Multi-repo session awareness first (the full space), then this repo's
       // conventions/graph context.
       var sessionCtx = await sessionContextFor(currentTaskId);
@@ -894,6 +1001,9 @@ window.ActionModal = (function () {
         submitBtn.disabled = false;
         submitBtn.textContent = cfg.submitLabel;
         return;
+      }
+      if (currentAction === 'rest-of-the-owl' && window.DevLoopPanel && window.DevLoopPanel.startDevLoop) {
+        window.DevLoopPanel.startDevLoop(currentTaskId, content);
       }
       close();
     } catch (err) {
