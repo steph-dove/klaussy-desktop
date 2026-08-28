@@ -234,3 +234,29 @@ test('isInside tolerates a trailing separator and non-normalised input', () => {
   assert.equal(isInside(wt + path.sep, path.join(wt, 'qa', 'a.png')), true);
   assert.equal(isInside(wt, path.join(wt, 'sub', '..', 'qa', 'b.png')), true);
 });
+
+test('findQaMediaFiles: discovers non-png image and video formats (.gif, .jpg, .jpeg, .webp, .avif, .webm)', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-qa-formats-'));
+  const worktreeDir = makeRepo(path.join(tempRoot, 'my-repo'), 'feat-formats');
+  const downloadsDir = downloads('klaussy-qa-feat-formats');
+
+  fs.mkdirSync(downloadsDir, { recursive: true });
+  fs.writeFileSync(path.join(downloadsDir, '01-hero.jpg'), 'jpg-data');
+  fs.writeFileSync(path.join(downloadsDir, '02-flow.gif'), 'gif-data');
+  fs.writeFileSync(path.join(downloadsDir, '03-preview.webp'), 'webp-data');
+  fs.writeFileSync(path.join(downloadsDir, '04-demo.webm'), 'webm-data');
+  fs.writeFileSync(path.join(downloadsDir, '05-modern.avif'), 'avif-data');
+
+  try {
+    const results = await findQaMediaFiles(worktreeDir);
+    const names = results.map((r) => r.name).sort();
+    assert.deepEqual(names, ['01-hero.jpg', '02-flow.gif', '03-preview.webp', '04-demo.webm', '05-modern.avif']);
+
+    assert.equal(results.find((r) => r.name === '04-demo.webm').type, 'video');
+    assert.equal(results.find((r) => r.name === '01-hero.jpg').type, 'image');
+    assert.equal(results.find((r) => r.name === '02-flow.gif').type, 'image');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(downloadsDir, { recursive: true, force: true });
+  }
+});

@@ -492,8 +492,8 @@ window.DevLoopPanel = (function () {
         var allFiles = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
         allFiles.forEach(function (f) {
           var rel = typeof f === 'string' ? f : (f.path || f.name || '');
-          var isVideo = /\.(mp4|webm|mov)$/i.test(rel);
-          var isImg = /\.(png|jpg|jpeg|webp)$/i.test(rel);
+          var isVideo = /\.(mp4|webm|mov|m4v|mkv)$/i.test(rel);
+          var isImg = /\.(png|jpg|jpeg|webp|gif|avif|bmp)$/i.test(rel);
           var isQaDir = /^(?:e2e-artifacts|e2e-screenshots|qa-artifacts|qa-screenshots|screenshots|qa|e2e\/screenshots|test-results|playwright-report|cypress\/screenshots|cypress\/videos|tmp\/qa|tmp\/screenshots)\//i.test(rel);
           var isQaName = /(?:^|[\\/._-])(?:screenshot|screen-shot|screen_shot|qa[-_]|test[-_]shot|recording)(?:[\\/._-]|$)/i.test(rel);
           var isNonAsset = !/(?:node_modules|\.git|src[\\/]assets|public[\\/]|styles[\\/]|icons[\\/]|renderer[\\/])/i.test(rel);
@@ -516,9 +516,17 @@ window.DevLoopPanel = (function () {
           }
         });
       }
-      // Only the scanner mints a servable URL, so anything it didn't resolve
-      // would render as a broken tile.
-      cachedQaMedia = qaMedia.filter(function (m) { return m && m.url; });
+      
+      // Ensure all media items have a servable klaussy-qa: URL
+      qaMedia.forEach(function (m) {
+        if (!m.url && m.path) {
+          try {
+            var b64 = btoa(unescape(encodeURIComponent(m.path))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            m.url = 'klaussy-qa://media/' + b64;
+          } catch (e) {}
+        }
+      });
+      cachedQaMedia = qaMedia.filter(function (m) { return m && (m.url || m.path); });
 
       if (window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
@@ -663,8 +671,13 @@ window.DevLoopPanel = (function () {
 
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
       tab.addEventListener('click', function () {
+        var prevSub = currentSubTab;
         currentSubTab = tab.dataset.sub;
-        renderActiveView();
+        if ((currentSubTab === 'qa' || currentSubTab === 'design') && currentWorktreePath) {
+          load(currentWorktreePath);
+        } else {
+          renderActiveView();
+        }
       });
     });
 
@@ -1047,6 +1060,21 @@ window.DevLoopPanel = (function () {
     }
   }
 
+  function setQaMedia(media) {
+    cachedQaMedia = Array.isArray(media) ? media : [];
+    qaMediaError = null;
+    qaMediaWarning = null;
+    renderActiveView();
+  }
+
+  function setDocs(docs) {
+    cachedDocs = Array.isArray(docs) ? docs : [];
+    if (cachedDocs.length > 0 && (!selectedDocPath || !cachedDocs.some(function (d) { return d.path === selectedDocPath; }))) {
+      selectedDocPath = cachedDocs[0].path;
+    }
+    renderActiveView();
+  }
+
   return {
     init: init,
     load: load,
@@ -1058,5 +1086,7 @@ window.DevLoopPanel = (function () {
     renderMiniHud: renderMiniHud,
     setWorktree: setWorktree,
     switchDiffTabToDevLoop: switchDiffTabToDevLoop,
+    setQaMedia: setQaMedia,
+    setDocs: setDocs,
   };
 })();

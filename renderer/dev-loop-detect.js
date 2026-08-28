@@ -27,9 +27,9 @@
   ];
 
   var PR_URL = /https:\/\/(?:github\.com|gitlab\.com)\/([^\s\n\r/]+)\/([^\s\n\r/]+)\/(?:pull|merge_requests)\/(\d+)/i;
-  var MEDIA = /(?:[a-zA-Z0-9_.~/-]+\.(?:mp4|webm|mov|png|jpg|jpeg|webp))/gi;
-  var VIDEO_EXT = /\.(mp4|webm|mov)$/i;
-  var IMG_EXT = /\.(png|jpg|jpeg|webp)$/i;
+  var MEDIA = /(?:[a-zA-Z0-9_.~/-]+\.(?:mp4|webm|mov|m4v|mkv|png|jpg|jpeg|webp|gif|avif|bmp))/gi;
+  var VIDEO_EXT = /\.(mp4|webm|mov|m4v|mkv)$/i;
+  var IMG_EXT = /\.(png|jpg|jpeg|webp|gif|avif|bmp)$/i;
   var QA_PATH = /(?:Downloads|e2e|qa|screenshot|screen-shot|screen_shot|artifact|test-result|cypress)/i;
   var APP_ASSET = /(?:node_modules|\.git|src[\\/]assets|public[\\/]|styles[\\/]|icons[\\/]|renderer[\\/])/i;
 
