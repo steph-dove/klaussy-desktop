@@ -76,6 +76,7 @@ window.DevLoopPanel = (function () {
   var cachedDocs = [];
   var evidenceTimer = null;
   var cachedQaMedia = [];
+  var qaMediaError = null;
   var containerEl = null;
   var reloadTimer = null;
 
@@ -451,6 +452,7 @@ window.DevLoopPanel = (function () {
       var qaMedia = [];
       if (window.klaus && window.klaus.fs && window.klaus.fs.findQaMedia) {
         var qaRes = await window.klaus.fs.findQaMedia(worktreePath);
+        qaMediaError = (qaRes && qaRes.error) || null;
         if (qaRes && Array.isArray(qaRes.media)) {
           qaMedia = qaRes.media;
         }
@@ -753,6 +755,15 @@ window.DevLoopPanel = (function () {
   function renderQaView() {
     var esc = AppUtils.escHtml;
     if (!cachedQaMedia || cachedQaMedia.length === 0) {
+      if (qaMediaError) {
+        return (
+          '<div class="devloop-empty">' +
+            '<div class="devloop-empty-icon">⚠️</div>' +
+            '<h3>QA Media Could Not Be Loaded</h3>' +
+            '<p>' + esc(qaMediaError) + '</p>' +
+          '</div>'
+        );
+      }
       return (
         '<div class="devloop-empty">' +
           '<div class="devloop-empty-icon">🎥</div>' +

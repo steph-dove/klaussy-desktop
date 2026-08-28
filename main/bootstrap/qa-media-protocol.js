@@ -11,6 +11,7 @@ const { pathToFileURL } = require('url');
 const SCHEME = 'klaussy-qa';
 
 const allowed = new Set();
+let registrationError = null;
 
 function allowQaPaths(paths) {
   for (const p of paths || []) {
@@ -45,7 +46,13 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(target).toString());
   });
 }).catch((err) => {
+  registrationError = (err && err.message) || String(err);
   console.error('[qa-media-protocol] scheme registration failed', err);
 });
 
-module.exports = { allowQaPaths, qaMediaUrl, SCHEME };
+// Non-null once registration failed: nothing the scheme serves will load.
+function protocolError() {
+  return registrationError;
+}
+
+module.exports = { allowQaPaths, qaMediaUrl, protocolError, SCHEME };

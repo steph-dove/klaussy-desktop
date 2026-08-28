@@ -12,7 +12,7 @@ const { ipcMain, shell, clipboard } = require('electron');
 const { execFileP, ghExecP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
 const { worktreeWatchers, startWorktreeWatcher, stopWorktreeWatcher } = require('../state/watcher');
-const { allowQaPaths, qaMediaUrl } = require('../bootstrap/qa-media-protocol');
+const { allowQaPaths, qaMediaUrl, protocolError } = require('../bootstrap/qa-media-protocol');
 
 // Directories we never descend into during the plain-fs fallback. Mirrors
 // the patterns used by the H3 watcher.
@@ -688,6 +688,8 @@ ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
     const media = await findQaMediaFiles(worktreePath);
     allowQaPaths(media.map((m) => m.path));
     for (const m of media) m.url = qaMediaUrl(m.path);
+    const protoErr = protocolError();
+    if (protoErr) return { media, error: 'QA media cannot be displayed: ' + protoErr };
     return { media };
   } catch (err) {
     return { media: [], error: err.message };
