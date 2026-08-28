@@ -754,6 +754,12 @@ window.DevLoopPanel = (function () {
 
   function renderQaView() {
     var esc = AppUtils.escHtml;
+    // Also shown above a populated gallery: a scheme that failed to register
+    // still returns tiles, they just never load.
+    var errorBanner = qaMediaError
+      ? ('<div class="devloop-qa-error">⚠️ QA media could not be loaded: ' + esc(qaMediaError) + '</div>')
+      : '';
+
     if (!cachedQaMedia || cachedQaMedia.length === 0) {
       if (qaMediaError) {
         return (
@@ -775,6 +781,7 @@ window.DevLoopPanel = (function () {
 
     var html =
       '<div class="devloop-qa-pane">' +
+        errorBanner +
         '<div class="devloop-qa-card-header">' +
           '<h4>Captured QA Recordings &amp; Screenshots (' + cachedQaMedia.length + ')</h4>' +
         '</div>' +
