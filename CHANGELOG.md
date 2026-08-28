@@ -2,6 +2,12 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.21.2
+
+### 🦉 Workspace Root Document Filtering
+
+- **Workspace Root Document Scoping**: Restricts markdown document discovery in the Dev Loop panel to workspace root files, preventing internal skill directories (`.agents/skills/`, `.kimi-code/`, `.claude/`, etc.) from inflating the Designs & Plan document count.
+
 ## 0.21.1
 
 ### 🦉 Dev Loop Plan Resolution, Universal QA Media & UI Polish
