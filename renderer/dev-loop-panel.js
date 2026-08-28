@@ -265,6 +265,7 @@ window.DevLoopPanel = (function () {
     var parts = [];
     if (ev.commits) parts.push(ev.commits + (ev.commits === 1 ? ' commit' : ' commits'));
     if (ev.qaMedia) parts.push(ev.qaMedia + ' QA file' + (ev.qaMedia === 1 ? '' : 's'));
+    else if (ev.qaMediaError) parts.push('QA scan failed');
     if (ev.prNumber) parts.push('PR #' + ev.prNumber);
     if (ev.checksTotal) parts.push(ev.checksPassed + '/' + ev.checksTotal + ' checks green');
     if (ev.reviewThreads) parts.push(ev.reviewThreads + ' review' + (ev.reviewThreads === 1 ? '' : 's'));
@@ -276,6 +277,7 @@ window.DevLoopPanel = (function () {
     if (!(window.klaus && window.klaus.fs && window.klaus.fs.devLoopEvidence)) return false;
     try {
       var res = await window.klaus.fs.devLoopEvidence(worktreePath);
+      if (res && res.error) console.warn('[dev-loop-panel evidence]', res.error);
       if (!res || !(res.phase > 0)) return false;
       state.evidence = res.evidence || null;
       if (res.evidence && res.evidence.prUrl && !state.prUrl) {
