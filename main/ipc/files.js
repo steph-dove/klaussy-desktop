@@ -621,6 +621,7 @@ async function devLoopEvidence(worktreePath) {
     prNumber: null, prUrl: null,
     checksTotal: 0, checksPassed: 0, checksFailed: 0,
     reviewThreads: 0,
+    qaMediaError: null,
   };
   if (!worktreePath) return ev;
 
@@ -638,9 +639,12 @@ async function devLoopEvidence(worktreePath) {
     } catch {}
   }
 
+  // A failed scan and an empty one both leave qaMedia at 0, so say which.
   try {
     ev.qaMedia = (await findQaMediaFiles(worktreePath)).length;
-  } catch {}
+  } catch (err) {
+    ev.qaMediaError = err.message;
+  }
 
   // No PR yet is the normal early state, so a failure here is not an error.
   try {
