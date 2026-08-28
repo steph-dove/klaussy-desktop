@@ -621,7 +621,7 @@ async function devLoopEvidence(worktreePath) {
     prNumber: null, prUrl: null,
     checksTotal: 0, checksPassed: 0, checksFailed: 0,
     reviewThreads: 0,
-    qaMediaError: null,
+    qaMediaError: null, prError: null,
   };
   if (!worktreePath) return ev;
 
@@ -646,7 +646,8 @@ async function devLoopEvidence(worktreePath) {
     ev.qaMediaError = err.message;
   }
 
-  // No PR yet is the normal early state, so a failure here is not an error.
+  // "No PR yet" is the normal early state; anything else (auth drift, network,
+  // timeout) would otherwise pin the HUD below Phase 6 with nothing said.
   try {
     const { stdout } = await ghExecP(
       ['pr', 'view', '--json', 'number,url,statusCheckRollup,reviews'],
@@ -662,7 +663,12 @@ async function devLoopEvidence(worktreePath) {
       ev.checksFailed = checks.filter((c) => c.conclusion === 'FAILURE' || c.conclusion === 'TIMED_OUT').length;
       ev.reviewThreads = Array.isArray(pr.reviews) ? pr.reviews.length : 0;
     }
-  } catch {}
+  } catch (err) {
+    const stderr = String((err && err.stderr) || (err && err.message) || '');
+    if (!/no (?:open )?pull requests? found/i.test(stderr)) {
+      ev.prError = stderr.trim().split('\n')[0] || 'gh pr view failed';
+    }
+  }
 
   return ev;
 }

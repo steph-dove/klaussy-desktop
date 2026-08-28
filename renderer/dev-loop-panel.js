@@ -267,6 +267,7 @@ window.DevLoopPanel = (function () {
     if (ev.qaMedia) parts.push(ev.qaMedia + ' QA file' + (ev.qaMedia === 1 ? '' : 's'));
     else if (ev.qaMediaError) parts.push('QA scan failed');
     if (ev.prNumber) parts.push('PR #' + ev.prNumber);
+    else if (ev.prError) parts.push('PR lookup failed');
     if (ev.checksTotal) parts.push(ev.checksPassed + '/' + ev.checksTotal + ' checks green');
     if (ev.reviewThreads) parts.push(ev.reviewThreads + ' review' + (ev.reviewThreads === 1 ? '' : 's'));
     return parts.join(' · ');

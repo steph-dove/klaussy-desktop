@@ -93,6 +93,29 @@ test('devLoopEvidence reads a real worktree without a PR', async () => {
   }
 });
 
+test('a PR lookup that fails is recorded, not read as "no PR yet"', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-evidence-nopr-'));
+  const repo = path.join(tempRoot, 'repo');
+  fs.mkdirSync(repo, { recursive: true });
+  const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  fs.writeFileSync(path.join(repo, 'README.md'), '# x\n');
+  git('add', '.');
+  git('commit', '-q', '-m', 'init');
+
+  try {
+    // No remote, and the test HOME has no gh auth — either way gh fails for a
+    // reason that is not "this branch has no PR", so it must leave a trace.
+    const result = await devLoopEvidence(repo);
+    assert.equal(result.prNumber, null);
+    assert.ok(result.prError, 'expected prError to be recorded');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('devLoopEvidence returns an empty reading for no worktree', async () => {
   const result = await devLoopEvidence('');
   assert.equal(result.hasPlan, false);
