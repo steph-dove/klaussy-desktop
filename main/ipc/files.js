@@ -288,25 +288,37 @@ ipcMain.handle('write-env-file', async (_event, { worktreePath, filename, conten
 // repo with several matches resolves deterministically, then fall back to the
 // shortest matching name. Root-only (the hook uses cwd), so there's no
 // recursive walk and no path-traversal surface to gate.
-function findRootDoc(worktreePath, keywordRe, preferred) {
+const EXCLUDE_DOCS = new Set([
+  'readme.md', 'claude.md', 'agents.md', 'gemini.md',
+  'contributing.md', 'license.md', 'changelog.md', 'code_of_conduct.md', 'security.md'
+]);
+
+function findRootDoc(worktreePath, keywordRe, preferred, allowAnyNonBoilerplate = false) {
   let entries;
   try {
     entries = fs.readdirSync(worktreePath, { withFileTypes: true });
   } catch (err) {
     return { error: err.message };
   }
-  const names = entries
+  let names = entries
     .filter((e) => e.isFile() && keywordRe.test(e.name) && /\.md$/i.test(e.name))
     .map((e) => e.name);
+
+  if (names.length === 0 && allowAnyNonBoilerplate) {
+    names = entries
+      .filter((e) => e.isFile() && /\.md$/i.test(e.name) && !EXCLUDE_DOCS.has(e.name.toLowerCase()))
+      .map((e) => e.name);
+  }
+
   if (names.length === 0) return { error: 'not found' };
   const lower = names.map((n) => n.toLowerCase());
   let chosen = null;
   for (const p of preferred) {
-    const i = lower.indexOf(p);
+    const i = lower.indexOf(p.toLowerCase());
     if (i !== -1) { chosen = names[i]; break; }
   }
   // Stable tiebreak when no conventional name matched: shortest, then
-  // lexicographic — so the resolved file doesn't flap between reloads.
+  // lexicographic.
   if (!chosen) {
     chosen = names.slice().sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
   }
@@ -319,11 +331,25 @@ function findRootDoc(worktreePath, keywordRe, preferred) {
 }
 
 const { listSessionNotes } = require('../state/session-context');
+const { klaussySessionDir } = require('../util/git-repo');
 
 async function findPlanDoc(worktreePath) {
   if (!worktreePath) return { error: 'no worktreePath' };
-  const rootRes = findRootDoc(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
+  let rootRes = findRootDoc(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
   if (!rootRes.error && rootRes.content) return rootRes;
+
+  // Check child directories if worktreePath is a session root folder
+  if (fs.existsSync(worktreePath)) {
+    try {
+      const entries = fs.readdirSync(worktreePath, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
+          const childRes = findRootDoc(path.join(worktreePath, ent.name), /plan/i, ['implementation_plan.md', 'plan.md']);
+          if (!childRes.error && childRes.content) return childRes;
+        }
+      }
+    } catch {}
+  }
 
   try {
     const notes = listSessionNotes(worktreePath);
@@ -348,28 +374,56 @@ async function findPlanDoc(worktreePath) {
   return rootRes;
 }
 
+const DESIGN_KEYWORD_RE = /(?:design|spec|architecture|rfc|palette|theme|requirement|ui[-_]|prompt|task|notes)/i;
+const DESIGN_PREFERRED = [
+  'design.md', 'design_doc.md', 'design-doc.md', 'design-spec.md', 'ui-design.md',
+  'spec.md', 'specs.md', 'architecture.md', 'rfc.md', 'requirements.md'
+];
+
 async function findDesignDoc(worktreePath) {
   if (!worktreePath) return { error: 'no worktreePath' };
-  const rootRes = findRootDoc(worktreePath, /design/i, ['design.md', 'design_doc.md', 'design-doc.md']);
+  let rootRes = findRootDoc(worktreePath, DESIGN_KEYWORD_RE, DESIGN_PREFERRED, true);
   if (!rootRes.error && rootRes.content) return rootRes;
+
+  // Check child directories if worktreePath is a session root folder
+  if (fs.existsSync(worktreePath)) {
+    try {
+      const entries = fs.readdirSync(worktreePath, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
+          const childRes = findRootDoc(path.join(worktreePath, ent.name), DESIGN_KEYWORD_RE, DESIGN_PREFERRED, true);
+          if (!childRes.error && childRes.content) return childRes;
+        }
+      }
+    } catch {}
+  }
 
   try {
     const notes = listSessionNotes(worktreePath);
     for (const note of notes) {
       const meta = note.metadata || {};
       const tags = Array.isArray(meta.tags) ? meta.tags : [];
-      const isDesign = tags.some((t) => /design/i.test(t))
-        || /design/i.test(note.id || '')
-        || /design/i.test(note.filePath || '')
-        || /design/i.test(meta.title || '')
-        || /^#+\s*Design/i.test(note.body || '');
+      const isDesign = tags.some((t) => /^(design|spec|architecture|rfc|task|ui)/i.test(t))
+        || DESIGN_KEYWORD_RE.test(note.id || '')
+        || DESIGN_KEYWORD_RE.test(note.filePath || '')
+        || DESIGN_KEYWORD_RE.test(meta.title || '')
+        || /^#+\s*(?:Design|Spec|Architecture)/i.test(note.body || '');
       if (isDesign && (note.body || note.content)) {
         return {
           name: (meta.title || note.id || path.basename(note.filePath, '.md') || 'design') + '.md',
           path: note.filePath,
-          content: note.body,
+          content: note.body || note.content || '',
         };
       }
+    }
+    // If no note specifically matched design tags but session notes exist, use the first non-plan note
+    if (notes.length > 0) {
+      const firstNote = notes[0];
+      return {
+        name: (firstNote.metadata?.title || firstNote.id || path.basename(firstNote.filePath, '.md') || 'note') + '.md',
+        path: firstNote.filePath,
+        content: firstNote.body || firstNote.content || '',
+      };
     }
   } catch {}
 
@@ -379,8 +433,8 @@ async function findDesignDoc(worktreePath) {
 ipcMain.handle('find-plan-file', async (_event, { worktreePath }) => findPlanDoc(worktreePath));
 ipcMain.handle('find-design-file', async (_event, { worktreePath }) => findDesignDoc(worktreePath));
 
-const QA_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp']);
-const QA_VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov']);
+const QA_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.bmp']);
+const QA_VIDEO_EXTS = new Set(['.mp4', '.webm', '.mov', '.m4v', '.mkv']);
 
 const QA_REL_DIRS = [
   'e2e-artifacts',
@@ -431,12 +485,40 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
 
   let branch = '';
   let repoName = path.basename(worktreePath);
+  const session = klaussySessionDir(worktreePath);
+  if (session && session.name) {
+    branch = session.name;
+    if (session.repo) repoName = session.repo;
+  }
+
   try {
     const { stdout: branchOut } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath, maxBuffer: 1024 * 1024,
     });
-    branch = branchOut.trim();
+    if (branchOut.trim()) branch = branchOut.trim();
   } catch {}
+
+  // If worktree is a session folder without direct git, check child repo branches
+  if (!branch && fs.existsSync(worktreePath)) {
+    try {
+      const entries = fs.readdirSync(worktreePath, { withFileTypes: true });
+      for (const ent of entries) {
+        if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
+          const childPath = path.join(worktreePath, ent.name);
+          try {
+            const { stdout: childBranch } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+              cwd: childPath, maxBuffer: 1024 * 1024,
+            });
+            if (childBranch.trim()) {
+              branch = childBranch.trim();
+              repoName = ent.name;
+              break;
+            }
+          } catch {}
+        }
+      }
+    } catch {}
+  }
 
   try {
     const { stdout: rootOut } = await execFileP('git', ['rev-parse', '--show-toplevel'], {
@@ -462,23 +544,28 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
     downloadsDir = path.join(homeDir, 'Downloads');
   }
   if (fs.existsSync(downloadsDir)) {
-    if (branch) {
-      const cleanBranch = branch.replace(/\//g, '-');
-      const safeBranch = branch.replace(/[^a-zA-Z0-9._-]/g, '-');
-      candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${branch}`));
-      candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${cleanBranch}`));
-      candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${safeBranch}`));
-      candidateDirs.add(path.join(downloadsDir, `klauss-qa-${branch}`));
-      candidateDirs.add(path.join(downloadsDir, `klauss-qa-${cleanBranch}`));
-      candidateDirs.add(path.join(downloadsDir, `klauss-qa-${safeBranch}`));
-      if (repoName) {
-        candidateDirs.add(path.join(downloadsDir, `${repoName}-${branch}`));
-        candidateDirs.add(path.join(downloadsDir, `${repoName}-${cleanBranch}`));
-        candidateDirs.add(path.join(downloadsDir, `${repoName}-${safeBranch}`));
+    const branchCandidates = new Set();
+    if (branch) branchCandidates.add(branch);
+    if (session && session.name) branchCandidates.add(session.name);
+
+    for (const bCandidate of branchCandidates) {
+      const cleanBranch = bCandidate.replace(/\//g, '-');
+      const safeBranch = bCandidate.replace(/[^a-zA-Z0-9._-]/g, '-');
+      const strippedBranch = bCandidate.replace(/^(feat|fix|chore|docs|refactor|style|test)\//i, '');
+      const cleanStripped = strippedBranch.replace(/\//g, '-');
+      const safeStripped = strippedBranch.replace(/[^a-zA-Z0-9._-]/g, '-');
+
+      const branchTokens = [bCandidate, cleanBranch, safeBranch, strippedBranch, cleanStripped, safeStripped];
+      for (const b of branchTokens) {
+        if (!b) continue;
+        candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${b}`));
+        candidateDirs.add(path.join(downloadsDir, `klauss-qa-${b}`));
+        if (repoName) {
+          candidateDirs.add(path.join(downloadsDir, `${repoName}-${b}`));
+          candidateDirs.add(path.join(downloadsDir, `klaussy-qa-${repoName}-${b}`));
+        }
       }
     }
-    // Exact branch-named folders only: a `klaussy-*` / `<repo>-*` prefix sweep
-    // pulls in every other branch's QA run.
   }
 
   const tmpDir = os.tmpdir();
@@ -503,6 +590,8 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
 
   // Media in a shared folder like Downloads must also be newer than the branch
   // start, or a re-used branch name resurrects the previous run's screenshots.
+  // We use a 12-hour grace period before the branch's first commit so that
+  // "before" screenshots taken before the first commit are preserved.
   let branchStartMs = 0;
   for (const baseRef of ['origin/HEAD', 'origin/main', 'main', 'origin/master', 'master']) {
     try {
@@ -515,7 +604,7 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
       );
       const secs = parseInt(stdout.trim().split('\n')[0], 10);
       if (secs) {
-        branchStartMs = secs * 1000;
+        branchStartMs = Math.max(0, (secs * 1000) - (12 * 60 * 60 * 1000));
         break;
       }
     } catch {}
@@ -523,11 +612,10 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
   // A branch with no commits of its own yet still has a session behind it.
   if (!branchStartMs) {
     try {
-      branchStartMs = fs.statSync(worktreePath).birthtimeMs || 0;
+      const birth = fs.statSync(worktreePath).birthtimeMs || 0;
+      if (birth) branchStartMs = Math.max(0, birth - (12 * 60 * 60 * 1000));
     } catch {}
   }
-  // birthtime is 0 on filesystems that don't record it, so the staleness filter
-  // is skipped and a reused branch name brings back old media.
   meta.branchStartUnknown = !branchStartMs;
 
   function scanDirectory(dirPath, maxDepth = 3) {
@@ -562,7 +650,7 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
               if (!inWorktree && branchStartMs && stat.mtimeMs < branchStartMs) continue;
               const rel = inWorktree
                 ? path.relative(worktreePath, absChild)
-                : ent.name;
+                : path.relative(dirPath, absChild);
               foundFiles.set(absChild, {
                 name: ent.name,
                 path: absChild,

@@ -392,28 +392,37 @@ window.DevLoopPanel = (function () {
 
     try {
       var docs = [];
+      function addDoc(d) {
+        if (!d || !d.path || !d.content) return;
+        if (!docs.some(function (existing) { return existing.path === d.path; })) {
+          docs.push(d);
+        }
+      }
+
       var planRes = await window.klaus.fs.findPlanFile(worktreePath);
       if (planRes && !planRes.error && planRes.content) {
-        docs.push({ name: planRes.name || 'plan.md', path: planRes.path || (worktreePath + '/plan.md'), content: planRes.content, type: 'plan' });
+        addDoc({ name: planRes.name || 'plan.md', path: planRes.path || (worktreePath + '/plan.md'), content: planRes.content, type: 'plan' });
       }
 
       var designRes = await window.klaus.fs.findDesignFile(worktreePath);
       if (designRes && !designRes.error && designRes.content) {
-        docs.push({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
+        addDoc({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
       }
 
       if (window.klaus.fs.listFiles) {
         var filesRes = await window.klaus.fs.listFiles(worktreePath);
         var fileList = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
+        var EXCLUDE_DOC_NAMES = /^(readme|claude|agents|gemini|contributing|license|changelog|security|code_of_conduct)\.md$/i;
         for (var i = 0; i < fileList.length; i++) {
           var f = fileList[i];
           var rel = typeof f === 'string' ? f : (f.path || f.name || '');
-          if (/^(task-.*|REVIEW_OUTPUT)\.md$/i.test(rel)) {
+          var baseName = rel.split('/').pop();
+          if (/\.md$/i.test(rel) && !EXCLUDE_DOC_NAMES.test(baseName) && !/(?:node_modules|\.git|vendor)\//i.test(rel)) {
             var fullPath = worktreePath + '/' + rel;
-            var readRes = await window.klaus.fs.readFile(fullPath);
-            if (readRes && !readRes.error && typeof readRes.content === 'string') {
-              if (!docs.some(function (d) { return d.name === rel; })) {
-                docs.push({ name: rel, path: fullPath, content: readRes.content, type: 'spec' });
+            if (!docs.some(function (d) { return d.path === fullPath; })) {
+              var readRes = await window.klaus.fs.readFile(fullPath);
+              if (readRes && !readRes.error && typeof readRes.content === 'string') {
+                addDoc({ name: baseName, path: fullPath, content: readRes.content, type: 'spec' });
               }
             }
           }
@@ -428,31 +437,19 @@ window.DevLoopPanel = (function () {
           if (Array.isArray(sessionNotes)) {
             sessionNotes.forEach(function (note) {
               var meta = note.metadata || {};
-              var tags = Array.isArray(meta.tags) ? meta.tags : [];
-              var isPlanOrDesign = tags.some(function (t) {
-                return /^(plan|design|spec|architecture|task|devloop)/i.test(String(t));
-              }) || /(?:^|[\\/._-])(?:plan|design|spec|task|devloop)/i.test(note.id || '')
-                 || /(?:^#+\s*(?:Plan|Design|Implementation Plan|Architecture|Task))/i.test(note.body || '')
-                 || (note.title && /(?:Plan|Design|Implementation|Architecture|Spec)/i.test(note.title))
-                 || /(?:plan|design)/i.test(note.filePath || '');
-
-              var displayName = note.title || (meta.title) || (tags.length ? ('OKF: ' + tags.join(', ')) : (note.id + '.md'));
+              var displayName = note.title || (meta.title) || (note.id + '.md');
               var agentSuffix = meta.agent ? (' (' + meta.agent + ')') : '';
               var cleanName = '🦉 ' + displayName + agentSuffix;
               var bodyText = (note.body || note.content || '').trim();
-              if (!docs.some(function (d) { return d.path === note.filePath; })) {
-                if (isPlanOrDesign || docs.length === 0) {
-                  docs.push({
-                    name: cleanName,
-                    path: note.filePath,
-                    content: bodyText,
-                    type: 'okf-note',
-                    metadata: meta,
-                    isSessionNote: true,
-                    writtenAt: note.writtenAt,
-                  });
-                }
-              }
+              addDoc({
+                name: cleanName,
+                path: note.filePath,
+                content: bodyText,
+                type: 'okf-note',
+                metadata: meta,
+                isSessionNote: true,
+                writtenAt: note.writtenAt,
+              });
             });
           }
         } catch (noteErr) {
@@ -492,8 +489,8 @@ window.DevLoopPanel = (function () {
         var allFiles = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
         allFiles.forEach(function (f) {
           var rel = typeof f === 'string' ? f : (f.path || f.name || '');
-          var isVideo = /\.(mp4|webm|mov)$/i.test(rel);
-          var isImg = /\.(png|jpg|jpeg|webp)$/i.test(rel);
+          var isVideo = /\.(mp4|webm|mov|m4v|mkv)$/i.test(rel);
+          var isImg = /\.(png|jpg|jpeg|webp|gif|avif|bmp)$/i.test(rel);
           var isQaDir = /^(?:e2e-artifacts|e2e-screenshots|qa-artifacts|qa-screenshots|screenshots|qa|e2e\/screenshots|test-results|playwright-report|cypress\/screenshots|cypress\/videos|tmp\/qa|tmp\/screenshots)\//i.test(rel);
           var isQaName = /(?:^|[\\/._-])(?:screenshot|screen-shot|screen_shot|qa[-_]|test[-_]shot|recording)(?:[\\/._-]|$)/i.test(rel);
           var isNonAsset = !/(?:node_modules|\.git|src[\\/]assets|public[\\/]|styles[\\/]|icons[\\/]|renderer[\\/])/i.test(rel);
@@ -516,9 +513,17 @@ window.DevLoopPanel = (function () {
           }
         });
       }
-      // Only the scanner mints a servable URL, so anything it didn't resolve
-      // would render as a broken tile.
-      cachedQaMedia = qaMedia.filter(function (m) { return m && m.url; });
+      
+      // Ensure all media items have a servable klaussy-qa: URL
+      qaMedia.forEach(function (m) {
+        if (!m.url && m.path) {
+          try {
+            var b64 = btoa(unescape(encodeURIComponent(m.path))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+            m.url = 'klaussy-qa://media/' + b64;
+          } catch (e) {}
+        }
+      });
+      cachedQaMedia = qaMedia.filter(function (m) { return m && (m.url || m.path); });
 
       if (window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
@@ -663,8 +668,13 @@ window.DevLoopPanel = (function () {
 
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
       tab.addEventListener('click', function () {
+        var prevSub = currentSubTab;
         currentSubTab = tab.dataset.sub;
-        renderActiveView();
+        if ((currentSubTab === 'qa' || currentSubTab === 'design') && currentWorktreePath) {
+          load(currentWorktreePath);
+        } else {
+          renderActiveView();
+        }
       });
     });
 
@@ -1047,6 +1057,21 @@ window.DevLoopPanel = (function () {
     }
   }
 
+  function setQaMedia(media) {
+    cachedQaMedia = Array.isArray(media) ? media : [];
+    qaMediaError = null;
+    qaMediaWarning = null;
+    renderActiveView();
+  }
+
+  function setDocs(docs) {
+    cachedDocs = Array.isArray(docs) ? docs : [];
+    if (cachedDocs.length > 0 && (!selectedDocPath || !cachedDocs.some(function (d) { return d.path === selectedDocPath; }))) {
+      selectedDocPath = cachedDocs[0].path;
+    }
+    renderActiveView();
+  }
+
   return {
     init: init,
     load: load,
@@ -1058,5 +1083,7 @@ window.DevLoopPanel = (function () {
     renderMiniHud: renderMiniHud,
     setWorktree: setWorktree,
     switchDiffTabToDevLoop: switchDiffTabToDevLoop,
+    setQaMedia: setQaMedia,
+    setDocs: setDocs,
   };
 })();

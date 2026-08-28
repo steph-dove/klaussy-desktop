@@ -36,9 +36,9 @@ function baseRepoForWorktree(worktreePath) {
 // first so Windows session paths match; fs/path accept forward slashes there.
 function klaussySessionDir(worktreePath) {
   if (typeof worktreePath !== 'string') return null;
-  const m = worktreePath.replace(/\\/g, '/').replace(/\/+$/, '')
-    .match(/^(.*\/klaussy\/sessions\/[^/]+)\/([^/]+)$/);
-  return m ? { dir: m[1], name: m[1].split('/').pop(), repo: m[2] } : null;
+  const clean = worktreePath.replace(/\\/g, '/').replace(/\/+$/, '');
+  const m = clean.match(/^(.*\/klaussy\/sessions\/([^/]+))(?:\/([^/]+))?$/);
+  return m ? { dir: m[1], name: m[2], repo: m[3] || null } : null;
 }
 
 // The session's other repo dirs (absolute, excluding this one), for an agent's

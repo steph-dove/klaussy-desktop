@@ -392,7 +392,7 @@ window.App = window.App || {};
       document.body.classList.toggle('task-branchless', branchless);
       if (branchless && DiffPanel.isVisible()) {
         var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
-        var hidden = activeTab && ['changes', 'pr', 'history', 'stash', 'env'].indexOf(activeTab.dataset.tab) !== -1;
+        var hidden = activeTab && ['changes', 'pr', 'history', 'env'].indexOf(activeTab.dataset.tab) !== -1;
         if (hidden) App.forceFilesTab();
       }
     },
@@ -549,16 +549,13 @@ window.App = window.App || {};
 
   App.doProjectSearch = FileBrowser.doProjectSearch;
 
-  // ---- Feature panels (extracted to history-panel.js, stash-panel.js) ----
+  // ---- Feature panels (extracted to history-panel.js) ----
   App.loadHistory = HistoryPanel.loadHistory;
-
-  App.loadStash = StashPanel.loadStash;
 
   // ---- Global tab reload (called by PRPanel.reloadActiveTab) ----
   window._reloadDiffTab = function (tab, wt) {
     if (tab === 'files') App.loadFileTree(wt);
     else if (tab === 'history') App.loadHistory(wt);
-    else if (tab === 'stash') App.loadStash(wt);
     else if (tab === 'search') App.doProjectSearch(wt);
     else if (tab === 'plan') { PlanPanel.setWorktree(wt); PlanPanel.load(); }
     else if (tab === 'devloop') { DevLoopPanel.setWorktree(wt); DevLoopPanel.renderActiveView(); }

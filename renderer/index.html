@@ -291,7 +291,6 @@
           <button class="diff-tab" data-tab="files">Files</button>
           <button class="diff-tab" data-tab="search">Search</button>
           <button class="diff-tab" data-tab="history">History</button>
-          <button class="diff-tab" data-tab="stash">Stash</button>
           <button class="diff-tab" data-tab="notes" title="Session notes shared between agents in this session">Notes</button>
         </div>
 
@@ -390,14 +389,6 @@
           </div>
         </div>
 
-        <!-- Stash tab content (D3) -->
-        <div id="stash-tab-content" style="display: none;">
-          <div id="stash-actions">
-            <input type="text" id="stash-message" placeholder="Stash message (optional)..." autocomplete="off" spellcheck="false" />
-            <button id="btn-stash-push">Stash</button>
-          </div>
-          <div id="stash-list"></div>
-        </div>
 
         <!-- Session notes tab content: the uncommitted inter-agent notes bus -->
         <div id="notes-tab-content" style="display: none;">
@@ -805,7 +796,6 @@
   <script src="file-browser.js"></script>
   <script src="history-panel.js"></script>
   <script src="session-notes-panel.js"></script>
-  <script src="stash-panel.js"></script>
   <script src="search-bar.js"></script>
   <script src="context-menu.js"></script>
   <script src="command-palette.js"></script>
