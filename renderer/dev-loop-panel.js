@@ -290,11 +290,17 @@ window.DevLoopPanel = (function () {
         return failureChanged;
       }
       state.evidence = res.evidence || null;
+      var prChanged = false;
       if (res.evidence && res.evidence.prUrl && !state.prUrl) {
         state.prUrl = res.evidence.prUrl;
         state.prNumber = res.evidence.prNumber;
+        prChanged = true;
       }
-      return advancePhase(state, res.phase, evidenceSummary(res.evidence)) || failureChanged;
+      var advanced = advancePhase(state, res.phase, evidenceSummary(res.evidence));
+      // advancePhase only saves when it moves, so a PR found at a phase we are
+      // already past would be lost on reload.
+      if (!advanced && prChanged) saveState(state.taskId, state);
+      return advanced || prChanged || failureChanged;
     } catch (err) {
       var msg = (err && err.message) || String(err);
       var changed = state.evidenceError !== msg;
