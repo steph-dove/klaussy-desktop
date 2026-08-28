@@ -392,28 +392,37 @@ window.DevLoopPanel = (function () {
 
     try {
       var docs = [];
+      function addDoc(d) {
+        if (!d || !d.path || !d.content) return;
+        if (!docs.some(function (existing) { return existing.path === d.path; })) {
+          docs.push(d);
+        }
+      }
+
       var planRes = await window.klaus.fs.findPlanFile(worktreePath);
       if (planRes && !planRes.error && planRes.content) {
-        docs.push({ name: planRes.name || 'plan.md', path: planRes.path || (worktreePath + '/plan.md'), content: planRes.content, type: 'plan' });
+        addDoc({ name: planRes.name || 'plan.md', path: planRes.path || (worktreePath + '/plan.md'), content: planRes.content, type: 'plan' });
       }
 
       var designRes = await window.klaus.fs.findDesignFile(worktreePath);
       if (designRes && !designRes.error && designRes.content) {
-        docs.push({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
+        addDoc({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
       }
 
       if (window.klaus.fs.listFiles) {
         var filesRes = await window.klaus.fs.listFiles(worktreePath);
         var fileList = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
+        var EXCLUDE_DOC_NAMES = /^(readme|claude|agents|gemini|contributing|license|changelog|security|code_of_conduct)\.md$/i;
         for (var i = 0; i < fileList.length; i++) {
           var f = fileList[i];
           var rel = typeof f === 'string' ? f : (f.path || f.name || '');
-          if (/^(task-.*|REVIEW_OUTPUT)\.md$/i.test(rel)) {
+          var baseName = rel.split('/').pop();
+          if (/\.md$/i.test(rel) && !EXCLUDE_DOC_NAMES.test(baseName) && !/(?:node_modules|\.git|vendor)\//i.test(rel)) {
             var fullPath = worktreePath + '/' + rel;
-            var readRes = await window.klaus.fs.readFile(fullPath);
-            if (readRes && !readRes.error && typeof readRes.content === 'string') {
-              if (!docs.some(function (d) { return d.name === rel; })) {
-                docs.push({ name: rel, path: fullPath, content: readRes.content, type: 'spec' });
+            if (!docs.some(function (d) { return d.path === fullPath; })) {
+              var readRes = await window.klaus.fs.readFile(fullPath);
+              if (readRes && !readRes.error && typeof readRes.content === 'string') {
+                addDoc({ name: baseName, path: fullPath, content: readRes.content, type: 'spec' });
               }
             }
           }
@@ -428,31 +437,19 @@ window.DevLoopPanel = (function () {
           if (Array.isArray(sessionNotes)) {
             sessionNotes.forEach(function (note) {
               var meta = note.metadata || {};
-              var tags = Array.isArray(meta.tags) ? meta.tags : [];
-              var isPlanOrDesign = tags.some(function (t) {
-                return /^(plan|design|spec|architecture|task|devloop)/i.test(String(t));
-              }) || /(?:^|[\\/._-])(?:plan|design|spec|task|devloop)/i.test(note.id || '')
-                 || /(?:^#+\s*(?:Plan|Design|Implementation Plan|Architecture|Task))/i.test(note.body || '')
-                 || (note.title && /(?:Plan|Design|Implementation|Architecture|Spec)/i.test(note.title))
-                 || /(?:plan|design)/i.test(note.filePath || '');
-
-              var displayName = note.title || (meta.title) || (tags.length ? ('OKF: ' + tags.join(', ')) : (note.id + '.md'));
+              var displayName = note.title || (meta.title) || (note.id + '.md');
               var agentSuffix = meta.agent ? (' (' + meta.agent + ')') : '';
               var cleanName = '🦉 ' + displayName + agentSuffix;
               var bodyText = (note.body || note.content || '').trim();
-              if (!docs.some(function (d) { return d.path === note.filePath; })) {
-                if (isPlanOrDesign || docs.length === 0) {
-                  docs.push({
-                    name: cleanName,
-                    path: note.filePath,
-                    content: bodyText,
-                    type: 'okf-note',
-                    metadata: meta,
-                    isSessionNote: true,
-                    writtenAt: note.writtenAt,
-                  });
-                }
-              }
+              addDoc({
+                name: cleanName,
+                path: note.filePath,
+                content: bodyText,
+                type: 'okf-note',
+                metadata: meta,
+                isSessionNote: true,
+                writtenAt: note.writtenAt,
+              });
             });
           }
         } catch (noteErr) {
