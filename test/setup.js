@@ -50,6 +50,8 @@ const electronStub = {
   Menu: { setApplicationMenu: () => {}, buildFromTemplate: () => ({}) },
   nativeTheme: { shouldUseDarkColors: false, on: () => {} },
   Notification: class { on() {} show() {} close() {} },
+  protocol: { registerSchemesAsPrivileged: () => {}, handle: () => {} },
+  net: { fetch: () => Promise.resolve() },
   contextBridge: { exposeInMainWorld: () => {} },
   ipcRenderer: { invoke: () => Promise.resolve(), on: () => {}, send: () => {} },
   webUtils: { getPathForFile: () => '' },

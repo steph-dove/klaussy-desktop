@@ -17,6 +17,8 @@ if (!acquirePrimaryOrExit()) {
 }
 
 require('./main/util/logging');
+// Before app ready — it registers a privileged scheme.
+require('./main/bootstrap/qa-media-protocol');
 const pathGate = require('./main/util/path-gate');
 const { loadConfig } = require('./main/util/config');
 const { instances } = require('./main/state/instances');

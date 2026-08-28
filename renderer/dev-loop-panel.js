@@ -482,7 +482,9 @@ window.DevLoopPanel = (function () {
           }
         });
       }
-      cachedQaMedia = qaMedia;
+      // Only the scanner mints a servable URL, so anything it didn't resolve
+      // would render as a broken tile.
+      cachedQaMedia = qaMedia.filter(function (m) { return m && m.url; });
 
       if (window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
@@ -765,9 +767,8 @@ window.DevLoopPanel = (function () {
         '<div class="devloop-qa-gallery">';
 
     cachedQaMedia.forEach(function (art) {
-      var fileUrl = (art.path && art.path.startsWith('/'))
-        ? ('file://' + esc(art.path))
-        : ('file:///' + esc((art.path || '').replace(/\\/g, '/')));
+      // Served over klaussy-qa: — the page CSP blocks file: for img and media.
+      var fileUrl = esc(art.url || '');
 
       var nameLower = (art.name || '').toLowerCase();
       var roleBadge = '';
