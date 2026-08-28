@@ -494,9 +494,11 @@ async function findQaMediaFiles(worktreePath) {
   let branchStartMs = 0;
   for (const baseRef of ['origin/HEAD', 'origin/main', 'main', 'origin/master', 'master']) {
     try {
+      // No --max-count: git limits before it reverses, so it would hand back
+      // the branch's newest commit instead of its first.
       const { stdout } = await execFileP(
         'git',
-        ['log', '--reverse', '--format=%ct', '--max-count=1', `${baseRef}..HEAD`],
+        ['log', '--reverse', '--format=%ct', `${baseRef}..HEAD`],
         { cwd: worktreePath, maxBuffer: 1024 * 1024 },
       );
       const secs = parseInt(stdout.trim().split('\n')[0], 10);

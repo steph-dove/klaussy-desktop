@@ -159,6 +159,55 @@ test('findQaMediaFiles: media older than the branch is left behind', async () =>
   }
 });
 
+test('findQaMediaFiles: media from mid-branch survives a later commit', async () => {
+  // Branch start must be the FIRST commit, or media captured before the latest
+  // commit vanishes from the gallery.
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-qa-midbranch-'));
+  const repo = path.join(tempRoot, 'my-repo');
+  fs.mkdirSync(repo, { recursive: true });
+  const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+  const commitAt = (msg, epochSecs) => {
+    const iso = new Date(epochSecs * 1000).toISOString();
+    execFileSync('git', ['commit', '-q', '-m', msg], {
+      cwd: repo,
+      stdio: 'pipe',
+      env: { ...process.env, GIT_AUTHOR_DATE: iso, GIT_COMMITTER_DATE: iso },
+    });
+  };
+
+  const now = Math.floor(Date.now() / 1000);
+  git('init', '-q');
+  git('config', 'user.email', 'test@example.com');
+  git('config', 'user.name', 'test');
+  git('checkout', '-q', '-B', 'main');
+  fs.writeFileSync(path.join(repo, 'README.md'), '# base\n');
+  git('add', '.');
+  commitAt('base', now - 7200);
+
+  git('checkout', '-q', '-b', 'feat-mid');
+  fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n');
+  git('add', '.');
+  commitAt('first on branch', now - 3600);
+
+  const downloadsDir = downloads('my-repo-feat-mid');
+  fs.mkdirSync(downloadsDir, { recursive: true });
+  const shot = path.join(downloadsDir, 'mid-run.png');
+  fs.writeFileSync(shot, 'png');
+  fs.utimesSync(shot, now - 1800, now - 1800);
+
+  fs.writeFileSync(path.join(repo, 'b.txt'), 'b\n');
+  git('add', '.');
+  commitAt('latest on branch', now);
+
+  try {
+    const results = await findQaMediaFiles(repo);
+    assert.deepEqual(results.map((r) => r.name), ['mid-run.png']);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(downloadsDir, { recursive: true, force: true });
+  }
+});
+
 test('findQaMediaFiles: handles null or empty worktree gracefully', async () => {
   const r1 = await findQaMediaFiles(null);
   assert.deepEqual(r1, []);
