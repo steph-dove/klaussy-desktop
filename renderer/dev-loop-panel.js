@@ -412,17 +412,21 @@ window.DevLoopPanel = (function () {
       if (window.klaus.fs.listFiles) {
         var filesRes = await window.klaus.fs.listFiles(worktreePath);
         var fileList = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
-        var EXCLUDE_DOC_NAMES = /^(readme|claude|agents|gemini|contributing|license|changelog|security|code_of_conduct)\.md$/i;
+        var EXCLUDE_DOC_NAMES = /^(readme|claude|agents|gemini|contributing|license|changelog|security|code_of_conduct|skill)\.md$/i;
+        var ROOT_SPEC_RE = /^(?:plan|design|spec|architecture|rfc|task|requirement|ui[-_]|prompt|todo|notes|review_output)/i;
         for (var i = 0; i < fileList.length; i++) {
           var f = fileList[i];
           var rel = typeof f === 'string' ? f : (f.path || f.name || '');
-          var baseName = rel.split('/').pop();
-          if (/\.md$/i.test(rel) && !EXCLUDE_DOC_NAMES.test(baseName) && !/(?:node_modules|\.git|vendor)\//i.test(rel)) {
-            var fullPath = worktreePath + '/' + rel;
-            if (!docs.some(function (d) { return d.path === fullPath; })) {
-              var readRes = await window.klaus.fs.readFile(fullPath);
-              if (readRes && !readRes.error && typeof readRes.content === 'string') {
-                addDoc({ name: baseName, path: fullPath, content: readRes.content, type: 'spec' });
+          // Root-level only, so nested docs like .agents/skills/*.md aren't mistaken for specs
+          var isRootFile = !rel.includes('/') && !rel.includes('\\');
+          if (isRootFile && /\.md$/i.test(rel) && !EXCLUDE_DOC_NAMES.test(rel)) {
+            if (ROOT_SPEC_RE.test(rel) || docs.length === 0) {
+              var fullPath = worktreePath + '/' + rel;
+              if (!docs.some(function (d) { return d.path === fullPath; })) {
+                var readRes = await window.klaus.fs.readFile(fullPath);
+                if (readRes && !readRes.error && typeof readRes.content === 'string') {
+                  addDoc({ name: rel, path: fullPath, content: readRes.content, type: 'spec' });
+                }
               }
             }
           }
