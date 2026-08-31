@@ -281,6 +281,7 @@ function saveSessions() {
       // agents on one worktree can share. Recorded per session as well, so a
       // resumed tab comes back the way it was left.
       notifyWebhook: inst.notifyWebhookEnabled === true,
+      devLoop: inst.devLoop === true,
       // A second agent opens as a tab on this task rather than a task of its
       // own, so it has no entry here to be resumed from — it rides on the one
       // belonging to the agent that started the session.
