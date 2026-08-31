@@ -1233,6 +1233,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     // This tab had its own thread in chat; nothing typed there reaches it now.
     if (sub.mirror) {
       try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+      try { require('../state/session-activity').forgetInstance(sub.mirror.id); } catch { /* non-fatal */ }
     }
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch {} }
@@ -1325,6 +1326,7 @@ ipcMain.handle('kill-task', (_event, { id }) => {
     if (!sub.mirror) continue;
     try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
     try { require('../util/session-transcript').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
+    try { require('../state/session-activity').forgetInstance(sub.mirror.id); } catch { /* non-fatal */ }
   }
 
   // Never delete worktrees or branches — only kill the process

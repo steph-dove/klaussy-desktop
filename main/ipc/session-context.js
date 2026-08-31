@@ -40,9 +40,9 @@ ipcMain.handle('session-context:get-summary', async (_event, { worktreePath } = 
 // another channel, so their notes would never show up here.
 ipcMain.handle('session-context:capture-now', async (_event, { worktreePath } = {}) => {
   try {
-    const { instances } = require('../state/instances');
+    const { liveAgentInstances } = require('../state/instances');
     const activity = require('../state/session-activity');
-    const agents = [...instances.values()];
+    const agents = liveAgentInstances();
     const byChannel = activity.liveAgentsByChannel(agents);
     const here = worktreePath ? activity.channelFor(worktreePath) : null;
     const inSession = (here && byChannel.get(here)) ? byChannel.get(here).length : 0;

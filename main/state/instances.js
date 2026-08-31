@@ -1044,6 +1044,19 @@ function isAgentInstance(inst) {
   return Boolean(inst && inst.alive && isAgentMode(inst.mode));
 }
 
+// A task's extra agent tabs are sub-terminals, so they have no `instances` entry
+// of their own and the map alone is never the whole session.
+function liveAgentInstances() {
+  const out = [];
+  for (const [, inst] of instances) {
+    out.push(inst);
+    for (const sub of (inst.subTerminals || [])) {
+      if (sub.alive && isAgentMode(sub.mode) && sub.mirror) out.push(sub.mirror);
+    }
+  }
+  return out;
+}
+
 function notifyingAgentInstances() {
   const out = [];
   for (const [, inst] of instances) {
@@ -1063,6 +1076,7 @@ module.exports = {
   instances,
   isAgentInstance,
   notifyingAgentInstances,
+  liveAgentInstances,
   stripAnsi,
   APPROVAL_PROMPT_PATTERNS,
   ROLLING_BUFFER_SIZE,
