@@ -296,3 +296,36 @@ test('a handoff with no brief writes nothing', async () => {
     fs.rmSync(path.dirname(dir), { recursive: true, force: true });
   }
 });
+
+test('the extra agent tabs in a task are captured too, not just the first agent', async () => {
+  const { instances, liveAgentInstances } = require('../../main/state/instances');
+  const wt = workspace('subs');
+  const dir = ensureSessionNotesDir(wt);
+  instances.set(4201, {
+    id: 4201, name: 'auth', worktreePath: wt, mode: 'agy', alive: true, recentOutput: LOTS,
+    subTerminals: [
+      {
+        subId: 1, mode: 'claude', alive: true,
+        mirror: {
+          id: '4201:1', name: 'auth · Claude Code', mode: 'claude',
+          worktreePath: wt, alive: true, recentOutput: LOTS,
+        },
+      },
+      { subId: 2, mode: 'codex', alive: false, mirror: { id: '4201:2', name: 'gone', mode: 'codex', worktreePath: wt, alive: true, recentOutput: LOTS } },
+    ],
+  });
+  try {
+    const agents = liveAgentInstances();
+    assert.deepEqual(agents.map((a) => a.id), [4201, '4201:1']);
+
+    const written = await activity.captureActivity(agents);
+    assert.equal(written.length, 2, 'both live agents in the task should get a note');
+    const notes = listSessionNotes(wt);
+    assert.deepEqual(notes.map((n) => n.metadata.agent).sort(), ['agy', 'claude']);
+  } finally {
+    instances.delete(4201);
+    activity.forgetInstance(4201);
+    activity.forgetInstance('4201:1');
+    fs.rmSync(path.dirname(dir), { recursive: true, force: true });
+  }
+});
