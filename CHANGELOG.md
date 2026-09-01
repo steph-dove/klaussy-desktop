@@ -2,6 +2,16 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.21.3
+
+### 🦉 Dev Loop Session Scoping & QA Media Fixes
+
+- **Dev Loop Surfaces Stay With Their Session**: The Dev Loop tab and the terminal mini-HUD now appear only on a session that actually started a loop. Terminal output no longer creates one by itself (a plain session running `gh pr create` matched a phase milestone), a running loop no longer draws its bar on every other session, and a recycled task id no longer inherits the previous run's loop. Loop status rides the saved session, so a restart or resume keeps it.
+- **QA Media Previews**: Screenshots and recordings the agent names in its terminal output, or that live in the worktree, now render instead of showing broken tiles. The main process vets each file against the same QA locations the scanner searches before serving it; anything it can't vet says the preview is unavailable and keeps its Copy MD and Reveal actions.
+- **Faster Designs & QA Tabs**: Switching sub-tabs paints immediately and refreshes behind that, rather than stalling on a worktree scan and a `gh pr view` spawn.
+- **Focused Pane Highlight**: In the columns and grid layouts the focused terminal gets its accent ring again.
+- **Session Notes From Every Agent**: A capture now includes the extra agent tabs in a session, which live as sub-terminals and were invisible to it — previously only the first agent in a session was ever summarized.
+
 ## 0.21.2
 
 ### 🦉 Workspace Root Document Filtering
