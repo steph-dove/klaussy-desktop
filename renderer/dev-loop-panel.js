@@ -76,6 +76,8 @@ window.DevLoopPanel = (function () {
   var cachedDocs = [];
   var evidenceTimer = null;
   var cachedQaMedia = [];
+  // A refresh is in flight, so an empty Designs/QA tab is not yet known to be empty.
+  var loading = false;
   var qaMediaError = null;
   var qaMediaWarning = null;
   var containerEl = null;
@@ -420,6 +422,7 @@ window.DevLoopPanel = (function () {
       renderActiveView();
       return;
     }
+    var switchedWorktree = currentWorktreePath !== worktreePath;
     currentWorktreePath = worktreePath;
     var taskId = activeTaskId();
     var state = getState(taskId);
@@ -429,8 +432,17 @@ window.DevLoopPanel = (function () {
     if (!state) {
       cachedDocs = [];
       cachedQaMedia = [];
+      loading = false;
       renderActiveView();
       return;
+    }
+
+    if (switchedWorktree) {
+      cachedDocs = [];
+      cachedQaMedia = [];
+      qaMediaError = null;
+      qaMediaWarning = null;
+      loading = true;
     }
 
     try {
@@ -561,29 +573,38 @@ window.DevLoopPanel = (function () {
         });
       }
       
-      // Ensure all media items have a servable klaussy-qa: URL
-      qaMedia.forEach(function (m) {
-        if (!m.url && m.path) {
-          try {
-            var b64 = btoa(unescape(encodeURIComponent(m.path))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            m.url = 'klaussy-qa://media/' + b64;
-          } catch (e) {}
-        }
-      });
+      // Media the scanner did not return (scraped from terminal output, or from
+      // the worktree listing) has no URL yet, and only main can grant one.
+      var unserved = qaMedia.filter(function (m) { return m && !m.url && m.path; });
+      if (unserved.length && window.klaus.fs.authorizeQaMedia) {
+        var granted = await window.klaus.fs.authorizeQaMedia(
+          worktreePath, unserved.map(function (m) { return m.path; }),
+        );
+        var urls = (granted && granted.urls) || {};
+        unserved.forEach(function (m) { m.url = urls[m.path] || ''; });
+      }
       cachedQaMedia = qaMedia.filter(function (m) { return m && (m.url || m.path); });
+
+      // The PR lookup below spawns `gh`, so paint first and land the content a
+      // whole process spawn sooner.
+      loading = false;
+      renderActiveView();
+      updateMiniHuds(taskId);
 
       if (window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
         if (prRes && prRes.pr) {
-          state.prUrl = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
-          state.prNumber = prRes.pr.number;
+          var url = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
+          if (url !== state.prUrl || prRes.pr.number !== state.prNumber) {
+            state.prUrl = url;
+            state.prNumber = prRes.pr.number;
+            renderActiveView();
+          }
         }
       }
-
-      renderActiveView();
-      updateMiniHuds(taskId);
     } catch (err) {
       console.warn('[dev-loop-panel load]', err);
+      loading = false;
       renderActiveView();
     }
   }
@@ -724,13 +745,12 @@ window.DevLoopPanel = (function () {
 
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
       tab.addEventListener('click', function () {
-        var prevSub = currentSubTab;
         currentSubTab = tab.dataset.sub;
-        if ((currentSubTab === 'qa' || currentSubTab === 'design') && currentWorktreePath) {
-          load(currentWorktreePath);
-        } else {
-          renderActiveView();
-        }
+        var refreshes = (currentSubTab === 'qa' || currentSubTab === 'design') && currentWorktreePath;
+        // Painting from cache first: waiting on the refresh left the click dead.
+        loading = Boolean(refreshes);
+        renderActiveView();
+        if (refreshes) load(currentWorktreePath);
       });
     });
 
@@ -798,8 +818,16 @@ window.DevLoopPanel = (function () {
     return html;
   }
 
+  // The empty states read as findings, so flashing one before the scan lands
+  // gives a wrong answer.
+  function loadingView(what) {
+    return '<div class="devloop-empty"><div class="devloop-empty-icon">⏳</div>'
+      + '<h3>Loading ' + what + '…</h3></div>';
+  }
+
   function renderDesignView() {
     var esc = AppUtils.escHtml;
+    if (loading && (!cachedDocs || cachedDocs.length === 0)) return loadingView('design documents');
     if (!cachedDocs || cachedDocs.length === 0) {
       return (
         '<div class="devloop-empty">' +
@@ -856,6 +884,11 @@ window.DevLoopPanel = (function () {
     return html;
   }
 
+  // An agent can name a file it never wrote, or one since cleaned up.
+  function unavailableMedia() {
+    return '<div class="devloop-qa-unavailable">Preview unavailable — the file is not where the agent said it was.</div>';
+  }
+
   function renderQaView() {
     var esc = AppUtils.escHtml;
     // Also shown above a populated gallery: a scheme that failed to register
@@ -865,6 +898,10 @@ window.DevLoopPanel = (function () {
       : '';
     if (!qaMediaError && qaMediaWarning) {
       errorBanner = '<div class="devloop-qa-warning">' + esc(qaMediaWarning) + '</div>';
+    }
+
+    if (loading && !qaMediaError && (!cachedQaMedia || cachedQaMedia.length === 0)) {
+      return errorBanner + loadingView('QA media');
     }
 
     if (!cachedQaMedia || cachedQaMedia.length === 0) {
@@ -923,7 +960,9 @@ window.DevLoopPanel = (function () {
               '</div>' +
             '</div>' +
             '<div class="devloop-video-wrap">' +
-              '<video src="' + fileUrl + '" controls preload="metadata" style="max-width: 100%; border-radius: 4px;"></video>' +
+              (fileUrl
+                ? '<video src="' + fileUrl + '" controls preload="metadata" style="max-width: 100%; border-radius: 4px;"></video>'
+                : unavailableMedia()) +
             '</div>' +
           '</div>';
       } else {
@@ -941,7 +980,9 @@ window.DevLoopPanel = (function () {
               '</div>' +
             '</div>' +
             '<div class="devloop-img-wrap">' +
-              '<img src="' + fileUrl + '" alt="' + esc(art.name) + '" style="max-width: 100%; max-height: 360px; border-radius: 4px; object-fit: contain;" />' +
+              (fileUrl
+                ? '<img src="' + fileUrl + '" alt="' + esc(art.name) + '" style="max-width: 100%; max-height: 360px; border-radius: 4px; object-fit: contain;" />'
+                : unavailableMedia()) +
             '</div>' +
           '</div>';
       }

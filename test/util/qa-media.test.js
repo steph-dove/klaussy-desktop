@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
-const { findQaMediaFiles } = require('../../main/ipc/files');
+const { findQaMediaFiles, resolveUnderRoots } = require('../../main/ipc/files');
 
 // QA folders are named after the branch, so the fixture needs a real branch.
 function makeRepo(dir, branch) {
@@ -258,5 +258,48 @@ test('findQaMediaFiles: discovers non-png image and video formats (.gif, .jpg, .
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
     fs.rmSync(downloadsDir, { recursive: true, force: true });
+  }
+});
+
+// The panel shows media the scanner never returned (names scraped from terminal
+// output), and the klaussy-qa: scheme serves nothing main has not vetted.
+test('resolveUnderRoots: finds a bare name in any of the QA locations', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-resolve-'));
+  const worktree = path.join(root, 'wt');
+  const downloadsQa = path.join(root, 'klaussy-qa-branch');
+  fs.mkdirSync(worktree, { recursive: true });
+  fs.mkdirSync(downloadsQa, { recursive: true });
+  fs.writeFileSync(path.join(downloadsQa, 'before-hero.jpg'), 'x');
+  fs.writeFileSync(path.join(worktree, 'in-tree.png'), 'x');
+  const roots = [worktree, downloadsQa];
+
+  try {
+    assert.equal(resolveUnderRoots('before-hero.jpg', roots), path.join(downloadsQa, 'before-hero.jpg'));
+    assert.equal(resolveUnderRoots('in-tree.png', roots), path.join(worktree, 'in-tree.png'));
+    assert.equal(resolveUnderRoots(path.join(worktree, 'in-tree.png'), roots), path.join(worktree, 'in-tree.png'));
+
+    assert.equal(resolveUnderRoots('never-written.png', roots), null, 'a file the agent only claimed');
+    assert.equal(resolveUnderRoots(path.join(root, 'outside.png'), roots), null, 'outside every QA location');
+    assert.equal(resolveUnderRoots('../outside.png', roots), null, 'no climbing out of a root');
+    assert.equal(resolveUnderRoots(worktree, roots), null, 'a directory is not media');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('resolveUnderRoots: an absolute path is never rewritten into another root', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-resolve-abs-'));
+  const worktree = path.join(root, 'wt');
+  const other = path.join(root, 'other');
+  fs.mkdirSync(worktree, { recursive: true });
+  fs.mkdirSync(other, { recursive: true });
+  // Same basename in both: resolving the absolute one must not silently serve
+  // the copy that happens to sit in a root it does belong to.
+  fs.writeFileSync(path.join(worktree, 'shot.png'), 'x');
+
+  try {
+    assert.equal(resolveUnderRoots(path.join(other, 'shot.png'), [worktree]), null);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

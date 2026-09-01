@@ -477,10 +477,11 @@ function isInside(parent, child) {
   return rel !== '..' && !rel.startsWith('..' + path.sep);
 }
 
-async function findQaMediaFiles(worktreePath, meta = {}) {
-  if (!worktreePath) return [];
 
-  const foundFiles = new Map();
+// Where QA media for a worktree can legitimately live: Downloads (under several
+// spellings of the branch), a tmp dir, or the repo's own folders. Shared with the
+// scheme's authorization so both answer "is this this session's QA media" alike.
+async function qaCandidateDirs(worktreePath) {
   const candidateDirs = new Set();
 
   let branch = '';
@@ -587,6 +588,14 @@ async function findQaMediaFiles(worktreePath, meta = {}) {
       candidateDirs.add(absQDir);
     }
   }
+  return candidateDirs;
+}
+
+async function findQaMediaFiles(worktreePath, meta = {}) {
+  if (!worktreePath) return [];
+
+  const foundFiles = new Map();
+  const candidateDirs = await qaCandidateDirs(worktreePath);
 
   // Media in a shared folder like Downloads must also be newer than the branch
   // start, or a re-used branch name resurrects the previous run's screenshots.
@@ -796,6 +805,42 @@ ipcMain.handle('dev-loop-evidence', async (_event, { worktreePath }) => {
   }
 });
 
+// An agent names its screenshots however it likes in its output, often bare or
+// relative, so a candidate is tried against each place its media can live.
+function resolveUnderRoots(candidate, roots) {
+  const absolute = path.isAbsolute(candidate);
+  for (const root of roots) {
+    const abs = absolute ? path.resolve(candidate) : path.resolve(root, candidate);
+    if (!isInside(root, abs)) continue;
+    try {
+      if (fs.statSync(abs).isFile()) return abs;
+    } catch { /* not here */ }
+  }
+  return null;
+}
+
+// Vetted here because an allow-list the renderer can write would hand a
+// renderer-side XSS arbitrary local file reads.
+ipcMain.handle('authorize-qa-media', async (_event, { worktreePath, paths } = {}) => {
+  if (!worktreePath || !Array.isArray(paths) || !paths.length) return { urls: {} };
+  try {
+    const roots = [worktreePath, ...(await qaCandidateDirs(worktreePath))];
+    const urls = {};
+    for (const candidate of paths) {
+      if (typeof candidate !== 'string' || !candidate) continue;
+      const ext = path.extname(candidate).toLowerCase();
+      if (!QA_IMAGE_EXTS.has(ext) && !QA_VIDEO_EXTS.has(ext)) continue;
+      const abs = resolveUnderRoots(candidate, roots);
+      if (!abs) continue;
+      allowQaPaths([abs]);
+      urls[candidate] = qaMediaUrl(abs);
+    }
+    return { urls };
+  } catch (err) {
+    return { urls: {}, error: err.message };
+  }
+});
+
 ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
   if (!worktreePath) return { media: [] };
   try {
@@ -1002,6 +1047,8 @@ ipcMain.handle('clipboard-write-text', async (_event, { text }) => {
 
 module.exports = {
   findQaMediaFiles,
+  qaCandidateDirs,
+  resolveUnderRoots,
   isInside,
   devLoopEvidence,
   phaseFromEvidence,
