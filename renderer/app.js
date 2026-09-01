@@ -169,6 +169,7 @@ window.App = window.App || {};
   DiffPanel.init();
   PRPanel.init();
   PlanPanel.init();
+  DevLoopPanel.init();
   ConflictPanel.init();
   DiffPanel.setCommentCallback(function (text) {
     if (AppState.activeTaskId) {

@@ -126,6 +126,7 @@ window.TerminalManager = (function () {
       } else {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
+        markFocusedContainer(id);
         Events.emit('task:switched', { task: tasks.get(id) || null });
       }
     });
@@ -211,6 +212,7 @@ window.TerminalManager = (function () {
       if (AppState.focusedTaskId !== id) {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
+        markFocusedContainer(id);
         Events.emit('task:switched', { task: tasks.get(id) || null });
       }
     });
@@ -321,6 +323,7 @@ window.TerminalManager = (function () {
       id: id, name: name, worktreePath: worktreePath, branch: branch,
       repoPath: task.repoPath || null,
       mode: task.mode || 'claude',
+      devLoop: task.devLoop === true,
       terminal: terminal, fitAddon: fitAddon, searchAddon: searchAddon,
       container: container, cleanup: cleanup,
       alive: task.alive !== false,
@@ -617,6 +620,7 @@ window.TerminalManager = (function () {
       if (AppState.focusedTaskId !== id) {
         AppState.focusedTaskId = id;
         AppState.activeTaskId = id;
+        markFocusedContainer(id);
         Events.emit('task:switched', { task: tasks.get(id) || null, refreshDiff: true });
       }
     });
@@ -1046,6 +1050,16 @@ window.TerminalManager = (function () {
     return layouts[AppState.layoutIndex];
   }
 
+  // Marks which pane holds input, for the accent ring the multi-pane layouts
+  // draw around .active. Single view uses that class for display instead, where
+  // switchToTask owns it.
+  function markFocusedContainer(id) {
+    if (currentLayout() === 'single') return;
+    terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {
+      el.classList.toggle('active', Number(el.dataset.id) === id);
+    });
+  }
+
   function applyLayout() {
     var layout = currentLayout();
     terminalsEl.classList.remove('columns-view', 'grid-view');
@@ -1059,9 +1073,7 @@ window.TerminalManager = (function () {
       }
     } else {
       terminalsEl.classList.add(layout === 'columns' ? 'columns-view' : 'grid-view');
-      terminalsEl.querySelectorAll('.terminal-container').forEach(function (el) {
-        el.classList.remove('active');
-      });
+      markFocusedContainer(AppState.focusedTaskId != null ? AppState.focusedTaskId : AppState.activeTaskId);
       fitAllTerminals();
     }
   }

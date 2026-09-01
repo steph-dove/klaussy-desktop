@@ -269,8 +269,25 @@ function applySavedBell(result, notifyWebhook) {
   return result;
 }
 
+// A session that was started as a dev loop stays one for its whole life, so the
+// flag rides the saved session and is restored onto the resumed instance.
+function applyDevLoop(result, devLoop) {
+  if (devLoop !== true || !result || result.error) return result;
+  const inst = result.id != null ? instances.get(result.id) : null;
+  if (inst) inst.devLoop = true;
+  result.devLoop = true;
+  return result;
+}
+
+ipcMain.handle('mark-dev-loop', (_event, { taskId } = {}) => {
+  const inst = instances.get(taskId);
+  if (!inst) return { error: 'Instance not found' };
+  inst.devLoop = true;
+  return { ok: true };
+});
+
 ipcMain.handle('resume-session', async (_event, {
-  sessionId, name, worktreePath, path: inputPath, branch, mode, originalMode, repoPath, notifyWebhook,
+  sessionId, name, worktreePath, path: inputPath, branch, mode, originalMode, repoPath, notifyWebhook, devLoop,
 } = {}) => {
   const actualWorktreePath = worktreePath || inputPath;
   if (!actualWorktreePath) return { error: 'No worktree path provided' };
@@ -307,10 +324,10 @@ ipcMain.handle('resume-session', async (_event, {
         .catch((err) => console.warn('[resume-session] handoff note failed:', err && err.message));
     }
     try {
-      return applySavedBell(
+      return applyDevLoop(applySavedBell(
         spawnInWorktree(name, actualWorktreePath, branch, resumeMode, null, undefined, undefined, seed || undefined),
         notifyWebhook,
-      );
+      ), devLoop);
     } catch (err) {
       console.error('[resume-session] handoff spawn failed:', err);
       return { error: 'Failed to start terminal: ' + (err && err.message || err) };
@@ -332,10 +349,10 @@ ipcMain.handle('resume-session', async (_event, {
   }
   if (!exactId) exactId = trackedLatestSession(provider, actualWorktreePath);
   try {
-    return applySavedBell(
+    return applyDevLoop(applySavedBell(
       spawnInWorktree(name, actualWorktreePath, branch, resumeMode, exactId, undefined, undefined, undefined, undefined, /* resumeLatest */ !exactId),
       notifyWebhook,
-    );
+    ), devLoop);
   } catch (err) {
     console.error('[resume-session] spawnInWorktree failed:', err);
     return { error: 'Failed to start terminal: ' + (err && err.message || err) };

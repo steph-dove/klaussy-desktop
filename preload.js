@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('klaus', {
   task: {
     create: (name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos, initialPrompt, grantPermissions) =>
       ipcRenderer.invoke('create-task', { name, repoPath, mode, basePath, envVars, baseBranch, baseBranchFallback, sessionRepos, initialPrompt, grantPermissions }),
+    markDevLoop: (taskId) => ipcRenderer.invoke('mark-dev-loop', { taskId }),
     grantWorktreePermissions: (worktreePath) => ipcRenderer.invoke('grant-worktree-permissions', { worktreePath }),
     listBranches: (repoPath) => ipcRenderer.invoke('list-branches', { repoPath }),
     currentModel: (worktreePath, mode, taskId) => ipcRenderer.invoke('agent-current-model', { worktreePath, mode, taskId }),
@@ -663,6 +664,7 @@ contextBridge.exposeInMainWorld('klaus', {
     findPlanFile: (worktreePath) => ipcRenderer.invoke('find-plan-file', { worktreePath }),
     findDesignFile: (worktreePath) => ipcRenderer.invoke('find-design-file', { worktreePath }),
     findQaMedia: (worktreePath) => ipcRenderer.invoke('find-qa-media', { worktreePath }),
+    authorizeQaMedia: (worktreePath, paths) => ipcRenderer.invoke('authorize-qa-media', { worktreePath, paths }),
     devLoopEvidence: (worktreePath) => ipcRenderer.invoke('dev-loop-evidence', { worktreePath }),
     readFilesBulk: (worktreePath, relPaths, maxBytesPerFile) =>
       ipcRenderer.invoke('read-files-bulk', { worktreePath, relPaths, maxBytesPerFile }),

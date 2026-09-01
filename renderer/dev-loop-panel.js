@@ -76,6 +76,8 @@ window.DevLoopPanel = (function () {
   var cachedDocs = [];
   var evidenceTimer = null;
   var cachedQaMedia = [];
+  // A refresh is in flight, so an empty Designs/QA tab is not yet known to be empty.
+  var loading = false;
   var qaMediaError = null;
   var qaMediaWarning = null;
   var containerEl = null;
@@ -110,8 +112,29 @@ window.DevLoopPanel = (function () {
     };
   }
 
+  // Task ids restart at 1 every run, so only the worktree identifies a session
+  // across launches: a stored loop must name the worktree it started in.
+  function isDevLoopState(state, worktreePath) {
+    return Boolean(state && state.devLoop === true && state.worktreePath === worktreePath);
+  }
+
   var STORAGE_KEY_PREFIX = 'klaussy-devloop:';
   var WT_KEY_PREFIX = 'klaussy-devloop-wt:';
+
+  // The task map is keyed by the numeric id; everything here normalizes to a
+  // string.
+  function taskFor(id) {
+    if (id == null || id === '') return null;
+    return AppState.tasks.get(id) || AppState.tasks.get(Number(id)) || null;
+  }
+
+  // The worktree key recovers a loop whose task id changed across a restart, so
+  // it must name that task's own worktree and not whichever one is active.
+  function worktreeFor(id) {
+    var task = taskFor(id);
+    if (task) return task.worktreePath || null;
+    return id ? null : (currentWorktreePath || getActiveWorktreePath());
+  }
 
   function saveState(id, state) {
     if (!state) return;
@@ -120,7 +143,7 @@ window.DevLoopPanel = (function () {
       if (id) {
         localStorage.setItem(STORAGE_KEY_PREFIX + id, serialized);
       }
-      var wt = currentWorktreePath || getActiveWorktreePath();
+      var wt = worktreeFor(id);
       if (wt) {
         localStorage.setItem(WT_KEY_PREFIX + wt, serialized);
       }
@@ -130,44 +153,43 @@ window.DevLoopPanel = (function () {
   }
 
   function loadState(id) {
-    try {
-      if (id) {
-        var raw = localStorage.getItem(STORAGE_KEY_PREFIX + id);
-        if (raw) return JSON.parse(raw);
+    var wt = worktreeFor(id);
+    if (!wt) return null;
+    // The task's own key first, then the worktree's — the second is what
+    // carries a loop across a restart, which renumbers every id.
+    var keys = (id ? [STORAGE_KEY_PREFIX + id] : []).concat(WT_KEY_PREFIX + wt);
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var raw = localStorage.getItem(keys[i]);
+        var parsed = raw ? JSON.parse(raw) : null;
+        if (isDevLoopState(parsed, wt)) return parsed;
+      } catch (e) {
+        console.warn('[dev-loop-panel loadState]', e);
       }
-      var wt = currentWorktreePath || getActiveWorktreePath();
-      if (wt) {
-        var wtRaw = localStorage.getItem(WT_KEY_PREFIX + wt);
-        if (wtRaw) return JSON.parse(wtRaw);
-      }
-    } catch (e) {
-      console.warn('[dev-loop-panel loadState]', e);
     }
     return null;
   }
 
+  // The task carries the devLoop flag across a restart or resume, which
+  // renumbers ids and can outlive this browser store entirely.
   function getState(taskId) {
     var id = normId(taskId || activeTaskId());
-    if (id && devLoopStates.has(id)) return devLoopStates.get(id);
-    var persisted = loadState(id);
-    if (persisted) {
-      if (id) devLoopStates.set(id, persisted);
-      return persisted;
+    var state = (id && devLoopStates.has(id)) ? devLoopStates.get(id) : loadState(id);
+    if (isDevLoopState(state, worktreeFor(id))) {
+      if (id) devLoopStates.set(id, state);
+      return state;
     }
+    var task = taskFor(id);
+    if (task && task.devLoop === true) return createState(id, task.name || '');
     return null;
   }
 
-  function getOrCreateState(taskId, taskDescription) {
+  // Only ever called from a user action — starting or resuming a loop.
+  function createState(taskId, taskDescription) {
     var id = normId(taskId || activeTaskId());
-    if (id && devLoopStates.has(id)) {
-      return devLoopStates.get(id);
-    }
-    var persisted = loadState(id);
-    if (persisted) {
-      if (id) devLoopStates.set(id, persisted);
-      return persisted;
-    }
     var state = defaultState(id || 'default', taskDescription);
+    state.devLoop = true;
+    state.worktreePath = worktreeFor(id);
     if (id) {
       devLoopStates.set(id, state);
       saveState(id, state);
@@ -217,10 +239,10 @@ window.DevLoopPanel = (function () {
 
   function resumeDevLoop(taskId) {
     var id = normId(taskId || activeTaskId());
-    var state = getState(id) || getOrCreateState(id);
+    var state = getState(id) || createState(id);
     var curPhase = state.currentPhase || 1;
     var phaseObj = PHASES.find(function (p) { return p.id === curPhase; }) || PHASES[0];
-    var task = AppState.tasks.get(id);
+    var task = taskFor(id);
     var taskDesc = (task && (task.name || task.initialPrompt)) || state.taskDescription || 'this task';
 
     var resumePrompt = 'Resume the autonomous Dev Loop for ' + taskDesc + ' starting at Phase ' + curPhase + ' (' + phaseObj.name + '). Continue executing through all remaining phases to completion.';
@@ -236,13 +258,26 @@ window.DevLoopPanel = (function () {
 
   function startDevLoop(taskId, taskDescription) {
     var id = normId(taskId || activeTaskId());
-    var state = defaultState(id, taskDescription);
-    devLoopStates.set(id, state);
-    saveState(id, state);
+    var state = createState(id, taskDescription);
+    var task = taskFor(id);
+    if (task) task.devLoop = true;
+    if (window.klaus && window.klaus.task && window.klaus.task.markDevLoop) {
+      window.klaus.task.markDevLoop(task ? task.id : taskId);
+    }
     emitUpdate(id);
     switchDiffTabToDevLoop();
     load(currentWorktreePath);
     return state;
+  }
+
+  function syncTabVisibility(hasLoop) {
+    var tabBtn = document.querySelector('#diff-tabs .diff-tab[data-tab="devloop"]');
+    if (!tabBtn) return;
+    tabBtn.style.display = hasLoop ? '' : 'none';
+    if (!hasLoop && tabBtn.classList.contains('active')) {
+      var changesTab = document.querySelector('#diff-tabs .diff-tab[data-tab="changes"]');
+      if (changesTab) changesTab.click();
+    }
   }
 
   function switchDiffTabToDevLoop() {
@@ -334,10 +369,11 @@ window.DevLoopPanel = (function () {
 
   function feedTerminalData(taskId, rawData) {
     if (!rawData) return;
-    var signals = DevLoopDetect.detect(rawData);
-
     var id = normId(taskId || activeTaskId());
-    var state = getOrCreateState(id, 'Active Dev Loop');
+    var state = getState(id);
+    if (!state) return;
+
+    var signals = DevLoopDetect.detect(rawData);
     var changed = false;
 
     signals.advances.forEach(function (advance) {
@@ -386,9 +422,28 @@ window.DevLoopPanel = (function () {
       renderActiveView();
       return;
     }
+    var switchedWorktree = currentWorktreePath !== worktreePath;
     currentWorktreePath = worktreePath;
     var taskId = activeTaskId();
-    var state = getOrCreateState(taskId, 'Active Dev Loop');
+    var state = getState(taskId);
+    // Ahead of the awaits below: the tab belongs to the session being switched
+    // to, and must not wait on a worktree scan and a `gh pr view` to come back.
+    syncTabVisibility(Boolean(state));
+    if (!state) {
+      cachedDocs = [];
+      cachedQaMedia = [];
+      loading = false;
+      renderActiveView();
+      return;
+    }
+
+    if (switchedWorktree) {
+      cachedDocs = [];
+      cachedQaMedia = [];
+      qaMediaError = null;
+      qaMediaWarning = null;
+      loading = true;
+    }
 
     try {
       var docs = [];
@@ -510,7 +565,7 @@ window.DevLoopPanel = (function () {
         });
       }
 
-      if (state && state.qaArtifacts) {
+      if (state.qaArtifacts) {
         state.qaArtifacts.forEach(function (art) {
           if (!qaMedia.some(function (m) { return m.path === art.path || m.name === art.name; })) {
             qaMedia.push(art);
@@ -518,35 +573,45 @@ window.DevLoopPanel = (function () {
         });
       }
       
-      // Ensure all media items have a servable klaussy-qa: URL
-      qaMedia.forEach(function (m) {
-        if (!m.url && m.path) {
-          try {
-            var b64 = btoa(unescape(encodeURIComponent(m.path))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-            m.url = 'klaussy-qa://media/' + b64;
-          } catch (e) {}
-        }
-      });
+      // Media the scanner did not return (scraped from terminal output, or from
+      // the worktree listing) has no URL yet, and only main can grant one.
+      var unserved = qaMedia.filter(function (m) { return m && !m.url && m.path; });
+      if (unserved.length && window.klaus.fs.authorizeQaMedia) {
+        var granted = await window.klaus.fs.authorizeQaMedia(
+          worktreePath, unserved.map(function (m) { return m.path; }),
+        );
+        var urls = (granted && granted.urls) || {};
+        unserved.forEach(function (m) { m.url = urls[m.path] || ''; });
+      }
       cachedQaMedia = qaMedia.filter(function (m) { return m && (m.url || m.path); });
+
+      // The PR lookup below spawns `gh`, so paint first and land the content a
+      // whole process spawn sooner.
+      loading = false;
+      renderActiveView();
+      updateMiniHuds(taskId);
 
       if (window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
         if (prRes && prRes.pr) {
-          state.prUrl = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
-          state.prNumber = prRes.pr.number;
+          var url = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
+          if (url !== state.prUrl || prRes.pr.number !== state.prNumber) {
+            state.prUrl = url;
+            state.prNumber = prRes.pr.number;
+            renderActiveView();
+          }
         }
       }
-
-      renderActiveView();
-      updateMiniHuds(taskId);
     } catch (err) {
       console.warn('[dev-loop-panel load]', err);
+      loading = false;
       renderActiveView();
     }
   }
 
   function init() {
     containerEl = document.getElementById('devloop-tab-content');
+    syncTabVisibility(Boolean(getState(activeTaskId())));
 
     window.addEventListener('load-devloop', function () {
       load(currentWorktreePath || getActiveWorktreePath());
@@ -597,7 +662,15 @@ window.DevLoopPanel = (function () {
     if (!containerEl) return;
 
     var taskId = activeTaskId();
-    var state = getOrCreateState(taskId, 'Active Dev Loop');
+    var state = getState(taskId);
+    syncTabVisibility(Boolean(state));
+    if (!state) {
+      containerEl.innerHTML = '<div class="file-tree-empty">'
+        + 'This session is not running a dev loop. Start one from the dashboard '
+        + 'to track its phases, plan and QA media here.'
+        + '</div>';
+      return;
+    }
     var esc = AppUtils.escHtml;
     var task = AppState.tasks.get(taskId);
     var taskName = (task && task.name) || (currentWorktreePath ? currentWorktreePath.split('/').pop() : 'Active Task');
@@ -672,13 +745,12 @@ window.DevLoopPanel = (function () {
 
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
       tab.addEventListener('click', function () {
-        var prevSub = currentSubTab;
         currentSubTab = tab.dataset.sub;
-        if ((currentSubTab === 'qa' || currentSubTab === 'design') && currentWorktreePath) {
-          load(currentWorktreePath);
-        } else {
-          renderActiveView();
-        }
+        var refreshes = (currentSubTab === 'qa' || currentSubTab === 'design') && currentWorktreePath;
+        // Painting from cache first: waiting on the refresh left the click dead.
+        loading = Boolean(refreshes);
+        renderActiveView();
+        if (refreshes) load(currentWorktreePath);
       });
     });
 
@@ -746,8 +818,16 @@ window.DevLoopPanel = (function () {
     return html;
   }
 
+  // The empty states read as findings, so flashing one before the scan lands
+  // gives a wrong answer.
+  function loadingView(what) {
+    return '<div class="devloop-empty"><div class="devloop-empty-icon">⏳</div>'
+      + '<h3>Loading ' + what + '…</h3></div>';
+  }
+
   function renderDesignView() {
     var esc = AppUtils.escHtml;
+    if (loading && (!cachedDocs || cachedDocs.length === 0)) return loadingView('design documents');
     if (!cachedDocs || cachedDocs.length === 0) {
       return (
         '<div class="devloop-empty">' +
@@ -804,6 +884,11 @@ window.DevLoopPanel = (function () {
     return html;
   }
 
+  // An agent can name a file it never wrote, or one since cleaned up.
+  function unavailableMedia() {
+    return '<div class="devloop-qa-unavailable">Preview unavailable — the file is not where the agent said it was.</div>';
+  }
+
   function renderQaView() {
     var esc = AppUtils.escHtml;
     // Also shown above a populated gallery: a scheme that failed to register
@@ -813,6 +898,10 @@ window.DevLoopPanel = (function () {
       : '';
     if (!qaMediaError && qaMediaWarning) {
       errorBanner = '<div class="devloop-qa-warning">' + esc(qaMediaWarning) + '</div>';
+    }
+
+    if (loading && !qaMediaError && (!cachedQaMedia || cachedQaMedia.length === 0)) {
+      return errorBanner + loadingView('QA media');
     }
 
     if (!cachedQaMedia || cachedQaMedia.length === 0) {
@@ -871,7 +960,9 @@ window.DevLoopPanel = (function () {
               '</div>' +
             '</div>' +
             '<div class="devloop-video-wrap">' +
-              '<video src="' + fileUrl + '" controls preload="metadata" style="max-width: 100%; border-radius: 4px;"></video>' +
+              (fileUrl
+                ? '<video src="' + fileUrl + '" controls preload="metadata" style="max-width: 100%; border-radius: 4px;"></video>'
+                : unavailableMedia()) +
             '</div>' +
           '</div>';
       } else {
@@ -889,7 +980,9 @@ window.DevLoopPanel = (function () {
               '</div>' +
             '</div>' +
             '<div class="devloop-img-wrap">' +
-              '<img src="' + fileUrl + '" alt="' + esc(art.name) + '" style="max-width: 100%; max-height: 360px; border-radius: 4px; object-fit: contain;" />' +
+              (fileUrl
+                ? '<img src="' + fileUrl + '" alt="' + esc(art.name) + '" style="max-width: 100%; max-height: 360px; border-radius: 4px; object-fit: contain;" />'
+                : unavailableMedia()) +
             '</div>' +
           '</div>';
       }
@@ -1014,9 +1107,12 @@ window.DevLoopPanel = (function () {
 
   function renderMiniHud(hostEl, taskId) {
     if (!hostEl) return;
-    var state = getOrCreateState(taskId, 'Active Dev Loop');
-
+    var state = getState(taskId);
     var minihud = hostEl.querySelector('.terminal-devloop-minihud');
+    if (!state) {
+      if (minihud) minihud.remove();
+      return;
+    }
     if (!minihud) {
       minihud = document.createElement('div');
       minihud.className = 'terminal-devloop-minihud';
@@ -1052,10 +1148,7 @@ window.DevLoopPanel = (function () {
 
   function updateMiniHuds(taskId) {
     if (!taskId) return;
-    // getState, not getOrCreate: a terminal with no dev loop must not sprout
-    // one just because the panel repainted.
-    if (!getState(taskId)) return;
-    var task = AppState.tasks.get(taskId);
+    var task = taskFor(taskId);
     if (task && task.container) {
       renderMiniHud(task.container, taskId);
     }
