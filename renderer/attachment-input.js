@@ -81,6 +81,9 @@ window.AttachmentInput = (function () {
     // A drop lands on the container, not the box, so the caret is wherever the
     // user last left it. Null until they have actually put it somewhere.
     var lastCaret = null;
+    // Bumped by clear(). Saving bytes is async, so a dialog reopened mid-save
+    // would otherwise get the late result written into its fresh prompt.
+    var generation = 0;
 
     if (editor) {
       ['keyup', 'click', 'select', 'focus'].forEach(function (evt) {
@@ -117,11 +120,13 @@ window.AttachmentInput = (function () {
       editor.selectionStart = editor.selectionEnd = lastCaret;
     }
 
+    // Takes back the separator inserted with the marker and nothing else; the
+    // prose may hold deliberate indentation.
     function dropMarkerFromText(marker) {
       if (!editor) return;
       var token = markerFor(marker);
       if (editor.value.indexOf(token) === -1) return;
-      editor.value = editor.value.split(token).join('').replace(/[ \t]+\n/g, '\n').replace(/[ \t]{2,}/g, ' ');
+      editor.value = editor.value.split(' ' + token).join('').split(token).join('');
     }
 
     function render() {
@@ -157,7 +162,9 @@ window.AttachmentInput = (function () {
     async function add(files) {
       if (!files || files.length === 0) return;
       setError('');
+      var gen = generation;
       var results = await Promise.all(files.map(pathForDropped));
+      if (gen !== generation) return;
       // Dedupe so the same path added twice doesn't appear twice. Use the ×
       // buttons to drop individual items.
       results.forEach(function (r) {
@@ -171,6 +178,7 @@ window.AttachmentInput = (function () {
     }
 
     function clear() {
+      generation++;
       // Strip the markers too: the New Session dialog keeps its prose across
       // opens, and a marker with nothing behind it ships as literal text.
       items.forEach(function (it) { dropMarkerFromText(it.marker); });

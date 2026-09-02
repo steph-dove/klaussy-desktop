@@ -254,3 +254,43 @@ test('clearing takes the markers with it, so none ship pointing at nothing', asy
     window.App.devLoopAttachments.compose(document.getElementById('modal-devloop-prompt').value));
   expect(composed).not.toContain('stale.png');
 });
+
+test('removing an attachment leaves indented prose alone', async ({ mainWindow: win }) => {
+  await openModal(win);
+  const CODE = 'Repro:\n\n    function f() {\n        return 1;\n    }\n\nScreenshot:';
+  await win.locator('#plan-modal-text').fill(CODE);
+  await win.evaluate(() => {
+    const ta = document.getElementById('plan-modal-text');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(new Event('select'));
+  });
+  await dropImage(win, 'shot.png');
+
+  await win.locator('.plan-file-remove').first().click();
+  // The snippet's indentation has to survive; only the marker goes.
+  await expect(win.locator('#plan-modal-text')).toHaveValue(CODE);
+});
+
+test('a drop still in flight when the dialog resets is discarded', async ({ mainWindow: win }) => {
+  await win.evaluate(() => {
+    window.App.showModal();
+    const check = document.getElementById('modal-devloop-check');
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+    document.getElementById('modal-devloop-prompt').value = 'first run';
+
+    // Saving the bytes is async; resetting synchronously after the drop means
+    // clear() lands first and the late result must not write itself back in.
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1, 2, 3])], 'inflight.png', { type: 'image/png' }));
+    document.getElementById('modal-devloop-fields').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
+    );
+    window.App.showModal();
+  });
+  await win.waitForTimeout(1200);
+
+  await expect(win.locator('#modal-devloop-prompt')).not.toHaveValue(/inflight\.png/);
+  await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(0);
+});
