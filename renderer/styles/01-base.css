@@ -2267,44 +2267,6 @@ body.task-branchless #ahead-behind {
   font-size: 11px;
 }
 
-#plan-modal-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 14px;
-  background: var(--input-bg);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.plan-modal-tab {
-  flex: 1;
-  padding: 8px 12px;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: var(--text-muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.plan-modal-tab:hover {
-  color: var(--text);
-}
-
-.plan-modal-tab.active {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.plan-tab-content {
-  display: none;
-}
-
-.plan-tab-content.active {
-  display: block;
-}
-
 #plan-modal-text {
   width: 100%;
   box-sizing: border-box;
@@ -2328,6 +2290,7 @@ body.task-branchless #ahead-behind {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: 10px;
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;

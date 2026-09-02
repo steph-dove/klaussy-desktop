@@ -608,24 +608,15 @@
     <div id="plan-modal" class="klaus-modal klaus-modal-wide">
       <h3 id="plan-modal-title">Plan a task</h3>
       <p class="plan-modal-sub">Provide task details. A new agent tab will open on this worktree and run a guided plan flow.</p>
-      <div id="plan-modal-tabs">
-        <button class="plan-modal-tab active" data-tab="paste">Paste text</button>
-        <button class="plan-modal-tab" data-tab="upload">Upload file</button>
-      </div>
+      <textarea id="plan-modal-text" rows="10" placeholder="Paste task details here, and drop or paste any screenshots..." spellcheck="false"></textarea>
 
-      <div id="plan-tab-paste" class="plan-tab-content active">
-        <textarea id="plan-modal-text" rows="10" placeholder="Paste task details here..." spellcheck="false"></textarea>
+      <div id="plan-file-picker">
+        <span id="plan-file-display">No files attached</span>
+        <button id="plan-file-btn" class="klaus-btn klaus-btn-secondary" type="button">Attach files</button>
+        <input type="file" id="plan-file-input" multiple style="display:none" />
       </div>
-
-      <div id="plan-tab-upload" class="plan-tab-content">
-        <div id="plan-file-picker">
-          <span id="plan-file-display">No files selected</span>
-          <button id="plan-file-btn" class="klaus-btn klaus-btn-secondary" type="button">Choose files</button>
-          <input type="file" id="plan-file-input" multiple style="display:none" />
-        </div>
-        <div id="plan-file-list"></div>
-        <p class="plan-modal-hint">Any files or folders. Their paths are passed to the agent on submit, and the agent reads them directly.</p>
-      </div>
+      <div id="plan-file-list"></div>
+      <p class="plan-modal-hint">Drop or paste screenshots anywhere on this dialog, or attach any files and folders. They are sent along with the text above, and the agent reads them directly.</p>
 
       <div id="plan-modal-perm-row" class="plan-modal-perm-row">
         <label id="plan-modal-perm-toggle" class="plan-modal-perm-toggle">
