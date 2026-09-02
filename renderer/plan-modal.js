@@ -768,7 +768,6 @@ window.ActionModal = (function () {
     var cfg = ACTIONS[action];
     reset(action);
     var task = AppState.tasks.get(taskId);
-    // Nothing ever applied cfg.title, so every action said "Plan a task".
     if (titleEl) titleEl.textContent = cfg.title;
     if (subHint) {
       subHint.innerHTML = cfg.hint;
