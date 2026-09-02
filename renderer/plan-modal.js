@@ -801,19 +801,24 @@ window.ActionModal = (function () {
   }
 
   // A Finder drag has a real path; a browser or clipboard image is bytes only.
+  // Returns { name, path } on success, { name, error } with the reason on failure.
   async function pathForDropped(file) {
     var fsApi = (window.klaus && window.klaus.fs) || {};
+    var name = file.name || 'item';
     try {
       var existing = fsApi.getPathForFile && fsApi.getPathForFile(file);
-      if (existing) return existing;
+      if (existing) return { name: name, path: existing };
     } catch (_err) { /* no backing file — fall through to the bytes */ }
-    if (!fsApi.saveAttachment || typeof file.arrayBuffer !== 'function') return '';
+    if (!fsApi.saveAttachment || typeof file.arrayBuffer !== 'function') {
+      return { name: name, error: 'no file behind it to read' };
+    }
     try {
       var buf = await file.arrayBuffer();
-      var saved = await fsApi.saveAttachment(file.name || '', new Uint8Array(buf));
-      return (saved && saved.path) || '';
-    } catch (_err) {
-      return '';
+      var saved = await fsApi.saveAttachment(name, new Uint8Array(buf));
+      if (saved && saved.path) return { name: name, path: saved.path };
+      return { name: name, error: (saved && saved.error) || 'could not be saved' };
+    } catch (err) {
+      return { name: name, error: (err && err.message) || 'could not be read' };
     }
   }
 
@@ -821,19 +826,22 @@ window.ActionModal = (function () {
   async function processFiles(files) {
     if (!files || files.length === 0) return;
     errorEl.textContent = '';
-    var paths = (await Promise.all(files.map(pathForDropped))).filter(Boolean);
-    if (paths.length === 0) {
-      errorEl.textContent = 'Could not attach the dropped item(s).';
-      return;
-    }
+    var results = await Promise.all(files.map(pathForDropped));
     // Accumulate across repeated drops/picks; dedupe so the same path added
     // twice doesn't appear twice. Use the × buttons to drop individual items.
-    paths.forEach(function (p) {
-      if (uploadedPaths.indexOf(p) === -1) uploadedPaths.push(p);
+    results.forEach(function (r) {
+      if (r.path && uploadedPaths.indexOf(r.path) === -1) uploadedPaths.push(r.path);
     });
     renderUploadList();
-    var skipped = files.length - paths.length;
-    if (skipped > 0) errorEl.textContent = skipped + ' item(s) could not be attached and were skipped.';
+    errorEl.textContent = attachErrors(results.filter(function (r) { return !r.path; }));
+  }
+
+  // Name the reason (a size cap, an unreadable drag) rather than a generic
+  // failure, so the user knows whether re-dropping is worth trying.
+  function attachErrors(failed) {
+    if (failed.length === 0) return '';
+    if (failed.length === 1) return failed[0].name + ' could not be attached: ' + failed[0].error;
+    return failed.length + ' items could not be attached — ' + failed[0].name + ': ' + failed[0].error;
   }
 
   function renderUploadList() {

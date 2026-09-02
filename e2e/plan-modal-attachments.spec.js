@@ -84,6 +84,20 @@ test('an image with no file behind it is persisted so it has a path to send', as
   expect(fs.readFileSync(attached[0]).subarray(1, 4).toString()).toBe('PNG');
 });
 
+test('an attachment that main refuses says why, not just that it failed', async ({ mainWindow: win }) => {
+  await openModal(win);
+  await win.evaluate(() => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([], 'broken.png', { type: 'image/png' }));
+    document.getElementById('plan-modal').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(win.locator('#plan-modal-error')).toContainText('broken.png');
+  await expect(win.locator('#plan-modal-error')).toContainText('empty');
+  await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(0);
+});
+
 test('the modal titles itself by the action that opened it', async ({ mainWindow: win }) => {
   await openModal(win);
   await expect(win.locator('#plan-modal-title')).toContainText('Full Dev Loop');
