@@ -933,18 +933,20 @@ window.App = window.App || {};
       }
       var isDevLoop = App.modalDevLoopCheck && App.modalDevLoopCheck.checked;
       var devLoopTask = (App.modalDevLoopPrompt && App.modalDevLoopPrompt.value.trim()) || '';
-      // The prose alone names the branch below; the agent gets the attachments too.
+      // The agent gets the attachments; the branch name gets the prose alone,
+      // with the inline markers stripped back out.
       var devLoopContent = App.devLoopAttachments ? App.devLoopAttachments.compose(devLoopTask) : devLoopTask;
+      var devLoopName = App.devLoopAttachments ? App.devLoopAttachments.plain(devLoopTask) : devLoopTask;
       var grantPermissionsCheck = document.getElementById('modal-permissions-check');
       var grantPermissions = grantPermissionsCheck ? grantPermissionsCheck.checked : false;
       var name = App.modalInput.value.trim();
 
-      if (isDevLoop && !name && devLoopTask) {
-        var issueMatch = devLoopTask.match(/(?:issues|pull|merge_requests)[/](\d+)/i);
+      if (isDevLoop && !name && devLoopName) {
+        var issueMatch = devLoopName.match(/(?:issues|pull|merge_requests)[/](\d+)/i);
         if (issueMatch) {
           name = 'issue-' + issueMatch[1];
         } else {
-          name = devLoopTask.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+          name = devLoopName.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
         }
       }
 

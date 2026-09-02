@@ -168,7 +168,11 @@ window.AttachmentInput = (function () {
       // Dedupe so the same path added twice doesn't appear twice. Use the ×
       // buttons to drop individual items.
       results.forEach(function (r) {
-        if (!r.path || items.some(function (it) { return it.path === r.path; })) return;
+        if (!r.path) return;
+        // Referencing one image at two spots is legitimate, so a repeat drop
+        // places the marker again rather than looking like it did nothing.
+        var known = items.filter(function (it) { return it.path === r.path; })[0];
+        if (known) return insertMarker(known.marker);
         var marker = uniqueMarker(basename(r.path));
         items.push({ path: r.path, marker: marker });
         insertMarker(marker);
@@ -235,9 +239,21 @@ window.AttachmentInput = (function () {
 
     render();
 
+    // The prose without any markers, for callers naming a branch or labelling
+    // the loop, where a literal [shot.png] would leak through.
+    function plain(text) {
+      var out = text || '';
+      items.forEach(function (it) {
+        var token = markerFor(it.marker);
+        out = out.split(' ' + token).join('').split(token).join('');
+      });
+      return out.trim();
+    }
+
     return {
       add: add,
       clear: clear,
+      plain: plain,
       paths: function () { return items.map(function (it) { return it.path; }); },
       compose: function (text) { return composeSubmission(text, items); },
     };

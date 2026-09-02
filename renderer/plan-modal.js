@@ -906,7 +906,7 @@ window.ActionModal = (function () {
       if (currentAction === 'rest-of-the-owl' && window.DevLoopPanel && window.DevLoopPanel.startDevLoop) {
         // The loop labels itself with this, so it wants the prose the user
         // typed — a list of attachment paths makes for a useless header.
-        window.DevLoopPanel.startDevLoop(currentTaskId, textarea.value.trim() || content);
+        window.DevLoopPanel.startDevLoop(currentTaskId, attachments.plain(textarea.value) || content);
       }
       close();
     } catch (err) {

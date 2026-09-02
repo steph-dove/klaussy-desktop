@@ -7,6 +7,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { test, expect } = require('./fixtures');
 
 const QA_OUT = process.env.QA_OUT;
@@ -32,6 +33,7 @@ async function openModal(win) {
 }
 
 async function dropImage(win, name) {
+  const before = await win.locator('#plan-file-list .plan-file-row').count();
   await win.evaluate(({ b64, name }) => {
     const bin = atob(b64);
     const bytes = new Uint8Array(bin.length);
@@ -43,7 +45,8 @@ async function dropImage(win, name) {
     );
   }, { b64: PNG_B64, name });
   // The bytes round-trip through main to get a temp path before the row lands.
-  await expect(win.locator('#plan-file-list .plan-file-row', { hasText: name })).toBeVisible();
+  // Counted rather than matched by name, since two drops can share one.
+  await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(before + 1);
 }
 
 test('a dropped image attaches alongside the typed task instead of replacing it', async ({ mainWindow: win }) => {
@@ -293,4 +296,88 @@ test('a drop still in flight when the dialog resets is discarded', async ({ main
 
   await expect(win.locator('#modal-devloop-prompt')).not.toHaveValue(/inflight\.png/);
   await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(0);
+});
+
+test('markers stay out of the branch name derived from the task', async ({ mainWindow: win }) => {
+  await win.evaluate(() => {
+    window.App.showModal();
+    const check = document.getElementById('modal-devloop-check');
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+  });
+  await win.locator('#modal-devloop-prompt').fill('Fix the login redirect');
+  await win.evaluate(() => {
+    const ta = document.getElementById('modal-devloop-prompt');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = 'Fix the'.length;
+    ta.dispatchEvent(new Event('select'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1, 2, 3])], 'shot.png', { type: 'image/png' }));
+    document.getElementById('modal-devloop-fields').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/\[shot\.png\]/);
+
+  // The name is derived from this; a marker mid-prose would land in the branch.
+  const plain = await win.evaluate(() =>
+    window.App.devLoopAttachments.plain(document.getElementById('modal-devloop-prompt').value));
+  expect(plain).toBe('Fix the login redirect');
+});
+
+test('two files sharing a name get distinct markers', async ({ mainWindow: win }) => {
+  await openModal(win);
+  await dropImage(win, 'shot.png');
+  await dropImage(win, 'shot.png');
+
+  // Each drop of raw bytes is its own file, so the second must not point at
+  // the first. The list carries both.
+  const value = await win.locator('#plan-modal-text').inputValue();
+  expect(value).toContain('[shot.png]');
+  expect(value).toContain('[shot.png 2]');
+  await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(2);
+
+  const submitted = await win.evaluate(() =>
+    window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
+  expect(submitted).not.toContain('[shot.png');
+  const paths = await win.evaluate(() => window.ActionModal.attachments().paths());
+  expect(new Set(paths).size).toBe(2);
+  paths.forEach((p) => expect(submitted).toContain(p));
+});
+
+test('re-picking the same on-disk file references it again instead of doing nothing', async ({ mainWindow: win }) => {
+  // A real file on disk resolves through getPathForFile, so both picks are the
+  // same attachment. Dropped bytes mint a fresh temp path each time and so
+  // cannot exercise this branch.
+  const real = path.join(os.tmpdir(), `klaussy-e2e-dup-${Date.now()}.png`);
+  fs.writeFileSync(real, Buffer.from(PNG_B64, 'base64'));
+  const marker = `[${path.basename(real)}]`;
+
+  await openModal(win);
+  await win.locator('#plan-modal-text').fill('Before:\n\nAfter:');
+
+  for (const at of ['Before:'.length, null]) {
+    await win.evaluate(({ at }) => {
+      const ta = document.getElementById('plan-modal-text');
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = at === null ? ta.value.length : at;
+      ta.dispatchEvent(new Event('select'));
+    }, { at });
+    // Setting the same file twice is a no-op, so the input is emptied between
+    // picks. add() ignores an empty selection.
+    await win.locator('#plan-file-input').setInputFiles([]);
+    await win.locator('#plan-file-input').setInputFiles(real);
+    await win.waitForTimeout(400);
+  }
+
+  const value = await win.locator('#plan-modal-text').inputValue();
+  expect(value.split(marker).length - 1).toBe(2);
+  // One attachment, referenced at both spots.
+  await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(1);
+
+  const submitted = await win.evaluate(() =>
+    window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
+  expect(submitted).not.toContain(marker);
+  expect(submitted.split(real).length - 1).toBe(2);
+  fs.rmSync(real, { force: true });
 });
