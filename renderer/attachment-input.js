@@ -13,12 +13,29 @@ window.AttachmentInput = (function () {
     return parts[parts.length - 1] || p;
   }
 
-  // Additive, never either/or: attachments follow the text so the agent reads
-  // the ask before the files.
-  function composeSubmission(text, paths) {
+  function markerFor(label) {
+    return '[' + label + ']';
+  }
+
+  // Where an attachment sits in the text is the point: "this one is the bug,
+  // this one is the goal". The box shows a short [name.png] marker so a long
+  // temp path doesn't swallow it; the real path is swapped in here. Anything
+  // the text never placed is listed at the end so it can't be lost.
+  function composeSubmission(text, items) {
     var body = (text || '').trim();
-    if (!paths || !paths.length) return body;
-    var attached = 'Attached files/folders for this task (read them):\n' + paths.map(quotePath).join('\n');
+    if (!items || !items.length) return body;
+    var loose = [];
+    items.forEach(function (item) {
+      var entry = typeof item === 'string' ? { path: item, marker: null } : item;
+      var token = entry.marker ? markerFor(entry.marker) : null;
+      if (token && body.indexOf(token) !== -1) {
+        body = body.split(token).join(quotePath(entry.path));
+      } else if (body.indexOf(entry.path) === -1) {
+        loose.push(entry.path);
+      }
+    });
+    if (!loose.length) return body;
+    var attached = 'Attached files/folders for this task (read them):\n' + loose.map(quotePath).join('\n');
     return body ? body + '\n\n' + attached : attached;
   }
 
@@ -60,34 +77,77 @@ window.AttachmentInput = (function () {
   // Wires one surface. Every element is optional so a caller can opt out of the
   // picker or the drop zone. Returns the handle the caller reads at submit time.
   function create(opts) {
-    var paths = [];
+    var items = [];
     var emptyText = opts.emptyText || 'No files attached';
+    var editor = opts.insertInto || opts.pasteFrom || null;
+    // A drop lands on the container, not the box, so the caret is wherever the
+    // user last left it. Null until they have actually put it somewhere.
+    var lastCaret = null;
+
+    if (editor) {
+      ['keyup', 'click', 'select', 'focus'].forEach(function (evt) {
+        editor.addEventListener(evt, function () { lastCaret = editor.selectionStart; });
+      });
+    }
 
     function setError(msg) {
       if (opts.errorEl) opts.errorEl.textContent = msg;
     }
 
+    // Two screenshots often share a name, so the marker gets a counter rather
+    // than pointing at whichever file was added first.
+    function uniqueMarker(name) {
+      var label = name;
+      for (var n = 2; items.some(function (it) { return it.marker === label; }); n++) {
+        label = name + ' ' + n;
+      }
+      return label;
+    }
+
+    // Drops the marker where the caret is, so the sentence introducing the
+    // screenshot stays next to it.
+    function insertMarker(marker) {
+      if (!editor) return;
+      var value = editor.value;
+      var at = lastCaret === null || lastCaret > value.length ? value.length : lastCaret;
+      var before = value.slice(0, at);
+      var after = value.slice(at);
+      var lead = before && !/\s$/.test(before) ? ' ' : '';
+      var chunk = lead + markerFor(marker);
+      editor.value = before + chunk + after;
+      lastCaret = (before + chunk).length;
+      editor.selectionStart = editor.selectionEnd = lastCaret;
+    }
+
+    function dropMarkerFromText(marker) {
+      if (!editor) return;
+      var token = markerFor(marker);
+      if (editor.value.indexOf(token) === -1) return;
+      editor.value = editor.value.split(token).join('').replace(/[ \t]+\n/g, '\n').replace(/[ \t]{2,}/g, ' ');
+    }
+
     function render() {
       if (opts.displayEl) {
-        opts.displayEl.textContent = paths.length === 0 ? emptyText
-          : (paths.length === 1 ? basename(paths[0]) : paths.length + ' items attached');
-        opts.displayEl.classList.toggle('has-file', paths.length > 0);
+        opts.displayEl.textContent = items.length === 0 ? emptyText
+          : (items.length === 1 ? items[0].marker : items.length + ' items attached');
+        opts.displayEl.classList.toggle('has-file', items.length > 0);
       }
       if (!opts.listEl) return;
       opts.listEl.innerHTML = '';
-      paths.forEach(function (p, i) {
+      items.forEach(function (it, i) {
         var row = document.createElement('div');
         row.className = 'plan-file-row';
         var nameEl = document.createElement('span');
-        nameEl.textContent = basename(p);
-        nameEl.title = p;
+        nameEl.textContent = it.marker;
+        nameEl.title = it.path;
         var rm = document.createElement('button');
         rm.className = 'plan-file-remove';
         rm.type = 'button';
         rm.textContent = '×';
         rm.title = 'Remove';
         rm.addEventListener('click', function () {
-          paths.splice(i, 1);
+          items.splice(i, 1);
+          dropMarkerFromText(it.marker);
           render();
         });
         row.appendChild(nameEl);
@@ -103,14 +163,18 @@ window.AttachmentInput = (function () {
       // Dedupe so the same path added twice doesn't appear twice. Use the ×
       // buttons to drop individual items.
       results.forEach(function (r) {
-        if (r.path && paths.indexOf(r.path) === -1) paths.push(r.path);
+        if (!r.path || items.some(function (it) { return it.path === r.path; })) return;
+        var marker = uniqueMarker(basename(r.path));
+        items.push({ path: r.path, marker: marker });
+        insertMarker(marker);
       });
       render();
       setError(describeErrors(results.filter(function (r) { return !r.path; })));
     }
 
     function clear() {
-      paths = [];
+      items = [];
+      lastCaret = null;
       if (opts.fileInput) opts.fileInput.value = '';
       // The error names files that are no longer attached, so it goes too.
       setError('');
@@ -132,6 +196,7 @@ window.AttachmentInput = (function () {
         var items = e.clipboardData && e.clipboardData.files;
         if (!items || items.length === 0) return;
         e.preventDefault();
+        lastCaret = opts.pasteFrom.selectionStart;
         add(Array.from(items));
       });
     }
@@ -164,8 +229,8 @@ window.AttachmentInput = (function () {
     return {
       add: add,
       clear: clear,
-      paths: function () { return paths.slice(); },
-      compose: function (text) { return composeSubmission(text, paths); },
+      paths: function () { return items.map(function (it) { return it.path; }); },
+      compose: function (text) { return composeSubmission(text, items); },
     };
   }
 

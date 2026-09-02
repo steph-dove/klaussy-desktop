@@ -979,5 +979,12 @@ window.ActionModal = (function () {
     });
   }
 
-  return { open: open, close: close, run: run, composeSubmission: window.AttachmentInput.composeSubmission };
+  return {
+    open: open,
+    close: close,
+    run: run,
+    composeSubmission: window.AttachmentInput.composeSubmission,
+    // The live handle, so the modal's real composition can be exercised.
+    attachments: function () { return attachments; },
+  };
 })();

@@ -57,3 +57,70 @@ test('each attachment goes on its own line', () => {
   const out = composeSubmission('', ['/a/one.png', '/a/two.png']);
   assert.match(out, /one\.png\n\/a\/two\.png/);
 });
+
+// Dropping at the cursor is the whole point: "this is the bug, this is the
+// goal". A path the user placed inline must not be repeated at the end.
+test('a path already sitting in the text is not listed again', () => {
+  const text = 'Current state:\n' + SHOT + '\n\nGoal:\n/Users/me/Desktop/goal.png';
+  const out = composeSubmission(text, [SHOT, '/Users/me/Desktop/goal.png']);
+  assert.equal(out, text);
+  assert.equal(out.match(/shot\.png/g).length, 1, 'shot.png appears twice');
+});
+
+test('an attachment the text does not mention is still appended', () => {
+  const text = 'Current state:\n' + SHOT;
+  const out = composeSubmission(text, [SHOT, '/Users/me/Desktop/orphan.png']);
+  assert.equal(out.match(/shot\.png/g).length, 1);
+  assert.match(out, /orphan\.png/);
+  assert.match(out, /read them/);
+});
+
+test('the inline ordering the user chose is preserved', () => {
+  const text = 'Broken:\n/a/bug.png\n\nShould look like:\n/a/goal.png';
+  const out = composeSubmission(text, ['/a/bug.png', '/a/goal.png']);
+  assert.ok(out.indexOf('bug.png') < out.indexOf('goal.png'));
+  assert.ok(out.indexOf('Broken') < out.indexOf('bug.png'));
+  assert.ok(out.indexOf('Should look like') < out.indexOf('goal.png'));
+});
+
+// The box shows a short [name.png] marker so a long temp path doesn't swallow
+// a three-row textarea; the real path is swapped in at submit.
+const ITEM = { path: SHOT, marker: 'shot.png' };
+
+test('a marker resolves to the real path where it was placed', () => {
+  const out = composeSubmission('Current state:\n[shot.png]\n\nGoal: none yet', [ITEM]);
+  assert.match(out, /Current state:\n\/Users\/me\/Desktop\/shot\.png/);
+  assert.ok(!out.includes('[shot.png]'), 'marker was left unresolved');
+  assert.ok(!out.includes('read them'), 'a placed attachment was also appended');
+});
+
+test('an attachment whose marker was deleted is still appended', () => {
+  const out = composeSubmission('I removed the marker', [ITEM]);
+  assert.match(out, /read them/);
+  assert.match(out, /shot\.png/);
+});
+
+test('markers resolve in the order the writer placed them', () => {
+  const items = [
+    { path: '/a/bug.png', marker: 'bug.png' },
+    { path: '/a/goal.png', marker: 'goal.png' },
+  ];
+  const out = composeSubmission('Should be: [goal.png]\nBut is: [bug.png]', items);
+  assert.ok(out.indexOf('/a/goal.png') < out.indexOf('/a/bug.png'));
+});
+
+test('a marker used twice resolves at both spots', () => {
+  const out = composeSubmission('before [shot.png] and again [shot.png]', [ITEM]);
+  assert.equal(out.match(/\/Users\/me\/Desktop\/shot\.png/g).length, 2);
+});
+
+test('a path with spaces is quoted when its marker resolves', () => {
+  const out = composeSubmission('here: [Screen Shot.png]',
+    [{ path: '/Users/me/Screen Shot.png', marker: 'Screen Shot.png' }]);
+  assert.match(out, /"\/Users\/me\/Screen Shot\.png"/);
+});
+
+test('bracket text that is not an attachment is left alone', () => {
+  const out = composeSubmission('see [some other thing] here', [ITEM]);
+  assert.match(out, /\[some other thing\]/);
+});

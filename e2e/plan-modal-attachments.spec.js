@@ -58,12 +58,11 @@ test('a dropped image attaches alongside the typed task instead of replacing it'
   await dropImage(win, 'settings-header-expected.png');
   await shot(win, '4-second-image');
 
-  // The task survives the drop, in the box and in what would be submitted.
-  await expect(win.locator('#plan-modal-text')).toHaveValue(TASK);
-  const submitted = await win.evaluate(() => window.ActionModal.composeSubmission(
-    document.getElementById('plan-modal-text').value,
-    Array.from(document.querySelectorAll('#plan-file-list .plan-file-row > span')).map((s) => s.title),
-  ));
+  // The task survives the drop; the paths land inline rather than replacing it.
+  await expect(win.locator('#plan-modal-text')).toHaveValue(new RegExp('Fix the header alignment'));
+  await expect(win.locator('#plan-modal-text')).toHaveValue(/\[settings-header-bug\.png\]/);
+  const submitted = await win.evaluate(() =>
+    window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
   expect(submitted).toContain('Fix the header alignment');
   expect(submitted).toContain('settings-header-bug.png');
   expect(submitted).toContain('settings-header-expected.png');
@@ -148,11 +147,11 @@ test('the New Session dev loop field takes attachments alongside its task', asyn
   }, { b64: PNG_B64 });
   await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(1);
 
-  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(TASK);
+  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(new RegExp('Fix the header alignment'));
   const composed = await win.evaluate(() =>
     window.App.devLoopAttachments.compose(document.getElementById('modal-devloop-prompt').value));
   expect(composed).toContain('Fix the header alignment');
-  expect(composed).toContain('session-bug.png');
+  expect(composed).toMatch(/klaussy-attachments\/[0-9a-f]+\/session-bug\.png/);
 });
 
 test('reopening New Session drops the previous run attachments', async ({ mainWindow: win }) => {
@@ -171,4 +170,57 @@ test('reopening New Session drops the previous run attachments', async ({ mainWi
 
   await win.evaluate(() => window.App.showModal());
   await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(0);
+});
+
+test('a drop lands at the cursor so images sit next to what describes them', async ({ mainWindow: win }) => {
+  await openModal(win);
+  await win.locator('#plan-modal-text').fill('Current state:\n\nWhat it should be:');
+
+  // Put the caret at the end of the first label, then drop.
+  await win.evaluate(() => {
+    const ta = document.getElementById('plan-modal-text');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = 'Current state:'.length;
+    ta.dispatchEvent(new Event('select'));
+  });
+  await dropImage(win, 'broken.png');
+
+  await win.evaluate(() => {
+    const ta = document.getElementById('plan-modal-text');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(new Event('select'));
+  });
+  await dropImage(win, 'goal.png');
+
+  const value = await win.locator('#plan-modal-text').inputValue();
+  expect(value.indexOf('Current state:')).toBeLessThan(value.indexOf('broken.png'));
+  expect(value.indexOf('broken.png')).toBeLessThan(value.indexOf('What it should be:'));
+  expect(value.indexOf('What it should be:')).toBeLessThan(value.indexOf('goal.png'));
+
+  // Both are placed, so nothing gets repeated in a trailing block, and the
+  // markers resolve to the real temp paths.
+  const submitted = await win.evaluate(() =>
+    window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
+  expect(submitted).not.toContain('Attached files/folders');
+  expect(submitted).not.toContain('[broken.png]');
+  expect(submitted).toMatch(/klaussy-attachments\/[0-9a-f]+\/broken\.png/);
+  expect(submitted.indexOf('Current state:')).toBeLessThan(submitted.indexOf('broken.png'));
+});
+
+test('removing an attachment takes its line out of the text', async ({ mainWindow: win }) => {
+  await openModal(win);
+  await win.locator('#plan-modal-text').fill('Look at this:');
+  await win.evaluate(() => {
+    const ta = document.getElementById('plan-modal-text');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(new Event('select'));
+  });
+  await dropImage(win, 'unwanted.png');
+  await expect(win.locator('#plan-modal-text')).toHaveValue(/\[unwanted\.png\]/);
+
+  await win.locator('.plan-file-remove').first().click();
+  await expect(win.locator('#plan-modal-text')).not.toHaveValue(/unwanted\.png/);
+  await expect(win.locator('#plan-modal-text')).toHaveValue(/Look at this:/);
 });
