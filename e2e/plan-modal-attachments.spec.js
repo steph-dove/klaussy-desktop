@@ -125,8 +125,7 @@ test('reopening the modal starts clean', async ({ mainWindow: win }) => {
   await expect(win.locator('#plan-file-display')).toContainText('No files attached');
 });
 
-// Same fix on the other surface: the New Session dialog's dev-loop field feeds
-// a different code path (app-functions-2), so it gets its own coverage.
+// The New Session dev-loop field runs through app-functions-2, not plan-modal.
 test('the New Session dev loop field takes attachments alongside its task', async ({ mainWindow: win }) => {
   await win.evaluate(() => {
     window.App.showModal();
@@ -149,7 +148,6 @@ test('the New Session dev loop field takes attachments alongside its task', asyn
   }, { b64: PNG_B64 });
   await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(1);
 
-  // The typed task survives, and the composed prompt carries both.
   await expect(win.locator('#modal-devloop-prompt')).toHaveValue(TASK);
   const composed = await win.evaluate(() =>
     window.App.devLoopAttachments.compose(document.getElementById('modal-devloop-prompt').value));

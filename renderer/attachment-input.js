@@ -112,6 +112,8 @@ window.AttachmentInput = (function () {
     function clear() {
       paths = [];
       if (opts.fileInput) opts.fileInput.value = '';
+      // The error names files that are no longer attached, so it goes too.
+      setError('');
       render();
     }
 
