@@ -1,10 +1,7 @@
 /* global window, document, DataTransfer, DragEvent, File, atob, Uint8Array */
 
-// The action modal used to treat the typed task and the attached files as
-// either/or — dropping a screenshot switched tabs and the task definition was
-// silently dropped on submit. It also refused any image without a file behind
-// it, which is every image dragged out of a browser or pasted from the
-// clipboard. Both are covered here against the real modal.
+// Covers the action modal's attachments: text and files together, and images
+// that arrive as bytes with no file behind them.
 //
 // Set QA_OUT to also write screenshots of each step into that directory.
 

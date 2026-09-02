@@ -13,9 +13,7 @@ const { composeSubmission } = global.window.ActionModal;
 
 const SHOT = '/Users/me/Desktop/shot.png';
 
-// The bug: the modal used to return the typed text OR the attachment paths
-// depending on which tab was active, and dropping a file switched tabs. So a
-// task definition plus a screenshot reached the agent as paths alone.
+// Regression: text and attachments must both survive, never either/or.
 test('a typed task and a dropped image both reach the agent', () => {
   const out = composeSubmission('Fix the header alignment', [SHOT]);
   assert.match(out, /Fix the header alignment/);
