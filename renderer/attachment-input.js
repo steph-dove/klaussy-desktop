@@ -17,10 +17,8 @@ window.AttachmentInput = (function () {
     return '[' + label + ']';
   }
 
-  // Where an attachment sits in the text is the point: "this one is the bug,
-  // this one is the goal". The box shows a short [name.png] marker so a long
-  // temp path doesn't swallow it; the real path is swapped in here. Anything
-  // the text never placed is listed at the end so it can't be lost.
+  // Markers keep long temp paths out of the box; they resolve here, and
+  // anything the writer never placed is appended so none are lost.
   function composeSubmission(text, items) {
     var body = (text || '').trim();
     if (!items || !items.length) return body;
@@ -173,6 +171,9 @@ window.AttachmentInput = (function () {
     }
 
     function clear() {
+      // Strip the markers too: the New Session dialog keeps its prose across
+      // opens, and a marker with nothing behind it ships as literal text.
+      items.forEach(function (it) { dropMarkerFromText(it.marker); });
       items = [];
       lastCaret = null;
       if (opts.fileInput) opts.fileInput.value = '';

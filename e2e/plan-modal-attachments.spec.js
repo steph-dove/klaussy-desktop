@@ -224,3 +224,33 @@ test('removing an attachment takes its line out of the text', async ({ mainWindo
   await expect(win.locator('#plan-modal-text')).not.toHaveValue(/unwanted\.png/);
   await expect(win.locator('#plan-modal-text')).toHaveValue(/Look at this:/);
 });
+
+test('clearing takes the markers with it, so none ship pointing at nothing', async ({ mainWindow: win }) => {
+  await win.evaluate(() => {
+    window.App.showModal();
+    const check = document.getElementById('modal-devloop-check');
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+  });
+  await win.locator('#modal-devloop-prompt').fill('Broken here:');
+  await win.evaluate(() => {
+    const ta = document.getElementById('modal-devloop-prompt');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = ta.value.length;
+    ta.dispatchEvent(new Event('select'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1, 2, 3])], 'stale.png', { type: 'image/png' }));
+    document.getElementById('modal-devloop-fields').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/\[stale\.png\]/);
+
+  // This dialog keeps its prose across opens, so a leftover marker would be
+  // sent to the agent as literal text.
+  await win.evaluate(() => window.App.showModal());
+  await expect(win.locator('#modal-devloop-prompt')).not.toHaveValue(/stale\.png/);
+  const composed = await win.evaluate(() =>
+    window.App.devLoopAttachments.compose(document.getElementById('modal-devloop-prompt').value));
+  expect(composed).not.toContain('stale.png');
+});
