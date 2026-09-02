@@ -110,6 +110,7 @@ window.App = window.App || {};
     App.modalSession++;
     App.pendingRepoClones = 0;
     App.modalInput.value = '';
+    if (App.devLoopAttachments) App.devLoopAttachments.clear();
     App.modalError.textContent = '';
     App.clearFieldFlags();
     App.modalCreate.disabled = false;
@@ -932,6 +933,8 @@ window.App = window.App || {};
       }
       var isDevLoop = App.modalDevLoopCheck && App.modalDevLoopCheck.checked;
       var devLoopTask = (App.modalDevLoopPrompt && App.modalDevLoopPrompt.value.trim()) || '';
+      // The prose alone names the branch below; the agent gets the attachments too.
+      var devLoopContent = App.devLoopAttachments ? App.devLoopAttachments.compose(devLoopTask) : devLoopTask;
       var grantPermissionsCheck = document.getElementById('modal-permissions-check');
       var grantPermissions = grantPermissionsCheck ? grantPermissionsCheck.checked : false;
       var name = App.modalInput.value.trim();
@@ -946,7 +949,7 @@ window.App = window.App || {};
       }
 
       var initialPrompt = undefined;
-      if (isDevLoop && devLoopTask) {
+      if (isDevLoop && devLoopContent) {
         var skillName = (window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill)
           ? await window.klaus.skills.resolveSkill(AppState.repoPath, App.selectedMode, 'rest-of-the-owl')
           : null;
@@ -959,9 +962,9 @@ window.App = window.App || {};
           : 'Use';
 
         if (skillName) {
-          initialPrompt = prefix + ' your "' + skillName + '" skill to plan and implement this task end-to-end:\n\n' + devLoopTask;
+          initialPrompt = prefix + ' your "' + skillName + '" skill to plan and implement this task end-to-end:\n\n' + devLoopContent;
         } else {
-          initialPrompt = prefix + ' your rest-of-the-owl skill to plan and implement this task end-to-end:\n\n' + devLoopTask;
+          initialPrompt = prefix + ' your rest-of-the-owl skill to plan and implement this task end-to-end:\n\n' + devLoopContent;
         }
       } else if (grantPermissions) {
         var singlePermSkill = (window.klaus && window.klaus.skills && window.klaus.skills.resolveSkill)

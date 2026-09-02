@@ -496,6 +496,14 @@
           <div id="modal-devloop-fields" style="display: none;">
             <p class="modal-devloop-sub">The Owl executes all 9 phases autonomously: Plan ➔ Code ➔ Review ➔ QA &amp; Screen Recording ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green. Provide an issue link or describe what to build:</p>
             <textarea id="modal-devloop-prompt" class="modal-devloop-textarea" rows="3" placeholder="e.g. https://github.com/org/repo/issues/123 or Describe the task requirements..."></textarea>
+            <div id="modal-devloop-attach">
+              <span id="modal-devloop-file-display">No files attached</span>
+              <button id="modal-devloop-file-btn" class="klaus-btn klaus-btn-secondary" type="button">Attach files</button>
+              <input type="file" id="modal-devloop-file-input" multiple style="display:none" />
+            </div>
+            <div id="modal-devloop-file-list"></div>
+            <div id="modal-devloop-file-error"></div>
+            <p class="modal-devloop-hint">Drop or paste screenshots here, or attach any files and folders. They are sent along with the task above.</p>
           </div>
         </div>
 
@@ -769,6 +777,7 @@
   <script src="artifact-preview.js"></script>
   <script src="app-state.js"></script>
   <script src="utils.js"></script>
+  <script src="attachment-input.js"></script>
   <script src="toast.js"></script>
   <script src="agent-setup.js"></script>
   <script src="agent-split.js"></script>

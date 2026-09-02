@@ -124,3 +124,53 @@ test('reopening the modal starts clean', async ({ mainWindow: win }) => {
   await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(0);
   await expect(win.locator('#plan-file-display')).toContainText('No files attached');
 });
+
+// Same fix on the other surface: the New Session dialog's dev-loop field feeds
+// a different code path (app-functions-2), so it gets its own coverage.
+test('the New Session dev loop field takes attachments alongside its task', async ({ mainWindow: win }) => {
+  await win.evaluate(() => {
+    window.App.showModal();
+    const check = document.getElementById('modal-devloop-check');
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+  });
+  await expect(win.locator('#modal-devloop-fields')).toBeVisible();
+
+  await win.locator('#modal-devloop-prompt').fill(TASK);
+  await win.evaluate(({ b64 }) => {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], 'session-bug.png', { type: 'image/png' }));
+    document.getElementById('modal-devloop-fields').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
+    );
+  }, { b64: PNG_B64 });
+  await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(1);
+
+  // The typed task survives, and the composed prompt carries both.
+  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(TASK);
+  const composed = await win.evaluate(() =>
+    window.App.devLoopAttachments.compose(document.getElementById('modal-devloop-prompt').value));
+  expect(composed).toContain('Fix the header alignment');
+  expect(composed).toContain('session-bug.png');
+});
+
+test('reopening New Session drops the previous run attachments', async ({ mainWindow: win }) => {
+  await win.evaluate(() => {
+    window.App.showModal();
+    const check = document.getElementById('modal-devloop-check');
+    check.checked = true;
+    check.dispatchEvent(new Event('change'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([new Uint8Array([1, 2, 3])], 'stale.png', { type: 'image/png' }));
+    document.getElementById('modal-devloop-fields').dispatchEvent(
+      new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(1);
+
+  await win.evaluate(() => window.App.showModal());
+  await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(0);
+});

@@ -745,17 +745,13 @@ window.ActionModal = (function () {
 
   var currentTaskId = null;
   var currentAction = 'plan';
-  // Absolute paths of everything dropped, pasted or picked this session.
-  var uploadedPaths = [];
+  // Wired below, once the modal's elements are known to exist.
+  var attachments = null;
 
   function reset(action) {
     var cfg = ACTIONS[action] || ACTIONS.plan;
     textarea.value = '';
-    fileInput.value = '';
-    fileDisplay.textContent = 'No files attached';
-    fileDisplay.classList.remove('has-file');
-    if (fileList) fileList.innerHTML = '';
-    uploadedPaths = [];
+    if (attachments) attachments.clear();
     errorEl.textContent = '';
     submitBtn.disabled = false;
     submitBtn.textContent = cfg.submitLabel;
@@ -785,101 +781,6 @@ window.ActionModal = (function () {
     currentTaskId = null;
   }
 
-  // Quote a path for the shell only when it contains whitespace, matching the
-  // terminal drag-drop behavior.
-  function quotePath(p) {
-    return /\s/.test(p) ? '"' + p + '"' : p;
-  }
-
-  // Additive, never either/or: prose plus the screenshots it refers to.
-  function composeSubmission(text, paths) {
-    var body = (text || '').trim();
-    if (!paths || !paths.length) return body;
-    var attached = 'Attached files/folders for this task (read them):\n' + paths.map(quotePath).join('\n');
-    return body ? body + '\n\n' + attached : attached;
-  }
-
-  // A Finder drag has a real path; a browser or clipboard image is bytes only.
-  // Returns { name, path } on success, { name, error } with the reason on failure.
-  async function pathForDropped(file) {
-    var fsApi = (window.klaus && window.klaus.fs) || {};
-    var name = file.name || 'item';
-    try {
-      var existing = fsApi.getPathForFile && fsApi.getPathForFile(file);
-      if (existing) return { name: name, path: existing };
-    } catch (_err) { /* no backing file — fall through to the bytes */ }
-    if (!fsApi.saveAttachment || typeof file.arrayBuffer !== 'function') {
-      return { name: name, error: 'no file behind it to read' };
-    }
-    try {
-      var buf = await file.arrayBuffer();
-      var saved = await fsApi.saveAttachment(name, new Uint8Array(buf));
-      if (saved && saved.path) return { name: name, path: saved.path };
-      return { name: name, error: (saved && saved.error) || 'could not be saved' };
-    } catch (err) {
-      return { name: name, error: (err && err.message) || 'could not be read' };
-    }
-  }
-
-  // Shared by the file picker, drag-and-drop and clipboard paste.
-  async function processFiles(files) {
-    if (!files || files.length === 0) return;
-    errorEl.textContent = '';
-    var results = await Promise.all(files.map(pathForDropped));
-    // Accumulate across repeated drops/picks; dedupe so the same path added
-    // twice doesn't appear twice. Use the × buttons to drop individual items.
-    results.forEach(function (r) {
-      if (r.path && uploadedPaths.indexOf(r.path) === -1) uploadedPaths.push(r.path);
-    });
-    renderUploadList();
-    errorEl.textContent = attachErrors(results.filter(function (r) { return !r.path; }));
-  }
-
-  // Name the reason (a size cap, an unreadable drag) rather than a generic
-  // failure, so the user knows whether re-dropping is worth trying.
-  function attachErrors(failed) {
-    if (failed.length === 0) return '';
-    if (failed.length === 1) return failed[0].name + ' could not be attached: ' + failed[0].error;
-    return failed.length + ' items could not be attached — ' + failed[0].name + ': ' + failed[0].error;
-  }
-
-  function renderUploadList() {
-    if (uploadedPaths.length === 0) {
-      fileDisplay.textContent = 'No files attached';
-      fileDisplay.classList.remove('has-file');
-      fileList.innerHTML = '';
-      return;
-    }
-    fileDisplay.textContent = uploadedPaths.length === 1
-      ? basename(uploadedPaths[0])
-      : uploadedPaths.length + ' items attached';
-    fileDisplay.classList.add('has-file');
-    fileList.innerHTML = '';
-    uploadedPaths.forEach(function (p, i) {
-      var row = document.createElement('div');
-      row.className = 'plan-file-row';
-      var nameEl = document.createElement('span');
-      nameEl.textContent = basename(p);
-      nameEl.title = p;
-      var rm = document.createElement('button');
-      rm.className = 'plan-file-remove';
-      rm.type = 'button';
-      rm.textContent = '×';
-      rm.title = 'Remove';
-      rm.addEventListener('click', function () {
-        uploadedPaths.splice(i, 1);
-        renderUploadList();
-      });
-      row.appendChild(nameEl);
-      row.appendChild(rm);
-      fileList.appendChild(row);
-    });
-  }
-
-  function basename(p) {
-    var parts = String(p).split(/[\\/]/);
-    return parts[parts.length - 1] || p;
-  }
 
   // Repository-intelligence block (conventions + import graph, generated on
   // session create and cached in main). '' until ready — callers append it
@@ -953,7 +854,7 @@ window.ActionModal = (function () {
   async function submit() {
     if (currentTaskId == null) return;
     var cfg = ACTIONS[currentAction] || ACTIONS.plan;
-    var content = composeSubmission(textarea.value, uploadedPaths);
+    var content = attachments.compose(textarea.value);
     if (!content) {
       errorEl.textContent = 'Add some details first (paste text or upload a file).';
       return;
@@ -1051,48 +952,15 @@ window.ActionModal = (function () {
   }
 
   if (overlay) {
-    fileBtn.addEventListener('click', function () { fileInput.click(); });
-
-    fileInput.addEventListener('change', function () {
-      processFiles(fileInput.files ? Array.from(fileInput.files) : []);
+    attachments = window.AttachmentInput.create({
+      dropZone: document.getElementById('plan-modal'),
+      pasteFrom: textarea,
+      listEl: fileList,
+      displayEl: fileDisplay,
+      errorEl: errorEl,
+      fileInput: fileInput,
+      pickButton: fileBtn,
     });
-
-    // Only a paste carrying files; text pastes keep their native behavior.
-    textarea.addEventListener('paste', function (e) {
-      var items = e.clipboardData && e.clipboardData.files;
-      if (!items || items.length === 0) return;
-      e.preventDefault();
-      processFiles(Array.from(items));
-    });
-
-    // Only engages for file drags, so text drags into the textarea still work.
-    var modalEl = document.getElementById('plan-modal');
-    if (modalEl) {
-      var draggingFiles = function (e) {
-        var types = e.dataTransfer && e.dataTransfer.types;
-        return !!types && Array.prototype.indexOf.call(types, 'Files') !== -1;
-      };
-      modalEl.addEventListener('dragover', function (e) {
-        if (!draggingFiles(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        modalEl.classList.add('drag-over');
-      });
-      modalEl.addEventListener('dragleave', function (e) {
-        // Only clear when the cursor actually leaves the modal, not when it
-        // crosses between child elements (which also fire dragleave).
-        if (!modalEl.contains(e.relatedTarget)) modalEl.classList.remove('drag-over');
-      });
-      modalEl.addEventListener('drop', function (e) {
-        if (!draggingFiles(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        modalEl.classList.remove('drag-over');
-        var files = Array.from(e.dataTransfer.files);
-        if (files.length === 0) return;
-        processFiles(files);
-      });
-    }
 
     cancelBtn.addEventListener('click', close);
     submitBtn.addEventListener('click', submit);
@@ -1111,5 +979,5 @@ window.ActionModal = (function () {
     });
   }
 
-  return { open: open, close: close, run: run, composeSubmission: composeSubmission };
+  return { open: open, close: close, run: run, composeSubmission: window.AttachmentInput.composeSubmission };
 })();

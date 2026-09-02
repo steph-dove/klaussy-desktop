@@ -3,13 +3,11 @@ require('../setup');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-// The modal is a browser IIFE; a null element from every DOM lookup keeps its
-// wiring inert, leaving the submission builder reachable on its own.
-global.document = { getElementById: () => null, querySelector: () => null };
+// A browser IIFE; the composer is pure, so it needs no DOM.
 global.window = {};
 
-require('../../renderer/plan-modal');
-const { composeSubmission } = global.window.ActionModal;
+require('../../renderer/attachment-input');
+const { composeSubmission } = global.window.AttachmentInput;
 
 const SHOT = '/Users/me/Desktop/shot.png';
 
