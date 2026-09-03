@@ -10,8 +10,6 @@ window.ActionModal = (function () {
   var cancelBtn = document.getElementById('plan-modal-cancel');
   var submitBtn = document.getElementById('plan-modal-submit');
   var subHint = overlay ? overlay.querySelector('.plan-modal-sub') : null;
-  var tabs = overlay ? overlay.querySelectorAll('.plan-modal-tab') : [];
-  var contents = overlay ? overlay.querySelectorAll('.plan-tab-content') : [];
 
   // Each action prefers the repo's own klaussy-generated <repo>-<action> skill
   // (resolved per-agent — a Codex task looks in Codex's skills dir), seeded with
@@ -747,32 +745,16 @@ window.ActionModal = (function () {
 
   var currentTaskId = null;
   var currentAction = 'plan';
-  // Absolute paths of dropped/picked uploads. We pass the paths to Claude (not
-  // the file contents) and let the CLI read them itself — works for any file
-  // type and for folders, with no size cap or binary handling on our side.
-  var uploadedPaths = [];
-
-  function setTab(name) {
-    tabs.forEach(function (t) {
-      t.classList.toggle('active', t.dataset.tab === name);
-    });
-    contents.forEach(function (c) {
-      c.classList.toggle('active', c.id === 'plan-tab-' + name);
-    });
-  }
+  // Wired below, once the modal's elements are known to exist.
+  var attachments = null;
 
   function reset(action) {
     var cfg = ACTIONS[action] || ACTIONS.plan;
     textarea.value = '';
-    fileInput.value = '';
-    fileDisplay.textContent = 'No files selected';
-    fileDisplay.classList.remove('has-file');
-    if (fileList) fileList.innerHTML = '';
-    uploadedPaths = [];
+    if (attachments) attachments.clear();
     errorEl.textContent = '';
     submitBtn.disabled = false;
     submitBtn.textContent = cfg.submitLabel;
-    setTab('paste');
   }
 
   function open(taskId, action) {
@@ -782,6 +764,7 @@ window.ActionModal = (function () {
     var cfg = ACTIONS[action];
     reset(action);
     var task = AppState.tasks.get(taskId);
+    if (titleEl) titleEl.textContent = cfg.title;
     if (subHint) {
       subHint.innerHTML = cfg.hint;
     }
@@ -798,88 +781,6 @@ window.ActionModal = (function () {
     currentTaskId = null;
   }
 
-  // Quote a path for the shell only when it contains whitespace, matching the
-  // terminal drag-drop behavior.
-  function quotePath(p) {
-    return /\s/.test(p) ? '"' + p + '"' : p;
-  }
-
-  function activeContent() {
-    var activeTab = overlay.querySelector('.plan-modal-tab.active');
-    var name = activeTab ? activeTab.dataset.tab : 'paste';
-    if (name === 'upload' && uploadedPaths.length) {
-      // Hand Claude the paths and let it read them. A short lead-in tells it
-      // these are the inputs for the task; the plan flow's clarifying phase
-      // takes over from there.
-      return 'Use these files/folders for the task (read them):\n'
-        + uploadedPaths.map(quotePath).join('\n');
-    }
-    return textarea.value.trim();
-  }
-
-  // Shared by the file-picker change handler and drag-and-drop. Resolves each
-  // dropped/picked item to its absolute path (getPathForFile works for files
-  // and folders alike) and lists them; the paths are handed to Claude at
-  // submit time. Multiple items in one drop/pick are all kept.
-  function processFiles(files) {
-    if (!files || files.length === 0) return;
-    errorEl.textContent = '';
-    // getPathForFile returns '' (or can throw) for files with no backing OS
-    // path; skip those rather than letting an exception kill the handler.
-    var paths = files.map(function (f) {
-      try { return window.klaus.fs.getPathForFile(f) || ''; } catch (_err) { return ''; }
-    }).filter(Boolean);
-    if (paths.length === 0) {
-      errorEl.textContent = 'Could not resolve a path for the selected item(s).';
-      return;
-    }
-    // Accumulate across repeated drops/picks; dedupe so the same path added
-    // twice doesn't appear twice. Use the × buttons to drop individual items.
-    paths.forEach(function (p) {
-      if (uploadedPaths.indexOf(p) === -1) uploadedPaths.push(p);
-    });
-    renderUploadList();
-    var skipped = files.length - paths.length;
-    if (skipped > 0) errorEl.textContent = skipped + ' item(s) had no readable path and were skipped.';
-  }
-
-  function renderUploadList() {
-    if (uploadedPaths.length === 0) {
-      fileDisplay.textContent = 'No files selected';
-      fileDisplay.classList.remove('has-file');
-      fileList.innerHTML = '';
-      return;
-    }
-    fileDisplay.textContent = uploadedPaths.length === 1
-      ? basename(uploadedPaths[0])
-      : uploadedPaths.length + ' items selected';
-    fileDisplay.classList.add('has-file');
-    fileList.innerHTML = '';
-    uploadedPaths.forEach(function (p, i) {
-      var row = document.createElement('div');
-      row.className = 'plan-file-row';
-      var nameEl = document.createElement('span');
-      nameEl.textContent = basename(p);
-      nameEl.title = p;
-      var rm = document.createElement('button');
-      rm.className = 'plan-file-remove';
-      rm.type = 'button';
-      rm.textContent = '×';
-      rm.title = 'Remove';
-      rm.addEventListener('click', function () {
-        uploadedPaths.splice(i, 1);
-        renderUploadList();
-      });
-      row.appendChild(nameEl);
-      row.appendChild(rm);
-      fileList.appendChild(row);
-    });
-  }
-
-  function basename(p) {
-    var parts = String(p).split(/[\\/]/);
-    return parts[parts.length - 1] || p;
-  }
 
   // Repository-intelligence block (conventions + import graph, generated on
   // session create and cached in main). '' until ready — callers append it
@@ -953,7 +854,7 @@ window.ActionModal = (function () {
   async function submit() {
     if (currentTaskId == null) return;
     var cfg = ACTIONS[currentAction] || ACTIONS.plan;
-    var content = activeContent();
+    var content = attachments.compose(textarea.value);
     if (!content) {
       errorEl.textContent = 'Add some details first (paste text or upload a file).';
       return;
@@ -1003,7 +904,9 @@ window.ActionModal = (function () {
         return;
       }
       if (currentAction === 'rest-of-the-owl' && window.DevLoopPanel && window.DevLoopPanel.startDevLoop) {
-        window.DevLoopPanel.startDevLoop(currentTaskId, content);
+        // The loop labels itself with this, so it wants the prose the user
+        // typed — a list of attachment paths makes for a useless header.
+        window.DevLoopPanel.startDevLoop(currentTaskId, attachments.plain(textarea.value) || content);
       }
       close();
     } catch (err) {
@@ -1049,48 +952,15 @@ window.ActionModal = (function () {
   }
 
   if (overlay) {
-    tabs.forEach(function (t) {
-      t.addEventListener('click', function () { setTab(t.dataset.tab); });
+    attachments = window.AttachmentInput.create({
+      dropZone: document.getElementById('plan-modal'),
+      pasteFrom: textarea,
+      listEl: fileList,
+      displayEl: fileDisplay,
+      errorEl: errorEl,
+      fileInput: fileInput,
+      pickButton: fileBtn,
     });
-
-    fileBtn.addEventListener('click', function () { fileInput.click(); });
-
-    fileInput.addEventListener('change', function () {
-      processFiles(fileInput.files ? Array.from(fileInput.files) : []);
-    });
-
-    // Drag-and-drop: drop a file anywhere on the modal to upload it. Only
-    // engages when files are actually being dragged, so text drags into the
-    // paste textarea keep their native behavior. A file drop flips to the
-    // upload tab and runs the same processing as the file picker.
-    var modalEl = document.getElementById('plan-modal');
-    if (modalEl) {
-      var draggingFiles = function (e) {
-        var types = e.dataTransfer && e.dataTransfer.types;
-        return !!types && Array.prototype.indexOf.call(types, 'Files') !== -1;
-      };
-      modalEl.addEventListener('dragover', function (e) {
-        if (!draggingFiles(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        modalEl.classList.add('drag-over');
-      });
-      modalEl.addEventListener('dragleave', function (e) {
-        // Only clear when the cursor actually leaves the modal, not when it
-        // crosses between child elements (which also fire dragleave).
-        if (!modalEl.contains(e.relatedTarget)) modalEl.classList.remove('drag-over');
-      });
-      modalEl.addEventListener('drop', function (e) {
-        if (!draggingFiles(e)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        modalEl.classList.remove('drag-over');
-        var files = Array.from(e.dataTransfer.files);
-        if (files.length === 0) return;
-        setTab('upload');
-        processFiles(files);
-      });
-    }
 
     cancelBtn.addEventListener('click', close);
     submitBtn.addEventListener('click', submit);
@@ -1109,5 +979,12 @@ window.ActionModal = (function () {
     });
   }
 
-  return { open: open, close: close, run: run };
+  return {
+    open: open,
+    close: close,
+    run: run,
+    composeSubmission: window.AttachmentInput.composeSubmission,
+    // The live handle, so the modal's real composition can be exercised.
+    attachments: function () { return attachments; },
+  };
 })();

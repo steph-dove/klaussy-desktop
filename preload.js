@@ -654,6 +654,9 @@ contextBridge.exposeInMainWorld('klaus', {
     readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
     writeFile: (filePath, content) => ipcRenderer.invoke('write-file', { filePath, content }),
     statFile: (filePath) => ipcRenderer.invoke('stat-file', { filePath }),
+    // For dropped/pasted images that have no file on disk behind them; returns
+    // the temp path main wrote them to.
+    saveAttachment: (name, data) => ipcRenderer.invoke('save-attachment', { name, data }),
     createFile: (worktreePath, relPath) => ipcRenderer.invoke('create-file', { worktreePath, relPath }),
     createDir: (worktreePath, relPath) => ipcRenderer.invoke('create-dir', { worktreePath, relPath }),
     renamePath: (worktreePath, fromRel, toRel) => ipcRenderer.invoke('rename-path', { worktreePath, fromRel, toRel }),

@@ -11,6 +11,7 @@ const os = require('os');
 const { ipcMain, shell, clipboard } = require('electron');
 const { execFileP, ghExecP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
+const { saveAttachment } = require('../util/attachments');
 const { worktreeWatchers, startWorktreeWatcher, stopWorktreeWatcher } = require('../state/watcher');
 const { allowQaPaths, qaMediaUrl, protocolError } = require('../bootstrap/qa-media-protocol');
 
@@ -922,6 +923,10 @@ ipcMain.handle('write-file', async (_event, { filePath, content }) => {
     return { error: err.message };
   }
 });
+
+// Park bytes dropped into the action modal that have no file behind them, so
+// the modal has a path to hand the agent. Takes no path from the renderer.
+ipcMain.handle('save-attachment', async (_event, { name, data }) => saveAttachment(data, name));
 
 // ---- File tree mutations: create / rename / delete / stat / reveal / copy ----
 //

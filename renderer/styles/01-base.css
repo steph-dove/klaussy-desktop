@@ -2267,44 +2267,6 @@ body.task-branchless #ahead-behind {
   font-size: 11px;
 }
 
-#plan-modal-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 14px;
-  background: var(--input-bg);
-  border-radius: 8px;
-  padding: 3px;
-}
-
-.plan-modal-tab {
-  flex: 1;
-  padding: 8px 12px;
-  background: none;
-  border: none;
-  border-radius: 6px;
-  color: var(--text-muted);
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.plan-modal-tab:hover {
-  color: var(--text);
-}
-
-.plan-modal-tab.active {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.plan-tab-content {
-  display: none;
-}
-
-.plan-tab-content.active {
-  display: block;
-}
-
 #plan-modal-text {
   width: 100%;
   box-sizing: border-box;
@@ -2324,17 +2286,20 @@ body.task-branchless #ahead-behind {
   border-color: var(--accent);
 }
 
-#plan-file-picker {
+#plan-file-picker,
+#modal-devloop-attach {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-top: 10px;
   background: var(--input-bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 4px 4px 4px 12px;
 }
 
-#plan-file-display {
+#plan-file-display,
+#modal-devloop-file-display {
   flex: 1;
   font-size: 13px;
   font-family: var(--font-mono);
@@ -2344,7 +2309,8 @@ body.task-branchless #ahead-behind {
   text-overflow: ellipsis;
 }
 
-#plan-file-display.has-file {
+#plan-file-display.has-file,
+#modal-devloop-file-display.has-file {
   color: var(--text);
 }
 
@@ -2354,9 +2320,22 @@ body.task-branchless #ahead-behind {
   margin: 8px 0 0 2px;
 }
 
-#plan-modal.drag-over {
+#plan-modal.drag-over,
+#modal-devloop-fields.drag-over {
   outline: 2px dashed var(--accent);
   outline-offset: -4px;
+}
+
+#modal-devloop-file-error {
+  font-size: 11px;
+  color: var(--danger, #f87171);
+  margin: 6px 0 0 2px;
+}
+
+.modal-devloop-hint {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 8px 0 0 2px;
 }
 
 /* ---- License Activation Modal — content styles only; shell + buttons
@@ -2561,7 +2540,8 @@ body.task-branchless #ahead-behind {
   font-size: 11px;
 }
 
-#plan-file-list {
+#plan-file-list,
+#modal-devloop-file-list {
   margin-top: 8px;
   display: flex;
   flex-direction: column;

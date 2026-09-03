@@ -1267,6 +1267,20 @@ window.App = window.App || {};
   App.modalDevLoopPrompt = document.getElementById('modal-devloop-prompt');
   App.modalPermissionsCheck = document.getElementById('modal-permissions-check');
 
+  // Task definitions usually arrive as prose plus the screenshots they refer
+  // to, so this field takes attachments the same way the action modal does.
+  if (App.modalDevLoopFields && window.AttachmentInput) {
+    App.devLoopAttachments = window.AttachmentInput.create({
+      dropZone: App.modalDevLoopFields,
+      pasteFrom: App.modalDevLoopPrompt,
+      listEl: document.getElementById('modal-devloop-file-list'),
+      displayEl: document.getElementById('modal-devloop-file-display'),
+      errorEl: document.getElementById('modal-devloop-file-error'),
+      fileInput: document.getElementById('modal-devloop-file-input'),
+      pickButton: document.getElementById('modal-devloop-file-btn'),
+    });
+  }
+
   if (App.modalDevLoopCheck && App.modalDevLoopFields) {
     App.modalDevLoopCheck.addEventListener('change', function () {
       var isChecked = App.modalDevLoopCheck.checked;
