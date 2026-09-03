@@ -13,9 +13,7 @@ window.AttachmentInput = (function () {
     return parts[parts.length - 1] || p;
   }
 
-  // A path dropped into the middle of the prose is already where it belongs,
-  // and that placement is the point: this one is the bug, this one is the goal.
-  // Only attachments the text never placed get listed at the end.
+  // Only attachments the text never placed inline get listed at the end.
   function composeSubmission(text, items) {
     var body = (text || '').trim();
     if (!items || !items.length) return body;
@@ -93,18 +91,24 @@ window.AttachmentInput = (function () {
       var at = lastCaret === null || lastCaret > value.length ? value.length : lastCaret;
       var before = value.slice(0, at);
       var after = value.slice(at);
+      // Both sides need a break, or a caret mid-word welds the path into it.
       var lead = before && !/\n$/.test(before) ? '\n' : '';
-      var chunk = lead + quotePath(p);
+      var trail = after && !/^\n/.test(after) ? '\n' : '';
+      var chunk = lead + quotePath(p) + trail;
       editor.value = before + chunk + after;
       lastCaret = (before + chunk).length;
       editor.selectionStart = editor.selectionEnd = lastCaret;
     }
 
-    // Takes back the newline inserted with the path and nothing else; the prose
+    // Takes back the breaks inserted with the path and nothing else; the prose
     // may hold deliberate indentation.
     function stripPath(text, p) {
       var q = quotePath(p);
-      return text.split('\n' + q).join('').split(q).join('');
+      return text
+        .split('\n' + q + '\n').join('\n')
+        .split('\n' + q).join('')
+        .split(q + '\n').join('')
+        .split(q).join('');
     }
 
     function dropPathFromText(p) {

@@ -318,9 +318,13 @@ test('inline paths stay out of the branch name derived from the task', async ({ 
   await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/shot\.png/);
 
   // The name is derived from this; a path mid-prose would land in the branch.
+  // Removing a path that split a line leaves the break behind, which the name
+  // derivation collapses along with any other whitespace.
   const plain = await win.evaluate(() =>
     window.App.devLoopAttachments.plain(document.getElementById('modal-devloop-prompt').value));
-  expect(plain).toBe('Fix the login redirect');
+  expect(plain).not.toMatch(/klaussy-attachments|shot\.png/);
+  const derived = plain.slice(0, 30).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  expect(derived).toBe('fix-the-login-redirect');
 });
 
 test('two files sharing a name stay distinct attachments', async ({ mainWindow: win }) => {
@@ -371,4 +375,27 @@ test('re-picking the same on-disk file references it again instead of doing noth
   expect(submitted).not.toContain('Attached files/folders');
   expect(submitted.split(real).length - 1).toBe(2);
   fs.rmSync(real, { force: true });
+});
+
+test('a drop with the caret mid-word does not weld the path into it', async ({ mainWindow: win }) => {
+  await openModal(win);
+  await win.locator('#plan-modal-text').fill('Current state here');
+  await win.evaluate(() => {
+    const ta = document.getElementById('plan-modal-text');
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = 'Cur'.length;
+    ta.dispatchEvent(new Event('select'));
+  });
+  await dropImage(win, 'welded.png');
+
+  const value = await win.locator('#plan-modal-text').inputValue();
+  // The path has to stand alone on its line, not run into the prose either side.
+  expect(value).not.toMatch(/Cur\/|png[a-z]/);
+  const line = value.split('\n').find((l) => l.includes('welded.png'));
+  expect(line.trim()).toBe(line.trim().match(/\S+$/)[0]);
+
+  const submitted = await win.evaluate(() =>
+    window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
+  const [attached] = await win.evaluate(() => window.ActionModal.attachments().paths());
+  expect(submitted).toContain(attached);
 });
