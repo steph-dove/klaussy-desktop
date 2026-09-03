@@ -2,6 +2,16 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.21.4
+
+### 🦉 Drag-and-Drop Images Into a Dev Loop Task
+
+- **Screenshots Attach Alongside the Task**: Dropping an image into a Full Dev Loop input used to delete the task you had just typed — the dialog returned either the text box or the file list depending on which tab was showing, and a drop switched tabs. Text and attachments now go together, and the New Session dialog's dev-loop field takes attachments too; it previously had none, so a drop there either did nothing or tried to add the image as a project.
+- **Images With No File Behind Them**: An image dragged out of a browser or pasted from the clipboard has no path on disk and was refused outright. Those bytes are now written to a temp file and attached, and Cmd/Ctrl+V in the text box attaches clipboard images the same way.
+- **Placement Carries Meaning**: A drop writes the file path where your cursor is, so each screenshot sits next to the line describing it and the agent can tell the current state from the goal. Anything not placed inline is listed at the end.
+- **Clearer Refusals**: A rejected attachment names the file and the reason (the size cap, an unreadable drag) instead of one generic message.
+- **Dialog Titles**: The action dialog now titles itself by the action that opened it; every action carried a title but nothing ever applied it, so Dev Loop, Debug and Permissions all announced themselves as "Plan a task".
+
 ## 0.21.3
 
 ### 🦉 Dev Loop Session Scoping & QA Media Fixes
