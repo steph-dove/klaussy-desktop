@@ -83,44 +83,15 @@ test('the inline ordering the user chose is preserved', () => {
   assert.ok(out.indexOf('Should look like') < out.indexOf('goal.png'));
 });
 
-// The box shows a short [name.png] marker so a long temp path doesn't swallow
-// a three-row textarea; the real path is swapped in at submit.
-const ITEM = { path: SHOT, marker: 'shot.png' };
-
-test('a marker resolves to the real path where it was placed', () => {
-  const out = composeSubmission('Current state:\n[shot.png]\n\nGoal: none yet', [ITEM]);
-  assert.match(out, /Current state:\n\/Users\/me\/Desktop\/shot\.png/);
-  assert.ok(!out.includes('[shot.png]'), 'marker was left unresolved');
-  assert.ok(!out.includes('read them'), 'a placed attachment was also appended');
-});
-
-test('an attachment whose marker was deleted is still appended', () => {
-  const out = composeSubmission('I removed the marker', [ITEM]);
-  assert.match(out, /read them/);
+// An item may arrive as a bare path or as { path }, since the live handle
+// carries objects.
+test('an item object composes the same as a bare path', () => {
+  const out = composeSubmission('look', [{ path: SHOT }]);
   assert.match(out, /shot\.png/);
+  assert.match(out, /read them/);
 });
 
-test('markers resolve in the order the writer placed them', () => {
-  const items = [
-    { path: '/a/bug.png', marker: 'bug.png' },
-    { path: '/a/goal.png', marker: 'goal.png' },
-  ];
-  const out = composeSubmission('Should be: [goal.png]\nBut is: [bug.png]', items);
-  assert.ok(out.indexOf('/a/goal.png') < out.indexOf('/a/bug.png'));
-});
-
-test('a marker used twice resolves at both spots', () => {
-  const out = composeSubmission('before [shot.png] and again [shot.png]', [ITEM]);
-  assert.equal(out.match(/\/Users\/me\/Desktop\/shot\.png/g).length, 2);
-});
-
-test('a path with spaces is quoted when its marker resolves', () => {
-  const out = composeSubmission('here: [Screen Shot.png]',
-    [{ path: '/Users/me/Screen Shot.png', marker: 'Screen Shot.png' }]);
-  assert.match(out, /"\/Users\/me\/Screen Shot\.png"/);
-});
-
-test('bracket text that is not an attachment is left alone', () => {
-  const out = composeSubmission('see [some other thing] here', [ITEM]);
-  assert.match(out, /\[some other thing\]/);
+test('a path the writer placed inline is not repeated', () => {
+  const text = 'Current:\n' + SHOT;
+  assert.equal(composeSubmission(text, [{ path: SHOT }]), text);
 });

@@ -63,7 +63,7 @@ test('a dropped image attaches alongside the typed task instead of replacing it'
 
   // The task survives the drop; the paths land inline rather than replacing it.
   await expect(win.locator('#plan-modal-text')).toHaveValue(new RegExp('Fix the header alignment'));
-  await expect(win.locator('#plan-modal-text')).toHaveValue(/\[settings-header-bug\.png\]/);
+  await expect(win.locator('#plan-modal-text')).toHaveValue(/settings-header-bug\.png/);
   const submitted = await win.evaluate(() =>
     window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
   expect(submitted).toContain('Fix the header alignment');
@@ -201,12 +201,10 @@ test('a drop lands at the cursor so images sit next to what describes them', asy
   expect(value.indexOf('broken.png')).toBeLessThan(value.indexOf('What it should be:'));
   expect(value.indexOf('What it should be:')).toBeLessThan(value.indexOf('goal.png'));
 
-  // Both are placed, so nothing gets repeated in a trailing block, and the
-  // markers resolve to the real temp paths.
+  // Both are placed, so nothing gets repeated in a trailing block.
   const submitted = await win.evaluate(() =>
     window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
   expect(submitted).not.toContain('Attached files/folders');
-  expect(submitted).not.toContain('[broken.png]');
   expect(submitted).toMatch(/klaussy-attachments\/[0-9a-f]+\/broken\.png/);
   expect(submitted.indexOf('Current state:')).toBeLessThan(submitted.indexOf('broken.png'));
 });
@@ -221,14 +219,14 @@ test('removing an attachment takes its line out of the text', async ({ mainWindo
     ta.dispatchEvent(new Event('select'));
   });
   await dropImage(win, 'unwanted.png');
-  await expect(win.locator('#plan-modal-text')).toHaveValue(/\[unwanted\.png\]/);
+  await expect(win.locator('#plan-modal-text')).toHaveValue(/unwanted\.png/);
 
   await win.locator('.plan-file-remove').first().click();
   await expect(win.locator('#plan-modal-text')).not.toHaveValue(/unwanted\.png/);
   await expect(win.locator('#plan-modal-text')).toHaveValue(/Look at this:/);
 });
 
-test('clearing takes the markers with it, so none ship pointing at nothing', async ({ mainWindow: win }) => {
+test('clearing takes the inline paths with it, so none ship unattached', async ({ mainWindow: win }) => {
   await win.evaluate(() => {
     window.App.showModal();
     const check = document.getElementById('modal-devloop-check');
@@ -247,10 +245,10 @@ test('clearing takes the markers with it, so none ship pointing at nothing', asy
       new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
     );
   });
-  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/\[stale\.png\]/);
+  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/stale\.png/);
 
-  // This dialog keeps its prose across opens, so a leftover marker would be
-  // sent to the agent as literal text.
+  // This dialog keeps its prose across opens, so a leftover path would be
+  // sent to an agent that has nothing attached.
   await win.evaluate(() => window.App.showModal());
   await expect(win.locator('#modal-devloop-prompt')).not.toHaveValue(/stale\.png/);
   const composed = await win.evaluate(() =>
@@ -271,7 +269,7 @@ test('removing an attachment leaves indented prose alone', async ({ mainWindow: 
   await dropImage(win, 'shot.png');
 
   await win.locator('.plan-file-remove').first().click();
-  // The snippet's indentation has to survive; only the marker goes.
+  // The snippet's indentation has to survive; only the path goes.
   await expect(win.locator('#plan-modal-text')).toHaveValue(CODE);
 });
 
@@ -298,7 +296,7 @@ test('a drop still in flight when the dialog resets is discarded', async ({ main
   await expect(win.locator('#modal-devloop-file-list .plan-file-row')).toHaveCount(0);
 });
 
-test('markers stay out of the branch name derived from the task', async ({ mainWindow: win }) => {
+test('inline paths stay out of the branch name derived from the task', async ({ mainWindow: win }) => {
   await win.evaluate(() => {
     window.App.showModal();
     const check = document.getElementById('modal-devloop-check');
@@ -317,32 +315,27 @@ test('markers stay out of the branch name derived from the task', async ({ mainW
       new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }),
     );
   });
-  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/\[shot\.png\]/);
+  await expect(win.locator('#modal-devloop-prompt')).toHaveValue(/shot\.png/);
 
-  // The name is derived from this; a marker mid-prose would land in the branch.
+  // The name is derived from this; a path mid-prose would land in the branch.
   const plain = await win.evaluate(() =>
     window.App.devLoopAttachments.plain(document.getElementById('modal-devloop-prompt').value));
   expect(plain).toBe('Fix the login redirect');
 });
 
-test('two files sharing a name get distinct markers', async ({ mainWindow: win }) => {
+test('two files sharing a name stay distinct attachments', async ({ mainWindow: win }) => {
   await openModal(win);
   await dropImage(win, 'shot.png');
   await dropImage(win, 'shot.png');
 
-  // Each drop of raw bytes is its own file, so the second must not point at
-  // the first. The list carries both.
-  const value = await win.locator('#plan-modal-text').inputValue();
-  expect(value).toContain('[shot.png]');
-  expect(value).toContain('[shot.png 2]');
+  // Each drop of raw bytes is its own file under its own temp dir, so the
+  // second must not collapse into the first.
   await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(2);
-
-  const submitted = await win.evaluate(() =>
-    window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
-  expect(submitted).not.toContain('[shot.png');
   const paths = await win.evaluate(() => window.ActionModal.attachments().paths());
   expect(new Set(paths).size).toBe(2);
-  paths.forEach((p) => expect(submitted).toContain(p));
+
+  const value = await win.locator('#plan-modal-text').inputValue();
+  paths.forEach((p) => expect(value).toContain(p));
 });
 
 test('re-picking the same on-disk file references it again instead of doing nothing', async ({ mainWindow: win }) => {
@@ -351,8 +344,6 @@ test('re-picking the same on-disk file references it again instead of doing noth
   // cannot exercise this branch.
   const real = path.join(os.tmpdir(), `klaussy-e2e-dup-${Date.now()}.png`);
   fs.writeFileSync(real, Buffer.from(PNG_B64, 'base64'));
-  const marker = `[${path.basename(real)}]`;
-
   await openModal(win);
   await win.locator('#plan-modal-text').fill('Before:\n\nAfter:');
 
@@ -371,13 +362,13 @@ test('re-picking the same on-disk file references it again instead of doing noth
   }
 
   const value = await win.locator('#plan-modal-text').inputValue();
-  expect(value.split(marker).length - 1).toBe(2);
-  // One attachment, referenced at both spots.
+  expect(value.split(real).length - 1).toBe(2);
+  // One attachment, written at both spots.
   await expect(win.locator('#plan-file-list .plan-file-row')).toHaveCount(1);
 
   const submitted = await win.evaluate(() =>
     window.ActionModal.attachments().compose(document.getElementById('plan-modal-text').value));
-  expect(submitted).not.toContain(marker);
+  expect(submitted).not.toContain('Attached files/folders');
   expect(submitted.split(real).length - 1).toBe(2);
   fs.rmSync(real, { force: true });
 });

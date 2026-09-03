@@ -13,25 +13,15 @@ window.AttachmentInput = (function () {
     return parts[parts.length - 1] || p;
   }
 
-  function markerFor(label) {
-    return '[' + label + ']';
-  }
-
-  // Markers keep long temp paths out of the box; they resolve here, and
-  // anything the writer never placed is appended so none are lost.
+  // A path dropped into the middle of the prose is already where it belongs,
+  // and that placement is the point: this one is the bug, this one is the goal.
+  // Only attachments the text never placed get listed at the end.
   function composeSubmission(text, items) {
     var body = (text || '').trim();
     if (!items || !items.length) return body;
-    var loose = [];
-    items.forEach(function (item) {
-      var entry = typeof item === 'string' ? { path: item, marker: null } : item;
-      var token = entry.marker ? markerFor(entry.marker) : null;
-      if (token && body.indexOf(token) !== -1) {
-        body = body.split(token).join(quotePath(entry.path));
-      } else if (body.indexOf(entry.path) === -1) {
-        loose.push(entry.path);
-      }
-    });
+    var loose = items
+      .map(function (item) { return typeof item === 'string' ? item : item.path; })
+      .filter(function (p) { return body.indexOf(p) === -1; });
     if (!loose.length) return body;
     var attached = 'Attached files/folders for this task (read them):\n' + loose.map(quotePath).join('\n');
     return body ? body + '\n\n' + attached : attached;
@@ -95,44 +85,37 @@ window.AttachmentInput = (function () {
       if (opts.errorEl) opts.errorEl.textContent = msg;
     }
 
-    // Two screenshots often share a name, so the marker gets a counter rather
-    // than pointing at whichever file was added first.
-    function uniqueMarker(name) {
-      var label = name;
-      for (var n = 2; items.some(function (it) { return it.marker === label; }); n++) {
-        label = name + ' ' + n;
-      }
-      return label;
-    }
-
-    // Drops the marker where the caret is, so the sentence introducing the
-    // screenshot stays next to it.
-    function insertMarker(marker) {
+    // Drops the path on its own line where the caret is, so the sentence
+    // introducing the screenshot stays next to it.
+    function insertPath(p) {
       if (!editor) return;
       var value = editor.value;
       var at = lastCaret === null || lastCaret > value.length ? value.length : lastCaret;
       var before = value.slice(0, at);
       var after = value.slice(at);
-      var lead = before && !/\s$/.test(before) ? ' ' : '';
-      var chunk = lead + markerFor(marker);
+      var lead = before && !/\n$/.test(before) ? '\n' : '';
+      var chunk = lead + quotePath(p);
       editor.value = before + chunk + after;
       lastCaret = (before + chunk).length;
       editor.selectionStart = editor.selectionEnd = lastCaret;
     }
 
-    // Takes back the separator inserted with the marker and nothing else; the
-    // prose may hold deliberate indentation.
-    function dropMarkerFromText(marker) {
+    // Takes back the newline inserted with the path and nothing else; the prose
+    // may hold deliberate indentation.
+    function stripPath(text, p) {
+      var q = quotePath(p);
+      return text.split('\n' + q).join('').split(q).join('');
+    }
+
+    function dropPathFromText(p) {
       if (!editor) return;
-      var token = markerFor(marker);
-      if (editor.value.indexOf(token) === -1) return;
-      editor.value = editor.value.split(' ' + token).join('').split(token).join('');
+      editor.value = stripPath(editor.value, p);
     }
 
     function render() {
       if (opts.displayEl) {
         opts.displayEl.textContent = items.length === 0 ? emptyText
-          : (items.length === 1 ? items[0].marker : items.length + ' items attached');
+          : (items.length === 1 ? basename(items[0].path) : items.length + ' items attached');
         opts.displayEl.classList.toggle('has-file', items.length > 0);
       }
       if (!opts.listEl) return;
@@ -141,7 +124,7 @@ window.AttachmentInput = (function () {
         var row = document.createElement('div');
         row.className = 'plan-file-row';
         var nameEl = document.createElement('span');
-        nameEl.textContent = it.marker;
+        nameEl.textContent = basename(it.path);
         nameEl.title = it.path;
         var rm = document.createElement('button');
         rm.className = 'plan-file-remove';
@@ -150,7 +133,7 @@ window.AttachmentInput = (function () {
         rm.title = 'Remove';
         rm.addEventListener('click', function () {
           items.splice(i, 1);
-          dropMarkerFromText(it.marker);
+          dropPathFromText(it.path);
           render();
         });
         row.appendChild(nameEl);
@@ -170,12 +153,9 @@ window.AttachmentInput = (function () {
       results.forEach(function (r) {
         if (!r.path) return;
         // Referencing one image at two spots is legitimate, so a repeat drop
-        // places the marker again rather than looking like it did nothing.
-        var known = items.filter(function (it) { return it.path === r.path; })[0];
-        if (known) return insertMarker(known.marker);
-        var marker = uniqueMarker(basename(r.path));
-        items.push({ path: r.path, marker: marker });
-        insertMarker(marker);
+        // writes the path again rather than looking like it did nothing.
+        if (!items.some(function (it) { return it.path === r.path; })) items.push({ path: r.path });
+        insertPath(r.path);
       });
       render();
       setError(describeErrors(results.filter(function (r) { return !r.path; })));
@@ -183,9 +163,9 @@ window.AttachmentInput = (function () {
 
     function clear() {
       generation++;
-      // Strip the markers too: the New Session dialog keeps its prose across
-      // opens, and a marker with nothing behind it ships as literal text.
-      items.forEach(function (it) { dropMarkerFromText(it.marker); });
+      // Strip the paths too: the New Session dialog keeps its prose across
+      // opens, and a path with nothing attached still ships to the agent.
+      items.forEach(function (it) { dropPathFromText(it.path); });
       items = [];
       lastCaret = null;
       if (opts.fileInput) opts.fileInput.value = '';
@@ -239,14 +219,11 @@ window.AttachmentInput = (function () {
 
     render();
 
-    // The prose without any markers, for callers naming a branch or labelling
-    // the loop, where a literal [shot.png] would leak through.
+    // The prose without the inline paths, for callers naming a branch or
+    // labelling the loop, where a temp path would otherwise leak through.
     function plain(text) {
       var out = text || '';
-      items.forEach(function (it) {
-        var token = markerFor(it.marker);
-        out = out.split(' ' + token).join('').split(token).join('');
-      });
+      items.forEach(function (it) { out = stripPath(out, it.path); });
       return out.trim();
     }
 
