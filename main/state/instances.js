@@ -63,9 +63,10 @@ function subscribeTerminalChannel(channel, webContents) {
     const id = parseInt(match[1], 10);
     const inst = instances.get(id);
     if (inst && inst.freshenWarning) {
-      const msg = `\r\n\x1b[31;1mError: Failed to freshen base branch from origin:\x1b[0m\r\n` +
-                  `\x1b[31m${inst.freshenWarning}\x1b[0m\r\n` +
-                  `\x1b[33mSpawning a plain shell so you can fix the underlying git issue.\x1b[0m\r\n\r\n`;
+      // Must not read as fatal: the worktree was created and the agent launched.
+      const msg = `\r\n\x1b[33;1mHeads up: couldn't refresh the base branch from origin.\x1b[0m\r\n` +
+                  `\x1b[33m${inst.freshenWarning}\x1b[0m\r\n` +
+                  `\x1b[2mThe worktree was branched from your local copy — the session is running normally.\x1b[0m\r\n\r\n`;
       webContents.send(channel, msg);
       inst.freshenWarning = null;
     }
@@ -958,12 +959,14 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
 
 function convertInstanceToShell(inst, exitCode) {
   const uptimeS = inst.spawnTime ? Math.round((Date.now() - inst.spawnTime) / 1000) : null;
+  // Read the agent's name before inst.mode is reassigned to 'shell' below.
+  const label = displayNameFor(inst.originalMode || inst.mode);
   // The CLI's own exit reason isn't captured, so a crash, an auth failure, and
   // a user typing /exit all look alike here.
   console.log(`[agent-exit] ${inst.mode} in "${inst.name}" exited`
     + ` (code=${exitCode == null ? '?' : exitCode}${uptimeS == null ? '' : `, uptime=${uptimeS}s`})`
     + ' — converting terminal to shell');
-  sendIdleNotification(inst, `${displayNameFor(inst.originalMode || inst.mode)} has exited`);
+  sendIdleNotification(inst, `${label} has exited`);
   const id = inst.id;
   const userShell = defaultShell();
   const ptyProc = pty.spawn(userShell, shellLoginArgs(userShell), {
@@ -977,6 +980,14 @@ function convertInstanceToShell(inst, exitCode) {
   inst.pty = ptyProc;
   inst.alive = true;
   inst.mode = 'shell';
+
+  const code = exitCode == null ? '' : ` with code ${exitCode}`;
+  // Under ~5s is a failure to launch, not a session the user ended.
+  const hint = uptimeS != null && uptimeS < 5
+    ? ' It exited immediately, so it likely failed to start — the output above should say why.'
+    : '';
+  sendToTerminalSubscribers(`terminal-data-${id}`,
+    `\r\n\x1b[33m${label} exited${code}.${hint} This terminal is now a plain shell; Restart starts ${label} again.\x1b[0m\r\n\r\n`);
 
   ptyProc.onData((data) => {
     sendToTerminalSubscribers(`terminal-data-${id}`, data);

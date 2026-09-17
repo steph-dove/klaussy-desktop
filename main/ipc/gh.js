@@ -11,6 +11,7 @@ const { ghExec, clearGhTokenCache, execFileP } = require('../util/exec');
 const { reconcileOutage, clearOutageProbeCache } = require('../util/gh-outage');
 const { allProviders, getProvider, binFor, installCommandFor, authMetaFor } = require('../state/ai-providers');
 const { discoverReposOnDisk } = require('./repo');
+const { resolveAgentBin } = require('../util/agent-bin');
 
 // Parse `gh auth status` output into structured account records.
 //
@@ -548,7 +549,10 @@ ipcMain.handle('check-dependencies', async () => {
   const agents = allProviders().filter((p) => !p.remoteBackend).map((p) => {
     const provider = getProvider(p.id);
     const bin = binFor(p.id, config);
-    const v = probe(bin, provider.versionArgs);
+    // `installed` comes from resolving the binary, not the probe below, which
+    // only supplies the version string and gates the auth check.
+    const resolved = resolveAgentBin(bin);
+    const v = resolved ? probe(resolved, provider.versionArgs) : { ok: false, error: 'not found' };
     const auth = authMetaFor(p.id);
     // authed: true / false when we have a verified status probe, else null
     // (unknown) so the UI doesn't show a false "not signed in".
@@ -557,7 +561,7 @@ ipcMain.handle('check-dependencies', async () => {
     // check both streams and don't require a clean exit.
     let authed = null;
     if (v.ok && auth.statusArgs) {
-      const s = probe(bin, auth.statusArgs);
+      const s = probe(resolved, auth.statusArgs);
       if (s.ok) {
         authed = !auth.notAuthedPattern.test(s.output || '');
       } else if (auth.notAuthedPattern.test(s.error || '')) {
@@ -567,9 +571,9 @@ ipcMain.handle('check-dependencies', async () => {
     return {
       id: p.id,
       name: `${p.displayName} (${p.defaultBin})`,
-      installed: v.ok,
-      version: v.ok ? v.output.split('\n')[0] : null,
-      path: bin,
+      installed: !!resolved,
+      version: v.ok ? v.output.split('\n')[0] : (resolved ? 'installed (version unavailable)' : null),
+      path: resolved || bin,
       isDefault: p.id === defaultProvider, // the user's current default agent
       installCommand: installCommandFor(p.id),
       authed,
