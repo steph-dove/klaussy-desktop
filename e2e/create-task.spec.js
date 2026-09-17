@@ -3,6 +3,8 @@
 // new branch with the sanitized task name, and spawns an instance the
 // terminal-data pipeline can talk to.
 
+/* global window */
+
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
