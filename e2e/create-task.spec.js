@@ -3,6 +3,8 @@
 // new branch with the sanitized task name, and spawns an instance the
 // terminal-data pipeline can talk to.
 
+/* global window */
+
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -119,7 +121,7 @@ function buildBaseRepoWithBrokenOrigin() {
   return dir;
 }
 
-test('create-task keeps the chosen agent and prints error if freshening fails', async ({ mainWindow }) => {
+test('create-task keeps the chosen agent and warns if freshening fails', async ({ mainWindow }) => {
   await mainWindow.waitForLoadState('networkidle');
 
   const repo = buildBaseRepoWithBrokenOrigin();
@@ -146,7 +148,7 @@ test('create-task keeps the chosen agent and prints error if freshening fails', 
       let buf = '';
       const unsub = window.klaus.terminal.onData(id, (data) => {
         buf += data;
-        if (buf.includes('Failed to freshen base branch')) {
+        if (buf.includes("couldn't refresh the base branch")) {
           unsub();
           resolve(buf);
         }
@@ -155,7 +157,9 @@ test('create-task keeps the chosen agent and prints error if freshening fails', 
       setTimeout(() => { unsub(); resolve(buf); }, 5000);
     }), taskId);
 
-    expect(output).toContain('Failed to freshen base branch from origin');
+    expect(output).toContain("couldn't refresh the base branch from origin");
+    // Must not claim the freshen failure downgraded the session — it didn't.
+    expect(output).not.toContain('Spawning a plain shell');
     expect(output).toContain('Could not fetch latest');
   } finally {
     if (taskId != null) {

@@ -11,6 +11,7 @@ const { allWindows, hardenWindow, getMainWindow } = require('../state/windows');
 const { startAutoFetch } = require('../state/ci-poll');
 const { allProviders, getProvider, binFor, installCommandFor, docsUrlFor, authMetaFor } = require('../state/ai-providers');
 const nemesis = require('../util/nemesis-client');
+const { resolveAgentBin } = require('../util/agent-bin');
 
 // Synchronous provider-list handed to the sandboxed preload (which can't
 // require local files). Registered on require, before any window/preload runs.
@@ -36,18 +37,27 @@ ipcMain.on('get-providers-sync', (event) => {
   }
 });
 
-// Probe a provider's binary --version ('not found' on failure). Remote backends
-// have no binary — probe the gateway instead.
+// Probe a provider's binary for its version. Remote backends have no binary —
+// probe the gateway instead. `installed` comes from resolving the binary, not
+// from the version probe (see util/agent-bin).
 function probeAgent(providerId, config) {
   const provider = getProvider(providerId);
   if (!provider) return null;
   if (provider.remoteBackend) return probeRemoteAgent(providerId, provider);
   const bin = binFor(providerId, config);
-  let version = 'not found';
+  const resolved = resolveAgentBin(bin);
+  let version = '';
   try {
-    version = execFileSync(bin, provider.versionArgs, { stdio: 'pipe', timeout: 5000 }).toString().trim();
+    // 10s: a Node CLI's cold start can lose a 5s race on a busy machine.
+    version = execFileSync(resolved || bin, provider.versionArgs, { stdio: 'pipe', timeout: 10000 }).toString().trim();
   } catch {}
-  return { id: providerId, displayName: provider.displayName, path: bin, version };
+  return {
+    id: providerId,
+    displayName: provider.displayName,
+    path: resolved || bin,
+    installed: !!resolved,
+    version: version || (resolved ? 'installed (version unavailable)' : 'not found'),
+  };
 }
 
 // Synchronous status for the About panel: reports only whether a gateway is
@@ -462,10 +472,9 @@ ipcMain.handle('get-agent-info', async (_event, { provider } = {}) => {
   // Remote backends resolve "installed" via a live gateway health check.
   if (prov && prov.remoteBackend) return remoteAgentInfo(provider, prov);
   const info = probeAgent(provider, config)
-    || { id: provider, displayName: (prov && prov.displayName) || provider, path: '', version: 'not found' };
+    || { id: provider, displayName: (prov && prov.displayName) || provider, path: '', version: 'not found', installed: false };
   return {
     ...info,
-    installed: info.version !== 'not found',
     installCommand: installCommandFor(provider) || null,
     docsUrl: docsUrlFor(provider) || null,
     loginCommand: (authMetaFor(provider) || {}).loginCommand || null,
