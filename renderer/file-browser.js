@@ -179,6 +179,26 @@ window.FileBrowser = (function () {
     return window.MarkdownPreview && window.MarkdownPreview.isMarkdownPath(filePath);
   }
 
+  // Raster images open as mojibake in Monaco, which only renders text.
+  function isImagePath(filePath) {
+    return /\.(png|jpe?g|webp|gif|avif|bmp)$/i.test(filePath || '');
+  }
+
+  function applyMediaMode(tab) {
+    var body = fileViewerView && fileViewerView.querySelector('.file-viewer-body');
+    var pane = body && body.querySelector('.file-media-preview');
+    if (!body || !pane) return;
+    var on = !!(tab && tab.mediaUrl);
+    body.classList.toggle('media-mode', on);
+    pane.hidden = !on;
+    if (!on) { pane.innerHTML = ''; return; }
+    var img = document.createElement('img');
+    img.src = tab.mediaUrl;
+    img.alt = tab.filePath.split('/').pop();
+    pane.innerHTML = '';
+    pane.appendChild(img);
+  }
+
   function renderMarkdownForTab(tab) {
     var preview = fileViewerView && fileViewerView.querySelector('.file-md-preview');
     if (!preview || !tab || !tab.model || tab.model.isDisposed()) return;
@@ -567,6 +587,7 @@ window.FileBrowser = (function () {
       '<div class="file-viewer-body">' +
         '<div class="file-editor-monaco"></div>' +
         '<div class="file-md-preview" tabindex="0"></div>' +
+        '<div class="file-media-preview" hidden></div>' +
         '<div class="artifact-split-handle" hidden></div>' +
         '<div class="file-artifact-preview" hidden></div>' +
       '</div>' +
@@ -905,6 +926,7 @@ window.FileBrowser = (function () {
   // entry. Returns the tab index, or -1 on error. Does NOT activate the tab
   // — caller decides when to switch.
   async function createTab(filePath) {
+    if (isImagePath(filePath)) return createImageTab(filePath);
     var result = await window.klaus.fs.readFile(filePath);
     if (result.error) {
       var body = fileViewerView.querySelector('.file-viewer-body');
@@ -949,6 +971,30 @@ window.FileBrowser = (function () {
     return tabs.length - 1;
   }
 
+  // The empty model is load-bearing: every call site here assumes tab.model
+  // exists, and an empty one is never dirty, so no save can reach the file.
+  async function createImageTab(filePath) {
+    var media = await window.klaus.fs.mediaUrl(filePath);
+    if (media.error) {
+      var body = fileViewerView.querySelector('.file-viewer-body');
+      if (body) body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(media.error) + '</span>';
+      return -1;
+    }
+    var monaco = await window.MonacoReady;
+    var uri = monaco.Uri.file(filePath);
+    var existing = monaco.editor.getModel(uri);
+    if (existing) { try { existing.dispose(); } catch (_) {} }
+    tabs.push({
+      filePath: filePath,
+      model: monaco.editor.createModel('', undefined, uri),
+      isProjectModel: false,
+      savedContent: '',
+      diskMtimeMs: null,
+      mediaUrl: media.url,
+    });
+    return tabs.length - 1;
+  }
+
   async function activateTab(index, line) {
     if (index < 0 || index >= tabs.length) return;
     // Drop view zones from the previous tab — Monaco anchors them by line
@@ -981,6 +1027,7 @@ window.FileBrowser = (function () {
     updateRunButtonForTab(tab.filePath);
     updatePreviewButton(tab);
     applyPreviewMode(tab);
+    applyMediaMode(tab);
     updateSplitButton(tab);
     applySplitMode(tab);
     refreshDirtyState();
@@ -1068,6 +1115,7 @@ window.FileBrowser = (function () {
   async function saveFile() {
     var tab = tabs[activeTabIndex];
     if (!tab || !tab.model || tab.model.isDisposed()) return;
+    if (tab.mediaUrl) return; // an image's model is a placeholder, not its bytes
     var content = tab.model.getValue();
     if (content === tab.savedContent) return;
     var statusEl = fileViewerView.querySelector('.file-editor-status');

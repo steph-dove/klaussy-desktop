@@ -911,6 +911,24 @@ ipcMain.handle('read-file', async (_event, { filePath }) => {
   }
 });
 
+// Images can't go through read-file (utf-8) or the CSP (blocks file:), so they
+// are vetted the same way and then served over the privileged media scheme.
+ipcMain.handle('file-media-url', async (_event, { filePath }) => {
+  const safe = pathUnderAnyRoot(filePath);
+  if (!safe) return { error: 'path not under an allowed project root' };
+  const ext = path.extname(safe).toLowerCase();
+  if (!QA_IMAGE_EXTS.has(ext)) return { error: 'not a previewable image' };
+  try {
+    if (!fs.statSync(safe).isFile()) return { error: 'not a file' };
+  } catch (err) {
+    return { error: err.message };
+  }
+  allowQaPaths([safe]);
+  const protoErr = protocolError();
+  if (protoErr) return { error: 'media cannot be displayed: ' + protoErr };
+  return { url: qaMediaUrl(safe) };
+});
+
 ipcMain.handle('write-file', async (_event, { filePath, content }) => {
   const safe = pathUnderAnyRoot(filePath);
   if (!safe) return { error: 'path not under an allowed project root' };

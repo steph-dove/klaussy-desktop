@@ -63,7 +63,7 @@ contextBridge.exposeInMainWorld('klaus', {
     discoverWorktrees: () => ipcRenderer.invoke('discover-worktrees'),
     suggestWorktreeLocations: (repoPath) => ipcRenderer.invoke('suggest-worktree-locations', { repoPath }),
     hideWorktree: (worktreePath) => ipcRenderer.invoke('hide-worktree', { worktreePath }),
-    browseDirectory: () => ipcRenderer.invoke('browse-directory'),
+    browseDirectory: (allowFiles) => ipcRenderer.invoke('browse-directory', { allowFiles }),
     recentPathsGet: () => ipcRenderer.invoke('recent-paths-get'),
     recentPathsAdd: (kind, path) => ipcRenderer.invoke('recent-paths-add', { kind, path }),
     recentPathsRemove: (kind, path) => ipcRenderer.invoke('recent-paths-remove', { kind, path }),
@@ -652,6 +652,7 @@ contextBridge.exposeInMainWorld('klaus', {
   // ---- fs: File IO, bulk read, search, replace-in-files, worktree watcher, env files ----
   fs: {
     readFile: (filePath) => ipcRenderer.invoke('read-file', { filePath }),
+    mediaUrl: (filePath) => ipcRenderer.invoke('file-media-url', { filePath }),
     writeFile: (filePath, content) => ipcRenderer.invoke('write-file', { filePath, content }),
     statFile: (filePath) => ipcRenderer.invoke('stat-file', { filePath }),
     // For dropped/pasted images that have no file on disk behind them; returns

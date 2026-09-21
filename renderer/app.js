@@ -39,6 +39,7 @@ window.App = window.App || {};
     const okBtn = document.getElementById('dir-pick-ok');
     const cancelBtn = document.getElementById('dir-pick-cancel');
     const browseBtn = document.getElementById('dir-pick-browse');
+    let allowFiles = false;
     const recentsBtn = document.getElementById('dir-pick-recents-btn');
     const recentsList = document.getElementById('dir-pick-recents-list');
     let resolver = null;
@@ -94,7 +95,7 @@ window.App = window.App || {};
     // it can't get wedged by the scopedbookmarksagent issue. Drag/paste
     // remain as fallbacks if it ever does hang.
     browseBtn.addEventListener('click', async function () {
-      const dir = await window.klaus.repo.browseDirectory();
+      const dir = await window.klaus.repo.browseDirectory(allowFiles);
       if (dir) input.value = dir;
     });
 
@@ -149,8 +150,10 @@ window.App = window.App || {};
 
     return function pickDirectoryPopup(opts) {
       opts = opts || {};
+      allowFiles = !!opts.allowFiles;
       titleEl.textContent = opts.title || 'Select folder';
-      input.placeholder = opts.placeholder || 'Drag a folder here or paste a path';
+      input.placeholder = opts.placeholder
+        || (allowFiles ? 'Drag a folder or file here, or paste a path' : 'Drag a folder here or paste a path');
       errEl.textContent = '';
       input.value = '';
       activeRecentsKind = opts.recentsKind || null;
