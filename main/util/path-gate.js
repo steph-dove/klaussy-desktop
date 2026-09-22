@@ -31,6 +31,10 @@ function getRendererAllowedRoots() {
     if (Array.isArray(config.projects)) {
       for (const p of config.projects) if (p && p.path) roots.add(p.path);
     }
+    // A non-git folder is never a project, so without this it is only
+    // readable while its task is alive.
+    const folders = (config.recentPaths && config.recentPaths.folders) || [];
+    for (const p of folders) if (p) roots.add(p);
   } catch {}
   for (const inst of _getInstances().values()) {
     if (inst && inst.worktreePath) roots.add(inst.worktreePath);

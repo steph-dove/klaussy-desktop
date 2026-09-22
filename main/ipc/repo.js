@@ -7,7 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync, execSync } = require('child_process');
 const { ipcMain, dialog } = require('electron');
-const { loadConfig, saveConfig } = require('../util/config');
+const { loadConfig, saveConfig, addRecentPath, RECENT_KINDS } = require('../util/config');
 const { execFileP } = require('../util/exec');
 const { getMainWindow, createWindow } = require('../state/windows');
 const { instances } = require('../state/instances');
@@ -525,27 +525,23 @@ ipcMain.handle('suggest-worktree-locations', async (_event, { repoPath }) => {
 // (worktrees, basepaths) cover the other two inputs. MRU order, capped at
 // 10. Source-repo recents reuse list-projects / remove-project / switch-
 // project — no new IPC for that case.
-const RECENT_KINDS = new Set(['worktrees', 'basepaths', 'folders']);
-const RECENT_CAP = 10;
 
 ipcMain.handle('recent-paths-get', () => {
   const config = loadConfig();
   const r = config.recentPaths || {};
-  return { worktrees: r.worktrees || [], basepaths: r.basepaths || [] };
+  return { worktrees: r.worktrees || [], basepaths: r.basepaths || [], folders: r.folders || [] };
 });
+
+// 'folders' entries are path-gate roots, so only main's open-folder may add them.
+const RENDERER_ADDABLE_KINDS = new Set(['worktrees', 'basepaths']);
 
 ipcMain.handle('recent-paths-add', (_event, { kind, path: p }) => {
-  if (!RECENT_KINDS.has(kind) || !p || typeof p !== 'string') return { ok: false };
-  const config = loadConfig();
-  if (!config.recentPaths) config.recentPaths = {};
-  const existing = config.recentPaths[kind] || [];
-  // MRU: drop any prior occurrence, prepend, cap.
-  const next = [p, ...existing.filter(x => x !== p)].slice(0, RECENT_CAP);
-  config.recentPaths[kind] = next;
-  saveConfig(config);
-  return { ok: true, list: next };
+  if (!RENDERER_ADDABLE_KINDS.has(kind)) return { ok: false };
+  const next = addRecentPath(kind, p);
+  return next ? { ok: true, list: next } : { ok: false };
 });
 
+// Removal stays open to every kind — it only ever narrows the allowed roots.
 ipcMain.handle('recent-paths-remove', (_event, { kind, path: p }) => {
   if (!RECENT_KINDS.has(kind) || !p) return { ok: false };
   const config = loadConfig();

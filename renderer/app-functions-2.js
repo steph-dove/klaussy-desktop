@@ -239,8 +239,9 @@ window.App = window.App || {};
   App.openFolderAsTask = async function(mode) {
     mode = mode || App.defaultAgent();
     var dir = await window.pickDirectoryPopup({
-      title: 'Open Folder in ' + AppUtils.modeDisplayName(mode),
+      title: 'Open Folder or File in ' + AppUtils.modeDisplayName(mode),
       recentsKind: 'folders',
+      allowFiles: true,
     });
     if (!dir) return;
     var result = await window.klaus.task.openFolder(dir, mode);
@@ -249,22 +250,24 @@ window.App = window.App || {};
       window.toast.error(result.error);
       return;
     }
-    // Record on successful open so abandoned typing doesn't pollute the list.
-    window.klaus.repo.recentPathsAdd('folders', dir);
+    if (result.warning) window.toast.warn(result.warning);
     App.addTaskToUI(result);
     App.switchToTask(result.id);
+    if (result.openFile && window.openFileViewer) {
+      window.openFileViewer(result.openFile, result.openFile.split('/').pop());
+    }
   };
 
   App.buildPaletteCommands = function() {
     var commands = [
       { label: 'New Task', action: function () { App.showModal(); } },
-      { label: 'Open Folder…', action: function () { App.openFolderAsTask(App.defaultAgent()); } },
+      { label: 'Open Folder or File…', action: function () { App.openFolderAsTask(App.defaultAgent()); } },
     ];
-    // One "Open Folder in <Agent>…" entry per supported AI CLI, plus Shell.
+    // One "Open Folder or File in <Agent>…" entry per supported AI CLI, plus Shell.
     ((window.klaus.ui && window.klaus.ui.providers) || []).forEach(function (p) {
-      commands.push({ label: 'Open Folder in ' + p.displayName + '…', action: function () { App.openFolderAsTask(p.id); } });
+      commands.push({ label: 'Open Folder or File in ' + p.displayName + '…', action: function () { App.openFolderAsTask(p.id); } });
     });
-    commands.push({ label: 'Open Folder in Shell…', action: function () { App.openFolderAsTask('shell'); } });
+    commands.push({ label: 'Open Folder or File in Shell…', action: function () { App.openFolderAsTask('shell'); } });
     commands.push.apply(commands, [
       { label: 'Toggle Diff Panel', action: function () { App.btnDiff.click(); } },
       { label: 'Change Theme', action: function () { App.showThemePicker(); } },

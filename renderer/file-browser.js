@@ -179,6 +179,83 @@ window.FileBrowser = (function () {
     return window.MarkdownPreview && window.MarkdownPreview.isMarkdownPath(filePath);
   }
 
+  // Binary media opens as mojibake in Monaco, which only renders text — and a
+  // video gets far enough to trip its unusual-line-terminator prompt.
+  function isMediaPath(filePath) {
+    return /\.(png|jpe?g|webp|gif|avif|bmp|mp4|webm|mov|m4v|mkv)$/i.test(filePath || '');
+  }
+
+  function applyMediaMode(tab) {
+    var body = fileViewerView && fileViewerView.querySelector('.file-viewer-body');
+    var pane = body && body.querySelector('.file-media-preview');
+    if (!body || !pane) return;
+    var on = !!(tab && tab.mediaUrl);
+    body.classList.toggle('media-mode', on);
+    pane.hidden = !on;
+    // Clearing first also stops a <video> that is still playing in a tab the
+    // user switched away from.
+    pane.innerHTML = '';
+    var zoomLabel = fileViewerView.querySelector('.statusbar-zoom');
+    if (zoomLabel) zoomLabel.hidden = true;
+    if (!on) return;
+    var name = tab.filePath.split('/').pop();
+    var el;
+    if (tab.mediaKind === 'video') {
+      el = document.createElement('video');
+      el.controls = true;
+      el.preload = 'metadata';
+    } else {
+      el = document.createElement('img');
+      el.alt = name;
+    }
+    el.src = tab.mediaUrl;
+    pane.appendChild(el);
+    if (tab.mediaKind !== 'video') wireImageZoom(pane, el, tab);
+  }
+
+  // tab.zoom: null is fit-to-pane, a number is a multiple of natural size.
+  var ZOOM_MIN = 0.1;
+  var ZOOM_MAX = 8;
+
+  function applyZoom(pane, img, tab) {
+    var label = fileViewerView && fileViewerView.querySelector('.statusbar-zoom');
+    if (tab.zoom == null) {
+      img.classList.remove('zoomed');
+      img.style.width = '';
+      img.style.height = '';
+    } else {
+      img.classList.add('zoomed');
+      img.style.width = (img.naturalWidth * tab.zoom) + 'px';
+      img.style.height = (img.naturalHeight * tab.zoom) + 'px';
+    }
+    if (!label) return;
+    label.hidden = false;
+    label.textContent = tab.zoom == null ? 'Fit' : Math.round(tab.zoom * 100) + '%';
+  }
+
+  function wireImageZoom(pane, img, tab) {
+    var render = function () { applyZoom(pane, img, tab); };
+    // naturalWidth is 0 until the bytes land, so the first sizing waits for it.
+    if (img.complete && img.naturalWidth) render();
+    else img.addEventListener('load', render, { once: true });
+
+    pane.addEventListener('wheel', function (e) {
+      if (!img.naturalWidth) return;
+      e.preventDefault();
+      // Starting from fit means the first notch has to know the on-screen size,
+      // or zooming out of a large fitted image appears to do nothing.
+      var current = tab.zoom == null ? (img.clientWidth / img.naturalWidth) : tab.zoom;
+      var next = current * (e.deltaY < 0 ? 1.1 : 1 / 1.1);
+      tab.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+      render();
+    }, { passive: false });
+
+    img.addEventListener('click', function () {
+      tab.zoom = tab.zoom == null ? 1 : null;
+      render();
+    });
+  }
+
   function renderMarkdownForTab(tab) {
     var preview = fileViewerView && fileViewerView.querySelector('.file-md-preview');
     if (!preview || !tab || !tab.model || tab.model.isDisposed()) return;
@@ -567,6 +644,7 @@ window.FileBrowser = (function () {
       '<div class="file-viewer-body">' +
         '<div class="file-editor-monaco"></div>' +
         '<div class="file-md-preview" tabindex="0"></div>' +
+        '<div class="file-media-preview" hidden></div>' +
         '<div class="artifact-split-handle" hidden></div>' +
         '<div class="file-artifact-preview" hidden></div>' +
       '</div>' +
@@ -577,6 +655,7 @@ window.FileBrowser = (function () {
         '</span>' +
         '<span class="statusbar-right">' +
           '<span class="statusbar-item statusbar-diagnostics" hidden></span>' +
+          '<span class="statusbar-item statusbar-zoom" hidden></span>' +
           '<span class="statusbar-item statusbar-branch"></span>' +
           '<span class="statusbar-item statusbar-encoding">UTF-8</span>' +
         '</span>' +
@@ -905,6 +984,7 @@ window.FileBrowser = (function () {
   // entry. Returns the tab index, or -1 on error. Does NOT activate the tab
   // — caller decides when to switch.
   async function createTab(filePath) {
+    if (isMediaPath(filePath)) return createMediaTab(filePath);
     var result = await window.klaus.fs.readFile(filePath);
     if (result.error) {
       var body = fileViewerView.querySelector('.file-viewer-body');
@@ -949,6 +1029,31 @@ window.FileBrowser = (function () {
     return tabs.length - 1;
   }
 
+  // The empty model is load-bearing: every call site here assumes tab.model
+  // exists, and an empty one is never dirty, so no save can reach the file.
+  async function createMediaTab(filePath) {
+    var media = await window.klaus.fs.mediaUrl(filePath);
+    if (media.error) {
+      var body = fileViewerView.querySelector('.file-viewer-body');
+      if (body) body.innerHTML = '<span style="color: var(--error)">Error: ' + escHtml(media.error) + '</span>';
+      return -1;
+    }
+    var monaco = await window.MonacoReady;
+    var uri = monaco.Uri.file(filePath);
+    var existing = monaco.editor.getModel(uri);
+    if (existing) { try { existing.dispose(); } catch (_) {} }
+    tabs.push({
+      filePath: filePath,
+      model: monaco.editor.createModel('', undefined, uri),
+      isProjectModel: false,
+      savedContent: '',
+      diskMtimeMs: null,
+      mediaUrl: media.url,
+      mediaKind: media.kind,
+    });
+    return tabs.length - 1;
+  }
+
   async function activateTab(index, line) {
     if (index < 0 || index >= tabs.length) return;
     // Drop view zones from the previous tab — Monaco anchors them by line
@@ -981,6 +1086,7 @@ window.FileBrowser = (function () {
     updateRunButtonForTab(tab.filePath);
     updatePreviewButton(tab);
     applyPreviewMode(tab);
+    applyMediaMode(tab);
     updateSplitButton(tab);
     applySplitMode(tab);
     refreshDirtyState();
@@ -1068,6 +1174,7 @@ window.FileBrowser = (function () {
   async function saveFile() {
     var tab = tabs[activeTabIndex];
     if (!tab || !tab.model || tab.model.isDisposed()) return;
+    if (tab.mediaUrl) return; // a media tab's model is a placeholder, not its bytes
     var content = tab.model.getValue();
     if (content === tab.savedContent) return;
     var statusEl = fileViewerView.querySelector('.file-editor-status');

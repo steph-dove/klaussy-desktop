@@ -9,7 +9,7 @@ const crypto = require('crypto');
 const { execFileSync, execSync } = require('child_process');
 const pty = require('node-pty');
 const { app, ipcMain, dialog, BrowserWindow } = require('electron');
-const { loadConfig, saveConfig, getNemesisProfile } = require('../util/config');
+const { loadConfig, saveConfig, getNemesisProfile, addRecentPath, flushSaveConfig } = require('../util/config');
 const nemesis = require('../util/nemesis-client');
 const { execFileP } = require('../util/exec');
 const { baseRepoForWorktree, sessionSiblingWorktrees, defaultBranchRefusal } = require('../util/git-repo');
@@ -1094,10 +1094,11 @@ ipcMain.handle('attach-worktree', async (_event, { worktreePath, mode, repoPath,
 // Browse for a directory (used by the existing worktree tab). NOTE: we
 // intentionally do NOT pass a parent window here. A sheet-attached NSOpenPanel
 // serializes the selected URL via NSRemoteViewMarshal, which requires a round-
-ipcMain.handle('browse-directory', async () => {
+ipcMain.handle('browse-directory', async (_event, { allowFiles } = {}) => {
   const result = await dialog.showOpenDialog({
-    title: 'Select existing worktree directory',
-    properties: ['openDirectory'],
+    title: allowFiles ? 'Select a folder or file to open' : 'Select existing worktree directory',
+    buttonLabel: 'Open',
+    properties: allowFiles ? ['openDirectory', 'openFile'] : ['openDirectory'],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
@@ -1106,24 +1107,54 @@ ipcMain.handle('browse-directory', async () => {
 // Open a plain directory (not a git worktree). Git-dependent panels will
 // degrade gracefully because `branch` is empty — auto-fetch and CI polling
 // explicitly skip instances without a branch.
+//
+// Picking a single file opens its parent and names the file in `openFile`.
 ipcMain.handle('open-folder', async (_event, { folderPath, mode }) => {
   if (!folderPath) {
     const result = await dialog.showOpenDialog({
-      title: 'Select folder to open',
-      properties: ['openDirectory'],
+      title: 'Select a folder or file to open',
+      buttonLabel: 'Open',
+      properties: ['openDirectory', 'openFile'],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
     folderPath = result.filePaths[0];
   }
+  let stat;
   try {
-    if (!fs.statSync(folderPath).isDirectory()) {
-      return { error: 'Not a directory: ' + folderPath };
-    }
+    stat = fs.statSync(folderPath);
   } catch {
     return { error: 'Folder does not exist: ' + folderPath };
   }
+  let openFile = null;
+  if (!stat.isDirectory()) {
+    if (!stat.isFile()) return { error: 'Not a folder or file: ' + folderPath };
+    openFile = folderPath;
+    folderPath = path.dirname(folderPath);
+  }
+  // A non-git folder never lands in config.projects, so this record is the only
+  // thing vouching for it to the path gate once its instance is gone.
+  let recordError = null;
+  try {
+    addRecentPath('folders', folderPath);
+    await flushSaveConfig();
+    const saved = (loadConfig().recentPaths || {}).folders || [];
+    if (!saved.includes(folderPath)) recordError = 'the config write did not land';
+  } catch (e) {
+    recordError = e.message;
+  }
+  if (recordError) console.warn('[open-folder] could not record folder:', recordError);
   const name = path.basename(folderPath) || 'folder';
-  return spawnInWorktree(name, folderPath, '', mode || 'claude');
+  const result = spawnInWorktree(name, folderPath, '', mode || 'claude');
+  if (result && !result.error) {
+    if (openFile) result.openFile = openFile;
+    // Say so rather than leaving the files silently unreadable once the task
+    // closes — that is precisely the failure this record exists to prevent.
+    if (recordError) {
+      result.warning = 'Opened, but this folder could not be saved as a known location ('
+        + recordError + '), so its files may stop opening once you close the tab.';
+    }
+  }
+  return result;
 });
 
 ipcMain.handle('list-tasks', () => {

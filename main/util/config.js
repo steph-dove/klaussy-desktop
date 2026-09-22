@@ -269,6 +269,21 @@ function runConfigMigrations() {
   }
 }
 
+// Lives here so open-folder can record the folder itself rather than
+// trusting the renderer to.
+const RECENT_KINDS = new Set(['worktrees', 'basepaths', 'folders']);
+const RECENT_CAP = 10;
+
+function addRecentPath(kind, p, config = loadConfig()) {
+  if (!RECENT_KINDS.has(kind) || !p || typeof p !== 'string') return null;
+  if (!config.recentPaths) config.recentPaths = {};
+  const existing = config.recentPaths[kind] || [];
+  const next = [p, ...existing.filter((x) => x !== p)].slice(0, RECENT_CAP);
+  config.recentPaths[kind] = next;
+  saveConfig(config);
+  return next;
+}
+
 module.exports = {
   getConfigPath,
   loadConfig,
@@ -279,5 +294,7 @@ module.exports = {
   getNemesisProfile,
   runConfigMigrations,
   getNotificationConfig,
+  addRecentPath,
+  RECENT_KINDS,
   CURRENT_SCHEMA_VERSION,
 };

@@ -4,9 +4,12 @@
 //
 // Must be required before app ready — registerSchemesAsPrivileged is pre-ready.
 
+const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 const { protocol, net, app } = require('electron');
 const { pathToFileURL } = require('url');
+const { parseRange } = require('../util/byte-range');
 
 const SCHEME = 'klaussy-qa';
 
@@ -31,6 +34,35 @@ protocol.registerSchemesAsPrivileged([{
   privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
 }]);
 
+// net.fetch on a file: URL always returns the whole file, so a seek has to be
+// served by hand: 206 plus Content-Range, or the element cannot scrub.
+const MEDIA_TYPES = {
+  '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm',
+  '.mov': 'video/quicktime', '.mkv': 'video/x-matroska',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif',
+  '.bmp': 'image/bmp',
+};
+
+function rangeResponse(target, rangeHeader) {
+  const size = fs.statSync(target).size;
+  const span = parseRange(rangeHeader, size);
+  if (!span) {
+    return new Response('bad range', { status: 416, headers: { 'Content-Range': `bytes */${size}` } });
+  }
+  const { start, end } = span;
+  const type = MEDIA_TYPES[path.extname(target).toLowerCase()] || 'application/octet-stream';
+  return new Response(Readable.toWeb(fs.createReadStream(target, { start, end })), {
+    status: 206,
+    headers: {
+      'Content-Type': type,
+      'Content-Length': String(end - start + 1),
+      'Content-Range': `bytes ${start}-${end}/${size}`,
+      'Accept-Ranges': 'bytes',
+    },
+  });
+}
+
 app.whenReady().then(() => {
   protocol.handle(SCHEME, async (request) => {
     let target;
@@ -46,7 +78,14 @@ app.whenReady().then(() => {
     // QA media lives in Downloads and tmp, which get cleaned up between the
     // scan and the render; a rejection here would just be a broken tile.
     try {
-      return await net.fetch(pathToFileURL(target).toString());
+      const range = request.headers.get('range');
+      if (range) return rangeResponse(target, range);
+      // Accept-Ranges is what tells <video> it may seek at all; without it the
+      // player treats the source as unseekable and the scrubber does nothing.
+      const res = await net.fetch(pathToFileURL(target).toString());
+      const headers = new Headers(res.headers);
+      headers.set('Accept-Ranges', 'bytes');
+      return new Response(res.body, { status: res.status, headers });
     } catch (err) {
       return new Response('unavailable: ' + ((err && err.message) || String(err)), { status: 404 });
     }
