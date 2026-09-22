@@ -1,4 +1,4 @@
-/* global window, document */
+/* global window, document, getComputedStyle */
 
 // "Open a directory" mode: a plain folder is not a git repo and is never
 // recorded as a project, so these cover the things that broke because of it.
@@ -147,15 +147,24 @@ test('markdown in a folder gets its Preview toggle and renders', async ({ mainWi
       btn.click();
       await new Promise((r) => setTimeout(r, 300));
       const preview = document.querySelector('.file-md-preview');
+      const media = document.querySelector('.file-media-preview');
       return {
         btnHidden: btn.hidden,
         previewHtml: preview ? preview.innerHTML : '',
+        // Computed, not the attribute: an author `display` overrides [hidden],
+        // which is exactly how the image pane came to sit on every tab.
+        mediaDisplay: media ? getComputedStyle(media).display : null,
+        bodyHasMediaMode: document
+          .querySelector('.file-viewer-body')
+          .classList.contains('media-mode'),
       };
     }, folder);
 
     expect(out.btnHidden).toBe(false);
     expect(out.previewHtml).toContain('<h1');
     expect(out.previewHtml).toContain('Notes');
+    expect(out.bodyHasMediaMode).toBe(false);
+    expect(out.mediaDisplay).toBe('none');
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
   }

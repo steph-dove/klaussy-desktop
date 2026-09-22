@@ -6894,10 +6894,12 @@ body.task-branchless .file-viewer-blame-btn {
 
 /* Checkerboard so transparent PNGs read as transparent, not as the theme bg. */
 .file-media-preview {
+  /* none by default: an author `display` beats the UA rule for [hidden], so
+     setting flex here unconditionally laid the pane out on every tab. */
+  display: none;
   flex: 1;
   min-height: 0;
   overflow: auto;
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
@@ -6919,6 +6921,7 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .file-viewer-body.media-mode .file-editor-monaco { display: none; }
+.file-viewer-body.media-mode .file-media-preview { display: flex; }
 
 /* Live artifact split preview — a rendered pane beside Monaco. Unlike
    .preview-mode (which swaps Monaco out), split lays the two side by side.
