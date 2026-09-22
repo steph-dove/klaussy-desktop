@@ -911,13 +911,15 @@ ipcMain.handle('read-file', async (_event, { filePath }) => {
   }
 });
 
-// Images can't go through read-file (utf-8) or the CSP (blocks file:), so they
-// are vetted the same way and then served over the privileged media scheme.
+// Media can't go through read-file (utf-8) or the CSP (blocks file:), so it is
+// vetted the same way and then served over the privileged media scheme, which
+// registers `stream: true` so <video> range requests can seek.
 ipcMain.handle('file-media-url', async (_event, { filePath }) => {
   const safe = pathUnderAnyRoot(filePath);
   if (!safe) return { error: 'path not under an allowed project root' };
   const ext = path.extname(safe).toLowerCase();
-  if (!QA_IMAGE_EXTS.has(ext)) return { error: 'not a previewable image' };
+  const kind = QA_IMAGE_EXTS.has(ext) ? 'image' : (QA_VIDEO_EXTS.has(ext) ? 'video' : null);
+  if (!kind) return { error: 'not a previewable image or video' };
   try {
     if (!fs.statSync(safe).isFile()) return { error: 'not a file' };
   } catch (err) {
@@ -926,7 +928,7 @@ ipcMain.handle('file-media-url', async (_event, { filePath }) => {
   allowQaPaths([safe]);
   const protoErr = protocolError();
   if (protoErr) return { error: 'media cannot be displayed: ' + protoErr };
-  return { url: qaMediaUrl(safe) };
+  return { url: qaMediaUrl(safe), kind };
 });
 
 ipcMain.handle('write-file', async (_event, { filePath, content }) => {
