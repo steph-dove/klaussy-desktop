@@ -328,7 +328,7 @@
           + '<span class="pr-conv-kind">' + (aiFinding ? 'review finding' : 'commented') + '</span>'
           + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
           + (mine && !isEditing && dbid != null && !aiFinding
-              ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit">✎</button>'
+              ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit" aria-label="Edit">✎</button>'
               : '')
         + '</div>'
         + (isEditing
@@ -424,7 +424,7 @@
           + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
           + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
           + (mine && !isEditing && dbid != null
-              ? '<button class="pr-conv-edit-btn" type="button" data-kind="review" data-id="' + dbid + '" title="Edit">✎</button>'
+              ? '<button class="pr-conv-edit-btn" type="button" data-kind="review" data-id="' + dbid + '" title="Edit" aria-label="Edit">✎</button>'
               : '')
         + '</div>'
         + (isEditing

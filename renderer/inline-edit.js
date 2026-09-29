@@ -51,7 +51,7 @@ window.InlineEdit = (function () {
     container.innerHTML =
       '<input class="inline-edit-input" type="text" placeholder="Tell the agent what to change…" />' +
       '<button class="inline-edit-submit" type="button" title="Submit (Enter)"></button>' +
-      '<button class="inline-edit-dismiss" type="button" title="Cancel (Esc)">×</button>';
+      '<button class="inline-edit-dismiss" type="button" title="Cancel (Esc)" aria-label="Cancel">×</button>';
 
     var input = container.querySelector('.inline-edit-input');
     var submitBtn = container.querySelector('.inline-edit-submit');
@@ -93,7 +93,7 @@ window.InlineEdit = (function () {
     var widgetEl = s.promptWidget.getDomNode();
     widgetEl.innerHTML =
       '<span class="inline-edit-status">⧗ Editing…</span>' +
-      '<button class="inline-edit-dismiss" type="button" title="Cancel (Esc)">×</button>';
+      '<button class="inline-edit-dismiss" type="button" title="Cancel (Esc)" aria-label="Cancel">×</button>';
     widgetEl.querySelector('.inline-edit-dismiss').addEventListener('click', cancel);
 
     // Panel outside Monaco's DOM entirely — mounted as a sibling of the

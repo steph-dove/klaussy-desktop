@@ -751,7 +751,7 @@ window.PrReview = window.PrReview || {};
     el.innerHTML =
       '<div class="diff-explanation-header">'
         + '<span title="' + PR.escHtml(hunkPreview) + '">' + PR.escHtml(headerLabel) + '</span>'
-        + '<button class="diff-explanation-close" title="Hide">&times;</button>'
+        + '<button class="diff-explanation-close" title="Hide" aria-label="Hide">&times;</button>'
       + '</div>'
       + '<div class="diff-explanation-body"></div>';
 
@@ -1134,7 +1134,7 @@ window.PrReview = window.PrReview || {};
     explanationEl.dataset.requestId = requestId;
     explanationEl.innerHTML = '<div class="diff-explanation-header">'
         + '<span>Explanation</span>'
-        + '<button class="diff-explanation-close" title="Close">&times;</button>'
+        + '<button class="diff-explanation-close" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="diff-explanation-body status-pulse">' + PR.escHtml(PR.EXPLAIN_STATUS_MESSAGES[0]) + '</div>';
     insertAfter.after(explanationEl);

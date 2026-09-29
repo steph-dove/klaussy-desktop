@@ -56,11 +56,11 @@ window.Sidebar = (function () {
       if (isCollapsed) header.classList.add('collapsed');
 
       header.innerHTML = 
-        '<span class="session-group-chevron">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
-        '<span class="session-group-icon">&#128193;</span>' +
+        '<span class="session-group-chevron" aria-hidden="true">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
+        '<span class="session-group-icon" aria-hidden="true">&#128193;</span>' +
         '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
         '<span class="session-group-badge">0</span>' +
-        '<button class="session-group-close" title="Close Session">&times;</button>';
+        '<button class="session-group-close" title="Close Session" aria-label="Close session ' + escHtml(sessionName) + '">&times;</button>';
 
       var itemsContainer = document.createElement('div');
       itemsContainer.className = 'session-group-items';
@@ -123,9 +123,9 @@ window.Sidebar = (function () {
       '<span class="ci-status-icon" title="CI status"></span>' +
       '<span class="dirty-indicator"></span>' +
       '<span class="unread-badge"></span>' +
-      '<button class="task-notify-btn" title="Slack/Discord notifications">&#128276;</button>' +
-      '<button class="task-note-btn" title="Notes">&#9998;</button>' +
-      '<button class="task-close" title="Remove">&times;</button>';
+      '<button class="task-notify-btn" title="Slack/Discord notifications" aria-label="Slack/Discord notifications for ' + escHtml(task.name) + '" aria-pressed="false">&#128276;</button>' +
+      '<button class="task-note-btn" title="Notes" aria-label="Notes for ' + escHtml(task.name) + '">&#9998;</button>' +
+      '<button class="task-close" title="Remove" aria-label="Remove ' + escHtml(task.name) + '">&times;</button>';
 
     item.addEventListener('click', function (e) {
       if (e.target.classList.contains('task-close') || e.target.classList.contains('task-note-btn')
@@ -158,6 +158,7 @@ window.Sidebar = (function () {
     function paintBell(on) {
       notifyBtn.classList.toggle('notifying', !!on);
       notifyBtn.innerHTML = on ? '&#128276;' : '&#128277;';
+      notifyBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
       notifyBtn.title = on
         ? 'Posting this session to Slack/Discord — click to stop'
         : 'Not posting this session — click to send it to Slack/Discord';
@@ -246,7 +247,7 @@ window.Sidebar = (function () {
             ? '<button class="saved-session-resume" title="Open shell">Open</button>'
             : '<button class="saved-session-resume" title="Resume conversation">Resume</button>' +
               '<button class="saved-session-new" title="New session on this worktree">New</button>') +
-          '<button class="saved-session-dismiss" title="Dismiss">&times;</button>' +
+          '<button class="saved-session-dismiss" title="Dismiss" aria-label="Dismiss saved session ' + escHtml(repoName) + '">&times;</button>' +
         '</div>';
 
       item.querySelector('.saved-session-resume').addEventListener('click', async function (e) {
@@ -344,9 +345,9 @@ window.Sidebar = (function () {
           '<span class="saved-session-detail">' + escHtml(wt.branch) + '</span>' +
         '</div>' +
         '<div class="saved-session-actions">' +
-          '<button class="worktree-open-claude" title="Open with ' + escHtml(AppUtils.modeDisplayName(window.App.defaultAgent())) + '">' + escHtml(AppUtils.modeShortLabel(window.App.defaultAgent())) + '</button>' +
-          '<button class="worktree-open-shell" title="Open shell">sh</button>' +
-          '<button class="worktree-remove" title="Remove worktree">\u00d7</button>' +
+          '<button class="worktree-open-claude" title="Open with ' + escHtml(AppUtils.modeDisplayName(window.App.defaultAgent())) + '" aria-label="Open ' + escHtml(repoName) + ' with ' + escHtml(AppUtils.modeDisplayName(window.App.defaultAgent())) + '">' + escHtml(AppUtils.modeShortLabel(window.App.defaultAgent())) + '</button>' +
+          '<button class="worktree-open-shell" title="Open shell" aria-label="Open shell in ' + escHtml(repoName) + '">sh</button>' +
+          '<button class="worktree-remove" title="Remove worktree" aria-label="Remove worktree ' + escHtml(repoName) + '">\u00d7</button>' +
         '</div>';
 
       item.querySelector('.worktree-open-claude').addEventListener('click', async function (e) {
@@ -404,16 +405,16 @@ window.Sidebar = (function () {
 
     var resumeBtnHtml = '';
     if (inactiveList.length > 0) {
-      resumeBtnHtml = '<button class="session-group-resume-btn" title="Resume All Repos in Session">&#9654; Resume All</button>';
+      resumeBtnHtml = '<button class="session-group-resume-btn" title="Resume All Repos in Session" aria-label="Resume all repos in session ' + escHtml(sessionName) + '"><span aria-hidden="true">&#9654;</span> Resume All</button>';
     }
 
     header.innerHTML = 
-      '<span class="session-group-chevron">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
-      '<span class="session-group-icon">&#128193;</span>' +
+      '<span class="session-group-chevron" aria-hidden="true">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
+      '<span class="session-group-icon" aria-hidden="true">&#128193;</span>' +
       '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
       '<span class="session-group-badge">' + totalCount + '</span>' +
       resumeBtnHtml +
-      '<button class="session-group-close" title="Close Session">&times;</button>';
+      '<button class="session-group-close" title="Close Session" aria-label="Close session ' + escHtml(sessionName) + '">&times;</button>';
 
     var itemsContainer = document.createElement('div');
     itemsContainer.className = 'session-group-items';

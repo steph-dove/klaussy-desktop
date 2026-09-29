@@ -107,14 +107,14 @@
       return '<div class="pr-local-changes pr-local-empty">'
         + '<span class="pr-local-title">Local changes</span>'
         + '<span class="pr-local-counts"> — ' + PR.escHtml(PR.localChanges.error) + '</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
       + '</div>';
     }
     if (!hasWt) {
       return '<div class="pr-local-changes pr-local-empty">'
         + '<span class="pr-local-title">Local changes</span>'
         + '<span class="pr-local-counts"> — no worktree found for this PR. Click Implement on a finding (or Check out locally) to set one up.</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
       + '</div>';
     }
     // Worktree exists but nothing's local: show a "clean" stub so the user
@@ -123,7 +123,7 @@
       return '<div class="pr-local-changes pr-local-empty">'
         + '<span class="pr-local-title">Local changes</span>'
         + '<span class="pr-local-counts"> — none. Worktree in sync with PR head.</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
       + '</div>';
     }
 
@@ -211,7 +211,7 @@
               ? unpushed.length + ' unpushed commit' + (unpushed.length === 1 ? '' : 's')
               : (diverged ? 'diverged from PR' : ''))
         + '</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
       + '</div>'
       + bannerHtml
       + fileListHtml + diffHtml + commitHtml
@@ -445,14 +445,14 @@
     } else if (f.commentStatus === 'failed') {
       commentBadge = '<span class="pr-ai-finding-comment-status failed">! Failed</span>';
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="Try again">Add to PR</button>';
-      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block" aria-label="Edit the review block">✎</button>';
     } else if (inDraft) {
       commentBadge = '<span class="pr-ai-finding-comment-status drafted" title="Queued — submit the review to post it">✎ Drafted</span>';
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="' + PR.escHtml(addBtnTitle) + '">Remove draft</button>';
-      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block" aria-label="Edit the review block">✎</button>';
     } else {
       commentBtn = '<button class="pr-ai-finding-comment" type="button" title="' + PR.escHtml(addBtnTitle) + '">Add to PR</button>';
-      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block">✎</button>';
+      editCommentBtn = '<button class="pr-ai-finding-edit-comment" type="button" title="Edit the review block" aria-label="Edit the review block">✎</button>';
     }
 
     // Location chip — shows where the finding will anchor, and whether we

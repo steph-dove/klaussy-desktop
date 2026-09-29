@@ -20,8 +20,8 @@ window.App = window.App || {};
       '<span class="modal-repo-path">No repo selected</span>' +
       '<select class="mr-base" hidden title="Base branch in this repo"></select>' +
       '<button type="button" class="modal-input-btn mr-browse" title="Browse for a git repo">Browse</button>' +
-      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>' +
-      '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo">×</button>' +
+      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-label="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>' +
+      '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo" aria-label="Remove this repo">×</button>' +
       '<div class="modal-recents-list" hidden role="listbox"></div>';
     row.el = el;
     row.pathEl = el.querySelector('.modal-repo-path');
@@ -848,7 +848,9 @@ window.App = window.App || {};
   // Clear the red "required" ring from every field that can carry it.
   App.clearFieldFlags = function() {
     [App.modalRepoRow, App.multiRepoRow, App.modalInput, App.modalBaseSelect, App.existingSessionSelect].forEach(function (el) {
-      if (el) el.classList.remove('modal-field-invalid');
+      if (!el) return;
+      el.classList.remove('modal-field-invalid');
+      el.removeAttribute('aria-invalid');
     });
   };
 
@@ -859,7 +861,9 @@ window.App = window.App || {};
     App.modalError.textContent = message;
     if (fieldEl) {
       fieldEl.classList.add('modal-field-invalid');
+      fieldEl.setAttribute('aria-invalid', 'true');
       var focusEl = fieldEl.tagName === 'INPUT' ? fieldEl : fieldEl.querySelector('input, button');
+      if (focusEl) focusEl.setAttribute('aria-describedby', 'modal-error');
       if (focusEl && focusEl.focus) setTimeout(function () { focusEl.focus(); }, 0);
     }
   };

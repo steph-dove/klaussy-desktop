@@ -164,7 +164,7 @@
     box.innerHTML =
       '<div class="precommit-findings-head">Pre-commit review found ' + count + ' issue' + (count === 1 ? '' : 's')
         + ' in the staged changes — fix them, or commit anyway.'
-        + '<button type="button" class="precommit-findings-close" title="Dismiss">&times;</button></div>'
+        + '<button type="button" class="precommit-findings-close" title="Dismiss" aria-label="Dismiss">&times;</button></div>'
       + '<pre class="precommit-findings-body"></pre>';
     box.querySelector('.precommit-findings-body').textContent = text;
     box.querySelector('.precommit-findings-close').addEventListener('click', DP.clearPrecommitFindings);

@@ -272,7 +272,7 @@ window.DiffPanel = window.DiffPanel || {};
     area.innerHTML =
       '<div class="diff-comment-header">' +
         '<span>Comment on <code>' + DP.escHtml(rangeLabel) + '</code></span>' +
-        '<button class="diff-comment-close" type="button" title="Close">&times;</button>' +
+        '<button class="diff-comment-close" type="button" title="Close" aria-label="Close">&times;</button>' +
       '</div>' +
       '<textarea class="diff-comment-input" placeholder="Write a comment..." rows="3"></textarea>' +
       '<div class="diff-comment-actions">' +
@@ -372,7 +372,7 @@ window.DiffPanel = window.DiffPanel || {};
     explanationEl.dataset.requestId = requestId;
     explanationEl.innerHTML = '<div class="diff-explanation-header">'
         + '<span>Explanation</span>'
-        + '<button class="diff-explanation-close" title="Close">&times;</button>'
+        + '<button class="diff-explanation-close" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="diff-explanation-body">Sending to the agent…</div>';
     insertAfter.after(explanationEl);

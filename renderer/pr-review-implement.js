@@ -964,7 +964,7 @@
     composer.innerHTML =
       '<div class="pr-comment-composer-head">'
         + '<span>Draft comment on <code>' + PR.escHtml(label) + '</code></span>'
-        + '<button class="pr-comment-composer-close" type="button" title="Cancel">&times;</button>'
+        + '<button class="pr-comment-composer-close" type="button" title="Cancel" aria-label="Cancel">&times;</button>'
       + '</div>'
       + '<textarea class="pr-comment-composer-input" placeholder="Comment (\u2318\u23CE to save)" rows="3"></textarea>'
       + '<div class="pr-comment-composer-actions">'
@@ -1039,7 +1039,7 @@
         '<div class="pr-pending-head">'
           + '<span class="pr-pending-badge">draft</span>'
           + '<span class="pr-pending-summary">' + PR.escHtml(PR.firstTwoLines(c.body)) + '</span>'
-          + '<button class="pr-pending-remove" type="button" title="Discard draft">&times;</button>'
+          + '<button class="pr-pending-remove" type="button" title="Discard draft" aria-label="Discard draft">&times;</button>'
         + '</div>'
         + '<div class="pr-pending-body">' + PR.renderCommentBody(c.body) + '</div>';
       after.insertAdjacentElement('afterend', el);

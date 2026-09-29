@@ -600,7 +600,8 @@
   flex-shrink: 0;
 }
 
-.diff-file:hover .diff-file-actions {
+.diff-file:hover .diff-file-actions,
+.diff-file:focus-within .diff-file-actions {
   opacity: 1;
 }
 
@@ -913,7 +914,8 @@
   transition: opacity 0.15s;
 }
 
-.diff-line.diff-hunk:hover .diff-explain-btn {
+.diff-line.diff-hunk:hover .diff-explain-btn,
+.diff-line.diff-hunk:focus-within .diff-explain-btn {
   opacity: 1;
 }
 
@@ -945,7 +947,8 @@
   transition: opacity 0.15s;
 }
 
-.diff-line.diff-hunk:hover .diff-stage-hunk-btn {
+.diff-line.diff-hunk:hover .diff-stage-hunk-btn,
+.diff-line.diff-hunk:focus-within .diff-stage-hunk-btn {
   opacity: 1;
 }
 

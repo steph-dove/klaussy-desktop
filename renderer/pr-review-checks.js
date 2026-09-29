@@ -558,7 +558,7 @@
     panel.innerHTML =
       '<div class="pr-check-debug-head">'
         + '<span>' + (entry.state === 'running' ? 'Debugging' : 'Debug') + ' — ' + PR.escHtml(entry.checkName || '') + '</span>'
-        + '<button class="pr-check-debug-close" type="button" title="Cancel / close">&times;</button>'
+        + '<button class="pr-check-debug-close" type="button" title="Cancel / close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="pr-check-debug-body' + (entry.state === 'running' && !entry.accumulated ? ' status-pulse' : '') + '">'
         + (entry.state === 'running' && !entry.accumulated ? PR.escHtml(PR.DEBUG_STATUS_MESSAGES[0]) : '')
@@ -799,7 +799,7 @@
     panel.innerHTML =
       '<div class="pr-check-fix-head">'
         + '<span>Fixing — ' + PR.escHtml(checkName) + '</span>'
-        + '<button class="pr-check-fix-close" type="button" title="Cancel / close">&times;</button>'
+        + '<button class="pr-check-fix-close" type="button" title="Cancel / close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="pr-check-fix-progress"><div class="pr-check-fix-progress-list"></div></div>'
       + '<div class="pr-check-fix-summary"></div>'

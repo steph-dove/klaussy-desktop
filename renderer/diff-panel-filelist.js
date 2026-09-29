@@ -126,6 +126,8 @@
           // Use a visible confirmation
           btn.textContent = '?';
           btn.title = 'Click again to confirm discard';
+          btn.setAttribute('aria-label', 'Confirm discarding changes to ' + file);
+          if (window.A11y) window.A11y.announce('Press again to confirm discarding ' + file);
           btn.dataset.action = 'discard-confirm';
         } else if (action === 'discard-confirm') {
           await window.klaus.git.discard(wtPath, [file]);
@@ -142,12 +144,13 @@
     var sel = uniqueKey === DP.selectedFile ? ' selected' : '';
 
     var actions = '';
+    var fileAttr = DP.escAttr(f.file);
     if (isStaged) {
-      actions = '<button class="diff-file-action" data-file="' + DP.escAttr(f.file) + '" data-action="unstage" title="Unstage">\u2212</button>';
+      actions = '<button class="diff-file-action" data-file="' + fileAttr + '" data-action="unstage" title="Unstage" aria-label="Unstage ' + fileAttr + '">\u2212</button>';
     } else {
       actions =
-        '<button class="diff-file-action" data-file="' + DP.escAttr(f.file) + '" data-action="stage" title="Stage">+</button>' +
-        '<button class="diff-file-action" data-file="' + DP.escAttr(f.file) + '" data-action="discard" title="Discard">\u2715</button>';
+        '<button class="diff-file-action" data-file="' + fileAttr + '" data-action="stage" title="Stage" aria-label="Stage ' + fileAttr + '">+</button>' +
+        '<button class="diff-file-action" data-file="' + fileAttr + '" data-action="discard" title="Discard" aria-label="Discard changes to ' + fileAttr + '">\u2715</button>';
     }
 
     return ('<div class="diff-file' + sel + '" data-file="' + DP.escAttr(f.file) + '" data-uniquekey="' + DP.escAttr(uniqueKey) + '" data-staged="' + isStaged + '" data-worktreepath="' + DP.escAttr(f.worktreePath || '') + '">' +

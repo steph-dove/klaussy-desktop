@@ -5791,11 +5791,13 @@ body.task-branchless .file-viewer-blame-btn {
   flex-shrink: 0;
 }
 
-.task-item:hover .task-note-btn {
+.task-item:hover .task-note-btn,
+.task-item:focus-within .task-note-btn {
   opacity: 0.7;
 }
 
-.task-note-btn:hover {
+.task-note-btn:hover,
+.task-note-btn:focus-visible {
   color: var(--accent);
   opacity: 1 !important;
 }
@@ -5819,11 +5821,13 @@ body.task-branchless .file-viewer-blame-btn {
   flex-shrink: 0;
 }
 
-.task-item:hover .task-notify-btn {
+.task-item:hover .task-notify-btn,
+.task-item:focus-within .task-notify-btn {
   opacity: 0.7;
 }
 
-.task-notify-btn:hover {
+.task-notify-btn:hover,
+.task-notify-btn:focus-visible {
   color: var(--accent);
   opacity: 1 !important;
 }
@@ -6017,7 +6021,8 @@ body.task-branchless .file-viewer-blame-btn {
   transition: opacity 0.15s;
 }
 
-.tag-item:hover .tag-actions {
+.tag-item:hover .tag-actions,
+.tag-item:focus-within .tag-actions {
   opacity: 1;
 }
 
@@ -6220,11 +6225,13 @@ body.task-branchless .file-viewer-blame-btn {
   flex-shrink: 0;
 }
 
-.env-row:hover .env-toggle-vis {
+.env-row:hover .env-toggle-vis,
+.env-row:focus-within .env-toggle-vis {
   opacity: 0.7;
 }
 
-.env-toggle-vis:hover {
+.env-toggle-vis:hover,
+.env-toggle-vis:focus-visible {
   opacity: 1 !important;
   color: var(--text);
 }

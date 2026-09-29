@@ -630,12 +630,12 @@ window.FileBrowser = (function () {
     fileViewerView.innerHTML =
       '<div class="file-viewer-tabs"></div>' +
       '<div class="file-viewer-header-inline">' +
-        '<button class="file-viewer-nav-btn" data-nav="back" title="Back (⌘⌥←)" disabled>◀</button>' +
-        '<button class="file-viewer-nav-btn" data-nav="forward" title="Forward (⌘⌥→)" disabled>▶</button>' +
+        '<button class="file-viewer-nav-btn" data-nav="back" title="Back (⌘⌥←)" aria-label="Back" disabled>◀</button>' +
+        '<button class="file-viewer-nav-btn" data-nav="forward" title="Forward (⌘⌥→)" aria-label="Forward" disabled>▶</button>' +
         '<span class="file-viewer-breadcrumbs"></span>' +
         '<span class="file-editor-status"></span>' +
         '<span class="file-viewer-problems-badge" hidden></span>' +
-        '<button class="file-viewer-run-btn" title="Run" hidden>▶</button>' +
+        '<button class="file-viewer-run-btn" title="Run" aria-label="Run" hidden>▶</button>' +
         '<button class="file-viewer-preview-btn" title="Toggle Markdown preview" hidden>Preview</button>' +
         '<button class="file-viewer-split-btn" title="Toggle live preview beside the editor" hidden>Split</button>' +
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
@@ -884,7 +884,7 @@ window.FileBrowser = (function () {
     domNode.innerHTML =
       '<div class="diff-explanation-header">'
         + '<span>Explanation</span>'
-        + '<button class="diff-explanation-close" title="Close">&times;</button>'
+        + '<button class="diff-explanation-close" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="diff-explanation-body"></div>';
     var bodyEl = domNode.querySelector('.diff-explanation-body');
@@ -1135,7 +1135,7 @@ window.FileBrowser = (function () {
       return '<div class="file-viewer-tab' + active + dirty + '" data-tab-index="' + i + '" title="' + escHtml(tab.filePath) + '">' +
                '<span class="tab-name">' + escHtml(basename) + '</span>' +
                '<span class="tab-dirty-dot">●</span>' +
-               '<button class="tab-close" title="Close (⌘W)">×</button>' +
+               '<button class="tab-close" title="Close (⌘W)" aria-label="Close tab">×</button>' +
              '</div>';
     }).join('');
   }

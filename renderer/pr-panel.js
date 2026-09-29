@@ -805,7 +805,7 @@ window.PRPanel = (function () {
         + '<strong>Claude\'s PR Review</strong>'
         + '<span class="pr-ai-elapsed">0s</span>'
         + '<button type="button" class="pr-ai-cancel-btn" title="Cancel review">Cancel</button>'
-        + '<button type="button" class="pr-ai-review-close" title="Dismiss">&times;</button>'
+        + '<button type="button" class="pr-ai-review-close" title="Dismiss" aria-label="Dismiss">&times;</button>'
       + '</div>'
       + '<div class="pr-ai-progress"></div>'
       + '<div class="pr-ai-review-body">'
@@ -1320,7 +1320,7 @@ window.PRPanel = (function () {
         + headerFixBtn
         + '<button type="button" class="pr-ai-regen-btn" title="Re-run the review">Re-run</button>'
         + '<button type="button" class="pr-ai-discard-btn" title="Discard cached review">Discard</button>'
-        + '<button type="button" class="pr-ai-review-close" title="Dismiss">&times;</button>'
+        + '<button type="button" class="pr-ai-review-close" title="Dismiss" aria-label="Dismiss">&times;</button>'
       + '</div>'
       + '<div class="pr-ai-review-body">' + renderReviewContent(reviewText) + '</div>'
       + '</div>';

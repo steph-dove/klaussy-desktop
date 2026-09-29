@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
@@ -20,6 +20,7 @@
        its own document, so it has to read the shared theme from config and
        apply the CSS variables itself. Without it the popout falls back to the
        dark defaults in 01-base.css regardless of the main window's theme. -->
+  <script src="a11y.js"></script>
   <script src="theme.js"></script>
   <script src="utils.js"></script>
   <script src="toast.js"></script>
