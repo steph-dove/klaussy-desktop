@@ -117,7 +117,12 @@ window.AppUtils = (function () {
     return isMac() ? '\u2318\u21e7K' : 'Ctrl+L';
   }
 
+  function screenReaderMode(prefs) {
+    return !!(prefs && (prefs.screenReaderMode || prefs.screenReaderActive));
+  }
+
   return {
+    screenReaderMode: screenReaderMode,
     isMac: isMac,
     isAppShortcut: isAppShortcut,
     shortcutLabel: shortcutLabel,

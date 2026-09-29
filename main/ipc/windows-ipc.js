@@ -228,6 +228,9 @@ ipcMain.handle('get-preferences', () => {
     fontSize: config.fontSize || 13,
     lineHeight: config.lineHeight || 1.2,
     cursorStyle: config.cursorStyle || 'block',
+    screenReaderMode: config.screenReaderMode === true,
+    // True while the OS reports an assistive technology (e.g. VoiceOver) attached.
+    screenReaderActive: app.isAccessibilitySupportEnabled(),
     // Inline-autocomplete (Ollama FIM) model tag; base = FIM-tuned.
     ollamaModel: config.ollamaModel || 'qwen2.5-coder:1.5b-base',
     claudePath: config.claudePath || '',
@@ -333,6 +336,7 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.fontSize !== undefined) config.fontSize = prefs.fontSize;
   if (prefs.lineHeight !== undefined) config.lineHeight = prefs.lineHeight;
   if (prefs.cursorStyle !== undefined) config.cursorStyle = prefs.cursorStyle;
+  if (prefs.screenReaderMode !== undefined) config.screenReaderMode = !!prefs.screenReaderMode;
   if (prefs.ollamaModel !== undefined) config.ollamaModel = prefs.ollamaModel;
   if (prefs.claudePath !== undefined) config.claudePath = prefs.claudePath;
   if (prefs.codexPath !== undefined) config.codexPath = prefs.codexPath;

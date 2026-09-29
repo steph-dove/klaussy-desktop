@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
+/* global window */
 const { test, expect } = require('./fixtures');
 
 // Build a repo whose worktree is left mid-merge with conflict markers in a.txt.
@@ -72,6 +73,8 @@ test('conflict resolver opens, shows panes, lists the file, and resolves', async
 
     // Panes render the divergent hunks.
     await expect(mainWindow.locator('#conflict-ours-body')).toContainText('OURS-change');
+    const result = mainWindow.getByRole('textbox', { name: 'Result for conflict 1 of 1' });
+    await expect(result).toHaveAttribute('rows', /^\d+$/);
     await expect(mainWindow.locator('#conflict-theirs-body')).toContainText('THEIRS-change');
     // The result pane offers per-block resolution actions.
     await expect(mainWindow.locator('#conflict-result-body .conflict-action-btn[data-action="ours"]').first()).toBeVisible();

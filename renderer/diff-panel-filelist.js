@@ -89,8 +89,7 @@
       el.addEventListener('click', function (e) {
         if (e.target.closest('.diff-file-action')) return;
         DP.selectedFile = uniqueKey;
-        DP.fileListEl.querySelectorAll('.diff-file').forEach(function (f) { f.classList.remove('selected'); });
-        el.classList.add('selected');
+        DP.markSelectedFile(el);
         DP.showFileDiff(file, isStaged, wtPath);
       });
 
@@ -154,10 +153,31 @@
     }
 
     return ('<div class="diff-file' + sel + '" data-file="' + DP.escAttr(f.file) + '" data-uniquekey="' + DP.escAttr(uniqueKey) + '" data-staged="' + isStaged + '" data-worktreepath="' + DP.escAttr(f.worktreePath || '') + '">' +
-      '<span class="diff-file-status ' + statusClass + '">' + statusLabel + '</span>' +
-      '<span class="diff-file-name" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.basename(f.file)) + '</span>' +
-      '<span class="diff-file-path" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.dirname(f.file)) + '</span>' +
+      DP.fileRowMain(f.file, statusClass, statusLabel, !!sel) +
       '<span class="diff-file-actions">' + actions + '</span>' + '</div>');
+  };
+
+  var STATUS_WORDS = { modified: 'modified', added: 'added', deleted: 'deleted', renamed: 'renamed' };
+
+  // The row's primary control: Enter shows the diff, Shift+Enter opens the file.
+  DP.fileRowMain = function(file, statusClass, statusLabel, selected) {
+    var word = statusLabel === 'U' ? 'untracked' : (STATUS_WORDS[statusClass] || statusLabel);
+    return '<button type="button" class="diff-file-main"' + (selected ? ' aria-current="true"' : '') + ' title="' + DP.escAttr(file) + '">' +
+      '<span class="diff-file-status ' + statusClass + '" aria-hidden="true">' + statusLabel + '</span>' +
+      '<span class="diff-file-name">' + DP.escHtml(DP.basename(file)) + '</span>' +
+      '<span class="diff-file-path">' + DP.escHtml(DP.dirname(file)) + '</span>' +
+      '<span class="sr-only">, ' + word + '</span>' +
+    '</button>';
+  };
+
+  DP.markSelectedFile = function(el) {
+    DP.fileListEl.querySelectorAll('.diff-file').forEach(function (f) {
+      f.classList.toggle('selected', f === el);
+      var main = f.querySelector('.diff-file-main');
+      if (!main) return;
+      if (f === el) main.setAttribute('aria-current', 'true');
+      else main.removeAttribute('aria-current');
+    });
   };
 
   DP.showFileDiff = async function(file, staged, wtPath) {
@@ -358,6 +378,7 @@
     text.className = 'diff-annotation-text';
     text.textContent = annotation.text;
     text.title = 'Edit comment';
+    A11y.makeButton(text, 'Edit comment: ' + annotation.text);
     text.addEventListener('click', function () {
       openAnnotationEditor(lineEl, file, { side: annotation.side, line: annotation.line }, annotation);
     });
@@ -367,6 +388,7 @@
     remove.className = 'diff-annotation-remove';
     remove.textContent = '×';
     remove.title = 'Remove comment';
+    remove.setAttribute('aria-label', 'Remove comment: ' + annotation.text);
     remove.addEventListener('click', function () { DP.removeAnnotation(annotation.id); });
 
     marker.appendChild(text);
@@ -400,16 +422,24 @@
 
     var ta = wrap.querySelector('textarea');
     ta.value = existing ? existing.text : '';
+    ta.setAttribute('aria-label', 'Comment on ' + DP.describeDiffLine(lineEl));
     ta.focus();
 
+    function backToLine() {
+      if (!lineEl.isConnected) return;
+      lineEl.tabIndex = -1;
+      lineEl.focus();
+    }
     function restore() { if (existing) DP.renderAnnotationMarker(lineEl, file, existing); }
-    function cancel() { wrap.remove(); restore(); }
+    function cancel() { wrap.remove(); restore(); backToLine(); }
     function save() {
       var text = ta.value.trim();
       if (!text) { cancel(); return; }
       var annotation = DP.addAnnotation({ filePath: file, side: identity.side, line: identity.line, text: text });
       wrap.remove();
       DP.renderAnnotationMarker(lineEl, file, annotation);
+      backToLine();
+      A11y.announce('Comment added');
     }
 
     wrap.querySelector('.diff-annotation-save').addEventListener('click', save);
@@ -716,6 +746,18 @@
 
     DP.currentParsedHunks = hunks;
     return { lines: lines, hunks: hunks, highlightedLines: highlightedLines };
+  };
+
+  DP.describeDiffLine = function(line) {
+    var code = (line.querySelector('.diff-code, .diff-hunk-text') || line).textContent;
+    if (line.classList.contains('diff-hunk')) {
+      var hunks = DP.diffViewEl.querySelectorAll('.diff-line.diff-hunk');
+      return 'Hunk ' + (Array.prototype.indexOf.call(hunks, line) + 1) + ' of ' + hunks.length + ': ' + code;
+    }
+    if (line.classList.contains('diff-add')) return 'Added line ' + line.dataset.newLn + ': ' + code;
+    if (line.classList.contains('diff-del')) return 'Removed line ' + line.dataset.oldLn + ': ' + code;
+    if (line.dataset.newLn) return 'Line ' + line.dataset.newLn + ': ' + code;
+    return code;
   };
 
   DP.renderDiff = function(diffText) {

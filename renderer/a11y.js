@@ -213,7 +213,7 @@ window.A11y = (function () {
     }
   }
 
-  const ACTIVATABLE = ['button', 'link', 'menuitem', 'menuitemradio', 'menuitemcheckbox']
+  const ACTIVATABLE = ['button', 'link', 'menuitem', 'menuitemradio', 'menuitemcheckbox', 'tab']
     .map(function (r) { return '[role="' + r + '"]:not(button):not(input):not(a[href])'; }).join(',');
   function onActivateKey(e) {
     if (e.defaultPrevented || (e.key !== 'Enter' && e.key !== ' ')) return;
@@ -423,6 +423,69 @@ window.A11y = (function () {
     });
   }
 
+  // Lines get tabindex only when reached, so a large diff costs one tab stop and no per-line setup.
+  function lineNav(container, opts) {
+    if (!container.hasAttribute('tabindex')) container.tabIndex = 0;
+    if (opts.label) container.setAttribute('aria-label', opts.label);
+    function go(from, selector, dir) {
+      const all = Array.from(container.querySelectorAll(selector)).filter(isShown);
+      if (!all.length) return;
+      let target;
+      if (from === container) {
+        target = dir > 0 ? all[0] : all[all.length - 1];
+      } else {
+        const pos = from.compareDocumentPosition.bind(from);
+        target = dir > 0
+          ? all.find(function (el) { return pos(el) & Node.DOCUMENT_POSITION_FOLLOWING; })
+          : all.slice().reverse().find(function (el) { return pos(el) & Node.DOCUMENT_POSITION_PRECEDING; });
+      }
+      if (!target) return;
+      target.tabIndex = -1;
+      if (opts.describe) target.setAttribute('aria-label', opts.describe(target));
+      target.focus();
+      target.scrollIntoView({ block: 'nearest' });
+    }
+    container.addEventListener('keydown', function (e) {
+      const from = e.target;
+      if (from !== container && !(from.matches && from.matches(opts.lineSelector))) return;
+      if (e.ctrlKey || e.metaKey) return;
+      const dir = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
+      if (dir) {
+        e.preventDefault();
+        go(from, e.altKey ? opts.hunkSelector : opts.lineSelector, dir);
+      } else if ((e.key === 'Enter' || e.key === 'c') && from !== container && opts.onActivate) {
+        if (opts.onActivate(from) !== false) e.preventDefault();
+      }
+    });
+  }
+
+  // Opening is detected from the menu's own visibility, so callers keep their toggle code.
+  function dropdownMenu(trigger, menu, itemSelector) {
+    trigger.setAttribute('aria-haspopup', 'menu');
+    trigger.setAttribute('aria-expanded', 'false');
+    menu.setAttribute('role', 'menu');
+    let open = false;
+    function sync() {
+      const nowOpen = isShown(menu);
+      if (nowOpen === open) return;
+      open = nowOpen;
+      trigger.setAttribute('aria-expanded', String(open));
+      if (!open) return;
+      const items = Array.from(menu.querySelectorAll(itemSelector));
+      items.forEach(function (el) { el.setAttribute('role', 'menuitem'); });
+      if (items[0]) items[0].focus();
+    }
+    new MutationObserver(sync).observe(menu, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
+    arrowNav(menu, itemSelector);
+    menu.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' && e.key !== 'Tab') return;
+      e.preventDefault();
+      e.stopPropagation();
+      menu.style.display = 'none';
+      trigger.focus();
+    });
+  }
+
   function makeButton(el, label) {
     if (!el.getAttribute('role')) el.setAttribute('role', 'button');
     if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
@@ -463,7 +526,7 @@ window.A11y = (function () {
     :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)); outline-offset: 2px; }
     :where(input, textarea, select):focus-visible { outline: none; }
     :where([contenteditable]):focus-visible { outline-offset: 0; }
-    :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible, [tabindex="-1"]:focus-visible) { outline: none; }
+    :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible) { outline: none; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -507,6 +570,8 @@ window.A11y = (function () {
     combobox: combobox,
     popupList: popupList,
     splitter: splitter,
+    lineNav: lineNav,
+    dropdownMenu: dropdownMenu,
     tabs: tabs,
     radios: radios,
     tabbables: tabbables,

@@ -1353,7 +1353,8 @@
 
 .diff-line.diff-add:hover .diff-comment-add,
 .diff-line.diff-del:hover .diff-comment-add,
-.diff-line.diff-context:hover .diff-comment-add {
+.diff-line.diff-context:hover .diff-comment-add,
+.diff-line:focus .diff-comment-add {
   display: flex;
 }
 
@@ -1715,4 +1716,8 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+
+#diff-view .diff-line:focus-visible {
+  outline-offset: -2px;
 }

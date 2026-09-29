@@ -169,6 +169,7 @@
     box.querySelector('.precommit-findings-body').textContent = text;
     box.querySelector('.precommit-findings-close').addEventListener('click', DP.clearPrecommitFindings);
     DP.commitAreaEl.insertBefore(box, DP.commitAreaEl.firstChild);
+    A11y.announce('Pre-commit review found ' + count + ' issue' + (count === 1 ? '' : 's') + ' in the staged changes', 'assertive');
   };
 
   // Returns true → proceed with the commit now; false → findings rendered,
@@ -446,6 +447,7 @@
     var el = document.createElement('div');
     el.className = 'diff-status-banner diff-status-' + (kind || 'info');
     el.textContent = text;
+    A11y.announce(text, kind === 'error' ? 'assertive' : 'polite');
     DP.panelEl.appendChild(el);
     setTimeout(function () {
       if (el && el.parentElement) el.parentElement.removeChild(el);

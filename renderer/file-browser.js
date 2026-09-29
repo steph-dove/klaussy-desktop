@@ -9,6 +9,14 @@ window.FileBrowser = (function () {
   var projectReplaceInput = document.getElementById('project-replace-input');
   var projectReplaceBtn = document.getElementById('project-replace-btn');
   var projectSearchResults = document.getElementById('project-search-results');
+  var SEARCH_HIT = '.search-result-file-label, .search-result-line';
+  A11y.arrowNav(projectSearchResults, SEARCH_HIT);
+  projectSearchInput.addEventListener('keydown', function (e) {
+    var first = e.key === 'ArrowDown' && projectSearchResults.querySelector(SEARCH_HIT);
+    if (!first) return;
+    e.preventDefault();
+    first.focus();
+  });
   var searchTimer = null;
   var lastSearchHits = []; // { file, line, text }[] from the last search
   var lastSearchQuery = '';
@@ -239,17 +247,28 @@ window.FileBrowser = (function () {
     if (img.complete && img.naturalWidth) render();
     else img.addEventListener('load', render, { once: true });
 
-    pane.addEventListener('wheel', function (e) {
-      if (!img.naturalWidth) return;
-      e.preventDefault();
+    function zoomBy(factor) {
       // Starting from fit means the first notch has to know the on-screen size,
       // or zooming out of a large fitted image appears to do nothing.
       var current = tab.zoom == null ? (img.clientWidth / img.naturalWidth) : tab.zoom;
-      var next = current * (e.deltaY < 0 ? 1.1 : 1 / 1.1);
-      tab.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+      tab.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, current * factor));
       render();
+    }
+
+    pane.addEventListener('wheel', function (e) {
+      if (!img.naturalWidth) return;
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1);
     }, { passive: false });
 
+    A11y.makeButton(img, 'Toggle zoom between fit and 100%');
+    img.addEventListener('keydown', function (e) {
+      if (!img.naturalWidth) return;
+      var step = e.key === '+' || e.key === '=' ? 1.1 : e.key === '-' ? 1 / 1.1 : 0;
+      if (!step) return;
+      e.preventDefault();
+      zoomBy(step);
+    });
     img.addEventListener('click', function () {
       tab.zoom = tab.zoom == null ? 1 : null;
       render();
@@ -695,6 +714,16 @@ window.FileBrowser = (function () {
         activateTab(idx);
       }
     });
+    A11y.tabs(tabBar, { itemSelector: '.file-viewer-tab', label: 'Open files' });
+    tabBar.addEventListener('keydown', function (e) {
+      var tabEl = e.target.closest('.file-viewer-tab');
+      if (!tabEl || e.key !== 'Delete') return;
+      e.preventDefault();
+      var idx = parseInt(tabEl.dataset.tabIndex, 10);
+      closeTab(idx);
+      var next = tabBar.querySelectorAll('.file-viewer-tab')[Math.min(idx, tabs.length - 1)];
+      if (next) next.focus();
+    });
     tabBar.addEventListener('auxclick', function (e) {
       if (e.button !== 1) return; // middle-click only
       var tabEl = e.target.closest('.file-viewer-tab');
@@ -727,6 +756,8 @@ window.FileBrowser = (function () {
       fontFamily: "'SF Mono', 'Fira Code', Menlo, monospace",
       tabSize: 2,
       renderWhitespace: 'selection',
+      accessibilitySupport: AppUtils.screenReaderMode(AppState.savedPrefs) ? 'on' : 'auto',
+      ariaLabel: 'Editor',
     });
 
     // Register word-completion on editor creation, not at module init, so we
@@ -1068,7 +1099,10 @@ window.FileBrowser = (function () {
     currentViewerWorktree = fileViewerWorktree;
     var monaco = await window.MonacoReady;
 
-    if (currentEditor) currentEditor.setModel(tab.model);
+    if (currentEditor) {
+      currentEditor.setModel(tab.model);
+      currentEditor.updateOptions({ ariaLabel: 'Editor: ' + tab.filePath.split('/').pop() });
+    }
     rehydrateViewerExplains(currentEditor, tab.filePath, tab.model);
 
     if (line) {
@@ -1132,10 +1166,12 @@ window.FileBrowser = (function () {
       var basename = tab.filePath.split('/').pop();
       var active = i === activeTabIndex ? ' active' : '';
       var dirty = tab.model && !tab.model.isDisposed() && tab.model.getValue() !== tab.savedContent ? ' dirty' : '';
+      // A tab can't contain a control, so keyboard users close with Delete instead.
       return '<div class="file-viewer-tab' + active + dirty + '" data-tab-index="' + i + '" title="' + escHtml(tab.filePath) + '">' +
                '<span class="tab-name">' + escHtml(basename) + '</span>' +
-               '<span class="tab-dirty-dot">●</span>' +
-               '<button class="tab-close" title="Close (⌘W)" aria-label="Close tab">×</button>' +
+               '<span class="tab-dirty-dot" aria-hidden="true">●</span>' +
+               (dirty ? '<span class="sr-only">, modified</span>' : '') +
+               '<button class="tab-close" tabindex="-1" aria-hidden="true" title="Close (⌘W)">×</button>' +
              '</div>';
     }).join('');
   }
@@ -1354,10 +1390,17 @@ window.FileBrowser = (function () {
     input.type = 'text';
     input.className = 'file-tree-rename-input';
     input.placeholder = kind === 'dir' ? 'folder name' : 'file name';
+    input.setAttribute('aria-label', kind === 'dir' ? 'New folder name' : 'New file name');
+    var returnFocus = document.activeElement;
     row.appendChild(input);
     container.insertBefore(row, container.firstChild);
     var done = false;
-    function cancel() { if (!done) { done = true; row.remove(); } }
+    function cancel() {
+      if (done) return;
+      done = true;
+      row.remove();
+      if (returnFocus && returnFocus.isConnected) returnFocus.focus();
+    }
     input.addEventListener('keydown', async function (e) {
       if (e.key === 'Escape') { e.preventDefault(); cancel(); }
       else if (e.key === 'Enter') {
@@ -1402,6 +1445,7 @@ window.FileBrowser = (function () {
     input.type = 'text';
     input.className = 'file-tree-rename-input';
     input.value = oldName;
+    input.setAttribute('aria-label', 'Rename ' + oldName);
     rowEl.innerHTML = '';
     if (kind === 'dir') {
       var arrow = document.createElement('span');
@@ -1412,7 +1456,7 @@ window.FileBrowser = (function () {
     }
     rowEl.appendChild(input);
     var done = false;
-    function restore() { if (!done) { done = true; rowEl.innerHTML = oldHTML; } }
+    function restore() { if (!done) { done = true; rowEl.innerHTML = oldHTML; rowEl.focus(); } }
     input.addEventListener('keydown', async function (e) {
       if (e.key === 'Escape') { e.preventDefault(); restore(); }
       else if (e.key === 'Enter') {
@@ -1705,12 +1749,74 @@ window.FileBrowser = (function () {
         }
       });
     });
+    var focusedPath = fileTree.contains(document.activeElement) ? document.activeElement.dataset.path : null;
     fileTree.innerHTML = '';
     // With a filter, auto-expand matched paths so results show without
     // clicking through dirs. Without one, lazy mode leaves collapsed dirs
     // unbuilt until opened, keeping the initial render cheap.
     renderTreeNode(tree, fileTree, 0, { autoExpand: hasFilter });
+    var restored = focusedPath && fileTree.querySelector('[role="treeitem"][data-path="' + CSS.escape(focusedPath) + '"]');
+    setTreeTabStop(restored || fileTree.querySelector('[role="treeitem"]'));
+    if (restored) restored.focus();
   }
+
+  // ---- File tree keyboard (WAI-ARIA tree: one tab stop, arrows move) ----
+  fileTree.setAttribute('role', 'tree');
+  fileTree.setAttribute('aria-label', 'Files');
+
+  function setTreeTabStop(item) {
+    var prev = fileTree.querySelector('[role="treeitem"][tabindex="0"]');
+    if (prev && prev !== item) prev.tabIndex = -1;
+    if (item) item.tabIndex = 0;
+  }
+
+  function visibleTreeItems() {
+    return Array.from(fileTree.querySelectorAll('[role="treeitem"]')).filter(function (el) { return el.offsetParent !== null; });
+  }
+
+  function focusTreeItem(item) {
+    if (!item) return;
+    setTreeTabStop(item);
+    item.focus();
+  }
+
+  fileTree.addEventListener('focusin', function (e) {
+    if (e.target.getAttribute('role') === 'treeitem') setTreeTabStop(e.target);
+  });
+
+  fileTree.addEventListener('keydown', function (e) {
+    var item = e.target;
+    if (item.getAttribute('role') !== 'treeitem' || e.altKey || e.ctrlKey || e.metaKey) return;
+    var isDir = item.dataset.kind === 'dir';
+    var expanded = item.getAttribute('aria-expanded') === 'true';
+    var items = visibleTreeItems();
+    var i = items.indexOf(item);
+    var handled = true;
+    if (e.key === 'ArrowDown') focusTreeItem(items[i + 1]);
+    else if (e.key === 'ArrowUp') focusTreeItem(items[i - 1]);
+    else if (e.key === 'Home') focusTreeItem(items[0]);
+    else if (e.key === 'End') focusTreeItem(items[items.length - 1]);
+    else if (e.key === 'ArrowRight') {
+      if (isDir && !expanded) item.click();
+      else if (isDir) focusTreeItem(visibleTreeItems()[i + 1]);
+    } else if (e.key === 'ArrowLeft') {
+      if (isDir && expanded) item.click();
+      else {
+        var group = item.closest('.file-tree-children');
+        focusTreeItem(group && group.previousElementSibling);
+      }
+    } else if (e.key === 'Enter' || e.key === ' ') item.click();
+    else if (e.key === 'F2') inlineRename(item, item.dataset.path, item.dataset.kind);
+    else if (e.key === 'Delete' || (e.key === 'Backspace' && e.metaKey)) deleteWithConfirm(item.dataset.path, item.dataset.kind);
+    else handled = false;
+    if (handled) e.preventDefault();
+  });
+
+  fileTreeFilter.addEventListener('keydown', function (e) {
+    if (e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    focusTreeItem(visibleTreeItems()[0]);
+  });
 
   // Build the children of a single directory node. Pulled out of renderTreeNode
   // so it can be called lazily on click (collapsed dirs defer their child DOM)
@@ -1729,6 +1835,9 @@ window.FileBrowser = (function () {
         fileEl.className = 'file-tree-file';
         fileEl.style.paddingLeft = (depth * 16 + 8) + 'px';
         fileEl.textContent = file.name;
+        fileEl.setAttribute('role', 'treeitem');
+        fileEl.setAttribute('aria-level', String(depth + 1));
+        fileEl.tabIndex = -1;
         fileEl.title = file.path;
         fileEl.dataset.path = file.path;
         fileEl.dataset.kind = 'file';
@@ -1754,12 +1863,18 @@ window.FileBrowser = (function () {
     var label = document.createElement('div');
     label.className = 'file-tree-label';
     label.style.paddingLeft = (depth * 16 + 8) + 'px';
-    label.innerHTML = '<span class="file-tree-arrow">&#9654;</span> ' + escHtml(name);
+    label.innerHTML = '<span class="file-tree-arrow" aria-hidden="true">&#9654;</span> ' + escHtml(name);
+    label.setAttribute('role', 'treeitem');
+    label.setAttribute('aria-level', String(depth + 1));
+    label.setAttribute('aria-expanded', 'false');
+    label.tabIndex = -1;
+    dirEl.setAttribute('role', 'none');
     label.dataset.path = dirRel;
     label.dataset.kind = 'dir';
     label.draggable = true;
     var children = document.createElement('div');
     children.className = 'file-tree-children';
+    children.setAttribute('role', 'group');
     children.style.display = 'none';
 
     // Lazy: build child DOM only when the dir first opens, tracked by a flag
@@ -1774,10 +1889,12 @@ window.FileBrowser = (function () {
       }
       children.style.display = '';
       label.querySelector('.file-tree-arrow').innerHTML = '&#9660;';
+      label.setAttribute('aria-expanded', 'true');
     }
     function closeDir() {
       children.style.display = 'none';
       label.querySelector('.file-tree-arrow').innerHTML = '&#9654;';
+      label.setAttribute('aria-expanded', 'false');
     }
     label.addEventListener('click', function () {
       if (children.style.display === 'none') openDir(); else closeDir();
@@ -1872,6 +1989,7 @@ window.FileBrowser = (function () {
       checkbox.className = 'search-result-file-check';
       checkbox.checked = !excludedFiles.has(file);
       checkbox.title = 'Include this file in replace';
+      checkbox.setAttribute('aria-label', 'Include ' + file + ' in replace');
       checkbox.addEventListener('click', function (e) { e.stopPropagation(); });
       checkbox.addEventListener('change', function () {
         if (checkbox.checked) excludedFiles.delete(file);
@@ -1882,6 +2000,7 @@ window.FileBrowser = (function () {
       var label = document.createElement('span');
       label.className = 'search-result-file-label';
       label.textContent = file + '  (' + hits.length + ')';
+      A11y.makeButton(label, 'Open ' + file + ', ' + hits.length + ' match' + (hits.length === 1 ? '' : 'es'));
       label.addEventListener('click', function () { window.openFileViewer(wt + '/' + file, file); });
       fileHeader.appendChild(label);
       projectSearchResults.appendChild(fileHeader);
@@ -1896,6 +2015,7 @@ window.FileBrowser = (function () {
             highlightReplacements(afterText.substring(0, 200), replaceText) + '</div>';
         }
         line.innerHTML = html;
+        A11y.makeButton(line, file + ' line ' + match.line + ': ' + match.text.substring(0, 200));
         line.addEventListener('click', function () { window.openFileViewer(wt + '/' + file, file, match.line); });
         projectSearchResults.appendChild(line);
       });
@@ -2117,6 +2237,9 @@ window.FileBrowser = (function () {
     loadFileTree: loadFileTree,
     doProjectSearch: doProjectSearch,
     getActiveEditor: getActiveEditor,
+    setScreenReaderMode: function (on) {
+      if (currentEditor) currentEditor.updateOptions({ accessibilitySupport: on ? 'on' : 'auto' });
+    },
     listOpenFiles: listOpenFiles,
   };
 })();

@@ -27,6 +27,9 @@
       minimumContrastRatio: 4.5, // never let low-contrast text vanish
       allowProposedApi: true,
     });
+    window.klaus.ui.getPreferences().then(function (prefs) {
+      terminal.options.screenReaderMode = AppUtils.screenReaderMode(prefs);
+    }).catch(function (err) { console.error('[popout] getPreferences failed', err); });
 
     var fitAddon = new FitAddon.FitAddon();
     terminal.loadAddon(fitAddon);

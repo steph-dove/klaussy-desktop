@@ -59,6 +59,24 @@ window.DiffPanel = window.DiffPanel || {};
     DP.commitAreaEl = document.getElementById('commit-area');
     DP.commitInput = document.getElementById('commit-message');
 
+    A11y.arrowNav(DP.fileListEl, '.diff-file-main');
+    DP.fileListEl.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter' || !e.shiftKey || !e.target.closest('.diff-file-main')) return;
+      e.preventDefault();
+      e.target.closest('.diff-file').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    });
+    A11y.lineNav(DP.diffViewEl, {
+      label: 'Diff',
+      lineSelector: '.diff-line',
+      hunkSelector: '.diff-line.diff-hunk',
+      describe: function (line) { return DP.describeDiffLine(line); },
+      onActivate: function (line) {
+        var add = line.querySelector('.diff-comment-add');
+        if (!add) return false;
+        add.click();
+      },
+    });
+
     document.getElementById('btn-refresh-diff').addEventListener('click', DP.refresh);
     document.getElementById('btn-close-diff').addEventListener('click', DP.hide);
 
@@ -108,6 +126,7 @@ window.DiffPanel = window.DiffPanel || {};
       }
       if (e.key === 'Escape') {
         DP.commitAreaEl.style.display = 'none';
+        document.getElementById('btn-commit').focus();
       }
     });
 
@@ -762,6 +781,9 @@ window.DiffPanel = window.DiffPanel || {};
   };
 
   DP.bindModeToggle = function() {
+    DP.fileListEl.querySelectorAll('.diff-mode-btn').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.classList.contains('active')));
+    });
     var workingBtn = DP.fileListEl.querySelector('.js-mode-working');
     var branchBtn = DP.fileListEl.querySelector('.js-mode-branch');
     var selectEl = DP.fileListEl.querySelector('.js-base-select');
@@ -855,9 +877,7 @@ window.DiffPanel = window.DiffPanel || {};
       var sel = f.file === DP.selectedFile ? ' selected' : '';
       html +=
         '<div class="diff-file' + sel + '" data-file="' + DP.escAttr(f.file) + '" data-staged="false">' +
-          '<span class="diff-file-status ' + statusClass + '">' + statusLabel + '</span>' +
-          '<span class="diff-file-name" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.basename(f.file)) + '</span>' +
-          '<span class="diff-file-path" title="' + DP.escAttr(f.file) + '">' + DP.escHtml(DP.dirname(f.file)) + '</span>' +
+          DP.fileRowMain(f.file, statusClass, statusLabel, !!sel) +
         '</div>';
     });
 
@@ -868,8 +888,7 @@ window.DiffPanel = window.DiffPanel || {};
       var file = el.dataset.file;
       el.addEventListener('click', function () {
         DP.selectedFile = file;
-        DP.fileListEl.querySelectorAll('.diff-file').forEach(function (f) { f.classList.remove('selected'); });
-        el.classList.add('selected');
+        DP.markSelectedFile(el);
         DP.showFileDiff(file, false);
       });
     });

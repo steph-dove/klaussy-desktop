@@ -517,6 +517,16 @@ window.App = window.App || {};
     if (prefs.theme !== undefined) {
       ThemeManager.apply(prefs.theme.preset);
     }
+    if (prefs.screenReaderMode !== undefined) {
+      if (!AppState.savedPrefs) AppState.savedPrefs = {};
+      AppState.savedPrefs.screenReaderMode = prefs.screenReaderMode;
+      var sr = AppUtils.screenReaderMode(AppState.savedPrefs);
+      App.tasks.forEach(function (task) {
+        task.terminal.options.screenReaderMode = sr;
+        (task.subTerminals || []).forEach(function (sub) { sub.terminal.options.screenReaderMode = sr; });
+      });
+      if (window.FileBrowser && window.FileBrowser.setScreenReaderMode) window.FileBrowser.setScreenReaderMode(sr);
+    }
     // Keep the single global default-agent state in sync when it's changed in
     // Preferences, and refresh any agent split buttons showing it.
     if (prefs.defaultProvider !== undefined || prefs.defaultMode !== undefined) {

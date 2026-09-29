@@ -3,6 +3,10 @@ window.HistoryPanel = (function () {
 
   var historyList = document.getElementById('history-list');
   var historyDiffView = document.getElementById('history-diff-view');
+  A11y.arrowNav(historyList, '.history-item');
+  historyList.setAttribute('aria-label', 'Commits');
+  historyDiffView.tabIndex = 0;
+  historyDiffView.setAttribute('aria-label', 'Commit diff');
   var historySubTabs = document.querySelectorAll('.history-sub-tab');
   var historyCommitsContent = document.getElementById('history-commits-content');
   var historyTagsContent = document.getElementById('history-tags-content');
@@ -36,13 +40,18 @@ window.HistoryPanel = (function () {
     result.commits.forEach(function (c) {
       var item = document.createElement('div');
       item.className = 'history-item';
+      A11y.makeButton(item);
       item.innerHTML =
         '<span class="history-hash">' + escHtml(c.short) + '</span>' +
         '<span class="history-subject">' + escHtml(c.subject) + '</span>' +
         '<span class="history-meta">' + escHtml(c.author) + ' \u00b7 ' + escHtml(c.date) + '</span>';
       item.addEventListener('click', async function () {
-        historyList.querySelectorAll('.history-item').forEach(function (el) { el.classList.remove('selected'); });
+        historyList.querySelectorAll('.history-item').forEach(function (el) {
+          el.classList.remove('selected');
+          el.removeAttribute('aria-current');
+        });
         item.classList.add('selected');
+        item.setAttribute('aria-current', 'true');
         historyDiffView.innerHTML = 'Loading...';
         var diff = await window.klaus.git.show(wt, c.hash);
         historyDiffView.textContent = diff.diff || diff.error || 'No diff';
@@ -124,8 +133,8 @@ window.HistoryPanel = (function () {
           (tag.message ? '<span class="tag-message">' + escHtml(tag.message) + '</span>' : '') +
         '</div>' +
         '<div class="tag-actions">' +
-          '<button class="tag-push-btn" title="Push to remote">\u2191</button>' +
-          '<button class="tag-delete-btn" title="Delete" aria-label="Delete">&times;</button>' +
+          '<button class="tag-push-btn" title="Push to remote" aria-label="Push tag ' + escHtml(tag.name) + ' to remote">\u2191</button>' +
+          '<button class="tag-delete-btn" title="Delete" aria-label="Delete tag ' + escHtml(tag.name) + '">&times;</button>' +
         '</div>';
       item.querySelector('.tag-push-btn').addEventListener('click', async function (e) {
         e.stopPropagation();
