@@ -13,9 +13,13 @@ window.AgentSplit = (function () {
   var escHtml = (window.AppUtils && AppUtils.escHtml) || function (s) { return s; };
 
   var openMenu = null;
-  document.addEventListener('click', function () {
-    if (openMenu) { openMenu.style.display = 'none'; openMenu = null; }
-  });
+  function closeOpenMenu() {
+    if (!openMenu) return;
+    openMenu.style.display = 'none';
+    if (openMenu.previousElementSibling) openMenu.previousElementSibling.setAttribute('aria-expanded', 'false');
+    openMenu = null;
+  }
+  document.addEventListener('click', closeOpenMenu);
 
   // These split buttons drive headless AI actions, so exclude interactive-only
   // remote backends (they stay selectable for terminal tabs elsewhere).
@@ -70,17 +74,39 @@ window.AgentSplit = (function () {
     caret.className = 'agent-split-caret';
     caret.innerHTML = '&#9662;';
     caret.title = 'Choose the default agent';
+    caret.setAttribute('aria-label', 'Choose the default agent');
+    caret.setAttribute('aria-haspopup', 'menu');
+    caret.setAttribute('aria-expanded', 'false');
 
     var menu = document.createElement('div');
     menu.className = 'agent-split-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Default agent');
     menu.style.display = 'none';
+    A11y.arrowNav(menu, '.agent-split-item');
+    menu.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape' && e.key !== 'Tab') return;
+      e.preventDefault();
+      setOpen(false);
+      caret.focus();
+    });
+    function setOpen(open) {
+      if (open && openMenu !== menu) closeOpenMenu();
+      menu.style.display = open ? 'flex' : 'none';
+      caret.setAttribute('aria-expanded', String(open));
+      openMenu = open ? menu : null;
+      if (open) {
+        var item = menu.querySelector('.agent-split-item.on') || menu.querySelector('.agent-split-item');
+        if (item) item.focus();
+      }
+    }
 
     function rebuildMenu() {
       var cur = currentAgent();
       menu.innerHTML = providers().map(function (p) {
         var on = p.id === cur;
-        return '<button type="button" class="agent-split-item' + (on ? ' on' : '')
-          + '" data-id="' + p.id + '">' + (on ? '✓ ' : '') + escHtml(p.displayName) + '</button>';
+        return '<button type="button" role="menuitemradio" aria-checked="' + on + '" class="agent-split-item' + (on ? ' on' : '')
+          + '" data-id="' + p.id + '"><span aria-hidden="true">' + (on ? '✓ ' : '') + '</span>' + escHtml(p.displayName) + '</button>';
       }).join('');
     }
     function refresh() {
@@ -96,17 +122,13 @@ window.AgentSplit = (function () {
     });
     caret.addEventListener('click', function (e) {
       e.stopPropagation();
-      var isOpen = menu.style.display !== 'none';
-      if (openMenu && openMenu !== menu) openMenu.style.display = 'none';
-      menu.style.display = isOpen ? 'none' : 'flex';
-      openMenu = isOpen ? null : menu;
+      setOpen(menu.style.display === 'none');
     });
     menu.addEventListener('click', function (e) {
       e.stopPropagation();
       var item = e.target.closest('.agent-split-item');
       if (!item) return;
-      menu.style.display = 'none';
-      openMenu = null;
+      setOpen(false);
       var id = item.dataset.id;
       setDefaultAgent(id); // becomes the new global default for everything
       run(id, true);

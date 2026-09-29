@@ -20,9 +20,9 @@ window.App = window.App || {};
       '<span class="modal-repo-path">No repo selected</span>' +
       '<select class="mr-base" hidden title="Base branch in this repo"></select>' +
       '<button type="button" class="modal-input-btn mr-browse" title="Browse for a git repo">Browse</button>' +
-      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-label="Projects and discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>' +
+      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-label="Projects and discovered repos" aria-expanded="false">▾</button>' +
       '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo" aria-label="Remove this repo">×</button>' +
-      '<div class="modal-recents-list" hidden role="listbox"></div>';
+      '<div class="modal-recents-list" hidden></div>';
     row.el = el;
     row.pathEl = el.querySelector('.modal-repo-path');
     row.baseEl = el.querySelector('.mr-base');
@@ -384,23 +384,23 @@ window.App = window.App || {};
     overlay.className = 'pr-picker-overlay';
     overlay.innerHTML =
       '<div class="pr-picker">'
-        + '<div class="pr-picker-header">Review a Pull Request or Merge Request</div>'
+        + '<h2 class="pr-picker-header">Review a Pull Request or Merge Request</h2>'
         + '<div class="pr-picker-account-row">'
-          + '<label class="pr-picker-account-label">Account:</label>'
-          + '<select class="pr-picker-account"><option>Loading…</option></select>'
+          + '<label class="pr-picker-account-label" for="pr-picker-account">Account:</label>'
+          + '<select class="pr-picker-account" id="pr-picker-account"><option>Loading…</option></select>'
           + '<span class="pr-picker-account-hint" aria-live="polite"></span>'
         + '</div>'
         + '<div class="pr-picker-url-row">'
-          + '<input type="text" class="pr-picker-url" placeholder="Paste a GitHub PR or GitLab MR URL" />'
+          + '<input type="text" class="pr-picker-url" aria-label="Pull request or merge request URL" placeholder="Paste a GitHub PR or GitLab MR URL" />'
           + '<button class="pr-picker-start" type="button" disabled>Start review</button>'
         + '</div>'
         + '<div class="pr-picker-search-row">'
-          + '<input type="text" class="pr-picker-search" placeholder="Search loaded PRs/MRs by title, number, author or repo…' + '" autocomplete="off" spellcheck="false" />'
+          + '<input type="text" class="pr-picker-search" aria-label="Search loaded pull requests" placeholder="Search loaded PRs/MRs by title, number, author or repo…' + '" autocomplete="off" spellcheck="false" />'
         + '</div>'
         + '<div class="pr-picker-recent"></div>'
         + '<div class="pr-picker-list"><div class="pr-picker-loading">Loading open PRs\u2026</div></div>'
         + '<div class="pr-picker-authored"></div>'
-        + '<div class="pr-picker-no-matches" hidden>No loaded PRs match your search.</div>'
+        + '<div class="pr-picker-no-matches" role="status" hidden>No loaded PRs match your search.</div>'
         + '<div class="pr-picker-footer"><button class="pr-picker-cancel">Cancel</button></div>'
       + '</div>';
     document.body.appendChild(overlay);
@@ -412,6 +412,13 @@ window.App = window.App || {};
     var urlInput = overlay.querySelector('.pr-picker-url');
     var startBtn = overlay.querySelector('.pr-picker-start');
     urlInput.focus();
+    var ROW = '.pr-picker-item[data-url]';
+    A11y.arrowNav(overlay, ROW);
+    overlay.querySelector('.pr-picker-search').addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowDown') return;
+      var first = Array.from(overlay.querySelectorAll(ROW)).find(function (r) { return r.offsetParent; });
+      if (first) { e.preventDefault(); first.focus(); }
+    });
 
     var accountSelect = overlay.querySelector('.pr-picker-account');
     var accountHint = overlay.querySelector('.pr-picker-account-hint');
@@ -658,7 +665,7 @@ window.App = window.App || {};
       var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
       var forgeClass = 'pr-forge-' + forge.toLowerCase();
 
-      return '<div class="pr-picker-item" data-url="' + AppUtils.escAttr(url) + '">'
+      return '<div class="pr-picker-item" role="button" tabindex="0" data-url="' + AppUtils.escAttr(url) + '">'
         + '<span class="pr-picker-num">#' + AppUtils.escHtml(it.number) + '</span>'
         + '<span class="pr-picker-title" title="' + AppUtils.escAttr(it.title || '') + '">' + AppUtils.escHtml(it.title || '') + '</span>'
         + (repoName ? '<span class="pr-picker-repo-tag" title="' + AppUtils.escAttr(repo) + '">' + AppUtils.escHtml(repoName) + '</span>' : '')

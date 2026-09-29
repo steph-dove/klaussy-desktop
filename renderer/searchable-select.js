@@ -33,6 +33,11 @@ window.SearchableSelect = (function () {
     trigger.innerHTML = '<span class="ss-label"></span><span class="ss-caret">▾</span>';
     wrap.appendChild(trigger);
     var labelEl = trigger.querySelector('.ss-label');
+    trigger.querySelector('.ss-caret').setAttribute('aria-hidden', 'true');
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    var fieldLabel = opts.label || select.getAttribute('aria-label') || select.title
+      || (select.id && document.querySelector('label[for="' + select.id + '"]') || {}).textContent || '';
 
     var popover = document.createElement('div');
     popover.className = 'ss-popover';
@@ -46,6 +51,10 @@ window.SearchableSelect = (function () {
     wrap.appendChild(popover);
     var searchInput = popover.querySelector('.ss-search');
     var listEl = popover.querySelector('.ss-list');
+    A11y.combobox(searchInput, listEl, { optionSelector: '.ss-item', activeClass: 'ss-active', label: fieldLabel || 'Options' });
+    wrap.addEventListener('focusout', function (e) {
+      if (!wrap.contains(e.relatedTarget)) close();
+    });
 
     var activeEl = null; // keyboard-highlighted item
 
@@ -60,6 +69,7 @@ window.SearchableSelect = (function () {
       // Dim when the empty/"all"/placeholder option is selected.
       trigger.classList.toggle('ss-placeholder', !opt || opt.value === '');
       trigger.title = (opt && opt.title) || text || '';
+      trigger.setAttribute('aria-label', (fieldLabel ? fieldLabel + ': ' : '') + labelEl.textContent);
     }
 
     function buildList() {
@@ -155,6 +165,7 @@ window.SearchableSelect = (function () {
       buildList();
       popover.hidden = false;
       wrap.classList.add('ss-open');
+      trigger.setAttribute('aria-expanded', 'true');
       searchInput.value = '';
       filter('');
       var selItem = listEl.querySelector('.ss-item.ss-selected:not([hidden])');
@@ -166,6 +177,7 @@ window.SearchableSelect = (function () {
       if (popover.hidden) return;
       popover.hidden = true;
       wrap.classList.remove('ss-open');
+      trigger.setAttribute('aria-expanded', 'false');
       if (openInstance === api) openInstance = null;
     }
 

@@ -114,15 +114,17 @@ window.App = window.App || {};
         } else {
           recentsList.innerHTML = items.map(function (p) {
             return '<div class="modal-recents-item" data-path="' + escForAttr(p) + '">'
-              + '<span class="modal-recents-pick">' + escForAttr(p) + '</span>'
+              + '<button type="button" class="modal-recents-pick">' + escForAttr(p) + '</button>'
               + '<button type="button" class="modal-recents-remove" title="Remove from recents" aria-label="Remove from recents" data-path="' + escForAttr(p) + '">×</button>'
             + '</div>';
           }).join('');
         }
         recentsList.hidden = false;
         recentsBtn.setAttribute('aria-expanded', 'true');
+        focusFirstRecent();
       });
     }
+    var focusFirstRecent = A11y.popupList(recentsBtn, recentsList, '.modal-recents-pick', closeRecents);
     recentsBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       if (recentsList.hidden) openRecents(); else closeRecents();
@@ -445,8 +447,7 @@ window.App = window.App || {};
       window.dispatchEvent(new Event('resize'));
     });
 
-    // Double-click to toggle between default and expanded
-    handle.addEventListener('dblclick', function () {
+    function togglePreset() {
       var current = panel.getBoundingClientRect().width;
       if (current > DEFAULT_WIDTH + 50) {
         panel.style.width = DEFAULT_WIDTH + 'px';
@@ -454,6 +455,20 @@ window.App = window.App || {};
         panel.style.width = Math.floor(window.innerWidth * 0.6) + 'px';
       }
       window.dispatchEvent(new Event('resize'));
+    }
+    handle.addEventListener('dblclick', togglePreset);
+
+    A11y.splitter(handle, {
+      label: 'Resize changes panel',
+      grow: 'ArrowLeft',
+      min: function () { return MIN_WIDTH; },
+      max: function () { return window.innerWidth * MAX_WIDTH_RATIO; },
+      get: function () { return panel.getBoundingClientRect().width; },
+      set: function (w) {
+        panel.style.width = w + 'px';
+        window.dispatchEvent(new Event('resize'));
+      },
+      onEnter: togglePreset,
     });
   })();
 
@@ -618,6 +633,22 @@ window.App = window.App || {};
       document.body.style.cursor = '';
       document.body.style.userSelect = '';
       App.refitTerminals();
+    });
+
+    A11y.splitter(App.sidebarResizeHandle, {
+      label: 'Resize sidebar',
+      min: function () { return App.MIN_SIDEBAR_WIDTH; },
+      max: function () { return window.innerWidth * App.MAX_SIDEBAR_RATIO; },
+      get: function () { return App.sidebar.getBoundingClientRect().width; },
+      set: function (w) {
+        App.sidebar.classList.remove('collapsed', 'expanded');
+        AppState.sidebarCollapsed = false;
+        App.sidebar.style.width = w + 'px';
+        App.sidebar.style.minWidth = w + 'px';
+        App.sidebarToggleIcon.textContent = '\u25C0';
+        App.sidebarToggleLabel.textContent = 'Hide';
+        App.refitTerminals();
+      },
     });
   })();
 

@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const { test, expect } = require('./fixtures');
+const { openShellTask } = require('./helpers');
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control+Shift';
 
@@ -16,18 +17,9 @@ test.describe('keyboard navigation', () => {
 
   test.beforeEach(async ({ mainWindow }) => {
     await mainWindow.waitForLoadState('networkidle');
-    await mainWindow.evaluate(() => {
-      const kill = () => { const o = document.getElementById('ollama-consent-overlay'); if (o) o.remove(); };
-      kill();
-      new MutationObserver(kill).observe(document.documentElement, { childList: true, subtree: true });
-    });
+    await mainWindow.addStyleTag({ content: '#ollama-consent-overlay { display: none !important; }' });
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-kbd-'));
-    taskId = await mainWindow.evaluate(async (dir) => {
-      const inst = await window.klaus.task.openFolder(dir, 'shell');
-      window.App.addTaskToUI(inst);
-      window.App.switchToTask(inst.id);
-      return inst.id;
-    }, tmpDir);
+    taskId = await openShellTask(mainWindow, tmpDir);
     await expect.poll(() => focusedIn(mainWindow, '#terminal-area')).toBe(true);
   });
 

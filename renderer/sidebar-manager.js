@@ -13,8 +13,11 @@ window.Sidebar = (function () {
     });
     var groupEl = taskList.querySelector('.session-group[data-session="' + sessionName + '"]');
     var header = groupEl && groupEl.querySelector('.session-group-header');
+    taskList.querySelectorAll('[aria-current]').forEach(function (el) { el.removeAttribute('aria-current'); });
     if (header) {
       header.classList.add('active');
+      var select = header.querySelector('.session-group-select');
+      if (select) select.setAttribute('aria-current', 'true');
     }
     AppState.activeSessionName = sessionName;
     AppState.activeTaskId = null;
@@ -116,10 +119,12 @@ window.Sidebar = (function () {
     var tIconColor = AppUtils.iconColor(task.name);
     var tIconLetter = (task.name || '?').charAt(0).toUpperCase();
     item.innerHTML =
-      '<span class="status-dot ' + (task.alive ? 'alive' : 'exited') + '"></span>' +
-      '<span class="collapsed-icon" style="background:' + tIconColor + '" title="' + escHtml(task.name) + '">' + tIconLetter + '</span>' +
-      '<span class="task-mode" title="' + escHtml(AppUtils.modeDisplayName(task.mode)) + '">' + modeLabel + '</span>' +
-      '<span class="task-name" title="' + escHtml(task.worktreePath) + '">' + escHtml(task.name) + '</span>' +
+      '<button type="button" class="task-main" title="' + escHtml(task.worktreePath) + '">' +
+        '<span class="status-dot ' + (task.alive ? 'alive' : 'exited') + '" aria-hidden="true"></span>' +
+        '<span class="collapsed-icon" style="background:' + tIconColor + '" aria-hidden="true">' + tIconLetter + '</span>' +
+        '<span class="task-mode" title="' + escHtml(AppUtils.modeDisplayName(task.mode)) + '">' + modeLabel + '</span>' +
+        '<span class="task-name">' + escHtml(task.name) + '</span>' +
+      '</button>' +
       '<span class="ci-status-icon" title="CI status"></span>' +
       '<span class="dirty-indicator"></span>' +
       '<span class="unread-badge"></span>' +
@@ -235,8 +240,8 @@ window.Sidebar = (function () {
       }
       
       item.innerHTML =
-        '<span class="status-dot saved"></span>' +
-        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '">' + iconLetter + '</span>' +
+        '<span class="status-dot saved" aria-hidden="true"></span>' +
+        '<button type="button" class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '" aria-label="Resume ' + escHtml(repoName) + '">' + iconLetter + '</button>' +
         '<span class="task-mode" title="' + modeTitle + '">' + modeLabel + '</span>' +
         '<div class="saved-session-info">' +
           '<span class="task-name" title="' + escHtml(wt.path || '') + '">' + escHtml(repoName) + '</span>' +
@@ -338,8 +343,8 @@ window.Sidebar = (function () {
 
     } else {
       item.innerHTML =
-        '<span class="status-dot idle"></span>' +
-        '<span class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '">' + iconLetter + '</span>' +
+        '<span class="status-dot idle" aria-hidden="true"></span>' +
+        '<button type="button" class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '" aria-label="Open ' + escHtml(repoName) + '">' + iconLetter + '</button>' +
         '<div class="saved-session-info">' +
           '<span class="task-name" title="' + escHtml(wt.path) + '">' + escHtml(repoName) + '</span>' +
           '<span class="saved-session-detail">' + escHtml(wt.branch) + '</span>' +
@@ -409,10 +414,14 @@ window.Sidebar = (function () {
     }
 
     header.innerHTML = 
-      '<span class="session-group-chevron" aria-hidden="true">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
-      '<span class="session-group-icon" aria-hidden="true">&#128193;</span>' +
-      '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
-      '<span class="session-group-badge">' + totalCount + '</span>' +
+      '<button type="button" class="session-group-toggle" aria-expanded="' + !isCollapsed + '" aria-label="Session ' + escHtml(sessionName) + '">' +
+        '<span class="session-group-chevron" aria-hidden="true">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
+      '</button>' +
+      '<button type="button" class="session-group-select" title="Show this session\'s changes">' +
+        '<span class="session-group-icon" aria-hidden="true">&#128193;</span>' +
+        '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
+        '<span class="session-group-badge" aria-label="' + totalCount + ' repos">' + totalCount + '</span>' +
+      '</button>' +
       resumeBtnHtml +
       '<button class="session-group-close" title="Close Session" aria-label="Close session ' + escHtml(sessionName) + '">&times;</button>';
 
@@ -422,7 +431,7 @@ window.Sidebar = (function () {
 
     header.addEventListener('click', function (e) {
       if (e.target.closest('.session-group-close') || e.target.closest('.session-group-resume-btn')) return;
-      if (e.target.closest('.session-group-name') || e.target.closest('.session-group-icon') || e.target.closest('.session-group-badge')) {
+      if (e.target.closest('.session-group-select')) {
         e.stopPropagation();
         selectSession(sessionName);
         return;
@@ -431,6 +440,7 @@ window.Sidebar = (function () {
       header.classList.toggle('collapsed', collapsed);
       var chevron = header.querySelector('.session-group-chevron');
       if (chevron) chevron.innerHTML = collapsed ? '&#9656;' : '&#9662;';
+      header.querySelector('.session-group-toggle').setAttribute('aria-expanded', String(!collapsed));
       if (collapsed) {
         collapsedSessions.add(sessionName);
       } else {
@@ -497,7 +507,28 @@ window.Sidebar = (function () {
     collapsedSessions.delete(sessionName);
   }
 
+  // rebuild() replaces every row, so focus is carried over by row key and control class.
+  function focusedRowKey() {
+    var active = document.activeElement;
+    if (!active || !taskList.contains(active)) return null;
+    var row = active.closest('.task-item, .session-group');
+    if (!row) return null;
+    var attr = row.dataset.id ? 'data-id' : row.dataset.path ? 'data-path' : 'data-session';
+    return {
+      row: '.' + row.classList[0] + '[' + attr + '="' + CSS.escape(row.getAttribute(attr) || '') + '"]',
+      control: active === row ? null : '.' + active.classList[0],
+    };
+  }
+
+  function restoreRowFocus(key) {
+    if (!key) return;
+    var row = taskList.querySelector(key.row);
+    var target = row && (key.control ? row.querySelector(key.control) : row);
+    if (target) target.focus();
+  }
+
   function rebuild() {
+    var focusKey = focusedRowKey();
     taskList.innerHTML = '';
 
     var activeTasks = Array.from(AppState.tasks.values());
@@ -543,6 +574,8 @@ window.Sidebar = (function () {
     if (activeSessionNames.length > 0 || standaloneActive.length > 0) {
       var activeHeader = document.createElement('div');
       activeHeader.className = 'sidebar-section-header';
+      activeHeader.setAttribute('role', 'heading');
+      activeHeader.setAttribute('aria-level', '2');
       activeHeader.textContent = 'Active';
       taskList.appendChild(activeHeader);
 
@@ -561,6 +594,8 @@ window.Sidebar = (function () {
     if (inactiveSessionNames.length > 0 || standaloneInactive.length > 0) {
       var inactiveHeader = document.createElement('div');
       inactiveHeader.className = 'sidebar-section-header';
+      inactiveHeader.setAttribute('role', 'heading');
+      inactiveHeader.setAttribute('aria-level', '2');
       inactiveHeader.textContent = 'Inactive';
       taskList.appendChild(inactiveHeader);
 
@@ -574,6 +609,7 @@ window.Sidebar = (function () {
         taskList.appendChild(itemEl);
       });
     }
+    restoreRowFocus(focusKey);
   }
 
   // ---- H2: Cross-task dirty indicators ----
@@ -776,42 +812,72 @@ window.Sidebar = (function () {
 
   // ---- Task Rename ----
 
-  taskList.addEventListener('dblclick', function (e) {
-    var item = e.target.closest('.task-item[data-id]');
-    if (!item) return;
+  function startRename(item) {
+    var main = item.querySelector('.task-main');
     var nameEl = item.querySelector('.task-name');
-    if (!nameEl) return;
+    if (!main || !nameEl) return;
     var id = parseInt(item.dataset.id, 10);
     var task = tasks.get(id);
     if (!task) return;
 
+    // Beside the button, not inside it: inputs nested in a <button> can't be typed into reliably.
     var input = document.createElement('input');
     input.type = 'text';
     input.className = 'inline-rename';
     input.value = task.name;
-    input.style.cssText = 'font-size:13px;background:var(--input-bg);border:1px solid var(--accent);border-radius:4px;color:var(--text);padding:1px 4px;width:100%;outline:none;';
+    input.setAttribute('aria-label', 'Rename task');
+    input.style.cssText = 'font-size:13px;background:var(--input-bg);border:1px solid var(--accent);border-radius:4px;color:var(--text);padding:1px 4px;flex:1;min-width:0;';
 
     var original = nameEl.textContent;
-    nameEl.textContent = '';
-    nameEl.appendChild(input);
+    main.hidden = true;
+    main.after(input);
     input.focus();
     input.select();
 
-    function commit() {
-      var newName = input.value.trim() || original;
-      nameEl.textContent = newName;
-      task.name = newName;
-      window.klaus.task.rename(id, newName);
-      // Only the sidebar name needs updating on rename. (The old wholesale
-      // .grid-label rewrite here destroyed the name/actions span structure
-      // and with it the actions dropdown.)
+    var done = false;
+    function finish(save) {
+      if (done) return;
+      done = true;
+      var newName = save ? (input.value.trim() || original) : original;
+      input.remove();
+      main.hidden = false;
+      if (newName !== original) {
+        nameEl.textContent = newName;
+        task.name = newName;
+        window.klaus.task.rename(id, newName);
+      }
+      main.focus();
     }
 
-    input.addEventListener('blur', commit);
+    input.addEventListener('blur', function () { finish(true); });
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-      if (e.key === 'Escape') { input.value = original; input.blur(); }
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
     });
+  }
+
+  taskList.addEventListener('dblclick', function (e) {
+    var item = e.target.closest('.task-item[data-id]');
+    if (item) startRename(item);
+  });
+
+  taskList.addEventListener('keydown', function (e) {
+    var main = e.target.closest && e.target.closest('.task-main');
+    if (!main) return;
+    var item = main.closest('.task-item[data-id]');
+    if (e.key === 'F2') {
+      e.preventDefault();
+      startRename(item);
+      return;
+    }
+    if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      var sibling = e.key === 'ArrowUp' ? item.previousElementSibling : item.nextElementSibling;
+      if (!sibling || !sibling.matches('.task-item[data-id]')) return;
+      e.preventDefault();
+      if (e.key === 'ArrowUp') sibling.before(item); else sibling.after(item);
+      main.focus();
+      if (window.A11y) A11y.announce('Moved ' + item.querySelector('.task-name').textContent + (e.key === 'ArrowUp' ? ' up' : ' down'));
+    }
   });
 
   // ---- Task Reorder ----

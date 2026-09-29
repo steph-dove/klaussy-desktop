@@ -2981,6 +2981,7 @@ body.pr-review-popout #pr-review-root {
   overflow: hidden;
 }
 .pr-picker-header {
+  margin: 0;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   font-weight: 600;
@@ -5746,6 +5747,13 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .modal-recents-pick {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
   flex: 1;
   min-width: 0;
   display: flex;

@@ -1998,6 +1998,8 @@ window.Dialogs = (function () {
     document.body.appendChild(overlay);
     var input = palette.querySelector('.palette-input');
     var list = palette.querySelector('.palette-list');
+    palette.setAttribute('aria-label', 'Run a slash command');
+    A11y.combobox(input, list, { optionSelector: '.palette-item[data-i]', label: 'Slash commands' });
 
     function close() { overlay.remove(); }
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });

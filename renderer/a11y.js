@@ -213,7 +213,8 @@ window.A11y = (function () {
     }
   }
 
-  const ACTIVATABLE = '[role="button"]:not(button):not(input), [role="link"]:not(a), [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]';
+  const ACTIVATABLE = ['button', 'link', 'menuitem', 'menuitemradio', 'menuitemcheckbox']
+    .map(function (r) { return '[role="' + r + '"]:not(button):not(input):not(a[href])'; }).join(',');
   function onActivateKey(e) {
     if (e.defaultPrevented || (e.key !== 'Enter' && e.key !== ' ')) return;
     if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -243,6 +244,161 @@ window.A11y = (function () {
   // Windows fires the native contextmenu on keyup; it would land on the just-opened menu and close it.
   function onContextMenuKeyUp(e) {
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) e.preventDefault();
+  }
+
+  const NEXT_KEYS = { vertical: ['ArrowDown'], horizontal: ['ArrowRight'], both: ['ArrowDown', 'ArrowRight'] };
+  const PREV_KEYS = { vertical: ['ArrowUp'], horizontal: ['ArrowLeft'], both: ['ArrowUp', 'ArrowLeft'] };
+
+  function stepTarget(e, items, current, orientation) {
+    const i = items.indexOf(current);
+    if (NEXT_KEYS[orientation].includes(e.key)) return items[(i + 1) % items.length];
+    if (PREV_KEYS[orientation].includes(e.key)) return items[(i - 1 + items.length) % items.length];
+    if (e.key === 'Home') return items[0];
+    if (e.key === 'End') return items[items.length - 1];
+    return null;
+  }
+
+  // Items keep their own tab stops; arrows are a shortcut on top of Tab.
+  function arrowNav(container, selector, opts) {
+    const orientation = (opts && opts.orientation) || 'vertical';
+    container.addEventListener('keydown', function (e) {
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      const current = e.target.closest && e.target.closest(selector);
+      if (!current || !container.contains(current)) return;
+      const items = Array.from(container.querySelectorAll(selector)).filter(isShown);
+      const next = stepTarget(e, items, current, orientation);
+      if (!next) return;
+      e.preventDefault();
+      next.focus();
+    });
+  }
+
+  function selectedIn(items) {
+    return items.find(function (el) { return el.classList.contains('active') || el.classList.contains('selected'); });
+  }
+
+  // State follows the `.active` class the existing click handlers already toggle.
+  function selectionGroup(container, opts, cfg) {
+    const selector = opts.itemSelector;
+    const orientation = opts.orientation || 'horizontal';
+    let syncing = false;
+
+    function sync() {
+      if (syncing) return;
+      syncing = true;
+      const items = Array.from(container.querySelectorAll(selector));
+      const selected = selectedIn(items);
+      const holder = items.includes(document.activeElement) ? document.activeElement : (selected || items.find(isShown));
+      if (!container.getAttribute('role')) container.setAttribute('role', cfg.groupRole);
+      if (opts.label && !container.hasAttribute('aria-label')) container.setAttribute('aria-label', opts.label);
+      items.forEach(function (el) {
+        el.setAttribute('role', cfg.itemRole);
+        el.setAttribute(cfg.stateAttr, el === selected ? 'true' : 'false');
+        el.tabIndex = el === holder ? 0 : -1;
+        const panel = opts.panelFor && opts.panelFor(el);
+        if (panel) {
+          el.setAttribute('aria-controls', ensureId(panel, 'a11y-tabpanel'));
+          panel.setAttribute('role', 'tabpanel');
+          panel.setAttribute('aria-labelledby', ensureId(el, 'a11y-tab'));
+        }
+      });
+      syncing = false;
+    }
+
+    container.addEventListener('keydown', function (e) {
+      if (e.altKey || e.ctrlKey || e.metaKey) return;
+      const current = e.target.closest && e.target.closest(selector);
+      if (!current || !container.contains(current)) return;
+      const items = Array.from(container.querySelectorAll(selector)).filter(isShown);
+      const next = stepTarget(e, items, current, orientation);
+      if (!next) return;
+      e.preventDefault();
+      items.forEach(function (el) { el.tabIndex = el === next ? 0 : -1; });
+      next.focus();
+      if (cfg.selectOnMove) next.click();
+    });
+    container.addEventListener('focusin', sync);
+    new MutationObserver(sync).observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    sync();
+  }
+
+  // Manual activation: several tab panels load content when selected.
+  function tabs(container, opts) {
+    selectionGroup(container, opts, { groupRole: 'tablist', itemRole: 'tab', stateAttr: 'aria-selected', selectOnMove: false });
+  }
+
+  function radios(container, opts) {
+    selectionGroup(container, opts, { groupRole: 'radiogroup', itemRole: 'radio', stateAttr: 'aria-checked', selectOnMove: true });
+  }
+
+  // Mirrors a list's highlighted item into ARIA for an input that already handles the arrow keys.
+  function combobox(input, list, opts) {
+    const selector = opts.optionSelector;
+    const activeClasses = opts.activeClass ? [opts.activeClass] : ['selected', 'active'];
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-expanded', 'true');
+    input.setAttribute('aria-controls', ensureId(list, 'listbox'));
+    if (opts.label) input.setAttribute('aria-label', opts.label);
+    list.setAttribute('role', 'listbox');
+    if (opts.label) list.setAttribute('aria-label', opts.label);
+    function sync() {
+      let active = null;
+      list.querySelectorAll(selector).forEach(function (el) {
+        const selected = activeClasses.some(function (c) { return el.classList.contains(c); });
+        el.setAttribute('role', 'option');
+        el.setAttribute('aria-selected', selected ? 'true' : 'false');
+        ensureId(el, 'option');
+        if (selected) active = el;
+      });
+      if (active) input.setAttribute('aria-activedescendant', active.id);
+      else input.removeAttribute('aria-activedescendant');
+    }
+    new MutationObserver(sync).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    sync();
+  }
+
+  function popupList(button, list, itemSelector, close) {
+    arrowNav(list, itemSelector);
+    list.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      close();
+      button.focus();
+    });
+    return function focusFirst() {
+      const first = list.querySelector(itemSelector);
+      if (first) first.focus();
+    };
+  }
+
+  // `grow` is ArrowLeft for a pane anchored to the right edge.
+  function splitter(handle, opts) {
+    const grow = opts.grow || 'ArrowRight';
+    const shrink = grow === 'ArrowRight' ? 'ArrowLeft' : 'ArrowRight';
+    handle.setAttribute('role', 'separator');
+    handle.setAttribute('aria-orientation', 'vertical');
+    handle.setAttribute('aria-label', opts.label);
+    handle.tabIndex = 0;
+    function update() {
+      handle.setAttribute('aria-valuemin', String(Math.round(opts.min())));
+      handle.setAttribute('aria-valuemax', String(Math.round(opts.max())));
+      handle.setAttribute('aria-valuenow', String(Math.round(opts.get())));
+    }
+    handle.addEventListener('focus', update);
+    handle.addEventListener('keydown', function (e) {
+      const step = e.shiftKey ? 50 : 10;
+      let width = opts.get();
+      if (e.key === grow) width += step;
+      else if (e.key === shrink) width -= step;
+      else if (e.key === 'Home') width = opts.min();
+      else if (e.key === 'End') width = opts.max();
+      else if (e.key === 'Enter' && opts.onEnter) { e.preventDefault(); opts.onEnter(); update(); return; }
+      else return;
+      e.preventDefault();
+      opts.set(Math.max(opts.min(), Math.min(width, opts.max())));
+      update();
+    });
   }
 
   function makeButton(el, label) {
@@ -325,6 +481,12 @@ window.A11y = (function () {
   return {
     announce: announce,
     makeButton: makeButton,
+    arrowNav: arrowNav,
+    combobox: combobox,
+    popupList: popupList,
+    splitter: splitter,
+    tabs: tabs,
+    radios: radios,
     tabbables: tabbables,
   };
 })();
