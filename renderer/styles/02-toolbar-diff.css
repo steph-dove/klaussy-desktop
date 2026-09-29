@@ -237,11 +237,13 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.2s ease, max-width 0.2s ease, border 0.2s ease;
+  transition: width 0.2s ease, max-width 0.2s ease, border 0.2s ease, visibility 0.2s;
   position: relative;
+  visibility: hidden;
 }
 
 #diff-panel.visible {
+  visibility: visible;
   width: 400px;
   max-width: none;
   border-left: 1px solid var(--border);

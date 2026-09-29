@@ -62,7 +62,29 @@ window.AppUtils = (function () {
     return (prior && prior !== 'shell') ? prior : null;
   }
 
+  function isMac() {
+    var p = window.klaus && window.klaus.ui && window.klaus.ui.platform;
+    return p ? p === 'darwin' : /Mac/.test(navigator.platform);
+  }
+
+  // Ctrl+Shift off macOS because plain Ctrl+<letter> belongs to the shell.
+  function isAppShortcut(e, key) {
+    var mod = isMac() ? (e.metaKey && !e.ctrlKey) : (e.ctrlKey && e.shiftKey && !e.metaKey);
+    if (!mod) return false;
+    if (key.length > 1) return e.code === key;
+    return (e.key || '').toLowerCase() === key;
+  }
+
+  var CODE_LABELS = { Slash: '/', Equal: '=', Minus: '\u2212', Digit0: '0' };
+  function shortcutLabel(key) {
+    var k = CODE_LABELS[key] || key.toUpperCase();
+    return isMac() ? '\u2318' + k : 'Ctrl+Shift+' + k;
+  }
+
   return {
+    isMac: isMac,
+    isAppShortcut: isAppShortcut,
+    shortcutLabel: shortcutLabel,
     escHtml: escHtml,
     escAttr: escAttr,
     formatAge: formatAge,

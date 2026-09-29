@@ -958,16 +958,15 @@ window.App = window.App || {};
   // Expose context menu builder for terminal-manager
   window._showContextMenu = App.showContextMenu;
 
-  // Keyboard shortcut: Cmd+G to toggle diff panel
   document.addEventListener('keydown', function (e) {
-    if (e.metaKey && e.key === 'g') {
+    if (AppUtils.isAppShortcut(e, 'g')) {
       e.preventDefault();
       App.btnDiff.click();
     }
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.metaKey && e.key === 'k') {
+    if (AppUtils.isAppShortcut(e, 'k') && !(AppUtils.isMac() && e.shiftKey)) {
       if (App.shouldInlineEdit(e)) {
         // Let Monaco's own Cmd+K binding fire — we're just yielding here. If
         // Monaco's binding doesn't catch it for some reason (out-of-date focus
@@ -983,15 +982,11 @@ window.App = window.App || {};
       e.preventDefault();
       App.showCommandPalette();
     }
-    // Cmd+P: quick open. `capture: false` is fine — Monaco doesn't rebind
-    // this by default, and we have no other Cmd+P consumer.
-    if (e.metaKey && e.key === 'p' && !e.shiftKey) {
+    if (AppUtils.isAppShortcut(e, 'p') && !(AppUtils.isMac() && e.shiftKey)) {
       e.preventDefault();
       if (window.QuickOpen) window.QuickOpen.show();
     }
-    // Cmd+/: slash-command launcher — fire any installed /command into the
-    // active terminal without remembering its plugin namespace.
-    if (e.metaKey && e.key === '/') {
+    if (AppUtils.isAppShortcut(e, 'Slash')) {
       e.preventDefault();
       if (window.Dialogs && Dialogs.showSlashLauncher) Dialogs.showSlashLauncher();
     }

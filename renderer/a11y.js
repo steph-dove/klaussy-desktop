@@ -224,6 +224,22 @@ window.A11y = (function () {
     el.click();
   }
 
+  // Chromium doesn't map Shift+F10 to contextmenu on every platform, so do it here.
+  function onContextMenuKey(e) {
+    if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+    const el = document.activeElement;
+    if (!el || el === document.body) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: Math.round(r.left + Math.min(r.width, 24)),
+      clientY: Math.round(r.top + Math.min(r.height, 24)),
+    }));
+  }
+
   function makeButton(el, label) {
     if (!el.getAttribute('role')) el.setAttribute('role', 'button');
     if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
@@ -294,6 +310,7 @@ window.A11y = (function () {
   window.addEventListener('keydown', onEscapeCapture, true);
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('pointerdown', recheck, true);
+  window.addEventListener('keydown', onContextMenuKey, true);
   document.addEventListener('keydown', onActivateKey);
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
@@ -302,5 +319,6 @@ window.A11y = (function () {
   return {
     announce: announce,
     makeButton: makeButton,
+    tabbables: tabbables,
   };
 })();

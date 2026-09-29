@@ -1369,20 +1369,29 @@ window.Dialogs = (function () {
   }
 
   // ---- Keyboard shortcuts ----
-  var SHORTCUTS = [
-    { keys: '\u2318K', label: 'Open command palette' },
-    { keys: '\u2318G', label: 'Toggle diff panel for current task' },
-    { keys: '\u2318N', label: 'New window' },
-    { keys: '\u2318R', label: 'Reload (resets renderer; main-process state survives)' },
-    { keys: '\u2318+ / \u2318\u2212', label: 'Zoom in / out (terminal text)' },
-    { keys: '\u23180', label: 'Reset zoom' },
-    { keys: '\u2318\u21E7F', label: 'Search inside the active terminal (xterm find)' },
-    { keys: 'Double-click task name', label: 'Rename a task' },
-    { keys: 'Drag task row', label: 'Reorder tasks in the sidebar' },
-    { keys: 'Right-click task row', label: 'Task context menu (kill, restart, pop out, notes\u2026)' },
-    { keys: 'Cmd+\u23CE in any composer', label: 'Submit comment / reply / save' },
-    { keys: 'Esc', label: 'Close composer / cancel selection / dismiss palette' },
-  ];
+  function shortcutList() {
+    var key = AppUtils.shortcutLabel;
+    var mac = AppUtils.isMac();
+    return [
+      { keys: 'F6 / Shift+F6', label: 'Move focus to the next / previous area (sidebar, terminals, changes panel, editor); also leaves a terminal' },
+      { keys: 'Shift+F10', label: 'Open the context menu for the focused item' },
+      { keys: key('k'), label: 'Open command palette' },
+      { keys: key('p'), label: 'Quick open a file' },
+      { keys: key('Slash'), label: 'Run a slash command in the active terminal' },
+      { keys: key('g'), label: 'Toggle changes panel for current task' },
+      { keys: mac ? '\u2318\u21e7A' : 'Ctrl+Shift+A', label: 'Show active agents' },
+      { keys: 'F1', label: 'Show this list' },
+      { keys: key('f'), label: 'Search inside the active terminal' },
+      { keys: mac ? '\u2318\u21e7K' : 'Ctrl+L', label: 'Clear the active terminal' },
+      { keys: key('Equal') + ' / ' + key('Minus'), label: 'Zoom terminal text in / out' },
+      { keys: key('Digit0'), label: 'Reset terminal zoom' },
+      { keys: mac ? '\u2318N' : 'Ctrl+N', label: 'New window' },
+      { keys: (mac ? '\u2318' : 'Ctrl+') + '\u23CE in any composer', label: 'Submit comment / reply / save' },
+      { keys: 'Esc', label: 'Close dialog, menu or composer' },
+      { keys: 'Double-click task name', label: 'Rename a task' },
+      { keys: 'Drag task row', label: 'Reorder tasks in the sidebar' },
+    ];
+  }
 
   function showShortcuts() {
     var overlay = document.createElement('div');
@@ -1395,7 +1404,7 @@ window.Dialogs = (function () {
         + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="shortcuts-body">'
-        + SHORTCUTS.map(function (s) {
+        + shortcutList().map(function (s) {
           return '<div class="shortcuts-row">'
             + '<span class="shortcuts-keys">' + escHtml(s.keys) + '</span>'
             + '<span class="shortcuts-label">' + escHtml(s.label) + '</span>'

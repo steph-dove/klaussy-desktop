@@ -34,3 +34,41 @@ test('exitedAgent: tolerates a missing task', () => {
   assert.equal(AppUtils.exitedAgent(null), null);
   assert.equal(AppUtils.exitedAgent(undefined), null);
 });
+
+function withPlatform(platform, fn) {
+  const prev = global.window.klaus;
+  global.window.klaus = { ui: { platform } };
+  try { fn(); } finally { global.window.klaus = prev; }
+}
+
+function key(opts) {
+  return Object.assign({ metaKey: false, ctrlKey: false, shiftKey: false, key: '', code: '' }, opts);
+}
+
+test('isAppShortcut: Cmd+key on macOS, not Ctrl', () => {
+  withPlatform('darwin', () => {
+    assert.equal(AppUtils.isAppShortcut(key({ metaKey: true, key: 'k' }), 'k'), true);
+    assert.equal(AppUtils.isAppShortcut(key({ ctrlKey: true, key: 'k' }), 'k'), false);
+    assert.equal(AppUtils.isAppShortcut(key({ metaKey: true, key: 'K', shiftKey: true }), 'k'), true);
+  });
+});
+
+test('isAppShortcut: Ctrl+Shift+key elsewhere, so plain Ctrl+key stays with the shell', () => {
+  withPlatform('linux', () => {
+    assert.equal(AppUtils.isAppShortcut(key({ ctrlKey: true, shiftKey: true, key: 'K' }), 'k'), true);
+    assert.equal(AppUtils.isAppShortcut(key({ ctrlKey: true, key: 'k' }), 'k'), false);
+    assert.equal(AppUtils.isAppShortcut(key({ metaKey: true, key: 'k' }), 'k'), false);
+  });
+});
+
+test('isAppShortcut: multi-character keys match on physical key code', () => {
+  withPlatform('win32', () => {
+    assert.equal(AppUtils.isAppShortcut(key({ ctrlKey: true, shiftKey: true, key: '?', code: 'Slash' }), 'Slash'), true);
+    assert.equal(AppUtils.isAppShortcut(key({ ctrlKey: true, shiftKey: true, key: '+', code: 'Equal' }), 'Equal'), true);
+  });
+});
+
+test('shortcutLabel: platform-specific modifier text', () => {
+  withPlatform('darwin', () => assert.equal(AppUtils.shortcutLabel('k'), '⌘K'));
+  withPlatform('linux', () => assert.equal(AppUtils.shortcutLabel('Slash'), 'Ctrl+Shift+/'));
+});
