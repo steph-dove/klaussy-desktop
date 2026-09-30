@@ -959,14 +959,14 @@ window.App = window.App || {};
   window._showContextMenu = App.showContextMenu;
 
   document.addEventListener('keydown', function (e) {
-    if (AppUtils.isAppShortcut(e, 'g')) {
+    if (AppUtils.isNamedShortcut(e, 'diff')) {
       e.preventDefault();
       App.btnDiff.click();
     }
   });
 
   document.addEventListener('keydown', function (e) {
-    if (AppUtils.isAppShortcut(e, 'k') && !(AppUtils.isMac() && e.shiftKey)) {
+    if (AppUtils.isNamedShortcut(e, 'palette')) {
       if (App.shouldInlineEdit(e)) {
         // Let Monaco's own Cmd+K binding fire — we're just yielding here. If
         // Monaco's binding doesn't catch it for some reason (out-of-date focus
@@ -982,11 +982,11 @@ window.App = window.App || {};
       e.preventDefault();
       App.showCommandPalette();
     }
-    if (AppUtils.isAppShortcut(e, 'p') && !(AppUtils.isMac() && e.shiftKey)) {
+    if (AppUtils.isNamedShortcut(e, 'quickOpen')) {
       e.preventDefault();
       if (window.QuickOpen) window.QuickOpen.show();
     }
-    if (AppUtils.isAppShortcut(e, 'Slash')) {
+    if (AppUtils.isNamedShortcut(e, 'slash')) {
       e.preventDefault();
       if (window.Dialogs && Dialogs.showSlashLauncher) Dialogs.showSlashLauncher();
     }

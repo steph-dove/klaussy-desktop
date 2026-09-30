@@ -17,15 +17,17 @@
     { id: 'light', name: 'Light' },
   ];
 
-  // Default keybindings
+  // Default keybindings; must match AppUtils.isAppShortcut (Ctrl+Shift off macOS, where Ctrl+L clears)
+  var mac = navigator.platform.includes('Mac');
+  var appMod = mac ? 'CmdOrCtrl+' : 'CmdOrCtrl+Shift+';
   var defaultBindings = {
     'newTask': { label: 'New Task', default: 'CmdOrCtrl+T' },
-    'toggleDiff': { label: 'Toggle Diff Panel', default: 'CmdOrCtrl+G' },
-    'search': { label: 'Search in Terminal', default: 'CmdOrCtrl+F' },
-    'zoomIn': { label: 'Zoom In', default: 'CmdOrCtrl+=' },
-    'zoomOut': { label: 'Zoom Out', default: 'CmdOrCtrl+-' },
-    'zoomReset': { label: 'Reset Zoom', default: 'CmdOrCtrl+0' },
-    'clearTerminal': { label: 'Clear Terminal', default: 'CmdOrCtrl+K' },
+    'toggleDiff': { label: 'Toggle Diff Panel', default: appMod + 'G' },
+    'search': { label: 'Search in Terminal', default: appMod + 'F' },
+    'zoomIn': { label: 'Zoom In', default: appMod + '=' },
+    'zoomOut': { label: 'Zoom Out', default: appMod + '-' },
+    'zoomReset': { label: 'Reset Zoom', default: appMod + '0' },
+    'clearTerminal': { label: 'Clear Terminal', default: mac ? 'CmdOrCtrl+Shift+K' : 'Ctrl+L' },
   };
 
   // ---- Populate fields ----

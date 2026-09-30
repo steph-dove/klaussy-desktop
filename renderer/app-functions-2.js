@@ -161,7 +161,7 @@ window.App = window.App || {};
       }},
       { sep: true },
       { label: 'Search', shortcut: AppUtils.shortcutLabel('f'), action: function () { SearchBar.open(id); }},
-      { label: 'Clear', shortcut: AppUtils.isMac() ? '\u2318\u21e7K' : 'Ctrl+L', action: function () { task.terminal.clear(); }},
+      { label: 'Clear', shortcut: AppUtils.clearShortcutLabel(), action: function () { task.terminal.clear(); }},
       { sep: true },
       { label: 'Zoom In', shortcut: AppUtils.shortcutLabel('Equal'), action: App.zoomIn },
       { label: 'Zoom Out', shortcut: AppUtils.shortcutLabel('Minus'), action: App.zoomOut },

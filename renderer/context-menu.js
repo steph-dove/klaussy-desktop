@@ -4,15 +4,21 @@ window.ContextMenu = (function () {
 
   function remove() {
     if (!contextMenu) return;
-    var hadFocus = contextMenu.contains(document.activeElement);
-    contextMenu.remove();
+    // Cleared first: removing the focused menu can fire focusout, which calls back in here.
+    var menu = contextMenu;
+    var target = opener;
     contextMenu = null;
-    if (hadFocus && opener && opener.isConnected) opener.focus();
     opener = null;
+    var hadFocus = menu.contains(document.activeElement);
+    menu.remove();
+    if (hadFocus && target && target.isConnected) target.focus();
   }
 
   document.addEventListener('click', remove);
-  document.addEventListener('contextmenu', remove);
+  document.addEventListener('contextmenu', function (e) {
+    if (contextMenu && contextMenu.contains(e.target)) { e.preventDefault(); return; }
+    remove();
+  });
 
   function items() {
     return Array.from(contextMenu.querySelectorAll('[role="menuitem"]'));
@@ -31,10 +37,12 @@ window.ContextMenu = (function () {
       e.stopPropagation();
       remove();
       return;
-    } else if (e.key.length === 1 && /\S/.test(e.key)) {
+    } else if (e.key.length === 1 && /\S/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
       var ch = e.key.toLowerCase();
       var rest = list.slice(i + 1).concat(list.slice(0, i + 1));
-      next = rest.find(function (el) { return el.textContent.trim().toLowerCase().startsWith(ch); }) || null;
+      next = rest.find(function (el) {
+        return el.textContent.replace(/^\s*\u2713?\s*/, '').toLowerCase().startsWith(ch);
+      }) || null;
     }
     if (next) {
       e.preventDefault();
@@ -76,6 +84,9 @@ window.ContextMenu = (function () {
     });
 
     menu.addEventListener('keydown', onKeydown);
+    menu.addEventListener('focusout', function (e) {
+      if (contextMenu === menu && !menu.contains(e.relatedTarget)) remove();
+    });
     document.body.appendChild(menu);
     contextMenu = menu;
 

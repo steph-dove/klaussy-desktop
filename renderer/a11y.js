@@ -240,6 +240,11 @@ window.A11y = (function () {
     }));
   }
 
+  // Windows fires the native contextmenu on keyup; it would land on the just-opened menu and close it.
+  function onContextMenuKeyUp(e) {
+    if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) e.preventDefault();
+  }
+
   function makeButton(el, label) {
     if (!el.getAttribute('role')) el.setAttribute('role', 'button');
     if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
@@ -311,6 +316,7 @@ window.A11y = (function () {
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('pointerdown', recheck, true);
   window.addEventListener('keydown', onContextMenuKey, true);
+  window.addEventListener('keyup', onContextMenuKeyUp, true);
   document.addEventListener('keydown', onActivateKey);
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);

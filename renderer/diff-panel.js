@@ -462,6 +462,8 @@ window.DiffPanel = window.DiffPanel || {};
   };
 
   DP.hide = function() {
+    // The panel goes visibility:hidden, which would drop focus to <body>.
+    if (DP.panelEl.contains(document.activeElement) && window.TerminalManager) window.TerminalManager.focusActive();
     DP.panelEl.classList.remove('visible');
     DP.stopWatching();
     setTimeout(() => window.dispatchEvent(new Event('resize')), 50);

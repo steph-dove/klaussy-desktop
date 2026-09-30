@@ -2,6 +2,10 @@
 (function () {
   function byId(id) { return function () { return document.getElementById(id); }; }
 
+  function diffPanelShown() {
+    return document.getElementById('diff-panel').classList.contains('visible');
+  }
+
   function prReviewShown() {
     const root = document.getElementById('pr-review-root');
     return !!root && root.style.display !== 'none';
@@ -31,11 +35,12 @@
     {
       label: 'Changes panel',
       el: byId('diff-panel'),
-      shown: function () { return document.getElementById('diff-panel').classList.contains('visible'); },
+      shown: diffPanelShown,
     },
     {
       label: 'Editor',
       el: byId('file-viewer-content'),
+      shown: diffPanelShown,
       focus: function () {
         const ed = window.FileBrowser && window.FileBrowser.getActiveEditor && window.FileBrowser.getActiveEditor();
         if (!ed) return false;
@@ -67,9 +72,13 @@
     const remembered = lastFocus.get(region);
     if (remembered && remembered.isConnected && el.contains(remembered) && remembered.getClientRects().length) {
       remembered.focus();
-    } else if (!(region.focus ? region.focus(el) : focusFirstIn(el))) {
-      return false;
+    } else if (region.focus) {
+      region.focus(el);
+    } else {
+      focusFirstIn(el);
     }
+    // focus() is a silent no-op on hidden nodes, so trust where focus landed, not what was called.
+    if (!el.contains(document.activeElement)) return false;
     A11y.announce(region.label);
     return true;
   }

@@ -1,14 +1,4 @@
 window.TerminalManager = (function () {
-  // Elsewhere the shell's own Ctrl+L clears.
-  function isClearShortcut(e) {
-    return AppUtils.isMac() && AppUtils.isAppShortcut(e, 'k') && e.shiftKey;
-  }
-
-  // Returning false keeps xterm from sending app shortcuts to the shell as control codes.
-  function isGlobalShortcut(e) {
-    return ['g', 'k', 'p', 'Slash'].some(function (k) { return AppUtils.isAppShortcut(e, k); });
-  }
-
   var escHtml = AppUtils.escHtml;
   var tasks = AppState.tasks;
   var terminalsEl = document.getElementById('terminals');
@@ -253,11 +243,12 @@ window.TerminalManager = (function () {
         return false;
       }
       if (AppUtils.isAppShortcut(e, 'f')) { SearchBar.open(id); return false; }
-      if (isClearShortcut(e)) { terminal.clear(); return false; }
-      if (AppUtils.isAppShortcut(e, 'Equal')) { zoomIn(); return false; }
-      if (AppUtils.isAppShortcut(e, 'Minus')) { zoomOut(); return false; }
-      if (AppUtils.isAppShortcut(e, 'Digit0')) { zoomReset(); return false; }
-      return !isGlobalShortcut(e);
+      if (AppUtils.isClearShortcut(e)) { terminal.clear(); return false; }
+      if (AppUtils.isAppShortcut(e, 'Equal')) { e.preventDefault(); zoomIn(); return false; }
+      if (AppUtils.isAppShortcut(e, 'Minus')) { e.preventDefault(); zoomOut(); return false; }
+      if (AppUtils.isAppShortcut(e, 'Digit0')) { e.preventDefault(); zoomReset(); return false; }
+      // Returning false keeps xterm from sending app shortcuts to the shell as control codes.
+      return !AppUtils.isAnyAppShortcut(e);
     });
 
     // File drag-and-drop
@@ -673,8 +664,8 @@ window.TerminalManager = (function () {
         });
         return false;
       }
-      if (isClearShortcut(e)) { subTerminal.clear(); return false; }
-      return !isGlobalShortcut(e);
+      if (AppUtils.isClearShortcut(e)) { subTerminal.clear(); return false; }
+      return !AppUtils.isAnyAppShortcut(e);
     });
 
     var subEntry = {
@@ -1172,8 +1163,9 @@ window.TerminalManager = (function () {
       var sub = (t.activeSubId !== null && t.activeSubId !== undefined)
         ? t.subTerminals.find(function (x) { return x.subId === t.activeSubId; })
         : null;
-      (sub || t).terminal.focus();
-      return true;
+      var term = (sub || t).terminal;
+      term.focus();
+      return !!term.element && term.element.contains(document.activeElement);
     },
     openClaudeSubTerminal: openClaudeSubTerminal,
     reopenSubAgents: reopenSubAgents,

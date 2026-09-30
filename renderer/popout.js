@@ -72,7 +72,7 @@
         });
         return false;
       }
-      if (AppUtils.isMac() && AppUtils.isAppShortcut(e, 'k') && e.shiftKey) {
+      if (AppUtils.isClearShortcut(e)) {
         terminal.clear();
         return false;
       }

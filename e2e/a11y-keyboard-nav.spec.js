@@ -17,8 +17,9 @@ test.describe('keyboard navigation', () => {
   test.beforeEach(async ({ mainWindow }) => {
     await mainWindow.waitForLoadState('networkidle');
     await mainWindow.evaluate(() => {
-      const o = document.getElementById('ollama-consent-overlay');
-      if (o) o.style.display = 'none';
+      const kill = () => { const o = document.getElementById('ollama-consent-overlay'); if (o) o.remove(); };
+      kill();
+      new MutationObserver(kill).observe(document.documentElement, { childList: true, subtree: true });
     });
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-kbd-'));
     taskId = await mainWindow.evaluate(async (dir) => {
@@ -38,7 +39,7 @@ test.describe('keyboard navigation', () => {
   test('F6 leaves the terminal and cycles through the visible regions', async ({ mainWindow }) => {
     await mainWindow.keyboard.press('F6');
     expect(await focusedIn(mainWindow, '#sidebar')).toBe(true);
-    await expect(mainWindow.locator('.a11y-live[aria-live="polite"]')).toHaveText('Sidebar');
+    await expect(mainWindow.locator('.a11y-live[aria-live="polite"] > div').last()).toHaveText('Sidebar');
 
     await mainWindow.keyboard.press('F6');
     expect(await focusedIn(mainWindow, '#terminal-area .xterm')).toBe(true);
