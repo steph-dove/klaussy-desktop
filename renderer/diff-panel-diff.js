@@ -314,7 +314,7 @@
 
     btn.disabled = true;
     btn.textContent = 'Committing...';
-    var result = await window.klaus.git.commit(DP.currentWorktreePath, msg);
+    result = await window.klaus.git.commit(DP.currentWorktreePath, msg);
     btn.disabled = false;
     btn.textContent = 'Commit';
     DP.precommitCleared = false;
@@ -513,9 +513,14 @@
   };
 
   DP.createPR = async function() {
-    var title = prompt('PR title:');
-    if (!title) return;
-    var body = prompt('PR description (optional):') || '';
+    var answers = await AppUtils.promptDialog({
+      title: 'Create pull request',
+      okLabel: 'Create',
+      fields: [{ label: 'Title', required: true }, { label: 'Description (optional)', multiline: true }],
+    });
+    if (!answers) return;
+    var title = answers[0];
+    var body = answers[1];
     var btn = document.getElementById('btn-create-pr');
     btn.disabled = true;
     btn.textContent = 'Creating...';
@@ -784,7 +789,7 @@
       // switch, then refetch. Skipped on same-worktree auto-refresh.
       var cachedAB = DP.aheadBehindCache.get(abPath);
       if (cachedAB && DP.renderedAheadBehindPath !== abPath) applyAheadBehind(cachedAB);
-      var result = await window.klaus.git.aheadBehind(abPath);
+      result = await window.klaus.git.aheadBehind(abPath);
       if (abPath !== DP.currentWorktreePath) return;
       DP.aheadBehindCache.set(abPath, result);
       DP.renderedAheadBehindPath = abPath;
@@ -799,26 +804,30 @@
 
     branchLabel.style.cursor = 'pointer';
     branchLabel.title = 'Click to switch branch';
+    A11y.makeButton(branchLabel, 'Switch branch, currently ' + branchLabel.textContent.replace(/^on\s+/, ''));
     branchLabel.addEventListener('click', async function () {
       if (DP.branchList.length === 0) {
         var result = await window.klaus.git.branches(DP.currentWorktreePath);
         DP.branchList = result.branches || [];
         DP.remoteList = result.remotes || [];
       }
-
-      var allBranches = DP.branchList.concat(DP.remoteList);
-      var choice = prompt('Switch to branch:\n\n' + allBranches.join('\n'));
-      if (!choice || !choice.trim()) return;
-
-      var res = await window.klaus.git.checkout(DP.currentWorktreePath, choice.trim());
-      if (res.error) {
-        window.toast.error('Checkout failed: ' + res.error);
-      } else {
-        DP.refresh();
-        DP.updateAheadBehind();
-      }
+      // A searchable list in the command palette, not window.prompt (unsupported in Electron).
+      window.CommandPalette.show(DP.branchList.concat(DP.remoteList).map(function (branch) {
+        return { label: branch, action: function () { checkoutBranch(branch); } };
+      }));
     });
   };
+
+  async function checkoutBranch(branch) {
+    var res = await window.klaus.git.checkout(DP.currentWorktreePath, branch);
+    if (res.error) {
+      window.toast.error('Checkout failed: ' + res.error);
+    } else {
+      window.toast.success('Switched to ' + branch);
+      DP.refresh();
+      DP.updateAheadBehind();
+    }
+  }
 
   // D7: Conflict detection
   DP.checkConflicts = async function() {

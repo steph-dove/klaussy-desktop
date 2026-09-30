@@ -6,9 +6,31 @@ window.SearchBar = (function () {
   var searchNext = document.getElementById('search-next');
   var searchCloseBtn = document.getElementById('search-close');
   var searchTaskId = null;
+  var resultsSub = null;
+  searchCount.setAttribute('role', 'status');
+
+  // The addon only reports match counts when decorations are on.
+  var SEARCH_OPTS = {
+    decorations: {
+      matchOverviewRuler: '#888888',
+      activeMatchColorOverviewRuler: '#ffaa00',
+      matchBackground: '#665500',
+      activeMatchBackground: '#aa7700',
+    },
+  };
+
+  function showCount(e) {
+    if (!searchInput.value) { searchCount.textContent = ''; return; }
+    if (e.resultCount === 0) searchCount.textContent = 'No matches';
+    else if (e.resultIndex < 0) searchCount.textContent = e.resultCount + '+ matches';
+    else searchCount.textContent = (e.resultIndex + 1) + ' of ' + e.resultCount;
+  }
 
   function open(id) {
     searchTaskId = id;
+    if (resultsSub) resultsSub.dispose();
+    var task = AppState.tasks.get(id);
+    resultsSub = task && task.searchAddon.onDidChangeResults(showCount);
     searchBar.style.display = 'flex';
     searchInput.value = '';
     searchCount.textContent = '';
@@ -19,9 +41,13 @@ window.SearchBar = (function () {
     searchBar.style.display = 'none';
     searchInput.value = '';
     searchCount.textContent = '';
+    if (resultsSub) { resultsSub.dispose(); resultsSub = null; }
     if (searchTaskId != null) {
       var task = AppState.tasks.get(searchTaskId);
-      if (task) task.terminal.focus();
+      if (task) {
+        task.searchAddon.clearDecorations();
+        task.terminal.focus();
+      }
     }
     searchTaskId = null;
   }
@@ -31,11 +57,15 @@ window.SearchBar = (function () {
     var task = AppState.tasks.get(searchTaskId);
     if (!task) return;
     var term = searchInput.value;
-    if (!term) return;
+    if (!term) {
+      task.searchAddon.clearDecorations();
+      searchCount.textContent = '';
+      return;
+    }
     if (direction === 'prev') {
-      task.searchAddon.findPrevious(term);
+      task.searchAddon.findPrevious(term, SEARCH_OPTS);
     } else {
-      task.searchAddon.findNext(term);
+      task.searchAddon.findNext(term, SEARCH_OPTS);
     }
   }
 

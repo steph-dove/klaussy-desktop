@@ -913,6 +913,21 @@
     if (list) A11y.arrowNav(list, '.pr-review-file');
     var pre = PR.hostEl.querySelector('.pr-review-diff-pre');
     if (pre) {
+      // E explains the focused line's hunk: the keyboard stand-in for select-then-Explain.
+      pre.addEventListener('keydown', function (e) {
+        if (e.key !== 'e' || e.metaKey || e.ctrlKey || e.altKey) return;
+        var line = e.target.closest && e.target.closest('.diff-line');
+        if (!line) return;
+        var hunk = hunkLines(line);
+        if (!hunk.length) return;
+        e.preventDefault();
+        var text = hunk.map(function (l) {
+          var prefix = l.querySelector('.diff-prefix');
+          var code = l.querySelector('.diff-code');
+          return (prefix ? prefix.textContent : '') + (code ? code.textContent : l.textContent);
+        }).join('\n');
+        PR.explainSelection(text, hunk[hunk.length - 1]);
+      });
       A11y.lineNav(pre, {
         lineSelector: '.diff-line',
         hunkSelector: '.diff-line.diff-hunk',
@@ -931,6 +946,20 @@
       });
     }
   };
+
+  function hunkLines(line) {
+    var start = line;
+    while (start.previousElementSibling && !start.classList.contains('diff-hunk')) start = start.previousElementSibling;
+    var out = [];
+    for (var el = start.classList.contains('diff-hunk') ? start.nextElementSibling : start; el; el = el.nextElementSibling) {
+      if (el.classList.contains('diff-hunk') || el.classList.contains('diff-header')) break;
+      if (el.classList.contains('diff-add') || el.classList.contains('diff-del') || el.classList.contains('diff-context')) out.push(el);
+    }
+    // The diff's trailing newline renders as blank context lines; they aren't part of the change.
+    while (out.length && out[out.length - 1].classList.contains('diff-context')
+      && !out[out.length - 1].querySelector('.diff-code').textContent.trim()) out.pop();
+    return out;
+  }
 
   // ---- G4: draft review comments ----
 

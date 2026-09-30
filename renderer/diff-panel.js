@@ -65,6 +65,17 @@ window.DiffPanel = window.DiffPanel || {};
       e.preventDefault();
       e.target.closest('.diff-file').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     });
+    // E on a line runs its hunk's Explain button, matching the PR review diff.
+    DP.diffViewEl.addEventListener('keydown', function (e) {
+      if (e.key !== 'e' || e.metaKey || e.ctrlKey || e.altKey) return;
+      var line = e.target.closest && e.target.closest('.diff-line');
+      var hunk = line;
+      while (hunk && !hunk.classList.contains('diff-hunk')) hunk = hunk.previousElementSibling;
+      var btn = hunk && hunk.querySelector('.diff-explain-btn');
+      if (!btn) return;
+      e.preventDefault();
+      btn.click();
+    });
     A11y.lineNav(DP.diffViewEl, {
       label: 'Diff',
       lineSelector: '.diff-line',
@@ -751,7 +762,7 @@ window.DiffPanel = window.DiffPanel || {};
     } else {
       // Standalone mode: Render the standard "Working" vs "Branch" mode toggle
       var workingActive = DP.diffMode === 'working' ? ' active' : '';
-      var branchActive = DP.diffMode === 'branch' ? ' active' : '';
+      branchActive = DP.diffMode === 'branch' ? ' active' : '';
 
       html += '<div class="diff-mode-bar">';
       html += '<div class="diff-mode-toggle">';

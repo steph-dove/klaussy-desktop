@@ -28,7 +28,7 @@ function readableOn(fill) {
 // WCAG 2.2 AA: 4.5:1 for text (1.4.3), 3:1 for form-control edges (1.4.11).
 const TEXT_ON_ALL = ['text', 'textMuted', 'textDim'];
 const PANELS = ['bg', 'sidebarBg', 'surface', 'surfaceHover'];
-const TEXT_ON_BG = ['accent', 'success', 'error'];
+const TEXT_ON_BG = ['accent', 'success', 'error', 'warning'];
 
 for (const [name, t] of Object.entries(presets)) {
   test(`${name}: body, muted and dim text reach 4.5:1 on every panel`, () => {
@@ -39,7 +39,7 @@ for (const [name, t] of Object.entries(presets)) {
     }
   });
 
-  test(`${name}: accent, success and error work as text`, () => {
+  test(`${name}: accent, success, error and warning work as text`, () => {
     for (const fg of TEXT_ON_BG) {
       for (const bg of ['bg', 'surface']) {
         assert.ok(ratio(t[fg], t[bg]) >= 4.5, `${fg} ${t[fg]} on ${bg} ${t[bg]} is ${ratio(t[fg], t[bg]).toFixed(2)}`);
@@ -47,7 +47,7 @@ for (const [name, t] of Object.entries(presets)) {
     }
   });
 
-  test(`${name}: filled accent/success/error have a readable text colour`, () => {
+  test(`${name}: filled accent/success/error/warning have a readable text colour`, () => {
     for (const fill of TEXT_ON_BG) {
       const best = Math.max(ratio('#ffffff', t[fill]), ratio('#0b0b0f', t[fill]));
       assert.ok(best >= 4.5, `${fill} ${t[fill]} has no readable text colour (${best.toFixed(2)})`);

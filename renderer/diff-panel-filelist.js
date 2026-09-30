@@ -734,7 +734,7 @@
     var lang = DP.detectLang(DP.selectedFile);
     var codeLines = [];
     var lineMap = [];
-    for (var i = 0; i < lines.length; i++) {
+    for (i = 0; i < lines.length; i++) {
       var line = lines[i];
       if (line.startsWith('+') && !line.startsWith('+++')) {
         codeLines.push(line.substring(1));

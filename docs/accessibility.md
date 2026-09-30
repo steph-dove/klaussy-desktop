@@ -20,7 +20,7 @@ Surface-specific keys:
 
 - **Sidebar**: F2 renames a task; Alt+Up/Down reorders it.
 - **Changes list**: Enter shows the diff; Shift+Enter opens the file in the editor.
-- **Diffs** (Changes panel and PR review): Tab into the diff, then Up/Down move line by line. Alt+Up/Down jump between hunks. Enter or C on a line opens a comment on it.
+- **Diffs** (Changes panel and PR review): Tab into the diff, then Up/Down move line by line. Alt+Up/Down jump between hunks. Enter or C on a line opens a comment on it; E explains the hunk the line is in.
 - **File tree**: Right/Left expand and collapse, Enter opens, F2 renames, Delete deletes.
 - **Editor tabs and terminal sub-tabs**: Delete closes the focused tab.
 - **Resize handles**: arrow keys resize, Shift makes larger steps, Home/End go to the minimum or maximum.
@@ -37,6 +37,7 @@ The shared helpers live in `renderer/a11y.js` (`window.A11y`); use them instead 
 - **Clickable elements**: use a `<button>`. If an element can't be a button, `A11y.makeButton(el, label)` adds the role and Enter/Space handling.
 - **Lists and tab strips**: `arrowNav`, `tabs`, `radios`, `combobox`, `dropdownMenu`, `popupList` and `splitter` take their state from the `.active`/`.selected` classes the code already toggles.
 - **Re-rendering with `innerHTML`**: wrap it in `A11y.preserveFocus(host, fn)` so keyboard focus survives.
+- **Asking for input**: Electron has no `window.prompt()`. Use `AppUtils.promptDialog({ title, fields })`, which returns a labelled modal and resolves with the values, or `null` if cancelled.
 - **Status messages**: `A11y.announce(msg)`, or `A11y.announce(msg, 'assertive')` for errors. Toasts announce themselves.
 - **Colours**: use the theme tokens (`--text`, `--text-muted`, `--text-dim`, `--accent`, `--border-strong`, `--accent-contrast` for text on filled accent). Don't use raw hex values or opacity to dim text. `test/util/theme-contrast.test.js` checks every preset.
 

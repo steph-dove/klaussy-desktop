@@ -74,7 +74,7 @@ window.WordComplete = (function () {
     }
     var best = null;
     var bestScore = -1;
-    for (var w in counts) {
+    for (w in counts) {
       // Score = frequency minus a small penalty for distance, so a token
       // used 3 times nearby beats one used 3 times across the file.
       var score = counts[w] - nearest[w] * 0.01;

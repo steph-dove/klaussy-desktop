@@ -1110,14 +1110,15 @@ window.PrReview = window.PrReview || {};
     'Drafting explanation\u2026',
   ];
 
-  PR.explainSelection = async function(text) {
-    // Anchor the explanation panel to the last diff-line the selection touches
-    // so it lands under the selected block rather than at the top of the diff.
-    var sel = window.getSelection();
-    var anchor = sel && sel.focusNode;
-    var lineEl = anchor;
-    while (lineEl && !lineEl.classList) lineEl = lineEl.parentElement;
-    while (lineEl && !lineEl.classList.contains('diff-line')) lineEl = lineEl.parentElement;
+  // Without anchorLine (mouse path) the panel anchors to the end of the text selection.
+  PR.explainSelection = async function(text, anchorLine) {
+    var lineEl = anchorLine;
+    if (!lineEl) {
+      var sel = window.getSelection();
+      lineEl = sel && sel.focusNode;
+      while (lineEl && !lineEl.classList) lineEl = lineEl.parentElement;
+      while (lineEl && !lineEl.classList.contains('diff-line')) lineEl = lineEl.parentElement;
+    }
     var diffPre = PR.hostEl.querySelector('.pr-review-diff-pre');
     var insertAfter = lineEl || (diffPre && diffPre.lastElementChild);
     if (!insertAfter) return;

@@ -55,8 +55,8 @@ window.PRPanel = (function () {
         var thread = header.closest('.pr-thread');
         if (thread && thread.classList.contains('pr-thread-resolved')) {
           var expanded = thread.classList.toggle('pr-thread-expanded');
-          var expandBtn = header.querySelector('.pr-thread-expand');
-          if (expandBtn) expandBtn.setAttribute('aria-expanded', String(expanded));
+          var threadToggle = header.querySelector('.pr-thread-expand');
+          if (threadToggle) threadToggle.setAttribute('aria-expanded', String(expanded));
         }
         return;
       }
