@@ -288,7 +288,9 @@ window.A11y = (function () {
       syncing = true;
       const items = Array.from(container.querySelectorAll(selector));
       const selected = selectedIn(items);
-      const holder = items.includes(document.activeElement) ? document.activeElement : (selected || items.find(isShown));
+      const shown = items.filter(isShown);
+      const holder = shown.includes(document.activeElement) ? document.activeElement
+        : (selected && isShown(selected) ? selected : shown[0]);
       if (!container.getAttribute('role')) container.setAttribute('role', cfg.groupRole);
       if (opts.label && !container.hasAttribute('aria-label')) container.setAttribute('aria-label', opts.label);
       items.forEach(function (el) {
@@ -315,7 +317,7 @@ window.A11y = (function () {
       e.preventDefault();
       items.forEach(function (el) { el.tabIndex = el === next ? 0 : -1; });
       next.focus();
-      if (cfg.selectOnMove) next.click();
+      if (cfg.selectOnMove) (opts.onMove ? opts.onMove(next) : next.click());
     });
     container.addEventListener('focusin', sync);
     new MutationObserver(sync).observe(container, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
@@ -342,19 +344,34 @@ window.A11y = (function () {
     if (opts.label) input.setAttribute('aria-label', opts.label);
     list.setAttribute('role', 'listbox');
     if (opts.label) list.setAttribute('aria-label', opts.label);
-    function sync() {
-      let active = null;
-      list.querySelectorAll(selector).forEach(function (el) {
-        const selected = activeClasses.some(function (c) { return el.classList.contains(c); });
-        el.setAttribute('role', 'option');
-        el.setAttribute('aria-selected', selected ? 'true' : 'false');
-        ensureId(el, 'option');
-        if (selected) active = el;
-      });
+    function mark(el) {
+      const selected = activeClasses.some(function (c) { return el.classList.contains(c); });
+      el.setAttribute('role', 'option');
+      el.setAttribute('aria-selected', selected ? 'true' : 'false');
+      ensureId(el, 'option');
+      return selected;
+    }
+    function setActiveDescendant(active) {
       if (active) input.setAttribute('aria-activedescendant', active.id);
       else input.removeAttribute('aria-activedescendant');
     }
-    new MutationObserver(sync).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    function sync() {
+      let active = null;
+      list.querySelectorAll(selector).forEach(function (el) { if (mark(el)) active = el; });
+      setActiveDescendant(active);
+    }
+    function onMutations(records) {
+      if (records.some(function (r) { return r.type === 'childList'; })) { sync(); return; }
+      let active;
+      records.forEach(function (r) {
+        const el = r.target;
+        if (!el.matches || !el.matches(selector)) return;
+        if (mark(el)) active = el;
+        else if (active === undefined && input.getAttribute('aria-activedescendant') === el.id) active = null;
+      });
+      if (active !== undefined) setActiveDescendant(active);
+    }
+    new MutationObserver(onMutations).observe(list, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
     sync();
   }
 
@@ -386,6 +403,11 @@ window.A11y = (function () {
       handle.setAttribute('aria-valuenow', String(Math.round(opts.get())));
     }
     handle.addEventListener('focus', update);
+    if (opts.commit) {
+      handle.addEventListener('keyup', function (e) {
+        if (e.key === grow || e.key === shrink || e.key === 'Home' || e.key === 'End') opts.commit();
+      });
+    }
     handle.addEventListener('keydown', function (e) {
       const step = e.shiftKey ? 50 : 10;
       let width = opts.get();

@@ -55,6 +55,10 @@ window.SearchableSelect = (function () {
     wrap.addEventListener('focusout', function (e) {
       if (!wrap.contains(e.relatedTarget)) close();
     });
+    // Group headers, "No matches" and padding aren't focusable, so a click there would blur the search box and close.
+    popover.addEventListener('mousedown', function (e) {
+      if (e.target !== searchInput) e.preventDefault();
+    });
 
     var activeEl = null; // keyboard-highlighted item
 
@@ -141,6 +145,7 @@ window.SearchableSelect = (function () {
     }
 
     function setActive(item) {
+      if ((item || null) === activeEl) return;
       if (activeEl) activeEl.classList.remove('ss-active');
       activeEl = item || null;
       if (activeEl) {

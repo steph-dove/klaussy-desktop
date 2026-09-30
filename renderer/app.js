@@ -140,8 +140,10 @@ window.App = window.App || {};
       const pick = e.target.closest('.modal-recents-item');
       if (pick) {
         e.stopPropagation();
+        var hadFocus = recentsList.contains(document.activeElement);
         input.value = pick.getAttribute('data-path');
         closeRecents();
+        if (hadFocus) recentsBtn.focus();
       }
     });
     document.addEventListener('click', function (e) {
@@ -398,7 +400,7 @@ window.App = window.App || {};
       document.body.classList.toggle('task-branchless', branchless);
       if (branchless && DiffPanel.isVisible()) {
         var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
-        var hidden = activeTab && ['changes', 'pr', 'history', 'env'].indexOf(activeTab.dataset.tab) !== -1;
+        var hidden = activeTab && ['changes', 'pr', 'history', 'env', 'plan'].indexOf(activeTab.dataset.tab) !== -1;
         if (hidden) App.forceFilesTab();
       }
     },
@@ -464,10 +466,8 @@ window.App = window.App || {};
       min: function () { return MIN_WIDTH; },
       max: function () { return window.innerWidth * MAX_WIDTH_RATIO; },
       get: function () { return panel.getBoundingClientRect().width; },
-      set: function (w) {
-        panel.style.width = w + 'px';
-        window.dispatchEvent(new Event('resize'));
-      },
+      set: function (w) { panel.style.width = w + 'px'; },
+      commit: function () { window.dispatchEvent(new Event('resize')); },
       onEnter: togglePreset,
     });
   })();
@@ -601,6 +601,15 @@ window.App = window.App || {};
     var startX = 0;
     var startWidth = 0;
 
+    App.setSidebarWidth = function (w) {
+      App.sidebar.classList.remove('collapsed', 'expanded');
+      AppState.sidebarCollapsed = false;
+      App.sidebar.style.width = w + 'px';
+      App.sidebar.style.minWidth = w + 'px';
+      App.sidebarToggleIcon.textContent = '\u25C0';
+      App.sidebarToggleLabel.textContent = 'Hide';
+    };
+
     App.sidebarResizeHandle.addEventListener('mousedown', function (e) {
       e.preventDefault();
       dragging = true;
@@ -617,12 +626,7 @@ window.App = window.App || {};
       var newWidth = startWidth + (e.clientX - startX);
       var maxWidth = window.innerWidth * App.MAX_SIDEBAR_RATIO;
       newWidth = Math.max(App.MIN_SIDEBAR_WIDTH, Math.min(newWidth, maxWidth));
-      App.sidebar.classList.remove('collapsed', 'expanded');
-      AppState.sidebarCollapsed = false;
-      App.sidebar.style.width = newWidth + 'px';
-      App.sidebar.style.minWidth = newWidth + 'px';
-      App.sidebarToggleIcon.textContent = '\u25C0';
-      App.sidebarToggleLabel.textContent = 'Hide';
+      App.setSidebarWidth(newWidth);
     });
 
     document.addEventListener('mouseup', function () {
@@ -640,15 +644,8 @@ window.App = window.App || {};
       min: function () { return App.MIN_SIDEBAR_WIDTH; },
       max: function () { return window.innerWidth * App.MAX_SIDEBAR_RATIO; },
       get: function () { return App.sidebar.getBoundingClientRect().width; },
-      set: function (w) {
-        App.sidebar.classList.remove('collapsed', 'expanded');
-        AppState.sidebarCollapsed = false;
-        App.sidebar.style.width = w + 'px';
-        App.sidebar.style.minWidth = w + 'px';
-        App.sidebarToggleIcon.textContent = '\u25C0';
-        App.sidebarToggleLabel.textContent = 'Hide';
-        App.refitTerminals();
-      },
+      set: App.setSidebarWidth,
+      commit: function () { App.refitTerminals(); },
     });
   })();
 

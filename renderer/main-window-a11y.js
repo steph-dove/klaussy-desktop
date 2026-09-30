@@ -17,7 +17,14 @@
     panelFor: function (tab) { return byId('history-' + tab.dataset.sub + '-content'); },
   });
   A11y.tabs(byId('plan-source-switch'), { itemSelector: '.plan-source-btn', label: 'Plan source' });
-  A11y.radios(document.querySelector('.shell-options'), { itemSelector: '.shell-option', label: 'Run', orientation: 'both' });
+  // Arrowing only moves the choice; the click handler's handoff flag and setup prompt wait for a real activation.
+  A11y.radios(document.querySelector('.shell-options'), {
+    itemSelector: '.shell-option', label: 'Run', orientation: 'both',
+    onMove: function (btn) {
+      App.selectedMode = btn.dataset.shell;
+      App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
+    },
+  });
 
   document.querySelectorAll('.dashboard-card').forEach(function (card) {
     A11y.makeButton(card);

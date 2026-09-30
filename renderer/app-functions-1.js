@@ -505,8 +505,10 @@ window.App = window.App || {};
       if (pick) {
         e.stopPropagation();
         var p = pick.getAttribute('data-path');
+        var hadFocus = list.contains(document.activeElement);
         opts.onPick(p, { kind: pick.getAttribute('data-kind') || '' });
         close();
+        if (hadFocus) button.focus();
       }
     });
     document.addEventListener('click', function (e) {

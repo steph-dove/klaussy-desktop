@@ -62,6 +62,33 @@ test.describe('main window keyboard access', () => {
       await expect(rows.first()).toBeFocused();
     });
 
+    test('Escape cancels a rename and returns focus to the row', async ({ mainWindow }) => {
+      const rows = mainWindow.locator('#task-list .task-main');
+      const original = await rows.first().locator('.task-name').textContent();
+      await rows.first().focus();
+      await mainWindow.keyboard.press('F2');
+      const input = mainWindow.getByRole('textbox', { name: 'Rename task' });
+      await expect(input).toBeFocused();
+      await input.fill('discarded-name');
+      await mainWindow.keyboard.press('Escape');
+      await expect(input).toHaveCount(0);
+      await expect(rows.first().locator('.task-name')).toHaveText(original);
+      await expect(rows.first()).toBeFocused();
+    });
+
+    test('clicking away commits a rename without pulling focus back to the row', async ({ mainWindow }) => {
+      const rows = mainWindow.locator('#task-list .task-main');
+      await rows.first().focus();
+      await mainWindow.keyboard.press('F2');
+      const input = mainWindow.getByRole('textbox', { name: 'Rename task' });
+      await input.fill('renamed-by-blur');
+      await mainWindow.locator('.xterm:visible').first().click();
+      await expect(input).toHaveCount(0);
+      await expect(rows.first().locator('.task-name')).toHaveText('renamed-by-blur');
+      await expect(rows.first()).not.toBeFocused();
+      await expect.poll(() => mainWindow.evaluate(() => !!document.activeElement.closest('.xterm'))).toBe(true);
+    });
+
     test('side panel tabs and splitter work from the keyboard', async ({ mainWindow }) => {
       await mainWindow.keyboard.press(`${MOD}+g`);
       await expect(mainWindow.locator('#diff-panel')).toHaveClass(/\bvisible\b/);
@@ -107,6 +134,7 @@ test.describe('main window keyboard access', () => {
     await mainWindow.evaluate(() => {
       document.getElementById('modal-overlay').style.display = 'flex';
       document.querySelector('#modal-tabs .modal-tab[data-tab="existing"]').click();
+      window.App.shellUserPicked = false;
     });
     const group = mainWindow.getByRole('radiogroup', { name: 'Run' });
     const checked = group.locator('[aria-checked="true"]');
@@ -115,14 +143,16 @@ test.describe('main window keyboard access', () => {
     await mainWindow.keyboard.press('ArrowRight');
     await expect(group.locator('[aria-checked="true"]')).not.toHaveAttribute('data-shell', before);
     await expect(group.locator('[aria-checked="true"]')).toBeFocused();
+    expect(await mainWindow.evaluate(() => !!window.App.shellUserPicked)).toBe(false);
+    await expect(mainWindow.locator('.klaus-modal-overlay:visible')).toHaveCount(0);
     await mainWindow.evaluate(() => { document.getElementById('modal-overlay').style.display = 'none'; });
   });
 
   test('dashboard cards are named buttons', async ({ mainWindow }) => {
-    const card = mainWindow.getByRole('button', { name: 'Open Local Folder or File' });
-    await expect(card).toBeVisible();
-    await card.focus();
+    await expect(mainWindow.getByRole('button', { name: 'Open Local Folder or File' })).toBeVisible();
+    const cards = mainWindow.locator('.empty-dashboard-grid .dashboard-card:visible');
+    await cards.first().focus();
     await mainWindow.keyboard.press('ArrowDown');
-    await expect(card).not.toBeFocused();
+    await expect(cards.nth(1)).toBeFocused();
   });
 });

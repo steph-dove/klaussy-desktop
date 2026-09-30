@@ -128,7 +128,9 @@ window.AgentSplit = (function () {
       e.stopPropagation();
       var item = e.target.closest('.agent-split-item');
       if (!item) return;
+      var hadFocus = menu.contains(document.activeElement);
       setOpen(false);
+      if (hadFocus) caret.focus();
       var id = item.dataset.id;
       setDefaultAgent(id); // becomes the new global default for everything
       run(id, true);

@@ -119,11 +119,11 @@ window.Sidebar = (function () {
     var tIconColor = AppUtils.iconColor(task.name);
     var tIconLetter = (task.name || '?').charAt(0).toUpperCase();
     item.innerHTML =
-      '<button type="button" class="task-main" title="' + escHtml(task.worktreePath) + '">' +
+      '<button type="button" class="task-main" title="' + escHtml(task.worktreePath) + '" aria-labelledby="task-name-' + task.id + '">' +
         '<span class="status-dot ' + (task.alive ? 'alive' : 'exited') + '" aria-hidden="true"></span>' +
-        '<span class="collapsed-icon" style="background:' + tIconColor + '" aria-hidden="true">' + tIconLetter + '</span>' +
+        '<span class="collapsed-icon" style="background:' + tIconColor + '" title="' + escHtml(task.name) + '" aria-hidden="true">' + tIconLetter + '</span>' +
         '<span class="task-mode" title="' + escHtml(AppUtils.modeDisplayName(task.mode)) + '">' + modeLabel + '</span>' +
-        '<span class="task-name">' + escHtml(task.name) + '</span>' +
+        '<span class="task-name" id="task-name-' + task.id + '">' + escHtml(task.name) + '</span>' +
       '</button>' +
       '<span class="ci-status-icon" title="CI status"></span>' +
       '<span class="dirty-indicator"></span>' +
@@ -835,7 +835,7 @@ window.Sidebar = (function () {
     input.select();
 
     var done = false;
-    function finish(save) {
+    function finish(save, refocus) {
       if (done) return;
       done = true;
       var newName = save ? (input.value.trim() || original) : original;
@@ -846,13 +846,14 @@ window.Sidebar = (function () {
         task.name = newName;
         window.klaus.task.rename(id, newName);
       }
-      main.focus();
+      if (refocus) main.focus();
     }
 
-    input.addEventListener('blur', function () { finish(true); });
+    // A blur commit must not refocus: Chromium would cancel the focus move that caused the blur.
+    input.addEventListener('blur', function () { finish(true, false); });
     input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-      if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      if (e.key === 'Enter') { e.preventDefault(); finish(true, true); }
+      if (e.key === 'Escape') { e.preventDefault(); finish(false, true); }
     });
   }
 
