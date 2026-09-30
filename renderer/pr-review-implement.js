@@ -180,6 +180,7 @@
       } else if (r && r.worktreePath) {
         PR.aiReview.worktreePath = r.worktreePath;
       }
+      PR.syncPtySizes();
     });
   };
 

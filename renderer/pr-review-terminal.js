@@ -1098,6 +1098,19 @@
     return PR.implTerminal;
   };
 
+  // PTYs spawn at 120x30 and xterm only reports size changes, so a fit made
+  // before the PTY existed never reached it; push each opened xterm's size.
+  PR.syncPtySizes = function() {
+    var chat = PR.chatTerminal && PR.chatTerminal.terminal;
+    if (chat && chat.element && PR.chatRun && PR.chatRun.chatKey) {
+      window.klaus.pr.reviewTchatResize(PR.chatRun.chatKey, chat.cols, chat.rows);
+    }
+    var impl = PR.implTerminal && PR.implTerminal.terminal;
+    if (impl && impl.element && PR.implRun && PR.implRunIsLive()) {
+      window.klaus.pr.reviewImplementResize(PR.implRun.requestId, impl.cols, impl.rows);
+    }
+  };
+
   PR.visibleTerminal = function() {
     return (PR.terminalView === 'impl' && PR.implTerminal) ? PR.implTerminal : PR.chatTerminal;
   };
@@ -1220,6 +1233,7 @@
       PR.chatRun.status = 'running';
       PR.subscribeChat(rt, r.chatKey);
       PR.repaintTerminalTab();
+      PR.syncPtySizes();
     }).catch(function (err) {
       if (!PR.chatRun) return;
       PR.chatRun.starting = false;
@@ -1270,6 +1284,7 @@
       term.open(host);
       try { rt.fitAddon.fit(); } catch (_) {}
     }
+    PR.syncPtySizes();
     // The control buttons live in the chrome row which gets re-rendered every
     // repaint, so re-bind here.
     var hostRow = PR.hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-head');
@@ -1302,6 +1317,7 @@
         rt.fitAddon.fit();
         rt.terminal.refresh(0, rt.terminal.rows - 1);
       } catch (_) {}
+      PR.syncPtySizes();
     };
     PR.implFocusRefitHandler = refit;
     PR.implVisibilityRefitHandler = function () { if (!document.hidden) refit(); };
