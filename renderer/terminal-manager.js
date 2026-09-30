@@ -416,6 +416,7 @@ window.TerminalManager = (function () {
       var close = e.key === 'Delete' && e.target.closest('.sub-tab') && e.target.querySelector('.sub-tab-close');
       if (!close) return;
       e.preventDefault();
+      close.dataset.keyboard = '1';
       close.click();
     });
 
@@ -703,6 +704,10 @@ window.TerminalManager = (function () {
 
     tab.querySelector('.sub-tab-close').addEventListener('click', async function (e) {
       e.stopPropagation();
+      var fromKeyboard = this.dataset.keyboard === '1';
+      delete this.dataset.keyboard;
+      var neighbor = fromKeyboard && (tab.nextElementSibling && tab.nextElementSibling.matches('.sub-tab')
+        ? tab.nextElementSibling : tab.previousElementSibling);
       await window.klaus.terminal.killSub(id, subId);
       subCleanup.forEach(function (fn) { fn(); });
       subTerminal.dispose();
@@ -711,14 +716,16 @@ window.TerminalManager = (function () {
       var idx = taskEntry.subTerminals.indexOf(subEntry);
       if (idx !== -1) taskEntry.subTerminals.splice(idx, 1);
       if (taskEntry.activeSubId === subId) {
-        switchSubTerminal(taskEntry, null);
+        switchSubTerminal(taskEntry, null, !neighbor);
       }
+      if (neighbor) neighbor.focus();
     });
 
     switchSubTerminal(taskEntry, subId);
   }
 
-  function switchSubTerminal(taskEntry, subId) {
+  function switchSubTerminal(taskEntry, subId, focusTerminal) {
+    if (focusTerminal === undefined) focusTerminal = true;
     var container = taskEntry.container;
     taskEntry.activeSubId = subId;
     refreshAgentLabels(taskEntry);
@@ -743,13 +750,13 @@ window.TerminalManager = (function () {
     setTimeout(function () {
       if (subId === null || subId === undefined) {
         taskEntry.fitAddon.fit();
-        taskEntry.terminal.focus();
+        if (focusTerminal) taskEntry.terminal.focus();
         window.klaus.terminal.resize(taskEntry.id, taskEntry.terminal.cols, taskEntry.terminal.rows);
       } else {
         var sub = taskEntry.subTerminals.find(function (s) { return s.subId === subId; });
         if (sub) {
           sub.fitAddon.fit();
-          sub.terminal.focus();
+          if (focusTerminal) sub.terminal.focus();
           window.klaus.terminal.resize(taskEntry.id, sub.terminal.cols, sub.terminal.rows, subId);
         }
       }

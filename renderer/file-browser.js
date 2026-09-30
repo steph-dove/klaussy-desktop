@@ -715,12 +715,14 @@ window.FileBrowser = (function () {
       }
     });
     A11y.tabs(tabBar, { itemSelector: '.file-viewer-tab', label: 'Open files' });
-    tabBar.addEventListener('keydown', function (e) {
+    tabBar.addEventListener('keydown', async function (e) {
       var tabEl = e.target.closest('.file-viewer-tab');
       if (!tabEl || e.key !== 'Delete') return;
       e.preventDefault();
       var idx = parseInt(tabEl.dataset.tabIndex, 10);
-      closeTab(idx);
+      if (isNaN(idx)) return;
+      if (dirtyAmong([idx]) && !window.confirm('Close ' + tabs[idx].filePath.split('/').pop() + ' and discard unsaved changes?')) return;
+      await closeTab(idx);
       var next = tabBar.querySelectorAll('.file-viewer-tab')[Math.min(idx, tabs.length - 1)];
       if (next) next.focus();
     });
@@ -1153,7 +1155,7 @@ window.FileBrowser = (function () {
       renderTabs();
     } else if (index === activeTabIndex) {
       activeTabIndex = Math.min(index, tabs.length - 1);
-      activateTab(activeTabIndex);
+      return activateTab(activeTabIndex);
     } else {
       renderTabs();
     }
@@ -1170,7 +1172,7 @@ window.FileBrowser = (function () {
       return '<div class="file-viewer-tab' + active + dirty + '" data-tab-index="' + i + '" title="' + escHtml(tab.filePath) + '">' +
                '<span class="tab-name">' + escHtml(basename) + '</span>' +
                '<span class="tab-dirty-dot" aria-hidden="true">●</span>' +
-               (dirty ? '<span class="sr-only">, modified</span>' : '') +
+               '<span class="sr-only tab-dirty-sr">' + (dirty ? ', modified' : '') + '</span>' +
                '<button class="tab-close" tabindex="-1" aria-hidden="true" title="Close (⌘W)">×</button>' +
              '</div>';
     }).join('');
@@ -1204,7 +1206,10 @@ window.FileBrowser = (function () {
     saveBtn.disabled = !dirty;
     // Update the active tab's dirty-dot class without re-rendering the whole bar.
     var tabEl = fileViewerView.querySelectorAll('.file-viewer-tab')[activeTabIndex];
-    if (tabEl) tabEl.classList.toggle('dirty', dirty);
+    if (!tabEl) return;
+    tabEl.classList.toggle('dirty', dirty);
+    var srEl = tabEl.querySelector('.tab-dirty-sr');
+    if (srEl) srEl.textContent = dirty ? ', modified' : '';
   }
 
   async function saveFile() {
