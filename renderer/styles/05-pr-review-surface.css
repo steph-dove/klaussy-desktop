@@ -2511,7 +2511,7 @@ button.pr-check-toggle {
 /* The PR-review file row now uses the shared .diff-file styling (it carries
    both classes); only the +/- count colors remain surface-specific. */
 .pr-file-add {
-  color: var(--success) !important;
+  color: color-mix(in srgb, var(--success) 65%, var(--text)) !important;
   background: color-mix(in srgb, var(--success) 12%, transparent);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
@@ -2519,7 +2519,7 @@ button.pr-check-toggle {
   font-size: 10px;
 }
 .pr-file-del {
-  color: var(--error) !important;
+  color: color-mix(in srgb, var(--error) 65%, var(--text)) !important;
   background: color-mix(in srgb, var(--error) 12%, transparent);
   padding: 1px 5px;
   border-radius: var(--radius-sm);
