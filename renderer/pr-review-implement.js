@@ -1083,7 +1083,7 @@
           + '<label class="pr-submit-event' + (ownPr ? ' disabled' : '') + '"><input type="radio" name="pr-event" value="REQUEST_CHANGES"' + selfDisabled + ' /> <span class="pr-submit-event-label">Request changes</span><span class="pr-submit-event-hint">' + (ownPr ? selfHint : 'Submit feedback that must be addressed') + '</span></label>'
         + '</div>'
         + '<div class="pr-submit-actions">'
-          + '<button class="pr-submit-cancel" type="button">Cancel</button>'
+          + '<button class="pr-submit-cancel" type="button" data-dialog-close>Cancel</button>'
           + '<button class="pr-submit-send" type="button">Submit review</button>'
         + '</div>'
         + '<div class="pr-submit-error" style="display:none;"></div>'
@@ -1097,6 +1097,7 @@
     var bodyTa = overlay.querySelector('.pr-submit-body');
     var sendBtn = overlay.querySelector('.pr-submit-send');
     var errEl = overlay.querySelector('.pr-submit-error');
+    var dialogEl = overlay.querySelector('.pr-submit-dialog');
     bodyTa.focus();
 
     sendBtn.addEventListener('click', async function () {
@@ -1116,7 +1117,14 @@
       }
       sendBtn.disabled = true;
       sendBtn.textContent = 'Submitting\u2026';
-      var result = await window.klaus.pr.submitReview({ event: event, body: body, comments: PR.pendingComments });
+      dialogEl.setAttribute('aria-busy', 'true');
+      var result;
+      try {
+        result = await window.klaus.pr.submitReview({ event: event, body: body, comments: PR.pendingComments });
+      } catch (err) {
+        result = { error: (err && err.message) || String(err) };
+      }
+      dialogEl.removeAttribute('aria-busy');
       if (result.error) {
         sendBtn.disabled = false;
         sendBtn.textContent = 'Submit review';

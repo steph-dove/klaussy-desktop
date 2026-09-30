@@ -20,7 +20,7 @@ window.App = window.App || {};
       '<span class="modal-repo-path">No repo selected</span>' +
       '<select class="mr-base" hidden title="Base branch in this repo"></select>' +
       '<button type="button" class="modal-input-btn mr-browse" title="Browse for a git repo">Browse</button>' +
-      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-label="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>' +
+      '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-label="Projects and discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>' +
       '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo" aria-label="Remove this repo">×</button>' +
       '<div class="modal-recents-list" hidden role="listbox"></div>';
     row.el = el;
@@ -851,6 +851,8 @@ window.App = window.App || {};
       if (!el) return;
       el.classList.remove('modal-field-invalid');
       el.removeAttribute('aria-invalid');
+      var fe = el.tagName === 'INPUT' ? el : el.querySelector('input, button');
+      if (fe && fe.getAttribute('aria-describedby') === 'modal-error') fe.removeAttribute('aria-describedby');
     });
   };
 

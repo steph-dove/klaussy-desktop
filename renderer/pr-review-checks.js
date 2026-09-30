@@ -117,7 +117,7 @@
           + '<div class="pr-workflow-dispatch-error" hidden></div>'
         + '</div>'
         + '<div class="pr-workflow-dispatch-actions">'
-          + '<button type="button" class="pr-workflow-dispatch-cancel">Cancel</button>'
+          + '<button type="button" class="pr-workflow-dispatch-cancel" data-dialog-close>Cancel</button>'
           + '<button type="button" class="pr-workflow-dispatch-go">Dispatch</button>'
         + '</div>'
       + '</div>';
@@ -128,6 +128,7 @@
     var inputsEl = backdrop.querySelector('.pr-workflow-inputs');
     var errorEl = backdrop.querySelector('.pr-workflow-dispatch-error');
     var goBtn = backdrop.querySelector('.pr-workflow-dispatch-go');
+    var modalEl = backdrop.querySelector('.pr-workflow-dispatch-modal');
 
     function close() { backdrop.remove(); }
     backdrop.querySelector('.pr-workflow-dispatch-cancel').addEventListener('click', close);
@@ -169,7 +170,11 @@
       goBtn.disabled = true;
       goBtn.textContent = 'Dispatching…';
       errorEl.hidden = true;
-      window.klaus.pr.reviewWorkflowDispatch(workflowId, ref, inputs).then(function (res) {
+      modalEl.setAttribute('aria-busy', 'true');
+      window.klaus.pr.reviewWorkflowDispatch(workflowId, ref, inputs).catch(function (err) {
+        return { error: (err && err.message) || String(err) };
+      }).then(function (res) {
+        modalEl.removeAttribute('aria-busy');
         if (res && res.error) {
           goBtn.disabled = false;
           goBtn.textContent = 'Dispatch';

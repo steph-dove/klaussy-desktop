@@ -7,8 +7,9 @@ test.describe('a11y foundations', () => {
     await mainWindow.waitForLoadState('networkidle');
     await expect(mainWindow.locator('#btn-theme')).toBeVisible();
     await mainWindow.evaluate(() => {
-      const o = document.getElementById('ollama-consent-overlay');
-      if (o) o.style.display = 'none';
+      const kill = () => { const o = document.getElementById('ollama-consent-overlay'); if (o) o.remove(); };
+      kill();
+      new MutationObserver(kill).observe(document.documentElement, { childList: true, subtree: true });
     });
   });
 
@@ -47,17 +48,45 @@ test.describe('a11y foundations', () => {
 
     await mainWindow.keyboard.press('Escape');
     await expect(mainWindow.locator('.palette-overlay')).toHaveCount(0);
+    await expect(mainWindow.locator('#app')).toHaveJSProperty('inert', false);
     await expect(mainWindow.locator('#btn-prefs')).toBeFocused();
+  });
+
+  test('a dialog opened over another stays usable and Escape closes only the top one', async ({ mainWindow }) => {
+    await mainWindow.evaluate(() => window.App.btnManageSessions.click());
+    const sessions = mainWindow.locator('#sessions-modal-overlay');
+    await expect(sessions).toBeVisible();
+
+    await mainWindow.evaluate(() => { window.App.confirmDeleteSession('demo', [{ repoName: 'repo', path: '/tmp/demo' }]); });
+    const del = mainWindow.locator('#delete-session-overlay');
+    await expect(del).toBeVisible();
+    await expect(del).toHaveJSProperty('inert', false);
+    const input = mainWindow.locator('#delete-session-input');
+    await input.focus();
+    await expect(input).toBeFocused();
+    await mainWindow.keyboard.type('del');
+    await expect(input).toHaveValue('del');
+
+    await mainWindow.keyboard.press('Escape');
+    await expect(del).toBeHidden();
+    await expect(sessions).toBeVisible();
+    await expect(mainWindow.locator('#app')).toHaveJSProperty('inert', true);
+    const focusInSessions = await mainWindow.evaluate(() => document.getElementById('sessions-modal-overlay').contains(document.activeElement));
+    expect(focusInSessions).toBe(true);
+
+    await mainWindow.keyboard.press('Escape');
+    await expect(sessions).toBeHidden();
+    await expect(mainWindow.locator('#app')).toHaveJSProperty('inert', false);
   });
 
   test('toasts are announced, pausable and dismissible by keyboard', async ({ mainWindow }) => {
     await mainWindow.evaluate(() => window.toast.error('Push failed: remote rejected'));
 
-    await expect(mainWindow.locator('.a11y-live[aria-live="assertive"]')).toHaveText('Push failed: remote rejected');
-    const close = mainWindow.getByRole('button', { name: 'Dismiss notification' });
-    await close.focus();
+    await expect(mainWindow.locator('.a11y-live[aria-live="assertive"]')).toContainText('Push failed: remote rejected');
+    const toast = mainWindow.locator('.klaussy-toast', { hasText: 'Push failed: remote rejected' });
+    await toast.getByRole('button', { name: 'Dismiss notification' }).focus();
     await mainWindow.keyboard.press('Enter');
-    await expect(mainWindow.locator('.klaussy-toast')).toHaveCount(0);
+    await expect(toast).toHaveCount(0);
   });
 
   test('role=button elements activate with Enter and Space', async ({ mainWindow }) => {

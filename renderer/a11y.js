@@ -65,14 +65,27 @@ window.A11y = (function () {
     if (heading) dialog.setAttribute('aria-labelledby', ensureId(heading, 'dialog-title'));
   }
 
+  // Ref-counted so dialogs closing out of order can't release an element another dialog still holds.
+  const inertCount = new Map();
+  function holdInert(el) {
+    inertCount.set(el, (inertCount.get(el) || 0) + 1);
+    el.inert = true;
+  }
+  function releaseInert(el) {
+    const n = (inertCount.get(el) || 1) - 1;
+    if (n > 0) inertCount.set(el, n);
+    else { inertCount.delete(el); el.inert = false; }
+  }
+
   function inertOthers(overlay) {
     const changed = [];
     let node = overlay;
     while (node && node.parentElement && node !== document.body) {
       for (const sib of node.parentElement.children) {
-        if (sib === node || sib.inert || /^(SCRIPT|STYLE|LINK)$/.test(sib.tagName)) continue;
-        if (sib.matches(KEEP_LIVE)) continue;
-        sib.inert = true;
+        if (sib === node || /^(SCRIPT|STYLE|LINK)$/.test(sib.tagName)) continue;
+        if (sib.matches(KEEP_LIVE) || sib.matches(DIALOG_SELECTOR)) continue;
+        if (sib.inert && !inertCount.has(sib)) continue;
+        holdInert(sib);
         changed.push(sib);
       }
       node = node.parentElement;
@@ -85,7 +98,10 @@ window.A11y = (function () {
     if (!dialog.getAttribute('role')) dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-modal', 'true');
     labelDialog(dialog);
-    const entry = { overlay: overlay, dialog: dialog, opener: lastFocusOutside, inerted: inertOthers(overlay) };
+    for (let n = overlay; n && n !== document.body; n = n.parentElement) n.inert = false;
+    const active = document.activeElement;
+    const opener = active && active !== document.body && !overlay.contains(active) ? active : lastFocusOutside;
+    const entry = { overlay: overlay, dialog: dialog, opener: opener, inerted: inertOthers(overlay) };
     stack.push(entry);
     if (!overlay.contains(document.activeElement)) focusFirst(dialog, dialog);
   }
@@ -95,15 +111,12 @@ window.A11y = (function () {
     const lost = !active || active === document.body || entry.overlay.contains(active) || !active.isConnected;
     if (!lost) return;
     const opener = entry.opener;
-    if (opener && opener.isConnected && isShown(opener) && !opener.closest('[inert]')) {
-      opener.focus();
-      return;
-    }
+    if (opener && opener.isConnected && isShown(opener) && !opener.closest('[inert]')) opener.focus();
   }
 
   function closeEntry(entry) {
     stack.splice(stack.indexOf(entry), 1);
-    entry.inerted.forEach(function (el) { el.inert = false; });
+    entry.inerted.forEach(releaseInert);
     restoreFocus(entry);
   }
 
@@ -123,26 +136,31 @@ window.A11y = (function () {
     queueMicrotask(sync);
   }
 
-  // The terminal mutates the DOM constantly and sync() forces layout, so filter to dialog changes.
-  function onMutations(records) {
+  // Overlays are direct children of body; observing the subtree would fire on every terminal repaint.
+  const attrObserver = new MutationObserver(queueSync);
+  function watchOverlay(overlay) {
+    attrObserver.observe(overlay, { attributes: true, attributeFilter: ['style', 'class', 'hidden'] });
+  }
+
+  function onBodyMutations(records) {
+    let changed = false;
     for (const r of records) {
-      if (r.type === 'attributes') {
-        if (r.target.matches(DIALOG_SELECTOR)) return queueSync();
-        continue;
-      }
       for (const n of r.addedNodes) {
         if (n.nodeType !== 1) continue;
-        if (n.matches(DIALOG_SELECTOR) || (r.target === document.body && n.querySelector(DIALOG_SELECTOR))) return queueSync();
+        if (n.matches(DIALOG_SELECTOR)) { watchOverlay(n); changed = true; }
+        n.querySelectorAll(DIALOG_SELECTOR).forEach(function (o) { watchOverlay(o); changed = true; });
       }
       for (const n of r.removedNodes) {
-        if (n.nodeType === 1 && stack.some(function (e) { return n === e.overlay || n.contains(e.overlay); })) return queueSync();
+        if (n.nodeType === 1 && stack.some(function (e) { return n === e.overlay || n.contains(e.overlay); })) changed = true;
       }
     }
+    if (changed) queueSync();
   }
 
   function top() { return stack[stack.length - 1]; }
 
   function closeTop(entry) {
+    if (entry.dialog.getAttribute('aria-busy') === 'true') return;
     const explicit = entry.dialog.querySelector('[data-dialog-close]');
     if (explicit) { explicit.click(); return; }
     entry.overlay.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
@@ -162,10 +180,17 @@ window.A11y = (function () {
     if (entry && !isShown(entry.overlay)) queueSync();
   }
 
+  // Snapshot before any handler runs: one closing its own overlay pops the stack, and this Escape must not then close the dialog below.
+  let escTarget = null;
+  function onEscapeCapture(e) {
+    if (e.key === 'Escape') escTarget = top();
+  }
+
   function onKeydown(e) {
     const entry = top();
     if (!entry || !isShown(entry.overlay)) { recheck(); return; }
     if (e.key === 'Escape' && !e.defaultPrevented) {
+      if (entry !== escTarget) return;
       e.preventDefault();
       closeTop(entry);
       return;
@@ -214,19 +239,21 @@ window.A11y = (function () {
     const el = document.createElement('div');
     el.className = 'a11y-live sr-only';
     el.setAttribute('aria-live', level);
-    el.setAttribute('aria-atomic', 'true');
+    el.setAttribute('aria-atomic', 'false');
     el.setAttribute('role', level === 'assertive' ? 'alert' : 'status');
     document.body.appendChild(el);
     if (level === 'assertive') assertiveEl = el; else politeEl = el;
     return el;
   }
 
-  // Clear-then-write so a repeated identical message is announced again.
+  // One node per message so messages fired together are each read, and a repeat is a fresh addition.
   function announce(message, level) {
     if (!document.body || !message) return;
     const region = liveRegion(level === 'assertive' ? 'assertive' : 'polite');
-    region.textContent = '';
-    setTimeout(function () { region.textContent = String(message); }, 60);
+    const item = document.createElement('div');
+    item.textContent = String(message);
+    region.appendChild(item);
+    setTimeout(function () { item.remove(); }, 5000);
   }
 
   const STYLE = `
@@ -234,9 +261,10 @@ window.A11y = (function () {
       position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
     }
-    :focus-visible { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)) !important; outline-offset: 2px; }
-    input:focus-visible, textarea:focus-visible, select:focus-visible, [contenteditable]:focus-visible { outline-offset: 0; }
-    .xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible, [tabindex="-1"]:focus-visible { outline: none !important; }
+    :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)); outline-offset: 2px; }
+    :where(input, textarea, select):focus-visible { outline: none; }
+    :where([contenteditable]):focus-visible { outline-offset: 0; }
+    :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible, [tabindex="-1"]:focus-visible) { outline: none; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -254,12 +282,8 @@ window.A11y = (function () {
     document.head.appendChild(style);
     liveRegion('polite');
     liveRegion('assertive');
-    new MutationObserver(onMutations).observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['style', 'class', 'hidden'],
-    });
+    document.querySelectorAll(DIALOG_SELECTOR).forEach(watchOverlay);
+    new MutationObserver(onBodyMutations).observe(document.body, { childList: true });
     sync();
   }
 
@@ -267,6 +291,7 @@ window.A11y = (function () {
     if (e.target && e.target.closest && !e.target.closest(DIALOG_SELECTOR)) lastFocusOutside = e.target;
   });
   // Window-level so any document or element Escape handler runs first.
+  window.addEventListener('keydown', onEscapeCapture, true);
   window.addEventListener('keydown', onKeydown);
   window.addEventListener('pointerdown', recheck, true);
   document.addEventListener('keydown', onActivateKey);

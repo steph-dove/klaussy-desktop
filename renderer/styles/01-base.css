@@ -2788,12 +2788,14 @@ body.task-branchless #ahead-behind {
   border-radius: 4px;
   display: block;
   opacity: 0;
+  pointer-events: none;
   line-height: 1;
 }
 
 .session-group-header:hover .session-group-close,
 .session-group-header:focus-within .session-group-close {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .session-group-close:hover {
@@ -2871,11 +2873,13 @@ body.task-branchless #ahead-behind {
   transition: all 0.2s;
   display: block;
   opacity: 0;
+  pointer-events: none;
 }
 
 .session-group-header:hover .session-group-resume-btn,
 .session-group-header:focus-within .session-group-resume-btn {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .session-group-resume-btn:hover {
