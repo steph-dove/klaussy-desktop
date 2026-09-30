@@ -45,6 +45,8 @@ test.describe('main window keyboard access', () => {
       await expect(rows.nth(1)).not.toHaveAttribute('aria-current', 'true');
       // Opening a task hands focus to its terminal.
       await expect.poll(() => mainWindow.evaluate(() => !!document.activeElement.closest('.xterm'))).toBe(true);
+      // switchToTask can queue more than one 50ms terminal-focus timer; let them all land.
+      await mainWindow.waitForTimeout(300);
 
       await rows.first().focus();
       await mainWindow.keyboard.press('F2');

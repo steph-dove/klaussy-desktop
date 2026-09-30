@@ -177,8 +177,15 @@
     input.value = formatBinding(current);
     input.dataset.action = action;
     input.dataset.binding = current;
+    input.setAttribute('aria-label', def.label + ' shortcut');
+    input.setAttribute('aria-description', 'Press Enter to record a new shortcut');
 
     input.addEventListener('click', function () {
+      startRecording(input, action);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (recordingInput || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
       startRecording(input, action);
     });
 
@@ -198,8 +205,17 @@
     recordingInput = input;
     input.classList.add('recording');
     input.value = 'Press keys...';
+    A11y.announce('Press the new shortcut, or Escape to cancel');
 
     function onKeyDown(e) {
+      // Tab leaves the field instead of being recorded, so recording can't trap focus.
+      if (e.key === 'Tab') {
+        input.classList.remove('recording');
+        input.value = formatBinding(input.dataset.binding);
+        recordingInput = null;
+        document.removeEventListener('keydown', onKeyDown, true);
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
 
@@ -228,6 +244,7 @@
       var binding = parts.join('+');
       input.dataset.binding = binding;
       input.value = formatBinding(binding);
+      A11y.announce('Shortcut set to ' + input.value);
       input.classList.remove('recording');
       recordingInput = null;
       document.removeEventListener('keydown', onKeyDown, true);
@@ -307,6 +324,7 @@
 
   function showStatus(msg) {
     statusMsg.textContent = msg;
+    A11y.announce(msg);
     statusMsg.classList.add('visible');
     setTimeout(function () { statusMsg.classList.remove('visible'); }, 1500);
   }
@@ -724,6 +742,7 @@
       if (p.value) btn.style.background = p.value;
       if (p.value) btn.dataset.value = p.value;
       btn.title = p.name;
+      btn.setAttribute('aria-label', p.name);
       btn.addEventListener('click', function () {
         current = p.value;
         markSelected();
@@ -733,6 +752,8 @@
       });
       container.appendChild(btn);
     });
+
+    A11y.radios(container, { itemSelector: '.window-color-swatch', label: 'Window color', orientation: 'both' });
 
     window.klaus.ui.prefsGetWindowColor().then(function (color) {
       current = color || null;

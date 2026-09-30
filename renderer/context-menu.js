@@ -79,7 +79,10 @@ window.ContextMenu = (function () {
         remove();
         entry.action();
       });
-      item.addEventListener('mouseenter', function () { item.focus({ preventScroll: true }); });
+      // Not mouseenter: that fires when a keyboard-opened menu appears under a resting cursor.
+      item.addEventListener('mousemove', function () {
+        if (document.activeElement !== item) item.focus({ preventScroll: true });
+      });
       menu.appendChild(item);
     });
 

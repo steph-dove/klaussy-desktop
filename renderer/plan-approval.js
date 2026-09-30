@@ -87,19 +87,7 @@ window.PlanApproval = (function () {
       handleResponse(false);
     });
 
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) {
-        handleResponse(false);
-      }
-    });
-
-    document.addEventListener('keydown', function (e) {
-      if (overlay.style.display === 'none') return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        handleResponse(false);
-      }
-    });
+    // No backdrop or Escape handler: rejecting can't be undone, so it needs an explicit Reject.
   }
 
   // Register main process listener if task IPC is available

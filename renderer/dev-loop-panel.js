@@ -611,6 +611,7 @@ window.DevLoopPanel = (function () {
 
   function init() {
     containerEl = document.getElementById('devloop-tab-content');
+    A11y.arrowNav(containerEl, '.devloop-subtab', { orientation: 'horizontal' });
     syncTabVisibility(Boolean(getState(activeTaskId())));
 
     window.addEventListener('load-devloop', function () {
@@ -723,10 +724,10 @@ window.DevLoopPanel = (function () {
     var qaCount = cachedQaMedia.length;
 
     html +=
-      '<div class="devloop-subnav">' +
-        '<button type="button" class="devloop-subtab ' + (currentSubTab === 'progress' ? 'active' : '') + '" data-sub="progress">📊 Progress (' + state.currentPhase + '/9)</button>' +
-        '<button type="button" class="devloop-subtab ' + (currentSubTab === 'design' ? 'active' : '') + '" data-sub="design">📐 Designs &amp; Plan <span class="devloop-badge">' + docCount + '</span></button>' +
-        '<button type="button" class="devloop-subtab ' + (currentSubTab === 'qa' ? 'active' : '') + '" data-sub="qa">🎥 QA Screenshots <span class="devloop-badge">' + qaCount + '</span></button>' +
+      '<div class="devloop-subnav" role="tablist" aria-label="Dev loop views">' +
+        subTab('progress', '📊', 'Progress (' + state.currentPhase + '/9)') +
+        subTab('design', '📐', 'Designs &amp; Plan <span class="devloop-badge">' + docCount + '</span>') +
+        subTab('qa', '🎥', 'QA Screenshots <span class="devloop-badge">' + qaCount + '</span>') +
       '</div>';
 
     html += '<div class="devloop-body">';
@@ -741,6 +742,17 @@ window.DevLoopPanel = (function () {
 
     html += '</div>';
 
+    // Re-rendered on every tab click, poll and event, so keep keyboard focus.
+    A11y.preserveFocus(containerEl, function () { paintView(html, state, taskId); });
+  }
+
+  function subTab(key, icon, labelHtml) {
+    var on = currentSubTab === key;
+    return '<button type="button" role="tab" aria-selected="' + on + '" class="devloop-subtab ' + (on ? 'active' : '') + '" data-sub="' + key + '">'
+      + '<span aria-hidden="true">' + icon + '</span> ' + labelHtml + '</button>';
+  }
+
+  function paintView(html, state, taskId) {
     containerEl.innerHTML = html;
 
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {

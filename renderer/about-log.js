@@ -635,6 +635,7 @@ window.Dialogs = (function () {
           loadSkillPreview(previewPane, row.dataset.path, row.dataset.name, row.dataset.insert);
         });
       });
+      wireSelectableRows(listPane);
       // Selection priority: an explicit autoSelectPath (e.g. just-created
       // file) → otherwise first row.
       var target = autoSelectPath
@@ -669,13 +670,13 @@ window.Dialogs = (function () {
           + '<div class="skills-preview-title">New skill or command</div>'
         + '</div>'
         + '<div class="skills-create-form">'
-          + '<label class="skills-create-row">'
+          + '<div class="skills-create-row">'
             + '<span>Type</span>'
             + '<div class="skills-create-toggle">'
               + '<button type="button" data-type="skill" class="active">Skill</button>'
               + '<button type="button" data-type="command">Slash command</button>'
             + '</div>'
-          + '</label>'
+          + '</div>'
           + '<label class="skills-create-row">'
             + '<span>Scope</span>'
             + '<select class="skills-create-scope">' + scopeOpts + '</select>'
@@ -685,7 +686,7 @@ window.Dialogs = (function () {
             + '<input type="text" class="skills-create-name" placeholder="my-skill" autocomplete="off" spellcheck="false" />'
           + '</label>'
           + '<div class="skills-create-hint">Letters, numbers, dashes, underscores.</div>'
-          + '<div class="skills-create-error" hidden></div>'
+          + '<div class="skills-create-error" role="alert" hidden></div>'
           + '<div class="skills-create-actions">'
             + '<button type="button" class="skills-create-cancel">Cancel</button>'
             + '<button type="button" class="skills-create-go">Create</button>'
@@ -693,6 +694,7 @@ window.Dialogs = (function () {
         + '</div>';
 
       var typeBtns = pane.querySelectorAll('.skills-create-toggle button');
+      A11y.radios(pane.querySelector('.skills-create-toggle'), { itemSelector: 'button', label: 'Type' });
       var nameInput = pane.querySelector('.skills-create-name');
       var scopeSel = pane.querySelector('.skills-create-scope');
       var goBtn = pane.querySelector('.skills-create-go');
@@ -822,6 +824,25 @@ window.Dialogs = (function () {
         });
       });
     });
+  }
+
+  // Skills and Memory rows are pick-one lists, so the picked row is marked current.
+  function wireSelectableRows(pane) {
+    pane.querySelectorAll('.skills-section-head').forEach(function (h) {
+      h.setAttribute('role', 'heading');
+      h.setAttribute('aria-level', '3');
+    });
+    pane.querySelectorAll('.skills-row:not(.mcp-row)').forEach(function (row) {
+      A11y.makeButton(row);
+      row.addEventListener('click', function () {
+        pane.querySelectorAll('.skills-row[aria-current]').forEach(function (r) { r.removeAttribute('aria-current'); });
+        row.setAttribute('aria-current', 'true');
+      });
+    });
+    if (!pane.dataset.arrowNav) {
+      pane.dataset.arrowNav = '1';
+      A11y.arrowNav(pane, '.skills-row[role="button"]');
+    }
   }
 
   function renderSkillRow(s) {
@@ -1329,6 +1350,7 @@ window.Dialogs = (function () {
             }
           });
         });
+        wireSelectableRows(listPane);
         var target = targetPath
           ? listPane.querySelector('.skills-row[data-path="' + cssEscape(targetPath) + '"]')
           : listPane.querySelector('.skills-row');
@@ -1729,7 +1751,9 @@ window.Dialogs = (function () {
       return f;
 
       function row(label, control) {
-        return '<div class="mcp-field"><label>' + escHtml(label) + '</label><div class="mcp-control">' + control + '</div></div>';
+        var idMatch = control.match(/\bid="([^"]+)"/);
+        var forAttr = idMatch ? ' for="' + idMatch[1] + '"' : '';
+        return '<div class="mcp-field"><label' + forAttr + '>' + escHtml(label) + '</label><div class="mcp-control">' + control + '</div></div>';
       }
       function opt(val, label, cur) {
         return '<option value="' + val + '"' + (cur === val ? ' selected' : '') + '>' + escHtml(label) + '</option>';
@@ -1776,7 +1800,7 @@ window.Dialogs = (function () {
         }
         return '<div class="mcp-field"><label>' + escHtml(e.label || e.key) + (required ? ' *' : '') + '</label>'
           + '<div class="mcp-control">'
-          + '<input class="skills-create-name mcp-in mcp-env-fixed" type="text" autocomplete="off" data-env-key="' + escHtml(e.key) + '"' + (required ? ' data-required="1"' : '') + ' spellcheck="false" placeholder="' + escHtml(e.placeholder || '') + '">'
+          + '<input class="skills-create-name mcp-in mcp-env-fixed" type="text" autocomplete="off" aria-label="' + escHtml(e.label || e.key) + '" data-env-key="' + escHtml(e.key) + '"' + (required ? ' data-required="1"' : '') + ' spellcheck="false" placeholder="' + escHtml(e.placeholder || '') + '">'
           + '<span class="mcp-env-keyname">' + escHtml(e.key) + '</span></div></div>';
       }
     }
@@ -1978,8 +2002,10 @@ window.Dialogs = (function () {
           + '</div>';
         }).join('') + '</div>';
       pane.querySelectorAll('.skills-row').forEach(function (row) {
+        A11y.makeButton(row);
         row.addEventListener('click', function () { window.klaus.skills.openFile(row.dataset.path); });
       });
+      A11y.arrowNav(pane, '.skills-row');
     });
   }
 
