@@ -21,8 +21,8 @@
   A11y.radios(document.querySelector('.shell-options'), {
     itemSelector: '.shell-option', label: 'Run', orientation: 'both',
     onMove: function (btn) {
-      App.selectedMode = btn.dataset.shell;
-      App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
+      window.App.selectedMode = btn.dataset.shell;
+      window.App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
     },
   });
 
