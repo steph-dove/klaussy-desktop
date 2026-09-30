@@ -86,7 +86,7 @@
   font-weight: 600;
   font-family: inherit;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
   border-radius: 6px;
   cursor: pointer;
@@ -129,7 +129,7 @@
 
 .pr-open-review-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .pr-open-review-btn:disabled {
@@ -559,7 +559,7 @@
 
 .pr-access-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* CI checks (F2) */
@@ -922,7 +922,7 @@
 
 #btn-pr-comment:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 #btn-pr-approve {
@@ -1064,7 +1064,7 @@
 
 .pr-reply-ask-claude:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -1089,7 +1089,7 @@
 
 .pr-reply-send:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .pr-reply-send:disabled {
@@ -1325,7 +1325,7 @@
 .pr-ai-discard-btn:hover,
 .pr-ai-fix-all-header-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .pr-ai-fix-all-btn:disabled,
@@ -1339,7 +1339,7 @@
 
 .pr-ai-fix-all-header-btn {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-weight: 600;
   margin-right: 4px;
 }
