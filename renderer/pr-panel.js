@@ -51,10 +51,12 @@ window.PRPanel = (function () {
       }
       // Expand a resolved thread when its header is clicked (but ignore button clicks).
       var header = e.target.closest('.pr-thread-header');
-      if (header && !e.target.closest('button')) {
+      if (header && (!e.target.closest('button') || e.target.closest('.pr-thread-expand'))) {
         var thread = header.closest('.pr-thread');
         if (thread && thread.classList.contains('pr-thread-resolved')) {
-          thread.classList.toggle('pr-thread-expanded');
+          var expanded = thread.classList.toggle('pr-thread-expanded');
+          var expandBtn = header.querySelector('.pr-thread-expand');
+          if (expandBtn) expandBtn.setAttribute('aria-expanded', String(expanded));
         }
         return;
       }
@@ -457,7 +459,7 @@ window.PRPanel = (function () {
     html += '<div class="pr-reply-ai-result" id="' + rid + '-ai" style="display:none;"></div>';
     // Reply input row
     html += '<div class="pr-reply-input-row">';
-    html += '<textarea class="pr-reply-input" id="' + rid + '-input" placeholder="Write a reply..." rows="1"></textarea>';
+    html += '<textarea class="pr-reply-input" aria-label="Reply" id="' + rid + '-input" placeholder="Write a reply..." rows="1"></textarea>';
     html += '<button class="pr-reply-ask-claude" data-rid="' + rid + '"';
     html += ' data-author="' + escAttr(opts.author) + '"';
     html += ' data-body="' + escAttr(opts.body) + '"';
@@ -592,7 +594,9 @@ window.PRPanel = (function () {
 
       // Thread header: path:line + state badges + resolve toggle
       html += '<div class="pr-thread-header">';
-      html += '<span class="pr-thread-path">' + escHtml(pathLabel) + '</span>';
+      html += t.isResolved
+        ? '<button type="button" class="pr-thread-path pr-thread-expand" aria-expanded="false">' + escHtml(pathLabel) + '</button>'
+        : '<span class="pr-thread-path">' + escHtml(pathLabel) + '</span>';
       html += '<span class="pr-thread-meta">';
       if (t.isOutdated) html += '<span class="pr-thread-badge outdated">outdated</span>';
       if (t.isResolved) {
@@ -1136,6 +1140,7 @@ window.PRPanel = (function () {
       if (btn.disabled) return;
       menu.hidden = !menu.hidden;
     });
+    A11y.dropdownMenu(btn, menu, 'button[data-strategy]');
 
     menu.addEventListener('click', function (e) {
       var target = e.target.closest('button[data-strategy]');

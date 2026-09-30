@@ -54,9 +54,14 @@ window.A11y = (function () {
   }
 
   let idSeq = 0;
+  // The `a11y-` prefix lets focus keys skip generated ids, which change on every re-render.
   function ensureId(el, prefix) {
-    if (!el.id) el.id = (prefix || 'a11y') + '-' + (++idSeq);
+    if (!el.id) el.id = 'a11y-' + (prefix || 'id').replace(/^a11y-/, '') + '-' + (++idSeq);
     return el.id;
+  }
+
+  function stableId(node) {
+    return node.id && !node.id.startsWith('a11y-') ? node.id : '';
   }
 
   function labelDialog(dialog) {
@@ -441,10 +446,15 @@ window.A11y = (function () {
       }
       if (!target) return;
       target.tabIndex = -1;
-      if (opts.describe) target.setAttribute('aria-label', opts.describe(target));
       target.focus();
       target.scrollIntoView({ block: 'nearest' });
     }
+    // Labelled on focus so a line refocused after a re-render is still announced.
+    container.addEventListener('focusin', function (e) {
+      if (opts.describe && e.target !== container && e.target.matches(opts.lineSelector)) {
+        e.target.setAttribute('aria-label', opts.describe(e.target));
+      }
+    });
     container.addEventListener('keydown', function (e) {
       const from = e.target;
       if (from !== container && !(from.matches && from.matches(opts.lineSelector))) return;
@@ -477,13 +487,81 @@ window.A11y = (function () {
     }
     new MutationObserver(sync).observe(menu, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
     arrowNav(menu, itemSelector);
+    // Close via the trigger's own toggle so the caller's open/closed bookkeeping stays consistent.
     menu.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' && e.key !== 'Tab') return;
       e.preventDefault();
       e.stopPropagation();
-      menu.style.display = 'none';
+      if (isShown(menu)) trigger.click();
       trigger.focus();
     });
+  }
+
+  const VOLATILE_CLASS = /^(active|selected|open|visible|expanded|collapsed|loading|disabled|hidden|focused|dirty|on|is-.+|has-.+)$/;
+
+  function keyOf(node, isTarget) {
+    if (stableId(node)) return '#' + CSS.escape(node.id);
+    let sel = '';
+    for (const a of node.attributes) {
+      if (a.name.startsWith('data-')) sel += '[' + a.name + '="' + CSS.escape(a.value) + '"]';
+    }
+    if (isTarget) {
+      const cls = Array.from(node.classList).find(function (c) { return !VOLATILE_CLASS.test(c); });
+      if (cls) sel = '.' + CSS.escape(cls) + sel;
+      sel = node.tagName.toLowerCase() + sel;
+    }
+    return sel;
+  }
+
+  function captureFocusKey(host) {
+    const el = document.activeElement;
+    if (!el || el === host || !host.contains(el)) return null;
+    const parts = [];
+    for (let node = el; node && node !== host; node = node.parentElement) {
+      const sel = keyOf(node, node === el);
+      if (sel) parts.unshift(sel);
+      if (stableId(node)) break;
+    }
+    const selector = parts.join(' ');
+    return {
+      selector: selector,
+      index: Array.prototype.indexOf.call(host.querySelectorAll(selector), el),
+      caret: typeof el.selectionStart === 'number' ? [el.selectionStart, el.selectionEnd] : null,
+    };
+  }
+
+  // Skipped when the render already moved focus on purpose (e.g. opened a composer).
+  function restoreFocusKey(host, key) {
+    if (!key) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const matches = host.querySelectorAll(key.selector);
+    const target = matches[key.index] || matches[0];
+    if (!target) return;
+    if (!target.hasAttribute('tabindex') && target.tabIndex < 0) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    if (key.caret && typeof target.setSelectionRange === 'function') {
+      try { target.setSelectionRange(key.caret[0], key.caret[1]); } catch {}
+    }
+  }
+
+  function preserveFocus(host, fn) {
+    const key = captureFocusKey(host);
+    const result = fn();
+    restoreFocusKey(host, key);
+    return result;
+  }
+
+  function describeDiffLine(line) {
+    const code = (line.querySelector('.diff-code, .diff-hunk-text') || line).textContent;
+    if (line.classList.contains('diff-hunk')) {
+      const hunks = Array.from((line.closest('pre') || line.parentElement).querySelectorAll('.diff-line.diff-hunk'));
+      return 'Hunk ' + (hunks.indexOf(line) + 1) + ' of ' + hunks.length + ': ' + code;
+    }
+    if (line.classList.contains('diff-add')) return 'Added line ' + line.dataset.newLn + ': ' + code;
+    if (line.classList.contains('diff-del')) return 'Removed line ' + line.dataset.oldLn + ': ' + code;
+    if (line.dataset.newLn) return 'Line ' + line.dataset.newLn + ': ' + code;
+    return code;
   }
 
   function makeButton(el, label) {
@@ -571,7 +649,9 @@ window.A11y = (function () {
     popupList: popupList,
     splitter: splitter,
     lineNav: lineNav,
+    describeDiffLine: describeDiffLine,
     dropdownMenu: dropdownMenu,
+    preserveFocus: preserveFocus,
     tabs: tabs,
     radios: radios,
     tabbables: tabbables,

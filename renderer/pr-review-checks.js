@@ -39,7 +39,10 @@
     // nothing's changed.
     if (!force && sig === PR.lastChecksSignature && slot.firstChild) return;
     PR.lastChecksSignature = sig;
+    A11y.preserveFocus(slot, function () { rebuildChecksSlot(slot); });
+  };
 
+  function rebuildChecksSlot(slot) {
     // Detach any live Fix panels so we can re-attach them after the wipe.
     // Detached DOM keeps its event listeners and IPC subscriptions alive,
     // so the stream keeps flowing into the same panel without restart.
@@ -60,7 +63,7 @@
       var row = btn.closest('.pr-check-row');
       if (row) row.insertAdjacentElement('afterend', p);
     });
-  };
+  }
 
   // Periodic refresh while Checks is the active tab. Idempotent — calling
   // start while already running just resets the interval. Stops on tab
@@ -106,15 +109,15 @@
     var backdrop = document.createElement('div');
     backdrop.className = 'pr-workflow-dispatch-modal-backdrop';
     backdrop.innerHTML = '<div class="pr-workflow-dispatch-modal">'
-        + '<div class="pr-workflow-dispatch-head">Dispatch workflow</div>'
+        + '<h2 class="pr-workflow-dispatch-head">Dispatch workflow</h2>'
         + '<div class="pr-workflow-dispatch-body">'
-          + '<label>Workflow</label>'
-          + '<select class="pr-workflow-select"><option value="">Loading…</option></select>'
-          + '<label>Ref (branch or tag)</label>'
-          + '<input class="pr-workflow-ref" type="text" value="' + PR.escHtml(defaultRef) + '" />'
-          + '<label>Inputs (JSON object, optional)</label>'
-          + '<textarea class="pr-workflow-inputs" placeholder=\'{"environment": "staging"}\'></textarea>'
-          + '<div class="pr-workflow-dispatch-error" hidden></div>'
+          + '<label for="pr-workflow-select">Workflow</label>'
+          + '<select class="pr-workflow-select" id="pr-workflow-select"><option value="">Loading…</option></select>'
+          + '<label for="pr-workflow-ref">Ref (branch or tag)</label>'
+          + '<input class="pr-workflow-ref" id="pr-workflow-ref" type="text" value="' + PR.escHtml(defaultRef) + '" />'
+          + '<label for="pr-workflow-inputs">Inputs (JSON object, optional)</label>'
+          + '<textarea class="pr-workflow-inputs" id="pr-workflow-inputs" placeholder=\'{"environment": "staging"}\'></textarea>'
+          + '<div class="pr-workflow-dispatch-error" role="alert" hidden></div>'
         + '</div>'
         + '<div class="pr-workflow-dispatch-actions">'
           + '<button type="button" class="pr-workflow-dispatch-cancel" data-dialog-close>Cancel</button>'
@@ -287,10 +290,16 @@
     Object.keys(PR.openAnnotations).forEach(function (checkId) {
       var row = PR.hostEl.querySelector('.pr-check-row[data-check-id="' + checkId + '"]');
       if (!row) return; // row no longer in the rendered set (e.g., check passed after rerun)
-      row.classList.add('expanded');
+      setAnnotationsExpanded(row, true);
       PR.mountAnnotationsPanel(row, checkId);
     });
   };
+
+  function setAnnotationsExpanded(row, open) {
+    row.classList.toggle('expanded', open);
+    var toggle = row.querySelector('.pr-check-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', String(open));
+  }
 
   // Toggle the annotations panel for a failing check's row. Accepts the row
   // itself (row-click) or any element inside it. Fetches lazily on first
@@ -303,13 +312,13 @@
     if (!checkId) return;
     if (PR.openAnnotations[checkId]) {
       delete PR.openAnnotations[checkId];
-      row.classList.remove('expanded');
+      setAnnotationsExpanded(row, false);
       var existing = PR.hostEl.querySelector('.pr-check-annotations-panel[data-check-id="' + checkId + '"]');
       if (existing) existing.remove();
       return;
     }
     PR.openAnnotations[checkId] = { data: null, error: null };
-    row.classList.add('expanded');
+    setAnnotationsExpanded(row, true);
     PR.mountAnnotationsPanel(row, checkId);
     PR.fetchAnnotations(checkId);
   };
@@ -360,7 +369,7 @@
         chatEl.innerHTML =
           '<div class="pr-check-debug-chat-log"></div>'
           + '<form class="pr-check-debug-chat-composer">'
-            + '<textarea class="pr-check-debug-chat-input" rows="2" placeholder="Ask the agent about this analysis…"></textarea>'
+            + '<textarea class="pr-check-debug-chat-input" aria-label="Ask about this failure" rows="2" placeholder="Ask the agent about this analysis…"></textarea>'
             + '<button class="pr-check-debug-chat-send" type="submit">Send</button>'
           + '</form>';
         // Insert before the footer if it exists, otherwise at the end.
@@ -1039,13 +1048,26 @@
       }
       counts[b] = (counts[b] || 0) + 1;
     });
+    var PILLS = [
+      ['pass', '\u2713', 'passing'], ['fail', '\u2717', 'failing'], ['pending', '\u25CB', 'pending'],
+      ['cancel', '\u2296', 'cancelled'], ['skipping', '\u2298', 'skipped'],
+    ];
     var bits = [];
-    if (counts.pass)     bits.push('<span class="pr-check-pill pass" title="Passing">\u2713 ' + counts.pass + '</span>');
-    if (counts.fail)     bits.push('<span class="pr-check-pill fail" title="Failing">\u2717 ' + counts.fail + '</span>');
-    if (counts.pending)  bits.push('<span class="pr-check-pill pending" title="Pending">\u25CB ' + counts.pending + '</span>');
-    if (counts.cancel)   bits.push('<span class="pr-check-pill cancel" title="Cancelled">\u2296 ' + counts.cancel + '</span>');
-    if (counts.skipping) bits.push('<span class="pr-check-pill skipping" title="Skipped">\u2298 ' + counts.skipping + '</span>');
+    var words = [];
+    PILLS.forEach(function (p) {
+      var n = counts[p[0]];
+      if (!n) return;
+      words.push(n + ' ' + p[2]);
+      bits.push('<span class="pr-check-pill ' + p[0] + '" title="' + p[2] + '"><span aria-hidden="true">' + p[1] + '</span> ' + n + '<span class="sr-only"> ' + p[2] + '</span></span>');
+    });
     slot.innerHTML = bits.join(' ');
+    // Announce only a change on the same PR, not the first paint or a PR switch.
+    var summary = PR.lastState && PR.lastState.number + ':' + words.join(', ');
+    if (PR.lastChecksSummary && summary !== PR.lastChecksSummary
+        && PR.lastChecksSummary.split(':')[0] === summary.split(':')[0]) {
+      A11y.announce('Checks: ' + words.join(', '));
+    }
+    PR.lastChecksSummary = summary;
   };
 
   PR.renderMergeControl = function(state) {
@@ -1054,7 +1076,7 @@
     var openState = (meta.state || '').toUpperCase() === 'OPEN';
     if (!openState) return '';
     return '<span class="pr-merge-wrap">'
-      + '<button class="pr-review-btn pr-merge-btn" type="button" disabled title="Checking mergeability\u2026">Merge \u25BE</button>'
+      + '<button class="pr-review-btn pr-merge-btn" type="button" disabled title="Checking mergeability\u2026">Merge <span aria-hidden="true">\u25BE</span></button>'
       + '<div class="pr-merge-menu" hidden>'
         + '<button type="button" data-strategy="merge">Create a merge commit</button>'
         + '<button type="button" data-strategy="squash">Squash and merge</button>'
@@ -1076,6 +1098,7 @@
       if (btn.disabled) return;
       menu.hidden = !menu.hidden;
     });
+    A11y.dropdownMenu(btn, menu, '[data-strategy]');
 
     menu.addEventListener('click', async function (e) {
       var target = e.target.closest('[data-strategy]');
@@ -1089,7 +1112,7 @@
       var result = await window.klaus.pr.reviewMerge(strategy);
       if (result && result.error) {
         window.toast.error('Merge failed:\n' + result.error);
-        btn.textContent = 'Merge \u25BE';
+        btn.innerHTML = 'Merge <span aria-hidden="true">\u25BE</span>';
         PR.updateMergeGate(wrap, PR.lastState);
         return;
       }
@@ -1097,13 +1120,14 @@
       // re-renders the header with the updated state pill.
     });
 
-    // Click-outside dismiss.
-    document.addEventListener('click', function onDoc(ev) {
-      if (!wrap.contains(ev.target)) {
-        menu.hidden = true;
-      }
-    });
   };
+
+  // Bound once at load; binding it in bindMergeControl would add a listener per render.
+  document.addEventListener('click', function (ev) {
+    var wrap = PR.hostEl && PR.hostEl.querySelector('.pr-merge-wrap');
+    var menu = wrap && wrap.querySelector('.pr-merge-menu');
+    if (menu && !wrap.contains(ev.target)) menu.hidden = true;
+  });
 
   PR.updateMergeGate = function(wrap, state) {
     var btn = wrap.querySelector('.pr-merge-btn');
