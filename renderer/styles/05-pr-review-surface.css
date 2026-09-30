@@ -7438,6 +7438,13 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--input-bg);
   white-space: nowrap;
 }
+button.pr-term-view {
+  font-family: inherit;
+  cursor: pointer;
+}
+.pr-term-view.active {
+  box-shadow: 0 0 0 2px var(--accent);
+}
 .pr-term-chip-chat.running {
   color: var(--success);
   border-color: rgba(63, 185, 80, 0.4);

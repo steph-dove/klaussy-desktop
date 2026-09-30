@@ -177,21 +177,18 @@ window.PrReview = window.PrReview || {};
 
   // PTY-backed Implement flow. Only one run can be in flight at a time
   // (matches the existing implementAllId guard). The xterm lives in
-  // reviewTerminal (below), separate from implRun, so multiple successive
+  // implTerminal (below), separate from implRun, so multiple successive
   // runs append to the same scrollback instead of disposing/recreating.
   //
   // Shape when active: see startImplementRun.
   PR.implRun = null;
 
-  // The Terminal-tab xterm. Persists across implement runs so a "Rerun"
-  // (or a fresh Implement after a previous run finished) appends a new
-  // banner + output to the same scrollback. Disposed only on explicit
-  // user dismissal (Hide terminal), PR navigation, or unmount.
-  //
+  // One xterm per PTY: when chat and implement shared one, each TUI repainted over the other's output.
   // Shape when present: { terminal, fitAddon, hasContent }
-  //   - hasContent flips true once the first byte has been written, so we
-  //     can suppress the leading separator on the first-ever run.
-  PR.reviewTerminal = null;
+  PR.chatTerminal = null;
+  PR.implTerminal = null;
+  // Which xterm the Terminal tab shows: 'chat' or 'impl'.
+  PR.terminalView = 'chat';
 
   // The persistent PR-aware chat session that backs the Terminal tab. The
   // default agent runs in the PR's worktree, seeded once with the PR context,

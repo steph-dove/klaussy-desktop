@@ -105,10 +105,8 @@
     var requestId = (opts.mode === 'all' ? 'impla-' : 'impl-')
       + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 
-    // Reuse the persistent xterm. If it doesn't exist yet, create it now
-    // (and the first mount in mountImplementTerminalIfActive will call
-    // terminal.open against the Terminal-tab host).
-    var rt = PR.ensureReviewTerminal();
+    var rt = PR.ensureImplTerminal();
+    PR.terminalView = 'impl';
 
     // Banner so successive runs are scannable in scrollback.
     var bodyPreview = (opts.body || '').replace(/\s+/g, ' ').trim().slice(0, 80);
@@ -198,30 +196,6 @@
     // (e.g. claude's interactive prompt is hanging after end_turn). Cancel
     // is idempotent — if the PTY already exited it's a no-op.
     try { window.klaus.pr.reviewImplementCancel(PR.implRun.requestId); } catch (_) {}
-    // The chat session's output was suppressed while this run owned the
-    // terminal (subscribeChat drops bytes when implRunIsLive). Now that the run
-    // is done, nudge the chat PTY with a resize so its TUI repaints a fresh
-    // frame at the bottom instead of waiting for the user's next keystroke.
-    PR.nudgeChatRedraw();
-  };
-
-  // Force the chat TUI to repaint by toggling its PTY size (two SIGWINCHes).
-  // Used after an implement run releases the shared terminal. No-op when there's
-  // no live chat session or the terminal tab isn't on screen.
-  PR.nudgeChatRedraw = function() {
-    if (!PR.chatRun || PR.chatRun.status !== 'running' || !PR.chatRun.chatKey) return;
-    if (PR.activeTab !== 'terminal' || !PR.reviewTerminal) return;
-    var t = PR.reviewTerminal.terminal;
-    var cols = t.cols, rows = t.rows;
-    if (!cols || !rows) return;
-    try {
-      window.klaus.pr.reviewTchatResize(PR.chatRun.chatKey, Math.max(2, cols - 1), rows);
-      setTimeout(function () {
-        if (PR.chatRun && PR.chatRun.chatKey) {
-          try { window.klaus.pr.reviewTchatResize(PR.chatRun.chatKey, cols, rows); } catch (_) {}
-        }
-      }, 60);
-    } catch (_) {}
   };
 
   PR.cleanupImplementRun = function() {
@@ -232,14 +206,12 @@
     PR.implRun.unsubData = null;
     PR.implRun.unsubEvent = null;
     PR.implRun.unsubDone = null;
-    // The xterm belongs to reviewTerminal (not implRun) and is reused
-    // across runs — only disposeReviewTerminal touches it.
   };
 
   PR.dismissImplementRun = function() {
     PR.cleanupImplementRun();
     PR.implRun = null;
-    PR.disposeReviewTerminal();
+    PR.disposeImplTerminal();
     PR.repaintForImplRun();
   };
 

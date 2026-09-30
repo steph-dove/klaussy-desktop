@@ -19,14 +19,20 @@
     var chatCls = (PR.chatRun && PR.chatRun.status === 'running') ? 'running'
       : (PR.chatRun && PR.chatRun.status === 'error') ? 'error' : '';
     var dot = (PR.chatRun && PR.chatRun.status === 'running') ? '● ' : '';
-    chips.push('<span class="pr-term-chip pr-term-chip-chat ' + chatCls + '">' + dot + PR.escHtml(chatLabel) + '</span>');
+    // Once an implement run exists, the chips double as the Chat / Implement switch.
+    function chip(view, cls, text) {
+      if (!PR.implRun) return '<span class="pr-term-chip ' + cls + '">' + text + '</span>';
+      var on = PR.terminalView === view;
+      return '<button type="button" class="pr-term-chip pr-term-view ' + cls + (on ? ' active' : '') + '" data-view="' + view + '" aria-pressed="' + on + '">' + text + '</button>';
+    }
+    chips.push(chip('chat', 'pr-term-chip-chat ' + chatCls, dot + PR.escHtml(chatLabel)));
     if (PR.implRun) {
       var implLabel = PR.implRunIsLive() ? 'Implementing…'
         : PR.implRun.status === 'done' ? 'Implement done'
         : PR.implRun.status === 'error' ? 'Implement error'
         : PR.implRun.status === 'cancelled' ? 'Implement cancelled'
         : 'Implement';
-      chips.push('<span class="pr-term-chip pr-term-chip-impl ' + PR.escHtml(PR.implRun.status || '') + '">' + PR.escHtml(implLabel) + '</span>');
+      chips.push(chip('impl', 'pr-term-chip-impl ' + PR.escHtml(PR.implRun.status || ''), PR.escHtml(implLabel)));
     }
     var ctaButtons = '';
     if (PR.implRunIsLive()) {
@@ -44,11 +50,9 @@
     + '</div>';
   };
 
-  // Body of the Terminal tab. Always renders the live terminal host — the tab
-  // is an always-on chat with the default agent (seeded with the PR context),
-  // and implement runs stream into the same xterm, separated by banners. The
-  // chat session itself is started lazily by ensureChatSession when the tab is
-  // shown.
+  // Body of the Terminal tab: an always-on chat with the default agent (seeded
+  // with the PR context), started lazily by ensureChatSession when shown.
+  // Implement runs get their own xterm, reached with the Chat / Implement switch.
   PR.renderTerminalTab = function() {
     return PR.renderTerminalChrome();
   };
@@ -747,7 +751,7 @@
     var rerunBtn = PR.hostEl.querySelector('.pr-ai-rerun');
     if (rerunBtn) rerunBtn.addEventListener('click', function () {
       // Cancel any in-flight implement run so its PTY exits, but KEEP the
-      // persistent reviewTerminal — the user wants new Implement runs to
+      // persistent implTerminal — the user wants new Implement runs to
       // append to the same scrollback, not start fresh in a blank xterm.
       if (PR.implRunIsLive()) PR.cancelImplementRun();
       PR.writeRunSeparator('Review rerun');
@@ -1049,12 +1053,7 @@
     PR.repaintTerminalTab();
   };
 
-  // Lazy-create the persistent Terminal-tab xterm. Returns the existing
-  // instance on subsequent calls so multiple implement runs share the
-  // same scrollback. onData/onResize proxy to the *current* implRun,
-  // looked up at send time — so the reused terminal works across runs.
-  PR.ensureReviewTerminal = function() {
-    if (PR.reviewTerminal) return PR.reviewTerminal;
+  function createTerminal(onData, onResize) {
     var theme = (window.ThemeManager && ThemeManager.getTerminalTheme)
       ? ThemeManager.getTerminalTheme() : undefined;
     var fontSize = (window.AppState && AppState.currentFontSize) || 13;
@@ -1071,29 +1070,36 @@
     });
     var fitAddon = new window.FitAddon.FitAddon();
     terminal.loadAddon(fitAddon);
-    // Always-current proxy: typed input goes to whichever session owns the
-    // terminal right now. A live implement run takes priority; otherwise the
-    // persistent chat session gets the keystrokes. Both share this one xterm.
-    terminal.onData(function (data) {
-      if (PR.implRun && PR.implRunIsLive()) {
-        window.klaus.pr.reviewImplementInput(PR.implRun.requestId, data);
-      } else if (PR.chatRun && PR.chatRun.chatKey && PR.chatRun.status === 'running') {
+    terminal.onData(onData);
+    terminal.onResize(onResize);
+    if (PR.reviewTerminalDark == null) PR.reviewTerminalDark = PR.termBgIsDark(theme && theme.background);
+    return { terminal: terminal, fitAddon: fitAddon, hasContent: false };
+  }
+
+  PR.ensureChatTerminal = function() {
+    if (PR.chatTerminal) return PR.chatTerminal;
+    PR.chatTerminal = createTerminal(function (data) {
+      if (PR.chatRun && PR.chatRun.chatKey && PR.chatRun.status === 'running') {
         window.klaus.pr.reviewTchatInput(PR.chatRun.chatKey, data);
       }
+    }, function (size) {
+      if (PR.chatRun && PR.chatRun.chatKey) window.klaus.pr.reviewTchatResize(PR.chatRun.chatKey, size.cols, size.rows);
     });
-    terminal.onResize(function (size) {
-      // Keep both PTYs sized to the shared xterm so neither wraps oddly when it
-      // next takes focus.
-      if (PR.implRun && PR.implRunIsLive()) {
-        window.klaus.pr.reviewImplementResize(PR.implRun.requestId, size.cols, size.rows);
-      }
-      if (PR.chatRun && PR.chatRun.chatKey) {
-        window.klaus.pr.reviewTchatResize(PR.chatRun.chatKey, size.cols, size.rows);
-      }
+    return PR.chatTerminal;
+  };
+
+  PR.ensureImplTerminal = function() {
+    if (PR.implTerminal) return PR.implTerminal;
+    PR.implTerminal = createTerminal(function (data) {
+      if (PR.implRun && PR.implRunIsLive()) window.klaus.pr.reviewImplementInput(PR.implRun.requestId, data);
+    }, function (size) {
+      if (PR.implRun && PR.implRunIsLive()) window.klaus.pr.reviewImplementResize(PR.implRun.requestId, size.cols, size.rows);
     });
-    PR.reviewTerminal = { terminal: terminal, fitAddon: fitAddon, hasContent: false };
-    PR.reviewTerminalDark = PR.termBgIsDark(theme && theme.background);
-    return PR.reviewTerminal;
+    return PR.implTerminal;
+  };
+
+  PR.visibleTerminal = function() {
+    return (PR.terminalView === 'impl' && PR.implTerminal) ? PR.implTerminal : PR.chatTerminal;
   };
 
   // Relative-luminance check on the terminal background, so we know whether a
@@ -1111,24 +1117,35 @@
   // startup, so when light<->dark actually flips we restart the chat to let it
   // re-render in the new theme (a same-darkness swap just retints the xterm).
   PR.onAppThemeChanged = function() {
-    if (!PR.reviewTerminal || !(window.ThemeManager && ThemeManager.getTerminalTheme)) return;
+    if (!(window.ThemeManager && ThemeManager.getTerminalTheme)) return;
+    if (!PR.chatTerminal && !PR.implTerminal) return;
     var theme = ThemeManager.getTerminalTheme();
     var nowDark = PR.termBgIsDark(theme && theme.background);
     var flipped = PR.reviewTerminalDark != null && PR.reviewTerminalDark !== nowDark;
     PR.reviewTerminalDark = nowDark;
-    try {
-      PR.reviewTerminal.terminal.options.theme = theme;
-      PR.reviewTerminal.terminal.refresh(0, PR.reviewTerminal.terminal.rows - 1);
-    } catch (_) {}
-    if (flipped && PR.activeTab === 'terminal' && PR.ensureChatSession) {
-      PR.ensureChatSession(true); // restart so the CLI re-detects the new background
-    }
+    [PR.chatTerminal, PR.implTerminal].forEach(function (rt) {
+      if (!rt) return;
+      try {
+        rt.terminal.options.theme = theme;
+        rt.terminal.refresh(0, rt.terminal.rows - 1);
+      } catch (_) {}
+    });
+    // Only the chat can restart to re-detect the background; if its tab is hidden, restart on next mount.
+    if (!flipped || !PR.chatRun) return;
+    if (PR.activeTab === 'terminal') PR.ensureChatSession(true);
+    else PR.chatThemeStale = true;
+  };
+
+  PR.disposeImplTerminal = function() {
+    if (PR.implTerminal) { try { PR.implTerminal.terminal.dispose(); } catch (_) {} }
+    PR.implTerminal = null;
+    PR.terminalView = 'chat';
   };
 
   PR.disposeReviewTerminal = function() {
-    if (!PR.reviewTerminal) return;
-    try { PR.reviewTerminal.terminal.dispose(); } catch (_) {}
-    PR.reviewTerminal = null;
+    PR.disposeImplTerminal();
+    if (PR.chatTerminal) { try { PR.chatTerminal.terminal.dispose(); } catch (_) {} }
+    PR.chatTerminal = null;
   };
 
   // Drop this surface's subscription to the chat session. Does NOT kill the
@@ -1151,12 +1168,6 @@
     if (PR.chatRun.unsubExit) { try { PR.chatRun.unsubExit(); } catch (_) {} }
     PR.chatRun.unsubData = window.klaus.pr.onReviewTchatData(chatKey, function (chunk) {
       if (!PR.chatRun || PR.chatRun.chatKey !== chatKey) return;
-      // Only one PTY paints the shared xterm at a time. While an implement run
-      // owns the terminal, drop chat bytes here so the two TUIs don't interleave
-      // and corrupt the display. The bytes stay in main's chat buffer; the chat
-      // TUI redraws a full frame on the user's next keystroke (and on the resize
-      // nudge fired when the implement run finishes), so nothing is lost.
-      if (PR.implRun && PR.implRunIsLive()) return;
       try { rt.terminal.write(chunk); rt.hasContent = true; } catch (_) {}
     });
     PR.chatRun.unsubExit = window.klaus.pr.onReviewTchatExit(chatKey, function () {
@@ -1187,7 +1198,9 @@
     if (PR.chatRun && PR.chatRun.starting) return;
     if (PR.chatRun && PR.chatRun.status === 'running' && !force) return;
     if (PR.chatRun && (PR.chatRun.status === 'error') && !force) return; // don't auto-retry a failed start
-    var rt = PR.ensureReviewTerminal();
+    var rt = PR.ensureChatTerminal();
+    // A fresh session draws a fresh screen; the old one's frame would garble it.
+    if (force) { try { rt.terminal.reset(); } catch (_) {} rt.hasContent = false; }
     if (PR.chatRun) PR.teardownChatRun();
     PR.chatRun = { chatKey: null, worktreePath: null, status: 'starting', starting: true, unsubData: null, unsubExit: null };
     PR.repaintTerminalTab();
@@ -1218,17 +1231,15 @@
 
   // ANSI-bold cyan banner between runs so the scrollback is scannable.
   PR.writeRunSeparator = function(label) {
-    if (!PR.reviewTerminal) return;
-    var prefix = PR.reviewTerminal.hasContent ? '\r\n' : '';
+    var rt = PR.implTerminal;
+    if (!rt) return;
+    var prefix = rt.hasContent ? '\r\n' : '';
     var line = prefix + '\x1b[1;36m── ' + label + ' ──\x1b[0m\r\n';
-    try { PR.reviewTerminal.terminal.write(line); } catch (_) {}
-    PR.reviewTerminal.hasContent = true;
+    try { rt.terminal.write(line); } catch (_) {}
+    rt.hasContent = true;
   };
 
-  // Mount the shared xterm into the Terminal-tab host and make sure the
-  // persistent chat session is running. Creates the xterm on first call (so the
-  // tab is a live terminal even before any implement run), re-parents it on
-  // subsequent repaints, and (re-)binds the chrome buttons.
+  // Mounts the selected xterm; the other stays detached but keeps writing to its own buffer.
   PR.mountImplementTerminalIfActive = function() {
     var host = PR.hostEl && PR.hostEl.querySelector('#pr-implement-terminal-host .pr-implement-terminal-body');
     // No host means the Terminal tab isn't on screen — don't provision a
@@ -1237,14 +1248,23 @@
     // Tab is visible: make sure the persistent chat session is running. This is
     // what makes the terminal "always open with the default agent". Idempotent
     // after the first start.
-    PR.ensureChatSession();
-    var rt = PR.ensureReviewTerminal();
+    if (PR.chatThemeStale && PR.chatRun && PR.chatRun.status === 'running') {
+      PR.chatThemeStale = false;
+      PR.ensureChatSession(true);
+    } else {
+      PR.ensureChatSession();
+    }
+    PR.ensureChatTerminal();
+    var rt = PR.visibleTerminal();
     var term = rt.terminal;
+    Array.prototype.slice.call(host.children).forEach(function (child) {
+      if (child !== term.element) host.removeChild(child);
+    });
     if (term.element && term.element.parentElement === host) {
       // Already mounted here; still rebind buttons below (chrome re-rendered).
     } else if (term.element) {
       host.appendChild(term.element);
-      try { rt.fitAddon.fit(); } catch (_) {}
+      try { rt.fitAddon.fit(); term.refresh(0, term.rows - 1); } catch (_) {}
     } else {
       // First mount — xterm.open creates the element under the host.
       term.open(host);
@@ -1258,6 +1278,15 @@
       if (cancelBtn) cancelBtn.addEventListener('click', PR.cancelImplementRun);
       var restartBtn = hostRow.querySelector('.pr-tchat-restart');
       if (restartBtn) restartBtn.addEventListener('click', function () { PR.ensureChatSession(true); });
+      hostRow.querySelectorAll('.pr-term-view').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          if (PR.terminalView === btn.dataset.view) return;
+          PR.terminalView = btn.dataset.view;
+          PR.repaintTerminalTab();
+          var shown = PR.visibleTerminal();
+          if (shown) shown.terminal.focus();
+        });
+      });
     }
   };
 
@@ -1267,10 +1296,11 @@
   PR.setupImplementFocusRefit = function() {
     if (PR.implFocusRefitHandler) return;
     var refit = function () {
-      if (!PR.reviewTerminal || PR.activeTab !== 'terminal') return;
+      var rt = PR.visibleTerminal();
+      if (!rt || PR.activeTab !== 'terminal') return;
       try {
-        PR.reviewTerminal.fitAddon.fit();
-        PR.reviewTerminal.terminal.refresh(0, PR.reviewTerminal.terminal.rows - 1);
+        rt.fitAddon.fit();
+        rt.terminal.refresh(0, rt.terminal.rows - 1);
       } catch (_) {}
     };
     PR.implFocusRefitHandler = refit;
@@ -1317,7 +1347,8 @@
   PR.attachToExistingRun = function(requestId, snapStatus) {
     if (PR.implRun && PR.implRun.requestId === requestId) return;
     if (PR.implRun) { PR.cleanupImplementRun(); PR.implRun = null; }
-    var rt = PR.ensureReviewTerminal();
+    var rt = PR.ensureImplTerminal();
+    if (snapStatus === 'running') PR.terminalView = 'impl';
     PR.implRun = {
       requestId: requestId,
       mode: requestId.indexOf('impla-') === 0 ? 'all' : 'one',
