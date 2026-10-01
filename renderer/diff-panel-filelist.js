@@ -223,6 +223,7 @@
       return;
     }
     DP.currentRawDiff = result.diff;
+    var focusedLine = focusedDiffLine();
     var diffHtml = DP.diffViewMode === 'split' ? DP.renderDiffSplit(result.diff) : DP.renderDiff(result.diff);
     DP.diffViewEl.innerHTML = DP.renderViewFullFileLink(file) + diffHtml;
     DP.bindViewFullFileLink(file);
@@ -230,7 +231,30 @@
     DP.bindInlineComments(file);
     DP.bindExplainButtons(file);
     DP.bindPartialStaging(file);
+    refocusDiffLine(focusedLine);
   };
+
+  // A refresh replaces every line and drops focus to <body>, so remember the focused line to restore it.
+  function focusedDiffLine() {
+    var el = document.activeElement;
+    if (!el || !DP.diffViewEl.contains(el) || !el.matches('.diff-line')) return null;
+    var attrs = ['data-side', 'data-old-ln', 'data-new-ln']
+      .filter(function (a) { return el.hasAttribute(a); })
+      .map(function (a) { return '[' + a + '="' + el.getAttribute(a) + '"]'; })
+      .join('');
+    var index = Array.prototype.indexOf.call(DP.diffViewEl.querySelectorAll('.diff-line'), el);
+    return { selector: attrs ? '.diff-line' + attrs : null, index: index };
+  }
+
+  function refocusDiffLine(prev) {
+    if (!prev) return;
+    var target = (prev.selector && DP.diffViewEl.querySelector(prev.selector)) ||
+      DP.diffViewEl.querySelectorAll('.diff-line')[prev.index];
+    if (!target) return;
+    target.tabIndex = -1;
+    target.setAttribute('aria-label', DP.describeDiffLine(target));
+    target.focus({ preventScroll: true });
+  }
 
   DP.renderViewFullFileLink = function(file) {
     var unifiedActive = DP.diffViewMode === 'unified' ? ' active' : '';

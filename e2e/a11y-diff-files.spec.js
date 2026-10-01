@@ -55,6 +55,10 @@ test.describe('diff, file tree and editor keyboard access', () => {
     await mainWindow.keyboard.press(process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter');
     await expect(mainWindow.getByRole('button', { name: 'Edit comment: why 3?' })).toBeVisible();
     expect((await focused(mainWindow)).label).toMatch(/^Added line/);
+
+    await mainWindow.evaluate(() => window.DiffPanel.refresh());
+    await expect(mainWindow.getByRole('button', { name: 'Edit comment: why 3?' })).toBeVisible();
+    expect((await focused(mainWindow)).label).toMatch(/^Added line \d+: const b = 3;/);
   });
 
   test('file tree is an ARIA tree and opens files into a tab strip', async ({ mainWindow }) => {
