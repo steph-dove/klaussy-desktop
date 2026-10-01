@@ -252,7 +252,7 @@
       DP.diffViewEl.querySelectorAll('.diff-line')[prev.index];
     if (!target) return;
     target.tabIndex = -1;
-    target.setAttribute('aria-label', DP.describeDiffLine(target));
+    target.setAttribute('aria-label', A11y.describeDiffLine(target));
     target.focus({ preventScroll: true });
   }
 
