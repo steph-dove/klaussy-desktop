@@ -500,7 +500,7 @@
           ? '<button class="pr-ai-cancel pr-review-btn" type="button">Cancel</button>'
           : '')
       + (!PR.aiReview.requestId && unimplementedOpen.length > 1
-          ? '<button class="pr-ai-implement-all pr-review-btn" type="button"' + (PR.aiReview.implementAllId ? ' disabled' : '') + '>'
+          ? '<button class="pr-ai-implement-all pr-review-btn" type="button" title="Apply every open finding, run the tests, then commit and push to the PR branch"' + (PR.aiReview.implementAllId ? ' disabled' : '') + '>'
               + (PR.aiReview.implementAllId ? 'Implementing all\u2026' : 'Implement all (' + unimplementedOpen.length + ')')
             + '</button>'
           : '')
