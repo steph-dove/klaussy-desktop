@@ -866,13 +866,19 @@
       onUsage: function (u) { PR.aiReview.implementAllUsage = u; },
       onTool: function (chip) { PR.aiReview.implementAllProgress.push(chip); },
       onDone: function () {
+        // Marker text must match IMPLEMENT_COMMITTED_MARKER in main/state/review-prompts.js.
+        var summary = (PR.aiReview.implementAllSummary || '').trim();
+        var committed = /<IMPLEMENT_ALL_COMMITTED\/>$/.test(summary);
+        if (committed) summary = summary.slice(0, -'<IMPLEMENT_ALL_COMMITTED/>'.length).trim();
+        PR.aiReview.implementAllSummary = summary;
         pending.forEach(function (f) {
           f.status = 'implemented';
-          f.implementOut = PR.aiReview.implementAllSummary || '';
+          f.implementOut = summary;
           f.implementId = null;
         });
         PR.aiReview.implementAllId = null;
         PR.saveAiReviewCache();
+        if (committed) PR.doPushLocal({});
       },
       onError: function (msg) {
         PR.aiReview.implementAllError = msg;

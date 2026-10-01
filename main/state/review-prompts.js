@@ -689,4 +689,97 @@ function explainPrompt(file, hunk) {
   return `Explain this specific code concisely. What does it do and why might it have been written this way?\n\nFile: ${file}\n\nSelected code:\n\`\`\`\n${hunk}\n\`\`\``;
 }
 
-module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, explainPrompt };
+// Steps 1 and 3 stop a fix for one finding from shipping a regression the next review round flags.
+const IMPLEMENT_BEFORE_EDITING =
+  `1. **Before editing.** For each symbol you will modify (function, class,\n`
+  + `   type, exported constant, IPC channel, config key): grep for every\n`
+  + `   usage in the repo and read the full file at each call site. For each\n`
+  + `   behavior you will change, trace one realistic call path end-to-end\n`
+  + `   and note any caller that depends on the current behavior (return\n`
+  + `   shape, null/empty handling, error propagation, ordering, side\n`
+  + `   effects). If a symbol crosses an IPC/preload boundary, grep the\n`
+  + `   matching channel name in both main and renderer.\n\n`;
+
+function implementWhileEditing(gitRule) {
+  return `2. **While editing.**\n`
+    + `   - Only change what the finding(s) ask for; no unrelated cleanup.\n`
+    + `   - Preserve invariants callers rely on. If a function returns \`null\`\n`
+    + `     on miss and callers gate on \`if (x)\`, don't switch to returning\n`
+    + `     \`{}\` or throwing. If an event fires once, don't make it fire twice.\n`
+    + `   - Match the existing error/null-handling style; don't introduce new\n`
+    + `     failure modes the callers won't catch.\n`
+    + `   - ${gitRule}\n\n`;
+}
+
+const IMPLEMENT_SELF_REVIEW =
+  `3. **After editing — self-review pass (required).** Re-read every call\n`
+  + `   site you found in step 1. For each one, state in one short sentence\n`
+  + `   whether the change is safe for that caller and why. If any caller\n`
+  + `   needs updating, update it in the same change and re-run this pass\n`
+  + `   on the updated caller. If you cannot verify a caller is safe (e.g.\n`
+  + `   the symbol crosses a process boundary, is reflected on, or is\n`
+  + `   consumed by code outside this repo), say so explicitly and stop —\n`
+  + `   surface the uncertainty rather than guess.\n\n`;
+
+// Single-finding only: one comment for a mixed batch wouldn't map to any one finding card.
+const IMPLEMENT_DRAFT_COMMENT =
+  `\n5. **Draft PR comment.** On a new line, output exactly one block\n`
+  + `   delimited by these literal markers:\n\n`
+  + `   <DRAFT_PR_COMMENT>\n`
+  + `   One or two sentences written as a reply the reviewer could post\n`
+  + `   under the finding on GitHub — explain what you fixed and how. Do\n`
+  + `   not repeat the finding verbatim. Plain prose, no code fences, no\n`
+  + `   bullets.\n`
+  + `   </DRAFT_PR_COMMENT>\n`;
+
+// The renderer pushes on seeing the marker, through the authenticated pr-review-push-local path.
+const IMPLEMENT_COMMITTED_MARKER = '<IMPLEMENT_ALL_COMMITTED/>';
+
+const IMPLEMENT_TEST_AND_COMMIT =
+  `4. **Run the tests.** Find the repo's test command (CLAUDE.md, then\n`
+  + `   package.json scripts / Makefile / pyproject) and run the test suite,\n`
+  + `   plus the linter if the repo has one. If something fails because of\n`
+  + `   your change, fix it and re-run until everything passes. If a failure\n`
+  + `   is pre-existing or unrelated to the findings (it fails the same way\n`
+  + `   without your change, or needs a missing secret/service), do not\n`
+  + `   commit: stop and report the failing test and why.\n\n`
+  + `5. **Commit.** Once the tests pass, commit exactly what was tested:\n`
+  + `   \`git add -u\` plus any new files you created (never \`git add -A\`\n`
+  + `   or \`.\`, so untracked files you didn't create stay out). Uncommitted\n`
+  + `   edits that were already in the worktree, usually from earlier\n`
+  + `   Implement runs on this PR, belong in the commit too. Use a short\n`
+  + `   conventional message (\`fix: ...\`) naming the findings it addresses.\n`
+  + `   Do not push; Klaussy pushes to the PR branch after you finish.\n\n`;
+
+function implementSummary(step, extra) {
+  return `${step}. **Summary.** One short bullet per change, prefixed with the file\n`
+    + `   path. Be terse. Then list the self-review notes from step 3 under a\n`
+    + `   "Call-site check:" heading.${extra}\n`;
+}
+
+// mode 'all' carries the batch through tests and a commit; 'one' only edits.
+function buildImplementPrompt({ mode, body, intel } = {}) {
+  let prompt;
+  if (mode === 'all') {
+    prompt = `Apply the following code-review findings to the codebase:\n\n${body}`
+      + `\n\nWorkflow (mandatory):\n\n`
+      + IMPLEMENT_BEFORE_EDITING
+      + implementWhileEditing('Do not install new dependencies.')
+      + IMPLEMENT_SELF_REVIEW
+      + IMPLEMENT_TEST_AND_COMMIT
+      + implementSummary(6, ' Finish with the test result and the commit\n'
+        + `   SHA. Only if the commit succeeded, end with ${IMPLEMENT_COMMITTED_MARKER}\n`
+        + '   on its own line.');
+  } else {
+    prompt = `Apply the following code-review finding to the codebase:\n\n${body}`
+      + `\n\nWorkflow (mandatory):\n\n`
+      + IMPLEMENT_BEFORE_EDITING
+      + implementWhileEditing('Do not run tests, install deps, or commit/push.')
+      + IMPLEMENT_SELF_REVIEW
+      + implementSummary(4, '')
+      + IMPLEMENT_DRAFT_COMMENT;
+  }
+  return prompt + (intel ? '\n' + intel : '');
+}
+
+module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };
