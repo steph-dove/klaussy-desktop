@@ -131,7 +131,7 @@ window.ThemeManager = (function () {
     light: {
       name: 'Light',
       bg: '#ffffff', sidebarBg: '#f5f5f7', border: '#d1d1d6', borderStrong: '#8a8a96',
-      accent: '#5856d6', accentHover: '#6e6cd8',
+      accent: '#5856d6', accentHover: '#5f5dd4',
       text: '#1c1c1e', textMuted: '#65656a', textDim: '#65656a',
       surface: '#f2f2f7', surfaceHover: '#e5e5ea',
       inputBg: '#ffffff', success: '#217e38', error: '#dd0c00',

@@ -258,6 +258,9 @@ select {
 :where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
   border-color: var(--border-strong) !important;
 }
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus {
+  border-color: var(--accent) !important;
+}
 
 input[type="text"]:focus,
 input[type="date"]:focus,
@@ -2848,13 +2851,17 @@ body.task-branchless #ahead-behind {
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
-  display: none;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
   line-height: 1;
 }
 
 .session-group-header:hover .session-group-close,
 .session-group-header:focus-within .session-group-close {
-  display: block;
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-group-close:hover {
@@ -2930,12 +2937,16 @@ body.task-branchless #ahead-behind {
   margin-right: 4px;
   line-height: 1.2;
   transition: all 0.2s;
-  display: none;
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .session-group-header:hover .session-group-resume-btn,
 .session-group-header:focus-within .session-group-resume-btn {
-  display: block;
+  position: static;
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-group-resume-btn:hover {

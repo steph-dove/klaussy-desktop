@@ -20,6 +20,11 @@ function ratio(a, b) {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
+// Mirrors readableOn() in renderer/theme.js, which picks --accent-contrast.
+function readableOn(fill) {
+  return ratio('#ffffff', fill) >= ratio('#0b0b0f', fill) ? '#ffffff' : '#0b0b0f';
+}
+
 // WCAG 2.2 AA: 4.5:1 for text (1.4.3), 3:1 for form-control edges (1.4.11).
 const TEXT_ON_ALL = ['text', 'textMuted', 'textDim'];
 const PANELS = ['bg', 'sidebarBg', 'surface', 'surfaceHover'];
@@ -47,6 +52,11 @@ for (const [name, t] of Object.entries(presets)) {
       const best = Math.max(ratio('#ffffff', t[fill]), ratio('#0b0b0f', t[fill]));
       assert.ok(best >= 4.5, `${fill} ${t[fill]} has no readable text colour (${best.toFixed(2)})`);
     }
+  });
+
+  test(`${name}: accent-contrast text stays readable on accentHover`, () => {
+    const fg = readableOn(t.accent);
+    assert.ok(ratio(fg, t.accentHover) >= 4.5, `${fg} on accentHover ${t.accentHover} is ${ratio(fg, t.accentHover).toFixed(2)}`);
   });
 
   test(`${name}: form-field borders reach 3:1`, () => {

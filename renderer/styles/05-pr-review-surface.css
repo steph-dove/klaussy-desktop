@@ -2107,6 +2107,7 @@ button.pr-check-toggle {
   background: var(--accent);
   border-radius: 8px;
   color: var(--accent-contrast);
+  text-shadow: none;
 }
 
 .pr-conv-head {
@@ -7991,9 +7992,4 @@ button.js-ai-review:hover,
 
 .pr-review-diff-pre .diff-line:focus-visible {
   outline-offset: -2px;
-}
-
-.pr-conv-avatar-ai {
-  color: var(--accent-contrast);
-  text-shadow: none;
 }

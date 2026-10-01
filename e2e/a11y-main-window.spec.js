@@ -24,9 +24,10 @@ test.describe('main window keyboard access', () => {
         ids.push(await openShellTask(mainWindow, dir));
       }
       await expect(mainWindow.locator('#task-list .task-main')).toHaveCount(2);
-      // Opening tasks queues terminal-focus timers; let them land before driving the sidebar.
-      await expect.poll(() => mainWindow.evaluate(() => !!document.activeElement.closest('.xterm'))).toBe(true);
-      await mainWindow.waitForTimeout(300);
+      // Opening tasks queues terminal-focus timers; let the last one land before driving the sidebar.
+      await expect.poll(() => mainWindow.evaluate(
+        (id) => document.activeElement.closest('.terminal-container')?.dataset.id === id, ids[ids.length - 1],
+      )).toBe(true);
     });
 
     test.afterEach(async ({ mainWindow }) => {
