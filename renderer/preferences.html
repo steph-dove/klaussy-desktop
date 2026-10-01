@@ -566,13 +566,13 @@
 
       <div class="field field-full">
         <label for="pref-slack-webhook">Slack webhook URL</label>
-        <input type="text" id="pref-slack-webhook" placeholder="https://hooks.slack.com/services/…" spellcheck="false" autocomplete="off" />
+        <input type="text" id="pref-slack-webhook" aria-describedby="pref-webhook-hint" placeholder="https://hooks.slack.com/services/…" spellcheck="false" autocomplete="off" />
       </div>
       <div class="field field-full">
         <label for="pref-discord-webhook">Discord webhook URL</label>
-        <input type="text" id="pref-discord-webhook" aria-describedby="pref-discord-webhook-hint" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" autocomplete="off" />
+        <input type="text" id="pref-discord-webhook" aria-describedby="pref-webhook-hint" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" autocomplete="off" />
       </div>
-      <div class="field-hint" id="pref-discord-webhook-hint">Anyone who can read this machine's config file can read these URLs, and anyone holding one can post to that channel. Prefer a webhook scoped to a channel you don't mind that for.</div>
+      <div class="field-hint" id="pref-webhook-hint">Anyone who can read this machine's config file can read these URLs, and anyone holding one can post to that channel. Prefer a webhook scoped to a channel you don't mind that for.</div>
 
       <div class="field">
         <label for="pref-notify-completed">Agent finished</label>
@@ -701,6 +701,7 @@
         </thead>
         <tbody id="keybindings-body"></tbody>
       </table>
+      <span id="shortcut-hint" class="sr-only">Press Enter to record a new shortcut</span>
       <div class="field-hint" style="margin-top: 8px;">Click a shortcut to record a new binding. Press Esc to cancel.</div>
     </div>
 

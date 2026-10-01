@@ -1705,24 +1705,24 @@ window.Dialogs = (function () {
       var f = '<div class="skills-section-head">' + (entry.id ? escHtml(entry.name) : 'Custom server') + '</div>';
       f += '<div class="mcp-form">';
       if (entry.note) f += '<div class="mcp-note">' + escHtml(entry.note) + '</div>';
-      f += row('Name', '<input class="skills-create-name mcp-in" id="mcp-name" spellcheck="false" value="' + escHtml(entry.id || '') + '" placeholder="my-server">');
+      f += row('Name', '<input class="skills-create-name mcp-in" id="mcp-name" spellcheck="false" value="' + escHtml(entry.id || '') + '" placeholder="my-server">', 'mcp-name');
       f += row('Transport',
         '<select class="skills-create-scope mcp-in" id="mcp-type">'
           + opt('stdio', 'stdio (local command)', type)
           + opt('http', 'http (remote)', type)
           + opt('sse', 'sse (remote)', type)
-        + '</select>');
+        + '</select>', 'mcp-type');
       // stdio fields
       f += '<div id="mcp-stdio" class="' + (isRemote ? 'mcp-hidden' : '') + '">';
-      f += row('Command', '<input class="skills-create-name mcp-in" id="mcp-command" spellcheck="false" value="' + escHtml(entry.command || '') + '" placeholder="npx">');
-      f += row('Args', '<input class="skills-create-name mcp-in" id="mcp-args" spellcheck="false" value="' + escHtml((entry.args || []).join(' ')) + '" placeholder="-y some-package">');
+      f += row('Command', '<input class="skills-create-name mcp-in" id="mcp-command" spellcheck="false" value="' + escHtml(entry.command || '') + '" placeholder="npx">', 'mcp-command');
+      f += row('Args', '<input class="skills-create-name mcp-in" id="mcp-args" spellcheck="false" value="' + escHtml((entry.args || []).join(' ')) + '" placeholder="-y some-package">', 'mcp-args');
       (entry.requiredArgs || []).forEach(function (a, idx) {
-        f += row(a.label, '<input class="skills-create-name mcp-in mcp-reqarg" data-idx="' + idx + '" spellcheck="false" placeholder="' + escHtml(a.placeholder || '') + '">');
+        f += row(a.label, '<input class="skills-create-name mcp-in mcp-reqarg" id="mcp-reqarg-' + idx + '" data-idx="' + idx + '" spellcheck="false" placeholder="' + escHtml(a.placeholder || '') + '">', 'mcp-reqarg-' + idx);
       });
       f += '</div>';
       // remote field
       f += '<div id="mcp-remote" class="' + (isRemote ? '' : 'mcp-hidden') + '">';
-      f += row('URL', '<input class="skills-create-name mcp-in" id="mcp-url" spellcheck="false" value="' + escHtml(entry.url || '') + '" placeholder="https://mcp.example.com/mcp">');
+      f += row('URL', '<input class="skills-create-name mcp-in" id="mcp-url" spellcheck="false" value="' + escHtml(entry.url || '') + '" placeholder="https://mcp.example.com/mcp">', 'mcp-url');
       f += '</div>';
       // Environment variables \u2014 rendered/refreshed by renderEnvBox() so the
       // shell-profile setup block tracks which vars are included.
@@ -1750,9 +1750,8 @@ window.Dialogs = (function () {
       f += '</div>';
       return f;
 
-      function row(label, control) {
-        var idMatch = control.match(/\bid="([^"]+)"/);
-        var forAttr = idMatch ? ' for="' + idMatch[1] + '"' : '';
+      function row(label, control, id) {
+        var forAttr = id ? ' for="' + id + '"' : '';
         return '<div class="mcp-field"><label' + forAttr + '>' + escHtml(label) + '</label><div class="mcp-control">' + control + '</div></div>';
       }
       function opt(val, label, cur) {

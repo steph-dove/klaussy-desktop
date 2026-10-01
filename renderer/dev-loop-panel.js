@@ -611,7 +611,6 @@ window.DevLoopPanel = (function () {
 
   function init() {
     containerEl = document.getElementById('devloop-tab-content');
-    A11y.arrowNav(containerEl, '.devloop-subtab', { orientation: 'horizontal' });
     syncTabVisibility(Boolean(getState(activeTaskId())));
 
     window.addEventListener('load-devloop', function () {
@@ -724,7 +723,7 @@ window.DevLoopPanel = (function () {
     var qaCount = cachedQaMedia.length;
 
     html +=
-      '<div class="devloop-subnav" role="tablist" aria-label="Dev loop views">' +
+      '<div class="devloop-subnav">' +
         subTab('progress', '📊', 'Progress (' + state.currentPhase + '/9)') +
         subTab('design', '📐', 'Designs &amp; Plan <span class="devloop-badge">' + docCount + '</span>') +
         subTab('qa', '🎥', 'QA Screenshots <span class="devloop-badge">' + qaCount + '</span>') +
@@ -748,12 +747,18 @@ window.DevLoopPanel = (function () {
 
   function subTab(key, icon, labelHtml) {
     var on = currentSubTab === key;
-    return '<button type="button" role="tab" aria-selected="' + on + '" class="devloop-subtab ' + (on ? 'active' : '') + '" data-sub="' + key + '">'
+    return '<button type="button" class="devloop-subtab ' + (on ? 'active' : '') + '" data-sub="' + key + '">'
       + '<span aria-hidden="true">' + icon + '</span> ' + labelHtml + '</button>';
   }
 
   function paintView(html, state, taskId) {
     containerEl.innerHTML = html;
+    var body = containerEl.querySelector('.devloop-body');
+    A11y.tabs(containerEl.querySelector('.devloop-subnav'), {
+      itemSelector: '.devloop-subtab',
+      label: 'Dev loop views',
+      panelFor: function (tab) { return tab.classList.contains('active') ? body : null; },
+    });
 
     containerEl.querySelectorAll('.devloop-subtab').forEach(function (tab) {
       tab.addEventListener('click', function () {

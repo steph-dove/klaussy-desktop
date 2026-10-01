@@ -316,7 +316,7 @@ window.PlanPanel = (function () {
       name.textContent = ph.name;
       var state = document.createElement('span');
       state.className = 'sr-only';
-      state.textContent = ', ' + ph.status.replace(/-/g, ' ');
+      state.textContent = ', ' + ({ done: 'done', inprogress: 'in progress', todo: 'not started' }[ph.status] || ph.status);
       name.title = ph.name;
 
       var count = document.createElement('span');

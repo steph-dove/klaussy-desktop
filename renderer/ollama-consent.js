@@ -62,11 +62,11 @@ window.OllamaConsent = (function () {
 
   // Mark everything up to and including `currentStep` as active/done.
   var STEP_ORDER = ['install', 'server', 'model', 'warmup'];
-  function advanceToStep(currentStep) {
+  function advanceToStep(currentStep, silent) {
     var idx = STEP_ORDER.indexOf(currentStep);
     if (idx === -1) return;
     var stepEl = document.querySelector('.ollama-progress-step[data-step="' + currentStep + '"]');
-    if (stepEl && !stepEl.classList.contains('active')) {
+    if (!silent && stepEl && !stepEl.classList.contains('active')) {
       A11y.announce(stepEl.querySelector('.ollama-progress-label').textContent);
     }
     STEP_ORDER.forEach(function (s, i) {
@@ -106,7 +106,7 @@ window.OllamaConsent = (function () {
     // Subscribe to progress BEFORE starting so we don't drop the first event.
     var unsub = window.klaus.ai.ollama.onSetupProgress(function (p) {
       if (!p) return;
-      if (p.step && p.step !== 'done') advanceToStep(p.step);
+      if (p.step && p.step !== 'done') advanceToStep(p.step, opts.silentProgress);
       if (p.message) progressMsg.textContent = p.message;
       if (typeof p.percent === 'number' && p.step === 'model') {
         setProgress(Math.max(0, Math.min(100, p.percent)));
@@ -114,7 +114,7 @@ window.OllamaConsent = (function () {
       if (p.step === 'done') {
         STEP_ORDER.forEach(function (s) { setStep(s, 'done'); });
         setProgress(100);
-        A11y.announce('Inline AI is ready');
+        if (!opts.silentProgress) A11y.announce('Inline AI is ready');
       }
     });
 

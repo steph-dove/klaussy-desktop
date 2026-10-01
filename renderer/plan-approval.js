@@ -12,6 +12,7 @@ window.PlanApproval = (function () {
     if (!data || !data.requestId) return;
     currentRequestId = data.requestId;
     errorEl.textContent = '';
+    approveBtn.disabled = rejectBtn.disabled = false;
 
     // Set raw plan description
     const plan = data.planContent || data.plan || {};
@@ -64,7 +65,9 @@ window.PlanApproval = (function () {
     rejectBtn.disabled = true;
     try {
       var res = await window.klaus.task.respondPlanApproval(currentRequestId, approved);
-      if (res && res.error) {
+      if (res && res.error === 'Request not found or already handled') {
+        close();
+      } else if (res && res.error) {
         errorEl.textContent = res.error;
         approveBtn.disabled = false;
         rejectBtn.disabled = false;
@@ -95,6 +98,8 @@ window.PlanApproval = (function () {
     window.klaus.task.onPlanApprovalEvent(function (data) {
       if (data && data.type === 'request') {
         open(data);
+      } else if (data && data.type === 'cancelled' && data.requestId === currentRequestId) {
+        close();
       }
     });
   }

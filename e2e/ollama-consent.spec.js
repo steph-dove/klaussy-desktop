@@ -119,6 +119,9 @@ test.describe('enable', () => {
     const status = await mainWindow.evaluate(() => window.klaus.ai.ollama.setupStatus());
     expect(status.consent).toBe('accepted');
 
+    await expect(mainWindow.locator('#ollama-progress-bar-wrap')).toHaveAttribute('aria-valuenow', '100');
+    await expect(mainWindow.locator('.ollama-progress-step .ollama-progress-state')).toHaveText([', done', ', done', ', done', ', done']);
+
     // Modal auto-hides ~500ms after success.
     await expect(overlay).toBeHidden();
   });

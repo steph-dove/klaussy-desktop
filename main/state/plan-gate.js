@@ -25,6 +25,7 @@ function handlePlanApprovalRequest(cwd, planContent, conn) {
         console.log(`[plan-gate] Client disconnected prematurely: ${requestId}`);
         pendingApprovals.delete(requestId);
         resolve({ approved: false });
+        notifyWindows('plan-approval-event', { type: 'cancelled', requestId });
       }
     };
     conn.on('close', cleanup);
