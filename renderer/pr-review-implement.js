@@ -866,10 +866,9 @@
       onUsage: function (u) { PR.aiReview.implementAllUsage = u; },
       onTool: function (chip) { PR.aiReview.implementAllProgress.push(chip); },
       onDone: function () {
-        // Marker text must match IMPLEMENT_COMMITTED_MARKER in main/state/review-prompts.js.
+        // Main pushes on IMPLEMENT_COMMITTED_MARKER (main/state/review-prompts.js); just hide it here.
         var summary = (PR.aiReview.implementAllSummary || '').trim();
-        var committed = /<IMPLEMENT_ALL_COMMITTED\/>$/.test(summary);
-        if (committed) summary = summary.slice(0, -'<IMPLEMENT_ALL_COMMITTED/>'.length).trim();
+        if (/<IMPLEMENT_ALL_COMMITTED\/>$/.test(summary)) summary = summary.slice(0, -'<IMPLEMENT_ALL_COMMITTED/>'.length).trim();
         PR.aiReview.implementAllSummary = summary;
         pending.forEach(function (f) {
           f.status = 'implemented';
@@ -878,7 +877,6 @@
         });
         PR.aiReview.implementAllId = null;
         PR.saveAiReviewCache();
-        if (committed) PR.doPushLocal({});
       },
       onError: function (msg) {
         PR.aiReview.implementAllError = msg;

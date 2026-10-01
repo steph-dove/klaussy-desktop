@@ -732,7 +732,7 @@ const IMPLEMENT_DRAFT_COMMENT =
   + `   bullets.\n`
   + `   </DRAFT_PR_COMMENT>\n`;
 
-// The renderer pushes on seeing the marker, through the authenticated pr-review-push-local path.
+// Main pushes to the PR head when the run's last text ends with this (see pr-review-terminal.js).
 const IMPLEMENT_COMMITTED_MARKER = '<IMPLEMENT_ALL_COMMITTED/>';
 
 const IMPLEMENT_TEST_AND_COMMIT =
@@ -750,6 +750,10 @@ const IMPLEMENT_TEST_AND_COMMIT =
   + `   Implement runs on this PR, belong in the commit too. Use a short\n`
   + `   conventional message (\`fix: ...\`) naming the findings it addresses.\n`
   + `   Do not push; Klaussy pushes to the PR branch after you finish.\n\n`;
+
+function endsWithCommittedMarker(text) {
+  return String(text || '').trim().endsWith(IMPLEMENT_COMMITTED_MARKER);
+}
 
 function implementSummary(step, extra) {
   return `${step}. **Summary.** One short bullet per change, prefixed with the file\n`
@@ -782,4 +786,4 @@ function buildImplementPrompt({ mode, body, intel } = {}) {
   return prompt + (intel ? '\n' + intel : '');
 }
 
-module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };
+module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, endsWithCommittedMarker, explainPrompt };

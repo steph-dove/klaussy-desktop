@@ -319,20 +319,29 @@
     PR.localBusy = 'pushing';
     PR.localBanner = null;
     PR.repaintAiReviewTab();
-    window.klaus.pr.pushLocal(PR.aiReview.worktreePath || null, opts).then(function (r) {
-      PR.localBusy = null;
-      if (r && r.error) {
-        var actions = [];
-        if (r.canStash) actions.push({ id: 'stash', label: 'Stash, pull & retry' });
-        if (r.canResolve) actions.push({ id: 'resolve', label: 'Resolve with agent' });
-        PR.localBanner = { kind: 'error', text: r.error, actions: actions };
-        PR.repaintAiReviewTab();
-      } else {
-        PR.localBanner = { kind: 'ok', text: (r && r.rebased ? 'Integrated the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' };
-        PR.refreshLocalChanges();
-      }
-    });
+    window.klaus.pr.pushLocal(PR.aiReview.worktreePath || null, opts).then(PR.showPushResult);
   };
+
+  PR.showPushResult = function (r) {
+    PR.localBusy = null;
+    if (r && r.error) {
+      var actions = [];
+      if (r.canStash) actions.push({ id: 'stash', label: 'Stash, pull & retry' });
+      if (r.canResolve) actions.push({ id: 'resolve', label: 'Resolve with agent' });
+      PR.localBanner = { kind: 'error', text: r.error, actions: actions };
+      PR.repaintAiReviewTab();
+    } else {
+      PR.localBanner = { kind: 'ok', text: (r && r.rebased ? 'Integrated the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' };
+      PR.refreshLocalChanges();
+    }
+  };
+
+  if (window.klaus && window.klaus.pr && window.klaus.pr.onImplementPushed) {
+    window.klaus.pr.onImplementPushed(function (ev) {
+      if (!ev || !PR.lastState || ev.prNumber !== PR.lastState.number) return;
+      PR.showPushResult(ev.result);
+    });
+  }
 
   // Hand a non-fast-forward / conflict situation to a Claude agent in the
   // worktree. Main spawns/reuses the task, pastes a resolve+commit+push prompt,

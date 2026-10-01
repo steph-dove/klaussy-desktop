@@ -2,7 +2,7 @@ require('../setup');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER } = require('../../main/state/review-prompts');
+const { buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, endsWithCommittedMarker } = require('../../main/state/review-prompts');
 
 test('implement all runs the tests before committing', () => {
   const p = buildImplementPrompt({ mode: 'all', body: '### Finding 1\nfix it' });
@@ -47,4 +47,12 @@ test('single-finding implement still leaves tests and git to the reviewer', () =
 test('repo intel is appended when present', () => {
   const p = buildImplementPrompt({ mode: 'all', body: 'x', intel: 'INTEL BLOCK' });
   assert.ok(p.endsWith('\nINTEL BLOCK'));
+});
+
+test('a push needs the commit marker as the last thing the agent said', () => {
+  assert.equal(endsWithCommittedMarker('Tests pass. Commit abc123.\n' + IMPLEMENT_COMMITTED_MARKER + '\n'), true);
+  assert.equal(endsWithCommittedMarker('Tests failed, so I did not emit ' + IMPLEMENT_COMMITTED_MARKER + '.'), false);
+  assert.equal(endsWithCommittedMarker('`' + IMPLEMENT_COMMITTED_MARKER + '`'), false);
+  assert.equal(endsWithCommittedMarker(''), false);
+  assert.equal(endsWithCommittedMarker(null), false);
 });

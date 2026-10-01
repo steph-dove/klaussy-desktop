@@ -5,10 +5,10 @@
 // claude-stream-ipc.js; required for its ipcMain.handle side effects.
 
 const { ipcMain, BrowserWindow } = require('electron');
-const { prReview, ensureWorktreeForActivePr } = require('../state/pr-review');
+const { prReview, ensureWorktreeForActivePr, pushPrHead } = require('../state/pr-review');
 const { pickProvider, agentForWorktree, repoIntelFor } = require('../state/agent-select');
 const { ensureWorktreeBootstrap } = require('../state/repo-intel');
-const { buildImplementPrompt } = require('../state/review-prompts');
+const { buildImplementPrompt, endsWithCommittedMarker } = require('../state/review-prompts');
 const { getOrAskRepoConsent, applyWorktreePermissions } = require('../util/worktree-permissions');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
@@ -45,6 +45,12 @@ function broadcastToImplementSubs(requestId, channel, payload) {
 // backgrounded implement run wants attention — finished, errored, or paused
 // after a turn while nobody was watching. app.js turns this into a toast so the
 // user knows to reopen the PR.
+function notifyImplementPushed(payload) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) { try { w.webContents.send('pr-implement-pushed', payload); } catch {} }
+  }
+}
+
 function notifyImplementAttention(payload) {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) { try { w.webContents.send('pr-implement-attention', payload); } catch {} }
@@ -115,6 +121,12 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // away — the run persists in the background and can be re-attached.
   implementSubs(requestId).add(sender);
 
+  // Snapshot the push target: a backgrounded run can finish after the reviewer moved to another PR.
+  const a = prReview.active;
+  const pushPr = mode === 'all' && a ? { meta: a.meta, forge: a.forge, host: a.host, account: a.account } : null;
+  let lastText = '';
+  let pushStarted = false;
+
   const result = startImplementPty({
     requestId,
     worktreePath: ensured.worktreePath,
@@ -123,6 +135,15 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     onData: (data) => broadcastToImplementSubs(requestId, dataChannel, data),
     onEvent: (ev) => {
       broadcastToImplementSubs(requestId, eventChannel, ev);
+      if (ev && ev.kind === 'text') lastText = ev.text || '';
+      if (ev && ev.kind === 'end_turn' && pushPr && !pushStarted && endsWithCommittedMarker(lastText)) {
+        pushStarted = true;
+        pushPrHead({ pr: pushPr, worktreePath: ensured.worktreePath })
+          .catch((err) => ({ error: (err && err.message) || String(err) }))
+          .then((pushResult) => notifyImplementPushed({
+            requestId, prNumber, worktreePath: ensured.worktreePath, result: pushResult,
+          }));
+      }
       // Turn finished with nobody attached. Normally the renderer sends the
       // cleanup Ctrl+C on finalize; with no surface, main MUST wind the PTY
       // down itself — otherwise the idle Claude TUI (and its agent-concurrency
