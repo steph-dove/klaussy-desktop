@@ -681,6 +681,8 @@
     nemesisAddBtn.addEventListener('click', function () {
       nemesisProfiles.push({ id: newProfileId(), name: '', remote: '', token: '', provider: '', model: '' });
       saveAll(); renderNemesisProfiles();
+      var names = nemesisProfilesEl.querySelectorAll('.np-name');
+      if (names.length) names[names.length - 1].focus();
     });
   }
 

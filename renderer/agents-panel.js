@@ -125,7 +125,7 @@ window.AgentsPanel = (function () {
     }
     emptyEl.style.display = 'none';
 
-    listEl.innerHTML = sorted.map(function (a) {
+    var html = sorted.map(function (a) {
       var unread = isUnreadDone(a);
       return (
         '<div class="agent-item' + (unread ? ' unread' : '') + '" data-id="' + escHtml(a.id) + '">' +
@@ -143,6 +143,7 @@ window.AgentsPanel = (function () {
         '</div>'
       );
     }).join('');
+    A11y.preserveFocus(listEl, function () { listEl.innerHTML = html; });
   }
 
   // Action delegation — one listener for the whole list.

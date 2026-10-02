@@ -5,6 +5,11 @@
 
 (function (DP) {
 
+  // The list re-renders on every file-watch event, so keyboard focus has to survive it.
+  DP.setFileListHtml = function (html) {
+    A11y.preserveFocus(DP.fileListEl, function () { DP.fileListEl.innerHTML = html; });
+  };
+
   DP.renderFileList = function(files, branch) {
     var staged = files.filter(function (f) { return f.staged; });
     var unstaged = files.filter(function (f) { return !f.staged; });
@@ -13,7 +18,7 @@
 
     if (files.length === 0) {
       html += '<div class="diff-empty">No changes</div>';
-      DP.fileListEl.innerHTML = html;
+      DP.setFileListHtml(html);
       DP.bindModeToggle();
       return;
     }
@@ -68,7 +73,7 @@
       }
     }
 
-    DP.fileListEl.innerHTML = html;
+    DP.setFileListHtml(html);
     DP.bindModeToggle();
     DP.addCheckoutToBranchSelect();
     DP.checkConflicts();

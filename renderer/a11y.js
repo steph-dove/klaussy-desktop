@@ -64,7 +64,10 @@ window.A11y = (function () {
     return node.id && !node.id.startsWith('a11y-') ? node.id : '';
   }
 
-  function labelDialog(dialog) {
+  // `refresh` re-points a generated label whose heading was replaced by a content swap.
+  function labelDialog(dialog, refresh) {
+    const by = dialog.getAttribute('aria-labelledby');
+    if (refresh && by && by.startsWith('a11y-') && !document.getElementById(by)) dialog.removeAttribute('aria-labelledby');
     if (dialog.hasAttribute('aria-label') || dialog.hasAttribute('aria-labelledby')) return;
     const heading = Array.from(dialog.querySelectorAll('h1, h2, h3, h4')).find(isShown);
     if (heading) dialog.setAttribute('aria-labelledby', ensureId(heading, 'dialog-title'));
@@ -429,6 +432,8 @@ window.A11y = (function () {
     });
   }
 
+  const lastLine = new WeakMap();
+
   // Lines get tabindex only when reached, so a large diff costs one tab stop and no per-line setup.
   function lineNav(container, opts) {
     if (!container.hasAttribute('tabindex')) container.tabIndex = 0;
@@ -452,9 +457,9 @@ window.A11y = (function () {
     }
     // Labelled on focus so a line refocused after a re-render is still announced.
     container.addEventListener('focusin', function (e) {
-      if (opts.describe && e.target !== container && e.target.matches(opts.lineSelector)) {
-        e.target.setAttribute('aria-label', opts.describe(e.target));
-      }
+      if (e.target === container || !e.target.matches(opts.lineSelector)) return;
+      lastLine.set(container, e.target);
+      if (opts.describe) e.target.setAttribute('aria-label', opts.describe(e.target));
     });
     container.addEventListener('keydown', function (e) {
       const from = e.target;
@@ -488,6 +493,13 @@ window.A11y = (function () {
     }
     new MutationObserver(sync).observe(menu, { attributes: true, attributeFilter: ['style', 'hidden', 'class'] });
     arrowNav(menu, itemSelector);
+    // Picking an item hides the menu under focus; registered on the menu so it runs before the generic rescue.
+    menu.addEventListener('focusout', function (e) {
+      if (e.relatedTarget) return;
+      setTimeout(function () {
+        if (document.activeElement === document.body && !isShown(menu) && canTakeFocus(trigger)) trigger.focus();
+      }, 0);
+    });
     // Close via the trigger's own toggle so the caller's open/closed bookkeeping stays consistent.
     menu.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' && e.key !== 'Tab') return;
@@ -514,8 +526,8 @@ window.A11y = (function () {
     return sel;
   }
 
-  function captureFocusKey(host) {
-    const el = document.activeElement;
+  function captureFocusKey(host, focused) {
+    const el = focused || document.activeElement;
     if (!el || el === host || !host.contains(el)) return null;
     const parts = [];
     for (let node = el; node && node !== host; node = node.parentElement) {
@@ -602,10 +614,10 @@ window.A11y = (function () {
       position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
     }
-    :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)); outline-offset: 2px; }
-    :where(input, textarea, select):focus-visible { outline: none; }
-    :where([contenteditable]):focus-visible { outline-offset: 0; }
-    :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible) { outline: none; }
+    :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)) !important; outline-offset: 2px; }
+    :where(input, textarea, select, [contenteditable]):focus-visible { outline-offset: 0; }
+    :where([role="tab"], .file-viewer-tab, .diff-tab):focus-visible { outline-offset: -2px; }
+    :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible) { outline: none !important; }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
@@ -628,9 +640,89 @@ window.A11y = (function () {
     sync();
   }
 
+  let lastFocused = null;
+  let rescueQueued = false;
+
+  function canTakeFocus(el) {
+    return !!el && isShown(el) && !el.disabled && !el.closest('[inert]') && el.getAttribute('aria-hidden') !== 'true';
+  }
+
+  // A re-render that removes, disables or hides the focused control drops focus to <body>; put it back nearby.
+  function focusLost() {
+    return !document.activeElement || document.activeElement === document.body;
+  }
+
+  // A control disabled while busy usually comes back; wait for it rather than moving focus somewhere unrelated.
+  function awaitReenable(lost) {
+    const deadline = Date.now() + 120000;
+    (function poll() {
+      if (lastFocused !== lost || !focusLost() || Date.now() > deadline) return;
+      if (lost.el.isConnected && isShown(lost.el) && lost.el.disabled) { setTimeout(poll, 200); return; }
+      if (canTakeFocus(lost.el)) lost.el.focus({ preventScroll: true });
+      else rescueFocus(true);
+    })();
+  }
+
+  function rescueFocus(afterWait) {
+    rescueQueued = false;
+    const lost = lastFocused;
+    if (!lost || !focusLost()) return;
+    if (canTakeFocus(lost.el)) return;
+    if (!afterWait && lost.el.isConnected && isShown(lost.el) && lost.el.disabled) { awaitReenable(lost); return; }
+    for (const anc of lost.ancestors) {
+      const line = anc.isConnected && lastLine.get(anc);
+      if (line && line !== lost.el && line.isConnected && isShown(line)) { line.focus({ preventScroll: true }); return; }
+    }
+    const twin = lost.key.index >= 0 && document.querySelectorAll(lost.key.selector)[lost.key.index];
+    if (twin && twin !== lost.el && canTakeFocus(twin)) { twin.focus({ preventScroll: true }); return; }
+    for (let i = 0; i < lost.ancestors.length; i++) {
+      const anc = lost.ancestors[i];
+      if (!anc.isConnected || !isShown(anc) || anc.closest('[inert]')) continue;
+      if (anc === document.body) return;
+      if (anc.matches('[role="dialog"]')) { labelDialog(anc, true); focusFirst(anc, anc); return; }
+      const next = nearSlot(anc, lost.slots[i]);
+      if (next) { next.focus({ preventScroll: true }); return; }
+      if (anc.matches('[tabindex], [role="region"], [role="dialog"], [role="main"], [role="navigation"], [role="complementary"], main, nav, aside')) {
+        if (!anc.hasAttribute('tabindex')) anc.setAttribute('tabindex', '-1');
+        anc.focus({ preventScroll: true });
+        return;
+      }
+    }
+  }
+
+  // Prefer the control that now occupies the lost one's position, e.g. the Cancel that replaced Run.
+  function nearSlot(anc, slot) {
+    const all = Array.from(anc.querySelectorAll(FOCUSABLE));
+    if (!all.length) return null;
+    const start = Math.min(slot == null ? 0 : slot, all.length - 1);
+    for (let d = 0; d < all.length; d++) {
+      const after = all[start + d];
+      if (after && canTakeFocus(after)) return after;
+      const before = all[start - d - 1];
+      if (before && canTakeFocus(before)) return before;
+    }
+    return null;
+  }
+
+  function queueRescue() {
+    if (rescueQueued || !lastFocused) return;
+    rescueQueued = true;
+    setTimeout(function () { rescueFocus(false); }, 0);
+  }
+
   document.addEventListener('focusin', function (e) {
     if (e.target && e.target.closest && !e.target.closest(DIALOG_SELECTOR)) lastFocusOutside = e.target;
+    const el = e.target;
+    if (!el || el === document.body || !el.closest || el.closest('.xterm, .monaco-editor')) return;
+    const ancestors = [];
+    const slots = [];
+    for (let n = el.parentElement; n; n = n.parentElement) {
+      ancestors.push(n);
+      slots.push(slots.length < 4 ? Array.prototype.indexOf.call(n.querySelectorAll(FOCUSABLE), el) : null);
+    }
+    lastFocused = { el: el, key: captureFocusKey(document.body, el) || { selector: el.tagName.toLowerCase(), index: -1 }, ancestors: ancestors, slots: slots };
   });
+  document.addEventListener('focusout', function (e) { if (!e.relatedTarget) queueRescue(); });
   // Window-level so any document or element Escape handler runs first.
   window.addEventListener('keydown', onEscapeCapture, true);
   window.addEventListener('keydown', onKeydown);
