@@ -732,7 +732,7 @@ const IMPLEMENT_DRAFT_COMMENT =
   + `   bullets.\n`
   + `   </DRAFT_PR_COMMENT>\n`;
 
-// Main pushes to the PR head when the run's last text ends with this (see pr-review-terminal.js).
+// The agent's success signal; the renderer hides it, and main pushes on the new commit instead (see commit-pusher.js).
 const IMPLEMENT_COMMITTED_MARKER = '<IMPLEMENT_ALL_COMMITTED/>';
 
 const IMPLEMENT_TEST_AND_COMMIT =
@@ -749,11 +749,11 @@ const IMPLEMENT_TEST_AND_COMMIT =
   + `   edits that were already in the worktree, usually from earlier\n`
   + `   Implement runs on this PR, belong in the commit too. Use a short\n`
   + `   conventional message (\`fix: ...\`) naming the findings it addresses.\n`
-  + `   Do not push; Klaussy pushes to the PR branch after you finish.\n\n`;
-
-function endsWithCommittedMarker(text) {
-  return String(text || '').trim().endsWith(IMPLEMENT_COMMITTED_MARKER);
-}
+  + `   Do not push and do not offer to. You are running inside Klaussy, the\n`
+  + `   app that started this run: Klaussy pushes your commit to the PR\n`
+  + `   branch itself the moment you finish (pushing from here would target\n`
+  + `   the wrong remote on forks). In your summary, say the commit will be\n`
+  + `   pushed by Klaussy; don't describe it as unpushed or waiting on the user.\n\n`;
 
 function implementSummary(step, extra) {
   return `${step}. **Summary.** One short bullet per change, prefixed with the file\n`
@@ -786,4 +786,4 @@ function buildImplementPrompt({ mode, body, intel } = {}) {
   return prompt + (intel ? '\n' + intel : '');
 }
 
-module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, endsWithCommittedMarker, explainPrompt };
+module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };

@@ -8,7 +8,9 @@ const { ipcMain, BrowserWindow } = require('electron');
 const { prReview, ensureWorktreeForActivePr, pushPrHead } = require('../state/pr-review');
 const { pickProvider, agentForWorktree, repoIntelFor } = require('../state/agent-select');
 const { ensureWorktreeBootstrap } = require('../state/repo-intel');
-const { buildImplementPrompt, endsWithCommittedMarker } = require('../state/review-prompts');
+const { buildImplementPrompt } = require('../state/review-prompts');
+const { execFileP } = require('../util/exec');
+const { createCommitPusher } = require('../util/commit-pusher');
 const { getOrAskRepoConsent, applyWorktreePermissions } = require('../util/worktree-permissions');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
@@ -49,6 +51,11 @@ function notifyImplementPushed(payload) {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) { try { w.webContents.send('pr-implement-pushed', payload); } catch {} }
   }
+}
+
+async function headSha(worktreePath) {
+  const { stdout } = await execFileP('git', ['rev-parse', 'HEAD'], { cwd: worktreePath, timeout: 10000 });
+  return String(stdout || '').trim();
 }
 
 function notifyImplementAttention(payload) {
@@ -124,8 +131,14 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // Snapshot the push target: a backgrounded run can finish after the reviewer moved to another PR.
   const a = prReview.active;
   const pushPr = mode === 'all' && a ? { meta: a.meta, forge: a.forge, host: a.host, account: a.account } : null;
-  let lastText = '';
-  let pushStarted = false;
+  // The commit, not the agent's closing text, decides the push: a run that commits but garbles the marker still lands.
+  const pusher = pushPr && createCommitPusher({
+    getHead: () => headSha(ensured.worktreePath),
+    push: () => pushPrHead({ pr: pushPr, worktreePath: ensured.worktreePath }),
+    onResult: (result) => notifyImplementPushed({ requestId, prNumber, worktreePath: ensured.worktreePath, result }),
+    log: (msg) => console.log(`[pr-implement] ${requestId} ${msg}`),
+  });
+  if (pusher) await pusher.start();
 
   const result = startImplementPty({
     requestId,
@@ -135,15 +148,7 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     onData: (data) => broadcastToImplementSubs(requestId, dataChannel, data),
     onEvent: (ev) => {
       broadcastToImplementSubs(requestId, eventChannel, ev);
-      if (ev && ev.kind === 'text') lastText = ev.text || '';
-      if (ev && ev.kind === 'end_turn' && pushPr && !pushStarted && endsWithCommittedMarker(lastText)) {
-        pushStarted = true;
-        pushPrHead({ pr: pushPr, worktreePath: ensured.worktreePath })
-          .catch((err) => ({ error: (err && err.message) || String(err) }))
-          .then((pushResult) => notifyImplementPushed({
-            requestId, prNumber, worktreePath: ensured.worktreePath, result: pushResult,
-          }));
-      }
+      if (ev && ev.kind === 'end_turn' && pusher) pusher.check('end of turn');
       // Turn finished with nobody attached. Normally the renderer sends the
       // cleanup Ctrl+C on finalize; with no surface, main MUST wind the PTY
       // down itself — otherwise the idle Claude TUI (and its agent-concurrency
@@ -156,6 +161,7 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     },
     onExit: ({ exitCode, signal, status }) => {
       broadcastToImplementSubs(requestId, exitChannel, { exitCode, signal, status });
+      if (pusher) pusher.check('exit');
       // If the run ended while backgrounded, surface it everywhere.
       if (implementSubs(requestId).size === 0) {
         notifyImplementAttention({ requestId, prNumber, status: status || 'done' });
