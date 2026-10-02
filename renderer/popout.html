@@ -7,25 +7,34 @@
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { background: #0f0f1a; height: 100vh; overflow: hidden; }
+    /* Pre-init defaults matching the Dark preset; theme.js overwrites them with the selected theme. */
+    :root {
+      --sidebar-bg: #16161d;
+      --border: #272730;
+      --text: #e8e8ee;
+      --text-muted: #9a9aa6;
+      --success: #46c463;
+      --term-bg: #0d0d12;
+    }
+    body { background: var(--term-bg); height: 100vh; overflow: hidden; }
     #popout-header {
       height: 32px;
-      background: #16162a;
-      border-bottom: 1px solid #2a2a4a;
+      background: var(--sidebar-bg);
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       padding: 0 12px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 12px;
-      color: #888;
+      color: var(--text-muted);
       -webkit-app-region: drag;
       gap: 8px;
     }
     #popout-header .dot {
-      width: 6px; height: 6px; border-radius: 50%; background: #00e676;
+      width: 6px; height: 6px; border-radius: 50%; background: var(--success);
     }
     #popout-header .task-name {
-      font-weight: 600; color: #e0e0e0;
+      font-weight: 600; color: var(--text);
     }
     #popout-terminal {
       position: absolute;
@@ -43,6 +52,7 @@
   <div id="popout-terminal"></div>
   <script src="a11y.js"></script>
   <script src="utils.js"></script>
+  <script src="theme.js"></script>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>

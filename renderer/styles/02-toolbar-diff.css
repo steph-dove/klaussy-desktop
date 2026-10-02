@@ -566,10 +566,10 @@
   flex-shrink: 0;
 }
 
-.diff-file-status.modified { color: #e2b93d; }
+.diff-file-status.modified { color: var(--warning); }
 .diff-file-status.added { color: var(--success); }
 .diff-file-status.deleted { color: var(--error); }
-.diff-file-status.renamed { color: #58a6ff; }
+.diff-file-status.renamed { color: var(--accent); }
 
 .diff-file-name {
   flex-shrink: 0;
@@ -714,8 +714,7 @@
   width: 42px;
   padding-right: 8px;
   text-align: right;
-  color: var(--text-dim);
-  opacity: 0.6;
+  color: var(--text-muted);
   user-select: none;
   -webkit-user-select: none;
   font-variant-numeric: tabular-nums;
@@ -781,7 +780,6 @@
 
 .diff-view-full-path {
   margin-left: 6px;
-  opacity: 0.6;
 }
 
 .diff-line.diff-header {
@@ -795,20 +793,16 @@
   font-style: italic;
 }
 
-.diff-line.diff-context {
-  opacity: 0.82;
-}
-
 .diff-line.diff-context .diff-prefix {
-  color: var(--text-muted);
-  opacity: 0.5;
+  color: var(--text-dim);
 }
 
 /* Boost hljs token specificity so they always win over diff-line color inheritance */
+/* Every syntax colour here and in the light-syntax block keeps 4.5:1 on its presets' --bg and diff tints; test/util/theme-contrast.test.js parses both blocks. */
 #diff-view .hljs-keyword, #file-viewer-view .hljs-keyword,
 #diff-view .hljs-literal, #file-viewer-view .hljs-literal,
 #diff-view .hljs-symbol, #file-viewer-view .hljs-symbol,
-#diff-view .hljs-name, #file-viewer-view .hljs-name { color: #569CD6; }
+#diff-view .hljs-name, #file-viewer-view .hljs-name { color: #6CB6FF; }
 #diff-view .hljs-built_in, #file-viewer-view .hljs-built_in,
 #diff-view .hljs-type, #file-viewer-view .hljs-type { color: #4EC9B0; }
 #diff-view .hljs-number, #file-viewer-view .hljs-number,
@@ -817,17 +811,17 @@
 #diff-view .diff-code .hljs-string,
 #diff-view .hljs-meta .hljs-string, #file-viewer-view .hljs-meta .hljs-string { color: #D69D85 !important; }
 #diff-view .hljs-regexp, #file-viewer-view .hljs-regexp,
-#diff-view .hljs-template-tag, #file-viewer-view .hljs-template-tag { color: #9A5334; }
+#diff-view .hljs-template-tag, #file-viewer-view .hljs-template-tag { color: #EBA0A0; }
 #diff-view .hljs-title, #file-viewer-view .hljs-title { color: #DCDCAA; }
 #diff-view .hljs-function, #file-viewer-view .hljs-function { color: #9CDCFE; }
 #diff-view .hljs-params, #file-viewer-view .hljs-params { color: #9CDCFE; }
 #diff-view .hljs-comment, #file-viewer-view .hljs-comment,
-#diff-view .hljs-quote, #file-viewer-view .hljs-quote { color: #57A64A; font-style: italic; }
-#diff-view .hljs-doctag, #file-viewer-view .hljs-doctag { color: #608B4E; }
+#diff-view .hljs-quote, #file-viewer-view .hljs-quote { color: #8CC27A; font-style: italic; }
+#diff-view .hljs-doctag, #file-viewer-view .hljs-doctag { color: #A3C98F; }
 #diff-view .hljs-meta, #file-viewer-view .hljs-meta,
-#diff-view .hljs-tag, #file-viewer-view .hljs-tag { color: #9B9B9B; }
+#diff-view .hljs-tag, #file-viewer-view .hljs-tag { color: #B0B0B0; }
 #diff-view .hljs-variable, #file-viewer-view .hljs-variable,
-#diff-view .hljs-template-variable, #file-viewer-view .hljs-template-variable { color: #BD63C5; }
+#diff-view .hljs-template-variable, #file-viewer-view .hljs-template-variable { color: #D59BD0; }
 #diff-view .hljs-attr, #file-viewer-view .hljs-attr,
 #diff-view .hljs-attribute, #file-viewer-view .hljs-attribute { color: #9CDCFE; }
 #diff-view .hljs-selector-tag, #file-viewer-view .hljs-selector-tag,
@@ -843,7 +837,7 @@
 /* Enhanced tokens (post-processed, not from hljs) */
 #diff-view .hljs-call, #file-viewer-view .hljs-call { color: #DCDCAA; }
 #diff-view .hljs-module, #file-viewer-view .hljs-module { color: #4EC9B0; }
-#diff-view .hljs-self, #file-viewer-view .hljs-self { color: #569CD6; }
+#diff-view .hljs-self, #file-viewer-view .hljs-self { color: #6CB6FF; }
 #diff-view .hljs-constant, #file-viewer-view .hljs-constant { color: #4FC1FF; }
 #diff-view .hljs-decorator, #file-viewer-view .hljs-decorator { color: #DCDCAA; }
 #diff-view .hljs-subst, #file-viewer-view .hljs-subst { color: #9CDCFE; }
@@ -855,7 +849,7 @@
 .light-syntax #diff-view .hljs-symbol, .light-syntax #file-viewer-view .hljs-symbol,
 .light-syntax #diff-view .hljs-name, .light-syntax #file-viewer-view .hljs-name { color: #cf222e; }
 .light-syntax #diff-view .hljs-built_in, .light-syntax #file-viewer-view .hljs-built_in,
-.light-syntax #diff-view .hljs-type, .light-syntax #file-viewer-view .hljs-type { color: #8250df; }
+.light-syntax #diff-view .hljs-type, .light-syntax #file-viewer-view .hljs-type { color: #6639ba; }
 .light-syntax #diff-view .hljs-number, .light-syntax #file-viewer-view .hljs-number,
 .light-syntax #diff-view .hljs-class, .light-syntax #file-viewer-view .hljs-class { color: #0550ae; }
 .light-syntax #diff-view .hljs-string, .light-syntax #file-viewer-view .hljs-string,
@@ -863,12 +857,12 @@
 .light-syntax #diff-view .hljs-meta .hljs-string, .light-syntax #file-viewer-view .hljs-meta .hljs-string { color: #0a3069 !important; }
 .light-syntax #diff-view .hljs-regexp, .light-syntax #file-viewer-view .hljs-regexp,
 .light-syntax #diff-view .hljs-template-tag, .light-syntax #file-viewer-view .hljs-template-tag { color: #0550ae; }
-.light-syntax #diff-view .hljs-title, .light-syntax #file-viewer-view .hljs-title { color: #8250df; }
-.light-syntax #diff-view .hljs-function, .light-syntax #file-viewer-view .hljs-function { color: #8250df; }
+.light-syntax #diff-view .hljs-title, .light-syntax #file-viewer-view .hljs-title { color: #6639ba; }
+.light-syntax #diff-view .hljs-function, .light-syntax #file-viewer-view .hljs-function { color: #6639ba; }
 .light-syntax #diff-view .hljs-params, .light-syntax #file-viewer-view .hljs-params { color: #24292f; }
 .light-syntax #diff-view .hljs-comment, .light-syntax #file-viewer-view .hljs-comment,
-.light-syntax #diff-view .hljs-quote, .light-syntax #file-viewer-view .hljs-quote { color: #6e7781; font-style: italic; }
-.light-syntax #diff-view .hljs-doctag, .light-syntax #file-viewer-view .hljs-doctag { color: #6e7781; }
+.light-syntax #diff-view .hljs-quote, .light-syntax #file-viewer-view .hljs-quote { color: #59636e; font-style: italic; }
+.light-syntax #diff-view .hljs-doctag, .light-syntax #file-viewer-view .hljs-doctag { color: #59636e; }
 .light-syntax #diff-view .hljs-meta, .light-syntax #file-viewer-view .hljs-meta,
 .light-syntax #diff-view .hljs-tag, .light-syntax #file-viewer-view .hljs-tag { color: #116329; }
 .light-syntax #diff-view .hljs-variable, .light-syntax #file-viewer-view .hljs-variable,
@@ -881,14 +875,14 @@
 .light-syntax #diff-view .hljs-selector-attr, .light-syntax #file-viewer-view .hljs-selector-attr,
 .light-syntax #diff-view .hljs-selector-pseudo, .light-syntax #file-viewer-view .hljs-selector-pseudo,
 .light-syntax #diff-view .hljs-bullet, .light-syntax #file-viewer-view .hljs-bullet { color: #953800; }
-.light-syntax #diff-view .hljs-title.function_, .light-syntax #file-viewer-view .hljs-title.function_ { color: #8250df; }
+.light-syntax #diff-view .hljs-title.function_, .light-syntax #file-viewer-view .hljs-title.function_ { color: #6639ba; }
 .light-syntax #diff-view .hljs-title.class_, .light-syntax #file-viewer-view .hljs-title.class_ { color: #953800; }
 .light-syntax #diff-view .hljs-property, .light-syntax #file-viewer-view .hljs-property { color: #0550ae; }
-.light-syntax #diff-view .hljs-call, .light-syntax #file-viewer-view .hljs-call { color: #8250df; }
+.light-syntax #diff-view .hljs-call, .light-syntax #file-viewer-view .hljs-call { color: #6639ba; }
 .light-syntax #diff-view .hljs-module, .light-syntax #file-viewer-view .hljs-module { color: #953800; }
 .light-syntax #diff-view .hljs-self, .light-syntax #file-viewer-view .hljs-self { color: #cf222e; }
 .light-syntax #diff-view .hljs-constant, .light-syntax #file-viewer-view .hljs-constant { color: #0550ae; }
-.light-syntax #diff-view .hljs-decorator, .light-syntax #file-viewer-view .hljs-decorator { color: #8250df; }
+.light-syntax #diff-view .hljs-decorator, .light-syntax #file-viewer-view .hljs-decorator { color: #6639ba; }
 .light-syntax #diff-view .hljs-subst, .light-syntax #file-viewer-view .hljs-subst { color: #24292f; }
 .light-syntax #diff-view .hljs-string .hljs-subst, .light-syntax #file-viewer-view .hljs-string .hljs-subst { color: #0550ae; }
 
@@ -988,17 +982,8 @@
   height: 14px;
   margin: 0 6px 0 0;
   vertical-align: middle;
-  opacity: 0.4;
-  transition: opacity 0.15s;
+  accent-color: var(--accent);
   user-select: none;
-}
-
-.diff-line:hover .diff-stage-check {
-  opacity: 1;
-}
-
-.diff-stage-check:checked {
-  opacity: 1;
 }
 
 #diff-partial-action-bar {
@@ -1220,9 +1205,9 @@
 
 .diff-comment-post {
   padding: 5px 14px;
-  background: #132d3d;
-  color: #79c0ff;
-  border: 1px solid rgba(121, 192, 255, 0.2);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border: 1px solid var(--accent);
   border-radius: 4px;
   font-family: inherit;
   font-size: 11px;
@@ -1231,7 +1216,7 @@
 }
 
 .diff-comment-post:hover {
-  background: #1a3e54;
+  background: var(--accent-hover);
 }
 
 .diff-comment-post:disabled {
@@ -1559,8 +1544,8 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-.diff-status-success { border-color: #3c9a3c; }
-.diff-status-error { border-color: #c0392b; color: #ff6b6b; }
+.diff-status-success { border-color: var(--success); }
+.diff-status-error { border-color: var(--error); color: var(--error); }
 
 #btn-do-commit {
   background: var(--accent);

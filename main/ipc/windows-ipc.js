@@ -108,10 +108,14 @@ ipcMain.handle('get-theme', () => {
   return config.theme || { preset: 'dark' };
 });
 
-ipcMain.handle('set-theme', (_event, { theme }) => {
+ipcMain.handle('set-theme', (event, { theme }) => {
   const config = loadConfig();
   config.theme = theme;
   saveConfig(config);
+  // Preferences and pop-out windows are not in allWindows, so reach every window.
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed() && win.webContents !== event.sender) win.webContents.send('theme-changed', theme);
+  }
   return { ok: true };
 });
 
@@ -121,7 +125,7 @@ ipcMain.handle('get-system-theme', () => {
 
 // Listen for system theme changes and forward to renderer
 nativeTheme.on('updated', () => {
-  for (const win of allWindows) {
+  for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('system-theme-changed', nativeTheme.shouldUseDarkColors);
   }
 });

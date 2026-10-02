@@ -140,6 +140,10 @@
     themeSelect.appendChild(opt);
   });
   themeSelect.value = prefs.theme.preset || 'dark';
+  // saveAll persists the choice; this only repaints this window straight away.
+  themeSelect.addEventListener('change', function () {
+    if (window.ThemeManager) window.ThemeManager.apply(themeSelect.value, { persist: false });
+  });
 
   // Per-agent version probes
   Object.keys(agentPaths).forEach(loadAgentInfo);
