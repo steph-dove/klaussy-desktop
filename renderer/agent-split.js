@@ -176,8 +176,10 @@ window.AgentSplit = (function () {
   // default agent (and that agent's model), plus a Run button. The selection
   // applies to every agent action (review, implement, CI debug, ask, …).
   //   AgentSplit.createToolbar({ runLabel: 'Run Review', onRun: function (agentId) {...} })
+  var toolbarCount = 0;
   function createToolbar(opts) {
     opts = opts || {};
+    var idBase = 'agent-toolbar-' + (++toolbarCount);
     var onRun = opts.onRun || function () {};
     var wrap = document.createElement('div');
     wrap.className = 'agent-toolbar' + (opts.className ? ' ' + opts.className : '');
@@ -185,10 +187,12 @@ window.AgentSplit = (function () {
     var agentLbl = document.createElement('span');
     agentLbl.className = 'agent-toolbar-label';
     agentLbl.textContent = 'Agent';
+    agentLbl.id = idBase + '-agent-label';
 
     var agentSel = document.createElement('select');
     agentSel.className = 'agent-toolbar-agent';
     agentSel.title = 'Agent used for review, implement, CI debug, and ask';
+    agentSel.setAttribute('aria-labelledby', agentLbl.id);
     providers().forEach(function (p) {
       var o = document.createElement('option');
       o.value = p.id; o.textContent = p.displayName;
@@ -198,10 +202,12 @@ window.AgentSplit = (function () {
     var modelLbl = document.createElement('span');
     modelLbl.className = 'agent-toolbar-label';
     modelLbl.textContent = 'Version';
+    modelLbl.id = idBase + '-model-label';
 
     var modelSel = document.createElement('select');
     modelSel.className = 'agent-toolbar-model';
     modelSel.title = 'Model / version';
+    modelSel.setAttribute('aria-labelledby', modelLbl.id);
 
     var runBtn = document.createElement('button');
     runBtn.type = 'button';

@@ -150,7 +150,8 @@ body.pr-review-popout #pr-review-root {
   border-color: var(--success);
   font-weight: 600;
 }
-.pr-merge-btn:disabled {
+.pr-merge-btn:disabled,
+.pr-merge-btn[aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
 }
@@ -310,6 +311,7 @@ button.pr-check-toggle {
 }
 .pr-check-actions button:hover { color: var(--accent); text-decoration: underline; }
 .pr-check-actions button:disabled { opacity: 0.7; cursor: wait; text-decoration: none; }
+.pr-check-action-error { font-size: 11px; color: var(--error); max-width: 320px; }
 .pr-check-fix-btn { color: var(--accent); }
 .pr-check-fix-btn:hover { color: var(--accent-hover); }
 .pr-check-actions .pr-check-action-cancel { color: var(--error); border: none; background: none; }
@@ -746,6 +748,7 @@ button.pr-check-toggle {
 }
 .pr-check-debug-open-task:hover { background: rgba(99, 102, 241, 0.16); }
 .pr-check-debug-open-task:disabled { opacity: 0.6; cursor: default; }
+.pr-check-debug-open-task-error { margin-top: 6px; font-size: 11px; color: var(--error); }
 
 .pr-check-log-watch-panel {
   margin: 4px 0 8px 0;

@@ -224,6 +224,12 @@
     + '</div>';
   };
 
+  // Announced here rather than via a live role on the banner, which re-renders on every tab repaint.
+  PR.setLocalBanner = function(banner) {
+    PR.localBanner = banner;
+    A11y.announce(banner.text, banner.kind === 'error' ? 'assertive' : 'polite');
+  };
+
   PR.bindLocalChanges = function() {
     var section = PR.hostEl.querySelector('.pr-local-changes');
     if (!section) return;
@@ -266,7 +272,7 @@
     if (commitBtn) commitBtn.addEventListener('click', function () {
       var msg = msgInput ? msgInput.value.trim() : (PR.localCommitMsg || '').trim();
       if (!msg) {
-        PR.localBanner = { kind: 'error', text: 'Commit message required.' };
+        PR.setLocalBanner({ kind: 'error', text: 'Commit message required.' });
         PR.repaintAiReviewTab();
         return;
       }
@@ -277,7 +283,7 @@
         function (cb) { return cb.getAttribute('data-file'); }
       ).filter(Boolean);
       if (!selectedFiles.length) {
-        PR.localBanner = { kind: 'error', text: 'Select at least one file to commit.' };
+        PR.setLocalBanner({ kind: 'error', text: 'Select at least one file to commit.' });
         PR.repaintAiReviewTab();
         return;
       }
@@ -288,10 +294,10 @@
       window.klaus.pr.commitLocal(msg, PR.aiReview.worktreePath || null, selectedFiles).then(function (r) {
         PR.localBusy = null;
         if (r && r.error) {
-          PR.localBanner = { kind: 'error', text: r.error };
+          PR.setLocalBanner({ kind: 'error', text: r.error });
           PR.repaintAiReviewTab();
         } else {
-          PR.localBanner = { kind: 'ok', text: 'Committed.' };
+          PR.setLocalBanner({ kind: 'ok', text: 'Committed.' });
           // Clear the message field + selection on success so the next commit
           // starts clean.
           PR.localCommitMsg = 'Apply review feedback';
@@ -333,10 +339,10 @@
       var actions = [];
       if (r.canStash) actions.push({ id: 'stash', label: 'Stash, pull & retry' });
       if (r.canResolve) actions.push({ id: 'resolve', label: 'Resolve with agent' });
-      PR.localBanner = { kind: 'error', text: r.error, actions: actions };
+      PR.setLocalBanner({ kind: 'error', text: r.error, actions: actions });
       PR.repaintAiReviewTab();
     } else {
-      PR.localBanner = { kind: 'ok', text: (r && r.rebased ? 'Integrated the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' };
+      PR.setLocalBanner({ kind: 'ok', text: (r && r.rebased ? 'Integrated the latest remote commit, then pushed to ' : 'Pushed to ') + (r && r.target ? r.target : 'PR branch') + '.' });
       PR.refreshLocalChanges();
     }
   };
@@ -358,7 +364,7 @@
     window.klaus.pr.resolveConflicts(PR.aiReview.worktreePath || null).then(function (r) {
       PR.localBusy = null;
       if (r && r.error) {
-        PR.localBanner = { kind: 'error', text: r.error };
+        PR.setLocalBanner({ kind: 'error', text: r.error });
         PR.repaintAiReviewTab();
       }
     });
@@ -1202,6 +1208,7 @@
     PR.chatRun.unsubExit = window.klaus.pr.onReviewTchatExit(chatKey, function () {
       if (!PR.chatRun || PR.chatRun.chatKey !== chatKey) return;
       PR.chatRun.status = 'exited';
+      A11y.announce('Chat session ended');
       try { rt.terminal.write('\r\n\x1b[2m── chat session ended (Restart chat to resume) ──\x1b[0m\r\n'); } catch (_) {}
       PR.repaintTerminalTab();
     });
@@ -1240,6 +1247,7 @@
       if (!r || r.error || r.cancelled) {
         PR.chatRun.status = 'error';
         var msg = (r && r.error) ? r.error : (r && r.cancelled) ? 'Agent access was declined.' : 'Could not start the chat session.';
+        A11y.announce('Chat failed to start: ' + msg, 'assertive');
         try { rt.terminal.write('\r\n\x1b[31m' + msg + '\x1b[0m\r\n'); rt.hasContent = true; } catch (_) {}
         PR.repaintTerminalTab();
         return;
@@ -1247,6 +1255,7 @@
       PR.chatRun.chatKey = r.chatKey;
       PR.chatRun.worktreePath = r.worktreePath;
       PR.chatRun.status = 'running';
+      if (!r.already) A11y.announce('Chat session started');
       PR.subscribeChat(rt, r.chatKey);
       PR.repaintTerminalTab();
       PR.syncPtySizes();
@@ -1254,6 +1263,7 @@
       if (!PR.chatRun) return;
       PR.chatRun.starting = false;
       PR.chatRun.status = 'error';
+      A11y.announce('Chat failed to start: ' + ((err && err.message) || 'unknown error'), 'assertive');
       try { rt.terminal.write('\r\n\x1b[31m' + ((err && err.message) || 'Chat failed to start') + '\x1b[0m\r\n'); } catch (_) {}
       PR.repaintTerminalTab();
     });

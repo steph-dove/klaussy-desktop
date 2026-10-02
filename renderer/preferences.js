@@ -325,11 +325,17 @@
     showStatus(res && res.error ? res.error : 'Saved', !!(res && res.error));
   }
 
+  var statusTimer = null;
   function showStatus(msg, isError) {
-    statusMsg.textContent = msg;
-    if (isError) A11y.announce(msg, 'assertive');
+    statusMsg.setAttribute('role', isError ? 'alert' : 'status');
+    // Autosave fires per keystroke; rewriting the same text would re-announce it each time.
+    if (statusMsg.textContent !== msg) statusMsg.textContent = msg;
     statusMsg.classList.add('visible');
-    setTimeout(function () { statusMsg.classList.remove('visible'); }, 1500);
+    clearTimeout(statusTimer);
+    statusTimer = setTimeout(function () {
+      statusMsg.classList.remove('visible');
+      statusMsg.textContent = '';
+    }, 1500);
   }
 
   // Attach change listeners
@@ -356,7 +362,11 @@
 
   // Re-probe an agent's version when its path changes.
   Object.keys(agentPaths).forEach(function (id) {
+    var infoEl = agentPaths[id].infoEl;
+    if (infoEl) agentPaths[id].input.setAttribute('aria-describedby', infoEl.id);
     agentPaths[id].input.addEventListener('change', function () {
+      // Live only from the first edit, so opening the window doesn't read out every agent's status.
+      if (infoEl) infoEl.setAttribute('role', 'status');
       saveAll();
       setTimeout(function () { loadAgentInfo(id); }, 500);
     });
@@ -546,17 +556,21 @@
   });
 
   var socketStatusEl = document.getElementById('notify-socket-status');
+  // Polled every 5s into a live region, so only write when the text changes.
+  function setSocketStatus(text) {
+    if (socketStatusEl.textContent !== text) socketStatusEl.textContent = text;
+  }
   async function refreshSocketStatus() {
     if (!socketStatusEl) return;
     var s;
     try {
       s = await window.klaus.ui.getNotificationStatus();
     } catch (err) {
-      socketStatusEl.textContent = 'Could not read connection status: ' + (err && err.message);
+      setSocketStatus('Could not read connection status: ' + (err && err.message));
       return;
     }
     if (!s || s.error) {
-      socketStatusEl.textContent = s && s.error ? 'Status unavailable: ' + s.error : '';
+      setSocketStatus(s && s.error ? 'Status unavailable: ' + s.error : '');
       return;
     }
     var lines = [];
@@ -569,7 +583,7 @@
       else if (st.ok) lines.push(label + ' replies: connected');
       else lines.push(label + ' replies: ' + (st.error || 'not connected'));
     });
-    socketStatusEl.textContent = lines.join(' · ');
+    setSocketStatus(lines.join(' · '));
   }
   refreshSocketStatus();
   // Connecting is async and can fail later (token rejected, intent refused), so
@@ -618,6 +632,17 @@
       var cls = kind === 'ok' ? 'version' : kind === 'err' ? 'not-found' : '';
       statusEl.innerHTML = 'Status: <span class="' + cls + '">' + html + '</span>';
     }
+    // Every card repeats the same controls, so their names carry the gateway's name.
+    function labelControls() {
+      var who = (profile.name || '').trim() || 'gateway ' + (nemesisProfiles.indexOf(profile) + 1);
+      [['.np-remove', 'Remove ' + who], ['.np-test', 'Test connection for ' + who],
+        ['.np-remote', 'Gateway URL for ' + who], ['.np-token', 'Auth token for ' + who],
+        ['.np-gen', 'Generate token for ' + who], ['.np-provider', 'Sandbox agent for ' + who],
+        ['.np-model', 'Model for ' + who], ['.np-setup', 'Set up & start locally for ' + who],
+        ['.np-copy', 'Copy command for ' + who]].forEach(function (pair) {
+        q(pair[0]).setAttribute('aria-label', pair[1]);
+      });
+    }
     function refresh() {
       cmdEl.textContent = buildSetupCmd(profile);
       var local = isLocalHost(profile.remote);
@@ -625,7 +650,7 @@
       manualRow.style.display = local ? 'none' : '';
     }
 
-    nameEl.addEventListener('input', function () { profile.name = nameEl.value; saveAll(); });
+    nameEl.addEventListener('input', function () { profile.name = nameEl.value; saveAll(); labelControls(); });
     remoteEl.addEventListener('input', function () { profile.remote = remoteEl.value; saveAll(); setStatus('', ''); refresh(); });
     tokenEl.addEventListener('input', function () { profile.token = tokenEl.value; saveAll(); setStatus('', ''); refresh(); });
     providerEl.addEventListener('change', function () { profile.provider = providerEl.value; saveAll(); refresh(); });
@@ -637,7 +662,8 @@
     q('.np-copy').addEventListener('click', function (e) {
       var btn = e.currentTarget;
       try { window.klaus.fs.copyToClipboard(cmdEl.textContent); } catch (_e) {}
-      btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy command'; }, 1500);
+      btn.textContent = 'Copied'; A11y.announce('Copied');
+      setTimeout(function () { btn.textContent = 'Copy command'; }, 1500);
     });
     q('.np-remove').addEventListener('click', function () {
       var i = nemesisProfiles.indexOf(profile);
@@ -676,6 +702,7 @@
     });
 
     refresh();
+    labelControls();
     return card;
   }
 

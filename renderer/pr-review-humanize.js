@@ -82,6 +82,7 @@
       f.humanizeRequestId = null;
       PR.repaintAiReviewTab();
       PR.saveAiReviewCache();
+      A11y.announce('Finding humanized');
       // Reshaping the text can move the quoted snippet, so the anchor has to be
       // re-verified exactly as it is after a manual ✎ edit.
       PR.verifyFindingLocations();
@@ -92,6 +93,7 @@
       // Cancelling is a choice, not a failure — don't leave a red box behind.
       f.humanizeError = msg === 'cancelled' ? null : msg;
       PR.repaintAiReviewTab();
+      if (f.humanizeError) A11y.announce('Humanize failed: ' + msg, 'assertive');
     });
   };
 
