@@ -103,6 +103,16 @@ window.OllamaConsent = (function () {
     // already-accepted server restart, which needs no download).
     if (!opts.silentProgress) show('progress');
 
+    var markedDone = false;
+    function markDone() {
+      if (markedDone) return;
+      markedDone = true;
+      STEP_ORDER.forEach(function (s) { setStep(s, 'done'); });
+      setProgress(100);
+      progressMsg.textContent = 'Ready.';
+      if (!opts.silentProgress) A11y.announce('Inline AI is ready');
+    }
+
     // Subscribe to progress BEFORE starting so we don't drop the first event.
     var unsub = window.klaus.ai.ollama.onSetupProgress(function (p) {
       if (!p) return;
@@ -111,11 +121,7 @@ window.OllamaConsent = (function () {
       if (typeof p.percent === 'number' && p.step === 'model') {
         setProgress(Math.max(0, Math.min(100, p.percent)));
       }
-      if (p.step === 'done') {
-        STEP_ORDER.forEach(function (s) { setStep(s, 'done'); });
-        setProgress(100);
-        if (!opts.silentProgress) A11y.announce('Inline AI is ready');
-      }
+      if (p.step === 'done') markDone();
     });
 
     var result = null;
@@ -127,6 +133,8 @@ window.OllamaConsent = (function () {
     try { unsub && unsub(); } catch {}
 
     if (result && result.ok) {
+      // The invoke reply can beat the final 'done' progress event, which unsub() then drops.
+      markDone();
       readyInSession = true;
       resolveAll({ ok: true });
       // Short delay so the user sees the "Ready." state land before close.
