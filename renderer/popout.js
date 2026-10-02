@@ -56,24 +56,23 @@
     // Key shortcuts
     terminal.attachCustomKeyEventHandler(function (e) {
       if (e.type !== 'keydown') return true;
-      var meta = e.metaKey;
-
       if (e.key === 'Enter' && e.shiftKey) {
         window.klaus.terminal.write(id, '\n');
         return false;
       }
-      if (meta && e.key === 'c') {
+      if (AppUtils.isAppShortcut(e, 'c')) {
         var sel = terminal.getSelection();
         if (sel) { navigator.clipboard.writeText(sel); return false; }
         return true;
       }
-      if (meta && e.key === 'v') {
+      if (AppUtils.isAppShortcut(e, 'v')) {
+        e.preventDefault();
         navigator.clipboard.readText().then(function (text) {
           if (text) window.klaus.terminal.write(id, text);
         });
         return false;
       }
-      if (meta && e.key === 'k') {
+      if (AppUtils.isClearShortcut(e)) {
         terminal.clear();
         return false;
       }

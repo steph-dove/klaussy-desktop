@@ -3237,7 +3237,8 @@ body.pr-review-popout #pr-review-root {
   justify-content: space-between;
 }
 
-.context-menu-item:hover {
+.context-menu-item:hover,
+.context-menu-item:focus {
   background: var(--surface-hover);
 }
 

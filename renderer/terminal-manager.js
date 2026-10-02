@@ -220,7 +220,6 @@ window.TerminalManager = (function () {
     // Custom key handling
     terminal.attachCustomKeyEventHandler(function (e) {
       if (e.type !== 'keydown') return true;
-      var meta = e.metaKey;
       if (e.key === 'Enter' && e.shiftKey) {
         // Known limitation: Ink can't reliably tell Shift+Enter from Enter in
         // our PTY. No escape sequence inserts a newline reliably; only the
@@ -228,12 +227,12 @@ window.TerminalManager = (function () {
         window.klaus.terminal.write(id, '\\\r');
         return false;
       }
-      if (meta && e.key === 'c') {
+      if (AppUtils.isAppShortcut(e, 'c')) {
         var sel = terminal.getSelection();
         if (sel) { navigator.clipboard.writeText(sel); return false; }
         return true;
       }
-      if (meta && e.key === 'v') {
+      if (AppUtils.isAppShortcut(e, 'v')) {
         // preventDefault is critical: returning false only stops xterm's
         // handler, but the native paste event still fires on the helper
         // textarea and pastes a second time. preventDefault kills that path.
@@ -243,12 +242,13 @@ window.TerminalManager = (function () {
         });
         return false;
       }
-      if (meta && e.key === 'f') { SearchBar.open(id); return false; }
-      if (meta && e.key === 'k') { terminal.clear(); return false; }
-      if (meta && (e.key === '=' || e.key === '+')) { zoomIn(); return false; }
-      if (meta && e.key === '-') { zoomOut(); return false; }
-      if (meta && e.key === '0') { zoomReset(); return false; }
-      return true;
+      if (AppUtils.isAppShortcut(e, 'f')) { SearchBar.open(id); return false; }
+      if (AppUtils.isClearShortcut(e)) { terminal.clear(); return false; }
+      if (AppUtils.isAppShortcut(e, 'Equal')) { e.preventDefault(); zoomIn(); return false; }
+      if (AppUtils.isAppShortcut(e, 'Minus')) { e.preventDefault(); zoomOut(); return false; }
+      if (AppUtils.isAppShortcut(e, 'Digit0')) { e.preventDefault(); zoomReset(); return false; }
+      // Returning false keeps xterm from sending app shortcuts to the shell as control codes.
+      return !AppUtils.isAnyAppShortcut(e);
     });
 
     // File drag-and-drop
@@ -643,7 +643,6 @@ window.TerminalManager = (function () {
 
     subTerminal.attachCustomKeyEventHandler(function (e) {
       if (e.type !== 'keydown') return true;
-      var meta = e.metaKey;
       if (e.key === 'Enter' && e.shiftKey) {
         // Sub-terminals run a plain shell, not Claude/Ink — a real newline
         // is the correct translation. The main terminal sends the CSI-u
@@ -651,12 +650,12 @@ window.TerminalManager = (function () {
         window.klaus.terminal.write(id, '\n', subId);
         return false;
       }
-      if (meta && e.key === 'c') {
+      if (AppUtils.isAppShortcut(e, 'c')) {
         var sel = subTerminal.getSelection();
         if (sel) { navigator.clipboard.writeText(sel); return false; }
         return true;
       }
-      if (meta && e.key === 'v') {
+      if (AppUtils.isAppShortcut(e, 'v')) {
         // See the main-terminal paste handler for why preventDefault is
         // required in addition to returning false.
         e.preventDefault();
@@ -665,8 +664,8 @@ window.TerminalManager = (function () {
         });
         return false;
       }
-      if (meta && e.key === 'k') { subTerminal.clear(); return false; }
-      return true;
+      if (AppUtils.isClearShortcut(e)) { subTerminal.clear(); return false; }
+      return !AppUtils.isAnyAppShortcut(e);
     });
 
     var subEntry = {
@@ -1158,6 +1157,16 @@ window.TerminalManager = (function () {
     zoomOut: zoomOut,
     zoomReset: zoomReset,
     runInSubTerminal: runInSubTerminal,
+    focusActive: function () {
+      var t = tasks.get(AppState.activeTaskId);
+      if (!t) return false;
+      var sub = (t.activeSubId !== null && t.activeSubId !== undefined)
+        ? t.subTerminals.find(function (x) { return x.subId === t.activeSubId; })
+        : null;
+      var term = (sub || t).terminal;
+      term.focus();
+      return !!term.element && term.element.contains(document.activeElement);
+    },
     openClaudeSubTerminal: openClaudeSubTerminal,
     reopenSubAgents: reopenSubAgents,
     // For callers that change a task's mode after creation (agent → shell

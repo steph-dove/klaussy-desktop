@@ -150,22 +150,22 @@ window.App = window.App || {};
     if (!task) return;
 
     var items = [
-      { label: 'Copy', shortcut: '\u2318C', action: function () {
+      { label: 'Copy', shortcut: AppUtils.shortcutLabel('c'), action: function () {
         var sel = task.terminal.getSelection();
         if (sel) navigator.clipboard.writeText(sel);
       }},
-      { label: 'Paste', shortcut: '\u2318V', action: function () {
+      { label: 'Paste', shortcut: AppUtils.shortcutLabel('v'), action: function () {
         navigator.clipboard.readText().then(function (text) {
           if (text) window.klaus.terminal.write(id, text);
         });
       }},
       { sep: true },
-      { label: 'Search', shortcut: '\u2318F', action: function () { SearchBar.open(id); }},
-      { label: 'Clear', shortcut: '\u2318K', action: function () { task.terminal.clear(); }},
+      { label: 'Search', shortcut: AppUtils.shortcutLabel('f'), action: function () { SearchBar.open(id); }},
+      { label: 'Clear', shortcut: AppUtils.clearShortcutLabel(), action: function () { task.terminal.clear(); }},
       { sep: true },
-      { label: 'Zoom In', shortcut: '\u2318+', action: App.zoomIn },
-      { label: 'Zoom Out', shortcut: '\u2318\u2212', action: App.zoomOut },
-      { label: 'Reset Zoom', shortcut: '\u23180', action: App.zoomReset },
+      { label: 'Zoom In', shortcut: AppUtils.shortcutLabel('Equal'), action: App.zoomIn },
+      { label: 'Zoom Out', shortcut: AppUtils.shortcutLabel('Minus'), action: App.zoomOut },
+      { label: 'Reset Zoom', shortcut: AppUtils.shortcutLabel('Digit0'), action: App.zoomReset },
       { sep: true },
       { label: 'Show Changes', action: function () {
         DiffPanel.show(task.worktreePath);

@@ -25,7 +25,7 @@
          plain draggable strip on the macOS custom title bar — the active branch
          shows in each terminal's header, not here. -->
     <div id="window-color-bar"></div>
-    <div id="sidebar">
+    <div id="sidebar" role="navigation" aria-label="Sidebar">
       <!-- Klaussy brand, pinned at the very top of the sidebar above the
            token graph. -->
       <div id="sidebar-brand">
@@ -174,7 +174,7 @@
     </div>
 
     <div id="main-panel">
-      <div id="terminal-area">
+      <div id="terminal-area" role="main" aria-label="Terminals">
         <div id="empty-state">
           <div class="empty-state-glow"></div>
           <div class="empty-dashboard">
@@ -269,10 +269,10 @@
       </div>
 
       <!-- Phase G: Review others' PRs. Takes over the main area while active. -->
-      <div id="pr-review-root" style="display:none;"></div>
+      <div id="pr-review-root" role="region" aria-label="Pull request review" style="display:none;"></div>
 
       <!-- Diff panel (Phase 1, 2, 6) -->
-      <div id="diff-panel">
+      <div id="diff-panel" role="complementary" aria-label="Changes panel">
         <div id="diff-resize-handle"></div>
         <div id="diff-header">
           <div class="diff-header-actions">
@@ -354,7 +354,7 @@
             <input type="text" id="file-tree-filter" placeholder="Filter files..." autocomplete="off" spellcheck="false" />
           </div>
           <div id="file-tree"></div>
-          <div id="file-viewer-content">
+          <div id="file-viewer-content" role="region" aria-label="Editor">
             <div id="file-viewer-view"></div>
           </div>
         </div>
@@ -813,6 +813,7 @@
   <script src="sidebar-manager.js"></script>
   <script src="token-tile.js"></script>
   <script src="terminal-manager.js"></script>
+  <script src="focus-regions.js"></script>
   <script src="plan-modal.js"></script>
   <script src="plan-approval.js"></script>
   <script src="ollama-consent.js"></script>

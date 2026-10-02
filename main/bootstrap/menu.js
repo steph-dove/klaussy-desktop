@@ -114,7 +114,8 @@ function installAppMenu() {
         },
         {
           label: 'Keyboard Shortcuts',
-          accelerator: 'CmdOrCtrl+/',
+          // Not CmdOrCtrl+/: the renderer claims that for the slash-command launcher.
+          accelerator: 'F1',
           click: (_item, focusedWindow) => {
             const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
             if (win && !win.isDestroyed()) win.webContents.send('show-shortcuts');

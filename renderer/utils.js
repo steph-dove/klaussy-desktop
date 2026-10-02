@@ -62,7 +62,70 @@ window.AppUtils = (function () {
     return (prior && prior !== 'shell') ? prior : null;
   }
 
+  function isMac() {
+    var p = window.klaus && window.klaus.ui && window.klaus.ui.platform;
+    return p ? p === 'darwin' : /Mac/.test(navigator.platform);
+  }
+
+  // Mac matches e.key so layouts where the key moves still work; elsewhere Shift rewrites e.key, so match the physical code.
+  var KEY_CHARS = { Slash: ['/'], Equal: ['=', '+'], Minus: ['-'], Digit0: ['0'] };
+
+  // Ctrl+Shift off macOS because plain Ctrl+<letter> belongs to the shell, so opts.shift only matters on macOS.
+  function isAppShortcut(e, key, opts) {
+    if (e.altKey) return false;
+    var mac = isMac();
+    var mod = mac ? (e.metaKey && !e.ctrlKey) : (e.ctrlKey && e.shiftKey && !e.metaKey);
+    if (!mod) return false;
+    if (mac && opts && typeof opts.shift === 'boolean' && !!e.shiftKey !== opts.shift) return false;
+    if (key.length > 1) return mac ? KEY_CHARS[key].indexOf(e.key) !== -1 : e.code === key;
+    return (e.key || '').toLowerCase() === key;
+  }
+
+  var CODE_LABELS = { Slash: '/', Equal: '=', Minus: '\u2212', Digit0: '0' };
+  function shortcutLabel(key) {
+    var k = CODE_LABELS[key] || key.toUpperCase();
+    return isMac() ? '\u2318' + k : 'Ctrl+Shift+' + k;
+  }
+
+  // Handled in app.js; terminals must not forward these to the shell.
+  var APP_SHORTCUTS = {
+    palette: { key: 'k', shift: false },
+    quickOpen: { key: 'p', shift: false },
+    slash: { key: 'Slash' },
+    diff: { key: 'g' },
+  };
+
+  function isNamedShortcut(e, name) {
+    var s = APP_SHORTCUTS[name];
+    return isAppShortcut(e, s.key, s);
+  }
+
+  function isAnyAppShortcut(e) {
+    return Object.keys(APP_SHORTCUTS).some(function (name) { return isNamedShortcut(e, name); });
+  }
+
+  function appShortcutLabel(name) {
+    return shortcutLabel(APP_SHORTCUTS[name].key);
+  }
+
+  // Elsewhere the shell's own Ctrl+L clears.
+  function isClearShortcut(e) {
+    return isMac() && isAppShortcut(e, 'k', { shift: true });
+  }
+
+  function clearShortcutLabel() {
+    return isMac() ? '\u2318\u21e7K' : 'Ctrl+L';
+  }
+
   return {
+    isMac: isMac,
+    isAppShortcut: isAppShortcut,
+    shortcutLabel: shortcutLabel,
+    isNamedShortcut: isNamedShortcut,
+    isAnyAppShortcut: isAnyAppShortcut,
+    appShortcutLabel: appShortcutLabel,
+    isClearShortcut: isClearShortcut,
+    clearShortcutLabel: clearShortcutLabel,
     escHtml: escHtml,
     escAttr: escAttr,
     formatAge: formatAge,

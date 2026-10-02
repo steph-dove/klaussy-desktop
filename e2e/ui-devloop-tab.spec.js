@@ -19,6 +19,8 @@ async function seedTasks(mainWindow) {
       document.body.appendChild(container);
       window.AppState.tasks.set(id, { id, worktreePath: '/tmp/e2e-devloop-' + id, container });
     });
+    // The tab lives in the changes panel, which is hidden while collapsed.
+    document.getElementById('diff-panel').classList.add('visible');
     window.AppState.activeTaskId = loopId;
     // Through the app's own wiring: the panel's task:switched subscription is
     // part of what this covers.
@@ -37,6 +39,7 @@ function cleanup(mainWindow) {
     });
     window.AppState.activeTaskId = null;
     window.Events.emit('task:switched', { task: null });
+    document.getElementById('diff-panel').classList.remove('visible');
     const changes = document.querySelector('#diff-tabs .diff-tab[data-tab="changes"]');
     if (changes) changes.click();
   }, { loopId: LOOP_ID, plainId: PLAIN_ID });
