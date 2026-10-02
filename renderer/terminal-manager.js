@@ -1000,6 +1000,10 @@ window.TerminalManager = (function () {
 
   // ---- switchToTask ----
 
+  var switchSeq = 0;
+  var keyedSinceSwitch = false;
+  document.addEventListener('keydown', function () { keyedSinceSwitch = true; }, true);
+
   function switchToTask(id) {
     AppState.activeTaskId = id;
     AppState.focusedTaskId = id;
@@ -1052,19 +1056,24 @@ window.TerminalManager = (function () {
       // Terminal focus/resize is the one thing that's intrinsically owned by
       // terminal-manager — not an event subscriber, since only this module
       // knows the xterm instance handle.
+      var seq = ++switchSeq;
+      var focusAtSwitch = document.activeElement;
+      keyedSinceSwitch = false;
       setTimeout(function () {
+        // Only the latest switch focuses, and not if a keyboard user moved on (F2, Tab) within the delay.
+        var focusMoved = seq !== switchSeq || (keyedSinceSwitch && document.activeElement !== focusAtSwitch);
         if (task.activeSubId !== null && task.activeSubId !== undefined) {
           var sub = task.subTerminals.find(function (s) { return s.subId === task.activeSubId; });
           if (sub) {
             sub.fitAddon.fit();
-            sub.terminal.focus();
+            if (!focusMoved) sub.terminal.focus();
             window.klaus.terminal.resize(id, sub.terminal.cols, sub.terminal.rows, task.activeSubId);
           }
         } else {
           task.fitAddon.fit();
           task.terminal.scrollToBottom();
           window.klaus.terminal.resize(id, task.terminal.cols, task.terminal.rows);
-          task.terminal.focus();
+          if (!focusMoved) task.terminal.focus();
         }
       }, 50);
     }

@@ -314,6 +314,9 @@ window.PlanPanel = (function () {
       var name = document.createElement('span');
       name.className = 'plan-phase-name';
       name.textContent = ph.name;
+      var state = document.createElement('span');
+      state.className = 'sr-only';
+      state.textContent = ', ' + ({ done: 'done', inprogress: 'in progress', todo: 'not started' }[ph.status] || ph.status);
       name.title = ph.name;
 
       var count = document.createElement('span');
@@ -328,6 +331,7 @@ window.PlanPanel = (function () {
 
       li.appendChild(icon);
       li.appendChild(name);
+      li.appendChild(state);
       li.appendChild(count);
       li.appendChild(track);
       phasesEl.appendChild(li);

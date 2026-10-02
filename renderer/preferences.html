@@ -305,25 +305,25 @@
 
     <!-- Terminal Section -->
     <div class="section">
-      <div class="section-title">Terminal</div>
+      <div class="section-title" role="heading" aria-level="2">Terminal</div>
 
       <div class="field field-full">
-        <label>Font Family</label>
+        <label for="pref-font-family">Font Family</label>
         <input type="text" id="pref-font-family" spellcheck="false" />
       </div>
 
       <div class="field">
-        <label>Font Size</label>
+        <label for="pref-font-size">Font Size</label>
         <input type="number" id="pref-font-size" min="8" max="28" step="1" />
       </div>
 
       <div class="field">
-        <label>Line Height</label>
+        <label for="pref-line-height">Line Height</label>
         <input type="number" id="pref-line-height" min="1" max="2" step="0.1" />
       </div>
 
       <div class="field">
-        <label>Cursor Style</label>
+        <label for="pref-cursor-style">Cursor Style</label>
         <select id="pref-cursor-style">
           <option value="block">Block</option>
           <option value="underline">Underline</option>
@@ -340,32 +340,32 @@
 
     <!-- Appearance Section -->
     <div class="section">
-      <div class="section-title">Appearance</div>
+      <div class="section-title" role="heading" aria-level="2">Appearance</div>
 
       <div class="field">
-        <label>Theme</label>
+        <label for="pref-theme">Theme</label>
         <select id="pref-theme"></select>
       </div>
     </div>
 
     <!-- Code Completion Section -->
     <div class="section">
-      <div class="section-title">Code Completion</div>
+      <div class="section-title" role="heading" aria-level="2">Code Completion</div>
 
       <div class="field">
-        <label>Autocomplete model</label>
+        <label for="pref-ollama-model">Autocomplete model</label>
         <select id="pref-ollama-model">
           <option value="qwen2.5-coder:1.5b-base">Qwen2.5-Coder 1.5B — fastest (default)</option>
           <option value="qwen2.5-coder:3b-base">Qwen2.5-Coder 3B — balanced</option>
           <option value="qwen2.5-coder:7b-base">Qwen2.5-Coder 7B — best, needs more RAM</option>
         </select>
-        <div class="claude-info" id="ollama-model-status"></div>
+        <div class="claude-info" id="ollama-model-status" role="status"></div>
       </div>
     </div>
 
     <!-- Window Section -->
     <div class="section">
-      <div class="section-title">Window</div>
+      <div class="section-title" role="heading" aria-level="2">Window</div>
 
       <div class="field field-full">
         <label>Window color</label>
@@ -376,58 +376,58 @@
 
     <!-- AI CLIs Section -->
     <div class="section">
-      <div class="section-title">AI CLIs</div>
+      <div class="section-title" role="heading" aria-level="2">AI CLIs</div>
 
       <div class="field field-full">
-        <label>Claude Path</label>
+        <label for="pref-claude-path">Claude Path</label>
         <input type="text" id="pref-claude-path" placeholder="claude (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-claude"></div>
 
       <div class="field field-full">
-        <label>Codex Path</label>
+        <label for="pref-codex-path">Codex Path</label>
         <input type="text" id="pref-codex-path" placeholder="codex (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-codex"></div>
 
       <div class="field field-full">
-        <label>Gemini Path</label>
+        <label for="pref-gemini-path">Gemini Path</label>
         <input type="text" id="pref-gemini-path" placeholder="gemini (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-gemini"></div>
 
       <div class="field field-full">
-        <label>Antigravity Path</label>
+        <label for="pref-antigravity-path">Antigravity Path</label>
         <input type="text" id="pref-antigravity-path" placeholder="agy (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-antigravity"></div>
 
       <div class="field field-full">
-        <label>Copilot Path</label>
+        <label for="pref-copilot-path">Copilot Path</label>
         <input type="text" id="pref-copilot-path" placeholder="copilot (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-copilot"></div>
 
       <div class="field field-full">
-        <label>Cursor Path</label>
+        <label for="pref-cursor-path">Cursor Path</label>
         <input type="text" id="pref-cursor-path" placeholder="cursor-agent (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-cursor"></div>
 
       <div class="field field-full">
-        <label>Cline Path</label>
+        <label for="pref-cline-path">Cline Path</label>
         <input type="text" id="pref-cline-path" placeholder="cline (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-cline"></div>
 
       <div class="field field-full">
-        <label>opencode Path</label>
+        <label for="pref-opencode-path">opencode Path</label>
         <input type="text" id="pref-opencode-path" placeholder="opencode (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-opencode"></div>
 
       <div class="field field-full">
-        <label>opencode Model</label>
+        <label for="pref-opencode-model">opencode Model</label>
         <select id="pref-opencode-model">
           <option value="">Default (from opencode.json)</option>
           <option value="ollama/qwen3-coder:30b">Qwen 3 Coder 30B (Ollama)</option>
@@ -438,11 +438,11 @@
           <option value="anthropic/claude-3-5-sonnet">Claude 3.5 Sonnet</option>
           <option value="openai/gpt-4o">GPT-4o</option>
         </select>
-        <div class="claude-info" id="opencode-model-status"></div>
+        <div class="claude-info" id="opencode-model-status" role="status"></div>
       </div>
 
       <div class="field field-full">
-        <label>Local Model Context Window</label>
+        <label for="pref-agent-context">Local Model Context Window</label>
         <select id="pref-agent-context">
           <option value="">Auto (match this machine)</option>
           <option value="32768">32K — smaller machines</option>
@@ -450,7 +450,7 @@
           <option value="131072">128K — long sessions</option>
           <option value="262144">256K — maximum</option>
         </select>
-        <div class="claude-info" id="agent-context-status"></div>
+        <div class="claude-info" id="agent-context-status" role="status"></div>
       </div>
       <div class="field-hint">Ollama serves local models a 4096-token window by default, which
         an agent's prompt and tool definitions alone exceed — so it loses its tools and forgets
@@ -458,21 +458,21 @@
         sessions but reserve more memory up front, and are capped at what the model supports.</div>
 
       <div class="field field-full">
-        <label>Kimi Path</label>
+        <label for="pref-kimi-path">Kimi Path</label>
         <input type="text" id="pref-kimi-path" placeholder="kimi (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-kimi"></div>
       <div class="field">
         <label for="pref-kimi-autonomous-bash">Let Kimi run shell commands unattended</label>
-        <input type="checkbox" id="pref-kimi-autonomous-bash" />
+        <input type="checkbox" id="pref-kimi-autonomous-bash" aria-describedby="pref-kimi-autonomous-bash-hint" />
       </div>
-      <div class="field-hint">Kimi already edits files in a worktree on its own, but never runs
+      <div class="field-hint" id="pref-kimi-autonomous-bash-hint">Kimi already edits files in a worktree on its own, but never runs
         commands without asking — so unattended jobs like CI fix-check can't run your tests. This
         adds an allow rule for its Bash tool to <code>~/.kimi-code/config.toml</code>, which applies
         to your kimi CLI everywhere, not just Klaussy. Unticking removes it.</div>
 
       <div class="field field-full">
-        <label>Aider Path (for Ollama)</label>
+        <label for="pref-aider-path">Aider Path (for Ollama)</label>
         <input type="text" id="pref-aider-path" placeholder="aider (uses PATH)" spellcheck="false" />
       </div>
       <div class="claude-info" id="agent-info-ollama"></div>
@@ -480,7 +480,7 @@
       <div class="field-hint">Leave a path empty to use that CLI from your PATH. Each new task uses the default agent below; you can switch per task in the New Task dialog.</div>
 
       <div class="field">
-        <label>Default Agent</label>
+        <label for="pref-default-mode">Default Agent</label>
         <select id="pref-default-mode">
           <option value="claude">Claude Code</option>
           <option value="codex">Codex</option>
@@ -499,7 +499,7 @@
 
     <!-- Nemesis8 Remote Sandbox Section -->
     <div class="section">
-      <div class="section-title">Nemesis8 Sandboxes</div>
+      <div class="section-title" role="heading" aria-level="2">Nemesis8 Sandboxes</div>
       <div class="field-hint">Nemesis8 runs an agent inside an isolated Docker container on a gateway. Add one or more gateways — each shows up in the agent picker as <strong>Nemesis8: &lt;name&gt;</strong>, so you can run, say, a Claude sandbox and a Codex sandbox side by side.</div>
 
       <div id="nemesis-profiles"></div>
@@ -513,21 +513,21 @@
       <template id="nemesis-profile-tpl">
         <div class="nemesis-profile">
           <div class="nemesis-profile-head">
-            <input type="text" class="np-name" placeholder="Name (e.g. Claude, staging)" spellcheck="false" />
+            <input type="text" class="np-name" aria-label="Gateway name" placeholder="Name (e.g. Claude, staging)" spellcheck="false" />
             <button type="button" class="np-remove klaus-btn klaus-btn-secondary" title="Remove this gateway">Remove</button>
           </div>
           <div class="field field-full">
             <label>Gateway URL</label>
-            <input type="text" class="np-remote" placeholder="http://your-host:9801" spellcheck="false" />
+            <input type="text" class="np-remote" aria-label="Gateway URL" placeholder="http://your-host:9801" spellcheck="false" />
           </div>
           <div class="field field-full">
             <label>Auth Token</label>
-            <input type="password" class="np-token" placeholder="click Generate, or paste your own" spellcheck="false" autocomplete="off" />
+            <input type="password" class="np-token" aria-label="Auth token" placeholder="click Generate, or paste your own" spellcheck="false" autocomplete="off" />
           </div>
           <div class="field"><button type="button" class="np-gen klaus-btn klaus-btn-secondary">Generate token</button></div>
           <div class="field">
             <label>Sandbox agent</label>
-            <select class="np-provider">
+            <select class="np-provider" aria-label="Sandbox agent">
               <option value="">Gateway default</option>
               <option value="codex">Codex</option>
               <option value="claude">Claude</option>
@@ -541,10 +541,10 @@
           </div>
           <div class="field field-full">
             <label>Model (optional)</label>
-            <input type="text" class="np-model" placeholder="leave empty for the gateway default" spellcheck="false" />
+            <input type="text" class="np-model" aria-label="Model" placeholder="leave empty for the gateway default" spellcheck="false" />
           </div>
           <div class="field"><button type="button" class="np-test klaus-btn klaus-btn-secondary">Test connection</button></div>
-          <div class="claude-info np-status"></div>
+          <div class="claude-info np-status" role="status"></div>
           <div class="field-hint np-setup-help">
             <div class="np-local-row">
               Set up this gateway on <strong>this machine</strong> in one step (needs Docker). Klaussy opens a terminal tab that installs nemesis8, signs the agent in, and starts it with the token above — you just complete the sign-in in that tab.
@@ -561,139 +561,139 @@
     </div>
 
     <div class="section">
-      <div class="section-title">Slack &amp; Discord Notifications</div>
+      <div class="section-title" role="heading" aria-level="2">Slack &amp; Discord Notifications</div>
       <div class="field-hint">Post to a chat channel when an agent finishes, fails, or stops to ask for permission — so you can leave Klaussy in the background. Paste a webhook URL for either service (or both). Leaving both empty turns the whole feature off.</div>
 
       <div class="field field-full">
-        <label>Slack webhook URL</label>
-        <input type="text" id="pref-slack-webhook" placeholder="https://hooks.slack.com/services/…" spellcheck="false" autocomplete="off" />
+        <label for="pref-slack-webhook">Slack webhook URL</label>
+        <input type="text" id="pref-slack-webhook" aria-describedby="pref-webhook-hint" placeholder="https://hooks.slack.com/services/…" spellcheck="false" autocomplete="off" />
       </div>
       <div class="field field-full">
-        <label>Discord webhook URL</label>
-        <input type="text" id="pref-discord-webhook" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" autocomplete="off" />
+        <label for="pref-discord-webhook">Discord webhook URL</label>
+        <input type="text" id="pref-discord-webhook" aria-describedby="pref-webhook-hint" placeholder="https://discord.com/api/webhooks/…" spellcheck="false" autocomplete="off" />
       </div>
-      <div class="field-hint">Anyone who can read this machine's config file can read these URLs, and anyone holding one can post to that channel. Prefer a webhook scoped to a channel you don't mind that for.</div>
+      <div class="field-hint" id="pref-webhook-hint">Anyone who can read this machine's config file can read these URLs, and anyone holding one can post to that channel. Prefer a webhook scoped to a channel you don't mind that for.</div>
 
       <div class="field">
-        <label>Agent finished</label>
+        <label for="pref-notify-completed">Agent finished</label>
         <input type="checkbox" id="pref-notify-completed" />
       </div>
       <div class="field">
-        <label>Agent failed</label>
+        <label for="pref-notify-failed">Agent failed</label>
         <input type="checkbox" id="pref-notify-failed" />
       </div>
       <div class="field">
-        <label>Agent needs approval</label>
+        <label for="pref-notify-approval">Agent needs approval</label>
         <input type="checkbox" id="pref-notify-approval" />
       </div>
       <div class="field">
-        <label>Mirror the whole session into a thread</label>
-        <input type="checkbox" id="pref-notify-message" />
+        <label for="pref-notify-message">Mirror the whole session into a thread</label>
+        <input type="checkbox" id="pref-notify-message" aria-describedby="pref-notify-message-hint" />
       </div>
-      <div class="field-hint">Posts each thing the agent says into that session's thread as it happens, so you can follow along and answer by replying — rather than only hearing about it when Klaussy recognises a prompt. Turning this off falls back to the quiet alert below.</div>
+      <div class="field-hint" id="pref-notify-message-hint">Posts each thing the agent says into that session's thread as it happens, so you can follow along and answer by replying — rather than only hearing about it when Klaussy recognises a prompt. Turning this off falls back to the quiet alert below.</div>
 
       <div class="field">
-        <label>Agent went quiet</label>
+        <label for="pref-notify-stale">Agent went quiet</label>
         <input type="checkbox" id="pref-notify-stale" />
       </div>
       <div class="field">
-        <label>…after this many seconds</label>
-        <input type="number" id="pref-notify-stale-after" min="30" max="3600" step="30" />
+        <label for="pref-notify-stale-after">…after this many seconds</label>
+        <input type="number" id="pref-notify-stale-after" aria-describedby="pref-notify-stale-after-hint" min="30" max="3600" step="30" />
       </div>
-      <div class="field-hint">For when an agent stops without asking anything — usually output waiting to be read. Kept separate from the 15-second desktop idle notification, which is far too frequent for a chat channel.</div>
+      <div class="field-hint" id="pref-notify-stale-after-hint">For when an agent stops without asking anything — usually output waiting to be read. Kept separate from the 15-second desktop idle notification, which is far too frequent for a chat channel.</div>
 
       <div class="field">
-        <label>Turn the bell on for new sessions</label>
-        <input type="checkbox" id="pref-notify-new-sessions" />
+        <label for="pref-notify-new-sessions">Turn the bell on for new sessions</label>
+        <input type="checkbox" id="pref-notify-new-sessions" aria-describedby="pref-notify-new-sessions-hint" />
       </div>
-      <div class="field-hint">Sets the starting position of the 🔔 on each new task in the sidebar. Flip any individual task's bell there to override this — that choice sticks for that task.</div>
+      <div class="field-hint" id="pref-notify-new-sessions-hint">Sets the starting position of the 🔔 on each new task in the sidebar. Flip any individual task's bell there to override this — that choice sticks for that task.</div>
 
       <div class="field"><button type="button" id="pref-notify-test" class="klaus-btn klaus-btn-secondary">Send a test message</button></div>
-      <div class="claude-info" id="notify-test-status"></div>
+      <div class="claude-info" id="notify-test-status" role="status"></div>
 
-      <div class="section-title" style="margin-top:18px;">Replying from chat (optional)</div>
+      <div class="section-title" role="heading" aria-level="3" style="margin-top:18px;">Replying from chat (optional)</div>
       <div class="field-hint">A webhook only sends one way. To get <strong>Approve</strong>/<strong>Reject</strong> buttons and to answer an agent by typing in the channel, Klaussy needs a Slack app or Discord bot — it opens an outgoing connection, so there's no public URL or tunnel involved. <a href="#" id="notify-docs-link" class="nemesis-docs">Step-by-step setup guide ↗</a></div>
       <div class="field-hint"><strong>Read before enabling:</strong> anyone you allow below can approve a permission prompt on this machine — including an agent asking to run something destructive. Use a private channel. Approvals are single-use and expire after 30 minutes.</div>
 
       <div class="field-hint"><strong>Slack</strong> — create an app, turn on Socket Mode <em>and</em> Interactivity, add the <code>chat:write</code> and <code>channels:history</code> scopes, then <code>/invite</code> the bot to the channel. <a href="#" id="slack-docs-link" class="nemesis-docs">Slack setup steps ↗</a></div>
 
       <div class="field field-full">
-        <label>Slack app-level token (xapp-…)</label>
+        <label for="pref-slack-app-token">Slack app-level token (xapp-…)</label>
         <input type="password" id="pref-slack-app-token" placeholder="from Socket Mode" spellcheck="false" autocomplete="off" />
       </div>
       <div class="field field-full">
-        <label>Slack bot token (xoxb-…)</label>
+        <label for="pref-slack-bot-token">Slack bot token (xoxb-…)</label>
         <input type="password" id="pref-slack-bot-token" placeholder="from OAuth &amp; Permissions" spellcheck="false" autocomplete="off" />
       </div>
       <div class="field field-full">
-        <label>Slack channel ID</label>
+        <label for="pref-slack-channel">Slack channel ID</label>
         <input type="text" id="pref-slack-channel" placeholder="C01ABCDEFGH" spellcheck="false" autocomplete="off" />
       </div>
 
-      <div class="field-hint"><strong>Discord</strong> — create a bot, turn on the <em>Message Content</em> intent, and invite it with permission to read, post and create threads. <a href="#" id="discord-docs-link" class="nemesis-docs">Discord setup steps ↗</a></div>
+      <div class="field-hint" id="discord-setup-hint"><strong>Discord</strong> — create a bot, turn on the <em>Message Content</em> intent, and invite it with permission to read, post and create threads. <a href="#" id="discord-docs-link" class="nemesis-docs">Discord setup steps ↗</a></div>
 
       <div class="field field-full">
-        <label>Discord bot token</label>
-        <input type="password" id="pref-discord-bot-token" placeholder="from the Bot page" spellcheck="false" autocomplete="off" />
+        <label for="pref-discord-bot-token">Discord bot token</label>
+        <input type="password" id="pref-discord-bot-token" aria-describedby="discord-setup-hint" placeholder="from the Bot page" spellcheck="false" autocomplete="off" />
       </div>
       <div class="field field-full">
-        <label>Discord channel ID</label>
+        <label for="pref-discord-channel">Discord channel ID</label>
         <input type="text" id="pref-discord-channel" placeholder="123456789012345678" spellcheck="false" autocomplete="off" />
       </div>
 
-      <div class="section-title" style="margin-top:14px;">Who may approve — both platforms</div>
+      <div class="section-title" role="heading" aria-level="3" style="margin-top:14px;">Who may approve — both platforms</div>
       <div class="field field-full">
-        <label>Slack member IDs / Discord user IDs (comma separated)</label>
-        <input type="text" id="pref-notify-allowlist" placeholder="U01ABCDEFGH, 123456789012345678" spellcheck="false" autocomplete="off" />
+        <label for="pref-notify-allowlist">Slack member IDs / Discord user IDs (comma separated)</label>
+        <input type="text" id="pref-notify-allowlist" aria-describedby="pref-notify-allowlist-hint" placeholder="U01ABCDEFGH, 123456789012345678" spellcheck="false" autocomplete="off" />
       </div>
-      <div class="field-hint">Your Slack <strong>member ID</strong> (avatar → Profile → ⋯ → Copy member ID) and/or your Discord <strong>user ID</strong> (right-click your name → Copy User ID). Leaving this empty means nobody can approve from chat — the buttons will refuse every click.</div>
-      <div class="claude-info" id="notify-socket-status"></div>
+      <div class="field-hint" id="pref-notify-allowlist-hint">Your Slack <strong>member ID</strong> (avatar → Profile → ⋯ → Copy member ID) and/or your Discord <strong>user ID</strong> (right-click your name → Copy User ID). Leaving this empty means nobody can approve from chat — the buttons will refuse every click.</div>
+      <div class="claude-info" id="notify-socket-status" role="status"></div>
     </div>
 
     <!-- Git Section -->
     <div class="section">
-      <div class="section-title">Git</div>
+      <div class="section-title" role="heading" aria-level="2">Git</div>
 
       <div class="field">
-        <label>Auto-fetch interval (s)</label>
-        <input type="number" id="pref-auto-fetch" min="0" max="3600" step="10" />
+        <label for="pref-auto-fetch">Auto-fetch interval (s)</label>
+        <input type="number" id="pref-auto-fetch" aria-describedby="pref-auto-fetch-hint" min="0" max="3600" step="10" />
       </div>
-      <div class="field-hint">Seconds between background fetches. Set to 0 to disable.</div>
+      <div class="field-hint" id="pref-auto-fetch-hint">Seconds between background fetches. Set to 0 to disable.</div>
 
       <div class="field">
-        <label>Pre-commit review (silent failures, secrets, debug leftovers + lint)</label>
-        <input type="checkbox" id="pref-precommit-review" />
+        <label for="pref-precommit-review">Pre-commit review (silent failures, secrets, debug leftovers + lint)</label>
+        <input type="checkbox" id="pref-precommit-review" aria-describedby="pref-precommit-review-hint" />
       </div>
-      <div class="field-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
+      <div class="field-hint" id="pref-precommit-review-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
 
       <div class="field">
-        <label>Keep comments concise before commit</label>
-        <input type="checkbox" id="pref-strip-comments" />
+        <label for="pref-strip-comments">Keep comments concise before commit</label>
+        <input type="checkbox" id="pref-strip-comments" aria-describedby="pref-strip-comments-hint" />
       </div>
-      <div class="field-hint">Right before a commit, your agent tightens the comments it added so they stay short: regular comments to at most two sentences (ideally one), docstrings to at most five — and deletes ones that just restate the code. It only touches comments on the lines you're committing, never your code, and leaves license headers and pragmas (eslint-disable, @ts-ignore, TODOs) alone. Runs through the same pre-commit hook. On by default; uncheck to leave comments as written.</div>
+      <div class="field-hint" id="pref-strip-comments-hint">Right before a commit, your agent tightens the comments it added so they stay short: regular comments to at most two sentences (ideally one), docstrings to at most five — and deletes ones that just restate the code. It only touches comments on the lines you're committing, never your code, and leaves license headers and pragmas (eslint-disable, @ts-ignore, TODOs) alone. Runs through the same pre-commit hook. On by default; uncheck to leave comments as written.</div>
 
       <div class="field">
-        <label>Summarize session notes on this machine</label>
-        <input type="checkbox" id="pref-summarize-locally" />
+        <label for="pref-summarize-locally">Summarize session notes on this machine</label>
+        <input type="checkbox" id="pref-summarize-locally" aria-describedby="pref-summarize-locally-hint" />
       </div>
-      <div class="field-hint">Session notes and cross-agent handoff briefs are written by a model. With this on, that runs against your local Ollama server, so the summarizing costs nothing and the text never leaves this machine — an installed agent (Claude, Codex, …) covers only when Ollama is stopped or has no instruction-following model. Uncheck to use the installed agent first, which gives better summaries at the cost of tokens. On by default.</div>
+      <div class="field-hint" id="pref-summarize-locally-hint">Session notes and cross-agent handoff briefs are written by a model. With this on, that runs against your local Ollama server, so the summarizing costs nothing and the text never leaves this machine — an installed agent (Claude, Codex, …) covers only when Ollama is stopped or has no instruction-following model. Uncheck to use the installed agent first, which gives better summaries at the cost of tokens. On by default.</div>
 
       <div class="field">
-        <label>Share session notes between active agents</label>
-        <input type="checkbox" id="pref-session-activity" />
+        <label for="pref-session-activity">Share session notes between active agents</label>
+        <input type="checkbox" id="pref-session-activity" aria-describedby="pref-session-activity-hint" />
       </div>
-      <div class="field-hint">When two or more agents are working in the same session, Klaussy summarizes what each one is doing every few minutes and leaves it as a session note the others can read, so they don't duplicate or contradict each other's work. It also records a note when a session is handed to a different agent. This costs a small headless agent call per active agent per pass; uncheck to stop it entirely. Agents can still write their own notes either way. On by default.</div>
+      <div class="field-hint" id="pref-session-activity-hint">When two or more agents are working in the same session, Klaussy summarizes what each one is doing every few minutes and leaves it as a session note the others can read, so they don't duplicate or contradict each other's work. It also records a note when a session is handed to a different agent. This costs a small headless agent call per active agent per pass; uncheck to stop it entirely. Agents can still write their own notes either way. On by default.</div>
 
       <div class="field">
-        <label>Enrich CLAUDE.md with your agent</label>
-        <input type="checkbox" id="pref-repo-intel-enrich" />
+        <label for="pref-repo-intel-enrich">Enrich CLAUDE.md with your agent</label>
+        <input type="checkbox" id="pref-repo-intel-enrich" aria-describedby="pref-repo-intel-enrich-hint" />
       </div>
-      <div class="field-hint">When generating repo intelligence for a new repo, run your agent to rewrite CLAUDE.md into richer prose. This makes an API call (billed to your agent account) on your machine. Off by default — the conventions, rules, skills, and import graph are still generated either way.</div>
+      <div class="field-hint" id="pref-repo-intel-enrich-hint">When generating repo intelligence for a new repo, run your agent to rewrite CLAUDE.md into richer prose. This makes an API call (billed to your agent account) on your machine. Off by default — the conventions, rules, skills, and import graph are still generated either way.</div>
     </div>
 
     <!-- Keybindings Section -->
     <div class="section">
-      <div class="section-title">Shortcuts</div>
+      <div class="section-title" role="heading" aria-level="2">Shortcuts</div>
 
       <table class="keybindings-table">
         <thead>
@@ -701,6 +701,7 @@
         </thead>
         <tbody id="keybindings-body"></tbody>
       </table>
+      <span id="shortcut-hint" class="sr-only">Press Enter to record a new shortcut</span>
       <div class="field-hint" style="margin-top: 8px;">Click a shortcut to record a new binding. Press Esc to cancel.</div>
     </div>
 

@@ -130,7 +130,7 @@ window.AgentsPanel = (function () {
       return (
         '<div class="agent-item' + (unread ? ' unread' : '') + '" data-id="' + escHtml(a.id) + '">' +
           '<div class="agent-item-row">' +
-            '<span class="agent-item-status ' + escHtml(a.status) + '"></span>' +
+            '<span class="agent-item-status ' + escHtml(a.status) + '" role="img" aria-label="' + escHtml(a.status) + '"></span>' +
             '<span class="agent-item-title">' + escHtml(titleFor(a)) + '</span>' +
             '<div class="agent-item-actions">' +
               '<button data-action="open" data-id="' + escHtml(a.id) + '">Open</button>' +

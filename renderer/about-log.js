@@ -635,6 +635,7 @@ window.Dialogs = (function () {
           loadSkillPreview(previewPane, row.dataset.path, row.dataset.name, row.dataset.insert);
         });
       });
+      wireSelectableRows(listPane);
       // Selection priority: an explicit autoSelectPath (e.g. just-created
       // file) → otherwise first row.
       var target = autoSelectPath
@@ -669,13 +670,13 @@ window.Dialogs = (function () {
           + '<div class="skills-preview-title">New skill or command</div>'
         + '</div>'
         + '<div class="skills-create-form">'
-          + '<label class="skills-create-row">'
+          + '<div class="skills-create-row">'
             + '<span>Type</span>'
             + '<div class="skills-create-toggle">'
               + '<button type="button" data-type="skill" class="active">Skill</button>'
               + '<button type="button" data-type="command">Slash command</button>'
             + '</div>'
-          + '</label>'
+          + '</div>'
           + '<label class="skills-create-row">'
             + '<span>Scope</span>'
             + '<select class="skills-create-scope">' + scopeOpts + '</select>'
@@ -685,7 +686,7 @@ window.Dialogs = (function () {
             + '<input type="text" class="skills-create-name" placeholder="my-skill" autocomplete="off" spellcheck="false" />'
           + '</label>'
           + '<div class="skills-create-hint">Letters, numbers, dashes, underscores.</div>'
-          + '<div class="skills-create-error" hidden></div>'
+          + '<div class="skills-create-error" role="alert" hidden></div>'
           + '<div class="skills-create-actions">'
             + '<button type="button" class="skills-create-cancel">Cancel</button>'
             + '<button type="button" class="skills-create-go">Create</button>'
@@ -693,6 +694,7 @@ window.Dialogs = (function () {
         + '</div>';
 
       var typeBtns = pane.querySelectorAll('.skills-create-toggle button');
+      A11y.radios(pane.querySelector('.skills-create-toggle'), { itemSelector: 'button', label: 'Type' });
       var nameInput = pane.querySelector('.skills-create-name');
       var scopeSel = pane.querySelector('.skills-create-scope');
       var goBtn = pane.querySelector('.skills-create-go');
@@ -822,6 +824,25 @@ window.Dialogs = (function () {
         });
       });
     });
+  }
+
+  // Skills and Memory rows are pick-one lists, so the picked row is marked current.
+  function wireSelectableRows(pane) {
+    pane.querySelectorAll('.skills-section-head').forEach(function (h) {
+      h.setAttribute('role', 'heading');
+      h.setAttribute('aria-level', '3');
+    });
+    pane.querySelectorAll('.skills-row:not(.mcp-row)').forEach(function (row) {
+      A11y.makeButton(row);
+      row.addEventListener('click', function () {
+        pane.querySelectorAll('.skills-row[aria-current]').forEach(function (r) { r.removeAttribute('aria-current'); });
+        row.setAttribute('aria-current', 'true');
+      });
+    });
+    if (!pane.dataset.arrowNav) {
+      pane.dataset.arrowNav = '1';
+      A11y.arrowNav(pane, '.skills-row[role="button"]');
+    }
   }
 
   function renderSkillRow(s) {
@@ -1329,6 +1350,7 @@ window.Dialogs = (function () {
             }
           });
         });
+        wireSelectableRows(listPane);
         var target = targetPath
           ? listPane.querySelector('.skills-row[data-path="' + cssEscape(targetPath) + '"]')
           : listPane.querySelector('.skills-row');
@@ -1683,24 +1705,24 @@ window.Dialogs = (function () {
       var f = '<div class="skills-section-head">' + (entry.id ? escHtml(entry.name) : 'Custom server') + '</div>';
       f += '<div class="mcp-form">';
       if (entry.note) f += '<div class="mcp-note">' + escHtml(entry.note) + '</div>';
-      f += row('Name', '<input class="skills-create-name mcp-in" id="mcp-name" spellcheck="false" value="' + escHtml(entry.id || '') + '" placeholder="my-server">');
+      f += row('Name', '<input class="skills-create-name mcp-in" id="mcp-name" spellcheck="false" value="' + escHtml(entry.id || '') + '" placeholder="my-server">', 'mcp-name');
       f += row('Transport',
         '<select class="skills-create-scope mcp-in" id="mcp-type">'
           + opt('stdio', 'stdio (local command)', type)
           + opt('http', 'http (remote)', type)
           + opt('sse', 'sse (remote)', type)
-        + '</select>');
+        + '</select>', 'mcp-type');
       // stdio fields
       f += '<div id="mcp-stdio" class="' + (isRemote ? 'mcp-hidden' : '') + '">';
-      f += row('Command', '<input class="skills-create-name mcp-in" id="mcp-command" spellcheck="false" value="' + escHtml(entry.command || '') + '" placeholder="npx">');
-      f += row('Args', '<input class="skills-create-name mcp-in" id="mcp-args" spellcheck="false" value="' + escHtml((entry.args || []).join(' ')) + '" placeholder="-y some-package">');
+      f += row('Command', '<input class="skills-create-name mcp-in" id="mcp-command" spellcheck="false" value="' + escHtml(entry.command || '') + '" placeholder="npx">', 'mcp-command');
+      f += row('Args', '<input class="skills-create-name mcp-in" id="mcp-args" spellcheck="false" value="' + escHtml((entry.args || []).join(' ')) + '" placeholder="-y some-package">', 'mcp-args');
       (entry.requiredArgs || []).forEach(function (a, idx) {
-        f += row(a.label, '<input class="skills-create-name mcp-in mcp-reqarg" data-idx="' + idx + '" spellcheck="false" placeholder="' + escHtml(a.placeholder || '') + '">');
+        f += row(a.label, '<input class="skills-create-name mcp-in mcp-reqarg" id="mcp-reqarg-' + idx + '" data-idx="' + idx + '" spellcheck="false" placeholder="' + escHtml(a.placeholder || '') + '">', 'mcp-reqarg-' + idx);
       });
       f += '</div>';
       // remote field
       f += '<div id="mcp-remote" class="' + (isRemote ? '' : 'mcp-hidden') + '">';
-      f += row('URL', '<input class="skills-create-name mcp-in" id="mcp-url" spellcheck="false" value="' + escHtml(entry.url || '') + '" placeholder="https://mcp.example.com/mcp">');
+      f += row('URL', '<input class="skills-create-name mcp-in" id="mcp-url" spellcheck="false" value="' + escHtml(entry.url || '') + '" placeholder="https://mcp.example.com/mcp">', 'mcp-url');
       f += '</div>';
       // Environment variables \u2014 rendered/refreshed by renderEnvBox() so the
       // shell-profile setup block tracks which vars are included.
@@ -1728,8 +1750,9 @@ window.Dialogs = (function () {
       f += '</div>';
       return f;
 
-      function row(label, control) {
-        return '<div class="mcp-field"><label>' + escHtml(label) + '</label><div class="mcp-control">' + control + '</div></div>';
+      function row(label, control, id) {
+        var forAttr = id ? ' for="' + id + '"' : '';
+        return '<div class="mcp-field"><label' + forAttr + '>' + escHtml(label) + '</label><div class="mcp-control">' + control + '</div></div>';
       }
       function opt(val, label, cur) {
         return '<option value="' + val + '"' + (cur === val ? ' selected' : '') + '>' + escHtml(label) + '</option>';
@@ -1776,7 +1799,7 @@ window.Dialogs = (function () {
         }
         return '<div class="mcp-field"><label>' + escHtml(e.label || e.key) + (required ? ' *' : '') + '</label>'
           + '<div class="mcp-control">'
-          + '<input class="skills-create-name mcp-in mcp-env-fixed" type="text" autocomplete="off" data-env-key="' + escHtml(e.key) + '"' + (required ? ' data-required="1"' : '') + ' spellcheck="false" placeholder="' + escHtml(e.placeholder || '') + '">'
+          + '<input class="skills-create-name mcp-in mcp-env-fixed" type="text" autocomplete="off" aria-label="' + escHtml(e.label || e.key) + '" data-env-key="' + escHtml(e.key) + '"' + (required ? ' data-required="1"' : '') + ' spellcheck="false" placeholder="' + escHtml(e.placeholder || '') + '">'
           + '<span class="mcp-env-keyname">' + escHtml(e.key) + '</span></div></div>';
       }
     }
@@ -1978,8 +2001,10 @@ window.Dialogs = (function () {
           + '</div>';
         }).join('') + '</div>';
       pane.querySelectorAll('.skills-row').forEach(function (row) {
+        A11y.makeButton(row);
         row.addEventListener('click', function () { window.klaus.skills.openFile(row.dataset.path); });
       });
+      A11y.arrowNav(pane, '.skills-row');
     });
   }
 

@@ -424,7 +424,7 @@
                   <span class="plan-count-label">tasks</span>
                   <span class="plan-count-pct">0%</span>
                 </button>
-                <div class="plan-progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="plan-progressbar" role="progressbar" aria-label="Plan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
                   <div class="plan-progressbar-fill" style="width:0%"></div>
                 </div>
               </div>
@@ -648,11 +648,11 @@
       <h3 id="plan-approval-title">Plan Approval Required</h3>
       <p class="plan-approval-sub" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">An agent is requesting approval to proceed with the following implementation plan:</p>
       
-      <div id="plan-approval-content" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); padding: 12px; border-radius: 4px; background: var(--bg-card); font-family: var(--font-mono); font-size: 13px; white-space: pre-wrap; margin-bottom: 12px;"></div>
+      <div id="plan-approval-content" tabindex="0" autofocus role="region" aria-label="Proposed plan" style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); padding: 12px; border-radius: 4px; background: var(--bg-card); font-family: var(--font-mono); font-size: 13px; white-space: pre-wrap; margin-bottom: 12px;"></div>
       
       <div id="plan-approval-checklist-container" style="margin-bottom: 16px;">
-        <h4 style="margin: 0 0 8px 0; font-size: 14px;">Files to modify/create:</h4>
-        <div id="plan-approval-checklist" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
+        <h4 id="plan-approval-files-title" style="margin: 0 0 8px 0; font-size: 14px;">Files to modify/create:</h4>
+        <div id="plan-approval-checklist" role="group" aria-labelledby="plan-approval-files-title" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
       </div>
 
       <div id="plan-approval-error" role="alert" class="klaus-error" style="color: var(--danger); margin-bottom: 12px;"></div>
@@ -686,13 +686,13 @@
       <!-- Progress pane (during install) -->
       <div id="ollama-progress-pane" style="display: none;">
         <h3>Setting up inline AI…</h3>
-        <div id="ollama-progress-steps">
-          <div class="ollama-progress-step" data-step="install"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Install Ollama</span></div>
-          <div class="ollama-progress-step" data-step="server"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Start server</span></div>
-          <div class="ollama-progress-step" data-step="model"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Download model</span></div>
-          <div class="ollama-progress-step" data-step="warmup"><span class="ollama-progress-icon">○</span><span class="ollama-progress-label">Warm up</span></div>
+        <div id="ollama-progress-steps" role="list">
+          <div class="ollama-progress-step" role="listitem" data-step="install"><span class="ollama-progress-icon" aria-hidden="true">○</span><span class="ollama-progress-label">Install Ollama</span><span class="sr-only ollama-progress-state">, not started</span></div>
+          <div class="ollama-progress-step" role="listitem" data-step="server"><span class="ollama-progress-icon" aria-hidden="true">○</span><span class="ollama-progress-label">Start server</span><span class="sr-only ollama-progress-state">, not started</span></div>
+          <div class="ollama-progress-step" role="listitem" data-step="model"><span class="ollama-progress-icon" aria-hidden="true">○</span><span class="ollama-progress-label">Download model</span><span class="sr-only ollama-progress-state">, not started</span></div>
+          <div class="ollama-progress-step" role="listitem" data-step="warmup"><span class="ollama-progress-icon" aria-hidden="true">○</span><span class="ollama-progress-label">Warm up</span><span class="sr-only ollama-progress-state">, not started</span></div>
         </div>
-        <div id="ollama-progress-bar-wrap">
+        <div id="ollama-progress-bar-wrap" role="progressbar" aria-label="Model download" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div id="ollama-progress-bar"></div>
         </div>
         <p id="ollama-progress-message">Starting…</p>
@@ -704,7 +704,7 @@
       <!-- Error pane -->
       <div id="ollama-error-pane" style="display: none;">
         <h3>Setup failed</h3>
-        <p id="ollama-error-message"></p>
+        <p id="ollama-error-message" role="alert"></p>
         <div class="klaus-modal-actions">
           <button id="ollama-error-close" class="klaus-btn klaus-btn-secondary" type="button">Close</button>
           <button id="ollama-error-retry" class="klaus-btn klaus-btn-primary" type="button">Retry</button>

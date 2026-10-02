@@ -177,8 +177,15 @@
     input.value = formatBinding(current);
     input.dataset.action = action;
     input.dataset.binding = current;
+    input.setAttribute('aria-label', def.label + ' shortcut');
+    input.setAttribute('aria-describedby', 'shortcut-hint');
 
     input.addEventListener('click', function () {
+      startRecording(input, action);
+    });
+    input.addEventListener('keydown', function (e) {
+      if (recordingInput || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
       startRecording(input, action);
     });
 
@@ -189,25 +196,35 @@
   });
 
   var recordingInput = null;
+  var recordingHandler = null;
+
+  function stopRecording() {
+    if (recordingHandler) document.removeEventListener('keydown', recordingHandler, true);
+    recordingHandler = null;
+    if (!recordingInput) return;
+    recordingInput.classList.remove('recording');
+    recordingInput.value = formatBinding(recordingInput.dataset.binding);
+    recordingInput = null;
+  }
 
   function startRecording(input, action) {
-    if (recordingInput) {
-      recordingInput.classList.remove('recording');
-      recordingInput.value = formatBinding(recordingInput.dataset.binding);
-    }
+    stopRecording();
     recordingInput = input;
     input.classList.add('recording');
     input.value = 'Press keys...';
+    A11y.announce('Press the new shortcut, or Escape to cancel');
 
     function onKeyDown(e) {
+      // Tab leaves the field instead of being recorded, so recording can't trap focus.
+      if (e.key === 'Tab') {
+        stopRecording();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
 
       if (e.key === 'Escape') {
-        input.classList.remove('recording');
-        input.value = formatBinding(input.dataset.binding);
-        recordingInput = null;
-        document.removeEventListener('keydown', onKeyDown, true);
+        stopRecording();
         return;
       }
 
@@ -227,14 +244,13 @@
 
       var binding = parts.join('+');
       input.dataset.binding = binding;
-      input.value = formatBinding(binding);
-      input.classList.remove('recording');
-      recordingInput = null;
-      document.removeEventListener('keydown', onKeyDown, true);
+      stopRecording();
+      A11y.announce('Shortcut set to ' + input.value);
 
       saveAll();
     }
 
+    recordingHandler = onKeyDown;
     document.addEventListener('keydown', onKeyDown, true);
   }
 
@@ -302,11 +318,12 @@
     if (!kimiBash.disabled) updated.kimiAutonomousBash = kimiBash.checked;
 
     var res = await window.klaus.ui.setPreferences(updated);
-    showStatus(res && res.error ? res.error : 'Saved');
+    showStatus(res && res.error ? res.error : 'Saved', !!(res && res.error));
   }
 
-  function showStatus(msg) {
+  function showStatus(msg, isError) {
     statusMsg.textContent = msg;
+    if (isError) A11y.announce(msg, 'assertive');
     statusMsg.classList.add('visible');
     setTimeout(function () { statusMsg.classList.remove('visible'); }, 1500);
   }
@@ -709,6 +726,7 @@
     ];
 
     var current = null;
+    var commitTimer = null;
 
     function markSelected() {
       container.querySelectorAll('.window-color-swatch').forEach(function (el) {
@@ -724,14 +742,35 @@
       if (p.value) btn.style.background = p.value;
       if (p.value) btn.dataset.value = p.value;
       btn.title = p.name;
+      btn.setAttribute('aria-label', p.name);
       btn.addEventListener('click', function () {
         current = p.value;
         markSelected();
-        window.klaus.ui.prefsSetWindowColor(p.value).then(function () {
-          showStatus('Saved');
-        });
+        commitColor(0);
       });
       container.appendChild(btn);
+    });
+
+    // Arrowing across swatches only checks them; the config write and recolor wait until it settles.
+    function commitColor(delay) {
+      if (commitTimer) clearTimeout(commitTimer);
+      commitTimer = setTimeout(function () {
+        commitTimer = null;
+        window.klaus.ui.prefsSetWindowColor(current).then(function () {
+          showStatus('Saved');
+        });
+      }, delay);
+    }
+
+    A11y.radios(container, {
+      itemSelector: '.window-color-swatch',
+      label: 'Window color',
+      orientation: 'both',
+      onMove: function (btn) {
+        current = btn.dataset.value || null;
+        markSelected();
+        commitColor(400);
+      },
     });
 
     window.klaus.ui.prefsGetWindowColor().then(function (color) {

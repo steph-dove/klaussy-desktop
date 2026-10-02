@@ -50,6 +50,8 @@ window.OllamaConsent = (function () {
       el.classList.remove('active', 'done');
       if (state === 'active') el.classList.add('active');
       if (state === 'done') el.classList.add('done');
+      var srState = el.querySelector('.ollama-progress-state');
+      if (srState) srState.textContent = state === 'done' ? ', done' : state === 'active' ? ', in progress' : ', not started';
       var icon = el.querySelector('.ollama-progress-icon');
       if (!icon) return;
       if (state === 'active') icon.textContent = '⧗';
@@ -60,9 +62,13 @@ window.OllamaConsent = (function () {
 
   // Mark everything up to and including `currentStep` as active/done.
   var STEP_ORDER = ['install', 'server', 'model', 'warmup'];
-  function advanceToStep(currentStep) {
+  function advanceToStep(currentStep, silent) {
     var idx = STEP_ORDER.indexOf(currentStep);
     if (idx === -1) return;
+    var stepEl = document.querySelector('.ollama-progress-step[data-step="' + currentStep + '"]');
+    if (!silent && stepEl && !stepEl.classList.contains('active')) {
+      A11y.announce(stepEl.querySelector('.ollama-progress-label').textContent);
+    }
     STEP_ORDER.forEach(function (s, i) {
       if (i < idx) setStep(s, 'done');
       else if (i === idx) setStep(s, 'active');
@@ -70,9 +76,14 @@ window.OllamaConsent = (function () {
     });
   }
 
+  function setProgress(pct) {
+    progressBar.style.width = pct + '%';
+    progressBar.parentElement.setAttribute('aria-valuenow', String(Math.round(pct)));
+  }
+
   function resetSteps() {
     STEP_ORDER.forEach(function (s) { setStep(s, 'pending'); });
-    progressBar.style.width = '0%';
+    setProgress(0);
     progressMsg.textContent = 'Starting…';
   }
 
@@ -95,14 +106,15 @@ window.OllamaConsent = (function () {
     // Subscribe to progress BEFORE starting so we don't drop the first event.
     var unsub = window.klaus.ai.ollama.onSetupProgress(function (p) {
       if (!p) return;
-      if (p.step && p.step !== 'done') advanceToStep(p.step);
+      if (p.step && p.step !== 'done') advanceToStep(p.step, opts.silentProgress);
       if (p.message) progressMsg.textContent = p.message;
       if (typeof p.percent === 'number' && p.step === 'model') {
-        progressBar.style.width = Math.max(0, Math.min(100, p.percent)) + '%';
+        setProgress(Math.max(0, Math.min(100, p.percent)));
       }
       if (p.step === 'done') {
         STEP_ORDER.forEach(function (s) { setStep(s, 'done'); });
-        progressBar.style.width = '100%';
+        setProgress(100);
+        if (!opts.silentProgress) A11y.announce('Inline AI is ready');
       }
     });
 
