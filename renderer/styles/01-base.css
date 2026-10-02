@@ -1212,7 +1212,8 @@ body.custom-titlebar #titlebar-content {
   opacity: 0.85;
 }
 
-.task-item.saved-session:hover {
+.task-item.saved-session:hover,
+.task-item.saved-session:focus-within {
   opacity: 1;
 }
 
@@ -1413,7 +1414,8 @@ body.custom-titlebar #titlebar-content {
   transition: opacity 0.15s;
 }
 
-.task-item:hover .worktree-remove {
+.task-item:hover .worktree-remove,
+.task-item:focus-within .worktree-remove {
   opacity: 1;
 }
 
@@ -1496,7 +1498,8 @@ body.custom-titlebar #titlebar-content {
   display: none;
 }
 
-.task-item:hover .task-close {
+.task-item:hover .task-close,
+.task-item:focus-within .task-close {
   opacity: 1;
 }
 
@@ -2117,7 +2120,8 @@ body.task-branchless #ahead-behind {
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), color 0.3s, opacity 0.3s;
 }
 
-.dashboard-card:hover .card-arrow {
+.dashboard-card:hover .card-arrow,
+.dashboard-card:focus-visible .card-arrow {
   transform: translateX(2px);
   color: var(--accent-hover);
   opacity: 1;
@@ -2214,7 +2218,8 @@ body.task-branchless #ahead-behind {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
-.terminal-scroll-bottom:hover {
+.terminal-scroll-bottom:hover,
+.terminal-scroll-bottom:focus-visible {
   opacity: 1;
   background: var(--accent);
   color: #fff;
@@ -2781,12 +2786,16 @@ body.task-branchless #ahead-behind {
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
-  display: none;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
   line-height: 1;
 }
 
-.session-group-header:hover .session-group-close {
-  display: block;
+.session-group-header:hover .session-group-close,
+.session-group-header:focus-within .session-group-close {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-group-close:hover {
@@ -2862,11 +2871,15 @@ body.task-branchless #ahead-behind {
   margin-right: 4px;
   line-height: 1.2;
   transition: all 0.2s;
-  display: none;
+  display: block;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.session-group-header:hover .session-group-resume-btn {
-  display: block;
+.session-group-header:hover .session-group-resume-btn,
+.session-group-header:focus-within .session-group-resume-btn {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .session-group-resume-btn:hover {
@@ -2904,6 +2917,7 @@ body.task-branchless #ahead-behind {
 
 #broadcast-bar.hidden {
   opacity: 0;
+  visibility: hidden;
   transform: translate(-50%, 15px);
   pointer-events: none;
 }
@@ -3011,7 +3025,7 @@ body.task-branchless #ahead-behind {
   font-family: inherit;
   cursor: pointer;
   z-index: 1000;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0.2s;
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3023,6 +3037,7 @@ body.task-branchless #ahead-behind {
 
 #broadcast-toggle.hidden {
   opacity: 0;
+  visibility: hidden;
   transform: translate(-50%, 15px);
   pointer-events: none;
 }

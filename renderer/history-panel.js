@@ -125,7 +125,7 @@ window.HistoryPanel = (function () {
         '</div>' +
         '<div class="tag-actions">' +
           '<button class="tag-push-btn" title="Push to remote">\u2191</button>' +
-          '<button class="tag-delete-btn" title="Delete">&times;</button>' +
+          '<button class="tag-delete-btn" title="Delete" aria-label="Delete">&times;</button>' +
         '</div>';
       item.querySelector('.tag-push-btn').addEventListener('click', async function (e) {
         e.stopPropagation();

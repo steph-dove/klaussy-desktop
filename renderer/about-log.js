@@ -109,7 +109,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="licenses-head">'
         + '<h2>Open Source Licenses</h2>'
-        + '<button class="licenses-close" type="button" title="Close">&times;</button>'
+        + '<button class="licenses-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<p class="licenses-preamble">Klaussy is built on the following open-source software. Full license texts are available at the linked sources.</p>'
       + '<div class="licenses-list">'
@@ -204,7 +204,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="howto-head">'
         + '<h2>How to use Klaussy</h2>'
-        + '<button class="howto-close" type="button" title="Close">&times;</button>'
+        + '<button class="howto-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="howto-body">' + sectionsHtml + '</div>';
 
@@ -224,7 +224,7 @@ window.Dialogs = (function () {
         + '<h3>Main Process Logs</h3>'
         + '<div class="log-viewer-actions">'
           + '<button class="log-viewer-copy" type="button" title="Copy all log lines to clipboard">Copy</button>'
-          + '<button class="log-viewer-close">&times;</button>'
+          + '<button class="log-viewer-close" type="button" title="Close" aria-label="Close log">&times;</button>'
         + '</div>'
       + '</div>'
       + '<div class="log-viewer-content">Loading...</div>';
@@ -409,7 +409,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="deps-head">'
         + '<h2>Setup check</h2>'
-        + '<button class="deps-close" type="button" title="Close">&times;</button>'
+        + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
@@ -560,7 +560,7 @@ window.Dialogs = (function () {
         + '<h2>Skills &amp; Commands</h2>'
         + '<div class="skills-head-actions">'
           + '<button class="skills-new" type="button" title="Create a new skill or slash command">+ New</button>'
-          + '<button class="skills-close" type="button" title="Close">&times;</button>'
+          + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
         + '</div>'
       + '</div>'
       + '<div class="skills-search-row">'
@@ -731,7 +731,7 @@ window.Dialogs = (function () {
       goBtn.addEventListener('click', submit);
       nameInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); submit(); }
-        if (e.key === 'Escape') cancelBtn.click();
+        if (e.key === 'Escape') { e.preventDefault(); cancelBtn.click(); }
       });
       setTimeout(function () { nameInput.focus(); }, 50);
     });
@@ -854,7 +854,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="deps-head">'
         + '<h2>Sign in to GitHub</h2>'
-        + '<button class="deps-close" type="button" title="Close">&times;</button>'
+        + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="gh-login-body"><div class="skills-loading">Starting sign-in…</div></div>';
     overlay.appendChild(dialog);
@@ -974,7 +974,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="deps-head">'
         + '<h2>Connect Bitbucket</h2>'
-        + '<button class="deps-close" type="button" title="Close">&times;</button>'
+        + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="deps-body" style="padding: 16px;">'
         + '<p style="margin: 0 0 12px 0; color: var(--text-dim); font-size: 13px;">'
@@ -1066,7 +1066,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="skills-head">'
         + '<h2>Git accounts</h2>'
-        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+        + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="gh-accounts-body"><div class="skills-loading">Reading accounts…</div></div>';
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
@@ -1287,7 +1287,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="skills-head">'
         + '<h2>Memory (CLAUDE.md)</h2>'
-        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+        + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="skills-body">'
         + '<div class="skills-list-pane"><div class="skills-loading">Reading\u2026</div></div>'
@@ -1392,7 +1392,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="skills-head">'
         + '<h2>Keyboard shortcuts</h2>'
-        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+        + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="shortcuts-body">'
         + SHORTCUTS.map(function (s) {
@@ -1429,7 +1429,7 @@ window.Dialogs = (function () {
     function loadingView(msg) {
       dialog.innerHTML =
         '<div class="skills-head"><h2>MCP servers</h2>'
-          + '<button class="skills-close" type="button" title="Close">&times;</button></div>'
+          + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button></div>'
         + '<div class="mcp-body"><div class="skills-loading">' + escHtml(msg) + '</div></div>';
       dialog.querySelector('.skills-close').addEventListener('click', close);
     }
@@ -1455,7 +1455,7 @@ window.Dialogs = (function () {
             + '<h2>MCP servers</h2>'
             + '<div class="skills-head-actions">'
               + '<button class="skills-new mcp-add-open" type="button">+ Add server</button>'
-              + '<button class="skills-close" type="button" title="Close">&times;</button>'
+              + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
             + '</div>'
           + '</div>'
           + '<div class="mcp-body">' + listBody(groups) + '</div>';
@@ -1508,7 +1508,7 @@ window.Dialogs = (function () {
           + '<button class="mcp-connect mcp-hidden" type="button" data-name="' + escHtml(g.name) + '" title="Sign in to this server (opens your browser)">Connect</button>'
           + '<span class="skills-row-source ' + (g.scope === 'user' ? 'skills-source-user' : 'skills-source-project') + '">' + escHtml(scopeLabel) + '</span>'
           + '<span class="mcp-type">' + escHtml(g.type) + '</span>'
-          + '<button class="mcp-remove" type="button" data-index="' + i + '" title="Remove from all of its agents">&times;</button>'
+          + '<button class="mcp-remove" type="button" data-index="' + i + '" title="Remove from all of its agents" aria-label="Remove from all of its agents">&times;</button>'
         + '</div>'
         + '<div class="skills-row-desc mcp-agent-badges">' + badges + '</div>'
         + '<div class="skills-row-desc"><code class="mcp-cmd">' + escHtml(g.detail) + '</code></div>'
@@ -1595,7 +1595,7 @@ window.Dialogs = (function () {
         var cmd = 'claude mcp login ' + name;
         box.innerHTML =
           '<div class="mcp-auth-head">Sign in to ' + escHtml(name)
-            + '<button class="mcp-auth-close" type="button" title="Close">&times;</button></div>'
+            + '<button class="mcp-auth-close" type="button" title="Close" aria-label="Close">&times;</button></div>'
           + '<div class="mcp-auth-text">This server uses an interactive sign-in. Open a terminal, approve access in your browser, then paste the redirect URL back into the terminal when it asks. Come back and Recheck when done.</div>'
           + '<pre class="mcp-exports">' + escHtml(cmd) + '</pre>'
           + '<div class="mcp-setup-actions">'
@@ -1626,7 +1626,7 @@ window.Dialogs = (function () {
           + '<h2>Add MCP server</h2>'
           + '<div class="skills-head-actions">'
             + '<button class="skills-create-cancel mcp-back" type="button">\u2190 Back</button>'
-            + '<button class="skills-close" type="button" title="Close">&times;</button>'
+            + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
           + '</div>'
         + '</div>'
         + '<div class="mcp-body">'
@@ -1806,7 +1806,7 @@ window.Dialogs = (function () {
           + '<input class="skills-create-name mcp-in mcp-env-k" spellcheck="false" placeholder="VAR_NAME">'
           + '<input class="skills-create-name mcp-in mcp-env-v" spellcheck="false" placeholder="value">'
           + '<label class="mcp-secret-toggle" title="Secret \u2014 referenced from your environment, never stored"><input type="checkbox" class="mcp-env-secret"> secret</label>'
-          + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove">&times;</button>'
+          + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove" aria-label="Remove">&times;</button>'
         + '</div>';
         var valInput = rowEl.querySelector('.mcp-env-v');
         rowEl.querySelector('.mcp-env-secret').addEventListener('change', function () {
@@ -1933,7 +1933,7 @@ window.Dialogs = (function () {
     dialog.innerHTML =
       '<div class="skills-head">'
         + '<h2>Plugins</h2>'
-        + '<button class="skills-close" type="button" title="Close">&times;</button>'
+        + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="skills-body" style="grid-template-columns:1fr">'
         + '<div class="skills-list-pane" style="border-right:none;">'

@@ -449,7 +449,7 @@ window.App = window.App || {};
       var main = label ? App.escHtml(label) : App.escHtml(p);
       var tag = it.tag ? '<span class="modal-recents-tag">' + App.escHtml(it.tag) + '</span>' : '';
       var rm = it.removable === false ? ''
-        : '<button type="button" class="modal-recents-remove" title="Remove from recents" data-path="' + App.escHtml(p) + '">×</button>';
+        : '<button type="button" class="modal-recents-remove" title="Remove from recents" aria-label="Remove from recents" data-path="' + App.escHtml(p) + '">×</button>';
       return '<div class="modal-recents-item" data-path="' + App.escHtml(p) + '" data-kind="' + App.escHtml(it.kind || '') + '">'
         + '<span class="modal-recents-pick">' + main + sub + '</span>'
         + tag + rm

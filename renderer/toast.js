@@ -82,14 +82,26 @@
         cursor: pointer;
       }
       .klaussy-toast-action:hover { background: rgba(255,255,255,0.2); }
+      .klaussy-toast { position: relative; padding-right: 30px; }
+      .klaussy-toast-close {
+        position: absolute; top: 4px; right: 4px;
+        width: 24px; height: 24px; padding: 0;
+        font: inherit; font-size: 16px; line-height: 1;
+        color: #e8e8f0; background: transparent; border: 0; border-radius: 4px;
+        cursor: pointer; opacity: 0.7;
+      }
+      .klaussy-toast-close:hover, .klaussy-toast-close:focus-visible { opacity: 1; background: rgba(255,255,255,0.12); }
     `;
     document.head.appendChild(style);
 
     _container = document.createElement('div');
     _container.id = 'klaussy-toast-stack';
-    // role=status so screen readers announce without stealing focus.
-    _container.setAttribute('role', 'status');
-    _container.setAttribute('aria-live', 'polite');
+    _container.setAttribute('aria-label', 'Notifications');
+    // A11y announces toasts itself; the stack is only a live region as a fallback.
+    if (!window.A11y) {
+      _container.setAttribute('role', 'status');
+      _container.setAttribute('aria-live', 'polite');
+    }
     document.body.appendChild(_container);
   }
 
@@ -111,6 +123,7 @@
     el.appendChild(span);
 
     let dismissed = false;
+    let timer = null;
     const dismiss = () => {
       if (dismissed) return;
       dismissed = true;
@@ -135,7 +148,16 @@
       el.appendChild(btn);
     }
 
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'klaussy-toast-close';
+    closeBtn.setAttribute('aria-label', 'Dismiss notification');
+    closeBtn.textContent = '\u00d7';
+    closeBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
+    el.appendChild(closeBtn);
+
     _container.appendChild(el);
+    if (window.A11y) window.A11y.announce(span.textContent, level === 'error' ? 'assertive' : 'polite');
 
     // Next frame so the transition runs from the initial off-screen state.
     requestAnimationFrame(() => el.classList.add('visible'));
@@ -143,9 +165,18 @@
     // Sticky toasts stay until clicked — used for actionable prompts the user
     // shouldn't miss (a timed-out upgrade nag reads as "nothing to do").
     const timeout = DISMISS_MS[level] || DISMISS_MS.info;
-    const timer = opts.sticky ? null : setTimeout(dismiss, timeout);
+    const arm = () => { if (!opts.sticky && !dismissed) timer = setTimeout(dismiss, timeout); };
+    const pause = () => { clearTimeout(timer); timer = null; };
+    arm();
+    el.addEventListener('mouseenter', pause);
+    el.addEventListener('focusin', pause);
+    el.addEventListener('mouseleave', () => { if (!el.contains(document.activeElement)) arm(); });
+    el.addEventListener('focusout', (e) => { if (!el.contains(e.relatedTarget) && !el.matches(':hover')) arm(); });
     el.addEventListener('click', dismiss);
   }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install);
+  else if (document.body) install();
 
   window.toast = {
     error:   (msg) => show('error', msg),

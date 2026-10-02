@@ -115,7 +115,7 @@ window.App = window.App || {};
           recentsList.innerHTML = items.map(function (p) {
             return '<div class="modal-recents-item" data-path="' + escForAttr(p) + '">'
               + '<span class="modal-recents-pick">' + escForAttr(p) + '</span>'
-              + '<button type="button" class="modal-recents-remove" title="Remove from recents" data-path="' + escForAttr(p) + '">×</button>'
+              + '<button type="button" class="modal-recents-remove" title="Remove from recents" aria-label="Remove from recents" data-path="' + escForAttr(p) + '">×</button>'
             + '</div>';
           }).join('');
         }
@@ -1145,11 +1145,13 @@ window.App = window.App || {};
       filesTabContent.classList.add('tree-collapsed');
       App.btnTreeCollapse.textContent = '▸';
       App.btnTreeCollapse.title = 'Show file tree';
+      App.btnTreeCollapse.setAttribute('aria-expanded', 'false');
     }
     App.btnTreeCollapse.addEventListener('click', function () {
       var collapsed = filesTabContent.classList.toggle('tree-collapsed');
       App.btnTreeCollapse.textContent = collapsed ? '▸' : '▾';
       App.btnTreeCollapse.title = collapsed ? 'Show file tree' : 'Collapse file tree';
+      App.btnTreeCollapse.setAttribute('aria-expanded', String(!collapsed));
       localStorage.setItem(TREE_COLLAPSED_KEY, collapsed ? '1' : '0');
     });
   }

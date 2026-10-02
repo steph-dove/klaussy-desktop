@@ -49,6 +49,7 @@
         "_pendingAgentNav": "writable",
         "_reloadDiffTab": "writable",
         "_showContextMenu": "writable",
+        "A11y": "writable",
         "ActionModal": "writable",
         "AgentRouter": "writable",
         "AgentsPanel": "writable",

@@ -351,7 +351,7 @@ window.TerminalManager = (function () {
     subTabBar.className = 'sub-terminal-tabs';
     subTabBar.innerHTML =
       '<button class="sub-tab active" data-sub-id="0"><span class="sub-tab-label">Primary</span></button>' +
-      '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)">+</button></span>';
+      '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)" aria-label="Add a tab">+</button></span>';
     container.insertBefore(subTabBar, label.nextSibling);
     updatePrimaryAgentTab(taskEntry);
 

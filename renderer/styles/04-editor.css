@@ -299,7 +299,7 @@
 }
 
 .file-viewer-tab.dirty .tab-dirty-dot { visibility: visible; }
-.file-viewer-tab.dirty:not(:hover) .tab-close { display: none; }
+.file-viewer-tab.dirty:not(:hover):not(:focus-within) .tab-close { display: none; }
 
 .file-viewer-tab .tab-close {
   background: transparent;
@@ -314,6 +314,7 @@
 }
 
 .file-viewer-tab:hover .tab-close,
+.file-viewer-tab:focus-within .tab-close,
 .file-viewer-tab.active .tab-close { opacity: 1; }
 
 .file-viewer-tab .tab-close:hover { background: var(--surface-hover); color: var(--text); }

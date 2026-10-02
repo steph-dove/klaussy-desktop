@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: klaussy-qa:; media-src 'self' klaussy-qa:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
@@ -68,7 +68,7 @@
       <div id="sidebar-header">
         <h1>Klaussy</h1>
         <div class="header-buttons">
-          <button id="btn-diff" title="Toggle diff panel">
+          <button id="btn-diff" aria-label="Toggle changes panel" title="Toggle diff panel">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="4" cy="4" r="2.5"></circle>
               <circle cx="12" cy="12" r="2.5"></circle>
@@ -76,12 +76,12 @@
               <path d="M4 8.5h4a2 2 0 0 0 2-2V4"></path>
             </svg>
           </button>
-          <button id="btn-layout" title="Cycle layout: single / columns / grid">
+          <button id="btn-layout" aria-label="Cycle terminal layout" title="Cycle layout: single / columns / grid">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="2" y="2" width="12" height="12" rx="1.5"></rect>
             </svg>
           </button>
-          <button id="btn-review-pr" title="Review a Pull Request…">
+          <button id="btn-review-pr" aria-label="Review a pull request" title="Review a Pull Request…">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <circle cx="4" cy="4" r="2.5"></circle>
               <circle cx="4" cy="12" r="2.5"></circle>
@@ -90,12 +90,12 @@
               <line x1="12" y1="6.5" x2="12" y2="12"></line>
             </svg>
           </button>
-          <button id="btn-open-folder" title="Open a folder or a single file (no git required)">
+          <button id="btn-open-folder" aria-label="Open a folder or file" title="Open a folder or a single file (no git required)">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M1.5 2.75a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .177.073l1.586 1.586c.047.047.11.073.177.073h7.06a.25.25 0 0 1 .25.25v8.5a.25.25 0 0 1-.25.25H1.75a.25.25 0 0 1-.25-.25v-10.25z"></path>
             </svg>
           </button>
-          <button id="btn-new-task" title="New Task">
+          <button id="btn-new-task" aria-label="New task" title="New Task">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <line x1="8" y1="2.5" x2="8" y2="13.5"></line>
               <line x1="2.5" y1="8" x2="13.5" y2="8"></line>
@@ -134,26 +134,26 @@
       <div id="task-list"></div>
 
       <div id="sidebar-footer">
-        <button id="btn-new-window" title="New Window">
+        <button id="btn-new-window" aria-label="New window" title="New Window">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <rect x="2" y="2" width="9" height="9" rx="1.5"></rect>
             <path d="M5 14h9V5a1 1 0 0 0-1-1"></path>
           </svg>
         </button>
-        <button id="btn-theme" title="Change theme">
+        <button id="btn-theme" aria-label="Change theme" title="Change theme">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="8" cy="8" r="7"></circle>
             <path fill="currentColor" d="M8 1a7 7 0 0 1 0 14V1z"></path>
           </svg>
         </button>
-        <button id="btn-prefs" title="Preferences">
+        <button id="btn-prefs" aria-label="Preferences" title="Preferences">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="8" cy="8" r="2.5"></circle>
             <path d="M9.8 1.4a.8.8 0 0 1 .5.7l.2.9a.8.8 0 0 0 .6.6l.9.2a.8.8 0 0 1 .7.5l.4.8a.8.8 0 0 1-.2.8l-.7.7a.8.8 0 0 0 0 .9l.7.7a.8.8 0 0 1 .2.8l-.4.8a.8.8 0 0 1-.7.5l-.9.2a.8.8 0 0 0-.6.6l-.2.9a.8.8 0 0 1-.5.7l-.8.4a.8.8 0 0 1 .9-.2l.7.7a.8.8 0 0 0 .9 0l.7-.7a.8.8 0 0 1 .8-.2l.8.4z"></path>
           </svg>
         </button>
         <button id="btn-sidebar-toggle" title="Toggle sidebar">
-          <span id="sidebar-toggle-icon">&#9664;</span>
+          <span id="sidebar-toggle-icon" aria-hidden="true">&#9664;</span>
           <span id="sidebar-toggle-label">Hide</span>
         </button>
       </div>
@@ -167,7 +167,7 @@
       <div id="agents-panel-header">
         <span class="agents-panel-title">Agents</span>
         <button id="btn-agents-clear" title="Clear completed">Clear</button>
-        <button id="btn-agents-close" title="Close">&times;</button>
+        <button id="btn-agents-close" aria-label="Close agents panel" title="Close">&times;</button>
       </div>
       <div id="agents-panel-list"></div>
       <div id="agents-panel-empty">No active agents</div>
@@ -279,8 +279,8 @@
             <button id="btn-fetch" title="Fetch">Fetch</button>
             <button id="btn-pull" title="Pull">Pull</button>
             <span id="ahead-behind"></span>
-            <button id="btn-refresh-diff" title="Refresh">&#8635;</button>
-            <button id="btn-close-diff" title="Close">&times;</button>
+            <button id="btn-refresh-diff" aria-label="Refresh changes" title="Refresh">&#8635;</button>
+            <button id="btn-close-diff" aria-label="Close changes panel" title="Close">&times;</button>
           </div>
         </div>
         <div id="diff-tabs">
@@ -303,7 +303,7 @@
           <div id="commit-area" style="display: none;">
             <textarea id="commit-message" rows="5" placeholder="Commit message... (Cmd+Enter to commit)" autocomplete="off" spellcheck="false"></textarea>
             <div id="commit-area-actions">
-              <button id="btn-claude-commit-msg" title="Write commit message with the agent">✨</button>
+              <button id="btn-claude-commit-msg" aria-label="Write commit message with the agent" title="Write commit message with the agent">✨</button>
               <button id="btn-do-commit">Commit</button>
             </div>
           </div>
@@ -343,11 +343,11 @@
         <!-- Files tab content (C2) -->
         <div id="files-tab-content" style="display: none;">
           <div id="file-tree-header">
-            <button id="btn-tree-collapse" title="Collapse file tree">▾</button>
+            <button id="btn-tree-collapse" aria-label="File tree" aria-expanded="true" title="Collapse file tree">▾</button>
             <div id="file-tree-worktree-label" title="Active worktree / folder"></div>
             <button id="btn-tree-new-file" title="New file">+ File</button>
             <button id="btn-tree-new-folder" title="New folder">+ Folder</button>
-            <button id="btn-tree-refresh" title="Refresh tree">↻</button>
+            <button id="btn-tree-refresh" aria-label="Refresh file tree" title="Refresh tree">↻</button>
             <button id="btn-run-app" title="Run app — the agent auto-detects how and streams output">▶ Run App</button>
           </div>
           <div id="file-tree-filter-bar">
@@ -383,7 +383,7 @@
                 <button id="btn-tag-cancel" class="tags-btn-secondary">Cancel</button>
                 <button id="btn-tag-submit" class="tags-btn-primary">Create</button>
               </div>
-              <div id="tag-error" class="tags-error"></div>
+              <div id="tag-error" role="alert" class="tags-error"></div>
             </div>
             <div id="tags-list"></div>
           </div>
@@ -395,7 +395,7 @@
           <div id="session-notes-actions">
             <span id="session-notes-title">Session notes</span>
             <button id="btn-session-notes-capture" title="Summarize what every active agent in this session is doing, now">Capture now</button>
-            <button id="btn-session-notes-refresh" title="Reload notes">&#8635;</button>
+            <button id="btn-session-notes-refresh" aria-label="Reload session notes" title="Reload notes">&#8635;</button>
             <button id="btn-session-notes-clear" title="Delete every note for this repo" disabled>Clear all</button>
           </div>
           <div id="session-notes-list"></div>
@@ -410,7 +410,7 @@
               <button class="plan-source-btn" type="button" data-source="design">Design</button>
             </div>
             <h3 id="plan-tab-title">Current Plan Progress</h3>
-            <button id="btn-refresh-plan" title="Refresh">&#8635;</button>
+            <button id="btn-refresh-plan" aria-label="Refresh plan" title="Refresh">&#8635;</button>
           </div>
           <div id="plan-tab-body">
             <!-- Populated by PlanPanel when a plan with task checkboxes loads. -->
@@ -474,14 +474,14 @@
             <span id="modal-repo-path" class="modal-repo-path">No repo selected</span>
             <select id="modal-base-branch" class="mr-base" hidden title="Base branch"></select>
             <button id="btn-modal-repo-browse" type="button" class="modal-input-btn" title="Browse for a git repo">Browse</button>
-            <button id="btn-modal-repo-recents" type="button" class="modal-input-btn modal-recents-btn" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
+            <button id="btn-modal-repo-recents" aria-label="Projects and discovered repos" type="button" class="modal-input-btn modal-recents-btn" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
             <div id="modal-repo-recents-list" class="modal-recents-list" hidden role="listbox"></div>
           </div>
         </div>
         <div id="modal-multirepo-picker">
           <div id="modal-multirepo-rows"></div>
           <div id="modal-multirepo-row">
-            <button id="btn-modal-multirepo-add" type="button" class="modal-multirepo-addbar" title="Add another repo to this session">+</button>
+            <button id="btn-modal-multirepo-add" aria-label="Add another repo to this session" type="button" class="modal-multirepo-addbar" title="Add another repo to this session">+</button>
           </div>
         </div>
         <p>Name the session (creates a branch with that name off each repo's selected base).</p>
@@ -502,7 +502,7 @@
               <input type="file" id="modal-devloop-file-input" multiple style="display:none" />
             </div>
             <div id="modal-devloop-file-list"></div>
-            <div id="modal-devloop-file-error"></div>
+            <div id="modal-devloop-file-error" role="alert"></div>
             <p class="modal-devloop-hint">Drop or paste screenshots where your cursor is and the file path lands there, so each image sits next to the text describing it.</p>
           </div>
         </div>
@@ -553,7 +553,7 @@
         <span>Open session in new window</span>
       </label>
 
-      <div id="modal-error"></div>
+      <div id="modal-error" role="alert"></div>
       <div id="modal-actions">
         <button id="modal-cancel">Cancel</button>
         <button id="modal-create">Create</button>
@@ -600,10 +600,10 @@
       <div id="dir-pick-drop">
         <input id="dir-pick-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
         <button id="dir-pick-browse" type="button" class="modal-input-btn" title="Browse for a folder">Browse</button>
-        <button id="dir-pick-recents-btn" type="button" class="modal-input-btn modal-recents-btn" title="Recent folders" aria-haspopup="listbox" aria-expanded="false" hidden>▾</button>
+        <button id="dir-pick-recents-btn" aria-label="Recent folders" type="button" class="modal-input-btn modal-recents-btn" title="Recent folders" aria-haspopup="listbox" aria-expanded="false" hidden>▾</button>
         <div id="dir-pick-recents-list" class="modal-recents-list" hidden role="listbox"></div>
       </div>
-      <div id="dir-pick-error"></div>
+      <div id="dir-pick-error" role="alert"></div>
       <div class="klaus-modal-actions">
         <button id="dir-pick-cancel" class="klaus-btn klaus-btn-ghost">Cancel</button>
         <button id="dir-pick-ok" class="klaus-btn klaus-btn-primary">Select</button>
@@ -633,7 +633,7 @@
         </label>
       </div>
 
-      <div id="plan-modal-error"></div>
+      <div id="plan-modal-error" role="alert"></div>
       <div class="klaus-modal-actions">
         <button id="plan-modal-cancel" class="klaus-btn klaus-btn-secondary" type="button">Cancel</button>
         <button id="plan-modal-submit" class="klaus-btn klaus-btn-primary" type="button">Plan</button>
@@ -655,7 +655,7 @@
         <div id="plan-approval-checklist" style="max-height: 150px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;"></div>
       </div>
 
-      <div id="plan-approval-error" class="klaus-error" style="color: var(--danger); margin-bottom: 12px;"></div>
+      <div id="plan-approval-error" role="alert" class="klaus-error" style="color: var(--danger); margin-bottom: 12px;"></div>
       <div class="klaus-modal-actions">
         <button id="plan-approval-reject" class="klaus-btn klaus-btn-secondary" type="button">Reject Plan</button>
         <button id="plan-approval-approve" class="klaus-btn klaus-btn-primary" type="button">Approve Plan</button>
@@ -729,7 +729,7 @@
         <select id="conflict-file-select"></select>
         <div id="conflict-header-actions">
           <button id="btn-conflict-resolve" class="conflict-btn-primary">Mark Resolved</button>
-          <button id="btn-conflict-close" class="conflict-btn-secondary">&times;</button>
+          <button id="btn-conflict-close" aria-label="Close conflict resolver" title="Close" data-dialog-close class="conflict-btn-secondary">&times;</button>
         </div>
       </div>
       <div id="conflict-panes">
@@ -753,11 +753,12 @@
   <div id="search-bar" style="display: none;">
     <input type="text" id="search-input" placeholder="Search..." autocomplete="off" spellcheck="false" />
     <span id="search-count"></span>
-    <button id="search-prev" title="Previous (Shift+Enter)">&#9650;</button>
-    <button id="search-next" title="Next (Enter)">&#9660;</button>
-    <button id="search-close" title="Close (Esc)">&times;</button>
+    <button id="search-prev" aria-label="Previous match" title="Previous (Shift+Enter)">&#9650;</button>
+    <button id="search-next" aria-label="Next match" title="Next (Enter)">&#9660;</button>
+    <button id="search-close" aria-label="Close search" title="Close (Esc)">&times;</button>
   </div>
 
+  <script src="a11y.js"></script>
   <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
