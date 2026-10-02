@@ -544,6 +544,13 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
+/* Muted and status colours have no headroom over the --accent-dim selection fill, so the selected row's secondary text goes full strength. */
+.diff-file.selected .diff-file-path,
+.diff-file.selected .pr-file-add,
+.diff-file.selected .pr-file-del {
+  color: var(--text) !important;
+}
+
 .diff-file-main {
   all: unset;
   display: flex;
