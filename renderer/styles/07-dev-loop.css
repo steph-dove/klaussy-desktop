@@ -50,7 +50,7 @@
 
 .minihud-dot.in_progress {
   background: var(--accent, #8b5cf6);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: #a78bfa;
   box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
   animation: pulse-glow 1.5s infinite;
@@ -58,7 +58,7 @@
 
 .minihud-dot.completed {
   background: var(--success, #10b981);
-  color: #fff;
+  color: var(--success-contrast);
   border-color: #34d399;
 }
 
@@ -112,7 +112,7 @@
 
 .quick-chip:hover {
   background: var(--accent, #7c3aed);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent, #7c3aed);
   transform: translateY(-1px);
 }
@@ -120,7 +120,7 @@
 .quick-chip-featured {
   background: linear-gradient(135deg, rgba(124, 58, 237, 0.25), rgba(79, 70, 229, 0.25));
   border-color: var(--accent, #8b5cf6);
-  color: #e4e4ff;
+  color: var(--text);
 }
 
 /* Dev Loop Tab in Right Rail */
@@ -349,13 +349,13 @@
 .devloop-step.completed .devloop-step-indicator {
   background: var(--success, #10b981);
   border-color: var(--success, #10b981);
-  color: #fff;
+  color: var(--success-contrast);
 }
 
 .devloop-step.in_progress .devloop-step-indicator {
   background: var(--accent, #7c3aed);
   border-color: #a78bfa;
-  color: #fff;
+  color: var(--accent-contrast);
   box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
   animation: pulse-glow 1.5s infinite;
 }
@@ -459,7 +459,7 @@
 
 .devloop-doc-btn.active {
   background: var(--accent, #7c3aed);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent, #7c3aed);
 }
 
@@ -529,7 +529,7 @@
 .devloop-doc-body h2,
 .devloop-doc-body h3,
 .devloop-doc-body h4 {
-  color: #fff;
+  color: var(--text);
   font-weight: 600;
   margin-top: 18px;
   margin-bottom: 8px;
@@ -797,7 +797,7 @@
 
 .devloop-btn-merge {
   background: var(--success, #46c463) !important;
-  color: #fff !important;
+  color: var(--success-contrast) !important;
   font-weight: 600;
   padding: 8px 16px;
   border-radius: 6px;
@@ -816,7 +816,7 @@
 
 .actions-dropdown-item.actions-featured:hover {
   background: var(--accent, #4a9eff);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* Modal Dev Loop Section */

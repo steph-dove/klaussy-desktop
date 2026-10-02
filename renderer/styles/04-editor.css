@@ -23,7 +23,7 @@
 
 .file-viewer-back:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -83,7 +83,7 @@
   line-height: 1;
 }
 .inline-edit-submit::before { content: '⏎'; }
-.inline-edit-submit:hover { background: var(--accent); color: white; }
+.inline-edit-submit:hover { background: var(--accent); color: var(--accent-contrast); }
 
 .inline-edit-dismiss {
   background: transparent;
@@ -185,7 +185,7 @@
 }
 .inline-edit-accept {
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -385,7 +385,7 @@
 
 #search-bar button:hover {
   background: var(--surface-hover);
-  color: #ccc;
+  color: var(--text);
 }
 
 #search-close {

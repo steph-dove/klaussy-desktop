@@ -7,18 +7,37 @@
   --bg: #0e0e13;
   --sidebar-bg: #16161d;
   --border: #272730;
-  --border-strong: #3a3a44;
+  --border-strong: #67677f;
   --accent: #4a9eff;
   --accent-hover: #6cb2ff;
   --accent-dim: rgba(74, 158, 255, 0.16);
   --text: #e8e8ee;
   --text-muted: #9a9aa6;
-  --text-dim: #64646f;
+  --text-dim: #8d8d98;
   --surface: #1c1c24;
   --surface-hover: #26262f;
   --input-bg: #0a0a0e;
   --success: #46c463;
   --error: #f0584f;
+  --accent-contrast: #0b0b0f;
+  --success-contrast: #0b0b0f;
+  --error-contrast: #0b0b0f;
+  /* Older rules use these names; undefined, they fell back to fixed dark colours in every theme. */
+  --danger: var(--error);
+  --bg-card: var(--surface);
+  --text-main: var(--text);
+  --muted: var(--text-muted);
+  --bg-hover: var(--surface-hover);
+  --hover-bg: var(--surface-hover);
+  --surface-active: var(--surface-hover);
+  --bg-input: var(--input-bg);
+  --bg-elev: var(--surface);
+  --panel-bg: var(--surface);
+  --surface-alt: var(--surface);
+  --surface-secondary: var(--surface);
+  --bg-deep: var(--bg);
+  --mono: var(--font-mono);
+  --accent-glow: var(--accent-dim);
   --term-bg: #0d0d12;
   --term-fg: #d2d2da;
   --term-cursor: #4a9eff;
@@ -123,7 +142,7 @@
 .klaus-btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .klaus-btn-primary:hover:not(:disabled) {
@@ -158,7 +177,7 @@
 .klaus-btn-danger {
   background: var(--error, #c0392b);
   border-color: var(--error, #c0392b);
-  color: #fff;
+  color: var(--error-contrast);
 }
 .klaus-btn-danger:hover:not(:disabled) {
   filter: brightness(1.1);
@@ -235,6 +254,14 @@ select {
               background-color 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* :where keeps this under the focus rule; !important beats component borders (WCAG 1.4.11). */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea) {
+  border-color: var(--border-strong) !important;
+}
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus {
+  border-color: var(--accent) !important;
+}
+
 input[type="text"]:focus,
 input[type="date"]:focus,
 input[type="search"]:focus,
@@ -284,7 +311,7 @@ button:not(.klaus-btn):not(:disabled):active,
 .overlay-content h2 {
   font-size: 24px;
   margin-bottom: 12px;
-  color: #fff;
+  color: var(--text);
 }
 
 .overlay-content p {
@@ -294,7 +321,7 @@ button:not(.klaus-btn):not(:disabled):active,
 
 .overlay-content button {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   padding: 12px 24px;
   border-radius: 8px;
@@ -530,7 +557,7 @@ body.custom-titlebar #titlebar-content {
 
 #btn-new-task {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   font-size: 18px;
   border: 1px solid var(--accent) !important;
   box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
@@ -546,7 +573,7 @@ body.custom-titlebar #titlebar-content {
 #btn-layout.active, #btn-diff.active {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
 }
 
@@ -564,7 +591,7 @@ body.custom-titlebar #titlebar-content {
   display: none;
   padding: 4px 10px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-radius: 6px;
   font-size: 11px;
   font-weight: 500;
@@ -649,7 +676,7 @@ body.custom-titlebar #titlebar-content {
   padding: 0 5px;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 10px;
   font-weight: 600;
   line-height: 16px;
@@ -883,7 +910,7 @@ body.custom-titlebar #titlebar-content {
   background: var(--accent);
   border: 1px solid var(--accent);
   border-radius: 6px;
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 11px;
   font-weight: 500;
   padding: 5px 10px;
@@ -1000,7 +1027,7 @@ body.custom-titlebar #titlebar-content {
   transition: border-color 120ms, color 120ms, background 120ms;
 }
 .sessions-modal-delete:hover {
-  color: #fff;
+  color: var(--error-contrast);
   background: var(--error, #c0392b);
   border-color: var(--error, #c0392b);
 }
@@ -1255,7 +1282,7 @@ body.custom-titlebar #titlebar-content {
 
 .saved-session-resume {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .saved-session-resume:hover {
@@ -1269,7 +1296,7 @@ body.custom-titlebar #titlebar-content {
 
 .saved-session-new:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .saved-session-dismiss {
@@ -1385,7 +1412,7 @@ body.custom-titlebar #titlebar-content {
 
 .worktree-open-claude {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .worktree-open-claude:hover {
@@ -1421,7 +1448,7 @@ body.custom-titlebar #titlebar-content {
 
 .worktree-remove:hover {
   background: var(--error, #e74c3c);
-  color: #fff;
+  color: var(--error-contrast);
   opacity: 1;
 }
 
@@ -1716,7 +1743,7 @@ button.collapsed-icon {
 
 .branch-item.selected {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .branch-item .branch-name {
@@ -1895,7 +1922,7 @@ button.collapsed-icon {
 
 #modal-create {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 #modal-create:hover {
@@ -1928,7 +1955,7 @@ button.collapsed-icon {
    container's top. order: -1 + position: relative pin it as the first
    flex item even if another child is inserted earlier by mistake. */
 .terminal-warning {
-  background: #c46a16;
+  background: #b26014;
   color: #fff;
   padding: 0 10px;
   height: 24px;
@@ -2219,7 +2246,7 @@ body.task-branchless #ahead-behind {
   font-size: 10px;
   font-weight: 600;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: 3px;
   cursor: pointer;
@@ -2260,7 +2287,7 @@ body.task-branchless #ahead-behind {
 .terminal-scroll-bottom:focus-visible {
   opacity: 1;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -2288,7 +2315,7 @@ body.task-branchless #ahead-behind {
 .terminal-plan-btn:hover {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .terminal-plan-btn .plan-btn-icon {
@@ -2824,7 +2851,7 @@ body.task-branchless #ahead-behind {
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
-  display: block;
+  position: absolute;
   opacity: 0;
   pointer-events: none;
   line-height: 1;
@@ -2832,6 +2859,7 @@ body.task-branchless #ahead-behind {
 
 .session-group-header:hover .session-group-close,
 .session-group-header:focus-within .session-group-close {
+  position: static;
   opacity: 1;
   pointer-events: auto;
 }
@@ -2909,20 +2937,21 @@ body.task-branchless #ahead-behind {
   margin-right: 4px;
   line-height: 1.2;
   transition: all 0.2s;
-  display: block;
+  position: absolute;
   opacity: 0;
   pointer-events: none;
 }
 
 .session-group-header:hover .session-group-resume-btn,
 .session-group-header:focus-within .session-group-resume-btn {
+  position: static;
   opacity: 1;
   pointer-events: auto;
 }
 
 .session-group-resume-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -3078,4 +3107,31 @@ body.task-branchless #ahead-behind {
   visibility: hidden;
   transform: translate(-50%, 15px);
   pointer-events: none;
+}
+
+/* WCAG 2.5.8: small icon buttons get at least a 24×24 hit area. */
+.task-close,
+.worktree-remove,
+.saved-session-dismiss,
+.session-group-close,
+.task-note-btn,
+.task-notify-btn,
+.diff-file-action,
+.diff-annotation-remove,
+.modal-recents-remove,
+.tag-push-btn,
+.tag-delete-btn,
+.skills-close,
+.deps-close,
+.licenses-close,
+.howto-close,
+.log-viewer-close,
+.mcp-remove,
+.mcp-auth-close,
+.agent-item-actions button,
+#btn-agents-close,
+#btn-refresh-plan,
+#btn-session-notes-refresh {
+  min-width: 24px;
+  min-height: 24px;
 }

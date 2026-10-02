@@ -6,9 +6,9 @@ window.ThemeManager = (function () {
       // Polished dark — soft, faintly-cool near-black with a clean elevation
       // ladder (bg → sidebar → surface → hover) so panels/cards separate
       // without hard lines. Inputs sit recessed below bg; calm blue accent.
-      bg: '#0e0e13', sidebarBg: '#16161d', border: '#272730',
+      bg: '#0e0e13', sidebarBg: '#16161d', border: '#272730', borderStrong: '#67677f',
       accent: '#4a9eff', accentHover: '#6cb2ff',
-      text: '#e8e8ee', textMuted: '#9a9aa6', textDim: '#64646f',
+      text: '#e8e8ee', textMuted: '#9a9aa6', textDim: '#8d8d98',
       surface: '#1c1c24', surfaceHover: '#26262f',
       inputBg: '#0a0a0e', success: '#46c463', error: '#f0584f',
       // termFg softer than the UI text — pure white in a full terminal is
@@ -25,56 +25,56 @@ window.ThemeManager = (function () {
     },
     midnight: {
       name: 'Midnight',
-      bg: '#0d1117', sidebarBg: '#161b22', border: '#30363d',
+      bg: '#0d1117', sidebarBg: '#161b22', border: '#30363d', borderStrong: '#657180',
       accent: '#58a6ff', accentHover: '#79c0ff',
-      text: '#c9d1d9', textMuted: '#8b949e', textDim: '#6e7681',
+      text: '#c9d1d9', textMuted: '#97a0a8', textDim: '#999fa8',
       surface: '#21262d', surfaceHover: '#30363d',
       inputBg: '#0d1117', success: '#3fb950', error: '#f85149',
       termBg: '#0d1117', termFg: '#c9d1d9', termCursor: '#58a6ff', termSelection: '#58a6ff44',
     },
     monokai: {
       name: 'Monokai',
-      bg: '#272822', sidebarBg: '#1e1f1c', border: '#3e3d32',
+      bg: '#272822', sidebarBg: '#1e1f1c', border: '#3e3d32', borderStrong: '#8c8971',
       accent: '#a6e22e', accentHover: '#b6f23e',
-      text: '#f8f8f2', textMuted: '#75715e', textDim: '#555550',
+      text: '#f8f8f2', textMuted: '#bbb8aa', textDim: '#b7b7b2',
       surface: '#3e3d32', surfaceHover: '#49483e',
-      inputBg: '#272822', success: '#a6e22e', error: '#f92672',
+      inputBg: '#272822', success: '#a6e22e', error: '#fb7fac',
       termBg: '#272822', termFg: '#f8f8f2', termCursor: '#f92672', termSelection: '#a6e22e44',
     },
     nord: {
       name: 'Nord',
-      bg: '#2e3440', sidebarBg: '#3b4252', border: '#4c566a',
-      accent: '#88c0d0', accentHover: '#8fbcbb',
-      text: '#eceff4', textMuted: '#d8dee9', textDim: '#a5b1c2',
+      bg: '#2e3440', sidebarBg: '#3b4252', border: '#4c566a', borderStrong: '#909bb0',
+      accent: '#91c5d4', accentHover: '#8fbcbb',
+      text: '#eceff4', textMuted: '#d8dee9', textDim: '#c5cdd8',
       surface: '#434c5e', surfaceHover: '#4c566a',
-      inputBg: '#2e3440', success: '#a3be8c', error: '#bf616a',
+      inputBg: '#2e3440', success: '#acc497', error: '#dfb1b5',
       termBg: '#2e3440', termFg: '#eceff4', termCursor: '#88c0d0', termSelection: '#88c0d044',
     },
     solarized: {
       name: 'Solarized',
-      bg: '#002b36', sidebarBg: '#073642', border: '#586e75',
-      accent: '#268bd2', accentHover: '#2aa198',
-      text: '#839496', textMuted: '#657b83', textDim: '#586e75',
+      bg: '#002b36', sidebarBg: '#073642', border: '#586e75', borderStrong: '#668088',
+      accent: '#48a0de', accentHover: '#2aa198',
+      text: '#9aa8aa', textMuted: '#96a8ae', textDim: '#96a8ae',
       surface: '#073642', surfaceHover: '#0a4050',
-      inputBg: '#002b36', success: '#859900', error: '#dc322f',
+      inputBg: '#002b36', success: '#8ea300', error: '#e87977',
       termBg: '#002b36', termFg: '#839496', termCursor: '#268bd2', termSelection: '#268bd244',
     },
     rose: {
       name: 'Rose Pine',
-      bg: '#191724', sidebarBg: '#1f1d2e', border: '#26233a',
+      bg: '#191724', sidebarBg: '#1f1d2e', border: '#26233a', borderStrong: '#7069a4',
       accent: '#c4a7e7', accentHover: '#ebbcba',
-      text: '#e0def4', textMuted: '#908caa', textDim: '#6e6a86',
+      text: '#e0def4', textMuted: '#938fac', textDim: '#928fa6',
       surface: '#26233a', surfaceHover: '#2a2837',
       inputBg: '#191724', success: '#9ccfd8', error: '#eb6f92',
       termBg: '#191724', termFg: '#e0def4', termCursor: '#c4a7e7', termSelection: '#c4a7e744',
     },
     synthwave: {
       name: 'Synthwave \'84',
-      bg: '#2b213a', sidebarBg: '#241b2f', border: '#372948',
+      bg: '#2b213a', sidebarBg: '#241b2f', border: '#372948', borderStrong: '#8a6dac',
       accent: '#ff7edb', accentHover: '#f97e72',
-      text: '#f0eff5', textMuted: '#b6b1cf', textDim: '#706b8c',
+      text: '#f0eff5', textMuted: '#b6b1cf', textDim: '#a4a1b7',
       surface: '#372948', surfaceHover: '#423257',
-      inputBg: '#1e1628', success: '#36f9f6', error: '#fe4450',
+      inputBg: '#1e1628', success: '#36f9f6', error: '#fe626c',
       termBg: '#261e35', termFg: '#f0eff5', termCursor: '#ff7edb', termSelection: 'rgba(255, 126, 219, 0.25)',
       termAnsi: {
         black: '#1e1628', red: '#fe4450', green: '#72f1b8', yellow: '#fede5d',
@@ -85,11 +85,11 @@ window.ThemeManager = (function () {
     },
     gruvbox: {
       name: 'Gruvbox',
-      bg: '#282828', sidebarBg: '#1d2021', border: '#3c3836',
+      bg: '#282828', sidebarBg: '#1d2021', border: '#3c3836', borderStrong: '#8b827e',
       accent: '#fe8019', accentHover: '#d65d0e',
-      text: '#ebdbb2', textMuted: '#a89984', textDim: '#928374',
+      text: '#ebdbb2', textMuted: '#c3b9ab', textDim: '#c1b9b0',
       surface: '#3c3836', surfaceHover: '#504945',
-      inputBg: '#282828', success: '#b8bb26', error: '#fb4934',
+      inputBg: '#282828', success: '#b8bb26', error: '#fc7d6e',
       termBg: '#282828', termFg: '#ebdbb2', termCursor: '#fe8019', termSelection: 'rgba(254, 128, 25, 0.25)',
       termAnsi: {
         black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921',
@@ -100,9 +100,9 @@ window.ThemeManager = (function () {
     },
     catppuccin: {
       name: 'Catppuccin',
-      bg: '#1e1e2e', sidebarBg: '#11111b', border: '#313244',
+      bg: '#1e1e2e', sidebarBg: '#11111b', border: '#313244', borderStrong: '#797b9f',
       accent: '#cba6f7', accentHover: '#f5c2e7',
-      text: '#cdd6f4', textMuted: '#a6adc8', textDim: '#6c7086',
+      text: '#cdd6f4', textMuted: '#b1b7cf', textDim: '#b1b7cf',
       surface: '#313244', surfaceHover: '#45475a',
       inputBg: '#1e1e2e', success: '#a6e3a1', error: '#f38ba8',
       termBg: '#1e1e2e', termFg: '#cdd6f4', termCursor: '#f5e0dc', termSelection: 'rgba(203, 166, 247, 0.25)',
@@ -115,9 +115,9 @@ window.ThemeManager = (function () {
     },
     tokyo: {
       name: 'Tokyo Night',
-      bg: '#1a1b26', sidebarBg: '#16161e', border: '#24283b',
+      bg: '#1a1b26', sidebarBg: '#16161e', border: '#24283b', borderStrong: '#6670a2',
       accent: '#7aa2f7', accentHover: '#89ddff',
-      text: '#a9b1d6', textMuted: '#787c99', textDim: '#565f89',
+      text: '#a9b1d6', textMuted: '#9b9eb3', textDim: '#9b9eb3',
       surface: '#24283b', surfaceHover: '#2f3549',
       inputBg: '#1a1b26', success: '#9ece6a', error: '#f7768e',
       termBg: '#1a1b26', termFg: '#a9b1d6', termCursor: '#c0caf5', termSelection: 'rgba(122, 162, 247, 0.25)',
@@ -130,11 +130,11 @@ window.ThemeManager = (function () {
     },
     light: {
       name: 'Light',
-      bg: '#ffffff', sidebarBg: '#f5f5f7', border: '#d1d1d6',
-      accent: '#5856d6', accentHover: '#6e6cd8',
-      text: '#1c1c1e', textMuted: '#6e6e73', textDim: '#aeaeb2',
+      bg: '#ffffff', sidebarBg: '#f5f5f7', border: '#d1d1d6', borderStrong: '#8a8a96',
+      accent: '#5856d6', accentHover: '#5f5dd4',
+      text: '#1c1c1e', textMuted: '#65656a', textDim: '#65656a',
       surface: '#f2f2f7', surfaceHover: '#e5e5ea',
-      inputBg: '#ffffff', success: '#34c759', error: '#ff3b30',
+      inputBg: '#ffffff', success: '#217e38', error: '#dd0c00',
       termBg: '#ffffff', termFg: '#1c1c1e', termCursor: '#5856d6', termSelection: '#5856d633',
       // On a light background, the ANSI "white" colors are the trap: programs
       // assume a dark terminal and emit white / bright-white foreground text,
@@ -156,6 +156,19 @@ window.ThemeManager = (function () {
       lightSyntax: true,
     },
   };
+
+  // Text on a filled colour (buttons, badges) uses whichever of white or near-black contrasts more.
+  function luminance(hexColor) {
+    var h = hexColor.replace('#', '');
+    return [0, 2, 4].map(function (i) {
+      var v = parseInt(h.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    }).reduce(function (sum, v, i) { return sum + v * [0.2126, 0.7152, 0.0722][i]; }, 0);
+  }
+  function readableOn(fill) {
+    var l = luminance(fill);
+    return (1.05 / (l + 0.05)) >= ((l + 0.05) / (luminance('#0b0b0f') + 0.05)) ? '#ffffff' : '#0b0b0f';
+  }
 
   var currentPreset = 'dark';
   var resolvedSystemPreset = 'dark';
@@ -204,6 +217,7 @@ window.ThemeManager = (function () {
     root.style.setProperty('--bg', theme.bg);
     root.style.setProperty('--sidebar-bg', theme.sidebarBg);
     root.style.setProperty('--border', theme.border);
+    root.style.setProperty('--border-strong', theme.borderStrong);
     root.style.setProperty('--accent', theme.accent);
     root.style.setProperty('--accent-hover', theme.accentHover);
     root.style.setProperty('--text', theme.text);
@@ -214,6 +228,9 @@ window.ThemeManager = (function () {
     root.style.setProperty('--input-bg', theme.inputBg);
     root.style.setProperty('--success', theme.success);
     root.style.setProperty('--error', theme.error);
+    root.style.setProperty('--accent-contrast', readableOn(theme.accent));
+    root.style.setProperty('--success-contrast', readableOn(theme.success));
+    root.style.setProperty('--error-contrast', readableOn(theme.error));
     root.style.setProperty('--term-bg', theme.termBg);
     root.style.setProperty('--term-fg', theme.termFg);
     root.style.setProperty('--term-cursor', theme.termCursor);
@@ -305,5 +322,5 @@ window.ThemeManager = (function () {
     return currentPreset;
   }
 
-  return { init: init, apply: apply, getTerminalTheme: getTerminalTheme, getPresetList: getPresetList, getCurrent: getCurrent };
+  return { init: init, apply: apply, getTerminalTheme: getTerminalTheme, getPresetList: getPresetList, getCurrent: getCurrent, presets: presets };
 })();

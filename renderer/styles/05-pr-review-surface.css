@@ -484,7 +484,7 @@ button.pr-check-toggle {
 .pr-check-fix-discard:hover { background: var(--surface-hover); }
 .pr-check-fix-push {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
 }
 .pr-check-fix-push:hover { filter: brightness(1.08); }
@@ -586,7 +586,7 @@ button.pr-check-toggle {
   font-size: 13px;
   padding: 8px 18px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -699,7 +699,7 @@ button.pr-check-toggle {
   font-size: 11px;
   font-weight: 600;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
   border-radius: 4px;
   cursor: pointer;
@@ -727,7 +727,7 @@ button.pr-check-toggle {
   font-weight: 600;
   border-radius: 4px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
   cursor: pointer;
   font-family: inherit;
@@ -872,14 +872,14 @@ button.pr-check-toggle {
 }
 .pr-workflow-dispatch-go {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
 }
 .pr-workflow-dispatch-go:disabled { opacity: 0.6; cursor: default; }
 
 .pr-ai-implement-all {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
   font-weight: 600;
 }
@@ -1188,7 +1188,7 @@ button.pr-check-toggle {
 .pr-ai-finding-ignore:hover, .pr-ai-finding-undo:hover { background: var(--surface-hover); }
 .pr-ai-finding-implement, .pr-ai-finding-redo {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
   font-weight: 600;
 }
@@ -1854,7 +1854,7 @@ button.pr-check-toggle {
 }
 .pr-ai-finding-composer-save {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
 }
 .pr-ai-finding-composer-save:hover {
@@ -2106,7 +2106,8 @@ button.pr-check-toggle {
 .pr-conv-avatar-ai {
   background: var(--accent);
   border-radius: 8px;
-  color: #fff;
+  color: var(--accent-contrast);
+  text-shadow: none;
 }
 
 .pr-conv-head {
@@ -2312,7 +2313,7 @@ button.pr-check-toggle {
 }
 .pr-conv-thread-resolve-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .pr-conv-thread-resolve-btn:disabled {
   opacity: 0.6;
@@ -2422,7 +2423,7 @@ button.pr-check-toggle {
 .pr-conv-new-post,
 .pr-conv-claude-draft-approve {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 .pr-conv-reply-send:hover,
@@ -2566,7 +2567,7 @@ button.pr-check-toggle {
 
 #pr-review-selection-fab button:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* Rotating status label while streaming explain. The pulse makes it obvious
@@ -2786,7 +2787,7 @@ button.pr-check-toggle {
 .pr-comment-composer-save {
   padding: 4px 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: 4px;
   font-size: 11px;
@@ -2821,7 +2822,7 @@ button.pr-check-toggle {
   letter-spacing: 0.4px;
   text-transform: uppercase;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .pr-pending-summary {
   color: var(--text-dim);
@@ -2861,14 +2862,14 @@ button.pr-check-toggle {
 .pr-pending-count {
   padding: 1px 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 10px;
   font-weight: 600;
   border-radius: 3px;
 }
 .pr-pending-submit {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
 }
 
@@ -2961,7 +2962,7 @@ button.pr-check-toggle {
 .pr-submit-cancel:hover { background: var(--surface-hover); }
 .pr-submit-send {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -3059,7 +3060,7 @@ button.pr-check-toggle {
   flex-shrink: 0;
   padding: 6px 14px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
   border-radius: 4px;
   font-size: 12px;
@@ -3340,7 +3341,7 @@ button.pr-check-toggle {
 
 .palette-item.selected {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .quick-open-item {
@@ -3421,7 +3422,7 @@ button.pr-check-toggle {
 
 .about-close {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: 6px;
   padding: 6px 20px;
@@ -3674,7 +3675,7 @@ button.pr-check-toggle {
 .skills-head-actions { display: flex; align-items: center; gap: 8px; }
 .skills-new {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
   border-radius: 4px;
   padding: 4px 12px;
@@ -3719,7 +3720,7 @@ button.pr-check-toggle {
   border-left: 1px solid var(--border);
 }
 .skills-create-toggle button:first-child { border-left: none; }
-.skills-create-toggle button.active { background: var(--accent); color: #fff; }
+.skills-create-toggle button.active { background: var(--accent); color: var(--accent-contrast); }
 .skills-create-scope, .skills-create-name {
   background: var(--input-bg, var(--bg));
   color: var(--text);
@@ -3759,7 +3760,7 @@ button.pr-check-toggle {
 .skills-create-cancel:hover { background: var(--surface-hover); }
 .skills-create-go {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -3844,7 +3845,7 @@ button.pr-check-toggle {
   border-radius: 4px;
   cursor: pointer;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
   font-family: inherit;
 }
@@ -4435,7 +4436,7 @@ button.pr-check-toggle {
 }
 .skills-preview-save {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
   font-weight: 600;
 }
@@ -4531,7 +4532,7 @@ button.pr-check-toggle {
 .skills-preview-run {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .skills-preview-run:hover { filter: brightness(1.08); }
 
@@ -4706,7 +4707,7 @@ button.pr-check-toggle {
   font-family: inherit;
   border: 1px solid var(--border);
 }
-.deps-recheck { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+.deps-recheck { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); font-weight: 600; }
 .deps-recheck:hover { filter: brightness(1.1); }
 .deps-skip { background: transparent; color: var(--text); }
 .deps-skip:hover { background: var(--surface-hover); }
@@ -4753,7 +4754,7 @@ button.pr-check-toggle {
 
 #btn-run-app {
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast);
   border: none;
   padding: 4px 10px;
   border-radius: 4px;
@@ -4848,7 +4849,7 @@ button.pr-check-toggle {
 #project-replace-btn {
   align-self: flex-end;
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast);
   border: none;
   padding: 4px 12px;
   border-radius: 4px;
@@ -5045,7 +5046,7 @@ mark.search-hit-replace {
 
 #btn-fetch:hover, #btn-pull:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -5093,7 +5094,7 @@ mark.search-hit-replace {
 
 #btn-stash-push {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: 6px;
   padding: 6px 12px;
@@ -5150,7 +5151,7 @@ mark.search-hit-replace {
 
 .stash-pop-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -5229,7 +5230,7 @@ mark.search-hit-replace {
 .file-viewer-run-btn {
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 4px;
@@ -5307,14 +5308,14 @@ mark.search-hit-replace {
 
 .file-viewer-blame-btn:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
 .file-viewer-save-btn {
   background: var(--accent);
   border: 1px solid var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 4px;
@@ -5927,7 +5928,7 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--accent);
   border: none;
   border-radius: 6px;
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 6px 14px;
@@ -5968,7 +5969,7 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--accent);
   border: none;
   border-radius: 6px;
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 5px 14px;
@@ -6136,7 +6137,7 @@ body.task-branchless .file-viewer-blame-btn {
 .env-file-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 #env-editor {
@@ -6273,7 +6274,7 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--accent);
   border: none;
   border-radius: 6px;
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 6px 16px;
@@ -6723,7 +6724,7 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--accent);
   border: none;
   border-radius: 6px;
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 6px 14px;
@@ -6874,7 +6875,7 @@ body.task-branchless .file-viewer-blame-btn {
   background: var(--accent);
   border: none;
   border-radius: 4px;
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
   font-size: 11px;
   padding: 2px 10px;
@@ -6904,7 +6905,7 @@ body.task-branchless .file-viewer-blame-btn {
 .file-viewer-preview-btn.active,
 .file-viewer-split-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -7669,7 +7670,7 @@ body.task-branchless .file-viewer-blame-btn {
 }
 .pr-check-actions button.pr-check-fix-btn:hover {
   background: var(--accent) !important;
-  color: #fff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
   box-shadow: 0 2px 8px rgba(74, 158, 255, 0.3);
 }
@@ -7686,7 +7687,7 @@ body.task-branchless .file-viewer-blame-btn {
   background: transparent !important;
 }
 .pr-check-actions button.pr-check-action-cancel:hover {
-  color: #fff !important;
+  color: var(--error-contrast) !important;
   background: var(--error) !important;
   border-color: var(--error) !important;
 }
@@ -7721,7 +7722,7 @@ body.task-branchless .file-viewer-blame-btn {
   font-size: 13px;
   padding: 10px 24px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: var(--radius-md);
   font-weight: 600;
@@ -7783,9 +7784,9 @@ body.task-branchless .file-viewer-blame-btn {
   border-radius: var(--radius-sm);
   color: #fff !important;
 }
-.pr-ai-verdict-approve .pr-ai-verdict-badge { background: var(--success); }
-.pr-ai-verdict-changes .pr-ai-verdict-badge { background: #d29922; }
-.pr-ai-verdict-block .pr-ai-verdict-badge   { background: var(--error); }
+.pr-ai-verdict-approve .pr-ai-verdict-badge { background: var(--success); color: var(--success-contrast) !important; }
+.pr-ai-verdict-changes .pr-ai-verdict-badge { background: #d29922; color: #0b0b0f !important; }
+.pr-ai-verdict-block .pr-ai-verdict-badge   { background: var(--error); color: var(--error-contrast) !important; }
 
 .pr-ai-finding {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -7870,7 +7871,7 @@ body.task-branchless .file-viewer-blame-btn {
 button.js-ai-review,
 .js-ai-review button.agent-toolbar-run {
   background: var(--accent) !important;
-  color: #ffffff !important;
+  color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
   font-weight: 600;
 }

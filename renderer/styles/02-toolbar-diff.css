@@ -86,7 +86,7 @@
 
 .actions-dropdown-item:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .terminal-container.dragging {
@@ -124,7 +124,7 @@
 .agent-split-main:hover,
 .agent-split-caret:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .agent-split-menu {
   position: absolute;
@@ -154,14 +154,14 @@
 }
 .agent-split-item:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 .agent-split-item.on {
   color: var(--accent);
   font-weight: 600;
 }
 .agent-split-item.on:hover {
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* Global Agent + Version toolbar (PR review header). */
@@ -191,7 +191,7 @@
 }
 .agent-toolbar-run {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: 6px;
   padding: 6px 14px;
@@ -381,7 +381,7 @@
 
 .diff-mode-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .diff-mode-btn:hover:not(.active) {
@@ -426,7 +426,7 @@
 
 .diff-scope-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .diff-scope-btn:hover:not(.active) {
@@ -643,7 +643,7 @@
 
 .diff-file-action:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .diff-file-action[data-action="discard"]:hover,
@@ -1032,7 +1032,7 @@
 
 #diff-partial-action-bar .partial-apply {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -1086,7 +1086,7 @@
 
 .diff-view-mode-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .diff-split-grid {
@@ -1293,7 +1293,7 @@
   font-size: 11px;
   font-weight: 600;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -1330,7 +1330,7 @@
 
 .diff-ctx-item:hover {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 /* Inline diff annotations */
@@ -1355,7 +1355,7 @@
   font-size: 13px;
   line-height: 1;
   white-space: normal;
-  color: #fff;
+  color: var(--accent-contrast);
   background: var(--accent);
   border: none;
   border-radius: 4px;
@@ -1418,7 +1418,7 @@
 
 .diff-annotation-save {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border-color: var(--accent);
 }
 
@@ -1498,7 +1498,7 @@
 
 .diff-annotations-send {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: 1px solid var(--accent);
 }
 
@@ -1564,7 +1564,7 @@
 
 #btn-do-commit {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   border: none;
   padding: 6px 14px;
   border-radius: 6px;
@@ -1639,7 +1639,7 @@
 #diff-footer #btn-commit {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
 }
 
