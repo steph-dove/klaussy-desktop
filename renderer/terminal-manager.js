@@ -56,6 +56,7 @@ window.TerminalManager = (function () {
       // fg in light mode); high-contrast text is untouched.
       minimumContrastRatio: 4.5,
       allowProposedApi: true,
+      screenReaderMode: AppUtils.screenReaderMode(AppState.savedPrefs),
     });
 
     var fitAddon = new FitAddon.FitAddon();
@@ -409,6 +410,15 @@ window.TerminalManager = (function () {
       + '<div class="actions-dropdown-divider"></div>'
       + '<button class="actions-dropdown-item" data-mode="shell">Shell</button>';
     addWrap.appendChild(addMenu);
+    A11y.dropdownMenu(addBtn, addMenu, '.actions-dropdown-item');
+    A11y.tabs(subTabBar, { itemSelector: '.sub-tab', label: 'Terminal tabs' });
+    subTabBar.addEventListener('keydown', function (e) {
+      var close = e.key === 'Delete' && e.target.closest('.sub-tab') && e.target.querySelector('.sub-tab-close');
+      if (!close) return;
+      e.preventDefault();
+      close.dataset.keyboard = '1';
+      close.click();
+    });
 
     addBtn.addEventListener('click', function (e) {
       e.stopPropagation();
@@ -577,7 +587,7 @@ window.TerminalManager = (function () {
     var tab = document.createElement('button');
     tab.className = 'sub-tab';
     tab.dataset.subId = subId;
-    tab.innerHTML = '<span class="sub-tab-label"></span> <span class="sub-tab-close">&times;</span>';
+    tab.innerHTML = '<span class="sub-tab-label"></span> <span class="sub-tab-close" aria-hidden="true" title="Close (Delete)">&times;</span>';
     var labelSpan = tab.querySelector('.sub-tab-label');
     if (agentTab) {
       labelSpan.dataset.agentTab = '1';
@@ -601,6 +611,7 @@ window.TerminalManager = (function () {
       theme: termTheme,
       minimumContrastRatio: 4.5, // never let low-contrast (e.g. white-on-white) text vanish
       allowProposedApi: true,
+      screenReaderMode: AppUtils.screenReaderMode(AppState.savedPrefs),
     });
 
     var subFitAddon = new FitAddon.FitAddon();
@@ -693,6 +704,10 @@ window.TerminalManager = (function () {
 
     tab.querySelector('.sub-tab-close').addEventListener('click', async function (e) {
       e.stopPropagation();
+      var fromKeyboard = this.dataset.keyboard === '1';
+      delete this.dataset.keyboard;
+      var neighbor = fromKeyboard && (tab.nextElementSibling && tab.nextElementSibling.matches('.sub-tab')
+        ? tab.nextElementSibling : tab.previousElementSibling);
       await window.klaus.terminal.killSub(id, subId);
       subCleanup.forEach(function (fn) { fn(); });
       subTerminal.dispose();
@@ -701,14 +716,16 @@ window.TerminalManager = (function () {
       var idx = taskEntry.subTerminals.indexOf(subEntry);
       if (idx !== -1) taskEntry.subTerminals.splice(idx, 1);
       if (taskEntry.activeSubId === subId) {
-        switchSubTerminal(taskEntry, null);
+        switchSubTerminal(taskEntry, null, !neighbor);
       }
+      if (neighbor) neighbor.focus();
     });
 
     switchSubTerminal(taskEntry, subId);
   }
 
-  function switchSubTerminal(taskEntry, subId) {
+  function switchSubTerminal(taskEntry, subId, focusTerminal) {
+    if (focusTerminal === undefined) focusTerminal = true;
     var container = taskEntry.container;
     taskEntry.activeSubId = subId;
     refreshAgentLabels(taskEntry);
@@ -733,13 +750,13 @@ window.TerminalManager = (function () {
     setTimeout(function () {
       if (subId === null || subId === undefined) {
         taskEntry.fitAddon.fit();
-        taskEntry.terminal.focus();
+        if (focusTerminal) taskEntry.terminal.focus();
         window.klaus.terminal.resize(taskEntry.id, taskEntry.terminal.cols, taskEntry.terminal.rows);
       } else {
         var sub = taskEntry.subTerminals.find(function (s) { return s.subId === subId; });
         if (sub) {
           sub.fitAddon.fit();
-          sub.terminal.focus();
+          if (focusTerminal) sub.terminal.focus();
           window.klaus.terminal.resize(taskEntry.id, sub.terminal.cols, sub.terminal.rows, subId);
         }
       }
@@ -863,6 +880,7 @@ window.TerminalManager = (function () {
 
     host.appendChild(btn);
     host.appendChild(menu);
+    A11y.dropdownMenu(btn, menu, '.actions-dropdown-item');
 
     btn.addEventListener('click', function (e) {
       e.stopPropagation();

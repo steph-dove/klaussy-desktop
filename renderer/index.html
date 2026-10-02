@@ -724,7 +724,7 @@
 
   <!-- Merge Conflict Resolution (Feature 1) -->
   <div id="conflict-overlay" style="display: none;">
-    <div id="conflict-modal">
+    <div id="conflict-modal" aria-label="Resolve merge conflicts">
       <div id="conflict-header">
         <select aria-label="Conflicted file" id="conflict-file-select"></select>
         <div id="conflict-header-actions">
@@ -734,16 +734,16 @@
       </div>
       <div id="conflict-panes">
         <div class="conflict-pane" id="conflict-ours">
-          <div class="conflict-pane-header">Ours (Current)</div>
-          <div class="conflict-pane-body" id="conflict-ours-body"></div>
+          <div class="conflict-pane-header" id="conflict-ours-title">Ours (Current)</div>
+          <div class="conflict-pane-body" id="conflict-ours-body" role="region" tabindex="0" aria-labelledby="conflict-ours-title"></div>
         </div>
         <div class="conflict-pane" id="conflict-result">
-          <div class="conflict-pane-header">Result</div>
-          <div class="conflict-pane-body" id="conflict-result-body"></div>
+          <div class="conflict-pane-header" id="conflict-result-title">Result</div>
+          <div class="conflict-pane-body" id="conflict-result-body" role="region" aria-labelledby="conflict-result-title"></div>
         </div>
         <div class="conflict-pane" id="conflict-theirs">
-          <div class="conflict-pane-header">Theirs (Incoming)</div>
-          <div class="conflict-pane-body" id="conflict-theirs-body"></div>
+          <div class="conflict-pane-header" id="conflict-theirs-title">Theirs (Incoming)</div>
+          <div class="conflict-pane-body" id="conflict-theirs-body" role="region" tabindex="0" aria-labelledby="conflict-theirs-title"></div>
         </div>
       </div>
     </div>

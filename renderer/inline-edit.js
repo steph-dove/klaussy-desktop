@@ -49,8 +49,8 @@ window.InlineEdit = (function () {
     var container = document.createElement('div');
     container.className = 'inline-edit-prompt';
     container.innerHTML =
-      '<input class="inline-edit-input" type="text" placeholder="Tell the agent what to change…" />' +
-      '<button class="inline-edit-submit" type="button" title="Submit (Enter)"></button>' +
+      '<input class="inline-edit-input" type="text" aria-label="Tell the agent what to change" placeholder="Tell the agent what to change…" />' +
+      '<button class="inline-edit-submit" type="button" title="Submit (Enter)" aria-label="Submit"></button>' +
       '<button class="inline-edit-dismiss" type="button" title="Cancel (Esc)" aria-label="Cancel">×</button>';
 
     var input = container.querySelector('.inline-edit-input');
@@ -138,6 +138,8 @@ window.InlineEdit = (function () {
     });
     s.disposeDone = window.klaus.ai.onInlineEditDone(s.requestId, function (msg) {
       s.stage = 'ready';
+      if (msg && msg.error) A11y.announce('Inline edit failed: ' + msg.error, 'assertive');
+      else A11y.announce('Edit ready. Press Enter to accept or Escape to reject.');
       var header = s.panelEl && s.panelEl.querySelector('.inline-edit-stream-header');
       var acceptBtn = s.actionsEl && s.actionsEl.querySelector('.inline-edit-accept');
       if (msg && msg.error) {
@@ -177,7 +179,8 @@ window.InlineEdit = (function () {
     // them. Scoped only while session is active; cleanup removes the listener.
     s.keyHandler = function (e) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
-      else if (e.key === 'Enter' && s.stage === 'ready') {
+      // A focused button (e.g. Reject) must get its own Enter, not an accept.
+      else if (e.key === 'Enter' && s.stage === 'ready' && !(e.target && e.target.closest && e.target.closest('button'))) {
         e.preventDefault(); e.stopPropagation();
         accept();
       }
@@ -206,7 +209,9 @@ window.InlineEdit = (function () {
     if (s.requestId && s.stage === 'streaming') {
       try { window.klaus.ai.inlineEditCancel(s.requestId); } catch (_) {}
     }
+    var editor = s.editor;
     cleanup();
+    if (editor) editor.focus();
   }
 
   function cleanup() {

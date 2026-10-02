@@ -36,6 +36,7 @@
   var fontSize = document.getElementById('pref-font-size');
   var lineHeight = document.getElementById('pref-line-height');
   var cursorStyle = document.getElementById('pref-cursor-style');
+  var screenReader = document.getElementById('pref-screen-reader');
   var ollamaModel = document.getElementById('pref-ollama-model');
   var ollamaModelStatus = document.getElementById('ollama-model-status');
   var opencodeModelSelect = document.getElementById('pref-opencode-model');
@@ -69,6 +70,7 @@
   fontSize.value = prefs.fontSize;
   lineHeight.value = prefs.lineHeight;
   cursorStyle.value = prefs.cursorStyle;
+  screenReader.checked = !!prefs.screenReaderMode;
 
   // Autocomplete model: show the saved value even if it isn't one of the
   // presets (e.g. a hand-set tag), so the picker never misrepresents config.
@@ -268,6 +270,7 @@
       fontSize: parseInt(fontSize.value, 10) || 13,
       lineHeight: parseFloat(lineHeight.value) || 1.2,
       cursorStyle: cursorStyle.value,
+      screenReaderMode: screenReader.checked,
       claudePath: agentPaths.claude.input.value.trim(),
       codexPath: agentPaths.codex.input.value.trim(),
       geminiPath: agentPaths.gemini.input.value.trim(),
@@ -317,6 +320,7 @@
   // Toggling this rewrites kimi's own config.toml, so it saves on change rather
   // than riding along with whatever control the user touches next.
   kimiBash.addEventListener('change', saveAll);
+  screenReader.addEventListener('change', saveAll);
 
   ['pref-slack-webhook', 'pref-discord-webhook', 'pref-notify-completed',
     'pref-notify-failed', 'pref-notify-approval', 'pref-notify-new-sessions',

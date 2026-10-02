@@ -140,6 +140,8 @@ window.ConflictPanel = (function () {
     theirsBody.innerHTML = '';
     resultBody.innerHTML = '';
 
+    var conflictTotal = currentBlocks.filter(function (b) { return b.type !== 'common'; }).length;
+    var conflictNo = 0;
     currentBlocks.forEach(function (block, idx) {
       if (block.type === 'common') {
         var commonHtml = '<div class="conflict-common">' + block.lines.map(escHtml).join('\n') + '</div>';
@@ -176,14 +178,16 @@ window.ConflictPanel = (function () {
         resolvedClass = ' conflict-resolved';
       }
 
+      conflictNo++;
+      var which = 'conflict ' + conflictNo + ' of ' + conflictTotal;
       var resultHtml =
-        '<div class="conflict-block conflict-result-block' + resolvedClass + '" data-idx="' + idx + '">' +
+        '<div class="conflict-block conflict-result-block' + resolvedClass + '" data-idx="' + idx + '" role="group" aria-label="' + which + (resolvedClass ? ', resolved' : '') + '" data-which="' + which + '">' +
           '<div class="conflict-actions">' +
-            '<button class="conflict-action-btn" data-action="ours" data-idx="' + idx + '">Ours</button>' +
-            '<button class="conflict-action-btn" data-action="theirs" data-idx="' + idx + '">Theirs</button>' +
-            '<button class="conflict-action-btn" data-action="both" data-idx="' + idx + '">Both</button>' +
+            '<button class="conflict-action-btn" data-action="ours" data-idx="' + idx + '" aria-label="Use ours for ' + which + '">Ours</button>' +
+            '<button class="conflict-action-btn" data-action="theirs" data-idx="' + idx + '" aria-label="Use theirs for ' + which + '">Theirs</button>' +
+            '<button class="conflict-action-btn" data-action="both" data-idx="' + idx + '" aria-label="Keep both for ' + which + '">Both</button>' +
           '</div>' +
-          '<textarea class="conflict-result-textarea" data-idx="' + idx + '" rows="' + Math.max(3, Math.max(block.ours.length, block.theirs.length)) + '">' +
+          '<textarea class="conflict-result-textarea" data-idx="' + idx + '" aria-label="Result for ' + which + '" rows="' + Math.max(3, Math.max(block.ours.length, block.theirs.length)) + '">' +
             resolvedContent +
           '</textarea>' +
         '</div>';
@@ -214,7 +218,8 @@ window.ConflictPanel = (function () {
         }
 
         var resultBlock = textarea.closest('.conflict-result-block');
-        if (resultBlock) resultBlock.classList.add('conflict-resolved');
+        if (resultBlock) markResolved(resultBlock);
+        A11y.announce(resultBlock ? resultBlock.dataset.which + ' resolved' : 'Resolved');
       });
     });
 
@@ -227,10 +232,15 @@ window.ConflictPanel = (function () {
           block.resolved = 'manual';
           block.resultLines = textarea.value.split('\n');
           var resultBlock = textarea.closest('.conflict-result-block');
-          if (resultBlock) resultBlock.classList.add('conflict-resolved');
+          if (resultBlock) markResolved(resultBlock);
         }
       });
     });
+  }
+
+  function markResolved(block) {
+    block.classList.add('conflict-resolved');
+    block.setAttribute('aria-label', block.dataset.which + ', resolved');
   }
 
   async function resolveAndSave() {
