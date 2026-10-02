@@ -712,7 +712,8 @@ window.Sidebar = (function () {
       // The popover lives at the end of <body>, so keyboard exits go back to the Notes button rather than off the sidebar.
       if (((e.metaKey || e.ctrlKey) && e.key === 'Enter') || e.key === 'Escape' || e.key === 'Tab') {
         e.preventDefault();
-        if (anchorEl.isConnected) anchorEl.focus(); else textarea.blur();
+        if (anchorEl.isConnected) anchorEl.focus();
+        if (document.activeElement === textarea) textarea.blur();
       }
     });
 

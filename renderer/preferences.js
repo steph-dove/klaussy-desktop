@@ -639,6 +639,10 @@
       var i = nemesisProfiles.indexOf(profile);
       if (i !== -1) nemesisProfiles.splice(i, 1);
       saveAll(); renderNemesisProfiles();
+      // Land on a name field, not the next profile's Remove, so a repeated Enter can't delete a second profile.
+      var names = nemesisProfilesEl.querySelectorAll('.np-name');
+      var next = names[Math.min(Math.max(i, 0), names.length - 1)] || nemesisAddBtn;
+      if (next) next.focus();
     });
     q('.np-test').addEventListener('click', async function (e) {
       var btn = e.currentTarget;

@@ -642,6 +642,7 @@ window.A11y = (function () {
 
   let lastFocused = null;
   let rescueQueued = false;
+  let lastInputAt = 0;
 
   function canTakeFocus(el) {
     return !!el && isShown(el) && !el.disabled && !el.closest('[inert]') && el.getAttribute('aria-hidden') !== 'true';
@@ -654,9 +655,10 @@ window.A11y = (function () {
 
   // A control disabled while busy usually comes back; wait for it rather than moving focus somewhere unrelated.
   function awaitReenable(lost) {
-    const deadline = Date.now() + 120000;
+    const startedAt = Date.now();
+    const deadline = startedAt + 120000;
     (function poll() {
-      if (lastFocused !== lost || !focusLost() || Date.now() > deadline) return;
+      if (lastFocused !== lost || !focusLost() || lastInputAt > startedAt || Date.now() > deadline) return;
       if (lost.el.isConnected && isShown(lost.el) && lost.el.disabled) { setTimeout(poll, 200); return; }
       if (canTakeFocus(lost.el)) lost.el.focus({ preventScroll: true });
       else rescueFocus(true);
@@ -673,7 +675,8 @@ window.A11y = (function () {
       const line = anc.isConnected && lastLine.get(anc);
       if (line && line !== lost.el && line.isConnected && isShown(line)) { line.focus({ preventScroll: true }); return; }
     }
-    const twin = lost.key.index >= 0 && document.querySelectorAll(lost.key.selector)[lost.key.index];
+    // An unkeyed index match is just the next row, e.g. the following row's Remove after a delete.
+    const twin = lost.keyed && lost.key.index >= 0 && document.querySelectorAll(lost.key.selector)[lost.key.index];
     if (twin && twin !== lost.el && canTakeFocus(twin)) { twin.focus({ preventScroll: true }); return; }
     for (let i = 0; i < lost.ancestors.length; i++) {
       const anc = lost.ancestors[i];
@@ -704,6 +707,14 @@ window.A11y = (function () {
     return null;
   }
 
+  function hasOwnKey(el) {
+    for (let n = el; n && n !== document.body; n = n.parentElement) {
+      if (stableId(n)) return n === el;
+      if (keyOf(n, false)) return true;
+    }
+    return false;
+  }
+
   function queueRescue() {
     if (rescueQueued || !lastFocused) return;
     rescueQueued = true;
@@ -713,15 +724,19 @@ window.A11y = (function () {
   document.addEventListener('focusin', function (e) {
     if (e.target && e.target.closest && !e.target.closest(DIALOG_SELECTOR)) lastFocusOutside = e.target;
     const el = e.target;
-    if (!el || el === document.body || !el.closest || el.closest('.xterm, .monaco-editor')) return;
+    if (!el || el === document.body || !el.closest) return;
+    if (el.closest('.xterm, .monaco-editor')) { lastFocused = null; return; }
     const ancestors = [];
     const slots = [];
     for (let n = el.parentElement; n; n = n.parentElement) {
       ancestors.push(n);
-      slots.push(slots.length < 4 ? Array.prototype.indexOf.call(n.querySelectorAll(FOCUSABLE), el) : null);
+      slots.push(slots.length < 4 && el.tabIndex >= 0 ? Array.prototype.indexOf.call(n.querySelectorAll(FOCUSABLE), el) : null);
     }
-    lastFocused = { el: el, key: captureFocusKey(document.body, el) || { selector: el.tagName.toLowerCase(), index: -1 }, ancestors: ancestors, slots: slots };
+    lastFocused = { el: el, key: captureFocusKey(document.body, el) || { selector: el.tagName.toLowerCase(), index: -1 }, keyed: hasOwnKey(el), ancestors: ancestors, slots: slots };
   });
+  function noteInput() { lastInputAt = Date.now(); }
+  window.addEventListener('pointerdown', noteInput, true);
+  window.addEventListener('keydown', noteInput, true);
   document.addEventListener('focusout', function (e) { if (!e.relatedTarget) queueRescue(); });
   // Window-level so any document or element Escape handler runs first.
   window.addEventListener('keydown', onEscapeCapture, true);

@@ -83,7 +83,7 @@ test.describe('focus rescue', () => {
   });
 
   test('picking a dropdown item returns focus to its trigger', async ({ mainWindow }) => {
-    await mountFixture(mainWindow, '<button id="trigger">Merge ▾</button><div id="menu" hidden><button class="item" id="squash">Squash</button></div>');
+    await mountFixture(mainWindow, '<button id="trigger">Merge ▾</button><button id="between">x</button><div id="menu" hidden><button class="item" id="squash">Squash</button></div>');
     await mainWindow.evaluate(() => {
       const trigger = document.getElementById('trigger');
       const menu = document.getElementById('menu');
@@ -97,13 +97,35 @@ test.describe('focus rescue', () => {
     await expect.poll(() => activeId(mainWindow)).toBe('trigger');
   });
 
+  test('preserveFocus restores focus before the generic rescue runs', async ({ mainWindow }) => {
+    await mountFixture(mainWindow, '<div id="host"><button>a</button><button class="pick">b</button></div>');
+    await mainWindow.locator('.pick').focus();
+    const sync = await mainWindow.evaluate(() => {
+      const host = document.getElementById('host');
+      window.A11y.preserveFocus(host, () => { host.innerHTML = '<button>a</button><button class="pick" id="pick2">b</button>'; });
+      return document.activeElement && document.activeElement.id;
+    });
+    expect(sync).toBe('pick2');
+  });
+
+  test('input while a control is busy cancels the refocus', async ({ mainWindow }) => {
+    await mountFixture(mainWindow, '<button id="other">o</button><button id="busy">Test</button>');
+    await mainWindow.locator('#busy').focus();
+    await mainWindow.evaluate(() => { document.getElementById('busy').disabled = true; });
+    await mainWindow.waitForTimeout(300);
+    await mainWindow.evaluate(() => window.dispatchEvent(new window.PointerEvent('pointerdown')));
+    await mainWindow.evaluate(() => { document.getElementById('busy').disabled = false; });
+    await mainWindow.waitForTimeout(500);
+    expect(await activeId(mainWindow)).not.toBe('busy');
+  });
+
   test('checkboxes show a focus ring', async ({ mainWindow }) => {
     await mountFixture(mainWindow, '<button id="start">s</button><input type="checkbox" id="cb" aria-label="Pick">');
     await mainWindow.locator('#start').focus();
     await mainWindow.keyboard.press('Tab');
     await expect.poll(() => activeId(mainWindow)).toBe('cb');
     const outline = await mainWindow.evaluate(() => {
-      const cs = getComputedStyle(document.getElementById('cb'));
+      const cs = window.getComputedStyle(document.getElementById('cb'));
       return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth) };
     });
     expect(outline.style).toBe('solid');
