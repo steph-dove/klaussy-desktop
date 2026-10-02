@@ -131,6 +131,8 @@ window.QuickOpen = (function () {
 
     palette.appendChild(input);
     palette.appendChild(list);
+    palette.setAttribute('aria-label', 'Go to file');
+    A11y.combobox(input, list, { optionSelector: '.palette-item', label: 'Files' });
     overlay.appendChild(palette);
     document.body.appendChild(overlay);
 

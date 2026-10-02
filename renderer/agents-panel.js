@@ -176,6 +176,7 @@ window.AgentsPanel = (function () {
 
   function show() {
     panel.style.display = '';
+    btn.setAttribute('aria-expanded', 'true');
     // Anchor the panel directly below the bar so it visually points at
     // its trigger regardless of sidebar layout / collapsed state.
     var rect = bar.getBoundingClientRect();
@@ -183,11 +184,24 @@ window.AgentsPanel = (function () {
     panel.style.left = (rect.left) + 'px';
     panel.style.width = Math.max(rect.width, 320) + 'px';
     render(current);
+    var first = A11y.tabbables(panel)[0];
+    if (first) first.focus();
   }
 
   function hide() {
+    var hadFocus = panel.contains(document.activeElement);
     panel.style.display = 'none';
+    btn.setAttribute('aria-expanded', 'false');
+    if (hadFocus) btn.focus();
   }
+
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Active agents');
+  btn.setAttribute('aria-controls', panel.id);
+  btn.setAttribute('aria-expanded', 'false');
+  panel.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') { e.preventDefault(); hide(); }
+  });
 
   function toggle() {
     if (panel.style.display === 'none') show(); else hide();

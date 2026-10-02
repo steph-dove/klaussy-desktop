@@ -41,7 +41,7 @@
             <div class="token-tile-label">Today</div>
             <div class="token-tile-value" id="token-tile-today-value">—</div>
           </div>
-          <select id="token-tile-range" title="Chart range">
+          <select aria-label="Token chart range" id="token-tile-range" title="Chart range">
             <option value="1d">1d</option>
             <option value="7d">7d</option>
             <option value="14d">14d</option>
@@ -53,8 +53,8 @@
           </select>
         </div>
         <div id="token-tile-custom" style="display:none;">
-          <input type="date" id="token-tile-from" />
-          <input type="date" id="token-tile-to" />
+          <input aria-label="From date" type="date" id="token-tile-from" />
+          <input aria-label="To date" type="date" id="token-tile-to" />
         </div>
         <svg id="token-tile-chart" viewBox="0 0 200 60" preserveAspectRatio="none"></svg>
         <div class="token-tile-foot">
@@ -262,7 +262,7 @@
         </button>
         <div id="broadcast-bar" class="hidden">
           <span class="broadcast-icon">&#128362;</span>
-          <input type="text" id="broadcast-input" placeholder="Broadcast command to all active agents in session... (Enter to send)" autocomplete="off" spellcheck="false" />
+          <input aria-label="Broadcast command to all agents in this session" type="text" id="broadcast-input" placeholder="Broadcast command to all active agents in session... (Enter to send)" autocomplete="off" spellcheck="false" />
           <button id="btn-broadcast-send">Send</button>
           <button id="btn-broadcast-close" title="Dismiss" aria-label="Dismiss">&times;</button>
         </div>
@@ -301,7 +301,7 @@
             <pre id="diff-view"></pre>
           </div>
           <div id="commit-area" style="display: none;">
-            <textarea id="commit-message" rows="5" placeholder="Commit message... (Cmd+Enter to commit)" autocomplete="off" spellcheck="false"></textarea>
+            <textarea aria-label="Commit message" id="commit-message" rows="5" placeholder="Commit message... (Cmd+Enter to commit)" autocomplete="off" spellcheck="false"></textarea>
             <div id="commit-area-actions">
               <button id="btn-claude-commit-msg" aria-label="Write commit message with the agent" title="Write commit message with the agent">✨</button>
               <button id="btn-do-commit">Commit</button>
@@ -322,7 +322,7 @@
             <div id="pr-ai-review"></div>
             <div id="pr-comments-list"></div>
             <div id="pr-comment-form">
-              <textarea id="pr-comment-input" placeholder="Leave a comment..." rows="3"></textarea>
+              <textarea aria-label="Pull request comment" id="pr-comment-input" placeholder="Leave a comment..." rows="3"></textarea>
               <div id="pr-comment-actions">
                 <button id="btn-pr-comment" title="Post a general comment">Comment</button>
                 <button id="btn-pr-approve" title="Approve this PR">Approve</button>
@@ -351,7 +351,7 @@
             <button id="btn-run-app" title="Run app — the agent auto-detects how and streams output">▶ Run App</button>
           </div>
           <div id="file-tree-filter-bar">
-            <input type="text" id="file-tree-filter" placeholder="Filter files..." autocomplete="off" spellcheck="false" />
+            <input aria-label="Filter files" type="text" id="file-tree-filter" placeholder="Filter files..." autocomplete="off" spellcheck="false" />
           </div>
           <div id="file-tree"></div>
           <div id="file-viewer-content" role="region" aria-label="Editor">
@@ -376,9 +376,9 @@
               <button id="btn-create-tag" class="tags-action-btn">+ Tag</button>
             </div>
             <div id="tags-create-form" style="display: none;">
-              <input type="text" id="tag-name-input" placeholder="Tag name (e.g. v1.0.0)" spellcheck="false" />
-              <input type="text" id="tag-message-input" placeholder="Message (optional)" spellcheck="false" />
-              <input type="text" id="tag-commit-input" placeholder="Commit (optional, defaults to HEAD)" spellcheck="false" />
+              <input aria-label="Tag name" type="text" id="tag-name-input" placeholder="Tag name (e.g. v1.0.0)" spellcheck="false" />
+              <input aria-label="Tag message" type="text" id="tag-message-input" placeholder="Message (optional)" spellcheck="false" />
+              <input aria-label="Tag commit" type="text" id="tag-commit-input" placeholder="Commit (optional, defaults to HEAD)" spellcheck="false" />
               <div id="tags-form-buttons">
                 <button id="btn-tag-cancel" class="tags-btn-secondary">Cancel</button>
                 <button id="btn-tag-submit" class="tags-btn-primary">Create</button>
@@ -440,8 +440,8 @@
         <!-- Search tab content (C3) -->
         <div id="search-tab-content" style="display: none;">
           <div id="project-search-bar">
-            <input type="text" id="project-search-input" placeholder="Search in project..." autocomplete="off" spellcheck="false" />
-            <input type="text" id="project-replace-input" placeholder="Replace with… (optional)" autocomplete="off" spellcheck="false" />
+            <input aria-label="Search in project" type="text" id="project-search-input" placeholder="Search in project..." autocomplete="off" spellcheck="false" />
+            <input aria-label="Replace with" type="text" id="project-replace-input" placeholder="Replace with… (optional)" autocomplete="off" spellcheck="false" />
             <button id="project-replace-btn" disabled>Replace</button>
           </div>
           <div id="project-search-results"></div>
@@ -472,10 +472,10 @@
         <div id="modal-repo-picker">
           <div id="modal-repo-row">
             <span id="modal-repo-path" class="modal-repo-path">No repo selected</span>
-            <select id="modal-base-branch" class="mr-base" hidden title="Base branch"></select>
+            <select aria-label="Base branch" id="modal-base-branch" class="mr-base" hidden title="Base branch"></select>
             <button id="btn-modal-repo-browse" type="button" class="modal-input-btn" title="Browse for a git repo">Browse</button>
-            <button id="btn-modal-repo-recents" aria-label="Projects and discovered repos" type="button" class="modal-input-btn modal-recents-btn" title="Projects &amp; discovered repos" aria-haspopup="listbox" aria-expanded="false">▾</button>
-            <div id="modal-repo-recents-list" class="modal-recents-list" hidden role="listbox"></div>
+            <button id="btn-modal-repo-recents" aria-label="Projects and discovered repos" type="button" class="modal-input-btn modal-recents-btn" title="Projects &amp; discovered repos" aria-controls="modal-repo-recents-list" aria-expanded="false">▾</button>
+            <div id="modal-repo-recents-list" class="modal-recents-list" hidden></div>
           </div>
         </div>
         <div id="modal-multirepo-picker">
@@ -485,7 +485,7 @@
           </div>
         </div>
         <p>Name the session (creates a branch with that name off each repo's selected base).</p>
-        <input type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
+        <input aria-label="Session name" type="text" id="modal-input" placeholder="e.g. fix-auth-bug" autocomplete="off" spellcheck="false" />
 
         <div id="modal-devloop-section" class="modal-devloop-section">
           <label id="modal-devloop-toggle" class="modal-devloop-toggle">
@@ -495,7 +495,7 @@
           </label>
           <div id="modal-devloop-fields" style="display: none;">
             <p class="modal-devloop-sub">The Owl executes all 9 phases autonomously: Plan ➔ Code ➔ Review ➔ QA &amp; Screen Recording ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green. Provide an issue link or describe what to build:</p>
-            <textarea id="modal-devloop-prompt" class="modal-devloop-textarea" rows="3" placeholder="e.g. https://github.com/org/repo/issues/123 or Describe the task requirements..."></textarea>
+            <textarea aria-label="Dev loop task" id="modal-devloop-prompt" class="modal-devloop-textarea" rows="3" placeholder="e.g. https://github.com/org/repo/issues/123 or Describe the task requirements..."></textarea>
             <div id="modal-devloop-attach">
               <span id="modal-devloop-file-display">No files attached</span>
               <button id="modal-devloop-file-btn" class="klaus-btn klaus-btn-secondary" type="button">Attach files</button>
@@ -521,7 +521,7 @@
       <div id="tab-existing" class="tab-content">
         <p>Pick a session to resume — every repo in it reopens with its agent session.</p>
         <div id="existing-session-row">
-          <select id="existing-session-select"></select>
+          <select aria-label="Existing session" id="existing-session-select"></select>
         </div>
         <label id="resume-all-agents-row">
           <input type="checkbox" id="resume-all-agents-check" checked>
@@ -573,7 +573,7 @@
       <div id="delete-session-list"></div>
       <p class="delete-session-note">Open terminals on these worktrees will be closed. Branches are kept in each repo.</p>
       <p class="delete-session-note">Type <strong>delete</strong> to confirm:</p>
-      <input id="delete-session-input" type="text" autocomplete="off" spellcheck="false" placeholder="delete">
+      <input aria-label="Type delete to confirm" id="delete-session-input" type="text" autocomplete="off" spellcheck="false" placeholder="delete">
       <div class="klaus-modal-actions">
         <button id="delete-session-cancel" class="klaus-btn klaus-btn-ghost">Cancel</button>
         <button id="delete-session-confirm" class="klaus-btn klaus-btn-danger" disabled>Delete</button>
@@ -598,10 +598,10 @@
     <div id="dir-pick-modal" class="klaus-modal">
       <h3 id="dir-pick-title">Select folder</h3>
       <div id="dir-pick-drop">
-        <input id="dir-pick-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
+        <input aria-label="Folder path" id="dir-pick-input" type="text" spellcheck="false" autocomplete="off" placeholder="Drag a folder here or paste a path">
         <button id="dir-pick-browse" type="button" class="modal-input-btn" title="Browse for a folder">Browse</button>
-        <button id="dir-pick-recents-btn" aria-label="Recent folders" type="button" class="modal-input-btn modal-recents-btn" title="Recent folders" aria-haspopup="listbox" aria-expanded="false" hidden>▾</button>
-        <div id="dir-pick-recents-list" class="modal-recents-list" hidden role="listbox"></div>
+        <button id="dir-pick-recents-btn" aria-label="Recent folders" type="button" class="modal-input-btn modal-recents-btn" title="Recent folders" aria-controls="dir-pick-recents-list" aria-expanded="false" hidden>▾</button>
+        <div id="dir-pick-recents-list" class="modal-recents-list" hidden></div>
       </div>
       <div id="dir-pick-error" role="alert"></div>
       <div class="klaus-modal-actions">
@@ -616,7 +616,7 @@
     <div id="plan-modal" class="klaus-modal klaus-modal-wide">
       <h3 id="plan-modal-title">Plan a task</h3>
       <p class="plan-modal-sub">Provide task details. A new agent tab will open on this worktree and run a guided plan flow.</p>
-      <textarea id="plan-modal-text" rows="10" placeholder="Paste task details here, and drop or paste any screenshots..." spellcheck="false"></textarea>
+      <textarea aria-labelledby="plan-modal-title" id="plan-modal-text" rows="10" placeholder="Paste task details here, and drop or paste any screenshots..." spellcheck="false"></textarea>
 
       <div id="plan-file-picker">
         <span id="plan-file-display">No files attached</span>
@@ -726,7 +726,7 @@
   <div id="conflict-overlay" style="display: none;">
     <div id="conflict-modal">
       <div id="conflict-header">
-        <select id="conflict-file-select"></select>
+        <select aria-label="Conflicted file" id="conflict-file-select"></select>
         <div id="conflict-header-actions">
           <button id="btn-conflict-resolve" class="conflict-btn-primary">Mark Resolved</button>
           <button id="btn-conflict-close" aria-label="Close conflict resolver" title="Close" data-dialog-close class="conflict-btn-secondary">&times;</button>
@@ -751,7 +751,7 @@
 
   <!-- Search bar (Cmd+F) -->
   <div id="search-bar" style="display: none;">
-    <input type="text" id="search-input" placeholder="Search..." autocomplete="off" spellcheck="false" />
+    <input aria-label="Search terminal" type="text" id="search-input" placeholder="Search..." autocomplete="off" spellcheck="false" />
     <span id="search-count"></span>
     <button id="search-prev" aria-label="Previous match" title="Previous (Shift+Enter)">&#9650;</button>
     <button id="search-next" aria-label="Next match" title="Next (Enter)">&#9660;</button>
@@ -825,6 +825,7 @@
   <script src="pr-review-conversation.js"></script>
   <script src="pr-review-checks.js"></script>
   <script src="window-color.js"></script>
+  <script src="main-window-a11y.js"></script>
   <!-- app-functions-*.js define window.App.* and must load BEFORE app.js,
        which runs the bootstrap and calls them. -->
   <script src="app-functions-1.js"></script>

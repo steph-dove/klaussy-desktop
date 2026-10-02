@@ -6,11 +6,7 @@ test.describe('a11y foundations', () => {
   test.beforeEach(async ({ mainWindow }) => {
     await mainWindow.waitForLoadState('networkidle');
     await expect(mainWindow.locator('#btn-theme')).toBeVisible();
-    await mainWindow.evaluate(() => {
-      const kill = () => { const o = document.getElementById('ollama-consent-overlay'); if (o) o.remove(); };
-      kill();
-      new MutationObserver(kill).observe(document.documentElement, { childList: true, subtree: true });
-    });
+    await mainWindow.addStyleTag({ content: '#ollama-consent-overlay { display: none !important; }' });
   });
 
   test('theme picker is a labelled modal dialog that traps and restores focus', async ({ mainWindow }) => {

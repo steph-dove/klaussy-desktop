@@ -74,6 +74,8 @@ window.CommandPalette = (function () {
 
     palette.appendChild(input);
     palette.appendChild(list);
+    palette.setAttribute('aria-label', 'Command palette');
+    A11y.combobox(input, list, { optionSelector: '.palette-item', label: 'Commands' });
     paletteOverlay.appendChild(palette);
     document.body.appendChild(paletteOverlay);
     render();

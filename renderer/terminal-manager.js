@@ -992,11 +992,18 @@ window.TerminalManager = (function () {
 
     taskList.querySelectorAll('.session-group-header').forEach(function (el) {
       el.classList.remove('active');
+      var select = el.querySelector('.session-group-select');
+      if (select) select.removeAttribute('aria-current');
     });
 
     taskList.querySelectorAll('.task-item').forEach(function (el) {
       var isActive = Number(el.dataset.id) === id;
       el.classList.toggle('active', isActive);
+      var main = el.querySelector('.task-main');
+      if (main) {
+        if (isActive) main.setAttribute('aria-current', 'true');
+        else main.removeAttribute('aria-current');
+      }
       if (isActive) {
         var itemsContainer = el.closest('.session-group-items');
         if (itemsContainer && itemsContainer.classList.contains('collapsed')) {
@@ -1007,6 +1014,8 @@ window.TerminalManager = (function () {
             header.classList.remove('collapsed');
             var chevron = header.querySelector('.session-group-chevron');
             if (chevron) chevron.innerHTML = '&#9662;';
+            var toggle = header.querySelector('.session-group-toggle');
+            if (toggle) toggle.setAttribute('aria-expanded', 'true');
             if (window.Sidebar && window.Sidebar.expandSession) {
               window.Sidebar.expandSession(groupEl.dataset.session);
             }

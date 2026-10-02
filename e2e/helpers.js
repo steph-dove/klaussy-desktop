@@ -187,7 +187,26 @@ function writeGhFixtures(dir, fixtures) {
   return p;
 }
 
+/* global window */
+// The window can reload once just after launch, so a lost execution context is retried.
+async function openShellTask(page, dir) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.waitForFunction(() => !!(window.App && window.App.addTaskToUI && window.klaus));
+      return await page.evaluate(async (d) => {
+        const inst = await window.klaus.task.openFolder(d, 'shell');
+        window.App.addTaskToUI(inst);
+        window.App.switchToTask(inst.id);
+        return inst.id;
+      }, dir);
+    } catch (err) {
+      if (attempt > 0 || !/Execution context was destroyed/.test(String(err))) throw err;
+    }
+  }
+}
+
 module.exports = {
+  openShellTask,
   tmpDir, rm, buildRepo, git,
   makeBinDir, envWithBin, writeExecutable,
   writeFakeAgent, writeFakeOllama, writeFakeGh, writeGhFixtures,

@@ -12,6 +12,8 @@ window.App = window.App || {};
     if (!item) return;
     var icon = item.querySelector('.ci-status-icon');
     if (!icon) return;
+    icon.removeAttribute('data-url');
+    ['role', 'tabindex', 'aria-label'].forEach(function (attr) { icon.removeAttribute(attr); });
 
     if (!runs || runs.length === 0) {
       icon.className = 'ci-status-icon';
@@ -23,7 +25,6 @@ window.App = window.App || {};
     var status = latest.status;
     var conclusion = latest.conclusion;
 
-    icon.removeAttribute('data-url');
 
     if (status === 'in_progress' || status === 'queued' || status === 'pending' || status === 'waiting') {
       icon.className = 'ci-status-icon ci-pending';
@@ -41,6 +42,10 @@ window.App = window.App || {};
 
     if (latest.url) {
       icon.dataset.url = latest.url;
+      A11y.makeButton(icon, icon.title + ' (open run)');
+    } else {
+      icon.setAttribute('role', 'img');
+      icon.setAttribute('aria-label', icon.title);
     }
   };
 
@@ -451,7 +456,7 @@ window.App = window.App || {};
       var rm = it.removable === false ? ''
         : '<button type="button" class="modal-recents-remove" title="Remove from recents" aria-label="Remove from recents" data-path="' + App.escHtml(p) + '">×</button>';
       return '<div class="modal-recents-item" data-path="' + App.escHtml(p) + '" data-kind="' + App.escHtml(it.kind || '') + '">'
-        + '<span class="modal-recents-pick">' + main + sub + '</span>'
+        + '<button type="button" class="modal-recents-pick">' + main + sub + '</button>'
         + tag + rm
       + '</div>';
     }
@@ -473,6 +478,7 @@ window.App = window.App || {};
         }
         list.hidden = false;
         button.setAttribute('aria-expanded', 'true');
+        focusFirst();
       }).catch(function (err) {
         // A discovery call rejected (rare — handlers normally return []). Degrade
         // to the empty state and still open, rather than leaving a dead button.
@@ -482,6 +488,7 @@ window.App = window.App || {};
         button.setAttribute('aria-expanded', 'true');
       });
     }
+    var focusFirst = A11y.popupList(button, list, '.modal-recents-pick', close);
     button.addEventListener('click', function (e) {
       e.stopPropagation();
       if (list.hidden) open(); else close();
@@ -498,8 +505,10 @@ window.App = window.App || {};
       if (pick) {
         e.stopPropagation();
         var p = pick.getAttribute('data-path');
+        var hadFocus = list.contains(document.activeElement);
         opts.onPick(p, { kind: pick.getAttribute('data-kind') || '' });
         close();
+        if (hadFocus) button.focus();
       }
     });
     document.addEventListener('click', function (e) {
