@@ -101,7 +101,7 @@
         "toggleBlame": "writable",
         "WordComplete": "writable"
       },
-      "rules": { "no-undef": "error" }
+      "rules": { "no-undef": "error", "no-redeclare": "error" }
     },
     {
       "files": ["test/**/*.js", "e2e/**/*.js"],

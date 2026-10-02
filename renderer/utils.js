@@ -117,12 +117,62 @@ window.AppUtils = (function () {
     return isMac() ? '\u2318\u21e7K' : 'Ctrl+L';
   }
 
+  // Stands in for window.prompt(), which Electron doesn't implement; resolves to the values or null.
+  function promptDialog(opts) {
+    return new Promise(function (resolve) {
+      var overlay = document.createElement('div');
+      overlay.className = 'klaus-modal-overlay';
+      var html = '<div class="klaus-modal"><h3>' + escHtml(opts.title) + '</h3>';
+      opts.fields.forEach(function (f, i) {
+        var id = 'prompt-dialog-field-' + i;
+        html += '<label class="prompt-dialog-label" for="' + id + '">' + escHtml(f.label) + '</label>'
+          + (f.multiline
+            ? '<textarea id="' + id + '" class="prompt-dialog-input" rows="4"></textarea>'
+            : '<input id="' + id + '" class="prompt-dialog-input" type="text" autocomplete="off" spellcheck="false">');
+      });
+      html += '<div class="klaus-modal-actions">'
+        + '<button type="button" class="klaus-btn klaus-btn-ghost" data-dialog-close>Cancel</button>'
+        + '<button type="button" class="klaus-btn klaus-btn-primary prompt-dialog-ok">' + escHtml(opts.okLabel || 'OK') + '</button>'
+        + '</div></div>';
+      overlay.innerHTML = html;
+      var inputs = Array.prototype.slice.call(overlay.querySelectorAll('.prompt-dialog-input'));
+
+      function finish(values) {
+        overlay.remove();
+        resolve(values);
+      }
+      function submit() {
+        var values = inputs.map(function (el) { return el.value.trim(); });
+        var missing = opts.fields.findIndex(function (f, i) { return f.required && !values[i]; });
+        if (missing >= 0) {
+          inputs[missing].setAttribute('aria-invalid', 'true');
+          inputs[missing].focus();
+          return;
+        }
+        finish(values);
+      }
+      overlay.querySelector('[data-dialog-close]').addEventListener('click', function () { finish(null); });
+      overlay.querySelector('.prompt-dialog-ok').addEventListener('click', submit);
+      overlay.addEventListener('click', function (e) { if (e.target === overlay) finish(null); });
+      overlay.addEventListener('keydown', function (e) {
+        var multiline = e.target.tagName === 'TEXTAREA';
+        if (e.key === 'Enter' && (!multiline || e.metaKey || e.ctrlKey) && e.target.classList.contains('prompt-dialog-input')) {
+          e.preventDefault();
+          submit();
+        }
+      });
+      document.body.appendChild(overlay);
+      inputs[0].focus();
+    });
+  }
+
   function screenReaderMode(prefs) {
     return !!(prefs && (prefs.screenReaderMode || prefs.screenReaderActive));
   }
 
   return {
     screenReaderMode: screenReaderMode,
+    promptDialog: promptDialog,
     isMac: isMac,
     isAppShortcut: isAppShortcut,
     shortcutLabel: shortcutLabel,

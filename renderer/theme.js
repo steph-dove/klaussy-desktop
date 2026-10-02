@@ -10,7 +10,7 @@ window.ThemeManager = (function () {
       accent: '#4a9eff', accentHover: '#6cb2ff',
       text: '#e8e8ee', textMuted: '#9a9aa6', textDim: '#8d8d98',
       surface: '#1c1c24', surfaceHover: '#26262f',
-      inputBg: '#0a0a0e', success: '#46c463', error: '#f0584f',
+      inputBg: '#0a0a0e', success: '#46c463', error: '#f0584f', warning: '#c8951b',
       // termFg softer than the UI text — pure white in a full terminal is
       // fatiguing.
       termBg: '#0d0d12', termFg: '#d2d2da', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
@@ -29,7 +29,7 @@ window.ThemeManager = (function () {
       accent: '#58a6ff', accentHover: '#79c0ff',
       text: '#c9d1d9', textMuted: '#97a0a8', textDim: '#999fa8',
       surface: '#21262d', surfaceHover: '#30363d',
-      inputBg: '#0d1117', success: '#3fb950', error: '#f85149',
+      inputBg: '#0d1117', success: '#3fb950', error: '#f85149', warning: '#c8951b',
       termBg: '#0d1117', termFg: '#c9d1d9', termCursor: '#58a6ff', termSelection: '#58a6ff44',
     },
     monokai: {
@@ -38,7 +38,7 @@ window.ThemeManager = (function () {
       accent: '#a6e22e', accentHover: '#b6f23e',
       text: '#f8f8f2', textMuted: '#bbb8aa', textDim: '#b7b7b2',
       surface: '#3e3d32', surfaceHover: '#49483e',
-      inputBg: '#272822', success: '#a6e22e', error: '#fb7fac',
+      inputBg: '#272822', success: '#a6e22e', error: '#fb7fac', warning: '#d59f1d',
       termBg: '#272822', termFg: '#f8f8f2', termCursor: '#f92672', termSelection: '#a6e22e44',
     },
     nord: {
@@ -47,7 +47,7 @@ window.ThemeManager = (function () {
       accent: '#91c5d4', accentHover: '#8fbcbb',
       text: '#eceff4', textMuted: '#d8dee9', textDim: '#c5cdd8',
       surface: '#434c5e', surfaceHover: '#4c566a',
-      inputBg: '#2e3440', success: '#acc497', error: '#dfb1b5',
+      inputBg: '#2e3440', success: '#acc497', error: '#dfb1b5', warning: '#e6b645',
       termBg: '#2e3440', termFg: '#eceff4', termCursor: '#88c0d0', termSelection: '#88c0d044',
     },
     solarized: {
@@ -56,7 +56,7 @@ window.ThemeManager = (function () {
       accent: '#48a0de', accentHover: '#2aa198',
       text: '#9aa8aa', textMuted: '#96a8ae', textDim: '#96a8ae',
       surface: '#073642', surfaceHover: '#0a4050',
-      inputBg: '#002b36', success: '#8ea300', error: '#e87977',
+      inputBg: '#002b36', success: '#8ea300', error: '#e87977', warning: '#c8951b',
       termBg: '#002b36', termFg: '#839496', termCursor: '#268bd2', termSelection: '#268bd244',
     },
     rose: {
@@ -65,7 +65,7 @@ window.ThemeManager = (function () {
       accent: '#c4a7e7', accentHover: '#ebbcba',
       text: '#e0def4', textMuted: '#938fac', textDim: '#928fa6',
       surface: '#26233a', surfaceHover: '#2a2837',
-      inputBg: '#191724', success: '#9ccfd8', error: '#eb6f92',
+      inputBg: '#191724', success: '#9ccfd8', error: '#eb6f92', warning: '#c8951b',
       termBg: '#191724', termFg: '#e0def4', termCursor: '#c4a7e7', termSelection: '#c4a7e744',
     },
     synthwave: {
@@ -74,7 +74,7 @@ window.ThemeManager = (function () {
       accent: '#ff7edb', accentHover: '#f97e72',
       text: '#f0eff5', textMuted: '#b6b1cf', textDim: '#a4a1b7',
       surface: '#372948', surfaceHover: '#423257',
-      inputBg: '#1e1628', success: '#36f9f6', error: '#fe626c',
+      inputBg: '#1e1628', success: '#36f9f6', error: '#fe626c', warning: '#c8951b',
       termBg: '#261e35', termFg: '#f0eff5', termCursor: '#ff7edb', termSelection: 'rgba(255, 126, 219, 0.25)',
       termAnsi: {
         black: '#1e1628', red: '#fe4450', green: '#72f1b8', yellow: '#fede5d',
@@ -89,7 +89,7 @@ window.ThemeManager = (function () {
       accent: '#fe8019', accentHover: '#d65d0e',
       text: '#ebdbb2', textMuted: '#c3b9ab', textDim: '#c1b9b0',
       surface: '#3c3836', surfaceHover: '#504945',
-      inputBg: '#282828', success: '#b8bb26', error: '#fc7d6e',
+      inputBg: '#282828', success: '#b8bb26', error: '#fc7d6e', warning: '#cf9a1c',
       termBg: '#282828', termFg: '#ebdbb2', termCursor: '#fe8019', termSelection: 'rgba(254, 128, 25, 0.25)',
       termAnsi: {
         black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921',
@@ -104,7 +104,7 @@ window.ThemeManager = (function () {
       accent: '#cba6f7', accentHover: '#f5c2e7',
       text: '#cdd6f4', textMuted: '#b1b7cf', textDim: '#b1b7cf',
       surface: '#313244', surfaceHover: '#45475a',
-      inputBg: '#1e1e2e', success: '#a6e3a1', error: '#f38ba8',
+      inputBg: '#1e1e2e', success: '#a6e3a1', error: '#f38ba8', warning: '#c8951b',
       termBg: '#1e1e2e', termFg: '#cdd6f4', termCursor: '#f5e0dc', termSelection: 'rgba(203, 166, 247, 0.25)',
       termAnsi: {
         black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
@@ -119,7 +119,7 @@ window.ThemeManager = (function () {
       accent: '#7aa2f7', accentHover: '#89ddff',
       text: '#a9b1d6', textMuted: '#9b9eb3', textDim: '#9b9eb3',
       surface: '#24283b', surfaceHover: '#2f3549',
-      inputBg: '#1a1b26', success: '#9ece6a', error: '#f7768e',
+      inputBg: '#1a1b26', success: '#9ece6a', error: '#f7768e', warning: '#c8951b',
       termBg: '#1a1b26', termFg: '#a9b1d6', termCursor: '#c0caf5', termSelection: 'rgba(122, 162, 247, 0.25)',
       termAnsi: {
         black: '#15161e', red: '#f7768e', green: '#9ece6a', yellow: '#e0af68',
@@ -134,7 +134,7 @@ window.ThemeManager = (function () {
       accent: '#5856d6', accentHover: '#5f5dd4',
       text: '#1c1c1e', textMuted: '#65656a', textDim: '#65656a',
       surface: '#f2f2f7', surfaceHover: '#e5e5ea',
-      inputBg: '#ffffff', success: '#217e38', error: '#dd0c00',
+      inputBg: '#ffffff', success: '#217e38', error: '#dd0c00', warning: '#8b6813',
       termBg: '#ffffff', termFg: '#1c1c1e', termCursor: '#5856d6', termSelection: '#5856d633',
       // On a light background, the ANSI "white" colors are the trap: programs
       // assume a dark terminal and emit white / bright-white foreground text,
@@ -231,6 +231,8 @@ window.ThemeManager = (function () {
     root.style.setProperty('--accent-contrast', readableOn(theme.accent));
     root.style.setProperty('--success-contrast', readableOn(theme.success));
     root.style.setProperty('--error-contrast', readableOn(theme.error));
+    root.style.setProperty('--warning', theme.warning);
+    root.style.setProperty('--warning-contrast', readableOn(theme.warning));
     root.style.setProperty('--term-bg', theme.termBg);
     root.style.setProperty('--term-fg', theme.termFg);
     root.style.setProperty('--term-cursor', theme.termCursor);

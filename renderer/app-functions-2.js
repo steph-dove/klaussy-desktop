@@ -182,12 +182,13 @@ window.App = window.App || {};
           App.switchToTask(result.id);
         }
       }},
-      { label: 'View File...', action: function () {
-        var filePath = prompt('File path (relative to worktree):');
-        if (filePath) {
-          var full = task.worktreePath + '/' + filePath;
-          window.openFileViewer(full, filePath);
-        }
+      { label: 'View File...', action: async function () {
+        var answers = await AppUtils.promptDialog({
+          title: 'View file',
+          okLabel: 'Open',
+          fields: [{ label: 'File path (relative to worktree)', required: true }],
+        });
+        if (answers) window.openFileViewer(task.worktreePath + '/' + answers[0], answers[0]);
       }},
       { sep: true },
       { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', action: async function () {

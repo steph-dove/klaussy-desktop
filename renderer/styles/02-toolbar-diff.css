@@ -1349,10 +1349,10 @@
   display: none;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 24px;
+  height: 24px;
   padding: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1;
   white-space: normal;
   color: var(--accent-contrast);

@@ -50,8 +50,9 @@ async function openWorktree(win) {
     await win.evaluate((id) => window.klaus.task.kill(id), result.id).catch(() => {});
     try { execFileSync('git', ['worktree', 'remove', '--force', worktree], { cwd: repo, stdio: 'pipe' }); } catch {}
     try { execFileSync('git', ['branch', '-D', taskName], { cwd: repo, stdio: 'pipe' }); } catch {}
-    fs.rmSync(repo, { recursive: true, force: true });
-    fs.rmSync(sessionDir, { recursive: true, force: true });
+    // The killed task's watcher can still be writing here, so a single rm races it (ENOTEMPTY).
+    fs.rmSync(repo, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   };
   return { worktree: result.worktreePath, cleanup };
 }
