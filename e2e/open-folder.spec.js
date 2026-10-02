@@ -225,7 +225,10 @@ test('an image zooms and the status bar tracks it', async ({ mainWindow }) => {
         window.App.switchToTask(opened.id);
       }
       await window.openFileViewer(f + '/shot.png', 'shot.png');
-      await new Promise((r) => setTimeout(r, 1500));
+      // The zoom label is set on the image's load event; a fixed sleep raced slow CI runners.
+      const zoomText = () => (document.querySelector('.statusbar-zoom') || {}).textContent;
+      const deadline = Date.now() + 10000;
+      while (!zoomText() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
       const img = document.querySelector('.file-media-preview img');
       const label = document.querySelector('.statusbar-zoom');
       const fit = { zoomed: img.classList.contains('zoomed'), label: label.textContent };
