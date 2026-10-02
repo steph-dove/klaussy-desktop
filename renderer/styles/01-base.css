@@ -3162,3 +3162,25 @@ body.task-branchless #ahead-behind {
 }
 
 .palette-list > .palette-empty { padding: 8px 12px; color: var(--text-muted); font-size: 13px; }
+
+/* Reflow at high zoom (WCAG 1.4.10): drag-set widths are inline, so the caps need !important. */
+@media (max-width: 900px) {
+  #sidebar:not(.collapsed) { min-width: 0; max-width: 30vw !important; }
+  #diff-panel.visible { min-width: 0; max-width: 45vw !important; }
+}
+
+/* Tiny targets keep their look but get a 24×24 hit area (WCAG 2.5.8). */
+.ci-status-icon[data-url],
+.sub-tab-close {
+  position: relative;
+}
+.ci-status-icon[data-url]::after,
+.sub-tab-close::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}

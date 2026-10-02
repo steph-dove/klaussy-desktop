@@ -925,6 +925,9 @@
         hunkSelector: '.diff-line.diff-hunk',
         describe: A11y.describeDiffLine,
         onActivate: function (line) {
+          // A Shift+Up/Down range makes this a multi-line comment.
+          var selected = PR.computeCommentRange();
+          if (selected) { PR.openCommentComposer(selected); return; }
           if (!line.dataset.line) return false;
           PR.openCommentComposer({
             path: PR.selectedFile,

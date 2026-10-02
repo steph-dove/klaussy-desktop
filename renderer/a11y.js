@@ -433,6 +433,7 @@ window.A11y = (function () {
   }
 
   const lastLine = new WeakMap();
+  const rangeAnchor = new WeakMap();
 
   // Lines get tabindex only when reached, so a large diff costs one tab stop and no per-line setup.
   function lineNav(container, opts) {
@@ -455,6 +456,22 @@ window.A11y = (function () {
       target.focus();
       target.scrollIntoView({ block: 'nearest' });
     }
+    // Shift+Up/Down builds a real text selection so the diff's selection actions (comment, explain) work from the keyboard.
+    function extendSelection(from, dir) {
+      const kept = rangeAnchor.get(container);
+      const anchor = kept && kept.isConnected ? kept : from;
+      rangeAnchor.set(container, anchor);
+      go(from, opts.lineSelector, dir);
+      const target = document.activeElement;
+      if (!target || target === from) return;
+      const forward = anchor === target || !!(anchor.compareDocumentPosition(target) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const start = forward ? anchor : target;
+      const end = forward ? target : anchor;
+      window.getSelection().setBaseAndExtent(start, 0, end, end.childNodes.length);
+      const lines = Array.from(container.querySelectorAll(opts.lineSelector)).filter(isShown);
+      const count = Math.abs(lines.indexOf(target) - lines.indexOf(anchor)) + 1;
+      announce(count + (count === 1 ? ' line selected' : ' lines selected'));
+    }
     // Labelled on focus so a line refocused after a re-render is still announced.
     container.addEventListener('focusin', function (e) {
       if (e.target === container || !e.target.matches(opts.lineSelector)) return;
@@ -468,6 +485,11 @@ window.A11y = (function () {
       const dir = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0;
       if (dir) {
         e.preventDefault();
+        if (e.shiftKey && !e.altKey && from !== container) { extendSelection(from, dir); return; }
+        if (rangeAnchor.has(container)) {
+          rangeAnchor.delete(container);
+          window.getSelection().removeAllRanges();
+        }
         go(from, e.altKey ? opts.hunkSelector : opts.lineSelector, dir);
       } else if ((e.key === 'Enter' || e.key === 'c') && from !== container && opts.onActivate) {
         if (opts.onActivate(from) !== false) e.preventDefault();
@@ -618,6 +640,10 @@ window.A11y = (function () {
     :where(input, textarea, select, [contenteditable]):focus-visible { outline-offset: 0; }
     :where([role="tab"], .file-viewer-tab, .diff-tab):focus-visible { outline-offset: -2px; }
     :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible) { outline: none !important; }
+    @media (forced-colors: active) {
+      :where(.status-dot, .grid-dot, .ci-status-icon, .agent-item-status, .minihud-dot, .unread-badge) { forced-color-adjust: none; }
+      :where([aria-selected="true"], [aria-current="true"], [aria-pressed="true"], [aria-checked="true"][role="radio"]) { outline: 2px solid Highlight; outline-offset: -2px; }
+    }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;

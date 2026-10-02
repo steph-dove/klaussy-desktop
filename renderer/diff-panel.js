@@ -65,10 +65,23 @@ window.DiffPanel = window.DiffPanel || {};
       e.preventDefault();
       e.target.closest('.diff-file').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     });
-    // E on a line runs its hunk's Explain button, matching the PR review diff.
+    // E explains the selected lines (Shift+Up/Down) or else the line's hunk; P posts a PR comment on them.
     DP.diffViewEl.addEventListener('keydown', function (e) {
-      if (e.key !== 'e' || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || (e.key !== 'e' && e.key !== 'p')) return;
       var line = e.target.closest && e.target.closest('.diff-line');
+      if (!line) return;
+      var selected = DP.getSelectedDiffText();
+      if (e.key === 'p') {
+        e.preventDefault();
+        if (!selected) window.getSelection().selectAllChildren(line);
+        DP.commentOnSelection();
+        return;
+      }
+      if (selected) {
+        e.preventDefault();
+        DP.explainSelection(selected);
+        return;
+      }
       var hunk = line;
       while (hunk && !hunk.classList.contains('diff-hunk')) hunk = hunk.previousElementSibling;
       var btn = hunk && hunk.querySelector('.diff-explain-btn');
@@ -167,15 +180,6 @@ window.DiffPanel = window.DiffPanel || {};
       '<button id="comment-selection-btn" type="button" title="Post as PR review comment">Comment</button>';
     document.body.appendChild(fab);
 
-    // Create right-click context menu
-    var menu = document.createElement('div');
-    menu.id = 'diff-context-menu';
-    menu.style.display = 'none';
-    menu.innerHTML =
-      '<div class="diff-ctx-item" data-action="explain">Explain Selection</div>' +
-      '<div class="diff-ctx-item" data-action="comment">Post PR Comment…</div>';
-    document.body.appendChild(menu);
-
     var commentBtn = fab.querySelector('#comment-selection-btn');
 
     // Track selection in the diff view area
@@ -222,33 +226,19 @@ window.DiffPanel = window.DiffPanel || {};
       DP.commentOnSelection();
     });
 
-    // Right-click context menu in diff area
     diffContent.addEventListener('contextmenu', function (e) {
       var sel = window.getSelection();
       if (!sel || sel.isCollapsed || !sel.toString().trim()) return;
       if (!diffContent.contains(sel.anchorNode)) return;
-
       e.preventDefault();
-      menu.style.display = 'block';
-      menu.style.top = e.clientY + 'px';
-      menu.style.left = e.clientX + 'px';
-    });
-
-    menu.addEventListener('click', function (e) {
-      var item = e.target.closest('.diff-ctx-item');
-      if (!item) return;
-      menu.style.display = 'none';
-      if (item.dataset.action === 'explain') {
-        var text = DP.getSelectedDiffText();
-        if (text) DP.explainSelection(text);
-      } else if (item.dataset.action === 'comment') {
-        DP.commentOnSelection();
-      }
-    });
-
-    // Hide context menu on click elsewhere
-    document.addEventListener('click', function () {
-      menu.style.display = 'none';
+      e.stopPropagation();
+      ContextMenu.show(e.clientX, e.clientY, [
+        { label: 'Explain Selection', action: function () {
+          var text = DP.getSelectedDiffText();
+          if (text) DP.explainSelection(text);
+        } },
+        { label: 'Post PR Comment…', action: function () { DP.commentOnSelection(); } },
+      ]);
     });
   };
 

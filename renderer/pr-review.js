@@ -525,7 +525,7 @@ window.PrReview = window.PrReview || {};
     if (agentId) {
       requestAnimationFrame(function () {
         var el = PR.hostEl.querySelector('.diff-explanation[data-request-id="' + agentId + '"]');
-        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        if (el && el.scrollIntoView) el.scrollIntoView({ behavior: AppUtils.prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
       });
     }
   };

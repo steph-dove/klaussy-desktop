@@ -16,7 +16,7 @@
     var WebLinksAddon = window.WebLinksAddon;
 
     var terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: 13,
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       scrollback: 10000,
