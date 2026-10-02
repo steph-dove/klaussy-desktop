@@ -144,6 +144,7 @@ window.HistoryPanel = (function () {
         this.disabled = false;
         this.textContent = '\u2191';
         if (res.error) window.toast.error('Push failed: ' + res.error);
+        else A11y.announce('Pushed tag ' + tag.name);
       });
       item.querySelector('.tag-delete-btn').addEventListener('click', async function (e) {
         e.stopPropagation();

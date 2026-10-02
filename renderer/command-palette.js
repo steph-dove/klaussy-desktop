@@ -23,8 +23,21 @@ window.CommandPalette = (function () {
     var filtered = commands;
     var selectedIndex = 0;
 
+    var wasEmpty = false;
     function render() {
       list.innerHTML = '';
+      var empty = filtered.length === 0;
+      if (empty !== wasEmpty) {
+        wasEmpty = empty;
+        if (empty) A11y.announce('No matching commands');
+      }
+      if (empty) {
+        var none = document.createElement('div');
+        none.className = 'palette-empty';
+        none.setAttribute('aria-hidden', 'true');
+        none.textContent = 'No matching commands';
+        list.appendChild(none);
+      }
       filtered.forEach(function (cmd, i) {
         var item = document.createElement('div');
         item.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');

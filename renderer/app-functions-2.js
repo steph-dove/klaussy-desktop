@@ -16,12 +16,14 @@ window.App = window.App || {};
     var row = { el: null, pathEl: null, baseEl: null, path: null, name: '', baseBranch: '', branchReq: 0 };
     var el = document.createElement('div');
     el.className = 'modal-multirepo-item';
+    App.repoRowSeq = (App.repoRowSeq || 0) + 1;
+    var pathId = 'mr-path-' + App.repoRowSeq;
     el.innerHTML =
-      '<span class="modal-repo-path">No repo selected</span>' +
-      '<select class="mr-base" hidden title="Base branch in this repo"></select>' +
+      '<span class="modal-repo-path" id="' + pathId + '">No repo selected</span>' +
+      '<select class="mr-base" hidden title="Base branch in this repo" aria-label="Base branch" aria-describedby="' + pathId + '"></select>' +
       '<button type="button" class="modal-input-btn mr-browse" title="Browse for a git repo">Browse</button>' +
       '<button type="button" class="modal-input-btn modal-recents-btn mr-recents" title="Projects &amp; discovered repos" aria-label="Projects and discovered repos" aria-expanded="false">▾</button>' +
-      '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo" aria-label="Remove this repo">×</button>' +
+      '<button type="button" class="modal-input-btn mr-remove" title="Remove this repo" aria-label="Remove this repo" aria-describedby="' + pathId + '">×</button>' +
       '<div class="modal-recents-list" hidden></div>';
     row.el = el;
     row.pathEl = el.querySelector('.modal-repo-path');
@@ -366,6 +368,7 @@ window.App = window.App || {};
     if (App.diffPanelEl) App.diffPanelEl.style.display = 'none';
     if (App.diffReveal) App.diffReveal.style.display = 'none';
     App.prReviewRoot.style.display = '';
+    App.prReviewRoot.setAttribute('role', 'main');
     window.PrReview.mount({ host: App.prReviewRoot, isPopout: false });
     App.prReviewMounted = true;
   };
@@ -374,6 +377,7 @@ window.App = window.App || {};
     if (!App.prReviewMounted) return;
     window.PrReview.unmount();
     App.prReviewRoot.style.display = 'none';
+    App.prReviewRoot.setAttribute('role', 'region');
     App.terminalArea.style.display = '';
     if (App.diffPanelEl) App.diffPanelEl.style.display = App.diffPanelEl.dataset.prevDisplay || '';
     if (App.diffReveal) App.diffReveal.style.display = '';

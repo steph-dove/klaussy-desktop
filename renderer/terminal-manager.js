@@ -190,6 +190,9 @@ window.TerminalManager = (function () {
     termBody.className = 'terminal-body';
     container.appendChild(termBody);
     terminal.open(termBody);
+    AppUtils.labelTerminal(terminal, function () {
+      return task.name + ', ' + AppUtils.modeDisplayName(task.mode) + ' terminal';
+    });
 
     // Scroll-to-bottom button
     var scrollBtn = document.createElement('button');
@@ -626,6 +629,9 @@ window.TerminalManager = (function () {
     subWrapper.style.display = 'none';
     container.appendChild(subWrapper);
     subTerminal.open(subWrapper);
+    AppUtils.labelTerminal(subTerminal, function () {
+      return taskEntry.name + ', ' + labelSpan.textContent + ' terminal';
+    });
 
     // Same focus tracker as the primary terminal: focusing a sub-terminal in
     // another task switches the active task so the diff/file panels follow
@@ -995,6 +1001,7 @@ window.TerminalManager = (function () {
       if (remaining.length > 0) {
         switchToTask(remaining[0]);
       } else {
+        document.title = 'Klaussy';
         emptyState.style.display = 'flex';
         if (window.BroadcastBar) window.BroadcastBar.update();
         if (window.BranchlessUI) window.BranchlessUI.apply(null);
@@ -1014,6 +1021,8 @@ window.TerminalManager = (function () {
     AppState.focusedTaskId = id;
     AppState.activeSessionName = null;
     Sidebar.hideUnreadBadge(id);
+    var switched = tasks.get(id);
+    document.title = switched ? 'Klaussy \u2014 ' + switched.name : 'Klaussy';
 
     if (window.BroadcastBar) window.BroadcastBar.update();
 
@@ -1100,12 +1109,18 @@ window.TerminalManager = (function () {
     });
   }
 
+  function labelLayoutButton(layout) {
+    btnLayout.setAttribute('aria-label', 'Terminal layout: ' + layout + '. Click to cycle');
+  }
+  labelLayoutButton(currentLayout());
+
   function applyLayout() {
     var layout = currentLayout();
     terminalsEl.classList.remove('columns-view', 'grid-view');
     btnLayout.classList.toggle('active', layout !== 'single');
     btnLayout.innerHTML = layoutIcons[layout];
     btnLayout.title = 'Layout: ' + layout + ' (click to cycle)';
+    labelLayoutButton(layout);
 
     if (layout === 'single') {
       if (AppState.activeTaskId != null) {

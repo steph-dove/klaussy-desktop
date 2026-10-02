@@ -359,6 +359,7 @@ window.FileBrowser = (function () {
     var show = !!(tab && artifactKind(tab.filePath));
     btn.hidden = !show;
     btn.classList.toggle('active', !!(tab && tab.splitMode));
+    btn.setAttribute('aria-pressed', String(!!(tab && tab.splitMode)));
   }
 
   function applySplitMode(tab) {
@@ -658,7 +659,7 @@ window.FileBrowser = (function () {
         '<button class="file-viewer-preview-btn" title="Toggle Markdown preview" hidden>Preview</button>' +
         '<button class="file-viewer-split-btn" title="Toggle live preview beside the editor" hidden>Split</button>' +
         '<button class="file-viewer-save-btn" title="Save (⌘S)" disabled>Save</button>' +
-        '<button class="file-viewer-blame-btn" title="Toggle blame annotations">Blame</button>' +
+        '<button class="file-viewer-blame-btn" title="Toggle blame annotations" aria-pressed="false">Blame</button>' +
       '</div>' +
       '<div class="file-viewer-body">' +
         '<div class="file-editor-monaco"></div>' +
@@ -913,6 +914,8 @@ window.FileBrowser = (function () {
   function openViewerExplainZone(editor, afterLineNumber, requestId, agent, hunkText) {
     var domNode = document.createElement('div');
     domNode.className = 'viewer-explain-zone';
+    domNode.setAttribute('role', 'region');
+    domNode.setAttribute('aria-label', 'Explanation');
     domNode.dataset.requestId = requestId;
     domNode.innerHTML =
       '<div class="diff-explanation-header">'
@@ -948,7 +951,10 @@ window.FileBrowser = (function () {
       editor.changeViewZones(function (accessor) { accessor.removeZone(entry.zoneId); });
       entry.zoneId = null;
     }
-    domNode.querySelector('.diff-explanation-close').addEventListener('click', removeZone);
+    domNode.querySelector('.diff-explanation-close').addEventListener('click', function () {
+      removeZone();
+      editor.focus();
+    });
 
     // Rehydration: paint cached text first.
     var accumulated = (agent && agent.text) || '';
@@ -980,6 +986,9 @@ window.FileBrowser = (function () {
       if (result && result.error) {
         bodyEl.className = 'diff-explanation-body diff-error';
         bodyEl.textContent = result.error;
+        A11y.announce('Explain failed: ' + result.error, 'assertive');
+      } else {
+        A11y.announce('Explanation ready');
       }
     });
   }
@@ -1224,13 +1233,19 @@ window.FileBrowser = (function () {
     if (saveBtn) saveBtn.disabled = true;
     var writeResult = await window.klaus.fs.writeFile(tab.filePath, content);
     if (writeResult.error) {
-      if (statusEl) { statusEl.textContent = 'Save failed'; statusEl.className = 'file-editor-status error'; }
+      if (statusEl) {
+        statusEl.textContent = 'Save failed';
+        statusEl.title = String(writeResult.error);
+        statusEl.className = 'file-editor-status error';
+      }
+      A11y.announce('Save failed: ' + writeResult.error, 'assertive');
       if (saveBtn) saveBtn.disabled = false;
       return;
     }
     tab.savedContent = content;
     if (writeResult.mtimeMs) tab.diskMtimeMs = writeResult.mtimeMs;
-    if (statusEl) { statusEl.textContent = 'Saved'; statusEl.className = 'file-editor-status saved'; }
+    if (statusEl) { statusEl.textContent = 'Saved'; statusEl.removeAttribute('title'); statusEl.className = 'file-editor-status saved'; }
+    A11y.announce('Saved');
     setTimeout(function () {
       if (statusEl && statusEl.textContent === 'Saved') {
         statusEl.textContent = '';
@@ -1958,10 +1973,12 @@ window.FileBrowser = (function () {
     var result = await window.klaus.fs.searchFiles(wt, query, maxPerFile);
     if (result.error) {
       projectSearchResults.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
+      A11y.announce('Search failed: ' + result.error, 'assertive');
       return;
     }
     if (result.results.length === 0) {
       projectSearchResults.innerHTML = '<div class="file-tree-empty">No matches found</div>';
+      A11y.announce('No matches found');
       lastSearchHits = [];
       lastSearchQuery = query;
       updateReplaceButton();
@@ -1972,6 +1989,8 @@ window.FileBrowser = (function () {
     excludedFiles.clear();
     renderSearchResults(wt);
     updateReplaceButton();
+    var fileCount = new Set(result.results.map(function (r) { return r.file; })).size;
+    A11y.announce(result.results.length + (result.results.length === 1 ? ' match' : ' matches') + ' in ' + fileCount + (fileCount === 1 ? ' file' : ' files'));
   }
 
   function renderSearchResults(wt) {
@@ -2201,11 +2220,15 @@ window.FileBrowser = (function () {
       currentBlameLines = null;
       currentEditor.updateOptions({ lineNumbers: 'on', lineNumbersMinChars: 5 });
       fileViewerView.classList.remove('blame-active');
+      setBlamePressed(false);
       return;
     }
 
     var result = await window.klaus.git.blame(task.worktreePath, fileName);
-    if (result.error || !result.lines || result.lines.length === 0) return;
+    if (result.error || !result.lines || result.lines.length === 0) {
+      A11y.announce(result.error ? 'Blame failed: ' + result.error : 'No blame for this file', result.error ? 'assertive' : 'polite');
+      return;
+    }
 
     // Replace the line-number column with "<hash> <author>". A new function
     // reference makes Monaco re-render, so the closure-captured blame array
@@ -2220,7 +2243,13 @@ window.FileBrowser = (function () {
       lineNumbersMinChars: 22,
     });
     fileViewerView.classList.add('blame-active');
+    setBlamePressed(true);
   };
+
+  function setBlamePressed(on) {
+    var btn = fileViewerView.querySelector('.file-viewer-blame-btn');
+    if (btn) btn.setAttribute('aria-pressed', String(on));
+  }
 
   // Cmd+K is overloaded (command palette vs in-editor inline-edit). Export a
   // getter so app.js can route to inline-edit when a file is open, without

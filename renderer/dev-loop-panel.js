@@ -1146,13 +1146,25 @@ window.DevLoopPanel = (function () {
       return '<span class="minihud-dot ' + dotCls + '" title="Phase ' + p.id + ': ' + AppUtils.escHtml(p.name) + '">' + dotText + '</span>';
     }).join('<span class="minihud-connector"></span>');
 
-    minihud.innerHTML =
-      '<div class="minihud-label">' +
-        '<span class="minihud-icon">🦉</span>' +
-        '<span class="minihud-phase">Phase ' + state.currentPhase + '/9: ' + AppUtils.escHtml(currentPhaseObj.shortName) + '</span>' +
-      '</div>' +
-      '<div class="minihud-stepper">' + dotsHtml + '</div>' +
-      '<button class="minihud-expand-btn" title="Open full Dev Loop details" type="button">Details ↗</button>';
+    var doneCount = PHASES.filter(function (p) { return (state.phaseStatuses[p.id] || {}).status === 'completed'; }).length;
+    var phaseText = 'Phase ' + state.currentPhase + '/9: ' + currentPhaseObj.shortName;
+    var prevPhase = minihud.dataset.phase;
+    minihud.dataset.phase = String(state.currentPhase);
+    if (prevPhase && prevPhase !== String(state.currentPhase)) {
+      var owner = taskFor(taskId);
+      A11y.announce((owner && owner.name ? owner.name + ': ' : '') + 'dev loop ' + phaseText);
+    }
+
+    A11y.preserveFocus(minihud, function () {
+      minihud.innerHTML =
+        '<div class="minihud-label">' +
+          '<span class="minihud-icon" aria-hidden="true">🦉</span>' +
+          '<span class="minihud-phase">' + AppUtils.escHtml(phaseText) + '</span>' +
+          '<span class="sr-only">, ' + doneCount + ' of ' + PHASES.length + ' phases complete</span>' +
+        '</div>' +
+        '<div class="minihud-stepper" aria-hidden="true">' + dotsHtml + '</div>' +
+        '<button class="minihud-expand-btn" title="Open full Dev Loop details" type="button">Details ↗</button>';
+    });
 
     var expandBtn = minihud.querySelector('.minihud-expand-btn');
     if (expandBtn) {

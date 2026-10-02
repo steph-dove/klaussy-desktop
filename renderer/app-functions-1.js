@@ -18,6 +18,7 @@ window.App = window.App || {};
     if (!runs || runs.length === 0) {
       icon.className = 'ci-status-icon';
       icon.title = 'No CI runs';
+      Sidebar.describeTask(item);
       return;
     }
 
@@ -47,6 +48,7 @@ window.App = window.App || {};
       icon.setAttribute('role', 'img');
       icon.setAttribute('aria-label', icon.title);
     }
+    Sidebar.describeTask(item);
   };
 
   App.forceFilesTab = function() {
@@ -61,11 +63,14 @@ window.App = window.App || {};
     presets.forEach(function (p) {
       var btn = document.createElement('button');
       btn.className = 'theme-option' + (p.id === current ? ' active' : '');
-      btn.innerHTML = '<span class="theme-swatch" data-preset="' + p.id + '"></span>' + p.name;
+      btn.setAttribute('aria-pressed', String(p.id === current));
+      btn.innerHTML = '<span class="theme-swatch" data-preset="' + p.id + '" aria-hidden="true"></span>' + p.name;
       btn.addEventListener('click', function () {
         ThemeManager.apply(p.id);
-        App.themeList.querySelectorAll('.theme-option').forEach(function (el) { el.classList.remove('active'); });
-        btn.classList.add('active');
+        App.themeList.querySelectorAll('.theme-option').forEach(function (el) {
+          el.classList.toggle('active', el === btn);
+          el.setAttribute('aria-pressed', String(el === btn));
+        });
       });
       App.themeList.appendChild(btn);
     });
@@ -769,7 +774,7 @@ window.App = window.App || {};
             +   '<span class="sessions-modal-name">' + App.escHtml(n) + (open ? ' <span class="sessions-modal-open">open</span>' : '') + '</span>'
             +   '<span class="sessions-modal-sub">' + wts.length + (wts.length === 1 ? ' repo: ' : ' repos: ') + App.escHtml(repos) + '</span>'
             + '</div>'
-            + '<button type="button" class="sessions-modal-delete" data-name="' + App.escHtml(n) + '">Delete</button>'
+            + '<button type="button" class="sessions-modal-delete" data-name="' + App.escHtml(n) + '" aria-label="Delete session ' + App.escHtml(n) + '">Delete</button>'
             + '</div>';
         }).join('');
       };

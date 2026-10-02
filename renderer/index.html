@@ -56,7 +56,8 @@
           <input aria-label="From date" type="date" id="token-tile-from" />
           <input aria-label="To date" type="date" id="token-tile-to" />
         </div>
-        <svg id="token-tile-chart" viewBox="0 0 200 60" preserveAspectRatio="none"></svg>
+        <span id="token-tile-chart-name" class="sr-only">Token usage chart:</span>
+        <svg id="token-tile-chart" viewBox="0 0 200 60" preserveAspectRatio="none" role="img" aria-labelledby="token-tile-chart-name token-tile-total token-tile-range-label"></svg>
         <div class="token-tile-foot">
           <span id="token-tile-total">—</span>
           <span id="token-tile-range-label"></span>

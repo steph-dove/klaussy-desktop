@@ -1082,6 +1082,7 @@
       theme: theme,
       minimumContrastRatio: 4.5, // never let low-contrast (e.g. white-on-white) text vanish
       allowProposedApi: true,
+      screenReaderMode: !!(window.AppUtils && window.AppState && AppUtils.screenReaderMode(AppState.savedPrefs)),
     });
     var fitAddon = new window.FitAddon.FitAddon();
     terminal.loadAddon(fitAddon);
@@ -1297,6 +1298,7 @@
     } else {
       // First mount — xterm.open creates the element under the host.
       term.open(host);
+      AppUtils.labelTerminal(term, function () { return rt === PR.chatTerminal ? 'Review chat terminal' : 'Implement run terminal'; });
       try { rt.fitAddon.fit(); } catch (_) {}
     }
     PR.syncPtySizes();

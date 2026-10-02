@@ -170,8 +170,18 @@ window.AppUtils = (function () {
     return !!(prefs && (prefs.screenReaderMode || prefs.screenReaderActive));
   }
 
+  // xterm names every input "Terminal input"; re-read on focus so renamed tasks stay current.
+  function labelTerminal(terminal, getLabel) {
+    var input = terminal && terminal.textarea;
+    if (!input) return;
+    var apply = function () { input.setAttribute('aria-label', getLabel()); };
+    apply();
+    input.addEventListener('focus', apply);
+  }
+
   return {
     screenReaderMode: screenReaderMode,
+    labelTerminal: labelTerminal,
     promptDialog: promptDialog,
     isMac: isMac,
     isAppShortcut: isAppShortcut,

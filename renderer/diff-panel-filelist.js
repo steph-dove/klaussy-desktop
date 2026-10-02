@@ -274,8 +274,8 @@
       + previewLink
       + ' <span class="diff-view-full-path">' + DP.escHtml(file) + '</span>'
       + '<div class="diff-view-mode-toggle" role="group" aria-label="Diff view mode">'
-        + '<button type="button" class="diff-view-mode-btn js-view-mode-unified' + unifiedActive + '" title="Unified view">Unified</button>'
-        + '<button type="button" class="diff-view-mode-btn js-view-mode-split' + splitActive + '" title="Side-by-side view">Split</button>'
+        + '<button type="button" class="diff-view-mode-btn js-view-mode-unified' + unifiedActive + '" title="Unified view" aria-pressed="' + !!unifiedActive + '">Unified</button>'
+        + '<button type="button" class="diff-view-mode-btn js-view-mode-split' + splitActive + '" title="Side-by-side view" aria-pressed="' + !!splitActive + '">Split</button>'
       + '</div>'
       + '</div>';
   };

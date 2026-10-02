@@ -425,6 +425,7 @@
       cleaned = cleaned.replace(/^```[a-zA-Z0-9_-]*\n?/, '').replace(/\n?```\s*$/, '');
       DP.commitInput.value = cleaned.trim();
       DP.commitInput.focus();
+      A11y.announce('Commit message generated');
     });
   };
 
@@ -449,6 +450,17 @@
     el.textContent = text;
     A11y.announce(text, kind === 'error' ? 'assertive' : 'polite');
     DP.panelEl.appendChild(el);
+    // Errors stay until dismissed so there's time to read them (WCAG 2.2.1).
+    if (kind === 'error') {
+      var close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'diff-status-close';
+      close.setAttribute('aria-label', 'Dismiss');
+      close.textContent = '\u00d7';
+      close.addEventListener('click', function () { el.remove(); });
+      el.appendChild(close);
+      return;
+    }
     setTimeout(function () {
       if (el && el.parentElement) el.parentElement.removeChild(el);
     }, 6000);

@@ -123,6 +123,13 @@ ipcMain.handle('get-system-theme', () => {
   return nativeTheme.shouldUseDarkColors;
 });
 
+// Starting VoiceOver/NVDA mid-session should switch terminals and the editor into screen-reader mode.
+app.on('accessibility-support-changed', (_event, enabled) => {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) win.webContents.send('preferences-changed', { screenReaderActive: enabled });
+  }
+});
+
 // Listen for system theme changes and forward to renderer
 nativeTheme.on('updated', () => {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -458,8 +465,8 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   }
   saveConfig(config);
 
-  // Broadcast to all windows so they can apply changes live
-  for (const win of allWindows) {
+  // Broadcast to all windows so they can apply changes live; pop-outs aren't in allWindows.
+  for (const win of BrowserWindow.getAllWindows()) {
     if (!win.isDestroyed()) win.webContents.send('preferences-changed', prefs);
   }
   return kimiError ? { ok: false, error: kimiError } : { ok: true };
