@@ -37,6 +37,8 @@ The shared helpers live in `renderer/a11y.js` (`window.A11y`); use them instead 
 - **Clickable elements**: use a `<button>`. If an element can't be a button, `A11y.makeButton(el, label)` adds the role and Enter/Space handling.
 - **Lists and tab strips**: `arrowNav`, `tabs`, `radios`, `combobox`, `dropdownMenu`, `popupList` and `splitter` take their state from the `.active`/`.selected` classes the code already toggles.
 - **Re-rendering with `innerHTML`**: wrap it in `A11y.preserveFocus(host, fn)` so keyboard focus survives.
+- **Focus rescue (safety net)**: if a re-render removes, hides or disables the focused control, `a11y.js` puts focus back instead of leaving it on `<body>`. Inside a diff it returns to the line the user was on. A control disabled while busy gets focus back when it's re-enabled. A re-rendered copy of the control gets focus, and otherwise the control now in the same position, or the dialog's first field. Still move focus on purpose when there's a better destination (e.g. the new field after "Add").
+- **Focus ring**: the global `:focus-visible` ring is `!important`, so a component's `outline: none` can't hide it. Don't fight it. Use `outline-offset` if it clips.
 - **Asking for input**: Electron has no `window.prompt()`. Use `AppUtils.promptDialog({ title, fields })`, which returns a labelled modal and resolves with the values, or `null` if cancelled.
 - **Status messages**: `A11y.announce(msg)`, or `A11y.announce(msg, 'assertive')` for errors. Toasts announce themselves.
 - **Colours**: use the theme tokens (`--text`, `--text-muted`, `--text-dim`, `--accent`, `--border-strong`, `--accent-contrast` for text on filled accent). Don't use raw hex values or opacity to dim text. `test/util/theme-contrast.test.js` checks every preset.

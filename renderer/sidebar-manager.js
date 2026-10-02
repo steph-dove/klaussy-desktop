@@ -680,6 +680,7 @@ window.Sidebar = (function () {
     popover.className = 'note-popover';
     popover.innerHTML = '<textarea class="note-textarea" placeholder="Add a note for this task..." rows="4"></textarea>';
     var textarea = popover.querySelector('textarea');
+    textarea.setAttribute('aria-label', 'Note for ' + taskName);
 
     var rect = anchorEl.getBoundingClientRect();
     popover.style.position = 'fixed';
@@ -708,8 +709,12 @@ window.Sidebar = (function () {
     });
 
     textarea.addEventListener('keydown', function (e) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') textarea.blur();
-      if (e.key === 'Escape') textarea.blur();
+      // The popover lives at the end of <body>, so keyboard exits go back to the Notes button rather than off the sidebar.
+      if (((e.metaKey || e.ctrlKey) && e.key === 'Enter') || e.key === 'Escape' || e.key === 'Tab') {
+        e.preventDefault();
+        if (anchorEl.isConnected) anchorEl.focus();
+        if (document.activeElement === textarea) textarea.blur();
+      }
     });
 
     function onOutsideClick(e) {

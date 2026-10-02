@@ -887,8 +887,10 @@ window.PRPanel = (function () {
 
     function renderFinal() {
       if (!finalText) return;
-      bodyEl.innerHTML = renderReviewContent(finalText);
-      wireFixButtons(bodyEl, finalText);
+      A11y.preserveFocus(bodyEl, function () {
+        bodyEl.innerHTML = renderReviewContent(finalText);
+        wireFixButtons(bodyEl, finalText);
+      });
     }
 
     var unsubscribe = window.klaus.pr.onAiReviewData(requestId, function (chunk) {
@@ -907,7 +909,11 @@ window.PRPanel = (function () {
       unsubscribe();
       if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
       if (currentAiReviewId !== requestId) return; // stale
-      if (cancelBtn) cancelBtn.remove();
+      if (cancelBtn) {
+        var cancelHadFocus = cancelBtn === document.activeElement;
+        cancelBtn.remove();
+        if (cancelHadFocus && btn) btn.focus();
+      }
       if (result && result.cancelled) {
         bodyEl.innerHTML = '<div class="pr-ai-error">Cancelled.</div>';
         return;

@@ -657,6 +657,11 @@
   background: var(--bg);
 }
 
+/* Keeps arrow-key line focus clear of the sticky partial-stage bar (WCAG 2.4.11). */
+#diff-content:has(#diff-partial-action-bar) {
+  scroll-padding-bottom: 48px;
+}
+
 #diff-view {
   font-family: 'SF Mono', 'Fira Code', Menlo, monospace;
   font-size: 12px;

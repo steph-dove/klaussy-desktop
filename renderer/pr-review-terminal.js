@@ -1049,8 +1049,10 @@
     if (PR.activeTab !== 'terminal') return;
     var tab = PR.hostEl.querySelector('.pr-review-terminal-tab');
     if (!tab) return;
-    tab.innerHTML = PR.renderTerminalTab();
-    PR.mountImplementTerminalIfActive();
+    A11y.preserveFocus(tab, function () {
+      tab.innerHTML = PR.renderTerminalTab();
+      PR.mountImplementTerminalIfActive();
+    });
   };
 
   PR.repaintTerminalTabBadge = function() {

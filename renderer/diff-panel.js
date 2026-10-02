@@ -876,7 +876,7 @@ window.DiffPanel = window.DiffPanel || {};
 
     if (files.length === 0) {
       html += '<div class="diff-empty">No changes from ' + DP.escHtml(DP.baseBranch) + '</div>';
-      DP.fileListEl.innerHTML = html;
+      DP.setFileListHtml(html);
       DP.bindModeToggle();
       return;
     }
@@ -892,7 +892,7 @@ window.DiffPanel = window.DiffPanel || {};
         '</div>';
     });
 
-    DP.fileListEl.innerHTML = html;
+    DP.setFileListHtml(html);
     DP.bindModeToggle();
 
     DP.fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
