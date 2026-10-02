@@ -494,6 +494,12 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.on('pr-implement-attention', handler);
       return () => ipcRenderer.removeListener('pr-implement-attention', handler);
     },
+    // Main pushed an "Implement all" commit to the PR branch. Fires in every window.
+    onImplementPushed: (callback) => {
+      const handler = (_event, payload) => callback(payload);
+      ipcRenderer.on('pr-implement-pushed', handler);
+      return () => ipcRenderer.removeListener('pr-implement-pushed', handler);
+    },
     popOut: () => ipcRenderer.invoke('pop-out-pr-review'),
     popIn: () => ipcRenderer.invoke('pop-in-pr-review'),
     onReviewState: (callback) => {

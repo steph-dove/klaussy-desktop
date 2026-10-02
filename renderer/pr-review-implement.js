@@ -843,9 +843,13 @@
       onUsage: function (u) { PR.aiReview.implementAllUsage = u; },
       onTool: function (chip) { PR.aiReview.implementAllProgress.push(chip); },
       onDone: function () {
+        // Main pushes on IMPLEMENT_COMMITTED_MARKER (main/state/review-prompts.js); just hide it here.
+        var summary = (PR.aiReview.implementAllSummary || '').trim();
+        if (/<IMPLEMENT_ALL_COMMITTED\/>$/.test(summary)) summary = summary.slice(0, -'<IMPLEMENT_ALL_COMMITTED/>'.length).trim();
+        PR.aiReview.implementAllSummary = summary;
         pending.forEach(function (f) {
           f.status = 'implemented';
-          f.implementOut = PR.aiReview.implementAllSummary || '';
+          f.implementOut = summary;
           f.implementId = null;
         });
         PR.aiReview.implementAllId = null;

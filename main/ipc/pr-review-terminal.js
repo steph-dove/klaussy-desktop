@@ -5,9 +5,10 @@
 // claude-stream-ipc.js; required for its ipcMain.handle side effects.
 
 const { ipcMain, BrowserWindow } = require('electron');
-const { prReview, ensureWorktreeForActivePr } = require('../state/pr-review');
+const { prReview, ensureWorktreeForActivePr, pushPrHead } = require('../state/pr-review');
 const { pickProvider, agentForWorktree, repoIntelFor } = require('../state/agent-select');
 const { ensureWorktreeBootstrap } = require('../state/repo-intel');
+const { buildImplementPrompt, endsWithCommittedMarker } = require('../state/review-prompts');
 const { getOrAskRepoConsent, applyWorktreePermissions } = require('../util/worktree-permissions');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
@@ -44,6 +45,12 @@ function broadcastToImplementSubs(requestId, channel, payload) {
 // backgrounded implement run wants attention — finished, errored, or paused
 // after a turn while nobody was watching. app.js turns this into a toast so the
 // user knows to reopen the PR.
+function notifyImplementPushed(payload) {
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) { try { w.webContents.send('pr-implement-pushed', payload); } catch {} }
+  }
+}
+
 function notifyImplementAttention(payload) {
   for (const w of BrowserWindow.getAllWindows()) {
     if (!w.isDestroyed()) { try { w.webContents.send('pr-implement-attention', payload); } catch {} }
@@ -78,54 +85,6 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // match a backgrounded run to this PR (e.g. when a fresh pop-out asks).
   if (prReview.active) prReview.active.worktreePath = ensured.worktreePath;
 
-  // Two prompts depending on whether we're implementing one finding or many.
-  // Both share guardrails so claude doesn't drift into unrelated cleanup or
-  // start running tests/commits.
-  // Structured workflow that forces usage-tracing before edits and a self-
-  // review after, so a fix for finding A doesn't ship a regression that a
-  // later review round flags as finding B (the "10 rounds of blockers" loop).
-  const baseGuardrails =
-    `\n\nWorkflow (mandatory):\n\n`
-    + `1. **Before editing.** For each symbol you will modify (function, class,\n`
-    + `   type, exported constant, IPC channel, config key): grep for every\n`
-    + `   usage in the repo and read the full file at each call site. For each\n`
-    + `   behavior you will change, trace one realistic call path end-to-end\n`
-    + `   and note any caller that depends on the current behavior (return\n`
-    + `   shape, null/empty handling, error propagation, ordering, side\n`
-    + `   effects). If a symbol crosses an IPC/preload boundary, grep the\n`
-    + `   matching channel name in both main and renderer.\n\n`
-    + `2. **While editing.**\n`
-    + `   - Only change what the finding(s) ask for; no unrelated cleanup.\n`
-    + `   - Preserve invariants callers rely on. If a function returns \`null\`\n`
-    + `     on miss and callers gate on \`if (x)\`, don't switch to returning\n`
-    + `     \`{}\` or throwing. If an event fires once, don't make it fire twice.\n`
-    + `   - Match the existing error/null-handling style; don't introduce new\n`
-    + `     failure modes the callers won't catch.\n`
-    + `   - Do not run tests, install deps, or commit/push.\n\n`
-    + `3. **After editing — self-review pass (required).** Re-read every call\n`
-    + `   site you found in step 1. For each one, state in one short sentence\n`
-    + `   whether the change is safe for that caller and why. If any caller\n`
-    + `   needs updating, update it in the same change and re-run this pass\n`
-    + `   on the updated caller. If you cannot verify a caller is safe (e.g.\n`
-    + `   the symbol crosses a process boundary, is reflected on, or is\n`
-    + `   consumed by code outside this repo), say so explicitly and stop —\n`
-    + `   surface the uncertainty rather than guess.\n\n`
-    + `4. **Summary.** One short bullet per change, prefixed with the file\n`
-    + `   path. Be terse. Then list the self-review notes from step 3 under a\n`
-    + `   "Call-site check:" heading.\n`;
-  // Single-finding mode emits a follow-up PR comment draft between literal
-  // markers so the renderer can extract it and present it to the reviewer
-  // for approval. Batch "all" mode skips the marker — one comment for a mixed
-  // batch of findings wouldn't map cleanly to any one finding card.
-  const draftCommentInstruction =
-    `\n5. **Draft PR comment.** On a new line, output exactly one block\n`
-    + `   delimited by these literal markers:\n\n`
-    + `   <DRAFT_PR_COMMENT>\n`
-    + `   One or two sentences written as a reply the reviewer could post\n`
-    + `   under the finding on GitHub — explain what you fixed and how. Do\n`
-    + `   not repeat the finding verbatim. Plain prose, no code fences, no\n`
-    + `   bullets.\n`
-    + `   </DRAFT_PR_COMMENT>\n`;
   // Prefer an explicit agent from the split-button picker; otherwise follow the
   // agent of the task running on this PR's worktree (then the default).
   const implProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
@@ -134,10 +93,7 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // should follow house rules, not generic style. (Provider-aware: claude in
   // a synced worktree gets the slim graph-only block.)
   const implIntel = repoIntelFor(ensured.worktreePath, implProvider);
-  const prompt = (mode === 'all'
-    ? `Apply the following code-review findings to the codebase:\n\n${body}` + baseGuardrails
-    : `Apply the following code-review finding to the codebase:\n\n${body}` + baseGuardrails + draftCommentInstruction)
-    + (implIntel ? '\n' + implIntel : '');
+  const prompt = buildImplementPrompt({ mode, body, intel: implIntel });
 
   // Permission consent (Claude only): pre-allow file edits scoped to this
   // worktree via settings.local.json (and deny secret files). Other agents
@@ -165,6 +121,12 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
   // away — the run persists in the background and can be re-attached.
   implementSubs(requestId).add(sender);
 
+  // Snapshot the push target: a backgrounded run can finish after the reviewer moved to another PR.
+  const a = prReview.active;
+  const pushPr = mode === 'all' && a ? { meta: a.meta, forge: a.forge, host: a.host, account: a.account } : null;
+  let lastText = '';
+  let pushStarted = false;
+
   const result = startImplementPty({
     requestId,
     worktreePath: ensured.worktreePath,
@@ -173,6 +135,15 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
     onData: (data) => broadcastToImplementSubs(requestId, dataChannel, data),
     onEvent: (ev) => {
       broadcastToImplementSubs(requestId, eventChannel, ev);
+      if (ev && ev.kind === 'text') lastText = ev.text || '';
+      if (ev && ev.kind === 'end_turn' && pushPr && !pushStarted && endsWithCommittedMarker(lastText)) {
+        pushStarted = true;
+        pushPrHead({ pr: pushPr, worktreePath: ensured.worktreePath })
+          .catch((err) => ({ error: (err && err.message) || String(err) }))
+          .then((pushResult) => notifyImplementPushed({
+            requestId, prNumber, worktreePath: ensured.worktreePath, result: pushResult,
+          }));
+      }
       // Turn finished with nobody attached. Normally the renderer sends the
       // cleanup Ctrl+C on finalize; with no surface, main MUST wind the PTY
       // down itself — otherwise the idle Claude TUI (and its agent-concurrency

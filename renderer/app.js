@@ -1228,6 +1228,15 @@ window.App = window.App || {};
     });
   }
 
+  if (window.klaus.pr.onImplementPushed) {
+    window.klaus.pr.onImplementPushed(function (ev) {
+      if (!ev || !window.toast) return;
+      var pr = ev.prNumber ? ('PR #' + ev.prNumber) : 'A PR';
+      if (ev.result && ev.result.error) window.toast.warn(pr + ': Implement all committed, but the push failed — reopen the PR to retry');
+      else window.toast.success(pr + ': Implement all pushed to the PR branch');
+    });
+  }
+
   // Keep the main-window panel visibility in sync with main-process state
   // changes (e.g. the pop-out's "pop back in" button clears popout → we want
   // the main panel mounted again; prReviewClose from anywhere unmounts us).

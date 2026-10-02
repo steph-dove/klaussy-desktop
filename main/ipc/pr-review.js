@@ -19,7 +19,7 @@ const {
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr, switchGhForReview, restoreGhAfterReview,
   switchGlabForReview, restoreGlabAfterReview,
-  switchBitbucketForReview, restoreBitbucketAfterReview,
+  switchBitbucketForReview, restoreBitbucketAfterReview, pushPrHead,
 } = require('../state/pr-review');
 const { ghJson, ghText } = require('../util/gh-json');
 const { glabJson, glabText } = require('../util/glab-json');
@@ -1242,145 +1242,9 @@ ipcMain.handle('pr-review-commit-local', async (_event, { message, worktreeHint,
 
 ipcMain.handle('pr-review-push-local', async (_event, args) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { meta } = prReview.active;
   const wt = activePrWorktree(args && args.worktreeHint);
   if (!wt) return { error: 'No worktree for this PR yet' };
-
-  // Push target = the PR's head repo + branch. For self-PRs that's the user's
-  // fork; for contributor PRs with "Allow edits from maintainers" enabled,
-  // it's the contributor's fork. We push by URL+refspec rather than mucking
-  // with named remotes so we don't pollute the worktree's remote config.
-  const headOwner = meta && meta.headRepositoryOwner && meta.headRepositoryOwner.login;
-  const headRepoName = meta && meta.headRepository && meta.headRepository.name;
-  const headBranch = meta && meta.headRefName;
-  if (!headOwner || !headRepoName || !headBranch) {
-    return { error: 'PR head repository/branch missing from metadata — cannot determine push target.' };
-  }
-
-  const forge = (prReview.active && prReview.active.forge) || 'github';
-  const host = (prReview.active && prReview.active.host) || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
-  let token = '';
-  let authedUrl = '';
-  if (forge === 'gitlab') {
-    token = getGlabToken(host);
-    if (!token) {
-      return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
-    }
-    authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
-  } else if (forge === 'bitbucket') {
-    const auth = getBitbucketAuth({ host, account: prReview.active && prReview.active.account });
-    if (auth && auth.username && (auth.password || auth.token)) {
-      authedUrl = `https://${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password || auth.token)}@${host}/${headOwner}/${headRepoName}.git`;
-    } else if (auth && auth.token) {
-      authedUrl = `https://x-token-auth:${auth.token}@${host}/${headOwner}/${headRepoName}.git`;
-    } else {
-      authedUrl = `https://${host}/${headOwner}/${headRepoName}.git`;
-    }
-  } else {
-    try {
-      token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
-    } catch (_) {
-      return { error: 'Could not read gh auth token — run `gh auth login` first.' };
-    }
-    authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
-  }
-  const scrub = (s) => (s || '')
-    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
-    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
-    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
-  const target = `${headOwner}/${headRepoName}:${headBranch}`;
-
-  const wtCwd = wt.worktreePath;
-  const stashRequested = !!(args && args.stash);
-
-  // HEAD:refs/heads/<branch> — pushes the worktree's current commit to the PR
-  // branch on the head fork. Non-force, so GitHub rejects it if the branch has
-  // advanced upstream (force-pushed by the author, or pushed from another
-  // worktree). We recover from that below rather than dead-ending on the raw
-  // git hint.
-  const doPush = () => execFileP(
-    'git', ['push', authedUrl, `HEAD:refs/heads/${headBranch}`],
-    { cwd: wtCwd, timeout: 60000 },
-  );
-  const isNonFastForward = (s) => /non-fast-forward|\[rejected\]|fetch first|behind its remote/i.test(s || '');
-  // git's "tree is dirty" phrasings — distinguishes an uncommitted-changes block
-  // (offer Stash) from a real merge conflict (offer the agent).
-  const looksLikeDirtyTree = (s) => /unstaged|uncommitted|untracked working tree|would be overwritten|cannot rebase|commit your changes or stash|please commit/i.test(s || '');
-
-  // Happy path: a plain push when nothing diverged. Skipped when the caller
-  // explicitly asked to stash (Stash button) — that means "set my changes
-  // aside, integrate the remote, push, restore", so we go straight to recovery.
-  if (!stashRequested) {
-    try {
-      const { stderr } = await doPush();
-      return { ok: true, target, output: scrub((stderr || '').trim()) };
-    } catch (err) {
-      const raw = err.stderr ? err.stderr.toString() : err.message;
-      if (!isNonFastForward(raw)) return { error: scrub(raw) };
-      // fall through to recovery
-    }
-  }
-
-  // Recovery: integrate the latest remote (fetch + rebase), then retry the push
-  // once. When asked to stash, set aside any uncommitted changes first so the
-  // rebase isn't blocked, and restore them afterwards.
-  let stashed = false;
-  if (stashRequested) {
-    try {
-      const { stdout } = await execFileP('git', ['stash', 'push', '-m', 'klaussy: auto-stash before integrating remote'], { cwd: wtCwd, timeout: 30000 });
-      stashed = !/No local changes to save/i.test(stdout || '');
-    } catch (se) {
-      return { error: 'Could not stash local changes: ' + scrub(se.stderr ? se.stderr.toString() : se.message) };
-    }
-  }
-  // Restore our stash (if any). The push has already happened by the time this
-  // runs, so a conflicting pop is non-fatal — surface it as a warning suffix.
-  const popStash = async () => {
-    if (!stashed) return '';
-    try {
-      await execFileP('git', ['stash', 'pop'], { cwd: wtCwd, timeout: 30000 });
-      return '';
-    } catch (_) {
-      return ' (Your stashed changes were restored but produced conflicts — resolve them in the worktree.)';
-    }
-  };
-
-  try {
-    await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wtCwd, timeout: 60000 });
-  } catch (fe) {
-    await popStash();
-    return { error: 'Could not fetch the latest remote branch:\n\n' + scrub(fe.stderr ? fe.stderr.toString() : fe.message) };
-  }
-
-  try {
-    await execFileP('git', ['rebase', 'FETCH_HEAD'], { cwd: wtCwd, timeout: 60000 });
-  } catch (re) {
-    // Abort the failed rebase to restore the pre-rebase state, then restore the
-    // stash. Ignore the abort's own error (e.g. the rebase never started).
-    try { await execFileP('git', ['rebase', '--abort'], { cwd: wtCwd, timeout: 30000 }); } catch (_) {}
-    const popWarn = await popStash();
-    const rmsg = scrub(re.stderr ? re.stderr.toString() : re.message);
-    const dirty = looksLikeDirtyTree(rmsg);
-    return {
-      kind: dirty ? 'dirty-tree' : 'conflict',
-      // Offer Stash only for a dirty tree we haven't already stashed for.
-      canStash: dirty && !stashRequested,
-      canResolve: true,
-      error: (dirty
-        ? 'Uncommitted changes in the worktree are blocking integration of the latest remote commit. Stash them and retry, or let the agent resolve it.'
-        : 'Integrating the latest remote commit hit merge conflicts. Let the agent resolve them and push, or resolve manually in the worktree.')
-        + popWarn + '\n\n' + rmsg,
-    };
-  }
-
-  try {
-    const { stderr } = await doPush();
-    const popWarn = await popStash();
-    return { ok: true, rebased: true, stashed, target, output: scrub((stderr || '').trim()) + popWarn };
-  } catch (e2) {
-    await popStash();
-    return { error: 'Integrated the latest remote commit, but the retry push still failed:\n\n' + scrub(e2.stderr ? e2.stderr.toString() : e2.message) };
-  }
+  return pushPrHead({ pr: prReview.active, worktreePath: wt.worktreePath, stash: !!(args && args.stash) });
 });
 
 // Hand the "remote advanced + can't auto-rebase" situation to an agent: spawn
