@@ -726,6 +726,9 @@ contextBridge.exposeInMainWorld('klaus', {
     onSystemThemeChanged: (callback) => {
       ipcRenderer.on('system-theme-changed', (_event, isDark) => callback(isDark));
     },
+    onThemeChanged: (callback) => {
+      ipcRenderer.on('theme-changed', (_event, theme) => callback(theme));
+    },
     openPreferences: () => ipcRenderer.invoke('open-preferences'),
     getPreferences: () => ipcRenderer.invoke('get-preferences'),
     setPreferences: (prefs) => ipcRenderer.invoke('set-preferences', prefs),

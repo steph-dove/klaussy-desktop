@@ -39,6 +39,7 @@ window.ThemeManager = (function () {
       text: '#f8f8f2', textMuted: '#bbb8aa', textDim: '#b7b7b2',
       surface: '#3e3d32', surfaceHover: '#49483e',
       inputBg: '#272822', success: '#a6e22e', error: '#fb7fac', warning: '#d59f1d',
+      diffDelFg: '#ffa1a1',
       termBg: '#272822', termFg: '#f8f8f2', termCursor: '#f92672', termSelection: '#a6e22e44',
     },
     nord: {
@@ -48,6 +49,7 @@ window.ThemeManager = (function () {
       text: '#eceff4', textMuted: '#d8dee9', textDim: '#c5cdd8',
       surface: '#434c5e', surfaceHover: '#4c566a',
       inputBg: '#2e3440', success: '#acc497', error: '#dfb1b5', warning: '#e6b645',
+      diffAddFg: '#86e486', diffDelFg: '#ffbcbc',
       termBg: '#2e3440', termFg: '#eceff4', termCursor: '#88c0d0', termSelection: '#88c0d044',
     },
     solarized: {
@@ -57,6 +59,8 @@ window.ThemeManager = (function () {
       text: '#9aa8aa', textMuted: '#96a8ae', textDim: '#96a8ae',
       surface: '#073642', surfaceHover: '#0a4050',
       inputBg: '#002b36', success: '#8ea300', error: '#e87977', warning: '#c8951b',
+      // Solarized body text has the least headroom, so its selection tint stays faint enough to keep 4.5:1.
+      accentDimAlpha: 0.09,
       termBg: '#002b36', termFg: '#839496', termCursor: '#268bd2', termSelection: '#268bd244',
     },
     rose: {
@@ -90,6 +94,7 @@ window.ThemeManager = (function () {
       text: '#ebdbb2', textMuted: '#c3b9ab', textDim: '#c1b9b0',
       surface: '#3c3836', surfaceHover: '#504945',
       inputBg: '#282828', success: '#b8bb26', error: '#fc7d6e', warning: '#cf9a1c',
+      diffDelFg: '#ff9a9a',
       termBg: '#282828', termFg: '#ebdbb2', termCursor: '#fe8019', termSelection: 'rgba(254, 128, 25, 0.25)',
       termAnsi: {
         black: '#282828', red: '#cc241d', green: '#98971a', yellow: '#d79921',
@@ -105,6 +110,7 @@ window.ThemeManager = (function () {
       text: '#cdd6f4', textMuted: '#b1b7cf', textDim: '#b1b7cf',
       surface: '#313244', surfaceHover: '#45475a',
       inputBg: '#1e1e2e', success: '#a6e3a1', error: '#f38ba8', warning: '#c8951b',
+      diffDelFg: '#ff8f8f',
       termBg: '#1e1e2e', termFg: '#cdd6f4', termCursor: '#f5e0dc', termSelection: 'rgba(203, 166, 247, 0.25)',
       termAnsi: {
         black: '#45475a', red: '#f38ba8', green: '#a6e3a1', yellow: '#f9e2af',
@@ -148,10 +154,9 @@ window.ThemeManager = (function () {
         brightBlue: '#0969da', brightMagenta: '#8b57ce', brightCyan: '#0e8585', brightWhite: '#48484a',
       },
       diffText: '#24292f',
-      // Soft, muted add/del foreground — not muddy-dark, not neon — so the
-      // file-list stat bars + counts sit calmly on the light background.
-      diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#4f9e6b',
-      diffDelBg: 'rgba(218, 54, 51, 0.1)', diffDelFg: '#d0665e',
+      // Add/del foregrounds double as text (sidebar counts, PR chips, errors), so they hold 4.5:1 on their tinted chips too.
+      diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#15662c',
+      diffDelBg: 'rgba(218, 54, 51, 0.1)', diffDelFg: '#b01d27',
       diffHunkBg: '#ddf4ff', diffHunkFg: '#0969da',
       lightSyntax: true,
     },
@@ -177,11 +182,11 @@ window.ThemeManager = (function () {
   function init() {
     window.klaus.ui.getTheme().then(function (theme) {
       if (theme && theme.preset === 'system') {
-        applySystem();
+        applySystem(false);
       } else if (theme && theme.preset && presets[theme.preset]) {
-        apply(theme.preset);
+        apply(theme.preset, { persist: false });
       } else {
-        apply('dark');
+        apply('dark', { persist: false });
       }
     });
 
@@ -194,12 +199,19 @@ window.ThemeManager = (function () {
         }
       });
     }
+
+    // Another window picked a theme; follow it without writing it back.
+    if (window.klaus.ui.onThemeChanged) {
+      window.klaus.ui.onThemeChanged(function (theme) {
+        if (theme && theme.preset) apply(theme.preset, { persist: false });
+      });
+    }
   }
 
-  function applySystem() {
+  function applySystem(persist) {
     isSystemMode = true;
     currentPreset = 'system';
-    window.klaus.ui.setTheme({ preset: 'system' });
+    if (persist !== false) window.klaus.ui.setTheme({ preset: 'system' });
     // Ask main process for current system theme
     if (window.klaus.ui.getSystemTheme) {
       window.klaus.ui.getSystemTheme().then(function (isDark) {
@@ -209,51 +221,67 @@ window.ThemeManager = (function () {
     }
   }
 
+  function withAlpha(hexColor, alpha) {
+    var h = hexColor.replace('#', '');
+    return 'rgba(' + [0, 2, 4].map(function (i) { return parseInt(h.slice(i, i + 2), 16); }).join(', ') + ', ' + alpha + ')';
+  }
+
+  // The CSS custom properties a preset sets, including the fallbacks for presets that leave a token out.
+  function cssVars(presetName) {
+    var theme = presets[presetName];
+    if (!theme) return null;
+    return {
+      '--bg': theme.bg,
+      '--sidebar-bg': theme.sidebarBg,
+      '--border': theme.border,
+      '--border-strong': theme.borderStrong,
+      '--accent': theme.accent,
+      '--accent-hover': theme.accentHover,
+      '--accent-dim': withAlpha(theme.accent, theme.accentDimAlpha || 0.16),
+      '--text': theme.text,
+      '--text-muted': theme.textMuted,
+      '--text-dim': theme.textDim,
+      '--surface': theme.surface,
+      '--surface-hover': theme.surfaceHover,
+      '--input-bg': theme.inputBg,
+      '--success': theme.success,
+      '--error': theme.error,
+      '--accent-contrast': readableOn(theme.accent),
+      '--success-contrast': readableOn(theme.success),
+      '--error-contrast': readableOn(theme.error),
+      '--warning': theme.warning,
+      '--warning-contrast': readableOn(theme.warning),
+      '--term-bg': theme.termBg,
+      '--term-fg': theme.termFg,
+      '--term-cursor': theme.termCursor,
+      '--term-selection': theme.termSelection,
+      '--diff-text': theme.diffText || '#9CDCFE',
+      '--diff-add-bg': theme.diffAddBg || 'rgba(35, 134, 54, 0.15)',
+      '--diff-add-fg': theme.diffAddFg || '#7ce27c',
+      '--diff-del-bg': theme.diffDelBg || 'rgba(218, 54, 51, 0.15)',
+      '--diff-del-fg': theme.diffDelFg || '#ff8a8a',
+      '--diff-hunk-bg': theme.diffHunkBg || '#1a2a3a',
+      '--diff-hunk-fg': theme.diffHunkFg || '#7cace2',
+    };
+  }
+
   function applyPresetColors(presetName) {
     var theme = presets[presetName];
     if (!theme) return;
 
     var root = document.documentElement;
-    root.style.setProperty('--bg', theme.bg);
-    root.style.setProperty('--sidebar-bg', theme.sidebarBg);
-    root.style.setProperty('--border', theme.border);
-    root.style.setProperty('--border-strong', theme.borderStrong);
-    root.style.setProperty('--accent', theme.accent);
-    root.style.setProperty('--accent-hover', theme.accentHover);
-    root.style.setProperty('--text', theme.text);
-    root.style.setProperty('--text-muted', theme.textMuted);
-    root.style.setProperty('--text-dim', theme.textDim);
-    root.style.setProperty('--surface', theme.surface);
-    root.style.setProperty('--surface-hover', theme.surfaceHover);
-    root.style.setProperty('--input-bg', theme.inputBg);
-    root.style.setProperty('--success', theme.success);
-    root.style.setProperty('--error', theme.error);
-    root.style.setProperty('--accent-contrast', readableOn(theme.accent));
-    root.style.setProperty('--success-contrast', readableOn(theme.success));
-    root.style.setProperty('--error-contrast', readableOn(theme.error));
-    root.style.setProperty('--warning', theme.warning);
-    root.style.setProperty('--warning-contrast', readableOn(theme.warning));
-    root.style.setProperty('--term-bg', theme.termBg);
-    root.style.setProperty('--term-fg', theme.termFg);
-    root.style.setProperty('--term-cursor', theme.termCursor);
-    root.style.setProperty('--term-selection', theme.termSelection);
-    // Diff colors (with fallbacks for presets that don't define them)
-    root.style.setProperty('--diff-text', theme.diffText || '#9CDCFE');
-    root.style.setProperty('--diff-add-bg', theme.diffAddBg || 'rgba(35, 134, 54, 0.15)');
-    root.style.setProperty('--diff-add-fg', theme.diffAddFg || '#7ce27c');
-    root.style.setProperty('--diff-del-bg', theme.diffDelBg || 'rgba(218, 54, 51, 0.15)');
-    root.style.setProperty('--diff-del-fg', theme.diffDelFg || '#e27c7c');
-    root.style.setProperty('--diff-hunk-bg', theme.diffHunkBg || '#1a2a3a');
-    root.style.setProperty('--diff-hunk-fg', theme.diffHunkFg || '#7cace2');
+    var vars = cssVars(presetName);
+    Object.keys(vars).forEach(function (name) { root.style.setProperty(name, vars[name]); });
     // Toggle light syntax highlighting class
     document.body.classList.toggle('light-syntax', !!theme.lightSyntax);
 
     window.dispatchEvent(new CustomEvent('theme-changed'));
   }
 
-  function apply(presetName) {
+  function apply(presetName, opts) {
+    var persist = !(opts && opts.persist === false);
     if (presetName === 'system') {
-      applySystem();
+      applySystem(persist);
       return;
     }
     isSystemMode = false;
@@ -261,7 +289,7 @@ window.ThemeManager = (function () {
     if (!theme) return;
     currentPreset = presetName;
     applyPresetColors(presetName);
-    window.klaus.ui.setTheme({ preset: presetName });
+    if (persist) window.klaus.ui.setTheme({ preset: presetName });
   }
 
   function getTerminalTheme() {
@@ -324,5 +352,5 @@ window.ThemeManager = (function () {
     return currentPreset;
   }
 
-  return { init: init, apply: apply, getTerminalTheme: getTerminalTheme, getPresetList: getPresetList, getCurrent: getCurrent, presets: presets };
+  return { init: init, apply: apply, getTerminalTheme: getTerminalTheme, getPresetList: getPresetList, getCurrent: getCurrent, presets: presets, cssVars: cssVars };
 })();

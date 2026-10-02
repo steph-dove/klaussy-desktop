@@ -88,8 +88,8 @@ body.pr-review-popout #pr-review-root {
   letter-spacing: 0.3px;
 }
 .pr-review-state.pr-state-open    { background: rgba(35, 134, 54, 0.2); color: var(--diff-add-fg, #7ce27c); }
-.pr-review-state.pr-state-draft   { background: rgba(128, 128, 128, 0.2); color: var(--text-muted); }
-.pr-review-state.pr-state-merged  { background: rgba(137, 87, 229, 0.2); color: #b48cff; }
+.pr-review-state.pr-state-draft   { background: var(--surface-hover); color: var(--text-muted); }
+.pr-review-state.pr-state-merged  { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
 .pr-review-state.pr-state-closed  { background: rgba(218, 54, 51, 0.2); color: var(--diff-del-fg, #e27c7c); }
 .pr-review-decision {
   padding: 1px 6px;
@@ -97,7 +97,7 @@ body.pr-review-popout #pr-review-root {
   font-weight: 600;
   font-size: 10px;
   letter-spacing: 0.3px;
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--surface-hover);
   color: var(--text-dim);
 }
 .pr-review-decision.pr-decision-approved        { color: var(--diff-add-fg, #7ce27c); background: rgba(35, 134, 54, 0.15); }
@@ -145,9 +145,9 @@ body.pr-review-popout #pr-review-root {
   display: inline-flex;
 }
 .pr-merge-btn.ready {
-  background: var(--diff-add-fg, #7ce27c);
-  color: #0a1a0a;
-  border-color: var(--diff-add-fg, #7ce27c);
+  background: var(--success);
+  color: var(--success-contrast);
+  border-color: var(--success);
   font-weight: 600;
 }
 .pr-merge-btn:disabled {
@@ -236,9 +236,9 @@ body.pr-review-popout #pr-review-root {
 .pr-check-row.pr-check-expandable,
 .pr-check-row[data-link] { cursor: pointer; }
 .pr-check-row:hover { background: var(--surface-hover); }
-.pr-check-pass    { border-left-color: #2ea043; }
-.pr-check-fail    { border-left-color: #f85149; }
-.pr-check-pending { border-left-color: #d29922; }
+.pr-check-pass    { border-left-color: var(--success); }
+.pr-check-fail    { border-left-color: var(--error); }
+.pr-check-pending { border-left-color: var(--warning); }
 .pr-check-cancel, .pr-check-skipping { border-left-color: var(--text-muted); }
 
 .pr-check-chevron {
@@ -263,9 +263,9 @@ button.pr-check-toggle {
 }
 
 .pr-check-icon { flex: none; font-size: 14px; font-weight: 700; }
-.pr-check-pass    .pr-check-icon { color: #2ea043; }
-.pr-check-fail    .pr-check-icon { color: #f85149; }
-.pr-check-pending .pr-check-icon { color: #d29922; }
+.pr-check-pass    .pr-check-icon { color: var(--success); }
+.pr-check-fail    .pr-check-icon { color: var(--error); }
+.pr-check-pending .pr-check-icon { color: var(--warning); }
 .pr-check-cancel  .pr-check-icon,
 .pr-check-skipping .pr-check-icon { color: var(--text-muted); }
 
@@ -299,7 +299,7 @@ button.pr-check-toggle {
    (matching the conversation's action links). */
 .pr-check-actions { flex: none; display: flex; align-items: center; gap: 14px; }
 .pr-check-actions button {
-  background: none;
+  background: transparent;
   border: none;
   padding: 0;
   font-family: inherit;
@@ -312,8 +312,8 @@ button.pr-check-toggle {
 .pr-check-actions button:disabled { opacity: 0.7; cursor: wait; text-decoration: none; }
 .pr-check-fix-btn { color: var(--accent); }
 .pr-check-fix-btn:hover { color: var(--accent-hover); }
-.pr-check-actions .pr-check-action-cancel { color: color-mix(in srgb, #f85149 75%, var(--text-muted)); border: none; background: none; }
-.pr-check-actions .pr-check-action-cancel:hover { color: #f85149; background: none; }
+.pr-check-actions .pr-check-action-cancel { color: var(--error); border: none; background: none; }
+.pr-check-actions .pr-check-action-cancel:hover { color: var(--error); background: none; text-decoration: underline; }
 .pr-check-open { color: var(--text-muted); font-size: 13px; }
 .pr-check-open:hover { color: var(--accent); text-decoration: none; }
 
@@ -545,7 +545,7 @@ button.pr-check-toggle {
 }
 .pr-ai-progress-chip {
   padding: 2px 8px;
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--surface-hover);
   color: var(--text-dim);
   border-radius: 10px;
   font-size: 10px;
@@ -554,7 +554,7 @@ button.pr-check-toggle {
   text-overflow: ellipsis;
   max-width: 280px;
 }
-.pr-ai-progress-chip.system { background: rgba(137, 87, 229, 0.15); color: #b48cff; }
+.pr-ai-progress-chip.system { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
 
 .pr-ai-body {
   padding: 12px 14px;
@@ -611,7 +611,7 @@ button.pr-check-toggle {
   font-size: 11px;
   font-family: 'SF Mono', Menlo, monospace;
   color: var(--text-dim);
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--surface-hover);
   padding: 2px 8px;
   border-radius: 10px;
   letter-spacing: 0.2px;
@@ -739,7 +739,7 @@ button.pr-check-toggle {
   font-size: 11px;
   border-radius: 4px;
   border: 1px solid var(--accent);
-  background: rgba(99, 102, 241, 0.08);
+  background: transparent;
   color: var(--accent);
   cursor: pointer;
   font-family: inherit;
@@ -774,7 +774,7 @@ button.pr-check-toggle {
   color: var(--text-dim);
   cursor: pointer;
 }
-.pr-check-log-watch-stop:hover { color: #f85149; border-color: rgba(248, 81, 73, 0.4); }
+.pr-check-log-watch-stop:hover { color: var(--error); border-color: var(--error); }
 .pr-check-log-watch-body {
   margin: 0;
   padding: 8px 12px;
@@ -850,7 +850,7 @@ button.pr-check-toggle {
 }
 .pr-workflow-dispatch-error {
   font-size: 12px;
-  color: #f85149;
+  color: var(--error);
   padding: 6px 0 0 0;
   white-space: pre-wrap;
 }
@@ -982,8 +982,8 @@ button.pr-check-toggle {
 }
 
 /* Tiny status badge on the Terminal tab label. */
-.pr-tab-count-running { color: #56d364; }
-.pr-tab-count-done { color: #56d364; }
+.pr-tab-count-running { color: var(--success); }
+.pr-tab-count-done { color: var(--success); }
 .pr-tab-count-error { color: var(--diff-del-fg, #e27c7c); }
 .pr-tab-count-cancelled { color: var(--muted); }
 
@@ -1034,8 +1034,8 @@ button.pr-check-toggle {
   word-break: break-word;
   white-space: pre-wrap;
 }
-.pr-local-banner.ok { background: rgba(124, 226, 124, 0.15); color: var(--diff-add-fg, #7ce27c); }
-.pr-local-banner.error { background: rgba(226, 124, 124, 0.15); color: var(--diff-del-fg, #e27c7c); }
+.pr-local-banner.ok { background: rgba(35, 134, 54, 0.2); color: var(--diff-add-fg, #7ce27c); }
+.pr-local-banner.error { background: rgba(218, 54, 51, 0.2); color: var(--diff-del-fg, #e27c7c); }
 .pr-local-banner-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .pr-local-banner-btn { font-size: 11px; padding: 3px 10px; }
 
@@ -1144,7 +1144,8 @@ button.pr-check-toggle {
   overflow: hidden;
   transition: opacity 0.1s;
 }
-.pr-ai-finding.ignored { opacity: 0.5; }
+/* Ignored findings recede through a dashed, unfilled card; opacity would take their text and Restore button below AA. */
+.pr-ai-finding.ignored { background: transparent; border-style: dashed; border-left-color: var(--border-strong); }
 .pr-ai-finding.implementing { border-left-color: var(--accent); }
 .pr-ai-finding.implemented { border-left-color: var(--diff-add-fg, #7ce27c); }
 .pr-ai-finding.failed { border-left-color: var(--diff-del-fg, #e27c7c); }
@@ -1193,7 +1194,7 @@ button.pr-check-toggle {
   font-weight: 600;
 }
 .pr-ai-finding-implement:hover, .pr-ai-finding-redo:hover { filter: brightness(1.1); }
-.pr-ai-finding-cancel { background: var(--diff-del-fg, #e27c7c) !important; color: #fff !important; border-color: var(--diff-del-fg, #e27c7c) !important; }
+.pr-ai-finding-cancel { background: var(--error) !important; color: var(--error-contrast) !important; border-color: var(--error) !important; }
 .pr-ai-finding-status {
   color: var(--diff-add-fg, #7ce27c);
   font-size: 11px;
@@ -1224,7 +1225,7 @@ button.pr-check-toggle {
 }
 .pr-ai-finding-comment-status.posting {
   color: var(--text-dim);
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--surface-hover);
   font-style: italic;
 }
 .pr-ai-finding-comment-status.failed {
@@ -1256,7 +1257,8 @@ button.pr-check-toggle {
 
 .pr-ai-finding-comment-status.drafted {
   color: var(--accent);
-  background: rgba(88, 166, 255, 0.12);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .pr-ai-finding-body.editing {
@@ -1301,7 +1303,7 @@ button.pr-check-toggle {
   border-color: var(--accent);
 }
 .pr-ai-finding-discuss.open {
-  background: rgba(88, 166, 255, 0.12);
+  background: transparent;
   color: var(--accent);
   border-color: var(--accent);
 }
@@ -1338,7 +1340,7 @@ button.pr-check-toggle {
 }
 .pr-ai-finding-chat-msg.user {
   align-self: flex-end;
-  background: rgba(88, 166, 255, 0.15);
+  background: var(--accent-dim);
   color: var(--text);
   border: 1px solid rgba(88, 166, 255, 0.3);
 }
@@ -1946,7 +1948,7 @@ button.pr-check-toggle {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-dim);
-  background: rgba(99, 102, 241, 0.08);
+  background: var(--surface-hover);
   border-bottom: 1px solid rgba(99, 102, 241, 0.25);
   font-family: 'SF Mono', Menlo, monospace;
 }
@@ -1997,7 +1999,7 @@ button.pr-check-toggle {
   font-weight: 600;
 }
 .pr-tab-count {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-hover);
   color: var(--text-muted);
   padding: 1px 6px;
   border-radius: 10px;
@@ -2007,12 +2009,12 @@ button.pr-check-toggle {
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .pr-review-tab:hover .pr-tab-count {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-hover);
   color: var(--text);
 }
 .pr-review-tab.active .pr-tab-count {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--text);
 }
 
 .pr-review-body {
@@ -2209,12 +2211,12 @@ button.pr-check-toggle {
 }
 .pr-conv-state-approved          { background: rgba(35, 134, 54, 0.2);  color: var(--diff-add-fg, #7ce27c); }
 .pr-conv-state-changes_requested { background: rgba(218, 54, 51, 0.2);  color: var(--diff-del-fg, #e27c7c); }
-.pr-conv-state-commented         { background: rgba(128, 128, 128, 0.2); color: var(--text-dim); }
-.pr-conv-state-dismissed         { background: rgba(128, 128, 128, 0.15); color: var(--text-muted); }
-.pr-conv-state-pending           { background: rgba(180, 140, 40, 0.2); color: #d4b454; }
+.pr-conv-state-commented         { background: var(--surface-hover); color: var(--text-dim); }
+.pr-conv-state-dismissed         { background: var(--surface-hover); color: var(--text-muted); }
+.pr-conv-state-pending           { background: transparent; color: var(--warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, transparent); }
 
 .pr-conv-inline-count {
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--surface-hover);
   color: var(--text-dim);
   padding: 1px 8px;
   border-radius: 10px;
@@ -2512,19 +2514,21 @@ button.pr-check-toggle {
    both classes); only the +/- count colors remain surface-specific. */
 .pr-file-add {
   color: color-mix(in srgb, var(--success) 65%, var(--text)) !important;
-  background: color-mix(in srgb, var(--success) 12%, transparent);
+  background: transparent;
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   font-weight: 600;
   font-size: 10px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, transparent);
 }
 .pr-file-del {
   color: color-mix(in srgb, var(--error) 65%, var(--text)) !important;
-  background: color-mix(in srgb, var(--error) 12%, transparent);
+  background: transparent;
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   font-weight: 600;
   font-size: 10px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error) 50%, transparent);
 }
 
 .pr-review-diff {
@@ -2598,7 +2602,7 @@ button.pr-check-toggle {
   color: var(--text-dim);
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--surface-hover);
 }
 .pr-threads-status.error { color: var(--diff-del-fg, #e27c7c); }
 
@@ -2666,7 +2670,7 @@ button.pr-check-toggle {
 }
 .pr-inline-thread-count {
   color: var(--text-muted);
-  background: rgba(128, 128, 128, 0.2);
+  background: var(--surface-hover);
   padding: 0 6px;
   border-radius: 10px;
   font-size: 10px;
@@ -2682,7 +2686,7 @@ button.pr-check-toggle {
   flex-shrink: 0;
 }
 .pr-inline-thread-badge.resolved { background: rgba(35, 134, 54, 0.25); color: var(--diff-add-fg, #7ce27c); }
-.pr-inline-thread-badge.outdated { background: rgba(128, 128, 128, 0.25); color: var(--text-muted); }
+.pr-inline-thread-badge.outdated { background: var(--surface-hover); color: var(--text-muted); }
 
 .pr-inline-thread-body {
   border-top: 1px solid var(--border);
@@ -3136,16 +3140,19 @@ button.pr-check-toggle {
   flex-shrink: 0;
 }
 .pr-picker-forge.pr-forge-github {
-  background: rgba(88, 166, 255, 0.15);
+  background: transparent;
   color: var(--accent, #58a6ff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .pr-picker-forge.pr-forge-gitlab {
-  background: rgba(252, 109, 38, 0.15);
-  color: #fc6d26;
+  background: transparent;
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px #fc6d26;
 }
 .pr-picker-forge.pr-forge-bitbucket {
-  background: rgba(0, 82, 204, 0.15);
-  color: #2684ff;
+  background: transparent;
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px #2684ff;
 }
 .pr-picker-author {
   color: var(--text-dim);
@@ -3165,8 +3172,8 @@ button.pr-check-toggle {
   flex-shrink: 0;
 }
 .pr-picker-state.pr-state-open  { background: rgba(35, 134, 54, 0.2); color: var(--diff-add-fg, #7ce27c); }
-.pr-picker-state.pr-state-draft { background: rgba(128, 128, 128, 0.2); color: var(--text-muted); }
-.pr-picker-state.pr-state-merged { background: rgba(137, 87, 229, 0.2); color: #a371f7; }
+.pr-picker-state.pr-state-draft { background: var(--surface-hover); color: var(--text-muted); }
+.pr-picker-state.pr-state-merged { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
 .pr-picker-state.pr-state-closed { background: rgba(218, 54, 51, 0.2); color: var(--diff-del-fg, #e27c7c); }
 .pr-picker-footer {
   padding: 10px 16px;
@@ -3363,7 +3370,7 @@ button.pr-check-toggle {
   flex: 1;
 }
 
-.quick-open-item.selected .quick-open-dir { color: rgba(255, 255, 255, 0.75); }
+.quick-open-item.selected .quick-open-dir { color: var(--accent-contrast); }
 
 /* ---- Task Drag Reorder (A5) ---- */
 
@@ -3777,7 +3784,7 @@ button.pr-check-toggle {
   letter-spacing: 0.4px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--surface-hover);
   color: var(--text-dim);
   font-weight: 600;
 }
@@ -3806,7 +3813,7 @@ button.pr-check-toggle {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--surface-hover);
   color: var(--text-dim);
 }
 
@@ -3831,11 +3838,11 @@ button.pr-check-toggle {
   border-radius: 50%;
   background: currentColor;
 }
-.mcp-conn-loading { color: var(--text-dim); background: rgba(128, 128, 128, 0.12); }
+.mcp-conn-loading { color: var(--text-dim); background: var(--surface-hover); }
 .mcp-conn-connected { color: var(--diff-add-fg, #46a758); background: rgba(70, 167, 88, 0.15); }
-.mcp-conn-auth { color: #d9a23a; background: rgba(217, 162, 58, 0.15); }
-.mcp-conn-partial { color: #d9a23a; background: rgba(217, 162, 58, 0.15); }
-.mcp-conn-failed { color: var(--error, #e5484d); background: rgba(229, 72, 77, 0.15); }
+.mcp-conn-auth { color: var(--warning); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, transparent); }
+.mcp-conn-partial { color: var(--warning); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, transparent); }
+.mcp-conn-failed { color: var(--error); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error) 50%, transparent); }
 .mcp-conn-none { padding: 0; }
 
 .mcp-connect {
@@ -3930,7 +3937,7 @@ button.pr-check-toggle {
 /* Add form */
 .mcp-form { padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
 .mcp-note {
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--surface-hover);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 12px;
@@ -3985,7 +3992,7 @@ button.pr-check-toggle {
   padding: 1px 5px;
   border-radius: 3px;
   margin-left: 6px;
-  background: rgba(128, 128, 128, 0.18);
+  background: var(--surface-hover);
   color: var(--text-dim);
   vertical-align: middle;
 }
@@ -4212,7 +4219,7 @@ button.pr-check-toggle {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: rgba(255,255,255,0.06);
+  background: var(--surface-hover);
   font-size: 11px;
   font-weight: 600;
   color: var(--text-dim);
@@ -4259,8 +4266,8 @@ button.pr-check-toggle {
 }
 .deps-action-row { margin-top: 8px; }
 .deps-action {
-  background: var(--accent, #79b8ff);
-  color: #0d1117;
+  background: var(--accent);
+  color: var(--accent-contrast);
   border: none;
   border-radius: 4px;
   padding: 6px 14px;
@@ -4278,8 +4285,8 @@ button.pr-check-toggle {
   text-align: center;
 }
 .deps-install-btn {
-  background: var(--accent, #79b8ff);
-  color: #0d1117;
+  background: var(--accent);
+  color: var(--accent-contrast);
   border: none;
   border-radius: 4px;
   padding: 8px 18px;
@@ -4467,7 +4474,7 @@ button.pr-check-toggle {
   gap: 8px;
 }
 .skills-section-count {
-  background: rgba(128, 128, 128, 0.2);
+  background: var(--surface-hover);
   color: var(--text-dim);
   padding: 0 6px;
   border-radius: 10px;
@@ -4510,8 +4517,8 @@ button.pr-check-toggle {
   font-weight: 600;
 }
 .skills-source-user    { background: rgba(46, 160, 67, 0.18); color: var(--diff-add-fg, #7ce27c); }
-.skills-source-project { background: rgba(137, 87, 229, 0.18); color: #b48cff; }
-.skills-source-plugin  { background: rgba(56, 139, 253, 0.18); color: #79b8ff; }
+.skills-source-project { background: transparent; color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent); }
+.skills-source-plugin  { background: var(--surface-hover); color: var(--text-muted); }
 
 /* Insert/Run share the outlined look of Copy; Run is filled to read as the
    primary action. */
@@ -4645,7 +4652,7 @@ button.pr-check-toggle {
   flex-shrink: 0;
 }
 .deps-icon.ok      { background: rgba(46, 160, 67, 0.2);  color: var(--diff-add-fg, #7ce27c); }
-.deps-icon.warn    { background: rgba(210, 153, 34, 0.2); color: #d29922; }
+.deps-icon.warn    { background: transparent; color: var(--warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warning) 50%, transparent); }
 .deps-icon.missing { background: rgba(218, 54, 51, 0.2);  color: var(--diff-del-fg, #e27c7c); }
 .deps-name { color: var(--text); font-weight: 600; flex: 1; }
 .deps-version {
@@ -5283,15 +5290,13 @@ mark.search-hit-replace {
 .file-viewer-breadcrumbs .crumb-sep { margin: 0 4px; opacity: 0.5; }
 
 .file-viewer-problems-badge.has-error {
-  background: rgba(255, 80, 80, 0.15);
-  color: #e53e3e;
-  border: 1px solid rgba(229, 62, 62, 0.4);
+  color: var(--error);
+  border: 1px solid color-mix(in srgb, var(--error) 50%, transparent);
 }
 
 .file-viewer-problems-badge.has-warning {
-  background: rgba(255, 180, 0, 0.15);
-  color: #d97706;
-  border: 1px solid rgba(217, 119, 6, 0.4);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
 }
 
 /* D5: Blame */
@@ -5437,11 +5442,12 @@ body.task-branchless .file-viewer-blame-btn {
 
 /* D7: Conflict banner */
 .conflict-banner {
-  background: color-mix(in srgb, var(--error) 15%, transparent);
+  background: transparent;
   color: var(--error);
   padding: 6px 12px;
   font-size: 12px;
   border-bottom: 1px solid var(--error);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--error) 50%, transparent);
 }
 
 .conflict-files {
@@ -5543,7 +5549,7 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .log-info .log-level { color: var(--text-muted); }
-.log-warn .log-level { color: #f0ad4e; }
+.log-warn .log-level { color: var(--warning); }
 .log-error .log-level { color: var(--error); }
 
 .log-msg {
@@ -6092,20 +6098,26 @@ body.task-branchless .file-viewer-blame-btn {
   opacity: 1;
 }
 
+/* Shape carries the state too (WCAG 1.4.1): success = disc, failure = square, pending = ring. */
 .ci-status-icon.ci-failure {
   background: var(--error);
+  border-radius: 1px;
   opacity: 1;
 }
 
 .ci-status-icon.ci-pending {
-  background: #f0ad4e;
+  border: 2px solid var(--warning);
   opacity: 1;
   animation: ci-pulse 1.5s ease-in-out infinite;
 }
 
 @keyframes ci-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 35%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ci-status-icon.ci-pending { animation: none; }
 }
 
 /* ---- .env Editor (Feature 12) ---- */
@@ -6618,12 +6630,11 @@ body.task-branchless .file-viewer-blame-btn {
 .sub-tab-close {
   font-size: 10px;
   margin-left: 4px;
-  opacity: 0.5;
+  color: var(--text-dim);
   cursor: pointer;
 }
 
 .sub-tab-close:hover {
-  opacity: 1;
   color: var(--error);
 }
 
@@ -7406,7 +7417,7 @@ body.task-branchless .file-viewer-blame-btn {
 .pr-ai-finding-comment:hover {
   background: var(--accent-dim);
   border-color: var(--accent);
-  color: var(--accent);
+  color: var(--text);
 }
 
 /* ---- Verdict banner ---- */
@@ -7440,7 +7451,7 @@ body.task-branchless .file-viewer-blame-btn {
   color: var(--text);
   background: rgba(128, 128, 128, 0.14);
 }
-.pr-ai-verdict-approve .pr-ai-verdict-badge { color: var(--success); background: rgba(63, 185, 80, 0.14); }
+.pr-ai-verdict-approve .pr-ai-verdict-badge { color: var(--success); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, transparent); }
 .pr-ai-verdict-changes .pr-ai-verdict-badge { color: var(--sev-medium); background: rgba(210, 153, 34, 0.16); }
 .pr-ai-verdict-block .pr-ai-verdict-badge   { color: var(--sev-blocker); background: rgba(240, 88, 79, 0.16); }
 .pr-ai-verdict-coverage { font-size: 12px; color: var(--text-muted); }
@@ -7481,15 +7492,15 @@ button.pr-term-view {
 .pr-term-chip-chat.running {
   color: var(--success);
   border-color: rgba(63, 185, 80, 0.4);
-  background: rgba(63, 185, 80, 0.1);
+  background: transparent;
 }
 .pr-term-chip-chat.error {
   color: var(--error);
   border-color: rgba(240, 88, 79, 0.4);
-  background: rgba(240, 88, 79, 0.1);
+  background: transparent;
 }
 .pr-term-chip-impl.running {
-  color: var(--accent);
+  color: var(--text);
   border-color: var(--accent);
   background: var(--accent-dim);
 }
@@ -7588,17 +7599,17 @@ button.pr-term-view {
 }
 .pr-required-gate.pr-required-all-pass {
   border-left-color: var(--success);
-  background: color-mix(in srgb, var(--success) 4%, var(--surface));
+  background: var(--surface);
   border-color: color-mix(in srgb, var(--success) 15%, var(--border));
 }
 .pr-required-gate.pr-required-blocking {
-  border-left-color: #d29922; /* warning */
-  background: color-mix(in srgb, #d29922 4%, var(--surface));
-  border-color: color-mix(in srgb, #d29922 15%, var(--border));
+  border-left-color: var(--warning);
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--warning) 15%, var(--border));
 }
 .pr-required-gate.pr-required-unknown {
   border-left-color: var(--error);
-  background: color-mix(in srgb, var(--error) 4%, var(--surface));
+  background: var(--surface);
   border-color: color-mix(in srgb, var(--error) 15%, var(--border));
 }
 .pr-required-chip {
@@ -7609,18 +7620,18 @@ button.pr-term-view {
 }
 .pr-required-chip.pr-required-pass {
   color: var(--success);
-  border-color: color-mix(in srgb, var(--success) 30%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  border-color: color-mix(in srgb, var(--success) 40%, transparent);
+  background: transparent;
 }
 .pr-required-chip.pr-required-fail {
   color: var(--error);
-  border-color: color-mix(in srgb, var(--error) 30%, transparent);
-  background: color-mix(in srgb, var(--error) 10%, transparent);
+  border-color: color-mix(in srgb, var(--error) 40%, transparent);
+  background: transparent;
 }
 .pr-required-chip.pr-required-pending {
-  color: #d29922;
-  border-color: color-mix(in srgb, #d29922 30%, transparent);
-  background: color-mix(in srgb, #d29922 10%, transparent);
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  background: transparent;
 }
 .pr-required-chip.pr-required-missing {
   color: var(--text-dim);
@@ -7642,19 +7653,19 @@ button.pr-term-view {
 }
 .pr-check-pass    { border-left-color: var(--success); }
 .pr-check-fail    { border-left-color: var(--error); }
-.pr-check-pending { border-left-color: #d29922; }
+.pr-check-pending { border-left-color: var(--warning); }
 .pr-check-cancel, .pr-check-skipping { border-left-color: var(--text-dim); }
 
 .pr-check-pass    .pr-check-icon { color: var(--success); }
 .pr-check-fail    .pr-check-icon { color: var(--error); }
-.pr-check-pending .pr-check-icon { color: #d29922; }
+.pr-check-pending .pr-check-icon { color: var(--warning); }
 
 /* CI Actions button premium styling */
 .pr-check-actions {
   gap: 8px;
 }
 .pr-check-actions button {
-  background: rgba(255, 255, 255, 0.04);
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 4px 10px;
@@ -7672,7 +7683,7 @@ button.pr-term-view {
 .pr-check-actions button.pr-check-fix-btn {
   background: var(--accent-dim) !important;
   border-color: color-mix(in srgb, var(--accent) 30%, transparent) !important;
-  color: var(--accent) !important;
+  color: var(--text) !important;
   font-weight: 600;
 }
 .pr-check-actions button.pr-check-fix-btn:hover {
@@ -7750,7 +7761,7 @@ button.pr-term-view {
   letter-spacing: 0.04em;
   color: var(--success);
   border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  background: transparent;
   border-radius: var(--radius-sm);
   padding: 2px 6px;
   align-self: center;
@@ -7792,7 +7803,7 @@ button.pr-term-view {
   color: #fff !important;
 }
 .pr-ai-verdict-approve .pr-ai-verdict-badge { background: var(--success); color: var(--success-contrast) !important; }
-.pr-ai-verdict-changes .pr-ai-verdict-badge { background: #d29922; color: #0b0b0f !important; }
+.pr-ai-verdict-changes .pr-ai-verdict-badge { background: var(--warning); color: var(--warning-contrast) !important; }
 .pr-ai-verdict-block .pr-ai-verdict-badge   { background: var(--error); color: var(--error-contrast) !important; }
 
 .pr-ai-finding {
@@ -7836,27 +7847,27 @@ button.pr-term-view {
 .pr-term-chip-chat.running {
   color: var(--success);
   border-color: color-mix(in srgb, var(--success) 35%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  background: transparent;
 }
 .pr-term-chip-chat.error {
   color: var(--error);
   border-color: color-mix(in srgb, var(--error) 35%, transparent);
-  background: color-mix(in srgb, var(--error) 10%, transparent);
+  background: transparent;
 }
 .pr-term-chip-impl.running {
-  color: var(--accent);
+  color: var(--text);
   border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   background: var(--accent-dim);
 }
 .pr-term-chip-impl.done {
   color: var(--success);
   border-color: color-mix(in srgb, var(--success) 35%, transparent);
-  background: color-mix(in srgb, var(--success) 10%, transparent);
+  background: transparent;
 }
 .pr-term-chip-impl.error {
   color: var(--error);
   border-color: color-mix(in srgb, var(--error) 35%, transparent);
-  background: color-mix(in srgb, var(--error) 10%, transparent);
+  background: transparent;
 }
 
 .pr-implement-terminal-head {

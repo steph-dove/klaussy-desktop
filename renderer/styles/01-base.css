@@ -817,14 +817,15 @@ body.custom-titlebar #titlebar-content {
   flex-shrink: 0;
 }
 
+/* States differ by shape as well as colour (WCAG 1.4.1): running = pulsing ring, done = disc, error = square, cancelled = hollow square. */
 .agent-item-status.running {
-  background: var(--accent);
+  border: 2px solid var(--accent);
   animation: agent-pulse 1.4s ease-in-out infinite;
 }
 
-.agent-item-status.done { background: #4caf50; }
-.agent-item-status.error { background: #e74c3c; }
-.agent-item-status.cancelled { background: var(--text-muted); }
+.agent-item-status.done { background: var(--success); }
+.agent-item-status.error { background: var(--error); border-radius: 2px; }
+.agent-item-status.cancelled { border: 2px solid var(--text-muted); border-radius: 2px; }
 
 .agent-item.unread .agent-item-title {
   font-weight: 600;
@@ -870,8 +871,12 @@ body.custom-titlebar #titlebar-content {
 }
 
 @keyframes agent-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 0 3px var(--accent-dim); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-item-status.running { animation: none; }
 }
 
 /* Project switcher (Phase 3) */
@@ -1240,8 +1245,10 @@ body.custom-titlebar #titlebar-content {
   border: 1px dashed var(--border);
 }
 
+/* Half-filled so a saved session reads differently from a live (filled) or exited (hollow) task without relying on colour. */
 .status-dot.saved {
-  background: var(--text-muted);
+  border: 1.5px solid var(--text-muted);
+  background: linear-gradient(90deg, var(--text-muted) 50%, transparent 50%);
 }
 
 .saved-session-info {
@@ -1388,11 +1395,11 @@ body.custom-titlebar #titlebar-content {
 }
 
 .task-item .status-dot.exited {
-  background: var(--text-dim);
+  border: 2px solid var(--text-dim);
 }
 
 .task-item .status-dot.idle {
-  background: var(--border);
+  border: 1px solid var(--text-dim);
 }
 
 /* Worktree item buttons */
@@ -1757,7 +1764,7 @@ button.collapsed-icon {
 }
 
 .branch-item.selected .branch-meta {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--accent-contrast);
 }
 
 .branch-item .branch-remote-tag {
@@ -1770,8 +1777,9 @@ button.collapsed-icon {
 }
 
 .branch-item.selected .branch-remote-tag {
-  background: rgba(255, 255, 255, 0.2);
-  color: #fff;
+  background: transparent;
+  color: var(--accent-contrast);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-contrast) 50%, transparent);
 }
 
 /* Shell selector */
@@ -2150,7 +2158,7 @@ body.task-branchless #ahead-behind {
 .dashboard-card:hover .card-icon {
   background: var(--accent-dim);
   border-color: var(--accent);
-  color: var(--accent-hover);
+  color: var(--text);
 }
 
 .dashboard-card .card-content {
@@ -2862,7 +2870,8 @@ body.task-branchless #ahead-behind {
 
 .session-group-close:hover {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent);
 }
 
 .session-group-items {
@@ -2922,7 +2931,7 @@ body.task-branchless #ahead-behind {
 }
 
 .session-group-resume-btn {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  background: transparent;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--accent);
   font-size: 10px;

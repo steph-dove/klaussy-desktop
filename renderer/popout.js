@@ -1,5 +1,7 @@
 // Pop-out window — standalone terminal for a single task
 (function () {
+  if (window.ThemeManager) window.ThemeManager.init();
+
   window.klaus.task.onPopoutInit(function (task) {
     var id = task.id;
     var name = task.name;
@@ -18,12 +20,7 @@
       fontSize: 13,
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       scrollback: 10000,
-      theme: {
-        background: '#0f0f1a',
-        foreground: '#e0e0e0',
-        cursor: '#6c5ce7',
-        selectionBackground: '#6c5ce744',
-      },
+      theme: window.ThemeManager.getTerminalTheme(),
       minimumContrastRatio: 4.5, // never let low-contrast text vanish
       allowProposedApi: true,
     });
@@ -80,6 +77,10 @@
         return false;
       }
       return true;
+    });
+
+    window.addEventListener('theme-changed', function () {
+      terminal.options.theme = window.ThemeManager.getTerminalTheme();
     });
 
     window.addEventListener('resize', function () {

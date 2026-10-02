@@ -41,7 +41,7 @@ The shared helpers live in `renderer/a11y.js` (`window.A11y`); use them instead 
 - **Focus ring**: the global `:focus-visible` ring is `!important`, so a component's `outline: none` can't hide it. Don't fight it. Use `outline-offset` if it clips.
 - **Asking for input**: Electron has no `window.prompt()`. Use `AppUtils.promptDialog({ title, fields })`, which returns a labelled modal and resolves with the values, or `null` if cancelled.
 - **Status messages**: `A11y.announce(msg)`, or `A11y.announce(msg, 'assertive')` for errors. Toasts announce themselves.
-- **Colours**: use the theme tokens (`--text`, `--text-muted`, `--text-dim`, `--accent`, `--border-strong`, `--accent-contrast` for text on filled accent). Don't use raw hex values or opacity to dim text. `test/util/theme-contrast.test.js` checks every preset.
+- **Colours**: use the theme tokens (`--text`, `--text-muted`, `--text-dim`, `--accent`, `--border-strong`, `--accent-contrast` for text on filled accent). Don't use raw hex values or opacity to dim text. Put `--success`/`--error`/`--warning`/`--accent` text on a tinted outline rather than a fill of the same hue, which drops it below 4.5:1, and give status dots a shape per state (disc, ring, square) so colour isn't the only cue. `test/util/theme-contrast.test.js` checks every preset, the syntax palettes, and fails on raw `color:` values in `renderer/styles/`.
 
 ## Testing
 
