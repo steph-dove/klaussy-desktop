@@ -262,12 +262,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(139, 92, 246, 0.25);
+  background: transparent;
   color: var(--accent, #a78bfa);
   padding: 1px 6px;
   border-radius: 10px;
   font-size: 10px;
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 /* PR banner in Dev Loop tab */
@@ -580,7 +581,7 @@
 }
 
 .devloop-doc-body pre {
-  background: #111116;
+  background: var(--input-bg);
   border: 1px solid var(--border, #333344);
   border-radius: 6px;
   padding: 12px;
@@ -643,7 +644,7 @@
   padding: 8px 10px;
   border: 1px solid var(--warning, #c8951b);
   border-radius: 4px;
-  background: rgba(200, 149, 27, 0.08);
+  background: transparent;
   color: var(--warning, #c8951b);
   font-size: 12px;
   line-height: 1.4;
@@ -654,7 +655,7 @@
   padding: 8px 10px;
   border: 1px solid var(--danger, #d9534f);
   border-radius: 4px;
-  background: rgba(217, 83, 79, 0.08);
+  background: transparent;
   color: var(--danger, #d9534f);
   font-size: 12px;
   line-height: 1.4;

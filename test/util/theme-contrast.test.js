@@ -148,22 +148,26 @@ function declarations(file) {
   return out;
 }
 
-function syntaxPalette(light) {
+// Covers both the #diff-view/#file-viewer-view palette and the markdown code-block override of stock vs2015.min.css.
+function syntaxPalette(light, scope) {
   return declarations('02-toolbar-diff.css')
     .filter((d) => d.prop === 'color' && d.selector.includes('.hljs-') && d.selector.includes('.light-syntax') === light && d.value.startsWith('#'))
+    .filter((d) => !scope || d.selector.includes(scope))
     .map((d) => d.value);
 }
 
 test('syntax palettes are found in 02-toolbar-diff.css', () => {
-  assert.ok(syntaxPalette(false).length >= 20);
-  assert.ok(syntaxPalette(true).length >= 20);
+  for (const light of [false, true]) {
+    assert.ok(syntaxPalette(light, '#diff-view').length >= 20);
+    assert.ok(syntaxPalette(light, '.file-md-preview').length >= 10);
+  }
 });
 
 for (const name of Object.keys(presets)) {
   const t = presets[name];
   const v = cssVars(name);
-  test(`${name}: every syntax colour reaches 4.5:1 on the diff background and add/del lines`, () => {
-    const bgs = [t.bg, over(v['--diff-add-bg'], t.bg), over(v['--diff-del-bg'], t.bg)];
+  test(`${name}: every syntax colour reaches 4.5:1 on code backgrounds and add/del lines`, () => {
+    const bgs = [t.bg, t.surface, t.inputBg, over(v['--diff-add-bg'], t.bg), over(v['--diff-del-bg'], t.bg)];
     for (const fg of new Set(syntaxPalette(!!t.lightSyntax))) {
       for (const bg of bgs) {
         assert.ok(ratio(fg, bg) >= 4.5, `${fg} on ${bg} is ${ratio(fg, bg).toFixed(2)}`);
@@ -172,10 +176,10 @@ for (const name of Object.keys(presets)) {
   });
 }
 
-// Text colours must come from theme tokens. These are the deliberate exceptions: white on a fixed-colour fill, light text on a theme-independent dark glass, and forge brand colours.
+// Text colours must come from theme tokens. These are the deliberate exceptions: white on a fixed-colour fill and light text on a theme-independent dark glass.
 const RAW_TEXT_COLOUR_ALLOWED = {
   '01-base.css': ['#sidebar.collapsed .task-item .collapsed-icon', '.terminal-warning', '.terminal-warning-link', '#broadcast-input', '#broadcast-input::placeholder', '#btn-broadcast-close', '#btn-broadcast-close:hover', '#broadcast-toggle'],
-  '05-pr-review-surface.css': ['.pr-conv-avatar', '.pr-picker-forge.pr-forge-gitlab', '.pr-picker-forge.pr-forge-bitbucket', '.pr-ai-verdict-badge'],
+  '05-pr-review-surface.css': ['.pr-conv-avatar', '.pr-ai-verdict-badge'],
 };
 
 test('stylesheets set text colours through theme tokens, not raw hex/rgb', () => {
@@ -187,6 +191,69 @@ test('stylesheets set text colours through theme tokens, not raw hex/rgb', () =>
       if (d.selector.includes('.hljs')) continue;
       if (allowed.includes(d.selector)) continue;
       offenders.push(`${file}: ${d.selector} { color: ${d.value} }`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+// Aliases from the :root block in 01-base.css that older rules still use.
+const ALIASES = { '--danger': '--error', '--muted': '--text-muted', '--text-main': '--text', '--bg-card': '--surface', '--bg-hover': '--surface-hover', '--hover-bg': '--surface-hover', '--surface-active': '--surface-hover', '--bg-input': '--input-bg', '--bg-elev': '--surface', '--panel-bg': '--surface', '--surface-alt': '--surface', '--surface-secondary': '--surface', '--bg-deep': '--bg', '--accent-glow': '--accent-dim' };
+
+// Resolves a colour value against a preset to { rgb, a }, or null when it can't be resolved statically.
+function resolveColour(value, vars) {
+  const v = value.trim();
+  let m;
+  if (v === 'transparent') return { rgb: [0, 0, 0], a: 0 };
+  if ((m = v.match(/^var\((--[\w-]+)\s*(?:,.*)?\)$/))) {
+    const name = ALIASES[m[1]] || m[1];
+    return vars[name] ? resolveColour(vars[name], vars) : null;
+  }
+  if (/^#[0-9a-f]{6}$/i.test(v) || /^rgba?\(/.test(v)) return parseColour(v);
+  if ((m = v.match(/^color-mix\(in srgb,\s*(.+?)\s+(\d+(?:\.\d+)?)%,\s*(.+)\)$/))) {
+    const a = resolveColour(m[1], vars);
+    const b = resolveColour(m[3], vars);
+    const p = Number(m[2]) / 100;
+    if (!a || !b) return null;
+    if (b.a === 0) return { rgb: a.rgb, a: a.a * p };
+    if (a.a < 1 || b.a < 1) return null;
+    return { rgb: a.rgb.map((x, i) => x * p + b.rgb[i] * (1 - p)), a: 1 };
+  }
+  return null;
+}
+
+function toHex(rgb) {
+  return '#' + rgb.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('');
+}
+
+function flatten(c, underHex) {
+  const u = parseColour(underHex).rgb;
+  return toHex(c.rgb.map((x, i) => x * c.a + u[i] * (1 - c.a)));
+}
+
+// A same-hue tint can pull a status token under 4.5:1 even when it passes on the bare panel.
+test('text on translucent tinted fills keeps 4.5:1 over every panel in every preset', () => {
+  const offenders = [];
+  for (const file of fs.readdirSync(STYLES).filter((f) => f.endsWith('.css'))) {
+    const rules = new Map();
+    for (const d of declarations(file)) {
+      if (!rules.has(d.selector)) rules.set(d.selector, []);
+      rules.get(d.selector).push(d);
+    }
+    for (const [selector, decls] of rules) {
+      const colour = decls.filter((d) => d.prop === 'color').pop();
+      const fill = decls.filter((d) => d.prop === 'background' || d.prop === 'background-color').pop();
+      if (!colour || !fill) continue;
+      for (const name of Object.keys(presets)) {
+        const vars = cssVars(name);
+        const bg = resolveColour(fill.value, vars);
+        const fg = resolveColour(colour.value, vars);
+        if (!bg || !fg || bg.a === 0 || bg.a === 1) continue;
+        for (const panel of DIFF_PANELS) {
+          const under = flatten(bg, presets[name][panel]);
+          const r = ratio(flatten(fg, under), under);
+          if (r < 4.5) offenders.push(`${file} ${selector} in ${name} over ${panel}: ${r.toFixed(2)}`);
+        }
+      }
     }
   }
   assert.deepEqual(offenders, []);

@@ -798,30 +798,30 @@
 }
 
 /* Boost hljs token specificity so they always win over diff-line color inheritance */
-/* Every syntax colour here and in the light-syntax block keeps 4.5:1 on its presets' --bg and diff tints; test/util/theme-contrast.test.js parses both blocks. */
+/* Every syntax colour here and in the light-syntax block keeps 4.5:1 on its presets' --bg, --surface, --input-bg and diff tints; test/util/theme-contrast.test.js parses both blocks. */
 #diff-view .hljs-keyword, #file-viewer-view .hljs-keyword,
 #diff-view .hljs-literal, #file-viewer-view .hljs-literal,
 #diff-view .hljs-symbol, #file-viewer-view .hljs-symbol,
-#diff-view .hljs-name, #file-viewer-view .hljs-name { color: #6CB6FF; }
+#diff-view .hljs-name, #file-viewer-view .hljs-name { color: #8CC8FF; }
 #diff-view .hljs-built_in, #file-viewer-view .hljs-built_in,
-#diff-view .hljs-type, #file-viewer-view .hljs-type { color: #4EC9B0; }
+#diff-view .hljs-type, #file-viewer-view .hljs-type { color: #5FD8C0; }
 #diff-view .hljs-number, #file-viewer-view .hljs-number,
 #diff-view .hljs-class, #file-viewer-view .hljs-class { color: #B8D7A3; }
 #diff-view .hljs-string, #file-viewer-view .hljs-string,
 #diff-view .diff-code .hljs-string,
-#diff-view .hljs-meta .hljs-string, #file-viewer-view .hljs-meta .hljs-string { color: #D69D85 !important; }
+#diff-view .hljs-meta .hljs-string, #file-viewer-view .hljs-meta .hljs-string { color: #E8B39C !important; }
 #diff-view .hljs-regexp, #file-viewer-view .hljs-regexp,
-#diff-view .hljs-template-tag, #file-viewer-view .hljs-template-tag { color: #EBA0A0; }
+#diff-view .hljs-template-tag, #file-viewer-view .hljs-template-tag { color: #F2B0B0; }
 #diff-view .hljs-title, #file-viewer-view .hljs-title { color: #DCDCAA; }
 #diff-view .hljs-function, #file-viewer-view .hljs-function { color: #9CDCFE; }
 #diff-view .hljs-params, #file-viewer-view .hljs-params { color: #9CDCFE; }
 #diff-view .hljs-comment, #file-viewer-view .hljs-comment,
-#diff-view .hljs-quote, #file-viewer-view .hljs-quote { color: #8CC27A; font-style: italic; }
+#diff-view .hljs-quote, #file-viewer-view .hljs-quote { color: #A0D28E; font-style: italic; }
 #diff-view .hljs-doctag, #file-viewer-view .hljs-doctag { color: #A3C98F; }
 #diff-view .hljs-meta, #file-viewer-view .hljs-meta,
-#diff-view .hljs-tag, #file-viewer-view .hljs-tag { color: #B0B0B0; }
+#diff-view .hljs-tag, #file-viewer-view .hljs-tag { color: #C0C0C0; }
 #diff-view .hljs-variable, #file-viewer-view .hljs-variable,
-#diff-view .hljs-template-variable, #file-viewer-view .hljs-template-variable { color: #D59BD0; }
+#diff-view .hljs-template-variable, #file-viewer-view .hljs-template-variable { color: #E0AEDB; }
 #diff-view .hljs-attr, #file-viewer-view .hljs-attr,
 #diff-view .hljs-attribute, #file-viewer-view .hljs-attribute { color: #9CDCFE; }
 #diff-view .hljs-selector-tag, #file-viewer-view .hljs-selector-tag,
@@ -831,14 +831,14 @@
 #diff-view .hljs-selector-pseudo, #file-viewer-view .hljs-selector-pseudo,
 #diff-view .hljs-bullet, #file-viewer-view .hljs-bullet { color: #D7BA7D; }
 #diff-view .hljs-title.function_, #file-viewer-view .hljs-title.function_ { color: #DCDCAA; }
-#diff-view .hljs-title.class_, #file-viewer-view .hljs-title.class_ { color: #4EC9B0; }
+#diff-view .hljs-title.class_, #file-viewer-view .hljs-title.class_ { color: #5FD8C0; }
 #diff-view .hljs-property, #file-viewer-view .hljs-property { color: #9CDCFE; }
 
 /* Enhanced tokens (post-processed, not from hljs) */
 #diff-view .hljs-call, #file-viewer-view .hljs-call { color: #DCDCAA; }
-#diff-view .hljs-module, #file-viewer-view .hljs-module { color: #4EC9B0; }
-#diff-view .hljs-self, #file-viewer-view .hljs-self { color: #6CB6FF; }
-#diff-view .hljs-constant, #file-viewer-view .hljs-constant { color: #4FC1FF; }
+#diff-view .hljs-module, #file-viewer-view .hljs-module { color: #5FD8C0; }
+#diff-view .hljs-self, #file-viewer-view .hljs-self { color: #8CC8FF; }
+#diff-view .hljs-constant, #file-viewer-view .hljs-constant { color: #6CCBFF; }
 #diff-view .hljs-decorator, #file-viewer-view .hljs-decorator { color: #DCDCAA; }
 #diff-view .hljs-subst, #file-viewer-view .hljs-subst { color: #9CDCFE; }
 
@@ -885,6 +885,77 @@
 .light-syntax #diff-view .hljs-decorator, .light-syntax #file-viewer-view .hljs-decorator { color: #6639ba; }
 .light-syntax #diff-view .hljs-subst, .light-syntax #file-viewer-view .hljs-subst { color: #24292f; }
 .light-syntax #diff-view .hljs-string .hljs-subst, .light-syntax #file-viewer-view .hljs-string .hljs-subst { color: #0550ae; }
+
+/* Markdown code blocks (file/diff preview, plan, dev-loop docs, PR conversation) otherwise get stock vs2015.min.css colours, several under 4.5:1. */
+/* Same colours as the diff palette above, which takes over where a preview sits inside #diff-view or #file-viewer-view. */
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-keyword,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-literal,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-name,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-symbol,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-link { color: #8CC8FF; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-built_in,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-type { color: #5FD8C0; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-number,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-class { color: #B8D7A3; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-string { color: #E8B39C; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-regexp,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-template-tag { color: #F2B0B0; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-title,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-function,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-params,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-subst,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-formula { color: inherit; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-comment,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-quote { color: #A0D28E; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-doctag { color: #A3C98F; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-meta,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-tag { color: #C0C0C0; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-variable,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-template-variable { color: #E0AEDB; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-attr,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-attribute { color: #9CDCFE; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-section { color: #FFD700; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-bullet,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-tag,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-id,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-class,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-attr,
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-pseudo { color: #D7BA7D; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-keyword,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-literal,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-name,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-symbol,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-link { color: #cf222e; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-built_in,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-type { color: #6639ba; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-number,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-class { color: #0550ae; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-string { color: #0a3069; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-regexp,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-template-tag { color: #0550ae; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-title,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-function,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-params,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-subst,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-formula { color: inherit; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-comment,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-quote { color: #59636e; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-doctag { color: #59636e; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-meta,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-tag { color: #116329; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-variable,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-template-variable { color: #953800; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-attr,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-attribute { color: #0550ae; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-section { color: #0550ae; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-bullet,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-tag,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-id,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-class,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-attr,
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-selector-pseudo { color: #953800; }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-addition { background: var(--diff-add-bg); color: var(--diff-add-fg); }
+:is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-deletion { background: var(--diff-del-bg); color: var(--diff-del-fg); }
 
 .diff-line.diff-add:hover,
 .diff-line.diff-del:hover,
@@ -1695,7 +1766,8 @@
 
 .diff-tab.active {
   color: var(--accent);
-  background-color: color-mix(in srgb, var(--accent) 5%, transparent);
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 
 .diff-tab.active::after {

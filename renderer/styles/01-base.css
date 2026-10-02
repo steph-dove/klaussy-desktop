@@ -2158,7 +2158,7 @@ body.task-branchless #ahead-behind {
 .dashboard-card:hover .card-icon {
   background: var(--accent-dim);
   border-color: var(--accent);
-  color: var(--accent-hover);
+  color: var(--text);
 }
 
 .dashboard-card .card-content {
@@ -2870,7 +2870,8 @@ body.task-branchless #ahead-behind {
 
 .session-group-close:hover {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent);
 }
 
 .session-group-items {
@@ -2930,7 +2931,7 @@ body.task-branchless #ahead-behind {
 }
 
 .session-group-resume-btn {
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  background: transparent;
   border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--accent);
   font-size: 10px;
