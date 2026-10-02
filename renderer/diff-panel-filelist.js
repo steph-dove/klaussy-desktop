@@ -252,7 +252,7 @@
       DP.diffViewEl.querySelectorAll('.diff-line')[prev.index];
     if (!target) return;
     target.tabIndex = -1;
-    target.setAttribute('aria-label', DP.describeDiffLine(target));
+    target.setAttribute('aria-label', A11y.describeDiffLine(target));
     target.focus({ preventScroll: true });
   }
 
@@ -446,7 +446,7 @@
 
     var ta = wrap.querySelector('textarea');
     ta.value = existing ? existing.text : '';
-    ta.setAttribute('aria-label', 'Comment on ' + DP.describeDiffLine(lineEl));
+    ta.setAttribute('aria-label', 'Comment on ' + A11y.describeDiffLine(lineEl));
     ta.focus();
 
     function backToLine() {
@@ -770,18 +770,6 @@
 
     DP.currentParsedHunks = hunks;
     return { lines: lines, hunks: hunks, highlightedLines: highlightedLines };
-  };
-
-  DP.describeDiffLine = function(line) {
-    var code = (line.querySelector('.diff-code, .diff-hunk-text') || line).textContent;
-    if (line.classList.contains('diff-hunk')) {
-      var hunks = DP.diffViewEl.querySelectorAll('.diff-line.diff-hunk');
-      return 'Hunk ' + (Array.prototype.indexOf.call(hunks, line) + 1) + ' of ' + hunks.length + ': ' + code;
-    }
-    if (line.classList.contains('diff-add')) return 'Added line ' + line.dataset.newLn + ': ' + code;
-    if (line.classList.contains('diff-del')) return 'Removed line ' + line.dataset.oldLn + ': ' + code;
-    if (line.dataset.newLn) return 'Line ' + line.dataset.newLn + ': ' + code;
-    return code;
   };
 
   DP.renderDiff = function(diffText) {

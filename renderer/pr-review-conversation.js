@@ -90,8 +90,10 @@
   PR.bindThreadControls = function() {
     PR.hostEl.querySelectorAll('.pr-inline-thread').forEach(function (el) {
       var head = el.querySelector('.pr-inline-thread-head');
+      head.setAttribute('aria-expanded', String(!el.classList.contains('collapsed')));
       head.addEventListener('click', function () {
-        el.classList.toggle('collapsed');
+        var collapsed = el.classList.toggle('collapsed');
+        head.setAttribute('aria-expanded', String(!collapsed));
       });
     });
   };
@@ -193,7 +195,7 @@
             + '<span class="pr-conv-claude-draft-label">Draft reply</span>'
             + '<span class="pr-conv-claude-draft-anchor">' + PR.escHtml(anchor) + '</span>'
           + '</div>'
-          + '<textarea class="pr-conv-claude-draft-input" rows="3">' + PR.escHtml(s.implementDraft) + '</textarea>'
+          + '<textarea class="pr-conv-claude-draft-input" aria-label="Draft reply" rows="3">' + PR.escHtml(s.implementDraft) + '</textarea>'
           + (s.draftError ? '<div class="pr-conv-claude-draft-error">' + PR.escHtml(s.draftError) + '</div>' : '')
           + '<div class="pr-conv-claude-draft-actions">'
             + '<button class="pr-conv-claude-draft-dismiss" type="button" data-dbid="' + ctx.dbid + '">Dismiss</button>'
@@ -244,7 +246,7 @@
 
     var composer = '<div class="pr-conv-new-comment">'
         + '<div class="pr-conv-new-head">Add a comment</div>'
-        + '<textarea class="pr-conv-new-body" placeholder="Write a general comment (\u2318\u23CE to post)" rows="3"></textarea>'
+        + '<textarea class="pr-conv-new-body" aria-label="Add a comment" placeholder="Write a general comment (\u2318\u23CE to post)" rows="3"></textarea>'
         + '<div class="pr-conv-new-actions">'
           + '<button class="pr-conv-new-post" type="button">Comment</button>'
         + '</div>'
@@ -344,7 +346,7 @@
   // `kind` (stored on the wrapper via data-kind).
   PR.renderCommentEditor = function(dbid, kind, body) {
     return '<div class="pr-conv-edit-wrap" data-id="' + dbid + '" data-kind="' + kind + '">'
-      + '<textarea class="pr-conv-edit-input" rows="5">' + PR.escHtml(body || '') + '</textarea>'
+      + '<textarea class="pr-conv-edit-input" aria-label="Edit comment" rows="5">' + PR.escHtml(body || '') + '</textarea>'
       + '<div class="pr-conv-edit-actions">'
         + '<span class="pr-conv-edit-error"></span>'
         + '<button class="pr-conv-edit-cancel" type="button">Cancel</button>'
@@ -579,7 +581,7 @@
         var match = checks.find(function (c) { return (c.name || '') === name; });
         var b = match ? bucketOf(match) : 'missing';
         if (b === 'pass') passingRequired += 1;
-        return '<span class="pr-required-chip pr-required-' + b + '" title="' + PR.escHtml(b) + '">' + PR.escHtml(name) + '</span>';
+        return '<span class="pr-required-chip pr-required-' + b + '" title="' + PR.escHtml(b) + '">' + PR.escHtml(name) + '<span class="sr-only">: ' + PR.escHtml(b) + '</span></span>';
       }).join('');
       var allPass = passingRequired === PR.currentRequiredChecks.length;
       requiredGate = '<div class="pr-required-gate ' + (allPass ? 'pr-required-all-pass' : 'pr-required-blocking') + '">'
@@ -623,18 +625,20 @@
         ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Stream the workflow log live">Watch log</button>'
         : '';
       var openBtn = c.link
-        ? '<button class="pr-check-open" type="button" data-link="' + PR.escHtml(c.link) + '" title="Open on ' + PR.escHtml(forgeName) + '">\u2197</button>'
+        ? '<button class="pr-check-open" type="button" data-link="' + PR.escHtml(c.link) + '" title="Open on ' + PR.escHtml(forgeName) + '" aria-label="Open ' + PR.escHtml(c.name || 'check') + ' on ' + PR.escHtml(forgeName) + '">\u2197</button>'
         : '';
       var dur = formatDur(c.startedAt, c.completedAt);
       var durHtml = dur ? '<span class="pr-check-dur">' + dur + '</span>' : '';
       var sub = [c.workflow, c.description].filter(Boolean).map(PR.escHtml).join(' \u00B7 ');
-      var chevron = '<span class="pr-check-chevron' + (expandable ? '' : ' pr-check-chevron-hidden') + '">\u203A</span>';
+      var chevron = expandable
+        ? '<button type="button" class="pr-check-chevron pr-check-toggle" aria-expanded="' + !!PR.openAnnotations[c.id] + '" aria-label="Annotations for ' + PR.escHtml(c.name || 'check') + '">\u203A</button>'
+        : '<span class="pr-check-chevron pr-check-chevron-hidden" aria-hidden="true">\u203A</span>';
       var attrs = ' class="pr-check-row pr-check-' + b + (expandable ? ' pr-check-expandable' : '') + '"';
       if (c.link) attrs += ' data-link="' + PR.escHtml(c.link) + '"';
       if (expandable) attrs += ' data-check-id="' + PR.escHtml(String(c.id)) + '"';
       return '<div' + attrs + '>'
         + chevron
-        + '<span class="pr-check-icon">' + icon + '</span>'
+        + '<span class="pr-check-icon" aria-hidden="true">' + icon + '</span>'
         + '<div class="pr-check-labels">'
           + '<div class="pr-check-name">' + PR.escHtml(c.name || '(unnamed)') + '</div>'
           + (sub ? '<div class="pr-check-sub">' + sub + '</div>' : '')
@@ -685,8 +689,9 @@
       var dur = aggregateDur(items);
       var workflowName = (items.find(function (c) { return c.workflow; }) || {}).workflow || '';
       return '<div class="pr-check-group pr-check-group-' + b + '">'
-        + '<div class="pr-check-group-head">'
+        + '<div class="pr-check-group-head" role="heading" aria-level="3">'
           + '<span class="pr-check-group-label">' + PR.escHtml(workflowName || ('Run #' + runId)) + '</span>'
+          + '<span class="sr-only">, ' + ({ fail: 'failing', pending: 'running', cancel: 'cancelled', skipping: 'skipped', pass: 'passing' }[b]) + '</span>'
           + '<span class="pr-check-group-meta">' + items.length + ' job' + (items.length === 1 ? '' : 's') + (dur ? ' \u00B7 ' + dur : '') + '</span>'
         + '</div>'
         + '<div class="pr-check-group-rows">' + items.map(renderRowHtml).join('') + '</div>'
@@ -731,6 +736,12 @@
         }
         var url = row.dataset.link;
         if (url) window.klaus.gh.openExternal(url);
+      });
+    });
+    PR.hostEl.querySelectorAll('.pr-check-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        PR.toggleAnnotations(btn);
       });
     });
     PR.hostEl.querySelectorAll('.pr-check-open').forEach(function (btn) {

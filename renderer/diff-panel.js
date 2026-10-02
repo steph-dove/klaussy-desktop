@@ -69,7 +69,7 @@ window.DiffPanel = window.DiffPanel || {};
       label: 'Diff',
       lineSelector: '.diff-line',
       hunkSelector: '.diff-line.diff-hunk',
-      describe: function (line) { return DP.describeDiffLine(line); },
+      describe: A11y.describeDiffLine,
       onActivate: function (line) {
         var add = line.querySelector('.diff-comment-add');
         if (!add) return false;

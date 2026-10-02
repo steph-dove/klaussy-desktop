@@ -116,6 +116,7 @@
       + (bodyPreview ? ': ' + bodyPreview : '');
     PR.writeRunSeparator(label);
 
+    A11y.announce('Implementation started');
     PR.implRun = {
       requestId: requestId,
       mode: opts.mode,
@@ -189,6 +190,9 @@
     if (!PR.implRun || PR.implRun.finalized) return;
     PR.implRun.finalized = true;
     PR.implRun.status = finalStatus;
+    A11y.announce(finalStatus === 'done' ? 'Implementation finished'
+      : finalStatus === 'error' ? 'Implementation failed' + (errMsg ? ': ' + errMsg : '')
+        : 'Implementation cancelled', finalStatus === 'error' ? 'assertive' : 'polite');
     if (finalStatus === 'done' && PR.implRun.onDone) PR.implRun.onDone();
     else if (finalStatus === 'error' && PR.implRun.onError) PR.implRun.onError(errMsg || 'Implementation failed');
     else if (finalStatus === 'cancelled' && PR.implRun.onCancelled) PR.implRun.onCancelled();
@@ -905,6 +909,27 @@
         if (PR.lastState) PR.render(PR.lastState);
       });
     });
+    var list = PR.hostEl.querySelector('.pr-review-file-list');
+    if (list) A11y.arrowNav(list, '.pr-review-file');
+    var pre = PR.hostEl.querySelector('.pr-review-diff-pre');
+    if (pre) {
+      A11y.lineNav(pre, {
+        lineSelector: '.diff-line',
+        hunkSelector: '.diff-line.diff-hunk',
+        describe: A11y.describeDiffLine,
+        onActivate: function (line) {
+          if (!line.dataset.line) return false;
+          PR.openCommentComposer({
+            path: PR.selectedFile,
+            side: line.dataset.side,
+            line: parseInt(line.dataset.line, 10),
+            startLine: null,
+            startSide: null,
+            anchorEl: line,
+          });
+        },
+      });
+    }
   };
 
   // ---- G4: draft review comments ----
@@ -966,7 +991,7 @@
         + '<span>Draft comment on <code>' + PR.escHtml(label) + '</code></span>'
         + '<button class="pr-comment-composer-close" type="button" title="Cancel" aria-label="Cancel">&times;</button>'
       + '</div>'
-      + '<textarea class="pr-comment-composer-input" placeholder="Comment (\u2318\u23CE to save)" rows="3"></textarea>'
+      + '<textarea class="pr-comment-composer-input" aria-label="Review comment on ' + PR.escHtml(label) + '" placeholder="Comment (\u2318\u23CE to save)" rows="3"></textarea>'
       + '<div class="pr-comment-composer-actions">'
         + '<span class="pr-comment-composer-hint">Saved to your pending review; submit from the header when you\u2019re done.</span>'
         + '<button class="pr-comment-composer-save" type="button">Add comment</button>'
@@ -977,7 +1002,15 @@
     var saveBtn = composer.querySelector('.pr-comment-composer-save');
     ta.focus();
 
-    function close() { composer.remove(); }
+    // Focus goes back to the anchor line so the post-save re-render keeps the user's place.
+    function close() {
+      var hadFocus = composer.contains(document.activeElement);
+      composer.remove();
+      if (hadFocus && range.anchorEl.isConnected) {
+        range.anchorEl.tabIndex = -1;
+        range.anchorEl.focus();
+      }
+    }
     composer.querySelector('.pr-comment-composer-close').addEventListener('click', close);
     ta.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') close();
@@ -1073,20 +1106,20 @@
     overlay.className = 'pr-submit-overlay';
     overlay.innerHTML =
       '<div class="pr-submit-dialog">'
-        + '<div class="pr-submit-head">Submit review</div>'
+        + '<h2 class="pr-submit-head">Submit review</h2>'
         + '<div class="pr-submit-count">' + PR.pendingComments.length
           + ' pending comment' + (PR.pendingComments.length === 1 ? '' : 's') + '</div>'
-        + '<textarea class="pr-submit-body" placeholder="Overall summary (optional)" rows="4"></textarea>'
-        + '<div class="pr-submit-events">'
+        + '<textarea class="pr-submit-body" aria-label="Review summary" placeholder="Overall summary (optional)" rows="4"></textarea>'
+        + '<fieldset class="pr-submit-events"><legend class="sr-only">Review action</legend>'
           + '<label class="pr-submit-event"><input type="radio" name="pr-event" value="COMMENT" checked /> <span class="pr-submit-event-label">Comment</span><span class="pr-submit-event-hint">Submit without approval</span></label>'
           + '<label class="pr-submit-event' + (ownPr ? ' disabled' : '') + '"><input type="radio" name="pr-event" value="APPROVE"' + selfDisabled + ' /> <span class="pr-submit-event-label">Approve</span><span class="pr-submit-event-hint">' + (ownPr ? selfHint : 'Submit feedback and approve') + '</span></label>'
           + '<label class="pr-submit-event' + (ownPr ? ' disabled' : '') + '"><input type="radio" name="pr-event" value="REQUEST_CHANGES"' + selfDisabled + ' /> <span class="pr-submit-event-label">Request changes</span><span class="pr-submit-event-hint">' + (ownPr ? selfHint : 'Submit feedback that must be addressed') + '</span></label>'
-        + '</div>'
+        + '</fieldset>'
         + '<div class="pr-submit-actions">'
           + '<button class="pr-submit-cancel" type="button" data-dialog-close>Cancel</button>'
           + '<button class="pr-submit-send" type="button">Submit review</button>'
         + '</div>'
-        + '<div class="pr-submit-error" style="display:none;"></div>'
+        + '<div class="pr-submit-error" role="alert" style="display:none;"></div>'
       + '</div>';
     document.body.appendChild(overlay);
 
@@ -1210,8 +1243,8 @@
     }).join('');
 
     return '<div class="pr-inline-thread' + resolvedCls + outdatedCls + '" data-thread-id="' + PR.escHtml(thread.id) + '">'
-      + '<div class="pr-inline-thread-head">'
-        + '<span class="pr-inline-thread-chevron">\u25B8</span>'
+      + '<div class="pr-inline-thread-head" role="button" tabindex="0">'
+        + '<span class="pr-inline-thread-chevron" aria-hidden="true">\u25B8</span>'
         + '<span class="pr-inline-thread-summary">'
           + (thread.isResolved ? '<span class="pr-inline-thread-badge resolved">resolved</span>' : '')
           + (thread.isOutdated ? '<span class="pr-inline-thread-badge outdated">outdated</span>' : '')

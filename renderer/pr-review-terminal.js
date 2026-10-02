@@ -63,7 +63,8 @@
     else if (PR.implRun.status === 'error') label = '!';
     else if (PR.implRun.status === 'cancelled') label = '×';
     else label = '●';
-    return ' <span class="pr-tab-count pr-tab-count-' + PR.implRun.status + '">' + label + '</span>';
+    return ' <span class="pr-tab-count pr-tab-count-' + PR.implRun.status + '"><span aria-hidden="true">' + label + '</span>'
+      + '<span class="sr-only">' + PR.implRun.status + '</span></span>';
   };
 
   PR.bindTerminalTab = function() {
@@ -168,7 +169,7 @@
 
     var commitHtml = files.length
       ? '<div class="pr-local-commit">'
-          + '<input type="text" class="pr-local-commit-msg" placeholder="Commit message"'
+          + '<input type="text" class="pr-local-commit-msg" aria-label="Commit message" placeholder="Commit message"'
             + ' value="' + PR.escHtml(PR.localCommitMsg || '') + '"'
             + (PR.localBusy ? ' disabled' : '') + '>'
           + '<button class="pr-review-btn pr-local-commit-btn" type="button"'
@@ -390,7 +391,7 @@
     var sevLabel = PR.SEV_LABELS[sev] || (f.severity || 'Note');
     var dot = sev
       ? '<span class="pr-ai-finding-sev pr-ai-finding-sev-' + sevKey + '">'
-          + '<span class="pr-ai-finding-dot"></span>' + PR.escHtml(sevLabel)
+          + '<span class="pr-ai-finding-dot" aria-hidden="true"></span>' + PR.escHtml(sevLabel)
         + '</span>'
       : '';
     var cat = category
@@ -399,7 +400,7 @@
     var title = f.title
       ? '<span class="pr-ai-finding-title-text">' + PR.escHtml(f.title) + '</span>'
       : '';
-    return '<div class="pr-ai-finding-head-row">'
+    return '<div class="pr-ai-finding-head-row" role="heading" aria-level="3">'
       + '<span class="pr-ai-finding-head-left">' + dot + cat + title + '</span>'
     + '</div>';
   };
@@ -544,7 +545,7 @@
     if (f.textEditing) {
       bodyHtml =
         '<div class="pr-ai-finding-body editing">'
-          + '<textarea class="pr-ai-finding-body-input" rows="8">' + PR.escHtml(f.text) + '</textarea>'
+          + '<textarea class="pr-ai-finding-body-input" aria-label="Review comment text" rows="8">' + PR.escHtml(f.text) + '</textarea>'
           + '<div class="pr-ai-finding-body-actions">'
             + (f.originalText != null && f.text !== f.originalText
                 ? '<button class="pr-ai-finding-body-reset" type="button" title="Restore the original AI text">Reset to AI text</button>'
@@ -618,7 +619,8 @@
       + '</div>';
     }
 
-    return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '">'
+    var cardName = (f.title || (f.severity ? f.severity + ' finding' : 'Finding')) + (f.ignored ? ', ignored' : '');
+    return '<div class="pr-ai-finding' + sevCls + statusCls + '" data-finding-id="' + f.id + '" role="group" aria-label="' + PR.escHtml(cardName) + '">'
       + bodyHtml
       + '<div class="pr-ai-finding-actions">' + actions + '</div>'
       + errorBlock
@@ -677,7 +679,7 @@
         + '<span class="pr-ai-finding-draft-label">Draft PR comment</span>'
         + '<span class="pr-ai-finding-draft-anchor">' + anchorHint + '</span>'
       + '</div>'
-      + '<textarea class="pr-ai-finding-draft-input" rows="3">' + PR.escHtml(f.implementDraftComment) + '</textarea>'
+      + '<textarea class="pr-ai-finding-draft-input" aria-label="Draft reply" rows="3">' + PR.escHtml(f.implementDraftComment) + '</textarea>'
       + '<div class="pr-ai-finding-draft-actions">'
         + '<button class="pr-ai-finding-draft-dismiss" type="button">Dismiss</button>'
         + '<button class="pr-ai-finding-draft-approve" type="button">Approve &amp; add to draft</button>'
@@ -710,7 +712,7 @@
           : '<div class="pr-ai-finding-chat-hint">Ask the agent anything about this finding — is it really a bug? what’s the simplest fix? etc.</div>')
       + errorBar
       + '<div class="pr-ai-finding-chat-composer">'
-        + '<textarea class="pr-ai-finding-chat-input" rows="2" placeholder="Message the agent (⌘⏎ to send)"' + (streaming ? ' disabled' : '') + '></textarea>'
+        + '<textarea class="pr-ai-finding-chat-input" aria-label="Ask the agent about this finding" rows="2" placeholder="Message the agent (⌘⏎ to send)"' + (streaming ? ' disabled' : '') + '></textarea>'
         + (streaming
             ? '<button class="pr-ai-finding-chat-cancel" type="button">Cancel</button>'
             : '<button class="pr-ai-finding-chat-send" type="button">Send</button>')
@@ -948,9 +950,11 @@
     // A repaint replaces the tab's HTML, including any chat composer the user
     // is mid-sentence in. Carry the focused one's text and caret across.
     var draft = PR.captureChatComposer(tab);
-    tab.innerHTML = PR.renderAiReviewTab();
-    PR.bindAiReviewTab();
-    PR.restoreChatComposer(tab, draft);
+    A11y.preserveFocus(tab, function () {
+      tab.innerHTML = PR.renderAiReviewTab();
+      PR.bindAiReviewTab();
+      PR.restoreChatComposer(tab, draft);
+    });
     // Update tab count badge as findings change.
     var tabBtn = PR.hostEl.querySelector('.pr-review-tab[data-tab="ai-review"]');
     if (tabBtn) tabBtn.innerHTML = 'AI Review' + PR.renderAiReviewTabCount();
@@ -1386,6 +1390,7 @@
     PR.aiReview.findings = [];
     PR.aiReview.usage = null;
     PR.repaintAiReviewTab();
+    A11y.announce('AI review started');
 
     var buffered = '';
     var unsubData = window.klaus.pr.onReviewAiData(requestId, function (chunk) {
@@ -1411,6 +1416,10 @@
       if (result && result.cancelled) PR.aiReview.cancelled = true;
       PR.applyReviewParse();
       PR.repaintAiReviewTab();
+      var n = PR.aiReview.findings.length;
+      if (PR.aiReview.error) A11y.announce('AI review failed: ' + PR.aiReview.error, 'assertive');
+      else if (PR.aiReview.cancelled) A11y.announce('AI review cancelled');
+      else A11y.announce('AI review finished: ' + n + ' finding' + (n === 1 ? '' : 's'));
       // Persist as soon as we have any content (even partial / cancelled —
       // user may still want to revisit the partial findings).
       if (PR.aiReview.finalText) PR.saveAiReviewCache();
@@ -1422,6 +1431,7 @@
         PR.aiReview.requestId = null;
         PR.aiReview.error = r.error;
         PR.repaintAiReviewTab();
+        A11y.announce('AI review failed: ' + r.error, 'assertive');
       } else if (r && r.worktreePath) {
         PR.aiReview.worktreePath = r.worktreePath;
       }

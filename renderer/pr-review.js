@@ -314,7 +314,12 @@ window.PrReview = window.PrReview || {};
     PR.hostEl.innerHTML = '<div class="pr-review-loading">No active PR review.</div>';
   };
 
+  // Every state broadcast rebuilds the whole surface, so focus is carried across.
   PR.render = function(state) {
+    return A11y.preserveFocus(PR.hostEl, function () { return renderSurface(state); });
+  };
+
+  function renderSurface(state) {
     // The main window never paints a popped-out review — app.js hides this
     // surface and the pop-out owns the display. Without this, a late
     // onReviewState(popped:true) (the broadcast races app.js's unmount) could
@@ -412,10 +417,10 @@ window.PrReview = window.PrReview || {};
 
     PR.hostEl.innerHTML =
       '<div class="pr-review-header">'
-        + '<div class="pr-review-title">'
+        + '<h1 class="pr-review-title">'
           + '<span class="pr-review-num">#' + PR.escHtml(state.number) + '</span> '
           + '<span class="pr-review-title-text">' + PR.escHtml(meta.title || '') + '</span>'
-        + '</div>'
+        + '</h1>'
         + '<div class="pr-review-meta">'
           + '<span class="pr-review-state pr-state-' + PR.escHtml((stateBadge || 'open').toLowerCase()) + '">' + PR.escHtml(stateBadge || 'OPEN') + '</span>'
           + (reviewDecision ? '<span class="pr-review-decision pr-decision-' + PR.escHtml(reviewDecision.toLowerCase()) + '">' + PR.escHtml(reviewDecision.replace('_', ' ')) + '</span>' : '')
@@ -423,18 +428,18 @@ window.PrReview = window.PrReview || {};
           + '<span class="pr-review-branch">' + PR.escHtml(meta.headRefName || '') + ' \u2192 ' + PR.escHtml(meta.baseRefName || '') + '</span>'
           + '<span class="pr-review-checks-slot"></span>'
         + '</div>'
-        + '<div class="pr-review-actions">'
+        + '<div class="pr-review-actions" role="toolbar" aria-label="' + itemType + ' actions">'
           + '<a href="#" class="pr-review-external" data-url="' + PR.escHtml(meta.url || '') + '">Open on ' + PR.escHtml(forgeName) + '</a>'
           + '<button class="pr-review-btn js-pull-updates" title="Re-fetch ' + itemType + ' data + advance the local worktree to the ' + itemType + '’s latest commit">Pull updates</button>'
           + '<button class="pr-review-btn js-ai-review" title="Run an AI code review against this ' + itemType + '">Review</button>'
           + '<button class="pr-review-btn js-checkout-local" title="Fetch this ' + itemType + ' into a new worktree and spawn a task">Check out locally</button>'
           + PR.renderMergeControl(state)
           + (PR.isPopout
-              ? '<button class="pr-review-btn js-pop-in" title="Return to main window">\u21B2 Pop back in</button>'
-              : '<button class="pr-review-btn js-pop-out" title="Open in a separate window">Pop out \u2197</button>')
+              ? '<button class="pr-review-btn js-pop-in" title="Return to main window"><span aria-hidden="true">\u21B2</span> Pop back in</button>'
+              : '<button class="pr-review-btn js-pop-out" title="Open in a separate window">Pop out <span aria-hidden="true">\u2197</span></button>')
           + (PR.isPopout
               ? ''
-              : '<button class="pr-review-btn js-close" title="Close review">\u2190 Back to tasks</button>')
+              : '<button class="pr-review-btn js-close" title="Close review"><span aria-hidden="true">\u2190</span> Back to tasks</button>')
         + '</div>'
       + '</div>'
       + '<div class="pr-review-tabs">'
@@ -495,7 +500,7 @@ window.PrReview = window.PrReview || {};
     // Files, select the right file, re-render, then scroll the explanation
     // into view once rehydration has injected it.
     PR.applyPendingNav(state);
-  };
+  }
 
   PR.applyPendingNav = function(state) {
     var nav = window._pendingAgentNav;
@@ -822,6 +827,7 @@ window.PrReview = window.PrReview || {};
           return;
         }
         ta.value = '';
+        A11y.announce('Comment posted');
         await window.klaus.pr.refreshThreads();
         // render is re-triggered by the pr-review-state broadcast.
       }
@@ -890,10 +896,12 @@ window.PrReview = window.PrReview || {};
     if (PR.activeTab !== 'conversation') return;
     var tab = PR.hostEl.querySelector('.pr-review-conversation');
     if (!tab || !PR.lastState) return;
-    tab.innerHTML = PR.renderConversation(PR.lastState);
-    PR.bindConversationComposer();
-    PR.bindReplyButtons();
-    PR.bindEditCommentButtons();
+    A11y.preserveFocus(tab, function () {
+      tab.innerHTML = PR.renderConversation(PR.lastState);
+      PR.bindConversationComposer();
+      PR.bindReplyButtons();
+      PR.bindEditCommentButtons();
+    });
   };
 
   PR.bindReplyButtons = function() {
@@ -967,7 +975,7 @@ window.PrReview = window.PrReview || {};
     var composer = document.createElement('div');
     composer.className = 'pr-conv-reply-composer';
     composer.innerHTML =
-      '<textarea class="pr-conv-reply-body" placeholder="Reply (\u2318\u23CE to post)" rows="2"></textarea>'
+      '<textarea class="pr-conv-reply-body" aria-label="Reply" placeholder="Reply (\u2318\u23CE to post)" rows="2"></textarea>'
       + '<div class="pr-conv-reply-actions">'
         + '<button class="pr-conv-reply-cancel" type="button">Cancel</button>'
         + '<button class="pr-conv-reply-send" type="button">Reply</button>'
@@ -994,14 +1002,20 @@ window.PrReview = window.PrReview || {};
         window.toast.error('Reply failed: ' + result.error);
         return;
       }
-      composer.remove();
+      closeComposer();
+      A11y.announce('Reply posted');
       await window.klaus.pr.refreshThreads();
+    }
+
+    function closeComposer() {
+      composer.remove();
+      if (btn.isConnected) btn.focus();
     }
 
     sendBtn.addEventListener('click', send);
     ta.addEventListener('keydown', function (e) {
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
-      if (e.key === 'Escape') composer.remove();
+      if (e.key === 'Escape') closeComposer();
     });
   };
 
@@ -1229,6 +1243,12 @@ window.PrReview = window.PrReview || {};
   };
 
   PR.bindTabs = function() {
+    var body = PR.hostEl.querySelector('.pr-review-body');
+    A11y.tabs(PR.hostEl.querySelector('.pr-review-tabs'), {
+      itemSelector: '.pr-review-tab',
+      label: 'Review sections',
+      panelFor: function (tab) { return tab.classList.contains('active') ? body : null; },
+    });
     PR.hostEl.querySelectorAll('.pr-review-tab').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var tab = btn.dataset.tab;
@@ -1272,7 +1292,9 @@ window.PrReview = window.PrReview || {};
             + '<span class="diff-file-bar-del" style="flex:' + dels + '"></span>'
           + '</span>'
         : '';
-      return '<div class="diff-file pr-review-file' + isSelected + '" data-file="' + PR.escHtml(f.path) + '" title="' + PR.escHtml(f.path) + '">'
+      var name = f.path + ', ' + adds + ' added, ' + dels + ' removed' + (openThreads ? ', ' + openThreads + ' open thread' + (openThreads === 1 ? '' : 's') : '');
+      return '<div class="diff-file pr-review-file' + isSelected + '" role="button" tabindex="0"' + (isSelected ? ' aria-current="true"' : '')
+        + ' aria-label="' + PR.escHtml(name) + '" data-file="' + PR.escHtml(f.path) + '" title="' + PR.escHtml(f.path) + '">'
         + '<span class="diff-file-name">' + PR.escHtml(base) + '</span>'
         + '<span class="diff-file-path">' + PR.escHtml(dir) + '</span>'
         + threadBadge
@@ -1288,7 +1310,7 @@ window.PrReview = window.PrReview || {};
   PR.renderSelectedFileDiff = function(files) {
     var file = files.find(function (f) { return f.path === PR.selectedFile; });
     if (!file) return '<div class="pr-review-empty">Select a file.</div>';
-    return '<pre class="pr-review-diff-pre">' + PR.renderUnifiedDiff(file.raw) + '</pre>';
+    return '<pre class="pr-review-diff-pre" aria-label="Diff of ' + PR.escHtml(file.path) + '">' + PR.renderUnifiedDiff(file.raw) + '</pre>';
   };
 
   // Parse a `gh pr diff` unified diff into per-file blocks.
