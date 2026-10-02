@@ -351,7 +351,7 @@ window.TerminalManager = (function () {
     var subTabBar = document.createElement('div');
     subTabBar.className = 'sub-terminal-tabs';
     subTabBar.innerHTML =
-      '<button class="sub-tab active" data-sub-id="0"><span class="sub-tab-label">Primary</span></button>' +
+      '<button class="sub-tab active" aria-current="true" data-sub-id="0"><span class="sub-tab-label">Primary</span></button>' +
       '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)" aria-label="Add a tab">+</button></span>';
     container.insertBefore(subTabBar, label.nextSibling);
     updatePrimaryAgentTab(taskEntry);
@@ -411,7 +411,10 @@ window.TerminalManager = (function () {
       + '<button class="actions-dropdown-item" data-mode="shell">Shell</button>';
     addWrap.appendChild(addMenu);
     A11y.dropdownMenu(addBtn, addMenu, '.actions-dropdown-item');
-    A11y.tabs(subTabBar, { itemSelector: '.sub-tab', label: 'Terminal tabs' });
+    // Not a tablist: the "+" menu button shares the strip, which a tablist can't contain.
+    subTabBar.setAttribute('role', 'toolbar');
+    subTabBar.setAttribute('aria-label', 'Terminal tabs');
+    A11y.arrowNav(subTabBar, '.sub-tab', { orientation: 'horizontal' });
     subTabBar.addEventListener('keydown', function (e) {
       var close = e.key === 'Delete' && e.target.closest('.sub-tab') && e.target.querySelector('.sub-tab-close');
       if (!close) return;
@@ -745,6 +748,8 @@ window.TerminalManager = (function () {
       var tabSubId = t.dataset.subId === '0' ? null : parseInt(t.dataset.subId, 10);
       var isActive = (subId === null || subId === undefined) ? t.dataset.subId === '0' : tabSubId === subId;
       t.classList.toggle('active', isActive);
+      if (isActive) t.setAttribute('aria-current', 'true');
+      else t.removeAttribute('aria-current');
     });
 
     setTimeout(function () {

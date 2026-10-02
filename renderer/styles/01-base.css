@@ -652,7 +652,7 @@ body.custom-titlebar #titlebar-content {
 }
 
 #agents-bar #btn-agents.is-empty {
-  opacity: 0.55;
+  color: var(--text-muted);
 }
 
 .agents-bar-label {
@@ -1236,12 +1236,6 @@ body.custom-titlebar #titlebar-content {
 .task-item.saved-session {
   flex-wrap: wrap;
   border: 1px dashed var(--border);
-  opacity: 0.85;
-}
-
-.task-item.saved-session:hover,
-.task-item.saved-session:focus-within {
-  opacity: 1;
 }
 
 .status-dot.saved {
@@ -3130,6 +3124,7 @@ body.task-branchless #ahead-behind {
 .mcp-auth-close,
 .agent-item-actions button,
 #btn-agents-close,
+.session-group-toggle,
 #btn-refresh-plan,
 #btn-session-notes-refresh {
   min-width: 24px;

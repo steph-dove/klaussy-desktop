@@ -47,7 +47,6 @@
 
 .ss-trigger.ss-placeholder .ss-label {
   color: var(--text-muted, var(--text-dim, var(--text)));
-  opacity: 0.85;
 }
 
 .ss-trigger .ss-caret {

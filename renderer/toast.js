@@ -98,7 +98,9 @@
     _container.id = 'klaussy-toast-stack';
     _container.setAttribute('aria-label', 'Notifications');
     // A11y announces toasts itself; the stack is only a live region as a fallback.
-    if (!window.A11y) {
+    if (window.A11y) {
+      _container.setAttribute('role', 'region');
+    } else {
       _container.setAttribute('role', 'status');
       _container.setAttribute('aria-live', 'polite');
     }

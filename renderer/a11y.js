@@ -408,6 +408,7 @@ window.A11y = (function () {
       handle.setAttribute('aria-valuenow', String(Math.round(opts.get())));
     }
     handle.addEventListener('focus', update);
+    update();
     if (opts.commit) {
       handle.addEventListener('keyup', function (e) {
         if (e.key === grow || e.key === shrink || e.key === 'Home' || e.key === 'End') opts.commit();
