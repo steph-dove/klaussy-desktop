@@ -1241,6 +1241,7 @@ body.custom-titlebar #titlebar-content {
 
 /* Saved session items in task list */
 .task-item.saved-session {
+  position: relative;
   flex-wrap: wrap;
   border: 1px dashed var(--border);
 }
@@ -1273,6 +1274,15 @@ body.custom-titlebar #titlebar-content {
   flex-shrink: 0;
 }
 
+/* Always its own row, so the name gets the full first line and the corner × never meets the buttons. */
+.saved-session .saved-session-actions {
+  flex-basis: 100%;
+}
+
+.saved-session .saved-session-info {
+  padding-right: 20px;
+}
+
 .saved-session-resume,
 .saved-session-new {
   padding: 2px 8px;
@@ -1302,7 +1312,14 @@ body.custom-titlebar #titlebar-content {
   color: var(--accent-contrast);
 }
 
+/* Pinned to the corner: as a flex item it wrapped onto the actions row whenever the card wrapped. */
 .saved-session-dismiss {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--text-muted);
