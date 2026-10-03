@@ -234,6 +234,7 @@ window.PrReview = window.PrReview || {};
       navigator.clipboard.writeText(btn.getAttribute('data-copy') || '').then(function () {
         var prev = btn.textContent;
         btn.textContent = 'Copied';
+        A11y.announce('Copied');
         setTimeout(function () { btn.textContent = prev; }, 1200);
       }).catch(function () {});
     });
@@ -927,6 +928,17 @@ window.PrReview = window.PrReview || {};
       var cancelBtn = wrap.querySelector('.pr-conv-edit-cancel');
       var errEl = wrap.querySelector('.pr-conv-edit-error');
       if (ta) ta.focus();
+      function showError(msg) {
+        if (!ta || !errEl) return;
+        errEl.textContent = msg;
+        if (msg) {
+          ta.setAttribute('aria-invalid', 'true');
+          ta.setAttribute('aria-describedby', errEl.id);
+        } else {
+          ta.removeAttribute('aria-invalid');
+          ta.removeAttribute('aria-describedby');
+        }
+      }
       if (cancelBtn) cancelBtn.addEventListener('click', function () {
         PR.editingCommentId = null;
         PR.editingCommentKind = null;
@@ -935,20 +947,22 @@ window.PrReview = window.PrReview || {};
       if (saveBtn) saveBtn.addEventListener('click', async function () {
         var body = ta ? ta.value : '';
         if (!body.trim()) {
-          if (errEl) errEl.textContent = 'Comment body cannot be empty.';
+          showError('Comment body cannot be empty.');
+          if (ta) ta.focus();
           return;
         }
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
-        if (errEl) errEl.textContent = '';
+        showError('');
         var fn = kind === 'review' ? window.klaus.pr.editReviewComment : window.klaus.pr.editIssueComment;
         var result = await fn(dbid, body);
         if (result && result.error) {
           saveBtn.disabled = false;
           saveBtn.textContent = 'Save';
-          if (errEl) errEl.textContent = 'Save failed: ' + result.error;
+          showError('Save failed: ' + result.error);
           return;
         }
+        A11y.announce('Comment updated');
         PR.editedCommentOverrides[dbid] = body;
         PR.editingCommentId = null;
         PR.editingCommentKind = null;
@@ -1209,8 +1223,12 @@ window.PrReview = window.PrReview || {};
         bodyEl.classList.remove('status-pulse');
         bodyEl.className = 'diff-explanation-body diff-error';
         bodyEl.textContent = result.error;
+        A11y.announce('Explanation failed: ' + result.error, 'assertive');
       } else if (result.cancelled) {
         // Leave whatever we managed to stream visible.
+        A11y.announce('Explanation cancelled');
+      } else {
+        A11y.announce('Explanation ready');
       }
       // Success path: stream already populated bodyEl; nothing more to do.
       // Intentionally not marking read — see note above.

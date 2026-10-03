@@ -139,7 +139,8 @@
     var replyBtn = (ctx.showReply && ctx.replyParentId)
       ? '<button class="pr-conv-reply-btn" type="button" data-reply-to="' + ctx.replyParentId + '">Reply</button>'
       : '';
-    var actions = '<div class="pr-conv-claude-actions">' + investigateBtn + implementBtn + replyBtn + '</div>';
+    var actions = '<div class="pr-conv-claude-actions" role="group" aria-label="Actions on ' + PR.escHtml(ctx.author || 'this') + '’s comment">'
+      + investigateBtn + implementBtn + replyBtn + '</div>';
 
     var investigatePanel = '';
     if (s.investigateId || s.investigateResult || s.investigateError) {
@@ -315,10 +316,10 @@
       : c.body;
     var mine = PR.currentUserLogin && author === PR.currentUserLogin;
     var isEditing = PR.editingCommentId === dbid && PR.editingCommentKind === 'issue';
-    var claudeBlock = (dbid != null && !isEditing)
-      ? PR.renderConvClaudeBlock({ dbid: dbid, kind: 'issue', body: displayBody || '' })
-      : '';
     var aiFinding = PR.isAiFinding(displayBody);
+    var claudeBlock = (dbid != null && !isEditing)
+      ? PR.renderConvClaudeBlock({ dbid: dbid, kind: 'issue', body: displayBody || '', author: aiFinding ? 'Klaussy' : author })
+      : '';
     var avatar = aiFinding
       ? PR.avatarHtml('Klaussy', { color: 'var(--accent)', letter: 'K', cls: 'pr-conv-avatar-ai' })
       : PR.avatarHtml(author);
@@ -330,7 +331,7 @@
           + '<span class="pr-conv-kind">' + (aiFinding ? 'review finding' : 'commented') + '</span>'
           + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
           + (mine && !isEditing && dbid != null && !aiFinding
-              ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit" aria-label="Edit">✎</button>'
+              ? '<button class="pr-conv-edit-btn" type="button" data-kind="issue" data-id="' + dbid + '" title="Edit" aria-label="Edit your comment from ' + PR.escHtml(when) + '">✎</button>'
               : '')
         + '</div>'
         + (isEditing
@@ -348,7 +349,7 @@
     return '<div class="pr-conv-edit-wrap" data-id="' + dbid + '" data-kind="' + kind + '">'
       + '<textarea class="pr-conv-edit-input" aria-label="Edit comment" rows="5">' + PR.escHtml(body || '') + '</textarea>'
       + '<div class="pr-conv-edit-actions">'
-        + '<span class="pr-conv-edit-error"></span>'
+        + '<span class="pr-conv-edit-error" id="pr-conv-edit-error-' + dbid + '" role="alert"></span>'
         + '<button class="pr-conv-edit-cancel" type="button">Cancel</button>'
         + '<button class="pr-conv-edit-save" type="button">Save</button>'
       + '</div>'
@@ -415,6 +416,7 @@
             dbid: dbid,
             kind: 'review',
             body: displayBody || '',
+            author: author,
             path: threadPath,
             hunk: threadHunk,
             replyParentId: replyParentId,
@@ -426,7 +428,7 @@
           + '<span class="pr-conv-author">' + PR.escHtml(author) + '</span>'
           + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
           + (mine && !isEditing && dbid != null
-              ? '<button class="pr-conv-edit-btn" type="button" data-kind="review" data-id="' + dbid + '" title="Edit" aria-label="Edit">✎</button>'
+              ? '<button class="pr-conv-edit-btn" type="button" data-kind="review" data-id="' + dbid + '" title="Edit" aria-label="Edit your comment from ' + PR.escHtml(when) + '">✎</button>'
               : '')
         + '</div>'
         + (isEditing
@@ -447,7 +449,8 @@
       + '<div class="pr-conv-thread-comments">' + commentsHtml + '</div>'
       + (thread.id
           ? '<div class="pr-conv-thread-foot">'
-              + '<button type="button" class="pr-conv-thread-resolve-btn" data-thread-id="' + PR.escHtml(thread.id) + '" data-resolved="' + (thread.isResolved ? '1' : '0') + '">'
+              + '<button type="button" class="pr-conv-thread-resolve-btn" data-thread-id="' + PR.escHtml(thread.id) + '" data-resolved="' + (thread.isResolved ? '1' : '0') + '"'
+                + (path ? ' aria-label="' + (thread.isResolved ? 'Unresolve' : 'Resolve') + ' thread on ' + PR.escHtml(path) + '"' : '') + '>'
                 + (thread.isResolved ? 'Unresolve' : 'Resolve') + '</button>'
             + '</div>'
           : '')
@@ -470,7 +473,9 @@
       btn.disabled = false;
       btn.textContent = orig;
       window.toast.error('Failed to ' + (wasResolved ? 'unresolve' : 'resolve') + ' thread: ' + res.error);
+      return;
     }
+    A11y.announce(wasResolved ? 'Thread unresolved' : 'Thread resolved');
   };
 
   PR.reviewStateLabel = function(state) {
@@ -606,23 +611,24 @@
       // Failing checks with an id can expand their file:line annotations inline
       // — the whole row is the toggle (chevron rotates), so no separate button.
       var expandable = b === 'fail' && c.id != null && c.id !== '';
+      var nameAttr = PR.escHtml(c.name || 'check');
       var debugBtn = (b === 'fail' && c.link)
-        ? '<button class="pr-check-debug-btn" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(c.id ? String(c.id) : '') + '" title="Use the agent to diagnose this failure">Debug</button>'
+        ? '<button class="pr-check-debug-btn" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(c.id ? String(c.id) : '') + '" title="Use the agent to diagnose this failure" aria-label="Debug ' + nameAttr + '">Debug</button>'
         : '';
       // Primary action for failing checks: spawn Claude in the PR worktree
       // with edit tools, then surface the resulting diff for the user to
       // review and push.
       var fixBtn = (b === 'fail' && c.link && c.id)
-        ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(String(c.id)) + '" title="Have the agent edit, commit, and push a fix">Fix</button>'
+        ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(String(c.id)) + '" title="Have the agent edit, commit, and push a fix" aria-label="Fix ' + nameAttr + '">Fix</button>'
         : '';
       var rerunBtn = (b === 'fail' && c.runId)
-        ? '<button class="pr-check-action-btn pr-check-action-rerun" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Rerun failed jobs in this workflow run">Rerun</button>'
+        ? '<button class="pr-check-action-btn pr-check-action-rerun" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Rerun failed jobs in this workflow run" aria-label="Rerun ' + nameAttr + '">Rerun</button>'
         : '';
       var cancelBtn = (b === 'pending' && c.runId)
-        ? '<button class="pr-check-action-btn pr-check-action-cancel" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Cancel this workflow run">Cancel</button>'
+        ? '<button class="pr-check-action-btn pr-check-action-cancel" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Cancel this workflow run" aria-label="Cancel ' + nameAttr + '">Cancel</button>'
         : '';
       var watchBtn = (b === 'pending' && c.runId)
-        ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Stream the workflow log live">Watch log</button>'
+        ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Stream the workflow log live" aria-label="Watch log for ' + nameAttr + '" aria-expanded="false">Watch log</button>'
         : '';
       var openBtn = c.link
         ? '<button class="pr-check-open" type="button" data-link="' + PR.escHtml(c.link) + '" title="Open on ' + PR.escHtml(forgeName) + '" aria-label="Open ' + PR.escHtml(c.name || 'check') + ' on ' + PR.escHtml(forgeName) + '">\u2197</button>'
@@ -794,13 +800,18 @@
   PR.toggleLogWatch = function(btn) {
     var row = btn.closest('.pr-check-row');
     if (!row) return;
+    function setLabel(text, expanded) {
+      btn.textContent = text;
+      btn.setAttribute('aria-label', text + ' for ' + (btn.dataset.name || 'check'));
+      if (expanded != null) btn.setAttribute('aria-expanded', String(expanded));
+    }
     var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-log-watch-panel')
       ? row.nextElementSibling : null;
     if (existing) {
       var existingId = existing.dataset.requestId;
       if (existingId) window.klaus.pr.reviewRunLogWatchStop(existingId);
       existing.remove();
-      btn.textContent = 'Watch log';
+      setLabel('Watch log', false);
       return;
     }
     var runId = btn.dataset.runId;
@@ -809,6 +820,7 @@
 
     var panel = document.createElement('div');
     panel.className = 'pr-check-log-watch-panel';
+    panel.id = 'pr-log-watch-' + requestId;
     panel.dataset.requestId = requestId;
     panel.innerHTML = '<div class="pr-check-log-watch-head">'
         + '<span>Tailing run #' + PR.escHtml(runId) + '</span>'
@@ -816,7 +828,8 @@
       + '</div>'
       + '<pre class="pr-check-log-watch-body">Waiting for log…</pre>';
     row.insertAdjacentElement('afterend', panel);
-    btn.textContent = 'Stop watching';
+    btn.setAttribute('aria-controls', panel.id);
+    setLabel('Stop watching', true);
 
     var bodyEl = panel.querySelector('.pr-check-log-watch-body');
     var firstChunk = true;
@@ -833,12 +846,12 @@
     });
     var unsubDone = window.klaus.pr.onRunLogDone(requestId, function (info) {
       var head = panel.querySelector('.pr-check-log-watch-head span');
-      if (head) {
-        if (info && info.truncated) head.textContent = 'Log too large — stopped tailing';
-        else if (info && info.conclusion) head.textContent = 'Run completed: ' + info.conclusion;
-        else head.textContent = 'Run completed';
-      }
-      btn.textContent = 'Watch log';
+      var msg = info && info.truncated ? 'Log too large — stopped tailing'
+        : info && info.conclusion ? 'Run completed: ' + info.conclusion
+        : 'Run completed';
+      if (head) head.textContent = msg;
+      A11y.announce(msg);
+      setLabel('Watch log');
     });
 
     panel.querySelector('.pr-check-log-watch-stop').addEventListener('click', function () {
@@ -846,21 +859,21 @@
       if (unsubChunk) unsubChunk();
       if (unsubDone) unsubDone();
       panel.remove();
-      btn.textContent = 'Watch log';
+      setLabel('Watch log', false);
+      if (btn.isConnected) btn.focus();
     });
 
     window.klaus.pr.reviewRunLogWatchStart(requestId, runId).then(function (res) {
       if (res && res.error) {
         bodyEl.classList.add('diff-error');
+        bodyEl.setAttribute('role', 'alert');
         bodyEl.textContent = res.error;
-        btn.textContent = 'Watch log';
+        setLabel('Watch log');
       }
     });
   };
 
-  // Shared rerun/cancel handler. Button label flips to a transient state, then
-  // the Checks tab is refreshed once gh returns. Errors surface on the button
-  // itself rather than a toast — keeps the row in scope for the user.
+  // Shared rerun/cancel handler; errors show next to the button so the row stays in scope.
   PR.runQuickAction = function(btn, kind) {
     var runId = btn.dataset.runId;
     if (!runId) return;
@@ -869,21 +882,29 @@
     if (!confirm(verb + ' for "' + name + '"?')) return;
 
     var originalText = btn.textContent;
+    var prevError = btn.nextElementSibling && btn.nextElementSibling.classList.contains('pr-check-action-error')
+      ? btn.nextElementSibling : null;
+    if (prevError) prevError.remove();
     btn.disabled = true;
     btn.textContent = kind === 'rerun' ? 'Rerunning…' : 'Cancelling…';
+
+    function showError(message) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+      var errEl = document.createElement('span');
+      errEl.className = 'pr-check-action-error';
+      errEl.setAttribute('role', 'alert');
+      errEl.textContent = verb + ' failed: ' + message;
+      btn.insertAdjacentElement('afterend', errEl);
+    }
 
     var p = kind === 'rerun'
       ? window.klaus.pr.reviewRunRerunFailed(runId)
       : window.klaus.pr.reviewRunCancel(runId);
 
     p.then(function (res) {
-      if (res && res.error) {
-        btn.disabled = false;
-        btn.textContent = 'Failed';
-        btn.title = res.error;
-        setTimeout(function () { btn.textContent = originalText; btn.title = ''; }, 4000);
-        return;
-      }
+      if (res && res.error) { showError(res.error); return; }
+      A11y.announce(kind === 'rerun' ? 'Rerun started' : 'Run cancelled');
       // Successful kick — refresh checks so the row's state reflects the new
       // run. Repaint just the Checks-tab slot rather than re-rendering the
       // whole PR view; the latter caused the entire section to flash empty
@@ -893,9 +914,7 @@
       PR.fetchAndRenderChecks(PR.lastState && PR.lastState.number)
         .then(function () { PR.repaintChecksTab({ force: true }); });
     }).catch(function (err) {
-      btn.disabled = false;
-      btn.textContent = 'Failed';
-      btn.title = (err && err.message) || 'unknown error';
+      showError((err && err.message) || 'unknown error');
     });
   };
 

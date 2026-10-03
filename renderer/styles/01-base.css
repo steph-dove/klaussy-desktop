@@ -3160,3 +3160,5 @@ body.task-branchless #ahead-behind {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-md);
 }
+
+.palette-list > .palette-empty { padding: 8px 12px; color: var(--text-muted); font-size: 13px; }

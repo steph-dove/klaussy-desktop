@@ -1803,3 +1803,4 @@
 #diff-view .diff-line:focus-visible {
   outline-offset: -2px;
 }
+.diff-status-close { margin-left: 8px; background: none; border: none; color: inherit; cursor: pointer; font-size: 14px; min-width: 24px; min-height: 24px; }

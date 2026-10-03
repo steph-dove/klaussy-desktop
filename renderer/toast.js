@@ -167,7 +167,9 @@
     // Sticky toasts stay until clicked — used for actionable prompts the user
     // shouldn't miss (a timed-out upgrade nag reads as "nothing to do").
     const timeout = DISMISS_MS[level] || DISMISS_MS.info;
-    const arm = () => { if (!opts.sticky && !dismissed) timer = setTimeout(dismiss, timeout); };
+    // Errors don't time out: there's no reliable way for keyboard users to reach them in time (WCAG 2.2.1).
+    const sticky = opts.sticky || level === 'error';
+    const arm = () => { if (!sticky && !dismissed) timer = setTimeout(dismiss, timeout); };
     const pause = () => { clearTimeout(timer); timer = null; };
     arm();
     el.addEventListener('mouseenter', pause);

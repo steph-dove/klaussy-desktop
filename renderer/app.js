@@ -517,13 +517,18 @@ window.App = window.App || {};
     if (prefs.theme !== undefined) {
       ThemeManager.apply(prefs.theme.preset);
     }
-    if (prefs.screenReaderMode !== undefined) {
+    if (prefs.screenReaderMode !== undefined || prefs.screenReaderActive !== undefined) {
       if (!AppState.savedPrefs) AppState.savedPrefs = {};
-      AppState.savedPrefs.screenReaderMode = prefs.screenReaderMode;
+      if (prefs.screenReaderMode !== undefined) AppState.savedPrefs.screenReaderMode = prefs.screenReaderMode;
+      if (prefs.screenReaderActive !== undefined) AppState.savedPrefs.screenReaderActive = prefs.screenReaderActive;
       var sr = AppUtils.screenReaderMode(AppState.savedPrefs);
       App.tasks.forEach(function (task) {
         task.terminal.options.screenReaderMode = sr;
         (task.subTerminals || []).forEach(function (sub) { sub.terminal.options.screenReaderMode = sr; });
+      });
+      var pr = window.PrReview;
+      [pr && pr.chatTerminal, pr && pr.implTerminal].forEach(function (rt) {
+        if (rt) rt.terminal.options.screenReaderMode = sr;
       });
       if (window.FileBrowser && window.FileBrowser.setScreenReaderMode) window.FileBrowser.setScreenReaderMode(sr);
     }

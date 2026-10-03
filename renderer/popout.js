@@ -24,9 +24,18 @@
       minimumContrastRatio: 4.5, // never let low-contrast text vanish
       allowProposedApi: true,
     });
+    var srPrefs = {};
     window.klaus.ui.getPreferences().then(function (prefs) {
+      srPrefs = { screenReaderMode: prefs.screenReaderMode, screenReaderActive: prefs.screenReaderActive };
       terminal.options.screenReaderMode = AppUtils.screenReaderMode(prefs);
     }).catch(function (err) { console.error('[popout] getPreferences failed', err); });
+    window.klaus.ui.onPreferencesChanged(function (prefs) {
+      if (prefs.screenReaderMode !== undefined) srPrefs.screenReaderMode = prefs.screenReaderMode;
+      if (prefs.screenReaderActive !== undefined) srPrefs.screenReaderActive = prefs.screenReaderActive;
+      if (prefs.screenReaderMode !== undefined || prefs.screenReaderActive !== undefined) {
+        terminal.options.screenReaderMode = AppUtils.screenReaderMode(srPrefs);
+      }
+    });
 
     var fitAddon = new FitAddon.FitAddon();
     terminal.loadAddon(fitAddon);
@@ -38,6 +47,7 @@
 
     var container = document.getElementById('popout-terminal');
     terminal.open(container);
+    AppUtils.labelTerminal(terminal, function () { return name + ' terminal'; });
 
     setTimeout(function () {
       fitAddon.fit();

@@ -36,5 +36,20 @@
   });
   A11y.arrowNav(document.querySelector('.empty-dashboard-grid'), '.dashboard-card', { orientation: 'both' });
 
+  // btn-diff's .active is the single source of truth for the panel's open state, toggled from several call sites.
+  var btnDiff = byId('btn-diff');
+  var diffToggles = [btnDiff, byId('diff-reveal')].filter(Boolean);
+  function syncDiffExpanded() {
+    var open = btnDiff.classList.contains('active');
+    diffToggles.forEach(function (b) {
+      b.setAttribute('aria-controls', 'diff-panel');
+      b.setAttribute('aria-expanded', String(open));
+    });
+  }
+  if (btnDiff) {
+    syncDiffExpanded();
+    new MutationObserver(syncDiffExpanded).observe(btnDiff, { attributes: true, attributeFilter: ['class'] });
+  }
+
   A11y.arrowNav(byId('task-list'), '.task-main, .session-group-toggle, .session-group-select, .saved-session-resume, .worktree-open-claude, button.collapsed-icon');
 })();

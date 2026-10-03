@@ -49,14 +49,13 @@ window.PRPanel = (function () {
         handleToggleResolve(resolveBtn);
         return;
       }
-      // Expand a resolved thread when its header is clicked (but ignore button clicks).
+      // Toggle a thread when its header is clicked (but ignore other button clicks).
       var header = e.target.closest('.pr-thread-header');
       if (header && (!e.target.closest('button') || e.target.closest('.pr-thread-expand'))) {
         var thread = header.closest('.pr-thread');
-        if (thread && thread.classList.contains('pr-thread-resolved')) {
-          var expanded = thread.classList.toggle('pr-thread-expanded');
-          var threadToggle = header.querySelector('.pr-thread-expand');
-          if (threadToggle) threadToggle.setAttribute('aria-expanded', String(expanded));
+        if (thread) {
+          thread.classList.toggle(thread.classList.contains('pr-thread-resolved') ? 'pr-thread-expanded' : 'pr-thread-collapsed');
+          syncThreadToggle(thread);
         }
         return;
       }
@@ -323,9 +322,9 @@ window.PRPanel = (function () {
     var expanded = hasFail; // auto-expand when anything is failing
 
     var html = '<div class="pr-checks-section' + (expanded ? ' expanded' : '') + '">';
-    html += '<button type="button" class="pr-checks-toggle">';
+    html += '<button type="button" class="pr-checks-toggle" aria-expanded="' + expanded + '">';
     html += '<span class="pr-checks-summary">' + summaryBits.join(' <span class="pr-check-dot">&middot;</span> ') + '</span>';
-    html += '<span class="pr-checks-caret">&#9662;</span>';
+    html += '<span class="pr-checks-caret" aria-hidden="true">&#9662;</span>';
     html += '</button>';
     html += '<div class="pr-checks-list">';
     function formatDur(startedAt, completedAt) {
@@ -346,7 +345,7 @@ window.PRPanel = (function () {
       if (dur) html += '<span class="pr-check-dur">' + dur + '</span>';
       html += '<span class="pr-check-conclusion">' + escHtml(c.state || '') + '</span>';
       if (c.link) {
-        html += '<a href="#" class="pr-check-link" data-url="' + escAttr(c.link) + '" title="Open in browser">&#8599;</a>';
+        html += '<a href="#" class="pr-check-link" data-url="' + escAttr(c.link) + '" title="Open in browser" aria-label="Open ' + escAttr(label) + ' in browser">&#8599;</a>';
       }
       html += '</div>';
     });
@@ -358,7 +357,9 @@ window.PRPanel = (function () {
     var section = host.querySelector('.pr-checks-section');
     var toggle = host.querySelector('.pr-checks-toggle');
     if (toggle && section) {
-      toggle.addEventListener('click', function () { section.classList.toggle('expanded'); });
+      toggle.addEventListener('click', function () {
+        toggle.setAttribute('aria-expanded', String(section.classList.toggle('expanded')));
+      });
     }
     host.querySelectorAll('.pr-check-link').forEach(function (a) {
       a.addEventListener('click', function (e) {
@@ -459,17 +460,18 @@ window.PRPanel = (function () {
     html += '<div class="pr-reply-ai-result" id="' + rid + '-ai" style="display:none;"></div>';
     // Reply input row
     html += '<div class="pr-reply-input-row">';
-    html += '<textarea class="pr-reply-input" aria-label="Reply" id="' + rid + '-input" placeholder="Write a reply..." rows="1"></textarea>';
+    var to = escAttr(opts.author || 'comment');
+    html += '<textarea class="pr-reply-input" aria-label="Reply to ' + to + '" id="' + rid + '-input" placeholder="Write a reply..." rows="1"></textarea>';
     html += '<button class="pr-reply-ask-claude" data-rid="' + rid + '"';
     html += ' data-author="' + escAttr(opts.author) + '"';
     html += ' data-body="' + escAttr(opts.body) + '"';
     if (opts.filePath) html += ' data-file="' + escAttr(opts.filePath) + '"';
     if (opts.diffHunk) html += ' data-hunk="' + escAttr(opts.diffHunk) + '"';
-    html += ' title="Ask Claude to draft a reply">Claude</button>';
+    html += ' title="Ask Claude to draft a reply" aria-label="Ask Claude to draft a reply to ' + to + '">Claude</button>';
     html += '<button class="pr-reply-send" data-rid="' + rid + '"';
     if (opts.commentId) html += ' data-comment-id="' + escAttr(String(opts.commentId)) + '"';
     html += ' data-threadable="' + (opts.threadable ? '1' : '0') + '"';
-    html += ' title="' + (opts.threadable ? 'Reply in thread' : 'Post comment') + '">Reply</button>';
+    html += ' title="' + (opts.threadable ? 'Reply in thread' : 'Post comment') + '" aria-label="Send reply to ' + to + '">Reply</button>';
     html += '</div>';
     html += '</div>';
     return html;
@@ -594,17 +596,17 @@ window.PRPanel = (function () {
 
       // Thread header: path:line + state badges + resolve toggle
       html += '<div class="pr-thread-header">';
-      html += t.isResolved
-        ? '<button type="button" class="pr-thread-path pr-thread-expand" aria-expanded="false">' + escHtml(pathLabel) + '</button>'
-        : '<span class="pr-thread-path">' + escHtml(pathLabel) + '</span>';
+      html += '<button type="button" class="pr-thread-path pr-thread-expand" aria-expanded="' + !t.isResolved + '">' + escHtml(pathLabel || 'Thread') + '</button>';
       html += '<span class="pr-thread-meta">';
       if (t.isOutdated) html += '<span class="pr-thread-badge outdated">outdated</span>';
       if (t.isResolved) {
         html += '<span class="pr-thread-badge resolved">resolved</span>';
         html += '<span class="pr-thread-count">' + comments.length + ' comment' + (comments.length === 1 ? '' : 's') + '</span>';
       }
-      html += '<button type="button" class="pr-thread-resolve-btn" data-thread-id="' + escAttr(t.id) + '" data-resolved="' + (t.isResolved ? '1' : '0') + '">'
-           +  (t.isResolved ? 'Unresolve' : 'Resolve') + '</button>';
+      var resolveVerb = t.isResolved ? 'Unresolve' : 'Resolve';
+      html += '<button type="button" class="pr-thread-resolve-btn" data-thread-id="' + escAttr(t.id) + '" data-resolved="' + (t.isResolved ? '1' : '0') + '"'
+           +  (pathLabel ? ' aria-label="' + resolveVerb + ' thread on ' + escAttr(pathLabel) + '"' : '') + '>'
+           +  resolveVerb + '</button>';
       html += '</div>';
       html += '</div>';
 
@@ -682,9 +684,10 @@ window.PRPanel = (function () {
     btn.textContent = 'Claude';
 
     if (result.error) {
-      aiEl.innerHTML = '<div class="pr-ai-error">Failed: ' + escHtml(result.error) + '</div>';
+      aiEl.innerHTML = '<div class="pr-ai-error" role="alert">Failed: ' + escHtml(result.error) + '</div>';
       return;
     }
+    A11y.announce('Claude\'s analysis is ready');
 
     var reviewText = result.review;
     var replyMatch = reviewText.match(/SUGGESTED REPLY:\s*\n?([\s\S]*)/i);
@@ -749,6 +752,7 @@ window.PRPanel = (function () {
     autoGrow(inputEl);
     btn.disabled = false;
     btn.textContent = 'Reply';
+    A11y.announce('Reply posted');
 
     // Hide AI result if showing
     var aiEl = document.getElementById(rid + '-ai');
@@ -784,11 +788,24 @@ window.PRPanel = (function () {
     var thread = btn.closest('.pr-thread');
     if (thread) {
       thread.classList.toggle('pr-thread-resolved', !wasResolved);
-      if (wasResolved) thread.classList.remove('pr-thread-expanded');
+      thread.classList.remove('pr-thread-expanded', 'pr-thread-collapsed');
+      syncThreadToggle(thread);
     }
     btn.disabled = false;
     btn.dataset.resolved = wasResolved ? '0' : '1';
     btn.textContent = wasResolved ? 'Resolve' : 'Unresolve';
+    var label = btn.getAttribute('aria-label');
+    if (label) btn.setAttribute('aria-label', label.replace(/^\w+/, btn.textContent));
+    A11y.announce(wasResolved ? 'Thread unresolved' : 'Thread resolved');
+  }
+
+  function syncThreadToggle(thread) {
+    var toggle = thread.querySelector('.pr-thread-expand');
+    if (!toggle) return;
+    var expanded = thread.classList.contains('pr-thread-resolved')
+      ? thread.classList.contains('pr-thread-expanded')
+      : !thread.classList.contains('pr-thread-collapsed');
+    toggle.setAttribute('aria-expanded', String(expanded));
   }
 
   // ---- Whole-PR AI review (F6) ----
@@ -916,14 +933,16 @@ window.PRPanel = (function () {
       }
       if (result && result.cancelled) {
         bodyEl.innerHTML = '<div class="pr-ai-error">Cancelled.</div>';
+        A11y.announce('Review cancelled');
         return;
       }
       if (result && result.error) {
-        bodyEl.innerHTML = '<div class="pr-ai-error">Failed: ' + escHtml(result.error) + '</div>';
+        bodyEl.innerHTML = '<div class="pr-ai-error" role="alert">Failed: ' + escHtml(result.error) + '</div>';
         return;
       }
       // Render final text (if we didn't already via stream events)
       renderFinal();
+      A11y.announce('Claude\'s PR review finished');
       progressEl.innerHTML = ''; // clear progress chips once done
 
       // Persist so reopening the app doesn't lose the review
@@ -941,7 +960,7 @@ window.PRPanel = (function () {
     if (startResult && startResult.error) {
       clearInterval(elapsedTimer);
       unsubscribe();
-      bodyEl.innerHTML = '<div class="pr-ai-error">Failed to start: ' + escHtml(startResult.error) + '</div>';
+      bodyEl.innerHTML = '<div class="pr-ai-error" role="alert">Failed to start: ' + escHtml(startResult.error) + '</div>';
       if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
     }
   }
@@ -968,6 +987,7 @@ window.PRPanel = (function () {
     }
 
     commentInput.value = '';
+    A11y.announce('Comment posted');
     await loadPR();
   }
 
@@ -992,6 +1012,7 @@ window.PRPanel = (function () {
     }
 
     commentInput.value = '';
+    A11y.announce(event === 'approve' ? 'PR approved' : 'Changes requested');
     await loadPR();
   }
 
@@ -1143,7 +1164,7 @@ window.PRPanel = (function () {
 
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
-      if (btn.disabled) return;
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
       menu.hidden = !menu.hidden;
     });
     A11y.dropdownMenu(btn, menu, 'button[data-strategy]');
@@ -1191,13 +1212,25 @@ window.PRPanel = (function () {
     if (menu) menu.hidden = true;
 
     var reason = mergeGateReason(currentPR, currentChecks);
+    var reasonEl = document.getElementById('pr-merge-reason');
+    if (!reasonEl) {
+      reasonEl = document.createElement('span');
+      reasonEl.id = 'pr-merge-reason';
+      reasonEl.className = 'sr-only';
+      btn.insertAdjacentElement('afterend', reasonEl);
+      btn.setAttribute('aria-describedby', reasonEl.id);
+    }
+    // aria-disabled rather than disabled so keyboard users can still reach the button and hear why.
+    btn.disabled = false;
     if (reason) {
-      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
       btn.title = reason;
+      reasonEl.textContent = 'Merge unavailable: ' + reason;
       btn.classList.remove('ready');
     } else {
-      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
       btn.title = 'Merge this PR';
+      reasonEl.textContent = '';
       btn.classList.add('ready');
     }
   }
@@ -1219,6 +1252,7 @@ window.PRPanel = (function () {
       return;
     }
 
+    A11y.announce('PR merged');
     await loadPR();
   }
 
@@ -1251,7 +1285,7 @@ window.PRPanel = (function () {
       html += '<div class="pr-ai-finding' + sevCls + '" data-finding-index="' + idx + '">';
       html += '<div class="pr-ai-finding-body">' + renderMarkdown(f) + '</div>';
       html += '<div class="pr-ai-finding-actions">';
-      html += '<button type="button" class="pr-ai-fix-btn" data-finding-index="' + idx + '">Fix this</button>';
+      html += '<button type="button" class="pr-ai-fix-btn" data-finding-index="' + idx + '" aria-label="Fix finding ' + (idx + 1) + '">Fix this</button>';
       html += '</div>';
       html += '</div>';
     });
@@ -1308,6 +1342,7 @@ window.PRPanel = (function () {
       window.toast.error('Could not send to terminal: ' + result.error);
       return;
     }
+    A11y.announce('Sent to terminal');
     if (btn) {
       btn.textContent = 'Sent ✓';
       setTimeout(function () { btn.textContent = origText; }, 2000);

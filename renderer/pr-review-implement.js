@@ -456,6 +456,7 @@
       await navigator.clipboard.writeText(PR.findingCommentBody(f));
       f.copyStatus = 'copied';
       PR.repaintAiReviewTab();
+      A11y.announce('Copied as Markdown');
       setTimeout(function () {
         f.copyStatus = null;
         PR.repaintAiReviewTab();
@@ -464,6 +465,7 @@
       console.error('clipboard write failed', err);
       f.copyStatus = 'failed';
       PR.repaintAiReviewTab();
+      A11y.announce('Copy failed', 'assertive');
       setTimeout(function () { f.copyStatus = null; PR.repaintAiReviewTab(); }, 2000);
     }
   };
@@ -511,6 +513,7 @@
       f.chatRequestId = null;
       if (result && result.error) {
         f.chatError = result.error;
+        A11y.announce('Chat failed: ' + result.error, 'assertive');
       } else if (result && result.cancelled) {
         // Commit whatever streamed before the cancel so the user keeps the
         // partial response; Claude doesn't get a second chance at the turn.
@@ -519,6 +522,7 @@
         }
       } else {
         f.chatMessages.push({ role: 'assistant', content: f.chatStreaming || '' });
+        A11y.announce('Claude replied');
       }
       f.chatStreaming = '';
       PR.repaintAiReviewTab();
@@ -533,6 +537,7 @@
         if (unsubData) unsubData();
         f.chatRequestId = null;
         f.chatError = r.error;
+        A11y.announce('Chat failed: ' + r.error, 'assertive');
         // Roll back the user message we optimistically appended — easier
         // than disabling Send until the IPC resolves.
         f.chatMessages = f.chatMessages.slice(0, -1);
@@ -597,10 +602,12 @@
       f.chatRequestId = null;
       if (result && result.error) {
         f.chatError = result.error;
+        A11y.announce('Chat failed: ' + result.error, 'assertive');
       } else if (result && result.cancelled) {
         if (f.chatStreaming) f.chatMessages.push({ role: 'assistant', content: f.chatStreaming });
       } else {
         f.chatMessages.push({ role: 'assistant', content: f.chatStreaming || '' });
+        A11y.announce('Claude replied');
       }
       f.chatStreaming = '';
       PR.repaintAiReviewTab();
@@ -659,10 +666,13 @@
       s.investigateId = null;
       if (result && result.error) {
         s.investigateError = result.error;
+        A11y.announce('Investigation failed: ' + result.error, 'assertive');
       } else if (result && result.cancelled) {
         if (s.investigateStreaming) s.investigateResult = s.investigateStreaming;
+        A11y.announce('Investigation cancelled');
       } else {
         s.investigateResult = s.investigateStreaming || '';
+        A11y.announce('Investigation finished');
       }
       s.investigateStreaming = '';
       PR.repaintConversationTab();
@@ -673,6 +683,7 @@
         if (unsubData) unsubData();
         s.investigateId = null;
         s.investigateError = r.error;
+        A11y.announce('Investigation failed: ' + r.error, 'assertive');
         PR.repaintConversationTab();
       }
     });
@@ -796,11 +807,14 @@
       f.investigateId = null;
       if (result && result.error) {
         f.investigateError = result.error;
+        A11y.announce('Investigation failed: ' + result.error, 'assertive');
       } else if (result && result.cancelled) {
         // Keep whatever streamed before cancel so the user sees partial progress.
         if (f.investigateStreaming) f.investigateResult = f.investigateStreaming;
+        A11y.announce('Investigation cancelled');
       } else {
         f.investigateResult = f.investigateStreaming || '';
+        A11y.announce('Investigation finished');
       }
       f.investigateStreaming = '';
       PR.repaintAiReviewTab();
@@ -812,6 +826,7 @@
         if (unsubData) unsubData();
         f.investigateId = null;
         f.investigateError = r.error;
+        A11y.announce('Investigation failed: ' + r.error, 'assertive');
         PR.repaintAiReviewTab();
       }
     });
@@ -1125,7 +1140,7 @@
           + '<button class="pr-submit-cancel" type="button" data-dialog-close>Cancel</button>'
           + '<button class="pr-submit-send" type="button">Submit review</button>'
         + '</div>'
-        + '<div class="pr-submit-error" role="alert" style="display:none;"></div>'
+        + '<div class="pr-submit-error" id="pr-submit-error" role="alert" style="display:none;"></div>'
       + '</div>';
     document.body.appendChild(overlay);
 
@@ -1139,19 +1154,30 @@
     var dialogEl = overlay.querySelector('.pr-submit-dialog');
     bodyTa.focus();
 
+    function summaryError(msg) {
+      errEl.style.display = '';
+      errEl.textContent = msg;
+      bodyTa.setAttribute('aria-invalid', 'true');
+      bodyTa.setAttribute('aria-describedby', errEl.id);
+      bodyTa.focus();
+    }
+    bodyTa.addEventListener('input', function () {
+      if (!bodyTa.hasAttribute('aria-invalid')) return;
+      bodyTa.removeAttribute('aria-invalid');
+      bodyTa.removeAttribute('aria-describedby');
+    });
+
     sendBtn.addEventListener('click', async function () {
       var event = overlay.querySelector('input[name="pr-event"]:checked').value;
       var body = bodyTa.value.trim();
       // GitHub requires a body for REQUEST_CHANGES and COMMENT reviews (with
       // no inline comments); surface that ahead of the round trip.
       if (event === 'REQUEST_CHANGES' && !body) {
-        errEl.style.display = '';
-        errEl.textContent = 'Please provide a summary when requesting changes.';
+        summaryError('Please provide a summary when requesting changes.');
         return;
       }
       if (event === 'COMMENT' && !body && PR.pendingComments.length === 0) {
-        errEl.style.display = '';
-        errEl.textContent = 'Add a summary or at least one line comment.';
+        summaryError('Add a summary or at least one line comment.');
         return;
       }
       sendBtn.disabled = true;
@@ -1173,6 +1199,13 @@
       }
       PR.pendingComments = [];
       close();
+      PR.renderPendingReviewBar(PR.lastState);
+      A11y.announce('Review submitted');
+      // The Finish review opener is gone, so land on a header control once the dialog has released the page.
+      setTimeout(function () {
+        var header = PR.hostEl.querySelector('.js-pull-updates');
+        if (header) header.focus();
+      }, 0);
       // Pull in the newly-posted threads so they replace the drafts inline.
       await window.klaus.pr.refreshThreads();
     });

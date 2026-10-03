@@ -133,9 +133,9 @@ window.AgentsPanel = (function () {
             '<span class="agent-item-status ' + escHtml(a.status) + '" role="img" aria-label="' + escHtml(a.status) + '"></span>' +
             '<span class="agent-item-title">' + escHtml(titleFor(a)) + '</span>' +
             '<div class="agent-item-actions">' +
-              '<button data-action="open" data-id="' + escHtml(a.id) + '">Open</button>' +
+              '<button data-action="open" data-id="' + escHtml(a.id) + '" aria-label="Open ' + escHtml(titleFor(a)) + '">Open</button>' +
               (a.status === 'running'
-                ? '<button data-action="cancel" data-id="' + escHtml(a.id) + '">Cancel</button>'
+                ? '<button data-action="cancel" data-id="' + escHtml(a.id) + '" aria-label="Cancel ' + escHtml(titleFor(a)) + '">Cancel</button>'
                 : '') +
             '</div>' +
           '</div>' +

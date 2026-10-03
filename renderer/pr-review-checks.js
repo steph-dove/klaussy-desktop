@@ -117,7 +117,7 @@
           + '<input class="pr-workflow-ref" id="pr-workflow-ref" type="text" value="' + PR.escHtml(defaultRef) + '" />'
           + '<label for="pr-workflow-inputs">Inputs (JSON object, optional)</label>'
           + '<textarea class="pr-workflow-inputs" id="pr-workflow-inputs" placeholder=\'{"environment": "staging"}\'></textarea>'
-          + '<div class="pr-workflow-dispatch-error" role="alert" hidden></div>'
+          + '<div class="pr-workflow-dispatch-error" id="pr-workflow-dispatch-error" role="alert" hidden></div>'
         + '</div>'
         + '<div class="pr-workflow-dispatch-actions">'
           + '<button type="button" class="pr-workflow-dispatch-cancel" data-dialog-close>Cancel</button>'
@@ -154,25 +154,37 @@
       }).join('');
     });
 
+    function fieldError(field, msg) {
+      [selectEl, refEl, inputsEl].forEach(function (el) {
+        el.removeAttribute('aria-invalid');
+        el.removeAttribute('aria-describedby');
+      });
+      errorEl.textContent = msg || '';
+      errorEl.hidden = !msg;
+      if (!field) return;
+      field.setAttribute('aria-invalid', 'true');
+      field.setAttribute('aria-describedby', errorEl.id);
+      field.focus();
+    }
+
     goBtn.addEventListener('click', function () {
       var workflowId = selectEl.value;
-      if (!workflowId) { errorEl.textContent = 'Choose a workflow.'; errorEl.hidden = false; return; }
+      if (!workflowId) { fieldError(selectEl, 'Choose a workflow.'); return; }
       var ref = refEl.value.trim();
-      if (!ref) { errorEl.textContent = 'Ref is required.'; errorEl.hidden = false; return; }
+      if (!ref) { fieldError(refEl, 'Ref is required.'); return; }
       var inputs = {};
       var raw = inputsEl.value.trim();
       if (raw) {
         try { inputs = JSON.parse(raw); }
-        catch (err) { errorEl.textContent = 'Inputs must be valid JSON: ' + err.message; errorEl.hidden = false; return; }
+        catch (err) { fieldError(inputsEl, 'Inputs must be valid JSON: ' + err.message); return; }
         if (typeof inputs !== 'object' || Array.isArray(inputs) || inputs === null) {
-          errorEl.textContent = 'Inputs must be a JSON object.';
-          errorEl.hidden = false;
+          fieldError(inputsEl, 'Inputs must be a JSON object.');
           return;
         }
       }
       goBtn.disabled = true;
       goBtn.textContent = 'Dispatching…';
-      errorEl.hidden = true;
+      fieldError(null);
       modalEl.setAttribute('aria-busy', 'true');
       window.klaus.pr.reviewWorkflowDispatch(workflowId, ref, inputs).catch(function (err) {
         return { error: (err && err.message) || String(err) };
@@ -187,6 +199,7 @@
         }
         // Successful dispatch. Refresh checks so the new run shows up promptly.
         close();
+        A11y.announce('Workflow dispatched');
         if (PR.lastState) {
           PR.fetchAndRenderChecks(PR.lastState.number).then(function () { PR.render(PR.lastState); });
         }
@@ -429,14 +442,17 @@
       }
       var openLabel = entry.openTaskState === 'opened' ? 'Opened ✓'
         : entry.openTaskState === 'opening' ? 'Opening…'
-        : entry.openTaskState === 'failed' ? 'Failed'
         : 'Open as task';
+      var openError = entry.openTaskState === 'failed'
+        ? '<div class="pr-check-debug-open-task-error">Couldn\'t open task: ' + PR.escHtml(entry.openTaskError || 'unknown error') + '</div>'
+        : '';
       footerEl.innerHTML =
         '<div class="pr-check-debug-usage">Ran in ' + PR.escHtml(String(entry.durationSec || 0)) + 's on your Anthropic account</div>'
         + '<div class="pr-check-debug-actions">'
           + '<button class="pr-check-debug-fix pr-check-action-primary" type="button" title="Apply this analysis as a code fix in the PR worktree">Fix this</button>'
           + '<button class="pr-check-debug-open-task" type="button"' + (entry.openTaskState === 'opening' ? ' disabled' : '') + ' title="Spawn an interactive agent task seeded with this analysis">' + PR.escHtml(openLabel) + '</button>'
-        + '</div>';
+        + '</div>'
+        + openError;
 
       footerEl.querySelector('.pr-check-debug-fix').addEventListener('click', function () {
         var fixBtn = PR.hostEl.querySelector('.pr-check-fix-btn[data-check-id="' + checkId + '"]');
@@ -451,25 +467,17 @@
         var prNumber = PR.lastState && PR.lastState.number;
         window.klaus.pr.debugCheckOpenAsTask(e.accumulated, e.checkName || '', prNumber).then(function (res) {
           if (!PR.openDebugChecks[checkId]) return;
-          if (res && res.error) {
-            PR.openDebugChecks[checkId].openTaskState = 'failed';
-            PR.openDebugChecks[checkId].openTaskError = res.error;
-            PR.paintDebugPanel(checkId);
-            setTimeout(function () {
-              if (PR.openDebugChecks[checkId] && PR.openDebugChecks[checkId].openTaskState === 'failed') {
-                PR.openDebugChecks[checkId].openTaskState = 'idle';
-                PR.paintDebugPanel(checkId);
-              }
-            }, 4000);
-            return;
-          }
+          if (res && res.error) throw new Error(res.error);
           PR.openDebugChecks[checkId].openTaskState = 'opened';
           PR.paintDebugPanel(checkId);
+          A11y.announce('Task opened');
         }).catch(function (err) {
           if (!PR.openDebugChecks[checkId]) return;
           PR.openDebugChecks[checkId].openTaskState = 'failed';
           PR.openDebugChecks[checkId].openTaskError = (err && err.message) || 'unknown error';
           PR.paintDebugPanel(checkId);
+          // Announced once here: the panel repaints while a chat streams, so a role="alert" in it would repeat.
+          A11y.announce('Couldn\'t open task: ' + PR.openDebugChecks[checkId].openTaskError, 'assertive');
         });
       });
     }
@@ -519,11 +527,13 @@
       e.chatRequestId = null;
       if (result && result.error) {
         e.chatError = result.error;
+        A11y.announce('Chat failed: ' + result.error, 'assertive');
       } else if (result && result.cancelled) {
         // Commit any partial reply so the user keeps the streamed context.
         if (e.chatStreaming) e.chatMessages.push({ role: 'assistant', content: e.chatStreaming });
       } else {
         e.chatMessages.push({ role: 'assistant', content: e.chatStreaming || '' });
+        A11y.announce('Agent replied');
       }
       e.chatStreaming = '';
       PR.paintDebugPanel(checkId);
@@ -545,6 +555,7 @@
         if (!e || e.chatRequestId !== requestId) return;
         e.chatRequestId = null;
         e.chatError = r.error;
+        A11y.announce('Chat failed: ' + r.error, 'assertive');
         // Roll back the optimistic user message so the user can retry without
         // duplicating it.
         if (e.chatMessages.length && e.chatMessages[e.chatMessages.length - 1].role === 'user'
@@ -747,11 +758,14 @@
       if (result && result.error) {
         entry.state = 'error';
         entry.error = result.error;
+        A11y.announce('Debug analysis failed: ' + result.error, 'assertive');
       } else if (result && result.cancelled) {
         entry.state = 'cancelled';
+        A11y.announce('Debug analysis cancelled');
       } else {
         entry.state = 'done';
         entry.durationSec = +((Date.now() - entry.startedAt) / 1000).toFixed(1);
+        A11y.announce('Debug analysis finished');
       }
       // Cache the finished analysis so it survives a close/reopen (cancelled
       // runs aren't worth keeping).
@@ -772,6 +786,7 @@
         entry.state = 'error';
         entry.error = r.error;
         PR.paintDebugPanel(checkId);
+        A11y.announce('Debug analysis failed: ' + r.error, 'assertive');
       }
     });
   };
@@ -875,11 +890,13 @@
       if (result && result.error) {
         progressItems.push({ kind: 'error', label: 'Failed: ' + result.error });
         paintProgress();
+        A11y.announce('Fix failed: ' + result.error, 'assertive');
         return;
       }
       if (result && result.cancelled) {
         progressItems.push({ kind: 'system', label: 'Cancelled.' });
         paintProgress();
+        A11y.announce('Fix cancelled');
         return;
       }
 
@@ -887,6 +904,7 @@
       var seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
       progressItems.push({ kind: 'system', label: 'Agent finished in ' + seconds + 's. Loading diff…' });
       paintProgress();
+      A11y.announce('Fix ready for review');
 
       if (finalText) {
         summaryEl.innerHTML = '<div class="pr-check-fix-summary-body">' + PR.renderMarkdownLite(finalText) + '</div>';
@@ -918,6 +936,7 @@
       if (r && r.error) {
         progressItems.push({ kind: 'error', label: r.error });
         paintProgress();
+        A11y.announce('Fix failed: ' + r.error, 'assertive');
         panel.dataset.state = 'done';
         return;
       }
@@ -959,46 +978,47 @@
         + '<button class="pr-check-fix-discard" type="button">Discard</button>'
         + '<button class="pr-check-fix-push pr-check-action-primary" type="button">Commit &amp; push</button>'
       + '</div>'
-      + '<div class="pr-check-fix-status"></div>';
+      + '<div class="pr-check-fix-status" role="status"></div>';
 
     var pushBtn = footerEl.querySelector('.pr-check-fix-push');
     var discardBtn = footerEl.querySelector('.pr-check-fix-discard');
     var msgInput = footerEl.querySelector('.pr-check-fix-msg');
     var statusEl = footerEl.querySelector('.pr-check-fix-status');
+    function setStatus(text, kind) {
+      statusEl.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+      statusEl.classList.toggle('diff-error', kind === 'error');
+      statusEl.classList.toggle('pr-check-fix-status-ok', kind === 'ok');
+      statusEl.textContent = text;
+    }
 
     pushBtn.addEventListener('click', function () {
       var message = (msgInput.value || '').trim() || commitMsg;
       pushBtn.disabled = true;
       discardBtn.disabled = true;
-      statusEl.textContent = 'Committing…';
+      setStatus('Committing…');
       window.klaus.pr.commitLocal(message, worktreePath).then(function (r) {
         if (r && r.error) {
-          statusEl.textContent = 'Commit failed: ' + r.error;
-          statusEl.classList.add('diff-error');
+          setStatus('Commit failed: ' + r.error, 'error');
           pushBtn.disabled = false;
           discardBtn.disabled = false;
           return;
         }
-        statusEl.textContent = 'Pushing…';
+        setStatus('Pushing…');
         return window.klaus.pr.pushLocal(worktreePath).then(function (pr) {
           if (pr && pr.error) {
-            statusEl.textContent = 'Push failed: ' + pr.error
-              + ' (commit is staged locally — fix the conflict and run Push again from the Review tab)';
-            statusEl.classList.add('diff-error');
+            setStatus('Push failed: ' + pr.error
+              + ' (commit is staged locally — fix the conflict and run Push again from the Review tab)', 'error');
             pushBtn.disabled = false;
             discardBtn.disabled = false;
             return;
           }
-          statusEl.classList.remove('diff-error');
-          statusEl.classList.add('pr-check-fix-status-ok');
-          statusEl.textContent = 'Pushed to ' + (pr && pr.target ? pr.target : 'PR branch') + '. CI will rerun shortly.';
+          setStatus('Pushed to ' + (pr && pr.target ? pr.target : 'PR branch') + '. CI will rerun shortly.', 'ok');
           // Force a refresh so the new run shows up as pending.
           PR.fetchAndRenderChecks(PR.lastState && PR.lastState.number)
             .then(function () { PR.repaintChecksTab({ force: true }); });
         });
       }).catch(function (err) {
-        statusEl.textContent = 'Failed: ' + ((err && err.message) || 'unknown error');
-        statusEl.classList.add('diff-error');
+        setStatus('Failed: ' + ((err && err.message) || 'unknown error'), 'error');
         pushBtn.disabled = false;
         discardBtn.disabled = false;
       });
@@ -1076,7 +1096,8 @@
     var openState = (meta.state || '').toUpperCase() === 'OPEN';
     if (!openState) return '';
     return '<span class="pr-merge-wrap">'
-      + '<button class="pr-review-btn pr-merge-btn" type="button" disabled title="Checking mergeability\u2026">Merge <span aria-hidden="true">\u25BE</span></button>'
+      + '<button class="pr-review-btn pr-merge-btn" type="button" aria-disabled="true" aria-describedby="pr-merge-reason" title="Checking mergeability\u2026">Merge <span aria-hidden="true">\u25BE</span></button>'
+      + '<span id="pr-merge-reason" class="sr-only">Merge unavailable: checking mergeability\u2026</span>'
       + '<div class="pr-merge-menu" hidden>'
         + '<button type="button" data-strategy="merge">Create a merge commit</button>'
         + '<button type="button" data-strategy="squash">Squash and merge</button>'
@@ -1095,7 +1116,7 @@
 
     btn.addEventListener('click', function (e) {
       e.stopPropagation();
-      if (btn.disabled) return;
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
       menu.hidden = !menu.hidden;
     });
     A11y.dropdownMenu(btn, menu, '[data-strategy]');
@@ -1113,9 +1134,11 @@
       if (result && result.error) {
         window.toast.error('Merge failed:\n' + result.error);
         btn.innerHTML = 'Merge <span aria-hidden="true">\u25BE</span>';
+        btn.disabled = false;
         PR.updateMergeGate(wrap, PR.lastState);
         return;
       }
+      A11y.announce('PR merged');
       // State reload is triggered on the main side; the resulting broadcast
       // re-renders the header with the updated state pill.
     });
@@ -1133,13 +1156,17 @@
     var btn = wrap.querySelector('.pr-merge-btn');
     if (!btn) return;
     var reason = PR.mergeGateReason(state);
+    var reasonEl = wrap.querySelector('#pr-merge-reason');
+    // aria-disabled rather than disabled so keyboard users can still reach the button and hear why.
     if (reason) {
-      btn.disabled = true;
+      btn.setAttribute('aria-disabled', 'true');
       btn.title = reason;
+      if (reasonEl) reasonEl.textContent = 'Merge unavailable: ' + reason;
       btn.classList.remove('ready');
     } else {
-      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
       btn.title = 'Merge this PR';
+      if (reasonEl) reasonEl.textContent = '';
       btn.classList.add('ready');
     }
   };

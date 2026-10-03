@@ -384,7 +384,7 @@
   cursor: default;
 }
 
-.pr-thread.pr-thread-resolved .pr-thread-header {
+.pr-thread .pr-thread-header {
   cursor: pointer;
 }
 
@@ -498,6 +498,10 @@
 
 .pr-thread-resolved.pr-thread-expanded .pr-thread-body {
   display: block;
+}
+
+.pr-thread-collapsed .pr-thread-body {
+  display: none;
 }
 
 /* De-emphasised with a dashed edge and muted path rather than opacity, which would pull its text under 4.5:1. */
@@ -980,6 +984,10 @@
 
 #btn-pr-merge.ready:hover {
   background: var(--accent-hover);
+}
+
+#btn-pr-merge[aria-disabled="true"] {
+  cursor: not-allowed;
 }
 
 .pr-merge-menu {

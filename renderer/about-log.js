@@ -1539,7 +1539,7 @@ window.Dialogs = (function () {
           + '<button class="mcp-connect mcp-hidden" type="button" data-name="' + escHtml(g.name) + '" title="Sign in to this server (opens your browser)">Connect</button>'
           + '<span class="skills-row-source ' + (g.scope === 'user' ? 'skills-source-user' : 'skills-source-project') + '">' + escHtml(scopeLabel) + '</span>'
           + '<span class="mcp-type">' + escHtml(g.type) + '</span>'
-          + '<button class="mcp-remove" type="button" data-index="' + i + '" title="Remove from all of its agents" aria-label="Remove from all of its agents">&times;</button>'
+          + '<button class="mcp-remove" type="button" data-index="' + i + '" title="Remove from all of its agents" aria-label="Remove ' + escHtml(g.name) + ' from all of its agents">&times;</button>'
         + '</div>'
         + '<div class="skills-row-desc mcp-agent-badges">' + badges + '</div>'
         + '<div class="skills-row-desc"><code class="mcp-cmd">' + escHtml(g.detail) + '</code></div>'

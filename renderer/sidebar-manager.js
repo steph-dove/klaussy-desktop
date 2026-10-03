@@ -21,6 +21,7 @@ window.Sidebar = (function () {
     }
     AppState.activeSessionName = sessionName;
     AppState.activeTaskId = null;
+    document.title = 'Klaussy \u2014 ' + sessionName;
     taskList.querySelectorAll('.task-item').forEach(function(item) {
       item.classList.remove('active');
     });
@@ -45,64 +46,6 @@ window.Sidebar = (function () {
     return null;
   }
 
-  function getOrCreateSessionGroup(sessionName) {
-    var groupEl = taskList.querySelector('.session-group[data-session="' + sessionName + '"]');
-    if (!groupEl) {
-      groupEl = document.createElement('div');
-      groupEl.className = 'session-group';
-      groupEl.dataset.session = sessionName;
-
-      var header = document.createElement('div');
-      header.className = 'session-group-header';
-      
-      var isCollapsed = collapsedSessions.has(sessionName);
-      if (isCollapsed) header.classList.add('collapsed');
-
-      header.innerHTML = 
-        '<span class="session-group-chevron" aria-hidden="true">' + (isCollapsed ? '&#9656;' : '&#9662;') + '</span>' +
-        '<span class="session-group-icon" aria-hidden="true">&#128193;</span>' +
-        '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
-        '<span class="session-group-badge">0</span>' +
-        '<button class="session-group-close" title="Close Session" aria-label="Close session ' + escHtml(sessionName) + '">&times;</button>';
-
-      var itemsContainer = document.createElement('div');
-      itemsContainer.className = 'session-group-items';
-      if (isCollapsed) itemsContainer.classList.add('collapsed');
-
-      header.addEventListener('click', function (e) {
-        if (e.target.classList.contains('session-group-close')) return;
-        var collapsed = itemsContainer.classList.toggle('collapsed');
-        header.classList.toggle('collapsed', collapsed);
-        var chevron = header.querySelector('.session-group-chevron');
-        if (chevron) chevron.innerHTML = collapsed ? '&#9656;' : '&#9662;';
-        if (collapsed) {
-          collapsedSessions.add(sessionName);
-        } else {
-          collapsedSessions.delete(sessionName);
-        }
-      });
-
-      header.querySelector('.session-group-close').addEventListener('click', function (e) {
-        e.stopPropagation();
-        var closes = itemsContainer.querySelectorAll('.task-close, .worktree-remove');
-        closes.forEach(function (c) { c.click(); });
-      });
-
-      groupEl.appendChild(header);
-      groupEl.appendChild(itemsContainer);
-      taskList.appendChild(groupEl);
-    }
-    return groupEl;
-  }
-
-  function updateSessionGroupBadge(groupEl) {
-    var badge = groupEl.querySelector('.session-group-badge');
-    var itemsContainer = groupEl.querySelector('.session-group-items');
-    if (badge && itemsContainer) {
-      badge.textContent = itemsContainer.querySelectorAll('.task-item').length;
-    }
-  }
-
   function renderItem(task) {
     startDirtyWatch(task);
     rebuild();
@@ -119,15 +62,16 @@ window.Sidebar = (function () {
     var tIconColor = AppUtils.iconColor(task.name);
     var tIconLetter = (task.name || '?').charAt(0).toUpperCase();
     item.innerHTML =
-      '<button type="button" class="task-main" title="' + escHtml(task.worktreePath) + '" aria-labelledby="task-name-' + task.id + '">' +
+      '<button type="button" class="task-main" title="' + escHtml(task.worktreePath) + '" aria-labelledby="task-name-' + task.id + '" aria-describedby="task-status-' + task.id + '">' +
         '<span class="status-dot ' + (task.alive ? 'alive' : 'exited') + '" aria-hidden="true"></span>' +
         '<span class="collapsed-icon" style="background:' + tIconColor + '" title="' + escHtml(task.name) + '" aria-hidden="true">' + tIconLetter + '</span>' +
         '<span class="task-mode" title="' + escHtml(AppUtils.modeDisplayName(task.mode)) + '">' + modeLabel + '</span>' +
         '<span class="task-name" id="task-name-' + task.id + '">' + escHtml(task.name) + '</span>' +
       '</button>' +
+      '<span class="sr-only" id="task-status-' + task.id + '"></span>' +
       '<span class="ci-status-icon" title="CI status"></span>' +
-      '<span class="dirty-indicator"></span>' +
-      '<span class="unread-badge"></span>' +
+      '<span class="dirty-indicator" aria-hidden="true"></span>' +
+      '<span class="unread-badge" aria-hidden="true"></span>' +
       '<button class="task-notify-btn" title="Slack/Discord notifications" aria-label="Slack/Discord notifications for ' + escHtml(task.name) + '" aria-pressed="false">&#128276;</button>' +
       '<button class="task-note-btn" title="Notes" aria-label="Notes for ' + escHtml(task.name) + '">&#9998;</button>' +
       '<button class="task-close" title="Remove" aria-label="Remove ' + escHtml(task.name) + '">&times;</button>';
@@ -208,6 +152,7 @@ window.Sidebar = (function () {
       showNotePopover(noteBtn, task.name);
     });
 
+    describeTask(item);
     return item;
   }
 
@@ -420,7 +365,8 @@ window.Sidebar = (function () {
       '<button type="button" class="session-group-select" title="Show this session\'s changes">' +
         '<span class="session-group-icon" aria-hidden="true">&#128193;</span>' +
         '<span class="session-group-name">' + escHtml(sessionName) + '</span>' +
-        '<span class="session-group-badge" aria-label="' + totalCount + ' repos">' + totalCount + '</span>' +
+        '<span class="session-group-badge" aria-hidden="true">' + totalCount + '</span>' +
+        '<span class="sr-only">, ' + totalCount + (totalCount === 1 ? ' repo' : ' repos') + '</span>' +
       '</button>' +
       resumeBtnHtml +
       '<button class="session-group-close" title="Close Session" aria-label="Close session ' + escHtml(sessionName) + '">&times;</button>';
@@ -641,12 +587,14 @@ window.Sidebar = (function () {
     if (!el) return;
 
     var parts = [];
-    if (state.staged > 0)    parts.push('<span class="dirty-staged"    title="' + state.staged + ' staged">' + state.staged + '</span>');
-    if (state.unstaged > 0)  parts.push('<span class="dirty-unstaged"  title="' + state.unstaged + ' unstaged">' + state.unstaged + '</span>');
-    if (state.untracked > 0) parts.push('<span class="dirty-untracked" title="' + state.untracked + ' untracked">' + state.untracked + '</span>');
+    // git-status-style prefixes so the counts don't rely on colour alone (WCAG 1.4.1).
+    if (state.staged > 0)    parts.push('<span class="dirty-staged"    title="' + state.staged + ' staged">+' + state.staged + '</span>');
+    if (state.unstaged > 0)  parts.push('<span class="dirty-unstaged"  title="' + state.unstaged + ' unstaged">~' + state.unstaged + '</span>');
+    if (state.untracked > 0) parts.push('<span class="dirty-untracked" title="' + state.untracked + ' untracked">?' + state.untracked + '</span>');
     if (state.ahead > 0)     parts.push('<span class="dirty-ahead"     title="' + state.ahead + ' ahead">&uarr;' + state.ahead + '</span>');
     if (state.behind > 0)    parts.push('<span class="dirty-behind"    title="' + state.behind + ' behind">&darr;' + state.behind + '</span>');
     el.innerHTML = parts.join('');
+    describeTask(item);
 
     var hasLocalChanges = state.staged > 0 || state.unstaged > 0 || state.untracked > 0;
     // has-dirty gates the "dirty only" filter. Ahead/behind alone don't qualify —
@@ -736,7 +684,10 @@ window.Sidebar = (function () {
     var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
     if (item) {
       var dot = item.querySelector('.status-dot');
+      var wasAlive = dot.classList.contains('alive');
       dot.className = 'status-dot ' + (task.alive ? 'alive' : 'exited');
+      if (wasAlive && !task.alive) A11y.announce(task.name + ' exited');
+      describeTask(item);
     }
     var gridDot = task.container.querySelector('.grid-dot');
     if (gridDot) {
@@ -752,6 +703,7 @@ window.Sidebar = (function () {
       modeEl.textContent = AppUtils.modeShortLabel(mode);
       modeEl.title = AppUtils.modeDisplayName(mode);
     }
+    describeTask(item);
   }
 
   function showResumeButton(id, task) {
@@ -805,7 +757,11 @@ window.Sidebar = (function () {
     var item = taskList.querySelector('.task-item[data-id="' + id + '"]');
     if (!item) return;
     var badge = item.querySelector('.unread-badge');
-    if (badge) badge.classList.add('visible');
+    if (!badge || badge.classList.contains('visible')) return;
+    badge.classList.add('visible');
+    var task = tasks.get(id);
+    if (task) A11y.announce('New output in ' + task.name);
+    describeTask(item);
   }
 
   function hideUnreadBadge(id) {
@@ -813,6 +769,24 @@ window.Sidebar = (function () {
     if (!item) return;
     var badge = item.querySelector('.unread-badge');
     if (badge) badge.classList.remove('visible');
+    describeTask(item);
+  }
+
+  // The row's indicators are visual-only, so their meaning is mirrored into the button's description.
+  function describeTask(item) {
+    var out = item && item.querySelector('[id^="task-status-"]');
+    if (!out) return;
+    var parts = [];
+    var dot = item.querySelector('.status-dot');
+    if (dot) parts.push(dot.classList.contains('alive') ? 'running' : 'exited');
+    var mode = item.querySelector('.task-mode');
+    if (mode && mode.title) parts.push(mode.title);
+    var badge = item.querySelector('.unread-badge');
+    if (badge && badge.classList.contains('visible')) parts.push('unread output');
+    item.querySelectorAll('.dirty-indicator [title]').forEach(function (el) { parts.push(el.title); });
+    var ci = item.querySelector('.ci-status-icon');
+    if (ci && /^CI (running|passed|failed)/.test(ci.title)) parts.push(ci.title);
+    out.textContent = parts.join(', ');
   }
 
   // ---- Task Rename ----
@@ -936,9 +910,8 @@ window.Sidebar = (function () {
     showResumeButton: showResumeButton,
     showUnreadBadge: showUnreadBadge,
     hideUnreadBadge: hideUnreadBadge,
+    describeTask: describeTask,
     getSessionName: getSessionName,
-    getOrCreateSessionGroup: getOrCreateSessionGroup,
-    updateSessionGroupBadge: updateSessionGroupBadge,
     expandSession: expandSession,
     rebuild: rebuild,
     selectSession: selectSession,

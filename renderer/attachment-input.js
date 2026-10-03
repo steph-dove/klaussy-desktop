@@ -135,6 +135,7 @@ window.AttachmentInput = (function () {
         rm.type = 'button';
         rm.textContent = '×';
         rm.title = 'Remove';
+        rm.setAttribute('aria-label', 'Remove ' + basename(it.path));
         rm.addEventListener('click', function () {
           items.splice(i, 1);
           dropPathFromText(it.path);

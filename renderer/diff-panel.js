@@ -92,18 +92,28 @@ window.DiffPanel = window.DiffPanel || {};
     document.getElementById('btn-close-diff').addEventListener('click', DP.hide);
 
     // D1: Fetch & Pull
+    DP.reportGitResults = function (label, done, results) {
+      var failed = results.filter(function (r) { return !r || r.error; });
+      if (failed.length) {
+        var reason = failed[0] && failed[0].error ? ': ' + String(failed[0].error).trim().split('\n')[0] : '';
+        DP.showDiffStatus(label + ' failed' + reason, 'error');
+      } else {
+        DP.showDiffStatus(done, 'success');
+      }
+    };
     document.getElementById('btn-fetch').addEventListener('click', async function () {
       this.disabled = true;
       this.textContent = '...';
       if (DP.currentSessionName && DP.viewScope === 'session') {
         var paths = DP.getSessionWorktrees().map(function(w) { return w.path; });
-        await Promise.all(paths.map(function(p) { return window.klaus.git.fetch(p); }));
+        var results = await Promise.all(paths.map(function(p) { return window.klaus.git.fetch(p); }));
       } else {
         var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
-        await window.klaus.git.fetch(path);
+        results = [await window.klaus.git.fetch(path)];
       }
       this.disabled = false;
       this.textContent = 'Fetch';
+      DP.reportGitResults('Fetch', 'Fetched', results);
       DP.updateAheadBehind();
       DP.refresh();
     });
@@ -112,13 +122,14 @@ window.DiffPanel = window.DiffPanel || {};
       this.textContent = '...';
       if (DP.currentSessionName && DP.viewScope === 'session') {
         var paths = DP.getSessionWorktrees().map(function(w) { return w.path; });
-        await Promise.all(paths.map(function(p) { return window.klaus.git.pull(p); }));
+        var results = await Promise.all(paths.map(function(p) { return window.klaus.git.pull(p); }));
       } else {
         var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
-        await window.klaus.git.pull(path);
+        results = [await window.klaus.git.pull(path)];
       }
       this.disabled = false;
       this.textContent = 'Pull';
+      DP.reportGitResults('Pull', 'Pulled', results);
       DP.updateAheadBehind();
       DP.refresh();
     });
@@ -399,12 +410,14 @@ window.DiffPanel = window.DiffPanel || {};
 
     var explanationEl = document.createElement('div');
     explanationEl.className = 'diff-explanation';
+    explanationEl.setAttribute('role', 'region');
+    explanationEl.setAttribute('aria-label', 'Explanation');
     explanationEl.dataset.requestId = requestId;
     explanationEl.innerHTML = '<div class="diff-explanation-header">'
         + '<span>Explanation</span>'
         + '<button class="diff-explanation-close" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
-      + '<div class="diff-explanation-body">Sending to the agent…</div>';
+      + '<div class="diff-explanation-body" tabindex="0">Sending to the agent…</div>';
     insertAfter.after(explanationEl);
 
     var bodyEl = explanationEl.querySelector('.diff-explanation-body');
@@ -445,6 +458,9 @@ window.DiffPanel = window.DiffPanel || {};
       if (result && result.error) {
         bodyEl.className = 'diff-explanation-body diff-error';
         bodyEl.textContent = result.error;
+        A11y.announce('Explain failed: ' + result.error, 'assertive');
+      } else {
+        A11y.announce('Explanation ready');
       }
     });
 
@@ -771,7 +787,7 @@ window.DiffPanel = window.DiffPanel || {};
       html += '</div>';
 
       if (DP.diffMode === 'branch') {
-        html += '<select class="diff-base-select js-base-select">';
+        html += '<select class="diff-base-select js-base-select" aria-label="Base branch">';
         var allBranches = DP.branchList.concat(DP.remoteList);
         for (var i = 0; i < allBranches.length; i++) {
           var b = allBranches[i];
