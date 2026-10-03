@@ -1081,7 +1081,7 @@
     var fontFamily = (window.AppState && AppState.savedPrefs && AppState.savedPrefs.fontFamily)
       || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
     var terminal = new window.Terminal({
-      cursorBlink: true,
+      cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: fontSize,
       fontFamily: fontFamily,
       scrollback: 10000,

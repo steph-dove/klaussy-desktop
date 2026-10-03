@@ -45,7 +45,7 @@ window.TerminalManager = (function () {
     var termTheme = ThemeManager.getTerminalTheme();
 
     var terminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: AppState.currentFontSize,
       fontFamily: AppState.savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       lineHeight: AppState.savedPrefs.lineHeight || 1.45,
@@ -88,7 +88,7 @@ window.TerminalManager = (function () {
     var nameSpan = document.createElement('span');
     nameSpan.className = 'grid-label-name';
     nameSpan.title = worktreePath || '';
-    nameSpan.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '"></span>'
+    nameSpan.innerHTML = '<span class="grid-dot ' + (task.alive !== false ? 'alive' : 'exited') + '" aria-hidden="true"></span>'
       + (repoName ? '<span class="grid-label-repo">' + escHtml(repoName) + '</span><span class="grid-label-sep">›</span>' : '')
       + '<span class="grid-label-branch">' + escHtml(branchLabel) + '</span>';
 
@@ -130,6 +130,24 @@ window.TerminalManager = (function () {
         markFocusedContainer(id);
         Events.emit('task:switched', { task: tasks.get(id) || null });
       }
+    });
+
+    A11y.makeButton(nameSpan);
+    nameSpan.setAttribute('aria-describedby', 'pane-move-hint');
+    // Keyboard alternative to drag-reordering (WCAG 2.5.7).
+    nameSpan.addEventListener('keydown', function (e) {
+      if (!e.altKey || currentLayout() === 'single') return;
+      var back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+      if (!back && e.key !== 'ArrowRight' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      var panes = Array.from(terminalsEl.querySelectorAll('.terminal-container'));
+      var i = panes.indexOf(container);
+      var j = back ? i - 1 : i + 1;
+      if (i < 0 || j < 0 || j >= panes.length) return;
+      terminalsEl.insertBefore(container, back ? panes[j] : panes[j].nextSibling);
+      nameSpan.focus();
+      fitAllTerminals();
+      A11y.announce('Moved to position ' + (j + 1) + ' of ' + panes.length);
     });
 
     // Grid drag-and-drop reordering
@@ -608,7 +626,7 @@ window.TerminalManager = (function () {
     var termTheme = ThemeManager.getTerminalTheme();
 
     var subTerminal = new Terminal({
-      cursorBlink: true,
+      cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: AppState.currentFontSize,
       fontFamily: AppState.savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       lineHeight: AppState.savedPrefs.lineHeight || 1.45,

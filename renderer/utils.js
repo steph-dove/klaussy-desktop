@@ -136,6 +136,7 @@ window.AppUtils = (function () {
         + '</div></div>';
       overlay.innerHTML = html;
       var inputs = Array.prototype.slice.call(overlay.querySelectorAll('.prompt-dialog-input'));
+      inputs.forEach(function (el, i) { if (opts.fields[i].value) el.value = opts.fields[i].value; });
 
       function finish(values) {
         overlay.remove();
@@ -170,6 +171,10 @@ window.AppUtils = (function () {
     return !!(prefs && (prefs.screenReaderMode || prefs.screenReaderActive));
   }
 
+  function prefersReducedMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
   // xterm names every input "Terminal input"; re-read on focus so renamed tasks stay current.
   function labelTerminal(terminal, getLabel) {
     var input = terminal && terminal.textarea;
@@ -182,6 +187,7 @@ window.AppUtils = (function () {
   return {
     screenReaderMode: screenReaderMode,
     labelTerminal: labelTerminal,
+    prefersReducedMotion: prefersReducedMotion,
     promptDialog: promptDialog,
     isMac: isMac,
     isAppShortcut: isAppShortcut,

@@ -176,6 +176,26 @@ test.describe('axe scans', () => {
     await prefs.close();
   });
 
+  test('page structure: landmarks, headings and titles', async ({ electronApp, mainWindow }) => {
+    const STRUCTURE = ['landmark-unique', 'landmark-no-duplicate-main', 'heading-order', 'document-title', 'html-has-lang'];
+    const scan = async (page) => {
+      const { violations } = await new AxeBuilder({ page }).setLegacyMode(true).withRules(STRUCTURE)
+        .exclude('.xterm').exclude('.monaco-editor').analyze();
+      expect(violations, describe(violations)).toEqual([]);
+    };
+    await scan(mainWindow);
+    await expect(mainWindow.getByRole('main')).toHaveCount(1);
+    const [prefs] = await Promise.all([
+      electronApp.waitForEvent('window'),
+      mainWindow.evaluate(() => window.klaus.ui.openPreferences()),
+    ]);
+    await prefs.waitForLoadState('domcontentloaded');
+    await expect(prefs.getByRole('radiogroup', { name: 'Window color' })).toBeVisible();
+    await scan(prefs);
+    await expect(prefs.getByRole('main')).toHaveCount(1);
+    await prefs.close();
+  });
+
   test('preferences window', async ({ electronApp, mainWindow }) => {
     const [prefs] = await Promise.all([
       electronApp.waitForEvent('window'),

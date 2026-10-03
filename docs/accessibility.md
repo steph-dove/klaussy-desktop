@@ -6,7 +6,7 @@ Klaussy aims to meet WCAG 2.2 AA and to be usable with the keyboard alone and wi
 
 | Keys | What they do |
 |---|---|
-| F6 / Shift+F6 | Move between areas: sidebar, terminals (or PR review), changes panel, editor. This is also how you leave a terminal, which keeps Tab and Escape for the shell. |
+| F6 / Shift+F6 | Move between areas: sidebar, terminals (or PR review), changes panel, agents panel, notifications, editor. This is also how you leave a terminal, which keeps Tab and Escape for the shell. |
 | Tab / Shift+Tab | Move between controls. Inside a dialog, focus stays in the dialog. |
 | Arrow keys | Move within lists, tab strips, menus, the file tree and radio groups. |
 | Enter / Space | Activate the focused control. |
@@ -15,19 +15,32 @@ Klaussy aims to meet WCAG 2.2 AA and to be usable with the keyboard alone and wi
 | Cmd+K (Ctrl+Shift+K on Windows/Linux) | Command palette. |
 | Cmd+P (Ctrl+Shift+P) | Quick open a file. |
 | F1 | Keyboard shortcuts. |
+| Cmd+, (Ctrl+, on Windows/Linux) | Preferences. |
+| Cmd+N (Ctrl+N) | New window. |
+| View → Zoom In / Zoom Out / Actual Size | Scale the whole window. Inside a terminal, Cmd+= / Cmd+− / Cmd+0 change only the terminal's font size. |
 
 Surface-specific keys:
 
 - **Sidebar**: F2 renames a task; Alt+Up/Down reorders it.
 - **Changes list**: Enter shows the diff; Shift+Enter opens the file in the editor.
-- **Diffs** (Changes panel and PR review): Tab into the diff, then Up/Down move line by line. Alt+Up/Down jump between hunks. Enter or C on a line opens a comment on it; E explains the hunk the line is in.
-- **File tree**: Right/Left expand and collapse, Enter opens, F2 renames, Delete deletes.
+- **Diffs** (Changes panel and PR review): Tab into the diff, then Up/Down move line by line. Alt+Up/Down jump between hunks. Shift+Up/Down select a range of lines. Enter or C on a line opens a comment on it; E explains the selected lines, or the hunk the line is in. In the Changes panel, P posts the selected lines (or the current line) as a PR review comment, and Shift+F10 on a selection opens its menu.
+- **Terminal panes** (columns and grid layouts): Tab to a pane's name, then Alt+Arrow keys move the pane.
+- **File tree**: Right/Left expand and collapse, Enter opens, F2 renames, Delete deletes. "Move to…" in the context menu (Shift+F10) moves a file or folder without dragging.
 - **Editor tabs and terminal sub-tabs**: Delete closes the focused tab.
 - **Resize handles**: arrow keys resize, Shift makes larger steps, Home/End go to the minimum or maximum.
 
 ## Screen readers
 
-Preferences → Terminal → **Optimize for screen readers** turns on xterm's screen-reader mode and Monaco's accessibility support. It also turns on automatically when the OS reports a screen reader at launch.
+Preferences → Terminal → **Optimize for screen readers** turns on xterm's screen-reader mode and Monaco's accessibility support in every terminal (including PR review and pop-outs). It also turns on automatically when the OS reports a screen reader, at launch or later in the session.
+
+Each sidebar task describes its state (running or exited, agent, unread output, uncommitted changes, CI). Exits and new output in background tasks are announced, and terminals are named after their task.
+
+## Display
+
+- All themes meet WCAG AA contrast; status dots differ by shape as well as colour.
+- *Reduce motion* in the OS stops animations, smooth scrolling and the terminal cursor blink.
+- Windows high-contrast (forced colours) keeps status dots visible and outlines the selected item.
+- At narrow widths (e.g. 200% zoom) the sidebar and changes panel shrink so the terminal keeps room.
 
 ## Building UI
 

@@ -38,6 +38,17 @@
       shown: diffPanelShown,
     },
     {
+      label: 'Agents',
+      el: byId('agents-panel'),
+      shown: function () { return document.getElementById('agents-panel').style.display !== 'none'; },
+    },
+    // Error toasts stay until dismissed, so keyboard users need a way to reach them.
+    {
+      label: 'Notifications',
+      el: byId('klaussy-toast-stack'),
+      shown: function () { return !!document.querySelector('#klaussy-toast-stack .klaussy-toast'); },
+    },
+    {
       label: 'Editor',
       el: byId('file-viewer-content'),
       shown: diffPanelShown,

@@ -197,8 +197,8 @@ window.Sidebar = (function () {
             ? '<button class="saved-session-resume" title="Open shell">Open</button>'
             : '<button class="saved-session-resume" title="Resume conversation">Resume</button>' +
               '<button class="saved-session-new" title="New session on this worktree">New</button>') +
-          '<button class="saved-session-dismiss" title="Dismiss" aria-label="Dismiss saved session ' + escHtml(repoName) + '">&times;</button>' +
-        '</div>';
+        '</div>' +
+        '<button class="saved-session-dismiss" title="Dismiss" aria-label="Dismiss saved session ' + escHtml(repoName) + '">&times;</button>';
 
       item.querySelector('.saved-session-resume').addEventListener('click', async function (e) {
         e.stopPropagation();

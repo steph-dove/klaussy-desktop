@@ -713,6 +713,8 @@ ipcMain.handle('pop-out-pr-review', () => {
     },
   });
   hardenWindow(popout);
+  // Keep the descriptive title; the page's static <title> would otherwise replace it (WCAG 2.4.2).
+  popout.on('page-title-updated', (e) => e.preventDefault());
 
   popout.loadFile(path.join(__dirname, '..', '..', 'renderer', 'pr-review.html'));
   prReview.active.popout = popout;

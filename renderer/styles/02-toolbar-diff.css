@@ -1378,29 +1378,6 @@
   background: #1f6feb;
 }
 
-#diff-context-menu {
-  position: fixed;
-  z-index: 200;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  padding: 4px 0;
-  min-width: 160px;
-}
-
-.diff-ctx-item {
-  padding: 6px 14px;
-  font-size: 12px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.diff-ctx-item:hover {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-
 /* Inline diff annotations */
 /* Anchor for the hover "+" button on each commentable line. */
 .diff-line.diff-add,

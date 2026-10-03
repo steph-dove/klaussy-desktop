@@ -422,6 +422,15 @@ window.FileBrowser = (function () {
       document.addEventListener('mouseup', onUp);
       e.preventDefault();
     });
+    A11y.splitter(els.handle, {
+      label: 'Resize preview',
+      grow: 'ArrowLeft',
+      min: function () { return ARTIFACT_MIN_PANE; },
+      max: function () { return Math.max(ARTIFACT_MIN_PANE, els.body.getBoundingClientRect().width - ARTIFACT_MIN_PANE); },
+      get: function () { return els.pane.getBoundingClientRect().width; },
+      set: function (w) { artifactPaneWidth = w; els.pane.style.flex = '0 0 ' + w + 'px'; },
+      commit: function () { window.dispatchEvent(new Event('resize')); },
+    });
   }
 
   // Map file extensions to their run commands. Only the small set of languages
@@ -1552,6 +1561,7 @@ window.FileBrowser = (function () {
       { label: 'New Folder', action: function () { inlineCreate(dirContextRel, 'dir'); } },
       { sep: true },
       { label: 'Rename', action: function () { inlineRename(rowEl, rel, kind); } },
+      { label: 'Move to…', action: function () { promptMove(rel); } },
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
@@ -1599,31 +1609,48 @@ window.FileBrowser = (function () {
       if (!fromRel || !fileTreeWorktree) return;
       e.preventDefault();
       e.stopPropagation();
-      // Refuse self-drop and into-own-descendant.
-      if (fromRel === dirRel) return;
-      if (dirRel && dirRel.indexOf(fromRel + '/') === 0) {
-        window.toast.error('Cannot move a folder into itself');
-        return;
-      }
-      var fromParent = fromRel.indexOf('/') >= 0 ? fromRel.slice(0, fromRel.lastIndexOf('/')) : '';
-      if (fromParent === dirRel) return; // already there
-      var name = fromRel.split('/').pop();
-      var toRel = dirRel ? dirRel + '/' + name : name;
-      var oldAbs = fileTreeWorktree + '/' + fromRel;
-      var newAbs = fileTreeWorktree + '/' + toRel;
-      var hits = tabsAffectedBy(oldAbs);
-      if (hits.length && dirtyAmong(hits)) {
-        window.toast.error('Cannot move: an affected tab has unsaved changes');
-        return;
-      }
-      var result = await window.klaus.fs.renamePath(fileTreeWorktree, fromRel, toRel);
-      if (result.error) {
-        window.toast.error('Move failed: ' + result.error);
-        return;
-      }
-      await reloadTabsAfterRename(oldAbs, newAbs);
-      await refreshFileTree();
+      await movePath(fromRel, dirRel);
     });
+  }
+
+  async function movePath(fromRel, dirRel) {
+    // Refuse self-drop and into-own-descendant.
+    if (fromRel === dirRel) return;
+    if (dirRel && dirRel.indexOf(fromRel + '/') === 0) {
+      window.toast.error('Cannot move a folder into itself');
+      return;
+    }
+    var fromParent = fromRel.indexOf('/') >= 0 ? fromRel.slice(0, fromRel.lastIndexOf('/')) : '';
+    if (fromParent === dirRel) return; // already there
+    var name = fromRel.split('/').pop();
+    var toRel = dirRel ? dirRel + '/' + name : name;
+    var oldAbs = fileTreeWorktree + '/' + fromRel;
+    var newAbs = fileTreeWorktree + '/' + toRel;
+    var hits = tabsAffectedBy(oldAbs);
+    if (hits.length && dirtyAmong(hits)) {
+      window.toast.error('Cannot move: an affected tab has unsaved changes');
+      return;
+    }
+    var result = await window.klaus.fs.renamePath(fileTreeWorktree, fromRel, toRel);
+    if (result.error) {
+      window.toast.error('Move failed: ' + result.error);
+      return;
+    }
+    await reloadTabsAfterRename(oldAbs, newAbs);
+    await refreshFileTree();
+    A11y.announce('Moved ' + name + ' to ' + (dirRel || 'the root folder'));
+  }
+
+  // Keyboard alternative to dragging a tree row onto a folder (WCAG 2.5.7).
+  async function promptMove(rel) {
+    var parent = rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : '';
+    var answers = await AppUtils.promptDialog({
+      title: 'Move ' + rel.split('/').pop(),
+      okLabel: 'Move',
+      fields: [{ label: 'Destination folder (relative to the worktree; empty for the root)', value: parent }],
+    });
+    if (!answers) return;
+    await movePath(rel, answers[0].replace(/^\/+|\/+$/g, ''));
   }
 
   // ---- External-modification detection (I9) ----
