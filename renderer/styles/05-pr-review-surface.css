@@ -3305,7 +3305,8 @@ button.pr-check-toggle {
   z-index: 10000;
   display: flex;
   justify-content: center;
-  padding-top: 80px;
+  padding: min(80px, 10vh) 16px 16px;
+  overflow-y: auto;
 }
 
 .palette {
@@ -3313,7 +3314,8 @@ button.pr-check-toggle {
   border: 1px solid var(--border);
   border-radius: 12px;
   width: 420px;
-  max-height: 400px;
+  max-width: calc(100vw - 32px);
+  max-height: min(400px, calc(100vh - min(80px, 10vh) - 16px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3396,6 +3398,7 @@ button.pr-check-toggle {
   border: 1px solid var(--border);
   border-radius: 12px;
   width: 320px;
+  max-width: calc(100vw - 32px);
   padding: 24px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   align-self: flex-start;
@@ -5466,7 +5469,8 @@ body.task-branchless .file-viewer-blame-btn {
   border: 1px solid var(--border);
   border-radius: 12px;
   width: 600px;
-  max-height: 500px;
+  max-width: calc(100vw - 32px);
+  max-height: min(500px, calc(100vh - min(80px, 10vh) - 16px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -5828,7 +5832,7 @@ body.task-branchless .file-viewer-blame-btn {
 
 .task-item:hover .task-note-btn,
 .task-item:focus-within .task-note-btn {
-  opacity: 0.7;
+  opacity: 1;
 }
 
 .task-note-btn:hover,
@@ -5838,7 +5842,7 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .task-note-btn.has-note {
-  opacity: 0.8;
+  opacity: 1;
   color: var(--accent);
 }
 
@@ -5858,7 +5862,7 @@ body.task-branchless .file-viewer-blame-btn {
 
 .task-item:hover .task-notify-btn,
 .task-item:focus-within .task-notify-btn {
-  opacity: 0.7;
+  opacity: 1;
 }
 
 .task-notify-btn:hover,
@@ -5870,7 +5874,7 @@ body.task-branchless .file-viewer-blame-btn {
 /* An armed bell stays visible without hover — this session posts outside the
    app, so it shouldn't be a hidden state. */
 .task-notify-btn.notifying {
-  opacity: 0.9;
+  opacity: 1;
   color: var(--accent);
 }
 
@@ -6394,7 +6398,7 @@ body.task-branchless .file-viewer-blame-btn {
 }
 @keyframes plan-spin { to { transform: rotate(360deg); } }
 
-.plan-empty small { color: var(--text-dim); opacity: 0.85; }
+.plan-empty small { color: var(--text-dim); }
 
 /* ---- Plan / Design source switcher ---- */
 

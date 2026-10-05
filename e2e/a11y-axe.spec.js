@@ -18,14 +18,43 @@ function describe(violations) {
   return violations.map((v) => `${v.impact} ${v.id}: ${v.help}\n  ` + v.nodes.slice(0, 3).map((n) => n.target.join(' ')).join('\n  ')).join('\n');
 }
 
+// Elements this suite's contrast fixes target; axe can't compute their contrast over a gradient or blend, so an incomplete result on one fails.
+const FIXED_CONTRAST = ['.diff-file-status', '.diff-file-path', '.diff-ln-gutter', '.commit-gate-text', '.pr-file-add', '.pr-file-del'].join(', ');
+const UNRESOLVED_BG = new Set(['bgGradient', 'bgImage', 'bgFilter', 'fgAlpha', 'bgOverlap']);
+
+// Settles the page after a theme change: no transitions or animations, so axe reads the final colours.
+async function settle(page) {
+  await page.evaluate(() => new Promise((resolve) => {
+    if (!document.getElementById('e2e-no-motion')) {
+      const style = document.createElement('style');
+      style.id = 'e2e-no-motion';
+      style.textContent = '*, *::before, *::after { transition: none !important; animation: none !important; }';
+      document.head.appendChild(style);
+    }
+    document.getAnimations().forEach((a) => a.finish());
+    window.requestAnimationFrame(() => window.requestAnimationFrame(resolve));
+  }));
+}
+
 // Applies each preset without persisting it and returns one entry per theme with colour-contrast violations.
 async function contrastInEveryTheme(page, label) {
   const presets = await page.evaluate(() => Object.keys(window.ThemeManager.presets));
   const failures = [];
   for (const preset of presets) {
     await page.evaluate((p) => window.ThemeManager.apply(p, { persist: false }), preset);
-    const { violations } = await axe(page).withRules(['color-contrast']).analyze();
+    await settle(page);
+    const { violations, incomplete } = await axe(page).withRules(['color-contrast']).analyze();
     if (violations.length) failures.push(`${label} / ${preset}:\n${describe(violations)}`);
+    const unresolved = incomplete.flatMap((r) => r.nodes)
+      .filter((n) => n.any.some((c) => c.data && UNRESOLVED_BG.has(c.data.messageKey)))
+      .map((n) => ({ target: n.target.join(' '), reason: n.any.map((c) => c.data && c.data.messageKey).join(',') }));
+    if (!unresolved.length) continue;
+    test.info().annotations.push({ type: 'contrast-unresolved', description: `${label} / ${preset}: ` + unresolved.map((u) => `${u.target} (${u.reason})`).join('; ') });
+    const fixed = await page.evaluate(({ targets, sel }) => targets.filter((t) => {
+      const el = document.querySelector(t);
+      return el && el.matches(sel);
+    }), { targets: unresolved.map((u) => u.target), sel: FIXED_CONTRAST });
+    if (fixed.length) failures.push(`${label} / ${preset}: contrast unresolved over a gradient or blend:\n  ${fixed.join('\n  ')}`);
   }
   return failures;
 }
@@ -123,6 +152,7 @@ test.describe('axe scans', () => {
     failures.push(...await contrastInEveryTheme(mainWindow, 'Files tab'));
 
     fs.writeFileSync(path.join(repo, 'src/a.js'), SOURCE_AFTER);
+    fs.writeFileSync(path.join(repo, 'src/b.js'), 'module.exports = 1;\n');
     await mainWindow.evaluate(() => {
       document.querySelector('#diff-tabs .diff-tab[data-tab="changes"]').click();
       return window.DiffPanel.refresh();
@@ -133,6 +163,15 @@ test.describe('axe scans', () => {
     }
     await expect(mainWindow.locator('#diff-view .hljs-string').first()).toBeVisible();
     failures.push(...await contrastInEveryTheme(mainWindow, 'Changes diff'));
+
+    const otherRow = mainWindow.locator('#diff-panel .diff-file:not(.selected)').first();
+    await otherRow.hover();
+    failures.push(...await contrastInEveryTheme(mainWindow, 'Changes diff, hovered file row'));
+
+    await mainWindow.locator('#diff-view .js-view-mode-split').click();
+    await expect(mainWindow.locator('#diff-view .diff-split-grid')).toBeVisible();
+    failures.push(...await contrastInEveryTheme(mainWindow, 'Changes split diff'));
+    await mainWindow.locator('#diff-view .js-view-mode-unified').click();
 
     await mainWindow.evaluate((checks) => {
       const root = document.getElementById('pr-review-root');
@@ -205,6 +244,21 @@ test.describe('axe scans', () => {
     await expect(prefs.getByRole('radiogroup', { name: 'Window color' })).toBeVisible();
     await expectClean(prefs);
     await prefs.close();
+  });
+
+  test('task pop-out window', async ({ electronApp, mainWindow }) => {
+    repo = buildRepo({ 'a.txt': 'a\n' }, 'axe-popout');
+    const id = await openShellTask(mainWindow, repo);
+    const [popout] = await Promise.all([
+      electronApp.waitForEvent('window'),
+      mainWindow.evaluate((taskId) => window.klaus.task.popOut(taskId), id),
+    ]);
+    await popout.waitForLoadState('domcontentloaded');
+    await expect(popout.locator('#popout-terminal .xterm')).toBeVisible();
+    await expectClean(popout);
+    const failures = await contrastInEveryTheme(popout, 'Pop-out');
+    expect(failures, failures.join('\n\n')).toEqual([]);
+    await popout.close();
   });
 
   test('PR review window', async ({ electronApp }) => {

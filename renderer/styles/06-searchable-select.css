@@ -120,7 +120,6 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted, var(--text-dim, var(--text)));
-  opacity: 0.8;
 }
 
 .ss-item {
@@ -155,7 +154,6 @@
   font-size: 12px;
   text-align: center;
   color: var(--text-muted, var(--text-dim, var(--text)));
-  opacity: 0.8;
 }
 
 /* Sidebar repo/session filters: keep the compact 11px monospace look. */
@@ -222,5 +220,4 @@
   text-align: center;
   font-size: 12px;
   color: var(--text-muted, var(--text-dim, var(--text)));
-  opacity: 0.8;
 }

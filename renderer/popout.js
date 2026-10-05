@@ -89,6 +89,9 @@
       return true;
     });
 
+    var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    reducedMotion.addEventListener('change', function () { terminal.options.cursorBlink = !reducedMotion.matches; });
+
     window.addEventListener('theme-changed', function () {
       terminal.options.theme = window.ThemeManager.getTerminalTheme();
     });

@@ -646,9 +646,11 @@ window.A11y = (function () {
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
-        animation-duration: 0.01ms !important;
+        animation-duration: 0s !important;
+        animation-delay: 0s !important;
         animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
+        transition-duration: 0s !important;
+        transition-delay: 0s !important;
         scroll-behavior: auto !important;
       }
     }

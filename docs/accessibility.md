@@ -37,10 +37,13 @@ Each sidebar task describes its state (running or exited, agent, unread output, 
 
 ## Display
 
-- All themes meet WCAG AA contrast; status dots differ by shape as well as colour.
-- *Reduce motion* in the OS stops animations, smooth scrolling and the terminal cursor blink.
+- All themes meet WCAG AA contrast, including status letters and counts on hovered and selected rows; status dots differ by shape as well as colour.
+- Terminals keep text at 4.5:1 through xterm's `minimumContrastRatio`. Known limitation: xterm halves that target for SGR-dim (faint) text, so dimmed agent output can fall to about 2.25:1. Raising the ratio would also brighten normal text, so it stays at 4.5.
+- *Reduce motion* in the OS stops animations, transitions, smooth scrolling and the terminal cursor blink, and takes effect in open terminals without a restart. The dashboard's ambient animations stop after a few cycles even without it.
 - Windows high-contrast (forced colours) keeps status dots visible and outlines the selected item.
-- At narrow widths (e.g. 200% zoom) the sidebar and changes panel shrink so the terminal keeps room.
+- At narrow widths (e.g. 200% zoom) the sidebar and changes panel shrink so the terminal keeps room. Dialogs, the command palette, the agents panel and the log viewer fit a 320px-wide window and scroll instead of overflowing; Preferences fields wrap below their labels, and the terminal's "not a worktree" banner wraps instead of clipping its link.
+- Toasts: at most three show at once; older ones collapse behind a "+N more" button that expands the stack. Error toasts stay until dismissed. Escape while focus is in the stack dismisses the focused toast (or the newest, from "+N more"), so it never takes Escape from a terminal or dialog.
+- Scrolling the PR panel keeps the focused comment clear of the sticky header and comment box.
 
 ## Building UI
 
@@ -54,11 +57,11 @@ The shared helpers live in `renderer/a11y.js` (`window.A11y`); use them instead 
 - **Focus ring**: the global `:focus-visible` ring is `!important`, so a component's `outline: none` can't hide it. Don't fight it. Use `outline-offset` if it clips.
 - **Asking for input**: Electron has no `window.prompt()`. Use `AppUtils.promptDialog({ title, fields })`, which returns a labelled modal and resolves with the values, or `null` if cancelled.
 - **Status messages**: `A11y.announce(msg)`, or `A11y.announce(msg, 'assertive')` for errors. Toasts announce themselves.
-- **Colours**: use the theme tokens (`--text`, `--text-muted`, `--text-dim`, `--accent`, `--border-strong`, `--accent-contrast` for text on filled accent). Don't use raw hex values or opacity to dim text. Put `--success`/`--error`/`--warning`/`--accent` text on a tinted outline rather than a fill of the same hue, which drops it below 4.5:1, and give status dots a shape per state (disc, ring, square) so colour isn't the only cue. `test/util/theme-contrast.test.js` checks every preset, the syntax palettes, and fails on raw `color:` values in `renderer/styles/`.
+- **Colours**: use the theme tokens (`--text`, `--text-muted`, `--text-dim`, `--accent`, `--border-strong`, `--accent-contrast` for text on filled accent). Don't use raw hex values or opacity to dim text. Inside an `--accent-dim` selection use `--text`: muted, dim and status tokens don't keep 4.5:1 on it. Put `--success`/`--error`/`--warning`/`--accent` text on a tinted outline rather than a fill of the same hue, which drops it below 4.5:1, and give status dots a shape per state (disc, ring, square) so colour isn't the only cue. `test/util/theme-contrast.test.js` checks every preset (status colours on `--surface-hover` too), the syntax palettes, and text inside `--accent-dim` rules, and fails on raw `color:` values or opacity-dimmed text in `renderer/styles/`.
 
 ## Testing
 
-- **Automated**: `e2e/a11y-*.spec.js`. `a11y-axe.spec.js` runs axe-core (WCAG 2.2 A/AA) over the main window, dialogs, Preferences and PR review, plus a colour-contrast pass across all themes.
+- **Automated**: `e2e/a11y-*.spec.js`. `a11y-axe.spec.js` runs axe-core (WCAG 2.2 A/AA) over the main window, dialogs, Preferences, PR review and the task pop-out, plus a colour-contrast pass across all themes (unified and split diffs, a hovered file row). The pass turns transitions off before each scan, and fails when axe can't resolve a fixed element's contrast over a gradient.
 - **Manual VoiceOver pass** (Cmd+F5), before a release that changes UI:
   1. Launch the app and turn on *Optimize for screen readers*.
   2. Using only the keyboard, open a folder, switch between two tasks from the sidebar, and rename one with F2.

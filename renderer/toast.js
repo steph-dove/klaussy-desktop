@@ -6,11 +6,8 @@
 //   window.toast.info('Pushed to origin/main');
 //   window.toast.success('Merged.');
 //
-// Toasts stack in the bottom-right, auto-dismiss after a type-dependent
-// timeout (longer for errors so they can actually be read), and can be
-// clicked to dismiss immediately. The module is fully self-contained —
-// it injects its own <style> + container on first use, so any HTML
-// entrypoint that includes this script gets the API for free.
+// Bottom-right stack; the newest three show, errors stay until dismissed, Escape dismisses the focused one.
+// Self-contained: injects its own <style> and container on first use.
 //
 // Not a drop-in for alert() semantically: alert() is blocking, toasts are
 // not. Every current caller was using alert() to report an async failure
@@ -19,7 +16,11 @@
 
 (function () {
   let _container = null;
+  let _more = null;
+  let _expanded = false;
   let _installed = false;
+  const MAX_VISIBLE = 3;
+  const dismissers = new WeakMap();
 
   function install() {
     if (_installed) return;
@@ -35,11 +36,13 @@
         flex-direction: column-reverse;
         gap: 8px;
         z-index: 99999;
+        max-height: calc(100vh - 32px);
         pointer-events: none;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         font-size: 13px;
         line-height: 1.4;
       }
+      #klaussy-toast-stack.expanded { overflow-y: auto; }
       .klaussy-toast {
         pointer-events: auto;
         min-width: 260px;
@@ -91,6 +94,19 @@
         cursor: pointer; opacity: 0.7;
       }
       .klaussy-toast-close:hover, .klaussy-toast-close:focus-visible { opacity: 1; background: rgba(255,255,255,0.12); }
+      .klaussy-toast-more {
+        pointer-events: auto;
+        align-self: flex-end;
+        padding: 4px 12px;
+        font: inherit;
+        font-weight: 600;
+        color: #e8e8f0;
+        background: #1c1c2e;
+        border: 1px solid rgba(255,255,255,0.18);
+        border-radius: 12px;
+        cursor: pointer;
+      }
+      .klaussy-toast-more:hover { background: #2a2a40; }
     `;
     document.head.appendChild(style);
 
@@ -104,7 +120,44 @@
       _container.setAttribute('role', 'status');
       _container.setAttribute('aria-live', 'polite');
     }
+    _more = document.createElement('button');
+    _more.type = 'button';
+    _more.className = 'klaussy-toast-more';
+    _more.hidden = true;
+    _more.addEventListener('click', () => { _expanded = !_expanded; layout(); });
+    _container.appendChild(_more);
+    _container.addEventListener('keydown', onStackKeydown);
     document.body.appendChild(_container);
+  }
+
+  function liveToasts() {
+    return Array.from(_container.querySelectorAll('.klaussy-toast:not(.leaving)'));
+  }
+
+  // Shows the newest MAX_VISIBLE toasts (all of them when expanded) so a burst of sticky errors can't cover the window.
+  function layout() {
+    const toasts = liveToasts();
+    const extra = toasts.length - MAX_VISIBLE;
+    if (extra <= 0) _expanded = false;
+    toasts.forEach((t, i) => { t.hidden = !_expanded && i < extra; });
+    _more.hidden = extra <= 0;
+    _more.textContent = _expanded ? 'Show fewer' : '+' + extra + ' more';
+    _more.setAttribute('aria-expanded', String(_expanded));
+    _container.classList.toggle('expanded', _expanded);
+  }
+
+  // Escape inside the stack dismisses the focused toast, or the newest one from the "+N more" button.
+  function onStackKeydown(e) {
+    if (e.key !== 'Escape') return;
+    const toasts = liveToasts();
+    const target = e.target.closest('.klaussy-toast') || toasts[toasts.length - 1];
+    if (!target) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dismissers.get(target)();
+    const next = liveToasts().filter((t) => !t.hidden).pop();
+    const focusTo = next ? next.querySelector('.klaussy-toast-close') : (!_more.hidden && _more);
+    if (focusTo) focusTo.focus();
   }
 
   // Type-dependent auto-dismiss timeouts (ms). Errors stick around longer
@@ -132,9 +185,11 @@
       clearTimeout(timer);
       el.classList.remove('visible');
       el.classList.add('leaving');
+      layout();
       // Wait for the fade-out transition before removing from the DOM.
       setTimeout(() => { try { el.remove(); } catch {} }, 200);
     };
+    dismissers.set(el, dismiss);
 
     if (opts.actionLabel && typeof opts.onAction === 'function') {
       const btn = document.createElement('button');
@@ -159,6 +214,7 @@
     el.appendChild(closeBtn);
 
     _container.appendChild(el);
+    layout();
     if (window.A11y) window.A11y.announce(span.textContent, level === 'error' ? 'assertive' : 'polite');
 
     // Next frame so the transition runs from the initial off-screen state.

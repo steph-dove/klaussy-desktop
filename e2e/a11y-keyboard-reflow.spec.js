@@ -126,6 +126,24 @@ test.describe('keyboard alternatives, reflow and display settings', () => {
     expect(widths.terminals).toBeGreaterThanOrEqual(widths.view * 0.2);
   });
 
+  test('the command palette and theme picker fit a 320px-wide window', async ({ electronApp, mainWindow }) => {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(320, 480));
+    await expect.poll(() => mainWindow.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(400);
+    const fits = (sel) => mainWindow.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return r.width > 0 && r.left >= 0 && r.right <= window.innerWidth && r.top >= 0 && r.bottom <= window.innerHeight;
+    }, sel);
+
+    await mainWindow.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+Shift+k');
+    await expect(mainWindow.getByRole('combobox', { name: 'Commands' })).toBeFocused();
+    expect(await fits('.palette')).toBe(true);
+    await mainWindow.keyboard.press('Escape');
+
+    await mainWindow.evaluate(() => window.App.showThemePicker());
+    await expect(mainWindow.locator('#theme-modal')).toBeVisible();
+    expect(await fits('#theme-modal')).toBe(true);
+  });
+
   test('forced colours keep status dots and reduced motion stops the cursor blink', async ({ mainWindow }) => {
     await mainWindow.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
     repo = buildRepo({ 'a.txt': 'a\n' }, 'display');
@@ -134,6 +152,8 @@ test.describe('keyboard alternatives, reflow and display settings', () => {
       getComputedStyle(document.querySelector(`.task-item[data-id="${tid}"] .status-dot`)).forcedColorAdjust, id);
     expect(adjust).toBe('none');
     expect(await mainWindow.evaluate((tid) => window.AppState.tasks.get(tid).terminal.options.cursorBlink, id)).toBe(false);
+    await mainWindow.emulateMedia({ reducedMotion: 'no-preference' });
+    await expect.poll(() => mainWindow.evaluate((tid) => window.AppState.tasks.get(tid).terminal.options.cursorBlink, id)).toBe(true);
   });
 
   test('F6 reaches error toasts so they can be dismissed', async ({ mainWindow }) => {

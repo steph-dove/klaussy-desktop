@@ -20,7 +20,7 @@
       --text-muted: #9a9aa6;
       --text-dim: #8d8d98;
       --input-bg: #0a0a0e;
-      --error: #f0584f;
+      --error: #f05d54;
       --success: #46c463;
     }
 
@@ -66,15 +66,17 @@
 
     .field {
       display: flex;
+      flex-wrap: wrap;
       align-items: center;
       justify-content: space-between;
+      gap: 6px 12px;
       margin-bottom: 12px;
     }
 
     .field label {
       font-size: 13px;
       color: var(--text);
-      flex-shrink: 0;
+      min-width: 0;
     }
 
     .field input[type="text"],
@@ -87,6 +89,7 @@
       color: var(--text);
       font-size: 13px;
       width: 200px;
+      max-width: 100%;
       outline: none;
     }
 

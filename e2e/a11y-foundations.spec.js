@@ -85,6 +85,23 @@ test.describe('a11y foundations', () => {
     await expect(toast).toHaveCount(0);
   });
 
+  test('only the newest three toasts show and Escape dismisses the focused one', async ({ mainWindow }) => {
+    await mainWindow.evaluate(() => { for (let i = 1; i <= 5; i++) window.toast.error('Error ' + i); });
+    const stack = mainWindow.locator('#klaussy-toast-stack');
+    await expect(stack.locator('.klaussy-toast:visible')).toHaveCount(3);
+    await expect(stack.getByRole('button', { name: '+2 more' })).toBeVisible();
+
+    await stack.locator('.klaussy-toast', { hasText: 'Error 5' }).getByRole('button', { name: 'Dismiss notification' }).focus();
+    await mainWindow.keyboard.press('Escape');
+    await expect(stack.locator('.klaussy-toast', { hasText: 'Error 5' })).toHaveCount(0);
+    await expect(stack.locator('.klaussy-toast', { hasText: 'Error 4' }).getByRole('button', { name: 'Dismiss notification' })).toBeFocused();
+
+    const more = stack.getByRole('button', { name: '+1 more' });
+    await more.click();
+    await expect(stack.locator('.klaussy-toast:visible')).toHaveCount(4);
+    await expect(stack.getByRole('button', { name: 'Show fewer' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
   test('role=button elements activate with Enter and Space', async ({ mainWindow }) => {
     await mainWindow.evaluate(() => {
       const el = document.createElement('div');

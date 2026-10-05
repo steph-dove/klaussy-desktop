@@ -58,10 +58,13 @@ for (const [name, t] of Object.entries(presets)) {
     }
   });
 
-  test(`${name}: accent, success, error and warning work as text`, () => {
-    for (const fg of TEXT_ON_BG) {
-      for (const bg of ['bg', 'surface']) {
-        assert.ok(ratio(t[fg], t[bg]) >= 4.5, `${fg} ${t[fg]} on ${bg} ${t[bg]} is ${ratio(t[fg], t[bg]).toFixed(2)}`);
+  // surfaceHover is included because status letters and counts sit on hovered rows.
+  test(`${name}: accent, success, error, warning and diff colours work as text on every panel`, () => {
+    const v = cssVars(name);
+    const colours = { ...Object.fromEntries(TEXT_ON_BG.map((k) => [k, t[k]])), diffAddFg: v['--diff-add-fg'], diffDelFg: v['--diff-del-fg'] };
+    for (const [fg, c] of Object.entries(colours)) {
+      for (const bg of PANELS) {
+        assert.ok(ratio(c, t[bg]) >= 4.5, `${fg} ${c} on ${bg} ${t[bg]} is ${ratio(c, t[bg]).toFixed(2)}`);
       }
     }
   });
@@ -252,6 +255,52 @@ test('text on translucent tinted fills keeps 4.5:1 over every panel in every pre
           const under = flatten(bg, presets[name][panel]);
           const r = ratio(flatten(fg, under), under);
           if (r < 4.5) offenders.push(`${file} ${selector} in ${name} over ${panel}: ${r.toFixed(2)}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+// Opacity on text multiplies down the token's contrast; hidden-until-hover (0) and disabled controls are exempt.
+test('stylesheets do not dim text colours with opacity', () => {
+  const offenders = [];
+  for (const file of fs.readdirSync(STYLES).filter((f) => f.endsWith('.css'))) {
+    const rules = new Map();
+    for (const d of declarations(file)) {
+      if (!rules.has(d.selector)) rules.set(d.selector, []);
+      rules.get(d.selector).push(d);
+    }
+    for (const [selector, decls] of rules) {
+      const opacity = decls.filter((d) => d.prop === 'opacity').pop();
+      if (!opacity || !decls.some((d) => d.prop === 'color')) continue;
+      const o = Number(opacity.value);
+      if (o === 0 || o >= 1 || /disabled/.test(selector)) continue;
+      offenders.push(`${file}: ${selector} { opacity: ${opacity.value} }`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+// Muted, dim and status tokens have no headroom over the --accent-dim selection fill, so text inside a selected row must be checked against it.
+test('text inside --accent-dim selections keeps 4.5:1 in every preset', () => {
+  const offenders = [];
+  for (const file of fs.readdirSync(STYLES).filter((f) => f.endsWith('.css'))) {
+    const decls = declarations(file);
+    const hosts = decls.filter((d) => /^background(-color)?$/.test(d.prop) && d.value.includes('var(--accent-dim)'))
+      .flatMap((d) => d.selector.split(',').map((s) => s.trim()));
+    for (const d of decls.filter((x) => x.prop === 'color')) {
+      for (const part of d.selector.split(',').map((s) => s.trim())) {
+        if (!hosts.some((h) => part.startsWith(h + ' '))) continue;
+        for (const name of Object.keys(presets)) {
+          const vars = cssVars(name);
+          const fg = resolveColour(d.value, vars);
+          assert.ok(fg, `${file}: can't resolve ${d.value} in ${part}`);
+          for (const panel of DIFF_PANELS) {
+            const under = flatten(resolveColour('var(--accent-dim)', vars), presets[name][panel]);
+            const r = ratio(flatten(fg, under), under);
+            if (r < 4.5) offenders.push(`${file} ${part} in ${name} over ${panel}: ${r.toFixed(2)}`);
+          }
         }
       }
     }
