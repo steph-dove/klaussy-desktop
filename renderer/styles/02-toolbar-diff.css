@@ -1412,7 +1412,7 @@
 .diff-line.diff-add:hover .diff-comment-add,
 .diff-line.diff-del:hover .diff-comment-add,
 .diff-line.diff-context:hover .diff-comment-add,
-.diff-line:focus .diff-comment-add {
+.diff-line:focus-within .diff-comment-add {
   display: flex;
 }
 

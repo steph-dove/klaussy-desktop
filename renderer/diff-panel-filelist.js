@@ -503,6 +503,7 @@
         addBtn.className = 'diff-comment-add';
         addBtn.textContent = '+';
         addBtn.title = 'Add a comment on this line';
+        addBtn.setAttribute('aria-label', 'Add a comment on this line');
         addBtn.addEventListener('click', function (e) {
           e.stopPropagation();
           openAnnotationEditor(lineEl, file, annotationLineIdentity(lineEl), null);

@@ -17,11 +17,14 @@
     panelFor: function (tab) { return byId('history-' + tab.dataset.sub + '-content'); },
   });
   A11y.tabs(byId('plan-source-switch'), { itemSelector: '.plan-source-btn', label: 'Plan source' });
-  // Arrowing only moves the choice; the click handler's handoff flag and setup prompt wait for a real activation.
+  // Arrowing records the same choice a click does; only the agent-setup prompt waits for a real activation.
   A11y.radios(document.querySelector('.shell-options'), {
     itemSelector: '.shell-option', label: 'Run', orientation: 'both',
     onMove: function (btn) {
       window.App.selectedMode = btn.dataset.shell;
+      window.App.shellUserPicked = true;
+      var resumeAll = byId('resume-all-agents-check');
+      if (resumeAll) resumeAll.checked = false;
       window.App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
     },
   });

@@ -1083,14 +1083,20 @@ window.DevLoopPanel = (function () {
 
     var mergeBtn = container.querySelector('#btn-devloop-merge');
     if (mergeBtn) {
-      mergeBtn.addEventListener('click', function () {
+      // The click must not bubble: the PR panel closes its merge menu on any outside click.
+      mergeBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var prTab = document.querySelector('#diff-tabs .diff-tab[data-tab="pr"]');
+        if (prTab) prTab.click();
         var prBtn = document.getElementById('btn-pr-merge');
-        if (prBtn && !prBtn.disabled) {
-          prBtn.click();
-        } else {
-          var prTab = document.querySelector('#diff-tabs .diff-tab[data-tab="pr"]');
-          if (prTab) prTab.click();
+        if (!prBtn) return;
+        prBtn.focus();
+        if (prBtn.disabled || prBtn.getAttribute('aria-disabled') === 'true') {
+          var reason = document.getElementById(prBtn.getAttribute('aria-describedby') || '');
+          A11y.announce(reason ? reason.textContent : 'Merge is not available yet');
+          return;
         }
+        prBtn.click();
       });
     }
 

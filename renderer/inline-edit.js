@@ -178,6 +178,12 @@ window.InlineEdit = (function () {
     // Capture-phase so we catch the keys before Monaco/anything else consumes
     // them. Scoped only while session is active; cleanup removes the listener.
     s.keyHandler = function (e) {
+      // Only keys aimed at this edit; Enter/Escape in a terminal, dialog or sidebar belong to them.
+      var t = e.target;
+      var editorDom = s.editor && s.editor.getDomNode && s.editor.getDomNode();
+      var promptDom = s.promptWidget && s.promptWidget.getDomNode();
+      var mine = t && [s.panelEl, editorDom, promptDom].some(function (el) { return el && el.contains(t); });
+      if (!mine) return;
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancel(); }
       // A focused button (e.g. Reject) must get its own Enter, not an accept.
       else if (e.key === 'Enter' && s.stage === 'ready' && !(e.target && e.target.closest && e.target.closest('button'))) {

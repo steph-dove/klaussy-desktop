@@ -969,9 +969,11 @@
     // A repaint replaces the tab's HTML, including any chat composer the user
     // is mid-sentence in. Carry the focused one's text and caret across.
     var draft = PR.captureChatComposer(tab);
+    var typed = PR.captureTyped(tab);
     A11y.preserveFocus(tab, function () {
       tab.innerHTML = PR.renderAiReviewTab();
       PR.bindAiReviewTab();
+      PR.restoreTyped(tab, typed);
       PR.restoreChatComposer(tab, draft);
     });
     // Update tab count badge as findings change.

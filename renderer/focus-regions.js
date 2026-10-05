@@ -22,8 +22,29 @@
     return true;
   }
 
+  function inReview(selector) {
+    return function () { return document.querySelector('#pr-review-root ' + selector); };
+  }
+
+  // The PR review pop-out has no sidebar or panels; F6 is still the only way out of its terminal.
+  const POPOUT_REGIONS = [
+    { label: 'Pull request header', el: inReview('.pr-review-header') },
+    { label: 'Review sections', el: inReview('.pr-review-tabs') },
+    { label: 'Section content', el: inReview('.pr-review-body') },
+    {
+      label: 'Terminal',
+      el: inReview('.pr-implement-terminal-body'),
+      focus: function (el) {
+        const input = el.querySelector('.xterm-helper-textarea');
+        if (!input) return focusFirstIn(el);
+        input.focus();
+        return true;
+      },
+    },
+  ];
+
   // The editor is nested in the changes panel, so it must come after it.
-  const REGIONS = [
+  const MAIN_REGIONS = [
     { label: 'Sidebar', el: byId('sidebar') },
     {
       label: 'Terminals',
@@ -60,6 +81,8 @@
       },
     },
   ];
+
+  const REGIONS = document.getElementById('sidebar') ? MAIN_REGIONS : POPOUT_REGIONS;
 
   const lastFocus = new Map();
 
