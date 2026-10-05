@@ -30,7 +30,7 @@
            token graph. -->
       <div id="sidebar-brand">
         <img class="sidebar-brand-logo" src="../icon.png" alt="" aria-hidden="true">
-        <span class="sidebar-brand-name">Klaussy</span>
+        <h1 class="sidebar-brand-name">Klaussy</h1>
       </div>
       <!-- Token-spend leaderboard: today's running total + a daily chart
            with selectable range. Lives at the top of the sidebar above the
@@ -67,7 +67,6 @@
       </div>
 
       <div id="sidebar-header">
-        <h1>Klaussy</h1>
         <div class="header-buttons">
           <button id="btn-diff" aria-label="Toggle changes panel" title="Toggle diff panel">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -153,7 +152,7 @@
             <path d="M9.8 1.4a.8.8 0 0 1 .5.7l.2.9a.8.8 0 0 0 .6.6l.9.2a.8.8 0 0 1 .7.5l.4.8a.8.8 0 0 1-.2.8l-.7.7a.8.8 0 0 0 0 .9l.7.7a.8.8 0 0 1 .2.8l-.4.8a.8.8 0 0 1-.7.5l-.9.2a.8.8 0 0 0-.6.6l-.2.9a.8.8 0 0 1-.5.7l-.8.4a.8.8 0 0 1 .9-.2l.7.7a.8.8 0 0 0 .9 0l.7-.7a.8.8 0 0 1 .8-.2l.8.4z"></path>
           </svg>
         </button>
-        <button id="btn-sidebar-toggle" title="Toggle sidebar">
+        <button id="btn-sidebar-toggle" title="Toggle sidebar" aria-label="Hide sidebar" aria-expanded="true" aria-controls="sidebar">
           <span id="sidebar-toggle-icon" aria-hidden="true">&#9664;</span>
           <span id="sidebar-toggle-label">Hide</span>
         </button>
@@ -259,14 +258,14 @@
         <div id="terminals"></div>
         <span id="pane-move-hint" class="sr-only">Alt+Arrow keys move this pane</span>
         <button id="broadcast-toggle" class="hidden" title="Broadcast a command to every agent in this session">
-          <span class="broadcast-icon">&#128362;</span>
+          <span class="broadcast-icon" aria-hidden="true">&#128362;</span>
           <span>Broadcast</span>
         </button>
         <div id="broadcast-bar" class="hidden">
-          <span class="broadcast-icon">&#128362;</span>
+          <span class="broadcast-icon" aria-hidden="true">&#128362;</span>
           <input aria-label="Broadcast command to all agents in this session" type="text" id="broadcast-input" placeholder="Broadcast command to all active agents in session... (Enter to send)" autocomplete="off" spellcheck="false" />
           <button id="btn-broadcast-send">Send</button>
-          <button id="btn-broadcast-close" title="Dismiss" aria-label="Dismiss">&times;</button>
+          <button id="btn-broadcast-close" title="Dismiss" aria-label="Close broadcast bar">&times;</button>
         </div>
       </div>
 

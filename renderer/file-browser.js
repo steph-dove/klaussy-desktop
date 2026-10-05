@@ -83,14 +83,22 @@ window.FileBrowser = (function () {
     // ThemeManager adds `light-syntax` to body when the active preset uses
     // GitHub-style light syntax colors; its absence means dark.
     var isLight = document.body.classList.contains('light-syntax');
+    if (highContrast.matches || forcedColors.matches) return isLight ? 'hc-light' : 'hc-black';
     return isLight ? 'vs' : 'vs-dark';
   }
 
-  window.addEventListener('theme-changed', function () {
+  // macOS Increase Contrast and Windows high-contrast get Monaco's high-contrast themes.
+  var highContrast = window.matchMedia('(prefers-contrast: more)');
+  var forcedColors = window.matchMedia('(forced-colors: active)');
+
+  function applyMonacoTheme() {
     if (window.monaco && window.monaco.editor) {
       window.monaco.editor.setTheme(currentMonacoTheme());
     }
-  });
+  }
+  window.addEventListener('theme-changed', applyMonacoTheme);
+  highContrast.addEventListener('change', applyMonacoTheme);
+  forcedColors.addEventListener('change', applyMonacoTheme);
 
   function disposeCurrentEditor() {
     if (currentMarkerDisposable) { try { currentMarkerDisposable.dispose(); } catch (_) {} currentMarkerDisposable = null; }
@@ -1518,6 +1526,8 @@ window.FileBrowser = (function () {
         }
         await reloadTabsAfterRename(oldAbs, newAbs);
         await refreshFileTree();
+        focusTreePath(newRel);
+        A11y.announce('Renamed ' + oldName + ' to ' + newName);
       }
     });
     input.addEventListener('blur', function () { setTimeout(restore, 100); });
@@ -1542,6 +1552,11 @@ window.FileBrowser = (function () {
       var ok = window.confirm('Move "' + rel + '" to Trash?');
       if (!ok) return;
     }
+    var items = visibleTreeItems();
+    var at = items.findIndex(function (el) { return el.dataset.path === rel; });
+    var outside = function (el) { return el.dataset.path !== rel && el.dataset.path.indexOf(rel + '/') !== 0; };
+    var neighbour = items.slice(at + 1).find(outside) || items.slice(0, Math.max(at, 0)).reverse().find(outside);
+    var neighbourRel = neighbour && neighbour.dataset.path;
     closeTabsAt(hits);
     var result = await window.klaus.fs.deletePath(fileTreeWorktree, rel, false);
     if (result.error) {
@@ -1549,6 +1564,20 @@ window.FileBrowser = (function () {
       return;
     }
     await refreshFileTree();
+    if (!neighbourRel || !focusTreePath(neighbourRel)) focusTreeItem(visibleTreeItems()[0]);
+    A11y.announce('Deleted ' + rel.split('/').pop());
+  }
+
+  // The tree rebuilds with folders collapsed, so open the path's folders before focusing it.
+  function focusTreePath(rel) {
+    var parts = rel.split('/');
+    for (var i = 1; i < parts.length; i++) {
+      var dir = fileTree.querySelector('[data-kind="dir"][data-path="' + cssEscape(parts.slice(0, i).join('/')) + '"]');
+      if (dir && dir.getAttribute('aria-expanded') !== 'true') dir.click();
+    }
+    var item = fileTree.querySelector('[role="treeitem"][data-path="' + cssEscape(rel) + '"]');
+    focusTreeItem(item);
+    return !!item;
   }
 
   function showTreeContextMenu(e, rel, kind) {
@@ -1977,7 +2006,8 @@ window.FileBrowser = (function () {
 
   // ---- Project Search (C3) ----
 
-  async function doProjectSearch(overrideWt) {
+  // `replacedSummary` reports a replace that just ran, in place of the "No matches" it leaves behind.
+  async function doProjectSearch(overrideWt, replacedSummary) {
     var query = projectSearchInput.value;
     if (!query) {
       projectSearchResults.innerHTML = '';
@@ -2004,8 +2034,9 @@ window.FileBrowser = (function () {
       return;
     }
     if (result.results.length === 0) {
-      projectSearchResults.innerHTML = '<div class="file-tree-empty">No matches found</div>';
-      A11y.announce('No matches found');
+      var emptyText = replacedSummary || 'No matches found';
+      projectSearchResults.innerHTML = '<div class="file-tree-empty">' + escHtml(emptyText) + '</div>';
+      A11y.announce(emptyText);
       lastSearchHits = [];
       lastSearchQuery = query;
       updateReplaceButton();
@@ -2017,7 +2048,7 @@ window.FileBrowser = (function () {
     renderSearchResults(wt);
     updateReplaceButton();
     var fileCount = new Set(result.results.map(function (r) { return r.file; })).size;
-    A11y.announce(result.results.length + (result.results.length === 1 ? ' match' : ' matches') + ' in ' + fileCount + (fileCount === 1 ? ' file' : ' files'));
+    A11y.announce((replacedSummary ? replacedSummary + '. ' : '') + result.results.length + (result.results.length === 1 ? ' match' : ' matches') + ' in ' + fileCount + (fileCount === 1 ? ' file' : ' files'));
   }
 
   function renderSearchResults(wt) {
@@ -2134,8 +2165,13 @@ window.FileBrowser = (function () {
     }
     // Re-run search so the UI reflects the post-replace state (usually zero
     // hits for the original query).
+    var changed = (result.files || []).filter(function (f) { return f.replaced > 0; }).length;
+    var failed = (result.files || []).filter(function (f) { return f.error; });
+    var summary = 'Replaced ' + result.totalReplacements + ' occurrence' + (result.totalReplacements === 1 ? '' : 's')
+      + ' in ' + changed + ' file' + (changed === 1 ? '' : 's');
+    if (failed.length) window.toast.error('Could not replace in ' + failed.map(function (f) { return f.file + ' (' + f.error + ')'; }).join(', '));
     projectReplaceInput.value = '';
-    await doProjectSearch(wt);
+    await doProjectSearch(wt, summary);
     if (window.DiffPanel && window.DiffPanel.isVisible()) window.DiffPanel.refresh();
   }
 

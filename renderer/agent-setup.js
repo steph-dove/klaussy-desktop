@@ -127,9 +127,7 @@
 
       els.copy.onclick = function () {
         if (!cmd) return;
-        try { window.klaus.fs.copyToClipboard(cmd); } catch (_e) {}
-        setText(els.copy, 'Copied');
-        setTimeout(function () { setText(els.copy, 'Copy'); }, 1500);
+        AppUtils.copyText(els.copy, cmd);
       };
       els.docs.onclick = function () {
         if (docs) { try { window.klaus.gh.openExternal(docs); } catch (_e) {} }
@@ -137,6 +135,7 @@
       pendingFinish = finish;
       els.recheck.onclick = async function () {
         setText(els.recheck, 'Checking…');
+        A11y.announce('Checking for ' + name + '…');
         els.recheck.disabled = true;
         var ok = false;
         try {
@@ -199,9 +198,7 @@
 
       els.copy.onclick = function () {
         if (!cmd) return;
-        try { window.klaus.fs.copyToClipboard(cmd); } catch (_e) {}
-        setText(els.copy, 'Copied');
-        setTimeout(function () { setText(els.copy, 'Copy'); }, 1500);
+        AppUtils.copyText(els.copy, cmd);
       };
       els.docs.onclick = function () {
         try { window.klaus.ui.openPreferences(); } catch (_e) {}
@@ -209,6 +206,7 @@
       pendingFinish = finish;
       els.recheck.onclick = async function () {
         setText(els.recheck, 'Checking…');
+        A11y.announce('Checking for ' + name + '…');
         els.recheck.disabled = true;
         var ok = false;
         try {

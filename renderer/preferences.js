@@ -322,16 +322,33 @@
     if (!kimiBash.disabled) updated.kimiAutonomousBash = kimiBash.checked;
 
     var res = await window.klaus.ui.setPreferences(updated);
-    showStatus(res && res.error ? res.error : 'Saved', !!(res && res.error));
+    if (res && res.error) showStatus(res.error, true, /kimi/i.test(res.error) ? kimiBash : null);
+    else showStatus('Saved');
   }
 
   var statusTimer = null;
-  function showStatus(msg, isError) {
+  var invalidField = null;
+  // An error stays up, tied to its field when known, until a later save succeeds.
+  function showStatus(msg, isError, field) {
     statusMsg.setAttribute('role', isError ? 'alert' : 'status');
+    if (invalidField) {
+      invalidField.el.removeAttribute('aria-invalid');
+      if (invalidField.describedBy) invalidField.el.setAttribute('aria-describedby', invalidField.describedBy);
+      else invalidField.el.removeAttribute('aria-describedby');
+      invalidField = null;
+    }
     // Autosave fires per keystroke; rewriting the same text would re-announce it each time.
     if (statusMsg.textContent !== msg) statusMsg.textContent = msg;
     statusMsg.classList.add('visible');
     clearTimeout(statusTimer);
+    if (isError) {
+      if (field) {
+        invalidField = { el: field, describedBy: field.getAttribute('aria-describedby') };
+        field.setAttribute('aria-invalid', 'true');
+        field.setAttribute('aria-describedby', statusMsg.id + (invalidField.describedBy ? ' ' + invalidField.describedBy : ''));
+      }
+      return;
+    }
     statusTimer = setTimeout(function () {
       statusMsg.classList.remove('visible');
       statusMsg.textContent = '';
@@ -667,8 +684,10 @@
     });
     q('.np-remove').addEventListener('click', function () {
       var i = nemesisProfiles.indexOf(profile);
+      var who = (profile.name || '').trim() || 'gateway ' + (i + 1);
       if (i !== -1) nemesisProfiles.splice(i, 1);
       saveAll(); renderNemesisProfiles();
+      A11y.announce('Removed ' + who);
       // Land on a name field, not the next profile's Remove, so a repeated Enter can't delete a second profile.
       var names = nemesisProfilesEl.querySelectorAll('.np-name');
       var next = names[Math.min(Math.max(i, 0), names.length - 1)] || nemesisAddBtn;

@@ -82,8 +82,18 @@ window.HistoryPanel = (function () {
     tagNameInput.focus();
   });
 
-  document.getElementById('btn-tag-cancel').addEventListener('click', function () {
+  function closeTagForm() {
     tagsCreateForm.style.display = 'none';
+    tagNameInput.removeAttribute('aria-invalid');
+    document.getElementById('btn-create-tag').focus();
+  }
+
+  document.getElementById('btn-tag-cancel').addEventListener('click', closeTagForm);
+  tagsCreateForm.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeTagForm();
   });
 
   document.getElementById('btn-tag-submit').addEventListener('click', async function () {
@@ -91,7 +101,13 @@ window.HistoryPanel = (function () {
     var wt = task ? task.worktreePath : null;
     if (!wt) return;
     var name = tagNameInput.value.trim();
-    if (!name) { tagError.textContent = 'Tag name is required'; return; }
+    if (!name) {
+      tagError.textContent = 'Tag name is required';
+      tagNameInput.setAttribute('aria-invalid', 'true');
+      tagNameInput.setAttribute('aria-describedby', tagError.id);
+      tagNameInput.focus();
+      return;
+    }
     var message = tagMessageInput.value.trim() || undefined;
     var commit = tagCommitInput.value.trim() || undefined;
     this.disabled = true;
@@ -100,7 +116,8 @@ window.HistoryPanel = (function () {
     if (result.error) {
       tagError.textContent = result.error;
     } else {
-      tagsCreateForm.style.display = 'none';
+      closeTagForm();
+      A11y.announce('Created tag ' + name);
       loadTags();
     }
   });
@@ -149,9 +166,13 @@ window.HistoryPanel = (function () {
       item.querySelector('.tag-delete-btn').addEventListener('click', async function (e) {
         e.stopPropagation();
         if (!confirm('Delete tag "' + tag.name + '"?')) return;
+        var index = Array.prototype.indexOf.call(tagsList.querySelectorAll('.tag-delete-btn'), this);
         var res = await window.klaus.git.tagDelete(wt, tag.name);
-        if (res.error) window.toast.error('Delete failed: ' + res.error);
-        else loadTags();
+        if (res.error) { window.toast.error('Delete failed: ' + res.error); return; }
+        A11y.announce('Deleted tag ' + tag.name);
+        await loadTags();
+        var rest = tagsList.querySelectorAll('.tag-delete-btn');
+        (rest[Math.min(index, rest.length - 1)] || document.getElementById('btn-create-tag')).focus();
       });
       tagsList.appendChild(item);
     });

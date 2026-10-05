@@ -200,6 +200,7 @@ window.TerminalManager = (function () {
     // Review — each dispatches to a helper that spawns a new Claude sub-tab
     // on this task's worktree and kicks off the appropriate command.
     buildActionsDropdown(actionsSpan, id);
+    nameForTask(actionsSpan.querySelector('.actions-dropdown-btn'), function () { return 'Actions for ' + task.name; });
 
     // Open into a dedicated flex body, not the container: FitAddon sizes from
     // parentElement's height, and the container includes the header + tab bar,
@@ -217,6 +218,7 @@ window.TerminalManager = (function () {
     scrollBtn.className = 'terminal-scroll-bottom';
     scrollBtn.innerHTML = '&#8595;';
     scrollBtn.title = 'Scroll to bottom';
+    nameForTask(scrollBtn, function () { return 'Scroll ' + task.name + ' to bottom'; });
     scrollBtn.style.display = 'none';
     container.appendChild(scrollBtn);
     scrollBtn.addEventListener('click', function () {
@@ -376,6 +378,7 @@ window.TerminalManager = (function () {
       '<span class="sub-tab-add-wrap"><button class="sub-tab-add" title="Add a tab (pick an agent or shell)" aria-label="Add a tab">+</button></span>';
     container.insertBefore(subTabBar, label.nextSibling);
     updatePrimaryAgentTab(taskEntry);
+    nameForTask(subTabBar.querySelector('.sub-tab-add'), function () { return 'Add a tab to ' + task.name; });
 
     var quickChips = document.createElement('div');
     quickChips.className = 'terminal-quick-chips';
@@ -384,6 +387,10 @@ window.TerminalManager = (function () {
       '<button type="button" class="quick-chip" data-action="plan" title="Plan and implement a task">📋 Plan</button>' +
       '<button type="button" class="quick-chip" data-action="debug" title="Debug and fix an issue">🐞 Debug</button>' +
       '<button type="button" class="quick-chip" data-action="review" title="Review working diff">🔍 Review</button>';
+    quickChips.querySelectorAll('.quick-chip').forEach(function (chip) {
+      var visible = chip.textContent.replace(/^\S+\s+/, '');
+      nameForTask(chip, function () { return visible + ' on ' + task.name; });
+    });
     quickChips.addEventListener('click', function (e) {
       var chip = e.target.closest('.quick-chip');
       if (!chip) return;
@@ -882,6 +889,13 @@ window.TerminalManager = (function () {
       openMenuEl = null;
     }
   });
+
+  // Every pane repeats these controls, so their names carry the task's current name.
+  function nameForTask(el, getName) {
+    var apply = function () { el.setAttribute('aria-label', getName()); };
+    apply();
+    el.addEventListener('focus', apply);
+  }
 
   function buildActionsDropdown(host, taskId) {
     var btn = document.createElement('button');

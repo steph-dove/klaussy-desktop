@@ -223,6 +223,9 @@ window.PlanPanel = (function () {
       cb.type = 'checkbox';
       cb.disabled = true; // read-only progress tracker
       cb.checked = checked;
+      var own = li.cloneNode(true);
+      own.querySelectorAll('ul, ol').forEach(function (n) { n.remove(); });
+      cb.setAttribute('aria-label', own.textContent.trim());
       li.classList.add('plan-task');
       if (checked) li.classList.add('is-done');
       li.insertBefore(cb, first);

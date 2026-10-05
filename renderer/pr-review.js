@@ -872,7 +872,7 @@ window.PrReview = window.PrReview || {};
 
       async function post() {
         var body = ta.value.trim();
-        if (!body) return;
+        if (!body) { A11y.fieldError(ta, 'Write a comment before posting.'); return; }
         btn.disabled = true;
         btn.textContent = 'Posting\u2026';
         var result = await window.klaus.pr.addIssueComment(body);
@@ -1067,7 +1067,7 @@ window.PrReview = window.PrReview || {};
 
     async function send() {
       var body = ta.value.trim();
-      if (!body) return;
+      if (!body) { A11y.fieldError(ta, 'Write a reply before posting.'); return; }
       sendBtn.disabled = true;
       sendBtn.textContent = 'Posting\u2026';
       var result = await window.klaus.pr.replyToReviewComment(parentId, body);

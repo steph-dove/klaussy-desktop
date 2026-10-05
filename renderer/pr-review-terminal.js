@@ -112,14 +112,14 @@
       return '<div class="pr-local-changes pr-local-empty">'
         + '<span class="pr-local-title">Local changes</span>'
         + '<span class="pr-local-counts"> — ' + PR.escHtml(PR.localChanges.error) + '</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh local changes">↻</button>'
       + '</div>';
     }
     if (!hasWt) {
       return '<div class="pr-local-changes pr-local-empty">'
         + '<span class="pr-local-title">Local changes</span>'
         + '<span class="pr-local-counts"> — no worktree found for this PR. Click Implement on a finding (or Check out locally) to set one up.</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh local changes">↻</button>'
       + '</div>';
     }
     // Worktree exists but nothing's local: show a "clean" stub so the user
@@ -128,7 +128,7 @@
       return '<div class="pr-local-changes pr-local-empty">'
         + '<span class="pr-local-title">Local changes</span>'
         + '<span class="pr-local-counts"> — none. Worktree in sync with PR head.</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh local changes">↻</button>'
       + '</div>';
     }
 
@@ -176,10 +176,11 @@
           + '<input type="text" class="pr-local-commit-msg" aria-label="Commit message" placeholder="Commit message"'
             + ' value="' + PR.escHtml(PR.localCommitMsg || '') + '"'
             + (PR.localBusy ? ' disabled' : '') + '>'
-          + '<button class="pr-review-btn pr-local-commit-btn" type="button"'
-            + ((PR.localBusy || !selectedCount) ? ' disabled' : '') + '>'
+          + '<button class="pr-review-btn pr-local-commit-btn" type="button" aria-describedby="pr-local-commit-reason"'
+            + (PR.localBusy ? ' disabled' : '') + (selectedCount ? '' : ' aria-disabled="true"') + '>'
             + (PR.localBusy === 'committing' ? 'Committing…' : 'Commit' + (selectedCount ? ' (' + selectedCount + ')' : ''))
           + '</button>'
+          + '<span id="pr-local-commit-reason" class="sr-only">' + (selectedCount ? '' : 'Select at least one file to commit.') + '</span>'
         + '</div>'
       : '';
 
@@ -216,7 +217,7 @@
               ? unpushed.length + ' unpushed commit' + (unpushed.length === 1 ? '' : 's')
               : (diverged ? 'diverged from PR' : ''))
         + '</span>'
-        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh">↻</button>'
+        + '<button class="pr-local-refresh" type="button" title="Refresh" aria-label="Refresh local changes">↻</button>'
       + '</div>'
       + bannerHtml
       + fileListHtml + diffHtml + commitHtml
@@ -246,7 +247,7 @@
     var refreshBtn = section.querySelector('.pr-local-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', function () {
       PR.localBanner = null;
-      PR.refreshLocalChanges();
+      PR.refreshLocalChanges(true);
     });
 
     var commitBtn = section.querySelector('.pr-local-commit-btn');
@@ -263,7 +264,9 @@
         else delete PR.localSelectedFiles[file];
         var n = section.querySelectorAll('.pr-local-file-check:checked').length;
         if (commitBtn) {
-          commitBtn.disabled = !!PR.localBusy || n === 0;
+          if (n) commitBtn.removeAttribute('aria-disabled');
+          else commitBtn.setAttribute('aria-disabled', 'true');
+          section.querySelector('#pr-local-commit-reason').textContent = n ? '' : 'Select at least one file to commit.';
           if (!PR.localBusy) commitBtn.textContent = 'Commit' + (n ? ' (' + n + ')' : '');
         }
       });
@@ -272,8 +275,7 @@
     if (commitBtn) commitBtn.addEventListener('click', function () {
       var msg = msgInput ? msgInput.value.trim() : (PR.localCommitMsg || '').trim();
       if (!msg) {
-        PR.setLocalBanner({ kind: 'error', text: 'Commit message required.' });
-        PR.repaintAiReviewTab();
+        if (msgInput) A11y.fieldError(msgInput, 'Commit message required.', msgInput.parentElement);
         return;
       }
       // Read the checked files straight from the DOM so stale set entries
@@ -378,11 +380,14 @@
   // lookup in main can miss when the user's local clone has its origin set
   // to the head fork (a self-PR), since that doesn't match the PR's base
   // repo. The hint short-circuits that lookup.
-  PR.refreshLocalChanges = function() {
+  PR.refreshLocalChanges = function(announce) {
     if (!window.klaus || !window.klaus.pr || !window.klaus.pr.localState) return;
     window.klaus.pr.localState(PR.aiReview.worktreePath || null).then(function (r) {
       PR.localChanges = r || null;
       PR.repaintAiReviewTab();
+      if (!announce) return;
+      var n = (r && r.files && r.files.length) || 0;
+      A11y.announce('Local changes refreshed: ' + n + ' uncommitted file' + (n === 1 ? '' : 's'));
     }).catch(function () {
       // IPC threw — leave localChanges as-is rather than wiping the panel.
     });
@@ -531,16 +536,19 @@
 
     var actions;
     if (f.ignored) {
-      actions = commentBadge + copyBtn + '<button class="pr-ai-finding-undo" type="button">Restore</button>';
+      actions = '<span class="pr-ai-finding-status">Ignored</span>'
+        + commentBadge + copyBtn + '<button class="pr-ai-finding-undo" type="button">Restore</button>';
     } else if (f.status === 'implementing') {
-      actions = commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
+      actions = '<span class="pr-ai-finding-status">Implementing\u2026</span>'
+        + commentBadge + copyBtn + '<button class="pr-ai-finding-cancel" type="button">Cancel</button>';
     } else if (f.status === 'implemented') {
       actions = '<span class="pr-ai-finding-status">\u2713 Implemented</span>'
         + commentBadge + editedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
         + commentBtn
         + '<button class="pr-ai-finding-redo" type="button" title="Run implement again">Implement again</button>';
     } else {
-      actions = commentBadge + editedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
+      actions = (f.status === 'failed' ? '<span class="pr-ai-finding-status">! Implement failed</span>' : '')
+        + commentBadge + editedBadge + copyBtn + humanizeBtn + investigateBtn + discussBtn + editCommentBtn
         + '<button class="pr-ai-finding-ignore" type="button">Ignore</button>'
         + commentBtn
         + '<button class="pr-ai-finding-implement" type="button" title="The agent updates the file and drafts a follow-up PR comment for your approval">Implement</button>';
@@ -803,8 +811,8 @@
       var undoBtn = card.querySelector('.pr-ai-finding-undo');
       var cancelImpl = card.querySelector('.pr-ai-finding-cancel');
       var commentBtn = card.querySelector('.pr-ai-finding-comment');
-      if (ignore) ignore.addEventListener('click', function () { f.ignored = true; PR.repaintAiReviewTab(); PR.saveAiReviewCache(); });
-      if (undoBtn) undoBtn.addEventListener('click', function () { f.ignored = false; PR.repaintAiReviewTab(); PR.saveAiReviewCache(); });
+      if (ignore) ignore.addEventListener('click', function () { f.ignored = true; PR.repaintAiReviewTab(); PR.saveAiReviewCache(); A11y.announce('Finding ignored'); });
+      if (undoBtn) undoBtn.addEventListener('click', function () { f.ignored = false; PR.repaintAiReviewTab(); PR.saveAiReviewCache(); A11y.announce('Finding restored'); });
       if (implementBtn) implementBtn.addEventListener('click', function () { PR.startImplement(f); });
       if (redoBtn) redoBtn.addEventListener('click', function () { PR.startImplement(f); });
       if (cancelImpl) cancelImpl.addEventListener('click', function () {

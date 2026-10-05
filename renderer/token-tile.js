@@ -54,11 +54,24 @@
     return String(n);
   }
 
+  // The bars' <title>s are hover-only, so screen readers get the same values as a hidden table.
+  const dataTable = document.createElement('table');
+  dataTable.className = 'sr-only';
+  chart.insertAdjacentElement('afterend', dataTable);
+
+  function renderTable(series) {
+    dataTable.innerHTML = series.length
+      ? '<caption>Tokens per period</caption><tr><th scope="col">Period</th><th scope="col">Tokens</th></tr>'
+        + series.map(function (p) { return '<tr><td>' + escHtml(p.day) + '</td><td>' + fmt(p.tokens) + '</td></tr>'; }).join('')
+      : '';
+  }
+
   // SVG bar chart over a `series` of {day, tokens}. Uses viewBox coords
   // (200x60) so CSS scales it freely; bars share a fixed gap and grow to
   // fill the available height relative to the max value in the series.
   function renderChart(series) {
     while (chart.firstChild) chart.removeChild(chart.firstChild);
+    renderTable(series);
     if (!series.length) return;
     const W = 200, H = 60, PAD_TOP = 4, PAD_BOTTOM = 2;
     const max = series.reduce((m, p) => Math.max(m, p.tokens), 0) || 1;

@@ -33,6 +33,7 @@
     #popout-header .dot {
       width: 6px; height: 6px; border-radius: 50%; background: var(--success);
     }
+    #popout-header .dot.exited { background: transparent; border: 1px solid var(--text-muted); }
     #popout-header .task-name {
       font-weight: 600; color: var(--text);
     }
@@ -45,9 +46,10 @@
 </head>
 <body>
   <div id="popout-header">
-    <span class="dot"></span>
+    <span class="dot" aria-hidden="true"></span>
     <span class="task-name" id="popout-name">Task</span>
     <span id="popout-branch"></span>
+    <span id="popout-status">running</span>
   </div>
   <main id="popout-terminal" aria-labelledby="popout-name"></main>
   <script src="a11y.js"></script>

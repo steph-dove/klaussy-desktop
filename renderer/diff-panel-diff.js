@@ -766,6 +766,18 @@
     return DP.selectedFile;
   };
 
+  // The arrows are read as "upwards arrow", so screen readers get the words instead.
+  function paintAheadBehind(el, ahead, behind, scope) {
+    var parts = [];
+    if (ahead > 0) parts.push('\u2191' + ahead);
+    if (behind > 0) parts.push('\u2193' + behind);
+    var words = ahead + ' ahead, ' + behind + ' behind' + scope;
+    el.title = words;
+    el.innerHTML = parts.length
+      ? '<span aria-hidden="true">' + parts.join(' ') + '</span><span class="sr-only">' + words + '</span>'
+      : '';
+  }
+
   // D1: Ahead/behind counts
   DP.updateAheadBehind = async function() {
     if (!DP.currentWorktreePath && !DP.currentSessionName) return;
@@ -783,19 +795,11 @@
           totalBehind += (result.behind || 0);
         } catch (_) {}
       }
-      var parts = [];
-      if (totalAhead > 0) parts.push('\u2191' + totalAhead);
-      if (totalBehind > 0) parts.push('\u2193' + totalBehind);
-      el.textContent = parts.join(' ');
-      el.title = totalAhead + ' ahead, ' + totalBehind + ' behind across session';
+      paintAheadBehind(el, totalAhead, totalBehind, ' across session');
     } else {
       var abPath = DP.currentWorktreePath;
       var applyAheadBehind = function (r) {
-        var parts = [];
-        if (r.ahead > 0) parts.push('\u2191' + r.ahead);
-        if (r.behind > 0) parts.push('\u2193' + r.behind);
-        el.textContent = parts.join(' ');
-        el.title = (r.ahead || 0) + ' ahead, ' + (r.behind || 0) + ' behind';
+        paintAheadBehind(el, r.ahead || 0, r.behind || 0, '');
       };
       // Stale-while-revalidate: show the last-known counts instantly on a
       // switch, then refetch. Skipped on same-worktree auto-refresh.

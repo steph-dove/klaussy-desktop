@@ -700,11 +700,11 @@ window.DevLoopPanel = (function () {
     var html =
       '<div class="devloop-header">' +
         '<div class="devloop-header-title">' +
-          '<span class="devloop-header-icon">🦉</span>' +
+          '<span class="devloop-header-icon" aria-hidden="true">🦉</span>' +
           '<div class="devloop-header-text">' +
             '<h3>Full Dev Loop: ' + esc(taskName) + '</h3>' +
             '<div class="devloop-phase-badge">' +
-              '<span class="devloop-pulse-dot"></span>' +
+              '<span class="devloop-pulse-dot" aria-hidden="true"></span>' +
               'Phase ' + state.currentPhase + ' of 9: ' + esc(currentPhaseObj.name) +
             '</div>' +
           '</div>' +
@@ -712,7 +712,7 @@ window.DevLoopPanel = (function () {
         headerActionsHtml +
       '</div>' +
       '<div class="devloop-intro-banner">' +
-        '<div class="devloop-intro-owl">🦉</div>' +
+        '<div class="devloop-intro-owl" aria-hidden="true">🦉</div>' +
         '<div class="devloop-intro-text">' +
           '<strong>Full Dev Loop ("Rest of the Owl")</strong>' +
           '<span>An autonomous 9-phase workflow: Plan ➔ Code with TDD ➔ Local Review ➔ QA Video ➔ Create PR ➔ Pull &amp; Resolve Feedback ➔ Pull &amp; Fix CI ➔ Notify when Green. You retain the merge button.</span>' +
@@ -790,7 +790,7 @@ window.DevLoopPanel = (function () {
     if (state.prUrl) {
       html +=
         '<div class="devloop-pr-banner">' +
-          '<span class="devloop-pr-icon">🚀</span>' +
+          '<span class="devloop-pr-icon" aria-hidden="true">🚀</span>' +
           '<span class="devloop-pr-text">Pull Request <strong>#' + esc(state.prNumber || '') + '</strong> active on forge.</span>' +
           '<a href="#" class="devloop-pr-link" data-url="' + esc(state.prUrl) + '">View PR ↗</a>' +
         '</div>';
@@ -805,10 +805,10 @@ window.DevLoopPanel = (function () {
       html +=
         '<div class="devloop-step ' + statusCls + '" data-phase="' + phase.id + '">' +
           '<div class="devloop-step-line"></div>' +
-          '<div class="devloop-step-indicator">' + statusIcon + '</div>' +
+          '<div class="devloop-step-indicator" aria-hidden="true">' + statusIcon + '</div>' +
           '<div class="devloop-step-body">' +
             '<div class="devloop-step-header">' +
-              '<span class="devloop-step-title">' + phase.icon + ' Phase ' + phase.id + ': ' + esc(phase.name) + '</span>' +
+              '<span class="devloop-step-title"><span aria-hidden="true">' + phase.icon + '</span> Phase ' + phase.id + ': ' + esc(phase.name) + '</span>' +
               '<span class="devloop-step-status-tag ' + statusCls + '">' + (statusCls === 'in_progress' ? 'In Progress' : (statusCls === 'completed' ? 'Done' : 'Pending')) + '</span>' +
             '</div>' +
             '<div class="devloop-step-desc">' + esc(phase.description) + '</div>' +
@@ -821,7 +821,7 @@ window.DevLoopPanel = (function () {
     html +=
       '<div class="devloop-merge-gate-card">' +
         '<div class="devloop-merge-gate-head">' +
-          '<span class="devloop-merge-gate-owl">🦉</span>' +
+          '<span class="devloop-merge-gate-owl" aria-hidden="true">🦉</span>' +
           '<div>' +
             '<h4>Human Merge Control</h4>' +
             '<p>The agent completes all planning, TDD, code review, QA, and CI polling. The merge button always stays with the human.</p>' +
@@ -838,7 +838,7 @@ window.DevLoopPanel = (function () {
   // The empty states read as findings, so flashing one before the scan lands
   // gives a wrong answer.
   function loadingView(what) {
-    return '<div class="devloop-empty"><div class="devloop-empty-icon">⏳</div>'
+    return '<div class="devloop-empty"><div class="devloop-empty-icon" aria-hidden="true">⏳</div>'
       + '<h3>Loading ' + what + '…</h3></div>';
   }
 
@@ -848,7 +848,7 @@ window.DevLoopPanel = (function () {
     if (!cachedDocs || cachedDocs.length === 0) {
       return (
         '<div class="devloop-empty">' +
-          '<div class="devloop-empty-icon">📐</div>' +
+          '<div class="devloop-empty-icon" aria-hidden="true">📐</div>' +
           '<h3>No Design Documents Found</h3>' +
           '<p>Create a <code>plan.md</code>, <code>design.md</code>, or an OKF session note (tagged <code>plan</code> in <code>$KLAUSSY_SESSION_NOTES_DIR</code>) to view and track requirements here.</p>' +
           '<button class="klaus-btn klaus-btn-primary devloop-create-plan-btn" type="button">+ Plan a Task</button>' +
@@ -861,10 +861,10 @@ window.DevLoopPanel = (function () {
     var html = '<div class="devloop-design-pane">';
 
     if (cachedDocs.length > 1) {
-      html += '<div class="devloop-doc-switch">';
+      html += '<div class="devloop-doc-switch" role="group" aria-label="Design documents">';
       cachedDocs.forEach(function (doc) {
         var isSel = doc.path === selectedDoc.path;
-        html += '<button type="button" class="devloop-doc-btn ' + (isSel ? 'active' : '') + '" data-doc-path="' + esc(doc.path) + '">' + esc(doc.name) + '</button>';
+        html += '<button type="button" class="devloop-doc-btn ' + (isSel ? 'active' : '') + '" aria-pressed="' + isSel + '" data-doc-path="' + esc(doc.path) + '">' + esc(doc.name) + '</button>';
       });
       html += '</div>';
     }
@@ -925,7 +925,7 @@ window.DevLoopPanel = (function () {
       if (qaMediaError) {
         return (
           '<div class="devloop-empty">' +
-            '<div class="devloop-empty-icon">⚠️</div>' +
+            '<div class="devloop-empty-icon" aria-hidden="true">⚠️</div>' +
             '<h3>QA Media Could Not Be Loaded</h3>' +
             '<p>' + esc(qaMediaError) + '</p>' +
           '</div>'
@@ -933,7 +933,7 @@ window.DevLoopPanel = (function () {
       }
       return (
         '<div class="devloop-empty">' +
-          '<div class="devloop-empty-icon">🎥</div>' +
+          '<div class="devloop-empty-icon" aria-hidden="true">🎥</div>' +
           '<h3>No QA Screenshots Recorded Yet</h3>' +
           '<p>During <strong>Phase 4 (QA the change)</strong>, the agent captures before/after screenshots, records full-flow responsive walkthrough videos (.mp4), and uploads QA assets for PR comparison tables in <code>Downloads/klaussy-qa-&lt;branch&gt;</code>.</p>' +
         '</div>'
@@ -967,13 +967,13 @@ window.DevLoopPanel = (function () {
           '<div class="devloop-qa-media-card video-card">' +
             '<div class="devloop-qa-media-head">' +
               '<div class="devloop-qa-media-title">' +
-                '<span class="devloop-media-icon">🎥</span>' +
+                '<span class="devloop-media-icon" aria-hidden="true">🎥</span>' +
                 '<span class="devloop-media-name" title="' + esc(art.path) + '">' + esc(art.name) + '</span>' +
                 roleBadge +
               '</div>' +
               '<div class="devloop-qa-media-actions">' +
-                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-copy-md-btn" data-path="' + esc(art.path) + '" data-name="' + esc(art.name) + '">Copy MD</button>' +
-                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-open-finder-btn" data-path="' + esc(art.path) + '">Reveal</button>' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-copy-md-btn" data-path="' + esc(art.path) + '" data-name="' + esc(art.name) + '" aria-label="Copy Markdown for ' + esc(art.name) + '">Copy MD</button>' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-open-finder-btn" data-path="' + esc(art.path) + '" aria-label="Reveal ' + esc(art.name) + ' in folder">Reveal</button>' +
               '</div>' +
             '</div>' +
             '<div class="devloop-video-wrap">' +
@@ -987,13 +987,13 @@ window.DevLoopPanel = (function () {
           '<div class="devloop-qa-media-card image-card">' +
             '<div class="devloop-qa-media-head">' +
               '<div class="devloop-qa-media-title">' +
-                '<span class="devloop-media-icon">🖼️</span>' +
+                '<span class="devloop-media-icon" aria-hidden="true">🖼️</span>' +
                 '<span class="devloop-media-name" title="' + esc(art.path) + '">' + esc(art.name) + '</span>' +
                 roleBadge +
               '</div>' +
               '<div class="devloop-qa-media-actions">' +
-                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-copy-md-btn" data-path="' + esc(art.path) + '" data-name="' + esc(art.name) + '">Copy MD</button>' +
-                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-open-finder-btn" data-path="' + esc(art.path) + '">Reveal</button>' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-copy-md-btn" data-path="' + esc(art.path) + '" data-name="' + esc(art.name) + '" aria-label="Copy Markdown for ' + esc(art.name) + '">Copy MD</button>' +
+                '<button type="button" class="klaus-btn klaus-btn-secondary devloop-open-finder-btn" data-path="' + esc(art.path) + '" aria-label="Reveal ' + esc(art.name) + ' in folder">Reveal</button>' +
               '</div>' +
             '</div>' +
             '<div class="devloop-img-wrap">' +
@@ -1061,12 +1061,7 @@ window.DevLoopPanel = (function () {
         var name = btn.dataset.name || 'screenshot';
         var filePath = btn.dataset.path || '';
         var mdSnippet = '![' + name + '](' + filePath + ')';
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(mdSnippet);
-          var origText = btn.textContent;
-          btn.textContent = 'Copied!';
-          setTimeout(function () { btn.textContent = origText; }, 1500);
-        }
+        AppUtils.copyText(btn, mdSnippet);
       });
     });
 
@@ -1122,6 +1117,9 @@ window.DevLoopPanel = (function () {
       cb.type = 'checkbox';
       cb.disabled = true;
       cb.checked = checked;
+      var own = li.cloneNode(true);
+      own.querySelectorAll('ul, ol').forEach(function (n) { n.remove(); });
+      cb.setAttribute('aria-label', own.textContent.trim());
       li.classList.add('plan-task');
       if (checked) li.classList.add('is-done');
       li.insertBefore(cb, first);

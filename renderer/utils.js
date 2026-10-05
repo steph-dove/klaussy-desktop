@@ -184,7 +184,22 @@ window.AppUtils = (function () {
     input.addEventListener('focus', apply);
   }
 
+  // Flips the button's label briefly and announces the outcome, which the label change alone doesn't.
+  function copyText(btn, text, ms) {
+    var orig = btn.textContent;
+    var flash = function (label) {
+      btn.textContent = label;
+      if (window.A11y) window.A11y.announce(label, label === 'Copied' ? 'polite' : 'assertive');
+      setTimeout(function () { btn.textContent = orig; }, ms || 1500);
+    };
+    var write = navigator.clipboard && navigator.clipboard.writeText
+      ? navigator.clipboard.writeText(text)
+      : window.klaus.fs.copyToClipboard(text);
+    return Promise.resolve(write).then(function () { flash('Copied'); }, function () { flash('Copy failed'); });
+  }
+
   return {
+    copyText: copyText,
     screenReaderMode: screenReaderMode,
     labelTerminal: labelTerminal,
     prefersReducedMotion: prefersReducedMotion,

@@ -91,7 +91,8 @@ window.DiffPanel = window.DiffPanel || {};
     });
     A11y.lineNav(DP.diffViewEl, {
       label: 'Diff',
-      lineSelector: '.diff-line',
+      // Split view pads with blank cells and repeats each context line in both panes; stop on each line once.
+      lineSelector: '.diff-line:not(.diff-blank):not(.diff-split-left.diff-context)',
       hunkSelector: '.diff-line.diff-hunk',
       describe: A11y.describeDiffLine,
       onActivate: function (line) {
@@ -305,7 +306,7 @@ window.DiffPanel = window.DiffPanel || {};
         '<span>Comment on <code>' + DP.escHtml(rangeLabel) + '</code></span>' +
         '<button class="diff-comment-close" type="button" title="Close" aria-label="Close">&times;</button>' +
       '</div>' +
-      '<textarea class="diff-comment-input" placeholder="Write a comment..." rows="3"></textarea>' +
+      '<textarea class="diff-comment-input" placeholder="Write a comment..." rows="3" aria-label="Comment on ' + DP.escAttr(rangeLabel) + '"></textarea>' +
       '<div class="diff-comment-actions">' +
         '<button class="diff-comment-post" type="button">Post</button>' +
       '</div>';
@@ -326,7 +327,7 @@ window.DiffPanel = window.DiffPanel || {};
 
     postBtn.addEventListener('click', async function () {
       var body = ta.value.trim();
-      if (!body) return;
+      if (!body) { A11y.fieldError(ta, 'Write a comment before posting.'); return; }
       postBtn.disabled = true;
       postBtn.textContent = '...';
       var result = await window.klaus.pr.addReviewComment({

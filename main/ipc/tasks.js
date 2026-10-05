@@ -1622,7 +1622,7 @@ ipcMain.handle('pop-out-task', (_event, { id }) => {
   popout.webContents.once('did-finish-load', () => {
     popout.webContents.send('popout-init', {
       id: inst.id, name: inst.name,
-      worktreePath: inst.worktreePath, branch: inst.branch, mode: inst.mode,
+      worktreePath: inst.worktreePath, branch: inst.branch, mode: inst.mode, alive: inst.alive,
     });
   });
 

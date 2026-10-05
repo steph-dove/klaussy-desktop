@@ -53,6 +53,8 @@
         liveFixPanels.push(p);
       }
     });
+    var logPanels = Array.from(slot.querySelectorAll('.pr-check-log-watch-panel'));
+    logPanels.forEach(function (p) { p.remove(); });
 
     slot.innerHTML = PR.renderChecksTab();
     PR.bindChecksTab(); // bindChecksTab now also restores annotations + debug panels
@@ -62,6 +64,15 @@
       if (!btn) return; // row no longer in the rendered set (check passed/disappeared)
       var row = btn.closest('.pr-check-row');
       if (row) row.insertAdjacentElement('afterend', p);
+    });
+
+    // A finished run loses its Watch button, so fall back to any row of the same run.
+    logPanels.forEach(function (p) {
+      var btn = PR.logWatchButton(p);
+      var row = (btn || slot.querySelector('[data-run-id="' + CSS.escape(p.dataset.runId) + '"]') || slot).closest('.pr-check-row');
+      if (row) row.insertAdjacentElement('afterend', p);
+      else slot.appendChild(p);
+      PR.syncLogWatchButton(btn, p);
     });
   }
 

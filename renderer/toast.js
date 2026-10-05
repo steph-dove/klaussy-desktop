@@ -128,6 +128,9 @@
     _container.appendChild(_more);
     _container.addEventListener('keydown', onStackKeydown);
     document.body.appendChild(_container);
+    _container.addEventListener('focusin', (e) => {
+      if (e.relatedTarget && !_container.contains(e.relatedTarget)) _returnFocus = e.relatedTarget;
+    });
   }
 
   function liveToasts() {
@@ -160,6 +163,18 @@
     if (focusTo) focusTo.focus();
   }
 
+  let _returnFocus = null;
+
+  // Dismissing the focused toast would drop focus to <body>; go to the next toast or back to where the user came from.
+  function moveFocusFrom(el) {
+    const next = liveToasts().filter((t) => t !== el && !t.hidden).pop();
+    const target = next ? next.querySelector('button') : _returnFocus;
+    if (target && target.isConnected && !target.closest('[inert]')) { target.focus(); return; }
+    if (window.TerminalManager && window.TerminalManager.focusActive) window.TerminalManager.focusActive();
+  }
+
+  const LEVEL_WORD = { error: 'Error', warn: 'Warning' };
+
   // Type-dependent auto-dismiss timeouts (ms). Errors stick around longer
   // so users can read + copy the failure message before it disappears.
   const DISMISS_MS = { error: 8000, warn: 6000, info: 4500, success: 4500 };
@@ -175,6 +190,15 @@
     span.className = 'msg';
     // Plain text: no innerHTML, so message content can't smuggle markup.
     span.textContent = String(message == null ? '' : message);
+    const word = LEVEL_WORD[level];
+    // The border colour is the only other severity cue, so errors and warnings also say so in words.
+    const prefix = word && span.textContent.toLowerCase().indexOf(word.toLowerCase()) !== 0 ? word + ': ' : '';
+    if (prefix) {
+      const tag = document.createElement('strong');
+      tag.className = 'level';
+      tag.textContent = prefix;
+      el.appendChild(tag);
+    }
     el.appendChild(span);
 
     let dismissed = false;
@@ -183,9 +207,11 @@
       if (dismissed) return;
       dismissed = true;
       clearTimeout(timer);
+      const hadFocus = el.contains(document.activeElement);
       el.classList.remove('visible');
       el.classList.add('leaving');
       layout();
+      if (hadFocus) moveFocusFrom(el);
       // Wait for the fade-out transition before removing from the DOM.
       setTimeout(() => { try { el.remove(); } catch {} }, 200);
     };
@@ -215,7 +241,11 @@
 
     _container.appendChild(el);
     layout();
-    if (window.A11y) window.A11y.announce(span.textContent, level === 'error' ? 'assertive' : 'polite');
+    if (window.A11y) {
+      let spoken = prefix + span.textContent;
+      if (opts.actionLabel) spoken += '. ' + opts.actionLabel + ' button available, press F6 to reach it.';
+      window.A11y.announce(spoken, level === 'error' ? 'assertive' : 'polite');
+    }
 
     // Next frame so the transition runs from the initial off-screen state.
     requestAnimationFrame(() => el.classList.add('visible'));
