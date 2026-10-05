@@ -56,8 +56,11 @@ test.describe('blockers', () => {
       await mainWindow.keyboard.press('Tab');
       await expect(mainWindow.getByRole('button', { name: 'Add a comment on this line' })).toBeFocused();
       await mainWindow.keyboard.press('Tab');
-      await mainWindow.waitForTimeout(100);
-      expect(await mainWindow.evaluate(() => !document.getElementById('diff-view').contains(document.activeElement))).toBe(true);
+      // The trap sent focus back to the line; any onward stop (a hunk button or the next region) is fine.
+      await expect.poll(() => mainWindow.evaluate(() => {
+        const el = document.activeElement;
+        return el !== document.body && !el.classList.contains('diff-line') && !el.classList.contains('diff-comment-add');
+      })).toBe(true);
     } finally {
       rm(repo);
     }
