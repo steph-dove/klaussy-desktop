@@ -1851,8 +1851,13 @@ button.collapsed-icon {
 
 /* "Open session in new window" checkbox — shown when this window already has
    open tasks; pre-checked when it's crowded (3+). */
-#window-selector,
-#resume-all-agents-row {
+#resume-agent-hint {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+#window-selector {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1862,12 +1867,10 @@ button.collapsed-icon {
   cursor: pointer;
   user-select: none;
 }
-#window-selector:hover,
-#resume-all-agents-row:hover {
+#window-selector:hover {
   color: var(--text);
 }
-#window-selector input,
-#resume-all-agents-row input {
+#window-selector input {
   accent-color: var(--accent);
   cursor: pointer;
 }

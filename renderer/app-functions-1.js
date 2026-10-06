@@ -296,13 +296,8 @@ window.App = window.App || {};
     }
   };
 
-  // The resume dialog's "reopen every agent" box. Absent (other callers, older
-  // markup) means yes: bringing a session back whole is the expectation the
-  // dialog sets, and picking an agent turns it off explicitly.
   App.resumeAllAgentsWanted = function() {
-    var box = document.getElementById('resume-all-agents-check');
-    if (!box) return true;
-    return !!box.checked;
+    return !App.shellUserPicked;
   };
 
   // Two saves of the same tab can both survive a session; the same agent on the
@@ -328,9 +323,7 @@ window.App = window.App || {};
       var res = s.mode === 'shell'
         ? await window.klaus.task.attachWorktree(s.worktreePath, 'shell', s.repoPath, s.branch)
         : await window.klaus.session.resume(s);
-      if (res && res.id && s.subAgents && s.subAgents.length && window.TerminalManager) {
-        await TerminalManager.reopenSubAgents(res.id, s.subAgents);
-      }
+      if (res && res.id && s.subAgents && s.subAgents.length) res.subAgentsToReopen = s.subAgents;
       if (i === 0) { first = res; continue; }
       if (res && res.id && onExtra) onExtra(res);
     }
@@ -365,6 +358,14 @@ window.App = window.App || {};
         }, 1000);
       }
     }
+  };
+
+  // A pre-highlighted default on the Existing tab looks picked but isn't, so resume would ignore it.
+  App.syncShellHighlight = function() {
+    var showDefault = App.activeTab !== 'existing' || App.shellUserPicked;
+    App.shellOptions.forEach(function (b) {
+      b.classList.toggle('active', showDefault && b.dataset.shell === App.selectedMode);
+    });
   };
 
   // The action button reads "Resume" on the Existing Session tab — nothing
@@ -647,9 +648,6 @@ window.App = window.App || {};
     var savedForWt = App.dedupeSavedAgents(
       (savedList || []).filter(function (s) { return s && s.worktreePath === wt.path; })
     );
-    // Unticking the box, or picking an agent while it is off, is a deliberate
-    // choice about this open: one agent, handed off to when it isn't the one
-    // that started the session.
     var all = App.resumeAllAgentsWanted();
     if (!all || savedForWt.length <= 1) {
       return App.resumeSavedAgent(wt, sessionName, savedForWt[0] || null, mode, true);
@@ -702,12 +700,8 @@ window.App = window.App || {};
       repoPath: wt.repoPath || (saved && saved.repoPath) || null,
       notifyWebhook: saved && typeof saved.notifyWebhook === 'boolean' ? saved.notifyWebhook : undefined,
     }).then(function (res) {
-      // The session's other agents were tabs on this task, not sessions of
-      // their own, so they are reopened as tabs once it is back.
       var extras = (saved && saved.subAgents) || [];
-      if (res && res.id && extras.length && window.TerminalManager) {
-        return TerminalManager.reopenSubAgents(res.id, extras).then(function () { return res; });
-      }
+      if (res && res.id && extras.length) res.subAgentsToReopen = extras;
       return res;
     });
   };
