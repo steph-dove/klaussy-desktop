@@ -179,9 +179,32 @@ for (const name of Object.keys(presets)) {
   });
 }
 
+for (const name of Object.keys(presets)) {
+  const t = presets[name];
+  const v = cssVars(name);
+
+  test(`${name}: selected diff text keeps 4.5:1 on the opaque --diff-selection`, () => {
+    const sel = v['--diff-selection'];
+    assert.match(sel, /^#[0-9a-f]{6}$/i, 'must be opaque so line tints underneath cannot shift it');
+    const fgs = [t.text, v['--diff-text'], v['--diff-add-fg'], v['--diff-del-fg'], ...syntaxPalette(!!t.lightSyntax, '#diff-view')];
+    for (const fg of new Set(fgs)) {
+      assert.ok(ratio(fg, sel) >= 4.5, `${fg} on ${sel} is ${ratio(fg, sel).toFixed(2)}`);
+    }
+  });
+
+  // Hunk header rows carry the hunk label, gutter numbers and the Explain/Stage buttons (muted, accent while busy).
+  test(`${name}: text on --diff-hunk-bg reaches 4.5:1`, () => {
+    const bg = v['--diff-hunk-bg'];
+    for (const fg of [t.text, t.textMuted, t.accent, v['--diff-hunk-fg']]) {
+      assert.ok(ratio(fg, bg) >= 4.5, `${fg} on hunk ${bg} is ${ratio(fg, bg).toFixed(2)}`);
+    }
+  });
+}
+
 // Text colours must come from theme tokens. These are the deliberate exceptions: white on a fixed-colour fill and light text on a theme-independent dark glass.
 const RAW_TEXT_COLOUR_ALLOWED = {
-  '01-base.css': ['#sidebar.collapsed .task-item .collapsed-icon', '.terminal-warning', '.terminal-warning-link', '#broadcast-input', '#broadcast-input::placeholder', '#btn-broadcast-close', '#btn-broadcast-close:hover', '#broadcast-toggle'],
+  '02-toolbar-diff.css': ['#comment-selection-btn'],
+  '01-base.css': ['#sidebar.collapsed .task-item .collapsed-icon','.terminal-warning', '.terminal-warning-link', '#broadcast-input', '#broadcast-input::placeholder', '#btn-broadcast-close', '#btn-broadcast-close:hover', '#broadcast-toggle'],
   '05-pr-review-surface.css': ['.pr-conv-avatar', '.pr-ai-verdict-badge'],
 };
 
@@ -262,10 +285,24 @@ test('text on translucent tinted fills keeps 4.5:1 over every panel in every pre
   assert.deepEqual(offenders, []);
 });
 
-// Opacity on text multiplies down the token's contrast; hidden-until-hover (0) and disabled controls are exempt.
-test('stylesheets do not dim text colours with opacity', () => {
+// Rules whose elements hold no text: dividers, icon glyphs, chart bars, drag ghosts and resize handles.
+const OPACITY_NON_TEXT_ALLOWED = {
+  '01-base.css': ['.sidebar-section-header::after'],
+  '02-toolbar-diff.css': ['.actions-dropdown-btn .actions-chevron', '.terminal-container.dragging', '#diff-resize-handle:hover, #diff-resize-handle.active'],
+  '04-editor.css': ['.inline-edit-prompt::before'],
+  '05-pr-review-surface.css': ['.task-item.dragging', '.plan-phase-icon-todo::before', '.token-tile-bar'],
+  '06-searchable-select.css': ['.ss-trigger .ss-caret'],
+};
+// Keyframes that only animate background glows and status dots.
+const OPACITY_NON_TEXT_KEYFRAMES = ['pulseGlow', 'pulse-glow'];
+
+// Opacity multiplies down whatever text the element contains, so any rule may hold text unless allowlisted above; hidden (0) and disabled are exempt.
+test('stylesheets do not dim text with opacity', () => {
   const offenders = [];
+  const isStop = (s) => /^(\d+(\.\d+)?%|from|to)(\s*,\s*(\d+(\.\d+)?%|from|to))*$/.test(s);
+  const dims = (v) => { const o = Number(v); return o > 0 && o < 1; };
   for (const file of fs.readdirSync(STYLES).filter((f) => f.endsWith('.css'))) {
+    const allowed = OPACITY_NON_TEXT_ALLOWED[file] || [];
     const rules = new Map();
     for (const d of declarations(file)) {
       if (!rules.has(d.selector)) rules.set(d.selector, []);
@@ -273,10 +310,16 @@ test('stylesheets do not dim text colours with opacity', () => {
     }
     for (const [selector, decls] of rules) {
       const opacity = decls.filter((d) => d.prop === 'opacity').pop();
-      if (!opacity || !decls.some((d) => d.prop === 'color')) continue;
-      const o = Number(opacity.value);
-      if (o === 0 || o >= 1 || /disabled/.test(selector)) continue;
+      if (!opacity || !dims(opacity.value) || isStop(selector)) continue;
+      if (/disabled/.test(selector) || allowed.includes(selector)) continue;
       offenders.push(`${file}: ${selector} { opacity: ${opacity.value} }`);
+    }
+    const css = fs.readFileSync(path.join(STYLES, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    for (const m of css.matchAll(/@keyframes\s+([\w-]+)\s*\{((?:[^{}]*\{[^{}]*\})*)\s*\}/g)) {
+      if (OPACITY_NON_TEXT_KEYFRAMES.includes(m[1])) continue;
+      for (const o of m[2].matchAll(/opacity\s*:\s*([\d.]+)/g)) {
+        if (dims(o[1])) offenders.push(`${file}: @keyframes ${m[1]} { opacity: ${o[1]} }`);
+      }
     }
   }
   assert.deepEqual(offenders, []);

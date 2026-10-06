@@ -144,6 +144,34 @@ test.describe('keyboard alternatives, reflow and display settings', () => {
     expect(await fits('#theme-modal')).toBe(true);
   });
 
+  test('dialogs taller than a short window scroll so their top and buttons stay reachable', async ({ electronApp, mainWindow }) => {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(320, 256));
+    await expect.poll(() => mainWindow.evaluate(() => window.innerHeight)).toBeLessThanOrEqual(300);
+    const inView = (sel) => mainWindow.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return r.height > 0 && r.top >= 0 && r.bottom <= window.innerHeight + 1 && r.left >= 0 && r.right <= window.innerWidth;
+    }, sel);
+
+    await mainWindow.locator('#btn-new-task').click();
+    await expect(mainWindow.locator('#modal-overlay')).toBeVisible();
+    const atTop = await mainWindow.evaluate(() => {
+      const overlay = document.getElementById('modal-overlay');
+      overlay.scrollTop = 0;
+      return { top: document.getElementById('modal').getBoundingClientRect().top, scrollable: overlay.scrollHeight > overlay.clientHeight };
+    });
+    expect(atTop.top).toBeGreaterThanOrEqual(0);
+    expect(atTop.scrollable).toBe(true);
+    await mainWindow.locator('#modal-create').scrollIntoViewIfNeeded();
+    expect(await inView('#modal-create')).toBe(true);
+    await mainWindow.locator('#modal-cancel').click();
+    await expect(mainWindow.locator('#modal-overlay')).toBeHidden();
+
+    await mainWindow.evaluate(() => { document.getElementById('plan-approval-overlay').style.display = 'flex'; });
+    expect(await inView('#plan-approval-title')).toBe(true);
+    await mainWindow.locator('#plan-approval-approve').scrollIntoViewIfNeeded();
+    expect(await inView('#plan-approval-approve')).toBe(true);
+  });
+
   test('forced colours keep status dots and reduced motion stops the cursor blink', async ({ mainWindow }) => {
     await mainWindow.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
     repo = buildRepo({ 'a.txt': 'a\n' }, 'display');

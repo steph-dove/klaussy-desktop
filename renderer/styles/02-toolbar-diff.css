@@ -688,7 +688,7 @@
 }
 
 #diff-view ::selection {
-  background: rgba(38, 79, 120, 0.8);
+  background: var(--diff-selection, #20395a);
 }
 
 .diff-line {
@@ -1000,7 +1000,7 @@
   padding: 1px 8px;
   font-size: 11px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
@@ -1033,7 +1033,7 @@
   padding: 1px 8px;
   font-size: 11px;
   background: transparent;
-  color: var(--text-dim);
+  color: var(--text-muted);
   border: 1px solid var(--border);
   border-radius: 3px;
   cursor: pointer;
@@ -1375,8 +1375,10 @@
   filter: brightness(1.15);
 }
 
+/* Fixed blue sets it apart from the accent buttons; white keeps 4.5:1 on it and on its brightened hover. */
 #comment-selection-btn {
-  background: #1f6feb;
+  background: #1858c0;
+  color: #ffffff;
 }
 
 /* Inline diff annotations */

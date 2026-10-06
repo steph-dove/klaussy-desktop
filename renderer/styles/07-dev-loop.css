@@ -53,7 +53,7 @@
   color: var(--accent-contrast);
   border-color: #a78bfa;
   box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
-  animation: pulse-glow 1.5s infinite;
+  animation: pulse-glow 1.5s 3;
 }
 
 .minihud-dot.completed {
@@ -208,7 +208,7 @@
   border-radius: 50%;
   background: var(--accent, #a78bfa);
   box-shadow: 0 0 6px var(--accent, #a78bfa);
-  animation: pulse-glow 1.5s infinite;
+  animation: pulse-glow 1.5s 3;
 }
 
 @keyframes pulse-glow {
@@ -357,7 +357,7 @@
   border-color: #a78bfa;
   color: var(--accent-contrast);
   box-shadow: 0 0 10px rgba(139, 92, 246, 0.6);
-  animation: pulse-glow 1.5s infinite;
+  animation: pulse-glow 1.5s 3;
 }
 
 .devloop-step-body {
@@ -835,7 +835,7 @@
 }
 
 .modal-devloop-toggle input[type="checkbox"] {
-  accent-color: #8b5cf6;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
@@ -946,7 +946,7 @@
 }
 
 .modal-permissions-toggle input[type="checkbox"] {
-  accent-color: #10b981;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
@@ -1004,7 +1004,7 @@
 }
 
 .plan-modal-perm-toggle input[type="checkbox"] {
-  accent-color: #8b5cf6;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 

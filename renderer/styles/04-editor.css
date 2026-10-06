@@ -231,9 +231,7 @@
 .statusbar-ai-toggle:hover { background: var(--surface-hover); color: var(--text); }
 .statusbar-ai-toggle.active { color: var(--accent); }
 
-/* K7: git gutter change markers. Monaco puts linesDecorationsClassName
-   on a thin element in the gutter left of line numbers. We paint a solid
-   color bar for added/modified, and a wedge for deletions. */
+/* K7: git change markers on Monaco's linesDecorationsClassName element, left of the line numbers. */
 .git-gutter-added,
 .git-gutter-modified,
 .git-gutter-deleted {
@@ -241,13 +239,22 @@
   margin-left: 3px;
 }
 
-.git-gutter-added { background: #4ade80; }      /* green */
-.git-gutter-modified { background: #fbbf24; }   /* amber */
+/* Shape tells the states apart without colour: added is solid, modified is dashed, deleted is a wedge. */
+.git-gutter-added { --git-gutter-colour: #4ade80; background: var(--git-gutter-colour); }
+.git-gutter-modified {
+  --git-gutter-colour: #fbbf24;
+  background: repeating-linear-gradient(to bottom, var(--git-gutter-colour) 0 3px, transparent 3px 5px);
+}
 .git-gutter-deleted {
+  --git-gutter-colour: #ef4444;
   background: transparent;
-  border-top: 4px solid #ef4444;                /* red, points at the deletion */
+  border-top: 4px solid var(--git-gutter-colour);
   height: 0 !important;
 }
+/* Light Monaco themes get darker hues that keep 3:1 on the white gutter. */
+.monaco-editor.vs .git-gutter-added, .monaco-editor.hc-light .git-gutter-added { --git-gutter-colour: #1a7f37; }
+.monaco-editor.vs .git-gutter-modified, .monaco-editor.hc-light .git-gutter-modified { --git-gutter-colour: #9a6700; }
+.monaco-editor.vs .git-gutter-deleted, .monaco-editor.hc-light .git-gutter-deleted { --git-gutter-colour: #cf222e; }
 
 .file-viewer-tabs {
   display: flex;
