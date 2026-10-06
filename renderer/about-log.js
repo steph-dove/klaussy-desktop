@@ -2,6 +2,12 @@ window.Dialogs = (function () {
   var escHtml = AppUtils.escHtml;
   var escAttr = AppUtils.escAttr;
 
+  // toast.info drops opts; an action toast with no action is a sticky info toast, so instructions don't time out.
+  function stickyInfo(msg) {
+    if (window.toast && window.toast.action) window.toast.action('info', msg);
+    else if (window.toast && window.toast.info) window.toast.info(msg);
+  }
+
   // Write a slash command into the active task's terminal. `run` appends a
   // carriage return to execute immediately. Routes to the active sub-terminal
   // (Shell tab) when one is live, mirroring the drag-drop handler.
@@ -471,9 +477,7 @@ window.Dialogs = (function () {
         // The install runs in an external terminal — we can't watch it
         // finish, so prompt the user to re-check once they're done.
         installBtn.textContent = 'Installing in terminal…';
-        if (window.toast && window.toast.info) {
-          window.toast.info('Installer running in your terminal. Click Re-check when it finishes.');
-        }
+        stickyInfo('Installer running in your terminal. Click Re-check when it finishes.');
       });
     }
   }
@@ -556,7 +560,7 @@ window.Dialogs = (function () {
         + '</div>'
       + '</div>'
       + '<div class="skills-search-row">'
-        + '<input type="text" class="skills-search" placeholder="Search skills &amp; commands\u2026" autocomplete="off" spellcheck="false" />'
+        + '<input type="text" class="skills-search" placeholder="Search skills &amp; commands\u2026" aria-label="Search skills and commands" autocomplete="off" spellcheck="false" />'
       + '</div>'
       + '<div class="skills-body">'
         + '<div class="skills-list-pane"><div class="skills-loading">Reading ~/.claude\u2026</div></div>'
@@ -745,9 +749,10 @@ window.Dialogs = (function () {
         ? '<button class="skills-preview-insert" type="button" title="Insert ' + escHtml(insert) + ' into the active terminal">Insert</button>'
           + '<button class="skills-preview-run" type="button" title="Run ' + escHtml(insert) + ' in the active terminal">Run</button>'
         : '';
+      var title = name || filePath.split('/').pop();
       pane.innerHTML =
         '<div class="skills-preview-head">'
-          + '<div class="skills-preview-title">' + escHtml(name || filePath.split('/').pop()) + '<span class="skills-preview-dirty" hidden>\u00b7 unsaved</span></div>'
+          + '<div class="skills-preview-title">' + escHtml(title) + '<span class="skills-preview-dirty" hidden>\u00b7 unsaved</span></div>'
           + '<div class="skills-preview-actions">'
             + slashBtns
             + '<button class="skills-preview-copy" type="button" title="Copy file contents">Copy</button>'
@@ -755,7 +760,7 @@ window.Dialogs = (function () {
           + '</div>'
         + '</div>'
         + '<div class="skills-preview-path">' + escHtml(filePath) + '</div>'
-        + '<textarea class="skills-preview-editor" spellcheck="false"></textarea>';
+        + '<textarea class="skills-preview-editor" spellcheck="false" aria-label="Edit ' + escAttr(title) + '"></textarea>';
 
       var ta = pane.querySelector('.skills-preview-editor');
       var saveBtn = pane.querySelector('.skills-preview-save');
@@ -912,11 +917,13 @@ window.Dialogs = (function () {
         window.klaus.gh.openExternal(verificationUrl);
       });
       body.querySelector('.gh-login-cancel').addEventListener('click', cleanup);
+      body.querySelector('.gh-login-copy').focus();
+      A11y.announce('Your one-time code is ' + String(code).split('').join(' ') + '. Copy it, then open the browser and paste it. Waiting for you to authorize.');
     }
 
     function renderError(message) {
       body.innerHTML =
-        '<div class="gh-login-error">'
+        '<div class="gh-login-error" role="alert">'
           + '<p><strong>Sign-in failed.</strong></p>'
           + '<pre>' + escHtml(message || 'Unknown error') + '</pre>'
         + '</div>'
@@ -929,6 +936,7 @@ window.Dialogs = (function () {
         showGhLogin({ hostname: hostname, onSuccess: onSuccess });
       });
       body.querySelector('.gh-login-close').addEventListener('click', cleanup);
+      body.querySelector('.gh-login-retry').focus();
     }
 
     unsubscribe = window.klaus.gh.onLoginEvent(function (evt) {
@@ -994,7 +1002,7 @@ window.Dialogs = (function () {
           + '<label style="font-size: 12px; font-weight: 500;">Host (default: bitbucket.org)'
             + '<input type="text" id="bb-host-input" value="' + escAttr(opts.hostname || 'bitbucket.org') + '" style="display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-input); color: inherit;" />'
           + '</label>'
-          + '<div id="bb-login-error" style="display: none; color: var(--danger, #ff5555); font-size: 12px;"></div>'
+          + '<div id="bb-login-error" role="alert" style="display: none; color: var(--danger, #ff5555); font-size: 12px;"></div>'
         + '</div>'
         + '<div class="deps-actions" style="margin-top: 16px;">'
           + '<button class="gh-login-open" id="bb-save-btn" type="button">Save Account</button>'
@@ -1016,18 +1024,27 @@ window.Dialogs = (function () {
     var hostInput = dialog.querySelector('#bb-host-input');
     var errEl = dialog.querySelector('#bb-login-error');
 
+    // Shown before the text is set so the alert region announces it.
+    function showError(msg) {
+      errEl.style.display = 'block';
+      errEl.textContent = msg;
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save Account';
+      passInput.focus();
+    }
+
     saveBtn.addEventListener('click', async function () {
       var username = userInput.value.trim();
       var password = passInput.value.trim();
       var hostname = hostInput.value.trim() || 'bitbucket.org';
+      errEl.style.display = 'none';
+      errEl.textContent = '';
       if (!username) {
-        errEl.textContent = 'Please enter a username.';
-        errEl.style.display = 'block';
+        A11y.fieldError(userInput, 'Please enter a username.', userInput.closest('label'));
         return;
       }
       if (!password) {
-        errEl.textContent = 'Please enter an App Password or Token.';
-        errEl.style.display = 'block';
+        A11y.fieldError(passInput, 'Please enter an App Password or Token.', passInput.closest('label'));
         return;
       }
       saveBtn.disabled = true;
@@ -1040,20 +1057,14 @@ window.Dialogs = (function () {
           active: true,
         });
         if (res && res.error) {
-          errEl.textContent = res.error;
-          errEl.style.display = 'block';
-          saveBtn.disabled = false;
-          saveBtn.textContent = 'Save Account';
+          showError(res.error);
           return;
         }
         if (window.toast && window.toast.success) window.toast.success('Bitbucket account saved');
         cleanup();
         try { onSuccess(); } catch (_) {}
       } catch (err) {
-        errEl.textContent = err.message || 'Failed to save account.';
-        errEl.style.display = 'block';
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Account';
+        showError(err.message || 'Failed to save account.');
       }
     });
   }
@@ -1078,6 +1089,19 @@ window.Dialogs = (function () {
     document.body.appendChild(overlay);
     dialog.querySelector('.skills-close').addEventListener('click', function () { overlay.remove(); });
     var body = dialog.querySelector('.gh-accounts-body');
+
+    var focusAfter = null;
+    function afterSwitch(btn, forgeLabel, result) {
+      focusAfter = { forge: btn.dataset.forge, username: btn.dataset.username };
+      if (result && result.error) {
+        window.toast.error('Switch failed: ' + result.error);
+        refresh();
+        return;
+      }
+      A11y.announce(forgeLabel + ' account switched to ' + btn.dataset.username);
+      refresh();
+      if (opts.onChange) try { opts.onChange(); } catch (_) {}
+    }
 
     async function refresh() {
       body.innerHTML = '<div class="skills-loading">Reading accounts…</div>';
@@ -1108,7 +1132,7 @@ window.Dialogs = (function () {
           if (!a.valid) status = '<span class="gh-account-status invalid" title="' + escHtml(a.reason || 'Token invalid') + '">' + escHtml(a.reason || 'Token invalid') + '</span><span class="gh-account-action">Re-auth</span>';
           else if (a.active) status = '<span class="gh-account-badge">active</span>';
           else status = '<span class="gh-account-action">Switch</span>';
-          var disabledAttr = (a.active && a.valid) ? ' disabled' : '';
+          var disabledAttr = (a.active && a.valid) ? ' aria-disabled="true" aria-current="true"' : '';
           var actionAttr = !a.valid ? 'reauth' : 'switch';
           return '<button class="' + classes + '" type="button"'
             + ' data-forge="github" data-username="' + escHtml(a.username) + '"'
@@ -1138,7 +1162,7 @@ window.Dialogs = (function () {
           if (a.valid === false) status = '<span class="gh-account-status invalid">Token invalid</span><span class="gh-account-action">Sign in</span>';
           else if (a.active) status = '<span class="gh-account-badge">active</span>';
           else status = '<span class="gh-account-action">Switch</span>';
-          var disabledAttr = (a.active && a.valid !== false) ? ' disabled' : '';
+          var disabledAttr = (a.active && a.valid !== false) ? ' aria-disabled="true" aria-current="true"' : '';
           var hostLabel = a.hostname && a.hostname !== 'gitlab.com' ? ' (' + a.hostname + ')' : '';
           return '<button class="' + classes + '" type="button"'
             + ' data-forge="gitlab" data-username="' + escHtml(a.username) + '" data-hostname="' + escHtml(a.hostname || 'gitlab.com') + '"'
@@ -1166,7 +1190,7 @@ window.Dialogs = (function () {
           var status;
           if (a.active) status = '<span class="gh-account-badge">active</span>';
           else status = '<span class="gh-account-action">Switch</span>';
-          var disabledAttr = a.active ? ' disabled' : '';
+          var disabledAttr = a.active ? ' aria-disabled="true" aria-current="true"' : '';
           var hostLabel = a.hostname && a.hostname !== 'bitbucket.org' ? ' (' + a.hostname + ')' : '';
           return '<button class="' + classes + '" type="button"'
             + ' data-forge="bitbucket" data-username="' + escHtml(a.username) + '" data-hostname="' + escHtml(a.hostname || 'bitbucket.org') + '"'
@@ -1193,9 +1217,7 @@ window.Dialogs = (function () {
       if (glabAddBtn) {
         glabAddBtn.addEventListener('click', async function () {
           try { await navigator.clipboard.writeText('glab auth login'); } catch (_) {}
-          if (window.toast && window.toast.info) {
-            window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this dialog.");
-          }
+          stickyInfo("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this dialog.");
         });
       }
 
@@ -1206,16 +1228,22 @@ window.Dialogs = (function () {
         });
       }
 
+      if (focusAfter) {
+        var again = body.querySelector('.gh-account-row[data-forge="' + focusAfter.forge + '"][data-username="' + cssEscape(focusAfter.username) + '"]');
+        focusAfter = null;
+        if (again) again.focus();
+      }
+
       body.querySelectorAll('.gh-account-row[data-forge="github"]').forEach(function (btn) {
         btn.addEventListener('click', async function () {
-          if (btn.disabled) return;
+          if (btn.getAttribute('aria-disabled') === 'true') return;
           var username = btn.dataset.username;
           var action = btn.dataset.action;
           if (action === 'reauth') {
             showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
             return;
           }
-          btn.disabled = true;
+          btn.setAttribute('aria-disabled', 'true');
           var orig = btn.querySelector('.gh-account-action');
           if (orig) orig.textContent = 'Switching…';
           var result = await window.klaus.gh.switchAccount(username);
@@ -1223,59 +1251,39 @@ window.Dialogs = (function () {
             showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
             return;
           }
-          if (result && result.error) {
-            window.toast.error('Switch failed: ' + result.error);
-            refresh();
-            return;
-          }
-          refresh();
-          if (opts.onChange) try { opts.onChange(); } catch (_) {}
+          afterSwitch(btn, 'GitHub', result);
         });
       });
 
       body.querySelectorAll('.gh-account-row[data-forge="gitlab"]').forEach(function (btn) {
         btn.addEventListener('click', async function () {
-          if (btn.disabled) return;
+          if (btn.getAttribute('aria-disabled') === 'true') return;
           var username = btn.dataset.username;
           var hostname = btn.dataset.hostname;
           var action = btn.dataset.action;
           if (action === 'glab-reauth') {
             try { await navigator.clipboard.writeText('glab auth login --hostname ' + hostname); } catch (_) {}
-            if (window.toast && window.toast.info) {
-              window.toast.info("Copied 'glab auth login --hostname " + hostname + "' to clipboard. Run it in your terminal.");
-            }
+            stickyInfo("Copied 'glab auth login --hostname " + hostname + "' to clipboard. Run it in your terminal.");
             return;
           }
-          btn.disabled = true;
+          btn.setAttribute('aria-disabled', 'true');
           var orig = btn.querySelector('.gh-account-action');
           if (orig) orig.textContent = 'Switching…';
           var result = await window.klaus.glab.switchAccount(username, hostname);
-          if (result && result.error) {
-            window.toast.error('Switch failed: ' + result.error);
-            refresh();
-            return;
-          }
-          refresh();
-          if (opts.onChange) try { opts.onChange(); } catch (_) {}
+          afterSwitch(btn, 'GitLab', result);
         });
       });
 
       body.querySelectorAll('.gh-account-row[data-forge="bitbucket"]').forEach(function (btn) {
         btn.addEventListener('click', async function () {
-          if (btn.disabled) return;
+          if (btn.getAttribute('aria-disabled') === 'true') return;
           var username = btn.dataset.username;
           var hostname = btn.dataset.hostname;
-          btn.disabled = true;
+          btn.setAttribute('aria-disabled', 'true');
           var orig = btn.querySelector('.gh-account-action');
           if (orig) orig.textContent = 'Switching…';
           var result = await window.klaus.bitbucket.switchAccount(username, hostname);
-          if (result && result.error) {
-            window.toast.error('Switch failed: ' + result.error);
-            refresh();
-            return;
-          }
-          refresh();
-          if (opts.onChange) try { opts.onChange(); } catch (_) {}
+          afterSwitch(btn, 'Bitbucket', result);
         });
       });
     }
@@ -1351,7 +1359,7 @@ window.Dialogs = (function () {
       + '<div class="skills-preview-path">' + escHtml(filePath) + '</div>'
       + '<div class="skills-create-form">'
         + '<p class="skills-create-hint" style="margin:0">Create a starter CLAUDE.md for this scope. You can edit it in place after.</p>'
-        + '<div class="skills-create-error" hidden></div>'
+        + '<div class="skills-create-error" role="alert" hidden></div>'
         + '<div class="skills-create-actions">'
           + '<button class="skills-create-go" type="button">Create CLAUDE.md</button>'
         + '</div>'
@@ -1367,6 +1375,7 @@ window.Dialogs = (function () {
         err.textContent = r.error;
         go.disabled = false;
         go.textContent = 'Create CLAUDE.md';
+        go.focus();
         return;
       }
       if (typeof onCreated === 'function') onCreated();
@@ -1557,10 +1566,12 @@ window.Dialogs = (function () {
     // (the check takes a few seconds) and fills each row's pill when it returns.
     // Servers Claude doesn't have configured get no pill (status is Claude-only).
     var STATUS_LABEL = { connected: 'connected', auth: 'needs auth', partial: 'tools failed', failed: 'not connected', unknown: '' };
-    function annotateStatus() {
+    // `recheckName` is the server whose Recheck the user pressed; without it only problems are summarised.
+    function annotateStatus(recheckName) {
       window.klaus.mcp.status().then(function (r) {
         var byName = (r && r.byName) || {};
         var sourceErr = r && r.error;
+        announceStatus(byName, recheckName);
         dialog.querySelectorAll('.mcp-row').forEach(function (row) {
           var el = row.querySelector('.mcp-conn');
           if (!el) return;
@@ -1586,12 +1597,30 @@ window.Dialogs = (function () {
           // Once connected, retire any open sign-in instructions for this row.
           if (st.status === 'connected') {
             var doneBox = row.querySelector('.mcp-authbox');
+            var hadFocus = doneBox && doneBox.contains(document.activeElement);
             if (doneBox) { doneBox.classList.add('mcp-hidden'); doneBox.innerHTML = ''; }
+            if (hadFocus) { el.tabIndex = -1; el.focus(); }
           }
         });
       }).catch(function () {
         dialog.querySelectorAll('.mcp-conn').forEach(function (el) { el.className = 'mcp-conn mcp-conn-none'; el.textContent = ''; });
+        if (recheckName) A11y.announce('Could not check the status of ' + recheckName, 'assertive');
       });
+    }
+
+    function announceStatus(byName, recheckName) {
+      if (recheckName) {
+        var st = byName[recheckName];
+        A11y.announce(recheckName + ': ' + (st ? (STATUS_LABEL[st.status] || st.text) : 'status unknown'));
+        return;
+      }
+      var counts = {};
+      Object.keys(byName).forEach(function (n) {
+        var label = STATUS_LABEL[byName[n].status];
+        if (label && byName[n].status !== 'connected') counts[label] = (counts[label] || 0) + 1;
+      });
+      var parts = Object.keys(counts).map(function (label) { return counts[label] + ' ' + label; });
+      if (parts.length) A11y.announce('MCP servers: ' + parts.join(', '));
     }
 
     // Sign-in for a needs-auth server. `claude mcp login` is interactive, so it
@@ -1622,14 +1651,17 @@ window.Dialogs = (function () {
         box.querySelector('.mcp-auth-open').addEventListener('click', function () {
           window.klaus.mcp.loginTerminal(name).then(function (r) {
             if (r && r.error) { if (window.toast) window.toast.error('Could not open a terminal: ' + r.error); return; }
-            if (window.toast) window.toast.info('Terminal opened — finish signing in there, then Recheck.');
+            stickyInfo('Terminal opened — finish signing in there, then Recheck.');
           });
         });
         box.querySelector('.mcp-auth-copy').addEventListener('click', function () {
           if (navigator.clipboard) navigator.clipboard.writeText(cmd);
           if (window.toast) window.toast.success('Copied');
         });
-        box.querySelector('.mcp-auth-recheck').addEventListener('click', function () { annotateStatus(); });
+        box.querySelector('.mcp-auth-recheck').addEventListener('click', function () {
+          A11y.announce('Checking ' + name + '…');
+          annotateStatus(name);
+        });
       });
     }
 
@@ -1653,6 +1685,7 @@ window.Dialogs = (function () {
         card.addEventListener('click', function () {
           var id = card.dataset.id;
           showAdd(id ? catalog.find(function (c) { return c.id === id; }) : null);
+          dialog.querySelector('#mcp-name').focus();
         });
       });
       wireForm(entry);
@@ -1728,7 +1761,7 @@ window.Dialogs = (function () {
         + '<label class="mcp-target"><input type="radio" name="mcp-scope" value="user" checked> User (applies everywhere)</label>'
         + '<label class="mcp-target"><input type="radio" name="mcp-scope" value="project"' + (anyProject ? '' : ' disabled') + '> This project' + (anyProject ? '' : ' <span class="mcp-target-note">(open a repo with a project-scoped agent)</span>') + '</label>'
         + '</div>';
-      f += '<div class="skills-create-error mcp-form-error" id="mcp-error" style="margin-left:0"></div>';
+      f += '<div class="skills-create-error mcp-form-error" id="mcp-error" role="alert" style="margin-left:0"></div>';
       f += '<div class="skills-create-actions"><button class="skills-create-go mcp-submit" type="button">Add server</button></div>';
       f += '</div>';
       return f;
@@ -1788,7 +1821,7 @@ window.Dialogs = (function () {
     }
 
     // Split form input into literal values (`env`) and secret names to pull from
-    // the environment (`secretRefs`). Required-but-empty value \u2192 `missing`.
+    // the environment (`secretRefs`). `missing` and `bad` are the offending inputs.
     function collectEnv() {
       var env = {};
       var secretRefs = [];
@@ -1797,13 +1830,14 @@ window.Dialogs = (function () {
       dialog.querySelectorAll('.mcp-env-fixed').forEach(function (inp) {
         var v = inp.value.trim();
         if (v) env[inp.dataset.envKey] = v;
-        else if (inp.dataset.required) missing = inp.dataset.envKey;
+        else if (inp.dataset.required) missing = missing || inp;
       });
       dialog.querySelectorAll('.mcp-secret-ref').forEach(function (el) { secretRefs.push(el.dataset.envKey); });
       dialog.querySelectorAll('.mcp-custom-row').forEach(function (rowEl) {
-        var k = rowEl.querySelector('.mcp-env-k').value.trim();
+        var kEl = rowEl.querySelector('.mcp-env-k');
+        var k = kEl.value.trim();
         if (!k) return;
-        if (!/^[A-Za-z0-9_]+$/.test(k)) { bad = k; return; }
+        if (!/^[A-Za-z0-9_]+$/.test(k)) { bad = bad || kEl; return; }
         if (rowEl.querySelector('.mcp-env-secret').checked) secretRefs.push(k);
         else env[k] = rowEl.querySelector('.mcp-env-v').value;
       });
@@ -1813,24 +1847,47 @@ window.Dialogs = (function () {
     function wireEnvBox() {
       var addBtn = dialog.querySelector('.mcp-add-env');
       if (!addBtn) return;
+      var hostBox = dialog.querySelector('#mcp-custom-env');
       addBtn.addEventListener('click', function () {
-        var hostBox = dialog.querySelector('#mcp-custom-env');
         var rowEl = document.createElement('div');
         rowEl.className = 'mcp-field mcp-custom-row';
-        rowEl.innerHTML = '<label></label><div class="mcp-control mcp-custom-pair">'
+        rowEl.innerHTML = '<span aria-hidden="true"></span><div class="mcp-control mcp-custom-pair">'
           + '<input class="skills-create-name mcp-in mcp-env-k" spellcheck="false" placeholder="VAR_NAME">'
           + '<input class="skills-create-name mcp-in mcp-env-v" spellcheck="false" placeholder="value">'
           + '<label class="mcp-secret-toggle" title="Secret \u2014 referenced from your environment, never stored"><input type="checkbox" class="mcp-env-secret"> secret</label>'
-          + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove" aria-label="Remove">&times;</button>'
+          + '<button class="skills-create-cancel mcp-env-del" type="button" title="Remove">&times;</button>'
         + '</div>';
+        var keyInput = rowEl.querySelector('.mcp-env-k');
         var valInput = rowEl.querySelector('.mcp-env-v');
         rowEl.querySelector('.mcp-env-secret').addEventListener('change', function () {
           valInput.classList.toggle('mcp-hidden', this.checked);
           updateSecretTargets();
         });
-        rowEl.querySelector('.mcp-env-del').addEventListener('click', function () { rowEl.remove(); updateSecretTargets(); });
+        rowEl.querySelector('.mcp-env-del').addEventListener('click', function () {
+          var rows = Array.from(hostBox.querySelectorAll('.mcp-custom-row'));
+          var at = rows.indexOf(rowEl);
+          var next = rows[at + 1] || rows[at - 1];
+          A11y.fieldError(keyInput, null);
+          rowEl.remove();
+          numberEnvRows();
+          updateSecretTargets();
+          (next ? next.querySelector('.mcp-env-k') : addBtn).focus();
+        });
         hostBox.appendChild(rowEl);
+        numberEnvRows();
+        keyInput.focus();
       });
+
+      // Placeholders aren't names, and every row's Remove would otherwise sound the same.
+      function numberEnvRows() {
+        hostBox.querySelectorAll('.mcp-custom-row').forEach(function (rowEl, i) {
+          var n = i + 1;
+          rowEl.querySelector('.mcp-env-k').setAttribute('aria-label', 'Variable name ' + n);
+          rowEl.querySelector('.mcp-env-v').setAttribute('aria-label', 'Value ' + n);
+          rowEl.querySelector('.mcp-env-secret').setAttribute('aria-label', 'Variable ' + n + ' is a secret');
+          rowEl.querySelector('.mcp-env-del').setAttribute('aria-label', 'Remove variable ' + n);
+        });
+      }
     }
 
     // When the server needs a secret, disable agents that can't reference env
@@ -1862,40 +1919,50 @@ window.Dialogs = (function () {
       dialog.querySelector('.mcp-submit').addEventListener('click', function () { submit(entry); });
     }
 
-    function fail(msg) {
+    // A field error is tied to and focuses its field; anything else goes to the form's alert and focuses `focusEl`.
+    function fail(msg, field, focusEl) {
       var el = dialog.querySelector('#mcp-error');
+      if (field) {
+        if (el) el.textContent = '';
+        A11y.fieldError(field, msg, field.closest('.mcp-field'));
+        return;
+      }
       if (el) el.textContent = msg;
+      if (focusEl) focusEl.focus();
     }
 
     function submit(entry) {
       entry = entry || {};
-      var name = dialog.querySelector('#mcp-name').value.trim();
+      var nameEl = dialog.querySelector('#mcp-name');
+      var name = nameEl.value.trim();
       var type = dialog.querySelector('#mcp-type').value;
       var remote = type === 'http' || type === 'sse';
-      if (!name) return fail('A server name is required.');
-      if (!/^[\w.-]+$/.test(name)) return fail('Name may contain only letters, numbers, dot, dash, underscore.');
+      if (!name) return fail('A server name is required.', nameEl);
+      if (!/^[\w.-]+$/.test(name)) return fail('Name may contain only letters, numbers, dot, dash, underscore.', nameEl);
 
       var server = { name: name, type: type };
       if (remote) {
-        var url = dialog.querySelector('#mcp-url').value.trim();
-        if (!url) return fail('A URL is required for http/sse servers.');
+        var urlEl = dialog.querySelector('#mcp-url');
+        var url = urlEl.value.trim();
+        if (!url) return fail('A URL is required for http/sse servers.', urlEl);
         server.url = url;
       } else {
-        var command = dialog.querySelector('#mcp-command').value.trim();
-        if (!command) return fail('A command is required for stdio servers.');
+        var commandEl = dialog.querySelector('#mcp-command');
+        var command = commandEl.value.trim();
+        if (!command) return fail('A command is required for stdio servers.', commandEl);
         server.command = command;
         var args = dialog.querySelector('#mcp-args').value.trim().split(/\s+/).filter(Boolean);
-        var missingArg = false;
+        var missingArg = null;
         dialog.querySelectorAll('.mcp-reqarg').forEach(function (inp) {
           var v = inp.value.trim();
-          if (!v) missingArg = true;
+          if (!v) missingArg = missingArg || inp;
           else args.push(v);
         });
-        if (missingArg) return fail('Fill in all required arguments.');
+        if (missingArg) return fail('Fill in all required arguments.', missingArg);
         server.args = args;
         var built = collectEnv();
-        if (built.bad) return fail('Variable name \u201c' + built.bad + '\u201d may contain only letters, numbers, underscore.');
-        if (built.missing) return fail('Required variable \u201c' + built.missing + '\u201d is empty.');
+        if (built.bad) return fail('Variable name \u201c' + built.bad.value.trim() + '\u201d may contain only letters, numbers, underscore.', built.bad);
+        if (built.missing) return fail('Required variable \u201c' + built.missing.dataset.envKey + '\u201d is empty.', built.missing);
         if (Object.keys(built.env).length) server.env = built.env;
         if (built.secretRefs.length) server.secretRefs = built.secretRefs;
       }
@@ -1905,14 +1972,14 @@ window.Dialogs = (function () {
       dialog.querySelectorAll('.mcp-target-cb:checked').forEach(function (cb) {
         chosen.push({ id: cb.dataset.agent, hasProject: cb.dataset.project === '1' });
       });
-      if (!chosen.length) return fail('Pick at least one agent to add this server to.');
+      if (!chosen.length) return fail('Pick at least one agent to add this server to.', null, dialog.querySelector('.mcp-target-cb:not(:disabled)'));
 
       var writeTargets = chosen;
       var skipped = [];
       if (scope === 'project') {
         writeTargets = chosen.filter(function (t) { return t.hasProject; });
         skipped = chosen.filter(function (t) { return !t.hasProject; });
-        if (!writeTargets.length) return fail('None of the selected agents support project scope here.');
+        if (!writeTargets.length) return fail('None of the selected agents support project scope here.', null, dialog.querySelector('input[name="mcp-scope"]:checked'));
       }
 
       fail('');
@@ -1931,7 +1998,7 @@ window.Dialogs = (function () {
         if (errs.length) {
           btn.disabled = false;
           btn.textContent = 'Add server';
-          fail('Failed for ' + errs.length + ' agent(s): ' + errs.map(function (e) { return (e.res && e.res.error) || e.id; }).join('; '));
+          fail('Failed for ' + errs.length + ' agent(s): ' + errs.map(function (e) { return (e.res && e.res.error) || e.id; }).join('; '), null, btn);
           return;
         }
         showList();
@@ -2015,10 +2082,16 @@ window.Dialogs = (function () {
     var all = [];
     var filtered = [];
     var sel = 0;
+    var wasEmpty = false;
 
     function render() {
-      if (filtered.length === 0) {
-        list.innerHTML = '<div class="palette-item palette-empty">No matching commands</div>';
+      var empty = filtered.length === 0;
+      if (empty !== wasEmpty) {
+        wasEmpty = empty;
+        if (empty) A11y.announce('No matching commands');
+      }
+      if (empty) {
+        list.innerHTML = '<div class="palette-item palette-empty" aria-hidden="true">No matching commands</div>';
         return;
       }
       list.innerHTML = filtered.map(function (c, i) {
