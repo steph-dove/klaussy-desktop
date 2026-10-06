@@ -57,10 +57,24 @@
     // Wire up I/O
     window.klaus.terminal.onData(id, function (data) {
       terminal.write(data);
+      if (exited) setAlive(true);
     });
 
     terminal.onData(function (data) {
       window.klaus.terminal.write(id, data);
+    });
+
+    // A restart reuses the task id, so output after an exit means it's running again.
+    var exited = false;
+    function setAlive(alive) {
+      exited = !alive;
+      document.querySelector('#popout-header .dot').classList.toggle('exited', exited);
+      document.getElementById('popout-status').textContent = alive ? 'running' : 'exited';
+    }
+    if (task.alive === false) setAlive(false);
+    window.klaus.terminal.onExit(id, function () {
+      setAlive(false);
+      A11y.announce(name + ' exited');
     });
 
     // Key shortcuts

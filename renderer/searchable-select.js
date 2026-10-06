@@ -12,6 +12,7 @@
 // filters) light up automatically.
 window.SearchableSelect = (function () {
   var openInstance = null; // only one popover open at a time
+  var groupSeq = 0;
 
   function enhance(select, opts) {
     if (!select || select.__ssEnhanced) return select && select.__ss;
@@ -80,14 +81,18 @@ window.SearchableSelect = (function () {
       listEl.innerHTML = '';
       var sel = select.value;
 
-      function addOption(opt) {
+      function addOption(opt, groupHead) {
         var item = document.createElement('div');
         item.className = 'ss-item';
         item.setAttribute('role', 'option');
+        if (groupHead) item.setAttribute('aria-describedby', groupHead.id);
         item.dataset.value = opt.value;
         item.textContent = opt.textContent;
         if (opt.title) item.title = opt.title;
-        if (opt.disabled) item.classList.add('ss-disabled');
+        if (opt.disabled) {
+          item.classList.add('ss-disabled');
+          item.setAttribute('aria-disabled', 'true');
+        }
         if (opt.value === sel) item.classList.add('ss-selected');
         // mousedown (not click) so the search input doesn't blur-close first.
         item.addEventListener('mousedown', function (e) {
@@ -102,10 +107,13 @@ window.SearchableSelect = (function () {
         if (node.tagName === 'OPTGROUP') {
           var head = document.createElement('div');
           head.className = 'ss-group';
+          head.id = 'a11y-ss-group-' + (++groupSeq);
+          // A listbox may only hold options, so the header is read as each option's description instead.
+          head.setAttribute('aria-hidden', 'true');
           head.textContent = node.label;
           listEl.appendChild(head);
           Array.prototype.forEach.call(node.children, function (o) {
-            if (o.tagName === 'OPTION') addOption(o);
+            if (o.tagName === 'OPTION') addOption(o, head);
           });
         } else if (node.tagName === 'OPTION') {
           addOption(node);
@@ -140,7 +148,10 @@ window.SearchableSelect = (function () {
         head.hidden = !visible;
       });
       var emptyEl = listEl.querySelector('.ss-empty');
-      if (emptyEl) emptyEl.hidden = any;
+      if (emptyEl) {
+        if (!any && q && emptyEl.hidden) A11y.announce('No matches');
+        emptyEl.hidden = any;
+      }
       setActive(listEl.querySelector('.ss-item:not([hidden]):not(.ss-disabled)'));
     }
 
@@ -239,6 +250,7 @@ window.SearchableSelect = (function () {
     syncLabel();
 
     var api = {
+      trigger: trigger,
       open: open,
       close: close,
       refresh: function () { syncLabel(); if (!popover.hidden) buildList(); },

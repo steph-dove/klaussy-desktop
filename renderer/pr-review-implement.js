@@ -376,6 +376,7 @@
       PR.repaintAiReviewTab();
       PR.saveAiReviewCache();
       if (PR.lastState) PR.render(PR.lastState);
+      A11y.announce('Removed draft from the review. ' + pendingSummary());
       return;
     }
 
@@ -398,6 +399,7 @@
     PR.repaintAiReviewTab();
     PR.saveAiReviewCache();
     if (PR.lastState) PR.render(PR.lastState);
+    A11y.announce('Added to the review as a draft. ' + pendingSummary());
   };
 
   // A finding has an Add-to-PR draft queued (as opposed to an implement draft).
@@ -739,7 +741,10 @@
     var card = btn && btn.closest('.pr-conv-claude-draft');
     var ta = card && card.querySelector('.pr-conv-claude-draft-input');
     var body = ta ? ta.value.trim() : s.implementDraft.trim();
-    if (!body) return;
+    if (!body) {
+      if (ta) A11y.fieldError(ta, 'Write the reply before posting.');
+      return;
+    }
     s.implementDraft = body;
     s.draftPosting = true;
     s.draftError = null;
@@ -905,14 +910,19 @@
     if (list) A11y.arrowNav(list, '.pr-review-file');
     var pre = PR.hostEl.querySelector('.pr-review-diff-pre');
     if (pre) {
-      // E explains the focused line's hunk: the keyboard stand-in for select-then-Explain.
+      // E explains the Shift+Up/Down selection, or else the focused line's hunk: the keyboard stand-in for select-then-Explain.
       pre.addEventListener('keydown', function (e) {
         if (e.key !== 'e' || e.metaKey || e.ctrlKey || e.altKey) return;
         var line = e.target.closest && e.target.closest('.diff-line');
         if (!line) return;
-        var hunk = hunkLines(line);
+        var sel = window.getSelection();
+        var picked = sel && !sel.isCollapsed
+          ? Array.from(pre.querySelectorAll('.diff-line.diff-add, .diff-line.diff-del, .diff-line.diff-context')).filter(function (l) { return sel.containsNode(l, true); })
+          : [];
+        var hunk = picked.length ? picked : hunkLines(line);
         if (!hunk.length) return;
         e.preventDefault();
+        if (picked.length) sel.removeAllRanges();
         var text = hunk.map(function (l) {
           var prefix = l.querySelector('.diff-prefix');
           var code = l.querySelector('.diff-code');
@@ -1042,7 +1052,7 @@
     });
     saveBtn.addEventListener('click', function () {
       var body = ta.value.trim();
-      if (!body) return;
+      if (!body) { A11y.fieldError(ta, 'Write a comment before saving the draft.'); return; }
       PR.pendingComments.push({
         id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
         path: range.path,
@@ -1054,12 +1064,19 @@
       });
       close();
       if (PR.lastState) PR.render(PR.lastState);
+      A11y.announce('Draft comment added. ' + pendingSummary());
     });
   };
+
+  function pendingSummary() {
+    var n = PR.pendingComments.length;
+    return n === 1 ? '1 draft comment pending' : n + ' draft comments pending';
+  }
 
   PR.removePendingComment = function(id) {
     PR.pendingComments = PR.pendingComments.filter(function (c) { return c.id !== id; });
     if (PR.lastState) PR.render(PR.lastState);
+    A11y.announce('Draft comment removed. ' + pendingSummary());
   };
 
   PR.renderPendingCount = function() {

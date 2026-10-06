@@ -140,6 +140,10 @@ window.AttachmentInput = (function () {
           items.splice(i, 1);
           dropPathFromText(it.path);
           render();
+          A11y.announce('Removed ' + basename(it.path) + '. ' + (items.length ? items.length + ' attached' : 'Nothing attached'));
+          var rest = opts.listEl.querySelectorAll('.plan-file-remove');
+          var next = rest[Math.min(i, rest.length - 1)] || opts.pickButton;
+          if (next) next.focus();
         });
         row.appendChild(nameEl);
         row.appendChild(rm);
@@ -163,6 +167,11 @@ window.AttachmentInput = (function () {
         insertPath(r.path);
       });
       render();
+      var added = results.filter(function (r) { return r.path; });
+      if (added.length) {
+        A11y.announce((added.length === 1 ? basename(added[0].path) + ' attached' : added.length + ' items attached')
+          + (items.length > added.length ? ', ' + items.length + ' in total' : ''));
+      }
       setError(describeErrors(results.filter(function (r) { return !r.path; })));
     }
 

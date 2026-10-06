@@ -285,8 +285,10 @@ window.ConflictPanel = (function () {
     if (remaining.length > 0) {
       // Remove resolved file from selector and load next
       fileSelect.querySelector('option[value="' + CSS.escape(currentFile) + '"]').remove();
+      A11y.announce('Resolved ' + currentFile + '. ' + remaining.length + ' conflicted file' + (remaining.length === 1 ? '' : 's') + ' left, showing ' + remaining[0].value);
       loadFile(remaining[0].value);
     } else {
+      A11y.announce('Resolved ' + currentFile + '. All conflicts resolved');
       hide();
       // Trigger diff panel refresh
       if (window.DiffPanel) window.DiffPanel.refresh();

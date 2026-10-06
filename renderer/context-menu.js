@@ -21,7 +21,7 @@ window.ContextMenu = (function () {
   });
 
   function items() {
-    return Array.from(contextMenu.querySelectorAll('[role="menuitem"]'));
+    return Array.from(contextMenu.querySelectorAll('[role^="menuitem"]'));
   }
 
   function onKeydown(e) {
@@ -71,9 +71,16 @@ window.ContextMenu = (function () {
       }
       var item = document.createElement('div');
       item.className = 'context-menu-item';
-      item.setAttribute('role', 'menuitem');
       item.tabIndex = -1;
       item.innerHTML = entry.label + '<span class="shortcut">' + (entry.shortcut || '') + '</span>';
+      // `checked` (true/false) makes a toggle item; the tick is visual, aria-checked carries the state.
+      if (typeof entry.checked === 'boolean') {
+        item.setAttribute('role', 'menuitemcheckbox');
+        item.setAttribute('aria-checked', String(entry.checked));
+        item.insertAdjacentHTML('afterbegin', '<span class="context-menu-check" aria-hidden="true">' + (entry.checked ? '\u2713 ' : '\u2003') + '</span>');
+      } else {
+        item.setAttribute('role', 'menuitem');
+      }
       item.addEventListener('click', function (e) {
         e.stopPropagation();
         remove();
@@ -97,7 +104,7 @@ window.ContextMenu = (function () {
     if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 4) + 'px';
     if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 4) + 'px';
 
-    var first = menu.querySelector('[role="menuitem"]');
+    var first = menu.querySelector('[role^="menuitem"]');
     if (first) first.focus();
   }
 

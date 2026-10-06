@@ -242,11 +242,7 @@ window.Dialogs = (function () {
     var copyBtn = viewer.querySelector('.log-viewer-copy');
     copyBtn.addEventListener('click', function () {
       if (!rawLogText) return;
-      navigator.clipboard.writeText(rawLogText).then(function () {
-        var orig = copyBtn.textContent;
-        copyBtn.textContent = 'Copied';
-        setTimeout(function () { copyBtn.textContent = orig; }, 900);
-      });
+      AppUtils.copyText(copyBtn, rawLogText, 900);
     });
 
     window.klaus.ui.getLogs().then(function (logs) {
@@ -432,12 +428,7 @@ window.Dialogs = (function () {
     });
     dialog.querySelectorAll('.deps-copy').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        var text = btn.dataset.copy || '';
-        navigator.clipboard.writeText(text).then(function () {
-          var orig = btn.textContent;
-          btn.textContent = 'Copied';
-          setTimeout(function () { btn.textContent = orig; }, 900);
-        });
+        AppUtils.copyText(btn, btn.dataset.copy || '', 900);
       });
     });
     var ghSigninBtn = dialog.querySelector('[data-action="gh-signin"]');
@@ -493,7 +484,7 @@ window.Dialogs = (function () {
     var fixes = (d.fixes || []).map(function (cmd) {
       return '<div class="deps-fix">'
         + '<code>' + escHtml(cmd) + '</code>'
-        + '<button class="deps-copy" type="button" data-copy="' + escHtml(cmd) + '">Copy</button>'
+        + '<button class="deps-copy" type="button" data-copy="' + escHtml(cmd) + '" aria-label="Copy ' + escHtml(cmd) + '">Copy</button>'
       + '</div>';
     }).join('');
     var actionBtn = d.action
@@ -501,7 +492,8 @@ window.Dialogs = (function () {
       : '';
     return '<div class="deps-row deps-row-' + iconCls + '">'
       + '<div class="deps-row-head">'
-        + '<span class="deps-icon ' + iconCls + '">' + icon + '</span>'
+        + '<span class="deps-icon ' + iconCls + '" aria-hidden="true">' + icon + '</span>'
+        + '<span class="sr-only">' + (d.ok ? 'OK: ' : d.missing ? 'Missing: ' : 'Needs attention: ') + '</span>'
         + '<span class="deps-name">' + escHtml(d.name) + '</span>'
         + (d.version ? '<span class="deps-version">' + escHtml(d.version) + '</span>' : '')
       + '</div>'
@@ -817,11 +809,7 @@ window.Dialogs = (function () {
       saveBtn.addEventListener('click', save);
 
       copyBtn.addEventListener('click', function () {
-        navigator.clipboard.writeText(ta.value).then(function () {
-          var orig = copyBtn.textContent;
-          copyBtn.textContent = 'Copied';
-          setTimeout(function () { copyBtn.textContent = orig; }, 900);
-        });
+        AppUtils.copyText(copyBtn, ta.value, 900);
       });
     });
   }
@@ -918,12 +906,7 @@ window.Dialogs = (function () {
         + '</div>'
         + '<p class="gh-login-wait">Waiting for you to authorize…</p>';
       body.querySelector('.gh-login-copy').addEventListener('click', function (e) {
-        var btn = e.currentTarget;
-        navigator.clipboard.writeText(btn.dataset.copy || '').then(function () {
-          var orig = btn.textContent;
-          btn.textContent = 'Copied';
-          setTimeout(function () { btn.textContent = orig; }, 900);
-        });
+        AppUtils.copyText(e.currentTarget, e.currentTarget.dataset.copy || '', 900);
       });
       body.querySelector('.gh-login-open').addEventListener('click', function () {
         window.klaus.gh.openExternal(verificationUrl);
@@ -1536,7 +1519,7 @@ window.Dialogs = (function () {
         + '<div class="skills-row-main">'
           + '<span class="skills-row-name">' + escHtml(g.name) + '</span>'
           + '<span class="mcp-conn mcp-conn-loading" data-name="' + escHtml(g.name) + '">checking…</span>'
-          + '<button class="mcp-connect mcp-hidden" type="button" data-name="' + escHtml(g.name) + '" title="Sign in to this server (opens your browser)">Connect</button>'
+          + '<button class="mcp-connect mcp-hidden" type="button" data-name="' + escHtml(g.name) + '" title="Sign in to this server (opens your browser)" aria-label="Connect ' + escHtml(g.name) + '">Connect</button>'
           + '<span class="skills-row-source ' + (g.scope === 'user' ? 'skills-source-user' : 'skills-source-project') + '">' + escHtml(scopeLabel) + '</span>'
           + '<span class="mcp-type">' + escHtml(g.type) + '</span>'
           + '<button class="mcp-remove" type="button" data-index="' + i + '" title="Remove from all of its agents" aria-label="Remove ' + escHtml(g.name) + ' from all of its agents">&times;</button>'
@@ -2054,6 +2037,7 @@ window.Dialogs = (function () {
     function paint() {
       list.querySelectorAll('.palette-item').forEach(function (el, i) {
         el.classList.toggle('selected', i === sel);
+        if (i === sel) el.scrollIntoView({ block: 'nearest' });
       });
     }
     function applyFilter() {

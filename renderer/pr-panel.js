@@ -184,6 +184,7 @@ window.PRPanel = (function () {
     if (!result.pr) {
       prCache.delete(worktreeAtForBranch);
       prInfoEl.innerHTML = '<div class="pr-empty">No pull request found for this branch.</div>';
+      A11y.announce('No pull request found for this branch');
       return;
     }
 
@@ -217,6 +218,7 @@ window.PRPanel = (function () {
       commentsListEl.insertAdjacentHTML('beforeend',
         '<div class="pr-error" style="text-align:left;padding:8px 14px;">Review threads failed: '
         + escHtml(threadsResult.error) + '</div>');
+      A11y.announce('Review threads failed: ' + threadsResult.error, 'assertive');
     }
     if (threadsResult.threads && threadsResult.threads.length > 0) {
       renderReviewThreads(threadsResult.threads);
@@ -235,6 +237,7 @@ window.PRPanel = (function () {
     // missing (e.g. an older main build that returned a flat access string).
     var isAccess = !!ACCESS[result.errorKind]
       || /cannot access this repository|could not resolve|authenticated with the correct|not logged in|bad credentials|http 40[13]|single sign-on|\bsso\b|requires.*scope|missing.*scope/i.test(result.error || result.errorSummary || '');
+    A11y.announce('Pull request failed to load: ' + (result.errorSummary || result.error), 'assertive');
     if (!isAccess) {
       prInfoEl.innerHTML = '<div class="pr-error">' + escHtml(result.error) + '</div>';
       return;
@@ -273,6 +276,7 @@ window.PRPanel = (function () {
 
     if (result.error) {
       host.innerHTML = '<div class="pr-checks-empty">Checks unavailable: ' + escHtml(result.error) + '</div>';
+      A11y.announce('Checks unavailable: ' + result.error, 'assertive');
       return;
     }
     var checks = result.checks || [];
@@ -654,7 +658,7 @@ window.PRPanel = (function () {
     });
 
     html += '</div>';
-    commentsListEl.innerHTML += html;
+    commentsListEl.insertAdjacentHTML('beforeend', html);
   }
 
   // ---- Ask Claude handler ----
@@ -716,7 +720,7 @@ window.PRPanel = (function () {
     if (!inputEl || !currentPR || !currentWorktreePath) return;
 
     var body = inputEl.value.trim();
-    if (!body) return;
+    if (!body) { A11y.fieldError(inputEl, 'Write a reply before posting.'); return; }
 
     var commentId = btn.dataset.commentId;
     var threadable = btn.dataset.threadable === '1';
@@ -970,7 +974,7 @@ window.PRPanel = (function () {
   async function submitComment() {
     if (!currentPR || !currentWorktreePath) return;
     var body = commentInput.value.trim();
-    if (!body) return;
+    if (!body) { A11y.fieldError(commentInput, 'Write a comment before posting.'); return; }
 
     var btn = document.getElementById('btn-pr-comment');
     btn.disabled = true;

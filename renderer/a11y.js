@@ -596,10 +596,37 @@ window.A11y = (function () {
       const hunks = Array.from((line.closest('pre') || line.parentElement).querySelectorAll('.diff-line.diff-hunk'));
       return 'Hunk ' + (hunks.indexOf(line) + 1) + ' of ' + hunks.length + ': ' + code;
     }
-    if (line.classList.contains('diff-add')) return 'Added line ' + line.dataset.newLn + ': ' + code;
-    if (line.classList.contains('diff-del')) return 'Removed line ' + line.dataset.oldLn + ': ' + code;
+    const side = line.classList.contains('diff-split-left') ? ', old side' : line.classList.contains('diff-split-right') && !line.classList.contains('diff-context') ? ', new side' : '';
+    if (line.classList.contains('diff-add')) return 'Added line ' + line.dataset.newLn + side + ': ' + code;
+    if (line.classList.contains('diff-del')) return 'Removed line ' + line.dataset.oldLn + side + ': ' + code;
     if (line.dataset.newLn) return 'Line ' + line.dataset.newLn + ': ' + code;
     return code;
+  }
+
+  // Inline validation message tied to its field; it clears when the field is next edited. `after` places it elsewhere.
+  function fieldError(field, message, after) {
+    const id = ensureId(field, 'field') + '-error';
+    let el = document.getElementById(id);
+    const describedBy = (field.getAttribute('aria-describedby') || '').split(' ').filter(function (t) { return t && t !== id; });
+    if (!message) {
+      if (el) el.remove();
+      field.removeAttribute('aria-invalid');
+      if (describedBy.length) field.setAttribute('aria-describedby', describedBy.join(' '));
+      else field.removeAttribute('aria-describedby');
+      return;
+    }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = 'a11y-field-error';
+      el.setAttribute('role', 'alert');
+      (after || field).insertAdjacentElement('afterend', el);
+    }
+    el.textContent = message;
+    field.setAttribute('aria-invalid', 'true');
+    field.setAttribute('aria-describedby', describedBy.concat(id).join(' '));
+    field.focus();
+    field.addEventListener('input', function () { fieldError(field, null); }, { once: true });
   }
 
   function makeButton(el, label) {
@@ -639,6 +666,7 @@ window.A11y = (function () {
       position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
     }
+    .a11y-field-error { color: var(--error); font-size: 12px; margin: 4px 0; }
     :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)) !important; outline-offset: 2px; }
     :where(input, textarea, select, [contenteditable]):focus-visible { outline-offset: 0; }
     :where([role="tab"], .file-viewer-tab, .diff-tab):focus-visible { outline-offset: -2px; }
@@ -789,6 +817,7 @@ window.A11y = (function () {
     splitter: splitter,
     lineNav: lineNav,
     describeDiffLine: describeDiffLine,
+    fieldError: fieldError,
     dropdownMenu: dropdownMenu,
     preserveFocus: preserveFocus,
     tabs: tabs,

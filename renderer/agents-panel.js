@@ -103,8 +103,19 @@ window.AgentsPanel = (function () {
     return bits.join(' · ');
   }
 
+  function announceFinished(prev) {
+    current.forEach(function (a) {
+      var before = prev.find(function (p) { return p.id === a.id; });
+      if (!before || !isRunning(before) || isRunning(a)) return;
+      if (a.status === 'done') A11y.announce(titleFor(a) + ' finished');
+      else if (a.status === 'error') A11y.announce(titleFor(a) + ' failed' + (a.error ? ': ' + String(a.error).slice(0, 120) : ''), 'assertive');
+    });
+  }
+
   function render(agents) {
+    var prev = current;
     current = Array.isArray(agents) ? agents : [];
+    announceFinished(prev);
     refreshButtonVisibility();
 
     if (panel.style.display === 'none') return;

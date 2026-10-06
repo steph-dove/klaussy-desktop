@@ -98,9 +98,17 @@ window.App = window.App || {};
     App.sidebar.style.minWidth = '';
     App.sidebar.classList.toggle('collapsed', AppState.sidebarCollapsed);
     App.sidebar.classList.remove('expanded');
-    App.sidebarToggleIcon.textContent = AppState.sidebarCollapsed ? '\u25B6' : '\u25C0';
-    App.sidebarToggleLabel.textContent = AppState.sidebarCollapsed ? 'Show' : 'Hide';
+    App.syncSidebarToggle();
     App.refitTerminals();
+  };
+
+  App.syncSidebarToggle = function() {
+    var collapsed = !!AppState.sidebarCollapsed;
+    App.sidebarToggleIcon.textContent = collapsed ? '\u25B6' : '\u25C0';
+    App.sidebarToggleLabel.textContent = collapsed ? 'Show' : 'Hide';
+    var btn = document.getElementById('btn-sidebar-toggle');
+    btn.setAttribute('aria-expanded', String(!collapsed));
+    btn.setAttribute('aria-label', collapsed ? 'Show sidebar' : 'Hide sidebar');
   };
 
   // Swap the empty-state copy based on whether the user has a project yet.
@@ -757,7 +765,7 @@ window.App = window.App || {};
     return true;
   };
 
-  App.renderSessionsModalList = function() {
+  App.renderSessionsModalList = function(focusIndex) {
     App.sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Loading…</div>';
     App.discoverWorktreesCache = null;
     App.getDiscoveredWorktrees().then(function (groups) {
@@ -786,12 +794,22 @@ window.App = window.App || {};
           var n = btn.dataset.name;
           var wts = grouped.sessions[n] || grouped.legacy[n] || [];
           if (!wts.length) return;
+          var index = Array.prototype.indexOf.call(App.sessionsModalList.querySelectorAll('.sessions-modal-delete'), btn);
           btn.disabled = true;
           var acted = await App.deleteSessionFlow(n, wts);
           btn.disabled = false;
-          if (acted) App.renderSessionsModalList();
+          if (acted) App.renderSessionsModalList(index);
         });
       });
+      if (focusIndex != null) {
+        var dels = App.sessionsModalList.querySelectorAll('.sessions-modal-delete');
+        var target = dels[Math.min(focusIndex, dels.length - 1)];
+        if (!target) {
+          target = document.querySelector('#sessions-modal h3');
+          target.tabIndex = -1;
+        }
+        target.focus();
+      }
     }).catch(function (e) {
       console.warn('[manage-sessions]', e);
       App.sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Could not load sessions</div>';

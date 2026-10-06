@@ -415,9 +415,9 @@ body.custom-titlebar #titlebar-content {
 }
 #titlebar-branch[hidden] { display: none; }
 
-/* Klaussy brand block at the top of the sidebar, above the token graph. The
-   sidebar's own <h1> title is dropped in favor of this. */
-#sidebar-header h1 { display: none; }
+/* Klaussy brand block at the top of the sidebar, above the token graph. Its
+   name is the window's <h1>. */
+.sidebar-brand-name { margin: 0; font: inherit; letter-spacing: inherit; }
 #sidebar-brand {
   display: flex;
   align-items: center;
@@ -445,7 +445,9 @@ body.custom-titlebar #titlebar-content {
   justify-content: center;
   padding: 14px 0 10px;
 }
-#sidebar.collapsed #sidebar-brand .sidebar-brand-name { display: none; }
+#sidebar.collapsed #sidebar-brand .sidebar-brand-name {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
 
 /* Sidebar */
 #sidebar {
@@ -504,19 +506,6 @@ body.custom-titlebar #titlebar-content {
 #sidebar.collapsed #sidebar-header {
   padding: 12px 8px;
   justify-content: center;
-}
-
-#sidebar-header h1 {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-  letter-spacing: 1px;
-  white-space: nowrap;
-  overflow: hidden;
-}
-
-#sidebar.collapsed #sidebar-header h1 {
-  display: none;
 }
 
 #sidebar-header .header-buttons {
@@ -3144,7 +3133,15 @@ body.task-branchless #ahead-behind {
 #btn-agents-close,
 .session-group-toggle,
 #btn-refresh-plan,
-#btn-session-notes-refresh {
+#btn-session-notes-refresh,
+.plan-file-remove,
+.file-viewer-tab .tab-close,
+.pr-pending-remove,
+.pr-comment-composer-close,
+.pr-local-refresh,
+.pr-check-open,
+.diff-explanation-close,
+.pr-ai-review-close {
   min-width: 24px;
   min-height: 24px;
 }

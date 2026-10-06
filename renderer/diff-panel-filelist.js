@@ -121,11 +121,13 @@
         e.stopPropagation();
         var file = btn.dataset.file;
         var action = btn.dataset.action;
-        var wtPath = btn.closest('.diff-file').dataset.worktreepath || DP.currentWorktreePath;
+        var row = btn.closest('.diff-file');
+        var wtPath = row.dataset.worktreepath || DP.currentWorktreePath;
+        var result = null;
         if (action === 'stage') {
-          await window.klaus.git.stage(wtPath, [file]);
+          result = await window.klaus.git.stage(wtPath, [file]);
         } else if (action === 'unstage') {
-          await window.klaus.git.unstage(wtPath, [file]);
+          result = await window.klaus.git.unstage(wtPath, [file]);
         } else if (action === 'discard') {
           // Use a visible confirmation
           btn.textContent = '?';
@@ -134,9 +136,16 @@
           if (window.A11y) window.A11y.announce('Press again to confirm discarding ' + file);
           btn.dataset.action = 'discard-confirm';
         } else if (action === 'discard-confirm') {
-          await window.klaus.git.discard(wtPath, [file]);
+          result = await window.klaus.git.discard(wtPath, [file]);
         }
-        if (action !== 'discard') await DP.refresh();
+        if (action === 'discard') return;
+        var verb = { stage: 'Stage', unstage: 'Unstage', 'discard-confirm': 'Discard' }[action];
+        if (result && result.error) window.toast.error(verb + ' failed for ' + file + ': ' + result.error);
+        else A11y.announce({ stage: 'Staged ', unstage: 'Unstaged ', 'discard-confirm': 'Discarded changes to ' }[action] + file);
+        await DP.refresh();
+        if (action === 'discard-confirm' || (result && result.error)) return;
+        var moved = DP.fileListEl.querySelector('.diff-file[data-uniquekey="' + CSS.escape(row.dataset.uniquekey) + '"][data-staged="' + (action === 'stage') + '"] .diff-file-main');
+        if (moved) moved.focus();
       });
     });
   };

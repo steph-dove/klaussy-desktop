@@ -794,24 +794,36 @@
     PR.restoreOpenDebugChecks();
   };
 
+  PR.logWatchButton = function(panel) {
+    return PR.hostEl.querySelector('.pr-check-action-watch[data-run-id="' + CSS.escape(panel.dataset.runId)
+      + '"][data-name="' + CSS.escape(panel.dataset.name) + '"]');
+  };
+
+  // The checks poll rebuilds the rows, so the button is looked up again on every change rather than captured.
+  PR.syncLogWatchButton = function(btn, panel) {
+    if (!btn) return;
+    var open = !!(panel && panel.isConnected);
+    var text = !open ? 'Watch log' : panel.dataset.done ? 'Close log' : 'Stop watching';
+    btn.textContent = text;
+    btn.setAttribute('aria-label', text + ' for ' + (btn.dataset.name || 'check'));
+    btn.setAttribute('aria-expanded', String(open));
+    if (open) btn.setAttribute('aria-controls', panel.id);
+    else btn.removeAttribute('aria-controls');
+  };
+
   // Live log tail for an in-progress run. Click again to stop. Renders into a
   // panel below the row with auto-scroll to bottom unless the user has
   // scrolled up (basic stick-to-bottom behavior).
   PR.toggleLogWatch = function(btn) {
     var row = btn.closest('.pr-check-row');
     if (!row) return;
-    function setLabel(text, expanded) {
-      btn.textContent = text;
-      btn.setAttribute('aria-label', text + ' for ' + (btn.dataset.name || 'check'));
-      if (expanded != null) btn.setAttribute('aria-expanded', String(expanded));
-    }
     var existing = row.nextElementSibling && row.nextElementSibling.classList.contains('pr-check-log-watch-panel')
       ? row.nextElementSibling : null;
     if (existing) {
       var existingId = existing.dataset.requestId;
       if (existingId) window.klaus.pr.reviewRunLogWatchStop(existingId);
       existing.remove();
-      setLabel('Watch log', false);
+      PR.syncLogWatchButton(btn, null);
       return;
     }
     var runId = btn.dataset.runId;
@@ -822,14 +834,15 @@
     panel.className = 'pr-check-log-watch-panel';
     panel.id = 'pr-log-watch-' + requestId;
     panel.dataset.requestId = requestId;
+    panel.dataset.runId = runId;
+    panel.dataset.name = btn.dataset.name || '';
     panel.innerHTML = '<div class="pr-check-log-watch-head">'
         + '<span>Tailing run #' + PR.escHtml(runId) + '</span>'
         + '<button type="button" class="pr-check-log-watch-stop">Stop</button>'
       + '</div>'
       + '<pre class="pr-check-log-watch-body">Waiting for log…</pre>';
     row.insertAdjacentElement('afterend', panel);
-    btn.setAttribute('aria-controls', panel.id);
-    setLabel('Stop watching', true);
+    PR.syncLogWatchButton(btn, panel);
 
     var bodyEl = panel.querySelector('.pr-check-log-watch-body');
     var firstChunk = true;
@@ -838,6 +851,11 @@
       // Within 12px of the bottom counts as "stuck" for resume-after-render.
       stickBottom = (bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight) < 12;
     });
+
+    function finished() {
+      panel.dataset.done = '1';
+      PR.syncLogWatchButton(PR.logWatchButton(panel), panel);
+    }
 
     var unsubChunk = window.klaus.pr.onRunLogChunk(requestId, function (chunk) {
       if (firstChunk) { bodyEl.textContent = ''; firstChunk = false; }
@@ -851,16 +869,17 @@
         : 'Run completed';
       if (head) head.textContent = msg;
       A11y.announce(msg);
-      setLabel('Watch log');
+      finished();
     });
 
     panel.querySelector('.pr-check-log-watch-stop').addEventListener('click', function () {
       window.klaus.pr.reviewRunLogWatchStop(requestId);
       if (unsubChunk) unsubChunk();
       if (unsubDone) unsubDone();
+      var current = PR.logWatchButton(panel);
       panel.remove();
-      setLabel('Watch log', false);
-      if (btn.isConnected) btn.focus();
+      PR.syncLogWatchButton(current, null);
+      if (current) current.focus();
     });
 
     window.klaus.pr.reviewRunLogWatchStart(requestId, runId).then(function (res) {
@@ -868,7 +887,7 @@
         bodyEl.classList.add('diff-error');
         bodyEl.setAttribute('role', 'alert');
         bodyEl.textContent = res.error;
-        setLabel('Watch log');
+        finished();
       }
     });
   };

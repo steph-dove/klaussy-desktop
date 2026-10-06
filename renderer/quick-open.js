@@ -92,6 +92,7 @@ window.QuickOpen = (function () {
       if (el) el.scrollIntoView({ block: 'nearest' });
     }
 
+    var saidNoMatch = false;
     function refilter() {
       var q = input.value.trim().toLowerCase();
       results = cachedFiles
@@ -102,6 +103,11 @@ window.QuickOpen = (function () {
         .map(function (r) { return r.entry; });
       selectedIndex = 0;
       render();
+      if (results.length || !q) { saidNoMatch = false; return; }
+      list.innerHTML = '<div class="palette-empty">No matching files</div>';
+      // Once per run of empty results, not on every keystroke.
+      if (!saidNoMatch) A11y.announce('No matching files');
+      saidNoMatch = true;
     }
 
     function openEntry(entry) {

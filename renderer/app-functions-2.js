@@ -193,12 +193,12 @@ window.App = window.App || {};
         if (answers) window.openFileViewer(task.worktreePath + '/' + answers[0], answers[0]);
       }},
       { sep: true },
-      { label: (task.notifyEnabled !== false ? '\u2713 ' : '  ') + 'Notify When Idle', action: async function () {
+      { label: 'Notify When Idle', checked: task.notifyEnabled !== false, action: async function () {
         var newVal = task.notifyEnabled === false;
         task.notifyEnabled = newVal;
         await window.klaus.task.setNotifyEnabled(id, newVal, 'idle');
       }},
-      { label: (task.notifyCIEnabled !== false ? '\u2713 ' : '  ') + 'Notify on CI Pass/Fail', action: async function () {
+      { label: 'Notify on CI Pass/Fail', checked: task.notifyCIEnabled !== false, action: async function () {
         var newVal = task.notifyCIEnabled === false;
         task.notifyCIEnabled = newVal;
         await window.klaus.task.setNotifyEnabled(id, newVal, 'ci');
@@ -863,9 +863,18 @@ window.App = window.App || {};
       if (!el) return;
       el.classList.remove('modal-field-invalid');
       el.removeAttribute('aria-invalid');
-      var fe = el.tagName === 'INPUT' ? el : el.querySelector('input, button');
-      if (fe && fe.getAttribute('aria-describedby') === 'modal-error') fe.removeAttribute('aria-describedby');
+      var fe = App.fieldControl(el);
+      if (!fe) return;
+      fe.classList.remove('modal-field-invalid');
+      fe.removeAttribute('aria-invalid');
+      if (fe.getAttribute('aria-describedby') === 'modal-error') fe.removeAttribute('aria-describedby');
     });
+  };
+
+  // An enhanced <select> is hidden; its searchable-select trigger is what the user reaches.
+  App.fieldControl = function(el) {
+    if (el.__ss) return el.__ss.trigger;
+    return el.tagName === 'INPUT' ? el : el.querySelector('input, button');
   };
 
   // Abort a submit: re-enable Create, show the message, ring + focus the field.
@@ -876,8 +885,12 @@ window.App = window.App || {};
     if (fieldEl) {
       fieldEl.classList.add('modal-field-invalid');
       fieldEl.setAttribute('aria-invalid', 'true');
-      var focusEl = fieldEl.tagName === 'INPUT' ? fieldEl : fieldEl.querySelector('input, button');
-      if (focusEl) focusEl.setAttribute('aria-describedby', 'modal-error');
+      var focusEl = App.fieldControl(fieldEl);
+      if (focusEl) {
+        if (fieldEl.__ss) focusEl.classList.add('modal-field-invalid');
+        focusEl.setAttribute('aria-invalid', 'true');
+        focusEl.setAttribute('aria-describedby', 'modal-error');
+      }
       if (focusEl && focusEl.focus) setTimeout(function () { focusEl.focus(); }, 0);
     }
   };

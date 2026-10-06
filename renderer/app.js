@@ -637,8 +637,7 @@ window.App = window.App || {};
       AppState.sidebarCollapsed = false;
       App.sidebar.style.width = w + 'px';
       App.sidebar.style.minWidth = w + 'px';
-      App.sidebarToggleIcon.textContent = '\u25C0';
-      App.sidebarToggleLabel.textContent = 'Hide';
+      App.syncSidebarToggle();
     };
 
     App.sidebarResizeHandle.addEventListener('mousedown', function (e) {
@@ -1354,7 +1353,6 @@ window.App = window.App || {};
       var isChecked = App.modalDevLoopCheck.checked;
       App.modalDevLoopFields.style.display = isChecked ? 'block' : 'none';
       if (isChecked && App.modalDevLoopPrompt) {
-        setTimeout(function () { App.modalDevLoopPrompt.focus(); }, 50);
         if (App.modalCreate) App.modalCreate.textContent = 'Start Full Dev Loop';
       } else {
         if (App.modalCreate) App.modalCreate.textContent = 'Create';
