@@ -925,7 +925,11 @@ window.App = window.App || {};
     // Don't create a session for an agent whose CLI isn't installed — guide the
     // user to set it up first (the modal handles the "Re-check" loop). Returns
     // true for installed agents and 'shell', so this is a no-op in the happy path.
-    if (window.agentSetup && !(await window.agentSetup.checkAndPrompt(App.selectedMode))) return;
+    if (window.agentSetup && !(await window.agentSetup.checkAndPrompt(App.selectedMode))) {
+      App.modalCreate.disabled = false;
+      App.syncCreateButtonLabel();
+      return;
+    }
 
     var result;
 

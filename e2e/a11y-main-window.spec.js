@@ -147,7 +147,8 @@ test.describe('main window keyboard access', () => {
     await mainWindow.keyboard.press('ArrowRight');
     await expect(group.locator('[aria-checked="true"]')).not.toHaveAttribute('data-shell', before);
     await expect(group.locator('[aria-checked="true"]')).toBeFocused();
-    expect(await mainWindow.evaluate(() => !!window.App.shellUserPicked)).toBe(false);
+    // Arrowing is the keyboard's way of choosing, so it records the pick like a click; only the setup prompt waits for activation.
+    expect(await mainWindow.evaluate(() => !!window.App.shellUserPicked)).toBe(true);
     await expect(mainWindow.locator('.klaus-modal-overlay:visible')).toHaveCount(0);
     await mainWindow.evaluate(() => { document.getElementById('modal-overlay').style.display = 'none'; });
   });

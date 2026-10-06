@@ -23,6 +23,7 @@
        apply the CSS variables itself. Without it the popout falls back to the
        dark defaults in 01-base.css regardless of the main window's theme. -->
   <script src="theme.js"></script>
+  <script src="app-state.js"></script>
   <script src="utils.js"></script>
   <script src="toast.js"></script>
   <!-- Markdown rendering for comment bodies (markdown-it + DOMPurify are UMD;
@@ -38,14 +39,36 @@
   <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="pr-review-terminal.js"></script>
   <script src="pr-review-implement.js"></script>
+  <script src="pr-review-humanize.js"></script>
   <script src="pr-review-conversation.js"></script>
   <script src="pr-review-checks.js"></script>
+  <script src="focus-regions.js"></script>
   <script>
     // Read the shared theme from config and apply it before/while mounting so
     // the popout matches the main window (init() is async but applies the CSS
     // variables as soon as it resolves; pr-review.js also listens for the
     // 'theme-changed' event it dispatches).
     if (window.ThemeManager && ThemeManager.init) ThemeManager.init();
+    // The pop-out has no app.js, so it loads prefs itself: terminals need font settings and screen-reader mode.
+    function applyTerminalPrefs() {
+      var sr = AppUtils.screenReaderMode(AppState.savedPrefs);
+      [PrReview.chatTerminal, PrReview.implTerminal].forEach(function (rt) {
+        if (!rt) return;
+        rt.terminal.options.screenReaderMode = sr;
+        rt.terminal.options.fontSize = AppState.currentFontSize;
+        if (AppState.savedPrefs.fontFamily) rt.terminal.options.fontFamily = AppState.savedPrefs.fontFamily;
+      });
+    }
+    window.klaus.ui.getPreferences().then(function (prefs) {
+      AppState.savedPrefs = prefs || {};
+      if (prefs && prefs.fontSize) AppState.currentFontSize = prefs.fontSize;
+      applyTerminalPrefs();
+    }).catch(function (err) { console.error('[pr-review popout] getPreferences failed', err); });
+    window.klaus.ui.onPreferencesChanged(function (prefs) {
+      Object.assign(AppState.savedPrefs, prefs);
+      if (prefs.fontSize) AppState.currentFontSize = prefs.fontSize;
+      applyTerminalPrefs();
+    });
     // Host is the window itself; no other renderer modules are loaded here.
     window.PrReview.mount({
       host: document.getElementById('pr-review-root'),

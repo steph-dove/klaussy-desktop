@@ -458,8 +458,11 @@ window.A11y = (function () {
     }
     // Shift+Up/Down builds a real text selection so the diff's selection actions (comment, explain) work from the keyboard.
     function extendSelection(from, dir) {
+      // A selection cleared by E/P, a click or Tab means this Shift+arrow starts a new range at the current line.
       const kept = rangeAnchor.get(container);
-      const anchor = kept && kept.isConnected ? kept : from;
+      const sel = window.getSelection();
+      const live = kept && kept.isConnected && !sel.isCollapsed && sel.containsNode(from, true);
+      const anchor = live ? kept : from;
       rangeAnchor.set(container, anchor);
       go(from, opts.lineSelector, dir);
       const target = document.activeElement;

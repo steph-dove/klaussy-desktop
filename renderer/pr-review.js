@@ -213,6 +213,12 @@ window.PrReview = window.PrReview || {};
     PR.hostEl = options.host;
     PR.isPopout = !!options.isPopout;
     PR.hostEl.classList.add('pr-review-host');
+    if (!PR.hostEl.dataset.typedWatch) {
+      PR.hostEl.dataset.typedWatch = '1';
+      PR.hostEl.addEventListener('input', function (e) {
+        if (e.target && /^(TEXTAREA|INPUT)$/.test(e.target.tagName)) e.target.dataset.typed = '1';
+      });
+    }
     // Delegated "Copy" for gh-error fix commands. Bound on hostEl (not its
     // children) so it survives the innerHTML rewrites every render does.
     PR.hostEl.addEventListener('click', function (e) {
@@ -314,7 +320,59 @@ window.PrReview = window.PrReview || {};
 
   // Every state broadcast rebuilds the whole surface, so focus is carried across.
   PR.render = function(state) {
-    return A11y.preserveFocus(PR.hostEl, function () { return renderSurface(state); });
+    return A11y.preserveFocus(PR.hostEl, function () {
+      var prevNumber = PR.lastState && PR.lastState.number;
+      var typed = PR.captureTyped(PR.hostEl);
+      var result = renderSurface(state);
+      if (PR.lastState && PR.lastState.number === prevNumber) PR.restoreTyped(PR.hostEl, typed);
+      return result;
+    });
+  };
+
+  // Text the user typed survives repaints; untouched fields still take the new state's values.
+  function fieldKey(el) {
+    var cls = el.classList[0];
+    if (!cls) return null;
+    var owner = el.closest('[data-finding-id], [data-id], [data-reply-to], [data-path]');
+    var scope = '';
+    if (owner && PR.hostEl.contains(owner)) {
+      ['data-finding-id', 'data-id', 'data-reply-to', 'data-path'].some(function (attr) {
+        if (!owner.hasAttribute(attr)) return false;
+        scope = '[' + attr + '="' + CSS.escape(owner.getAttribute(attr)) + '"] ';
+        return true;
+      });
+    }
+    return scope + el.tagName.toLowerCase() + '.' + CSS.escape(cls);
+  }
+
+  PR.captureTyped = function(root) {
+    var fields = [];
+    root.querySelectorAll('textarea[data-typed], input[data-typed]').forEach(function (el) {
+      var key = !el.closest('.pr-conv-reply-composer') && el.value && fieldKey(el);
+      if (key) fields.push({ key: key, value: el.value });
+    });
+    var replies = [];
+    root.querySelectorAll('.pr-conv-reply-composer[data-reply-to]').forEach(function (composer) {
+      var ta = composer.querySelector('textarea');
+      replies.push({ replyTo: composer.dataset.replyTo, value: ta ? ta.value : '', focused: composer.contains(document.activeElement) });
+    });
+    return { fields: fields, replies: replies };
+  };
+
+  PR.restoreTyped = function(root, typed) {
+    if (!typed) return;
+    typed.fields.forEach(function (f) {
+      var el = root.querySelector(f.key);
+      if (!el) return;
+      el.value = f.value;
+      el.dataset.typed = '1';
+    });
+    typed.replies.forEach(function (r) {
+      var btn = root.querySelector('.pr-conv-reply-btn[data-reply-to="' + CSS.escape(r.replyTo) + '"]');
+      if (!btn || root.querySelector('.pr-conv-reply-composer[data-reply-to="' + CSS.escape(r.replyTo) + '"]')) return;
+      var ta = PR.openReplyComposer(btn, { focus: r.focused });
+      if (ta) { ta.value = r.value; ta.dataset.typed = '1'; }
+    });
   };
 
   function renderSurface(state) {
@@ -824,7 +882,9 @@ window.PrReview = window.PrReview || {};
           window.toast.error('Post failed: ' + result.error);
           return;
         }
-        ta.value = '';
+        var live = PR.hostEl.querySelector('.pr-conv-new-body') || ta;
+        live.value = '';
+        delete live.dataset.typed;
         A11y.announce('Comment posted');
         await window.klaus.pr.refreshThreads();
         // render is re-triggered by the pr-review-state broadcast.
@@ -895,10 +955,12 @@ window.PrReview = window.PrReview || {};
     var tab = PR.hostEl.querySelector('.pr-review-conversation');
     if (!tab || !PR.lastState) return;
     A11y.preserveFocus(tab, function () {
+      var typed = PR.captureTyped(tab);
       tab.innerHTML = PR.renderConversation(PR.lastState);
       PR.bindConversationComposer();
       PR.bindReplyButtons();
       PR.bindEditCommentButtons();
+      PR.restoreTyped(tab, typed);
     });
   };
 
@@ -916,6 +978,7 @@ window.PrReview = window.PrReview || {};
       btn.addEventListener('click', function () {
         PR.editingCommentId = parseInt(btn.dataset.id, 10);
         PR.editingCommentKind = btn.dataset.kind;
+        PR.focusEditOnBind = true;
         if (PR.lastState) PR.render(PR.lastState);
       });
     });
@@ -927,7 +990,7 @@ window.PrReview = window.PrReview || {};
       var saveBtn = wrap.querySelector('.pr-conv-edit-save');
       var cancelBtn = wrap.querySelector('.pr-conv-edit-cancel');
       var errEl = wrap.querySelector('.pr-conv-edit-error');
-      if (ta) ta.focus();
+      if (ta && PR.focusEditOnBind) { PR.focusEditOnBind = false; ta.focus(); }
       function showError(msg) {
         if (!ta || !errEl) return;
         errEl.textContent = msg;
@@ -974,7 +1037,7 @@ window.PrReview = window.PrReview || {};
     });
   };
 
-  PR.openReplyComposer = function(btn) {
+  PR.openReplyComposer = function(btn, opts) {
     var parentId = btn.dataset.replyTo;
     if (!parentId) return;
     var inlineEl = btn.closest('.pr-conv-inline');
@@ -985,6 +1048,7 @@ window.PrReview = window.PrReview || {};
 
     var composer = document.createElement('div');
     composer.className = 'pr-conv-reply-composer';
+    composer.dataset.replyTo = parentId;
     composer.innerHTML =
       '<textarea class="pr-conv-reply-body" aria-label="Reply" placeholder="Reply (\u2318\u23CE to post)" rows="2"></textarea>'
       + '<div class="pr-conv-reply-actions">'
@@ -995,7 +1059,7 @@ window.PrReview = window.PrReview || {};
 
     var ta = composer.querySelector('textarea');
     var sendBtn = composer.querySelector('.pr-conv-reply-send');
-    ta.focus();
+    if (!opts || opts.focus !== false) ta.focus();
 
     composer.querySelector('.pr-conv-reply-cancel').addEventListener('click', function () {
       composer.remove();
@@ -1018,9 +1082,14 @@ window.PrReview = window.PrReview || {};
       await window.klaus.pr.refreshThreads();
     }
 
+    // A repaint may have reopened this composer as a new node while the reply was posting.
     function closeComposer() {
+      var hadFocus = !!document.activeElement && (composer.contains(document.activeElement)
+        || !!document.activeElement.closest('.pr-conv-reply-composer[data-reply-to="' + CSS.escape(parentId) + '"]'));
+      PR.hostEl.querySelectorAll('.pr-conv-reply-composer[data-reply-to="' + CSS.escape(parentId) + '"]').forEach(function (c) { c.remove(); });
       composer.remove();
-      if (btn.isConnected) btn.focus();
+      var liveBtn = PR.hostEl.querySelector('.pr-conv-reply-btn[data-reply-to="' + CSS.escape(parentId) + '"]') || btn;
+      if (hadFocus && liveBtn.isConnected) liveBtn.focus();
     }
 
     sendBtn.addEventListener('click', send);
@@ -1028,6 +1097,7 @@ window.PrReview = window.PrReview || {};
       if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
       if (e.key === 'Escape') closeComposer();
     });
+    return ta;
   };
 
   PR.renderPendingReviewBar = function(state) {

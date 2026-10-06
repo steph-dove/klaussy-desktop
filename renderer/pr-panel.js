@@ -1212,14 +1212,15 @@ window.PRPanel = (function () {
     if (menu) menu.hidden = true;
 
     var reason = mergeGateReason(currentPR, currentChecks);
-    var reasonEl = document.getElementById('pr-merge-reason');
+    // Its own id: the in-window PR review renders a #pr-merge-reason of its own earlier in the DOM.
+    var reasonEl = document.getElementById('pr-panel-merge-reason');
     if (!reasonEl) {
       reasonEl = document.createElement('span');
-      reasonEl.id = 'pr-merge-reason';
+      reasonEl.id = 'pr-panel-merge-reason';
       reasonEl.className = 'sr-only';
       btn.insertAdjacentElement('afterend', reasonEl);
-      btn.setAttribute('aria-describedby', reasonEl.id);
     }
+    btn.setAttribute('aria-describedby', reasonEl.id);
     // aria-disabled rather than disabled so keyboard users can still reach the button and hear why.
     btn.disabled = false;
     if (reason) {

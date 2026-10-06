@@ -68,14 +68,22 @@
       recheck: overlay.querySelector('#agent-setup-recheck'),
     };
 
-    els.close.addEventListener('click', hide);
-    overlay.addEventListener('click', function (e) { if (e.target === overlay) hide(); });
+    els.close.addEventListener('click', dismiss);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) dismiss(); });
     document.addEventListener('keydown', function (e) {
-      if (overlay.style.display !== 'none' && e.key === 'Escape') hide();
+      if (overlay.style.display !== 'none' && e.key === 'Escape') dismiss();
     });
   }
 
   function hide() { if (overlay) overlay.style.display = 'none'; }
+
+  // Every way out (Close, Escape, backdrop) has to settle the open prompt, or its caller waits forever.
+  var pendingFinish = null;
+  function dismiss() {
+    var finish = pendingFinish;
+    if (finish) finish(false);
+    else hide();
+  }
 
   function setText(el, text) { if (el) el.textContent = text == null ? '' : String(text); }
 
@@ -111,8 +119,8 @@
         if (settled) return;
         settled = true;
         els.copy.onclick = null; els.docs.onclick = null;
-        els.recheck.onclick = null; els.close.onclick = null;
-        els.close.addEventListener('click', hide); // restore default close
+        els.recheck.onclick = null;
+        pendingFinish = null;
         hide();
         resolve(!!installed);
       }
@@ -126,7 +134,7 @@
       els.docs.onclick = function () {
         if (docs) { try { window.klaus.gh.openExternal(docs); } catch (_e) {} }
       };
-      els.close.onclick = function () { finish(false); };
+      pendingFinish = finish;
       els.recheck.onclick = async function () {
         setText(els.recheck, 'Checking…');
         els.recheck.disabled = true;
@@ -182,8 +190,8 @@
         if (settled) return;
         settled = true;
         els.copy.onclick = null; els.docs.onclick = null;
-        els.recheck.onclick = null; els.close.onclick = null;
-        els.close.addEventListener('click', hide);
+        els.recheck.onclick = null;
+        pendingFinish = null;
         setText(els.docs, 'View docs'); // restore default label for other agents
         hide();
         resolve(!!ready);
@@ -198,7 +206,7 @@
       els.docs.onclick = function () {
         try { window.klaus.ui.openPreferences(); } catch (_e) {}
       };
-      els.close.onclick = function () { finish(false); };
+      pendingFinish = finish;
       els.recheck.onclick = async function () {
         setText(els.recheck, 'Checking…');
         els.recheck.disabled = true;
