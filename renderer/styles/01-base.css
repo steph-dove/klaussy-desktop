@@ -18,7 +18,7 @@
   --surface-hover: #26262f;
   --input-bg: #0a0a0e;
   --success: #46c463;
-  --error: #f0584f;
+  --error: #f05d54;
   --accent-contrast: #0b0b0f;
   --success-contrast: #0b0b0f;
   --error-contrast: #0b0b0f;
@@ -730,7 +730,8 @@ body.custom-titlebar #titlebar-content {
   top: 56px;
   left: 16px;
   width: 360px;
-  max-height: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: min(480px, calc(100vh - 72px));
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -910,7 +911,7 @@ body.custom-titlebar #titlebar-content {
 #commit-gate-banner .commit-gate-text {
   flex: 1 1 auto;
   min-width: 120px;
-  color: var(--text-muted);
+  color: var(--text);
   font-size: 11px;
 }
 #btn-enable-commit-gate {
@@ -1693,7 +1694,6 @@ button.collapsed-icon {
 
 #dir-pick-input::placeholder {
   color: var(--text-dim);
-  opacity: 0.7;
 }
 
 #dir-pick-error {
@@ -1971,17 +1971,14 @@ button.collapsed-icon {
    the warning only on the pane it applies to, not across the whole area.
    Branchless containers switch to flex-column layout so the banner, label,
    and xterm stack cleanly in every view (single / columns / grid). */
-/* Single-line banner — explicit height + nowrap so a narrow columns/grid
-   pane can't wrap the text into a multi-line block that overflows the
-   container's top. order: -1 + position: relative pin it as the first
-   flex item even if another child is inserted earlier by mistake. */
+/* The banner wraps in narrow panes so the "Open as worktree" link is never clipped; flex-shrink: 0 makes the terminal give up the height. order: -1 keeps it first even if another child is inserted earlier. */
 .terminal-warning {
   background: #b26014;
   color: #fff;
-  padding: 0 10px;
-  height: 24px;
+  padding: 4px 10px;
+  min-height: 24px;
   font-size: 11px;
-  line-height: 1;
+  line-height: 1.4;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2002,9 +1999,7 @@ button.collapsed-icon {
 .terminal-warning-text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .terminal-warning-link {
@@ -2065,7 +2060,7 @@ body.task-branchless #ahead-behind {
   filter: blur(60px);
   z-index: 0;
   pointer-events: none;
-  animation: pulseGlow 14s ease-in-out infinite alternate;
+  animation: pulseGlow 14s ease-in-out 2 alternate both;
 }
 
 @keyframes pulseGlow {
@@ -2098,7 +2093,7 @@ body.task-branchless #ahead-behind {
   border-radius: 12px;
   margin-bottom: 16px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  animation: logoPulse 4s ease-in-out infinite;
+  animation: logoPulse 4s ease-in-out 3;
 }
 
 @keyframes logoPulse {
@@ -2202,15 +2197,13 @@ body.task-branchless #ahead-behind {
   align-self: center;
   color: var(--text-dim);
   flex-shrink: 0;
-  opacity: 0.6;
-  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), color 0.3s, opacity 0.3s;
+  transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), color 0.3s;
 }
 
 .dashboard-card:hover .card-arrow,
 .dashboard-card:focus-visible .card-arrow {
   transform: translateX(2px);
   color: var(--accent-hover);
-  opacity: 1;
 }
 
 @media (max-width: 580px) {
@@ -2299,14 +2292,12 @@ body.task-branchless #ahead-behind {
   align-items: center;
   justify-content: center;
   z-index: 10;
-  opacity: 0.7;
-  transition: opacity 0.15s, background 0.15s;
+  transition: background 0.15s;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
 
 .terminal-scroll-bottom:hover,
 .terminal-scroll-bottom:focus-visible {
-  opacity: 1;
   background: var(--accent);
   color: var(--accent-contrast);
   border-color: var(--accent);
@@ -2575,7 +2566,6 @@ body.task-branchless #ahead-behind {
 
 .ollama-progress-step.done {
   color: var(--text-muted);
-  opacity: 0.75;
 }
 
 .ollama-progress-icon {
@@ -3049,7 +3039,7 @@ body.task-branchless #ahead-behind {
 }
 
 #broadcast-input::placeholder {
-  color: rgba(232, 232, 238, 0.5);
+  color: rgba(232, 232, 238, 0.7);
 }
 
 #btn-broadcast-send {

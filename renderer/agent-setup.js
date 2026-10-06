@@ -30,7 +30,7 @@
       + '#agent-setup-overlay .agent-setup-cmd code{flex:1;font-family:"SF Mono",Menlo,monospace;font-size:12px;'
       + 'background:#11111b;color:#e8e8f0;border:1px solid rgba(255,255,255,0.1);border-radius:6px;'
       + 'padding:8px 10px;white-space:pre-wrap;word-break:break-all;user-select:text;}'
-      + '#agent-setup-overlay .agent-setup-note{font-size:12px;opacity:0.7;margin:8px 0 0;line-height:1.5;}'
+      + '#agent-setup-overlay .agent-setup-note{font-size:12px;color:var(--text-muted);margin:8px 0 0;line-height:1.5;}'
       + '#agent-setup-overlay .agent-setup-docs{color:var(--accent);cursor:pointer;text-decoration:none;}'
       + '#agent-setup-overlay .agent-setup-docs:hover{text-decoration:underline;}';
     document.head.appendChild(style);

@@ -576,6 +576,22 @@ window.App = window.App || {};
     });
   });
 
+  // Reduce motion can be toggled while the app runs; cursorBlink is only read at terminal creation.
+  var reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  reducedMotion.addEventListener('change', function () {
+    var blink = !reducedMotion.matches;
+    App.tasks.forEach(function (task) {
+      task.terminal.options.cursorBlink = blink;
+      (task.subTerminals || []).forEach(function (sub) {
+        if (sub && sub.terminal) sub.terminal.options.cursorBlink = blink;
+      });
+    });
+    var pr = window.PrReview;
+    [pr && pr.chatTerminal, pr && pr.implTerminal].forEach(function (rt) {
+      if (rt) rt.terminal.options.cursorBlink = blink;
+    });
+  });
+
   // ---- File Viewer (C1) — renders inline in the diff panel ----
 
   // ---- File Browser (extracted to file-browser.js) ----
