@@ -26,6 +26,13 @@
     return function () { return document.querySelector('#pr-review-root ' + selector); };
   }
 
+  // Error toasts stay until dismissed, so keyboard users need a way to reach them.
+  const NOTIFICATIONS = {
+    label: 'Notifications',
+    el: byId('klaussy-toast-stack'),
+    shown: function () { return !!document.querySelector('#klaussy-toast-stack .klaussy-toast'); },
+  };
+
   // The PR review pop-out has no sidebar or panels; F6 is still the only way out of its terminal.
   const POPOUT_REGIONS = [
     { label: 'Pull request header', el: inReview('.pr-review-header') },
@@ -41,6 +48,7 @@
         return true;
       },
     },
+    NOTIFICATIONS,
   ];
 
   // The editor is nested in the changes panel, so it must come after it.
@@ -63,12 +71,7 @@
       el: byId('agents-panel'),
       shown: function () { return document.getElementById('agents-panel').style.display !== 'none'; },
     },
-    // Error toasts stay until dismissed, so keyboard users need a way to reach them.
-    {
-      label: 'Notifications',
-      el: byId('klaussy-toast-stack'),
-      shown: function () { return !!document.querySelector('#klaussy-toast-stack .klaussy-toast'); },
-    },
+    NOTIFICATIONS,
     {
       label: 'Editor',
       el: byId('file-viewer-content'),

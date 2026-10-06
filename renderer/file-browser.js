@@ -1195,7 +1195,7 @@ window.FileBrowser = (function () {
       var active = i === activeTabIndex ? ' active' : '';
       var dirty = tab.model && !tab.model.isDisposed() && tab.model.getValue() !== tab.savedContent ? ' dirty' : '';
       // A tab can't contain a control, so keyboard users close with Delete instead.
-      return '<div class="file-viewer-tab' + active + dirty + '" data-tab-index="' + i + '" title="' + escHtml(tab.filePath) + '">' +
+      return '<div class="file-viewer-tab' + active + dirty + '" data-tab-index="' + i + '" title="' + escHtml(tab.filePath) + '" aria-keyshortcuts="Delete">' +
                '<span class="tab-name">' + escHtml(basename) + '</span>' +
                '<span class="tab-dirty-dot" aria-hidden="true">●</span>' +
                '<span class="sr-only tab-dirty-sr">' + (dirty ? ', modified' : '') + '</span>' +

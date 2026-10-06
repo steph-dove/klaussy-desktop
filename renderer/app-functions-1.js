@@ -760,6 +760,12 @@ window.App = window.App || {};
   };
 
   App.renderSessionsModalList = function(focusIndex) {
+    var list = App.sessionsModalList;
+    // Park focus on the list itself so the swap doesn't drop it to the focus rescue.
+    if (list.contains(document.activeElement)) {
+      list.tabIndex = -1;
+      list.focus({ preventScroll: true });
+    }
     App.sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Loading…</div>';
     App.discoverWorktreesCache = null;
     App.getDiscoveredWorktrees().then(function (groups) {
@@ -793,6 +799,7 @@ window.App = window.App || {};
           var acted = await App.deleteSessionFlow(n, wts);
           btn.disabled = false;
           if (acted) App.renderSessionsModalList(index);
+          else if (!document.activeElement || document.activeElement === document.body) btn.focus();
         });
       });
       if (focusIndex != null) {

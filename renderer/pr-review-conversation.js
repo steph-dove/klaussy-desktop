@@ -467,7 +467,7 @@
     if (!threadId) return;
     btn.disabled = true;
     var orig = btn.textContent;
-    btn.textContent = '…';
+    btn.textContent = wasResolved ? 'Unresolving…' : 'Resolving…';
     var res = await window.klaus.pr.reviewResolveThread(threadId, !wasResolved);
     if (res && res.error) {
       btn.disabled = false;
@@ -838,7 +838,7 @@
     panel.dataset.name = btn.dataset.name || '';
     panel.innerHTML = '<div class="pr-check-log-watch-head">'
         + '<span>Tailing run #' + PR.escHtml(runId) + '</span>'
-        + '<button type="button" class="pr-check-log-watch-stop">Stop</button>'
+        + '<button type="button" class="pr-check-log-watch-stop" aria-label="Stop tailing run #' + PR.escHtml(runId) + '">Stop</button>'
       + '</div>'
       + '<pre class="pr-check-log-watch-body">Waiting for log…</pre>';
     row.insertAdjacentElement('afterend', panel);

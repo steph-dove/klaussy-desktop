@@ -622,6 +622,7 @@ window.TerminalManager = (function () {
     var tab = document.createElement('button');
     tab.className = 'sub-tab';
     tab.dataset.subId = subId;
+    tab.setAttribute('aria-keyshortcuts', 'Delete');
     tab.innerHTML = '<span class="sub-tab-label"></span> <span class="sub-tab-close" aria-hidden="true" title="Close (Delete)">&times;</span>';
     var labelSpan = tab.querySelector('.sub-tab-label');
     if (agentTab) {

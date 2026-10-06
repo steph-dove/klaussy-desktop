@@ -55,6 +55,7 @@
         box-shadow: 0 4px 16px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.06);
         cursor: pointer;
         word-break: break-word;
+        --focus-ring: #e8e8ee;
         opacity: 0;
         transform: translateX(12px);
         transition: opacity 140ms ease, transform 140ms ease;
@@ -142,7 +143,13 @@
     const toasts = liveToasts();
     const extra = toasts.length - MAX_VISIBLE;
     if (extra <= 0) _expanded = false;
-    toasts.forEach((t, i) => { t.hidden = !_expanded && i < extra; });
+    // The oldest toasts collapse first, but never the one holding focus.
+    const focused = toasts.find((t) => t.contains(document.activeElement));
+    let toHide = _expanded ? 0 : Math.max(extra, 0);
+    toasts.forEach((t) => {
+      t.hidden = toHide > 0 && t !== focused;
+      if (t.hidden) toHide--;
+    });
     _more.hidden = extra <= 0;
     _more.textContent = _expanded ? 'Show fewer' : '+' + extra + ' more';
     _more.setAttribute('aria-expanded', String(_expanded));
@@ -157,7 +164,10 @@
     if (!target) return;
     e.preventDefault();
     e.stopPropagation();
+    const fromToast = target.contains(document.activeElement);
     dismissers.get(target)();
+    // dismiss() already moved focus when it was inside the toast.
+    if (fromToast) return;
     const next = liveToasts().filter((t) => !t.hidden).pop();
     const focusTo = next ? next.querySelector('.klaussy-toast-close') : (!_more.hidden && _more);
     if (focusTo) focusTo.focus();
@@ -166,10 +176,15 @@
   let _returnFocus = null;
 
   // Dismissing the focused toast would drop focus to <body>; go to the next toast or back to where the user came from.
+  function canFocus(el) {
+    return !!el && el.isConnected && !el.disabled && !el.closest('[inert], [hidden]') && el.getClientRects().length > 0;
+  }
+
   function moveFocusFrom(el) {
     const next = liveToasts().filter((t) => t !== el && !t.hidden).pop();
-    const target = next ? next.querySelector('button') : _returnFocus;
-    if (target && target.isConnected && !target.closest('[inert]')) { target.focus(); return; }
+    const candidates = [next && next.querySelector('button'), _returnFocus, !_more.hidden && _more];
+    const target = candidates.find(canFocus);
+    if (target) { target.focus(); return; }
     if (window.TerminalManager && window.TerminalManager.focusActive) window.TerminalManager.focusActive();
   }
 
@@ -234,7 +249,8 @@
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'klaussy-toast-close';
-    closeBtn.setAttribute('aria-label', 'Dismiss notification');
+    const snippet = span.textContent.length > 60 ? span.textContent.slice(0, 57).trimEnd() + '…' : span.textContent;
+    closeBtn.setAttribute('aria-label', 'Dismiss: ' + (prefix + snippet).trim());
     closeBtn.textContent = '\u00d7';
     closeBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
     el.appendChild(closeBtn);
@@ -269,10 +285,11 @@
   else if (document.body) install();
 
   window.toast = {
-    error:   (msg) => show('error', msg),
-    warn:    (msg) => show('warn', msg),
-    info:    (msg) => show('info', msg),
-    success: (msg) => show('success', msg),
+    // opts.sticky keeps a toast up until dismissed, e.g. instructions the user works through.
+    error:   (msg, opts) => show('error', msg, opts),
+    warn:    (msg, opts) => show('warn', msg, opts),
+    info:    (msg, opts) => show('info', msg, opts),
+    success: (msg, opts) => show('success', msg, opts),
     // Actionable toast: level + message + a button. Sticky by default so the
     // action stays available; pass opts.sticky === false to auto-dismiss.
     action:  (level, msg, actionLabel, onAction, opts) =>

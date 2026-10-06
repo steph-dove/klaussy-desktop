@@ -356,7 +356,13 @@ window.PrReview = window.PrReview || {};
       var ta = composer.querySelector('textarea');
       replies.push({ replyTo: composer.dataset.replyTo, value: ta ? ta.value : '', focused: composer.contains(document.activeElement) });
     });
-    return { fields: fields, replies: replies };
+    var errors = [];
+    root.querySelectorAll('textarea[aria-invalid="true"], input[aria-invalid="true"]').forEach(function (el) {
+      var msg = el.id && document.getElementById(el.id + '-error');
+      var key = msg && fieldKey(el);
+      if (key) errors.push({ key: key, message: msg.textContent, afterParent: msg.previousElementSibling === el.parentElement });
+    });
+    return { fields: fields, replies: replies, errors: errors };
   };
 
   PR.restoreTyped = function(root, typed) {
@@ -372,6 +378,11 @@ window.PrReview = window.PrReview || {};
       if (!btn || root.querySelector('.pr-conv-reply-composer[data-reply-to="' + CSS.escape(r.replyTo) + '"]')) return;
       var ta = PR.openReplyComposer(btn, { focus: r.focused });
       if (ta) { ta.value = r.value; ta.dataset.typed = '1'; }
+    });
+    // A repaint rebuilds the field without its validation error; put it back without re-announcing it.
+    (typed.errors || []).forEach(function (f) {
+      var el = root.querySelector(f.key);
+      if (el && !el.value) A11y.fieldError(el, f.message, f.afterParent ? el.parentElement : null, { silent: true });
     });
   };
 

@@ -185,12 +185,15 @@ window.AppUtils = (function () {
   }
 
   // Flips the button's label briefly and announces the outcome, which the label change alone doesn't.
+  var copyTimers = new WeakMap();
   function copyText(btn, text, ms) {
-    var orig = btn.textContent;
+    // Kept on the button so a second click during the flash doesn't capture "Copied" as the label.
+    if (btn.dataset.copyLabel == null) btn.dataset.copyLabel = btn.textContent;
     var flash = function (label) {
+      clearTimeout(copyTimers.get(btn));
       btn.textContent = label;
       if (window.A11y) window.A11y.announce(label, label === 'Copied' ? 'polite' : 'assertive');
-      setTimeout(function () { btn.textContent = orig; }, ms || 1500);
+      copyTimers.set(btn, setTimeout(function () { btn.textContent = btn.dataset.copyLabel; }, ms || 1500));
     };
     var write = navigator.clipboard && navigator.clipboard.writeText
       ? navigator.clipboard.writeText(text)
