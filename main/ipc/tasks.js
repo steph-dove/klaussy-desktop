@@ -250,6 +250,9 @@ function trackedLatestSession(provider, worktreePath) {
   if (provider.sessionTracking === 'kimi-index') {
     return require('../state/kimi-sessions').latestSession(worktreePath) || null;
   }
+  if (provider.sessionTracking === 'copilot-state') {
+    return require('../util/copilot-sessions').latestSession(worktreePath) || null;
+  }
   return null;
 }
 
@@ -1435,7 +1438,8 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
       ? new Set() : snapshotSessionIds(inst.worktreePath);
     inst.claudeSessionId = resumeId || null;
   } else {
-    agentCmd = provider.buildInteractiveCmd(bin, { resumeLatest: true, trust, model, profile: nemProfile });
+    const trackedId = provider.sessionTracking ? trackedLatestSession(provider, inst.worktreePath) : null;
+    agentCmd = provider.buildInteractiveCmd(bin, { resumeSessionId: trackedId, resumeLatest: !trackedId, trust, model, profile: nemProfile });
     inst.preSpawnSessionIds = new Set();
     inst.claudeSessionId = null;
   }

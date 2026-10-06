@@ -4,7 +4,6 @@ const assert = require('node:assert/strict');
 // app-functions-1.js is pure definitions, so a stub `window` is enough to load
 // it (same approach as app-utils.test.js).
 global.window = global.window || {};
-// resumeAllAgentsWanted reads the dialog's checkbox; absent markup means "yes".
 global.document = global.document || { getElementById: () => null };
 require('../../renderer/app-functions-1');
 const App = global.window.App;
@@ -15,7 +14,7 @@ function stubKlaus(spawned) {
     session: {
       resume(s) {
         n++;
-        spawned.push({ kind: 'resume', mode: s.mode, sessionId: s.sessionId, worktreePath: s.worktreePath });
+        spawned.push({ kind: 'resume', mode: s.mode, originalMode: s.originalMode, sessionId: s.sessionId, worktreePath: s.worktreePath });
         return Promise.resolve({ id: 't' + n, mode: s.mode, worktreePath: s.worktreePath });
       },
     },
@@ -81,21 +80,44 @@ test('resumeSessionWorktree: resumes every saved agent for the worktree', async 
   assert.deepEqual(extras.map((t) => t.id), ['t2']);
 });
 
-test('resumeSessionWorktree: unticking resume-all opens only the first agent', async () => {
+test('resumeSessionWorktree: picking an agent hands the session off to that one only', async () => {
   const spawned = [];
   stubKlaus(spawned);
-  const wanted = App.resumeAllAgentsWanted;
-  App.resumeAllAgentsWanted = () => false;
+  App.shellUserPicked = true;
   const extras = [];
   try {
     await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', [
-      { mode: 'claude', sessionId: 'a', worktreePath: '/wt' },
+      { mode: 'copilot', sessionId: null, worktreePath: '/wt' },
       { mode: 'codex', sessionId: 'b', worktreePath: '/wt' },
     ], 'claude', (t) => extras.push(t));
   } finally {
-    App.resumeAllAgentsWanted = wanted;
+    App.shellUserPicked = false;
   }
 
   assert.equal(spawned.length, 1);
+  assert.equal(spawned[0].mode, 'claude');
+  assert.equal(spawned[0].originalMode, 'copilot');
   assert.equal(extras.length, 0);
+});
+
+test('resumeSessionWorktree: without a pick every agent resumes in its own CLI', async () => {
+  const spawned = [];
+  stubKlaus(spawned);
+  App.shellUserPicked = false;
+  await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', [
+    { mode: 'copilot', sessionId: null, worktreePath: '/wt' },
+  ], 'claude', () => {});
+
+  assert.deepEqual(spawned.map((s) => s.mode), ['copilot']);
+});
+
+test('resumeAllSavedAgents: leaves sub-agent tabs for addTaskToUI to reopen', async () => {
+  const spawned = [];
+  stubKlaus(spawned);
+  const subs = [{ mode: 'copilot', label: 'GitHub Copilot', sessionId: null }];
+  const first = await App.resumeAllSavedAgents({
+    savedAgents: [{ mode: 'claude', sessionId: 'a', worktreePath: '/wt', subAgents: subs }],
+  }, () => {});
+
+  assert.deepEqual(first.subAgentsToReopen, subs);
 });

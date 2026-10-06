@@ -207,10 +207,8 @@ window.Sidebar = (function () {
         btn.textContent = '...';
         var result;
         var extraTasks = [];
-        var resumedAll = false;
         try {
           if (wt.savedAgents && wt.savedAgents.length > 1) {
-            resumedAll = true;
             result = await window.App.resumeAllSavedAgents(wt, function (t) { extraTasks.push(t); });
           } else if (wt.mode === 'shell') {
             result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
@@ -235,6 +233,8 @@ window.Sidebar = (function () {
           return;
         }
         AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
+        var extras = (wt.savedAgents && wt.savedAgents[0] && wt.savedAgents[0].subAgents) || wt.subAgents;
+        if (!result.subAgentsToReopen && extras && extras.length) result.subAgentsToReopen = extras;
         window.App.addTaskToUI(result);
         window.App.switchToTask(result.id);
         window.App.restoreUIState(result);
@@ -242,13 +242,6 @@ window.Sidebar = (function () {
         // In single layout the extra agents would run with nothing on screen.
         if (extraTasks.length && window.TerminalManager && TerminalManager.currentLayout() === 'single') {
           TerminalManager.setLayout(extraTasks.length >= 2 ? 'grid' : 'columns');
-        }
-        // The session's other agents were tabs on this task, so they come back
-        // as tabs rather than as sessions of their own. resumeAllSavedAgents
-        // has already reopened them, so repeating it here would double the tabs.
-        var extras = (wt.savedAgents && wt.savedAgents[0] && wt.savedAgents[0].subAgents) || wt.subAgents;
-        if (!resumedAll && extras && extras.length && window.TerminalManager) {
-          TerminalManager.reopenSubAgents(result.id, extras);
         }
       });
 

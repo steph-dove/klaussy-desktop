@@ -622,15 +622,13 @@ const PROVIDERS = {
     defaultBin: 'copilot',
     configPathKey: 'copilotPath',
     versionArgs: ['--version'],
-    // Sessions live under ~/.copilot/session-state/<id>/events.jsonl (+ a
-    // SQLite session-store.db). Global, not per-cwd. `--continue` resumes the
-    // most recent session in the current directory.
+    // `--continue` takes the newest session from ANY directory, so resume goes by id (util/copilot-sessions).
     perWorktreeSessions: false,
     supportsExactResume: false,
+    sessionTracking: 'copilot-state',
 
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest } = {}) {
+    buildInteractiveCmd(bin, { resumeSessionId } = {}) {
       if (resumeSessionId) return `${bin} --resume=${resumeSessionId}`;
-      if (resumeLatest) return `${bin} --continue`;
       return bin;
     },
     buildHeadlessRun(_bin, { prompt, mode, allowEdits, promptOnStdin } = {}) {
@@ -709,8 +707,8 @@ const PROVIDERS = {
     // VERIFY: Copilot events.jsonl schema undocumented. Stubs so the implement
     // PTY degrades gracefully (no tail attached) instead of crashing.
     sessionLineToEvents() { return []; },
-    snapshotSessions() { return new Set(); },
-    findNewSession() { return null; },
+    snapshotSessions() { return require('../util/copilot-sessions').snapshotSessionIds(); },
+    findNewSession(worktreePath, preSpawn) { return require('../util/copilot-sessions').findNewSession(worktreePath, preSpawn); },
   },
 
   // Cursor CLI (`cursor-agent`) — Cursor's headless/interactive coding agent,

@@ -52,6 +52,21 @@ function setDeps({ isQuitting, startCIPolling, stopCIPolling } = {}) {
 // send only to that set.
 const terminalSubscribers = new Map(); // channel -> Set<webContents>
 
+// An agent's first bytes set terminal modes and query the terminal before any window subscribes; losing them leaves the TUI with no keyboard.
+const pendingTerminalOutput = new Map(); // channel -> { messages, size }
+const everSubscribed = new Set();
+const PENDING_OUTPUT_CAP = 512 * 1024;
+
+function holdTerminalOutput(channel, args) {
+  let pending = pendingTerminalOutput.get(channel);
+  if (!pending) { pending = { messages: [], size: 0 }; pendingTerminalOutput.set(channel, pending); }
+  const size = typeof args[0] === 'string' ? args[0].length : 0;
+  // Keep the head: the mode switches are at the start, and a TUI redraws the rest.
+  if (pending.size + size > PENDING_OUTPUT_CAP) return;
+  pending.size += size;
+  pending.messages.push(args);
+}
+
 function subscribeTerminalChannel(channel, webContents) {
   let subs = terminalSubscribers.get(channel);
   if (!subs) { subs = new Set(); terminalSubscribers.set(channel, subs); }
@@ -70,6 +85,13 @@ function subscribeTerminalChannel(channel, webContents) {
       webContents.send(channel, msg);
       inst.freshenWarning = null;
     }
+  }
+
+  everSubscribed.add(channel);
+  const pending = pendingTerminalOutput.get(channel);
+  if (pending) {
+    pendingTerminalOutput.delete(channel);
+    for (const args of pending.messages) webContents.send(channel, ...args);
   }
 
   // Auto-cleanup when the renderer goes away so we don't keep sending to
@@ -91,7 +113,10 @@ function unsubscribeTerminalChannel(channel, webContents) {
 
 function sendToTerminalSubscribers(channel, ...args) {
   const subs = terminalSubscribers.get(channel);
-  if (!subs || subs.size === 0) return;
+  if (!subs || subs.size === 0) {
+    if (!everSubscribed.has(channel)) holdTerminalOutput(channel, args);
+    return;
+  }
   for (const wc of subs) {
     if (!wc.isDestroyed()) wc.send(channel, ...args);
   }

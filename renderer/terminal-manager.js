@@ -492,6 +492,10 @@ window.TerminalManager = (function () {
     if (tasks.size >= 3) setLayout('grid');
     else if (tasks.size === 2) setLayout('columns');
     switchToTask(id);
+    // Sub-tabs need this task's tab bar, so they can't be reopened any earlier.
+    if (task.subAgentsToReopen && task.subAgentsToReopen.length) {
+      reopenSubAgents(id, task.subAgentsToReopen);
+    }
   }
 
   // ---- Agent tab labels (sub-tabs show the model the agent is on) ----
