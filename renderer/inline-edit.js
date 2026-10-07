@@ -105,6 +105,10 @@ window.InlineEdit = (function () {
     if (!body) { cancel(); return; }
     var dom = document.createElement('div');
     dom.className = 'inline-edit-stream';
+    dom.setAttribute('role', 'group');
+    dom.setAttribute('aria-label', 'Inline edit');
+    dom.setAttribute('aria-busy', 'true');
+    dom.tabIndex = -1;
     dom.innerHTML =
       '<div class="inline-edit-stream-header">Proposed change</div>' +
       '<pre class="inline-edit-stream-body"></pre>' +
@@ -122,6 +126,8 @@ window.InlineEdit = (function () {
     dom.querySelector('.inline-edit-reject').addEventListener('click', function (e) {
       e.preventDefault(); e.stopPropagation(); cancel();
     });
+    // The swap above removed the focused input; keep focus on the edit so Escape still reaches keyHandler.
+    dom.focus({ preventScroll: true });
 
     // Start the streaming IPC.
     s.requestId = 'ie-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
@@ -142,6 +148,9 @@ window.InlineEdit = (function () {
       else A11y.announce('Edit ready. Press Enter to accept or Escape to reject.');
       var header = s.panelEl && s.panelEl.querySelector('.inline-edit-stream-header');
       var acceptBtn = s.actionsEl && s.actionsEl.querySelector('.inline-edit-accept');
+      var active = document.activeElement;
+      var focusHere = !active || active === document.body || (s.panelEl && s.panelEl.contains(active));
+      if (s.panelEl) s.panelEl.removeAttribute('aria-busy');
       if (msg && msg.error) {
         if (header) header.textContent = 'Error: ' + msg.error;
         if (acceptBtn) acceptBtn.disabled = true;
@@ -149,12 +158,15 @@ window.InlineEdit = (function () {
           var statusEl = widgetEl.querySelector('.inline-edit-status');
           if (statusEl) statusEl.textContent = '✗ Failed';
         }
+        var rejectBtn = s.actionsEl && s.actionsEl.querySelector('.inline-edit-reject');
+        if (focusHere && rejectBtn) rejectBtn.focus({ preventScroll: true });
       } else if (msg && msg.cancelled) {
         cancel();
       } else {
         if (header) header.textContent = 'Proposed change';
         if (acceptBtn) acceptBtn.disabled = false;
         if (s.panelEl) s.panelEl.classList.add('ready');
+        if (focusHere && acceptBtn) acceptBtn.focus({ preventScroll: true });
         // Hide the prompt widget once the proposal is ready — the panel
         // below is now the primary surface. Prevents a leftover "Ready"
         // label floating awkwardly above the selection.

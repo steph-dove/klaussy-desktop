@@ -79,12 +79,13 @@ window.HistoryPanel = (function () {
     tagMessageInput.value = '';
     tagCommitInput.value = '';
     tagError.textContent = '';
+    A11y.fieldError(tagNameInput, null);
     tagNameInput.focus();
   });
 
   function closeTagForm() {
     tagsCreateForm.style.display = 'none';
-    tagNameInput.removeAttribute('aria-invalid');
+    A11y.fieldError(tagNameInput, null);
     document.getElementById('btn-create-tag').focus();
   }
 
@@ -102,10 +103,7 @@ window.HistoryPanel = (function () {
     if (!wt) return;
     var name = tagNameInput.value.trim();
     if (!name) {
-      tagError.textContent = 'Tag name is required';
-      tagNameInput.setAttribute('aria-invalid', 'true');
-      tagNameInput.setAttribute('aria-describedby', tagError.id);
-      tagNameInput.focus();
+      A11y.fieldError(tagNameInput, 'Tag name is required');
       return;
     }
     var message = tagMessageInput.value.trim() || undefined;
@@ -114,7 +112,7 @@ window.HistoryPanel = (function () {
     var result = await window.klaus.git.tagCreate(wt, name, message, commit);
     this.disabled = false;
     if (result.error) {
-      tagError.textContent = result.error;
+      A11y.fieldError(tagNameInput, result.error);
     } else {
       closeTagForm();
       A11y.announce('Created tag ' + name);
@@ -129,7 +127,12 @@ window.HistoryPanel = (function () {
       tagsList.innerHTML = '<div class="file-tree-empty">No active task</div>';
       return;
     }
-    tagsList.innerHTML = '<div class="file-tree-empty">Loading...</div>';
+    // Park focus on the list so the swap below doesn't drop it to the focus rescue.
+    if (tagsList.contains(document.activeElement)) {
+      tagsList.tabIndex = -1;
+      tagsList.focus({ preventScroll: true });
+    }
+    tagsList.innerHTML = '<div class="file-tree-empty">Loading…</div>';
     var result = await window.klaus.git.tags(wt);
     if (result.error) {
       tagsList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';

@@ -329,7 +329,7 @@ window.DiffPanel = window.DiffPanel || {};
       var body = ta.value.trim();
       if (!body) { A11y.fieldError(ta, 'Write a comment before posting.'); return; }
       postBtn.disabled = true;
-      postBtn.textContent = '...';
+      postBtn.textContent = 'Posting…';
       var result = await window.klaus.pr.addReviewComment({
         worktreePath: DP.currentWorktreePath,
         prNumber: pr.number,
@@ -348,6 +348,7 @@ window.DiffPanel = window.DiffPanel || {};
         return;
       }
       close();
+      A11y.announce('Comment posted');
       if (window.PRPanel && window.PRPanel.loadPR) window.PRPanel.loadPR();
     });
   };

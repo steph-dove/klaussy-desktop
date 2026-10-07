@@ -989,17 +989,18 @@
         + '<button class="pr-check-fix-discard" type="button">Discard</button>'
         + '<button class="pr-check-fix-push pr-check-action-primary" type="button">Commit &amp; push</button>'
       + '</div>'
-      + '<div class="pr-check-fix-status" role="status"></div>';
+      + '<div class="pr-check-fix-status"></div>';
 
     var pushBtn = footerEl.querySelector('.pr-check-fix-push');
     var discardBtn = footerEl.querySelector('.pr-check-fix-discard');
     var msgInput = footerEl.querySelector('.pr-check-fix-msg');
     var statusEl = footerEl.querySelector('.pr-check-fix-status');
+    // Announced rather than a live role: flipping status to alert before writing drops the alert, and a repeat isn't re-read.
     function setStatus(text, kind) {
-      statusEl.setAttribute('role', kind === 'error' ? 'alert' : 'status');
       statusEl.classList.toggle('diff-error', kind === 'error');
       statusEl.classList.toggle('pr-check-fix-status-ok', kind === 'ok');
       statusEl.textContent = text;
+      if (text) A11y.announce(text, kind === 'error' ? 'assertive' : 'polite');
     }
 
     pushBtn.addEventListener('click', function () {

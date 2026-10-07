@@ -330,7 +330,6 @@
   var invalidField = null;
   // An error stays up, tied to its field when known, until a later save succeeds.
   function showStatus(msg, isError, field) {
-    statusMsg.setAttribute('role', isError ? 'alert' : 'status');
     if (invalidField) {
       invalidField.el.removeAttribute('aria-invalid');
       if (invalidField.describedBy) invalidField.el.setAttribute('aria-describedby', invalidField.describedBy);
@@ -338,6 +337,8 @@
       invalidField = null;
     }
     // Autosave fires per keystroke; rewriting the same text would re-announce it each time.
+    // An error is re-read on each failed save, since the text alone doesn't change.
+    if (statusMsg.textContent !== msg || isError) A11y.announce(msg, isError ? 'assertive' : 'polite');
     if (statusMsg.textContent !== msg) statusMsg.textContent = msg;
     statusMsg.classList.add('visible');
     clearTimeout(statusTimer);
@@ -427,6 +428,19 @@
     });
   }
 
+  // The status line is a live region; writing every percent would queue dozens of announcements, so it only moves on a new step or every 25%.
+  function progressWriter(el) {
+    var last = null;
+    return function (p) {
+      var message = p.message || 'Downloading…';
+      var hasPct = typeof p.percent === 'number';
+      var bucket = hasPct ? Math.floor(p.percent / 25) : -1;
+      if (last && last.message === message && last.bucket === bucket) return;
+      last = { message: message, bucket: bucket };
+      el.textContent = message + (hasPct ? ' ' + p.percent + '%' : '');
+    };
+  }
+
   function checkAndPullOpencodeModel(modelVal) {
     if (!opencodeModelStatus) return;
     if (!modelVal || !modelVal.startsWith('ollama/')) {
@@ -438,10 +452,10 @@
     if (!api || !api.ensureModel) return;
 
     opencodeModelStatus.textContent = 'Checking model ' + tag + '…';
+    var progress = progressWriter(opencodeModelStatus);
     var dispose = api.onSetupProgress ? api.onSetupProgress(function (p) {
       if (!p || (p.step !== 'model' && p.step !== 'context')) return;
-      opencodeModelStatus.textContent = (p.message || 'Downloading…') +
-        (typeof p.percent === 'number' ? ' ' + p.percent + '%' : '');
+      progress(p);
     }) : null;
 
     // agentContext makes Ollama serve opencode a usable window; without it the
@@ -462,10 +476,10 @@
     var api = window.klaus.ai && window.klaus.ai.ollama;
     if (!api || !api.ensureModel) return;
     ollamaModelStatus.textContent = 'Checking model…';
+    var progress = progressWriter(ollamaModelStatus);
     var dispose = api.onSetupProgress ? api.onSetupProgress(function (p) {
       if (!p || p.step !== 'model') return;
-      ollamaModelStatus.textContent = (p.message || 'Downloading…') +
-        (typeof p.percent === 'number' ? ' ' + p.percent + '%' : '');
+      progress(p);
     }) : null;
     api.ensureModel().then(function (r) {
       if (dispose) dispose();

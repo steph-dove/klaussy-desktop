@@ -657,6 +657,8 @@ window.DevLoopPanel = (function () {
     return AppState.activeTaskId || null;
   }
 
+  var lastPaintedHtml = null;
+
   function renderActiveView() {
     if (!containerEl) containerEl = document.getElementById('devloop-tab-content');
     if (!containerEl) return;
@@ -665,6 +667,7 @@ window.DevLoopPanel = (function () {
     var state = getState(taskId);
     syncTabVisibility(Boolean(state));
     if (!state) {
+      lastPaintedHtml = null;
       containerEl.innerHTML = '<div class="file-tree-empty">'
         + 'This session is not running a dev loop. Start one from the dashboard '
         + 'to track its phases, plan and QA media here.'
@@ -741,6 +744,12 @@ window.DevLoopPanel = (function () {
 
     html += '</div>';
 
+    // Polls and file events usually change nothing; repainting anyway restarts playing QA videos and loses the reading position.
+    if (html === lastPaintedHtml && containerEl.querySelector('.devloop-body')) {
+      updateMiniHuds(taskId);
+      return;
+    }
+    lastPaintedHtml = html;
     // Re-rendered on every tab click, poll and event, so keep keyboard focus.
     A11y.preserveFocus(containerEl, function () { paintView(html, state, taskId); });
   }
@@ -792,7 +801,7 @@ window.DevLoopPanel = (function () {
         '<div class="devloop-pr-banner">' +
           '<span class="devloop-pr-icon" aria-hidden="true">🚀</span>' +
           '<span class="devloop-pr-text">Pull Request <strong>#' + esc(state.prNumber || '') + '</strong> active on forge.</span>' +
-          '<a href="#" class="devloop-pr-link" data-url="' + esc(state.prUrl) + '">View PR ↗</a>' +
+          '<a href="#" class="devloop-pr-link" data-url="' + esc(state.prUrl) + '">View PR <span aria-hidden="true">↗</span></a>' +
         '</div>';
     }
 
@@ -1085,7 +1094,9 @@ window.DevLoopPanel = (function () {
         if (prTab) prTab.click();
         var prBtn = document.getElementById('btn-pr-merge');
         if (!prBtn) return;
-        prBtn.focus();
+        // A natively disabled button can't take focus, which would leave it on this now-hidden panel.
+        if (prBtn.disabled && prTab) prTab.focus();
+        else prBtn.focus();
         if (prBtn.disabled || prBtn.getAttribute('aria-disabled') === 'true') {
           var reason = document.getElementById(prBtn.getAttribute('aria-describedby') || '');
           A11y.announce(reason ? reason.textContent : 'Merge is not available yet');
@@ -1167,7 +1178,7 @@ window.DevLoopPanel = (function () {
           '<span class="sr-only">, ' + doneCount + ' of ' + PHASES.length + ' phases complete</span>' +
         '</div>' +
         '<div class="minihud-stepper" aria-hidden="true">' + dotsHtml + '</div>' +
-        '<button class="minihud-expand-btn" title="Open full Dev Loop details" type="button">Details ↗</button>';
+        '<button class="minihud-expand-btn" title="Open full Dev Loop details" type="button">Details <span aria-hidden="true">↗</span></button>';
     });
 
     var expandBtn = minihud.querySelector('.minihud-expand-btn');

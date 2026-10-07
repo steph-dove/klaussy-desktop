@@ -386,7 +386,7 @@
               </div>
               <div id="tag-error" role="alert" class="tags-error"></div>
             </div>
-            <div id="tags-list"></div>
+            <div id="tags-list" role="group" aria-label="Tags"></div>
           </div>
         </div>
 
@@ -461,7 +461,7 @@
 
   <!-- New Task Modal -->
   <div id="modal-overlay" style="display: none;">
-    <div id="modal">
+    <div id="modal" aria-label="New session">
       <div id="modal-tabs">
         <button class="modal-tab active" data-tab="new">New Session</button>
         <button class="modal-tab" data-tab="existing">Existing Session</button>
@@ -585,7 +585,7 @@
   <div id="sessions-modal-overlay" class="klaus-modal-overlay" style="display: none;">
     <div id="sessions-modal" class="klaus-modal klaus-modal-wide">
       <h3>Manage Sessions</h3>
-      <div id="sessions-modal-list"></div>
+      <div id="sessions-modal-list" role="group" aria-label="Sessions"></div>
       <div class="klaus-modal-actions">
         <button id="sessions-modal-close" class="klaus-btn klaus-btn-ghost">Close</button>
       </div>

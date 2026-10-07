@@ -29,15 +29,22 @@
     },
   });
 
+  // The button sits inside the heading so the cards stay in heading navigation; clicks bubble to the card's handler.
   document.querySelectorAll('.dashboard-card').forEach(function (card) {
-    A11y.makeButton(card);
     card.querySelectorAll('svg').forEach(function (svg) { svg.setAttribute('aria-hidden', 'true'); });
     const title = card.querySelector('h3');
+    if (!title) return;
+    const action = document.createElement('span');
+    action.className = 'dashboard-card-action';
+    // The id moves with the text, which updateEmptyState rewrites.
+    if (title.id) { action.id = title.id; title.removeAttribute('id'); }
+    while (title.firstChild) action.appendChild(title.firstChild);
+    title.appendChild(action);
+    A11y.makeButton(action);
     const desc = card.querySelector('.card-content p');
-    if (title) card.setAttribute('aria-labelledby', title.id || (title.id = card.id + '-title'));
-    if (desc) card.setAttribute('aria-describedby', desc.id || (desc.id = card.id + '-desc'));
+    if (desc) action.setAttribute('aria-describedby', desc.id || (desc.id = card.id + '-desc'));
   });
-  A11y.arrowNav(document.querySelector('.empty-dashboard-grid'), '.dashboard-card', { orientation: 'both' });
+  A11y.arrowNav(document.querySelector('.empty-dashboard-grid'), '.dashboard-card-action', { orientation: 'both' });
 
   // btn-diff's .active is the single source of truth for the panel's open state, toggled from several call sites.
   var btnDiff = byId('btn-diff');

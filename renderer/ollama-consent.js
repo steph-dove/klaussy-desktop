@@ -32,6 +32,7 @@ window.OllamaConsent = (function () {
   // Guards the auto (already-accepted) setup path so frequent openIfNeeded
   // calls don't spawn parallel runSetup runs.
   var setupInFlight = false;
+  var lastSilentError = null;
 
   function show(pane) {
     consentPane.style.display = pane === 'consent' ? 'block' : 'none';
@@ -144,7 +145,11 @@ window.OllamaConsent = (function () {
 
     if (opts.silentError) {
       hide();
-      resolveAll({ ok: false, error: (result && result.error) || 'setup failed' });
+      var failure = (result && result.error) || 'setup failed';
+      // Said once per distinct error, since this path reruns on every editor open.
+      if (failure !== lastSilentError) A11y.announce('Inline AI could not start: ' + failure, 'assertive');
+      lastSilentError = failure;
+      resolveAll({ ok: false, error: failure });
       return;
     }
     errorMessage.textContent = (result && result.error) || 'Unknown error';
@@ -184,6 +189,12 @@ window.OllamaConsent = (function () {
     // First time (no saved consent): 'needs-install' / 'needs-server' /
     // 'needs-model' all ask first — even a model-only fetch is a ~1GB download.
     show('consent');
+    // This opens unprompted while the user is typing, so an Enter meant for the editor must not land on a decision button.
+    var heading = consentPane.querySelector('h3');
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
     return waiter;
   }
 

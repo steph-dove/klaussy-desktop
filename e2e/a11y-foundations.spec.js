@@ -80,7 +80,7 @@ test.describe('a11y foundations', () => {
 
     await expect(mainWindow.locator('.a11y-live[aria-live="assertive"]')).toContainText('Push failed: remote rejected');
     const toast = mainWindow.locator('.klaussy-toast', { hasText: 'Push failed: remote rejected' });
-    await toast.getByRole('button', { name: 'Dismiss notification' }).focus();
+    await toast.getByRole('button', { name: /^Dismiss: / }).focus();
     await mainWindow.keyboard.press('Enter');
     await expect(toast).toHaveCount(0);
   });
@@ -91,10 +91,10 @@ test.describe('a11y foundations', () => {
     await expect(stack.locator('.klaussy-toast:visible')).toHaveCount(3);
     await expect(stack.getByRole('button', { name: '+2 more' })).toBeVisible();
 
-    await stack.locator('.klaussy-toast', { hasText: 'Error 5' }).getByRole('button', { name: 'Dismiss notification' }).focus();
+    await stack.locator('.klaussy-toast', { hasText: 'Error 5' }).getByRole('button', { name: /^Dismiss: / }).focus();
     await mainWindow.keyboard.press('Escape');
     await expect(stack.locator('.klaussy-toast', { hasText: 'Error 5' })).toHaveCount(0);
-    await expect(stack.locator('.klaussy-toast', { hasText: 'Error 4' }).getByRole('button', { name: 'Dismiss notification' })).toBeFocused();
+    await expect(stack.locator('.klaussy-toast', { hasText: 'Error 4' }).getByRole('button', { name: /^Dismiss: / })).toBeFocused();
 
     const more = stack.getByRole('button', { name: '+1 more' });
     await more.click();

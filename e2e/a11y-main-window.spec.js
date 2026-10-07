@@ -153,9 +153,10 @@ test.describe('main window keyboard access', () => {
     await mainWindow.evaluate(() => { document.getElementById('modal-overlay').style.display = 'none'; });
   });
 
-  test('dashboard cards are named buttons', async ({ mainWindow }) => {
+  test('dashboard cards are named buttons inside their headings', async ({ mainWindow }) => {
     await expect(mainWindow.getByRole('button', { name: 'Open Local Folder or File' })).toBeVisible();
-    const cards = mainWindow.locator('.empty-dashboard-grid .dashboard-card:visible');
+    await expect(mainWindow.getByRole('heading', { name: 'Open Local Folder or File', level: 3 })).toBeVisible();
+    const cards = mainWindow.locator('.empty-dashboard-grid .dashboard-card:visible .dashboard-card-action');
     await cards.first().focus();
     await mainWindow.keyboard.press('ArrowDown');
     await expect(cards.nth(1)).toBeFocused();

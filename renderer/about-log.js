@@ -2,10 +2,8 @@ window.Dialogs = (function () {
   var escHtml = AppUtils.escHtml;
   var escAttr = AppUtils.escAttr;
 
-  // toast.info drops opts; an action toast with no action is a sticky info toast, so instructions don't time out.
   function stickyInfo(msg) {
-    if (window.toast && window.toast.action) window.toast.action('info', msg);
-    else if (window.toast && window.toast.info) window.toast.info(msg);
+    if (window.toast) window.toast.info(msg, { sticky: true });
   }
 
   // Write a slash command into the active task's terminal. `run` appends a

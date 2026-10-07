@@ -177,7 +177,7 @@
             + ' value="' + PR.escHtml(PR.localCommitMsg || '') + '"'
             + (PR.localBusy ? ' disabled' : '') + '>'
           + '<button class="pr-review-btn pr-local-commit-btn" type="button" aria-describedby="pr-local-commit-reason"'
-            + (PR.localBusy ? ' disabled' : '') + (selectedCount ? '' : ' aria-disabled="true"') + '>'
+            + busyAttrs('committing') + (selectedCount || PR.localBusy ? '' : ' aria-disabled="true"') + '>'
             + (PR.localBusy === 'committing' ? 'Committing…' : 'Commit' + (selectedCount ? ' (' + selectedCount + ')' : ''))
           + '</button>'
           + '<span id="pr-local-commit-reason" class="sr-only">' + (selectedCount ? '' : 'Select at least one file to commit.') + '</span>'
@@ -202,7 +202,7 @@
 
     var pushBtnHtml = (unpushed.length || diverged)
       ? '<button class="pr-review-btn pr-local-push-btn" type="button"'
-          + (PR.localBusy ? ' disabled' : '') + '>'
+          + busyAttrs('pushing') + '>'
           + (PR.localBusy === 'pushing' ? 'Pushing…' : 'Push to PR branch')
         + '</button>'
       : '';
@@ -224,6 +224,12 @@
       + unpushedHtml + pushBtnHtml
     + '</div>';
   };
+
+  // The button running the operation stays focusable (aria-disabled) so focus isn't dropped while it works.
+  function busyAttrs(op) {
+    if (!PR.localBusy) return '';
+    return PR.localBusy === op ? ' aria-disabled="true" aria-busy="true"' : ' disabled';
+  }
 
   // Announced here rather than via a live role on the banner, which re-renders on every tab repaint.
   PR.setLocalBanner = function(banner) {
@@ -273,6 +279,7 @@
     });
 
     if (commitBtn) commitBtn.addEventListener('click', function () {
+      if (PR.localBusy) return;
       var msg = msgInput ? msgInput.value.trim() : (PR.localCommitMsg || '').trim();
       if (!msg) {
         if (msgInput) A11y.fieldError(msgInput, 'Commit message required.', msgInput.parentElement);
@@ -329,6 +336,7 @@
   // returns canStash/canResolve flags and we render them as banner actions.
   PR.doPushLocal = function (opts) {
     opts = opts || {};
+    if (PR.localBusy) return;
     PR.localBusy = 'pushing';
     PR.localBanner = null;
     PR.repaintAiReviewTab();
@@ -361,6 +369,7 @@
   // then exits review mode and focuses the task (via pr-checkout-ready), so on
   // success there's nothing left to paint here.
   PR.resolveConflicts = function () {
+    if (PR.localBusy) return;
     PR.localBusy = 'pushing';
     PR.repaintAiReviewTab();
     window.klaus.pr.resolveConflicts(PR.aiReview.worktreePath || null).then(function (r) {

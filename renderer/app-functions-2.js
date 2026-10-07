@@ -798,7 +798,7 @@ window.App = window.App || {};
         accountHint.textContent = 'Run "glab auth login" to sign in (or "brew install glab"). Copied to clipboard.';
         try { await navigator.clipboard.writeText('glab auth login'); } catch (_) {}
         if (window.toast && window.toast.info) {
-          window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this picker.");
+          window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this picker.", { sticky: true });
         }
         return;
       }

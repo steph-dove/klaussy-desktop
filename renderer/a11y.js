@@ -30,6 +30,7 @@ window.A11y = (function () {
 
   const stack = [];
   let lastFocusOutside = null;
+  let lastFocusInStack = null;
   let syncQueued = false;
 
   function isShown(el) {
@@ -108,7 +109,8 @@ window.A11y = (function () {
     labelDialog(dialog);
     for (let n = overlay; n && n !== document.body; n = n.parentElement) n.inert = false;
     const active = document.activeElement;
-    const opener = active && active !== document.body && !overlay.contains(active) ? active : lastFocusOutside;
+    const lower = lastFocusInStack && lastFocusInStack.isConnected && stack.some(function (e) { return e.overlay.contains(lastFocusInStack); }) ? lastFocusInStack : null;
+    const opener = active && active !== document.body && !overlay.contains(active) ? active : (lower || lastFocusOutside);
     const entry = { overlay: overlay, dialog: dialog, opener: opener, inerted: inertOthers(overlay) };
     stack.push(entry);
     if (!overlay.contains(document.activeElement)) focusFirst(dialog, dialog);
@@ -119,7 +121,10 @@ window.A11y = (function () {
     const lost = !active || active === document.body || entry.overlay.contains(active) || !active.isConnected;
     if (!lost) return;
     const opener = entry.opener;
-    if (opener && opener.isConnected && isShown(opener) && !opener.closest('[inert]')) opener.focus();
+    if (!opener || !opener.isConnected || !isShown(opener) || opener.closest('[inert]')) return;
+    // An opener disabled while its dialog ran (e.g. a Delete awaiting confirmation) gets focus once it re-enables.
+    if (opener.disabled) awaitReenable(opener, null, function () { return focusLost() || entry.overlay.contains(document.activeElement); });
+    else opener.focus();
   }
 
   function closeEntry(entry) {
@@ -438,7 +443,16 @@ window.A11y = (function () {
   // Lines get tabindex only when reached, so a large diff costs one tab stop and no per-line setup.
   function lineNav(container, opts) {
     if (!container.hasAttribute('tabindex')) container.tabIndex = 0;
-    if (opts.label) container.setAttribute('aria-label', opts.label);
+    // A <pre> or <div> has no role, and aria-label is prohibited on generic elements, so give named nodes a group role.
+    if (opts.label) {
+      if (!container.getAttribute('role')) container.setAttribute('role', 'group');
+      container.setAttribute('aria-label', opts.label);
+    }
+    function label(line) {
+      if (!opts.describe) return;
+      if (!line.getAttribute('role')) line.setAttribute('role', 'group');
+      line.setAttribute('aria-label', opts.describe(line));
+    }
     function go(from, selector, dir) {
       const all = Array.from(container.querySelectorAll(selector)).filter(isShown);
       if (!all.length) return;
@@ -453,6 +467,7 @@ window.A11y = (function () {
       }
       if (!target) return;
       target.tabIndex = -1;
+      label(target);
       target.focus();
       target.scrollIntoView({ block: 'nearest' });
     }
@@ -479,7 +494,7 @@ window.A11y = (function () {
     container.addEventListener('focusin', function (e) {
       if (e.target === container || !e.target.matches(opts.lineSelector)) return;
       lastLine.set(container, e.target);
-      if (opts.describe) e.target.setAttribute('aria-label', opts.describe(e.target));
+      label(e.target);
     });
     container.addEventListener('keydown', function (e) {
       const from = e.target;
@@ -603,8 +618,9 @@ window.A11y = (function () {
     return code;
   }
 
-  // Inline validation message tied to its field; it clears when the field is next edited. `after` places it elsewhere.
-  function fieldError(field, message, after) {
+  // Inline validation message tied to its field; it clears when the field is next edited. `after` places it elsewhere; opts.silent re-applies one without announcing or moving focus.
+  function fieldError(field, message, after, opts) {
+    const silent = !!(opts && opts.silent);
     const id = ensureId(field, 'field') + '-error';
     let el = document.getElementById(id);
     const describedBy = (field.getAttribute('aria-describedby') || '').split(' ').filter(function (t) { return t && t !== id; });
@@ -619,13 +635,13 @@ window.A11y = (function () {
       el = document.createElement('div');
       el.id = id;
       el.className = 'a11y-field-error';
-      el.setAttribute('role', 'alert');
+      if (!silent) el.setAttribute('role', 'alert');
       (after || field).insertAdjacentElement('afterend', el);
     }
     el.textContent = message;
     field.setAttribute('aria-invalid', 'true');
     field.setAttribute('aria-describedby', describedBy.concat(id).join(' '));
-    field.focus();
+    if (!silent) field.focus();
     field.addEventListener('input', function () { fieldError(field, null); }, { once: true });
   }
 
@@ -713,14 +729,14 @@ window.A11y = (function () {
   }
 
   // A control disabled while busy usually comes back; wait for it rather than moving focus somewhere unrelated.
-  function awaitReenable(lost) {
+  function awaitReenable(el, lost, stillLost) {
     const startedAt = Date.now();
     const deadline = startedAt + 120000;
     (function poll() {
-      if (lastFocused !== lost || !focusLost() || lastInputAt > startedAt || Date.now() > deadline) return;
-      if (lost.el.isConnected && isShown(lost.el) && lost.el.disabled) { setTimeout(poll, 200); return; }
-      if (canTakeFocus(lost.el)) lost.el.focus({ preventScroll: true });
-      else rescueFocus(true);
+      if ((lost && lastFocused !== lost) || !(stillLost || focusLost)() || lastInputAt > startedAt || Date.now() > deadline) return;
+      if (el.isConnected && isShown(el) && el.disabled) { setTimeout(poll, 200); return; }
+      if (canTakeFocus(el)) el.focus({ preventScroll: true });
+      else if (lost) rescueFocus(true);
     })();
   }
 
@@ -729,7 +745,7 @@ window.A11y = (function () {
     const lost = lastFocused;
     if (!lost || !focusLost()) return;
     if (canTakeFocus(lost.el)) return;
-    if (!afterWait && lost.el.isConnected && isShown(lost.el) && lost.el.disabled) { awaitReenable(lost); return; }
+    if (!afterWait && lost.el.isConnected && isShown(lost.el) && lost.el.disabled) { awaitReenable(lost.el, lost); return; }
     for (const anc of lost.ancestors) {
       const line = anc.isConnected && lastLine.get(anc);
       if (line && line !== lost.el && line.isConnected && isShown(line)) { line.focus({ preventScroll: true }); return; }
@@ -781,7 +797,11 @@ window.A11y = (function () {
   }
 
   document.addEventListener('focusin', function (e) {
-    if (e.target && e.target.closest && !e.target.closest(DIALOG_SELECTOR)) lastFocusOutside = e.target;
+    if (e.target && e.target.closest) {
+      const owner = e.target.closest(DIALOG_SELECTOR);
+      if (!owner) lastFocusOutside = e.target;
+      else if (stack.some(function (en) { return en.overlay === owner; })) lastFocusInStack = e.target;
+    }
     const el = e.target;
     if (!el || el === document.body || !el.closest) return;
     if (el.closest('.xterm, .monaco-editor')) { lastFocused = null; return; }

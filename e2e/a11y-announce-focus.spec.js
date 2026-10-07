@@ -86,7 +86,7 @@ test.describe('announcements and focus after actions', () => {
     await mainWindow.evaluate(() => window.toast.error('Push failed: remote rejected'));
     const toast = mainWindow.locator('.klaussy-toast', { hasText: 'Push failed: remote rejected' });
     await expect(toast).toContainText('Error:');
-    await toast.getByRole('button', { name: 'Dismiss notification' }).focus();
+    await toast.getByRole('button', { name: /^Dismiss: / }).focus();
     await mainWindow.keyboard.press('Enter');
     await expect(toast).toHaveCount(0);
     await expect(origin).toBeFocused();
