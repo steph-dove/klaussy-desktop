@@ -62,6 +62,8 @@ test.describe('focus and announcements, round 4', () => {
 
   test('a second Copy click during the flash still restores the original label', async ({ mainWindow }) => {
     await mainWindow.evaluate(() => {
+      // writeText can hang when the window isn't focused (CI), so the flash would never start.
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: () => Promise.resolve() } });
       const btn = document.createElement('button');
       btn.id = 'copy-probe';
       btn.textContent = 'Copy command';
