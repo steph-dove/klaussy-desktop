@@ -54,6 +54,7 @@ window.FileBrowser = (function () {
   // K7 — gutter decorations for git-changed lines. `gitGutterDecorationIds`
   // holds the last-applied decoration IDs so we can swap them on refresh.
   var gitGutterDecorationIds = [];
+  var GIT_GUTTER_LABELS = { added: 'Added since the last commit', modified: 'Modified since the last commit', deleted: 'Lines deleted here since the last commit' };
 
   async function refreshGitGutter() {
     if (!currentEditor || !currentFilePath || !currentViewerWorktree) return;
@@ -70,8 +71,9 @@ window.FileBrowser = (function () {
       return {
         range: new monaco.Range(h.from, 1, h.to, 1),
         options: {
-          isWholeLine: false,
+          isWholeLine: true,
           linesDecorationsClassName: cls,
+          hoverMessage: { value: GIT_GUTTER_LABELS[h.type] || 'Changed since the last commit' },
           stickiness: monaco.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
         },
       };

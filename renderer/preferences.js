@@ -811,6 +811,14 @@
       btn.className = 'window-color-swatch' + (p.value ? '' : ' none');
       if (p.value) btn.style.background = p.value;
       if (p.value) btn.dataset.value = p.value;
+      // Forced colours repaint the button as Canvas; only this fill opts out, so the border and selection outline still follow the system palette.
+      if (p.value) {
+        var fill = document.createElement('span');
+        fill.setAttribute('aria-hidden', 'true');
+        fill.style.cssText = 'position:absolute;inset:1px;border-radius:3px;pointer-events:none;forced-color-adjust:none;';
+        fill.style.background = p.value;
+        btn.appendChild(fill);
+      }
       btn.title = p.name;
       btn.setAttribute('aria-label', p.name);
       btn.addEventListener('click', function () {

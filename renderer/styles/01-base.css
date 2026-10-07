@@ -68,20 +68,23 @@
   inset: 0;
   background: var(--modal-overlay-bg);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 16px;
+  overflow: auto;
   z-index: 220;
   backdrop-filter: saturate(140%) blur(4px);
   -webkit-backdrop-filter: saturate(140%) blur(4px);
 }
 
+/* A dialog taller than the window scrolls with the overlay; "safe" keeps its top reachable instead of centring it off-screen. */
 .klaus-modal {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 24px;
   width: 460px;
-  max-width: 92vw;
+  max-width: min(92vw, 100%);
   box-shadow: var(--shadow-modal);
 }
 
@@ -653,7 +656,7 @@ body.custom-titlebar #titlebar-content {
 #agents-bar #btn-agents.has-running {
   color: var(--accent);
   border-color: var(--accent);
-  animation: btn-agents-pulse 1.4s ease-in-out infinite;
+  animation: btn-agents-pulse 1.4s ease-in-out 3;
 }
 
 @keyframes btn-agents-pulse {
@@ -810,7 +813,7 @@ body.custom-titlebar #titlebar-content {
 /* States differ by shape as well as colour (WCAG 1.4.1): running = pulsing ring, done = disc, error = square, cancelled = hollow square. */
 .agent-item-status.running {
   border: 2px solid var(--accent);
-  animation: agent-pulse 1.4s ease-in-out infinite;
+  animation: agent-pulse 1.4s ease-in-out 3;
 }
 
 .agent-item-status.done { background: var(--success); }
@@ -957,7 +960,7 @@ body.custom-titlebar #titlebar-content {
 
 /* Manage Sessions modal list */
 #sessions-modal-list {
-  max-height: 360px;
+  max-height: min(360px, 50vh);
   overflow-y: auto;
   margin: 8px 0;
 }
@@ -1046,7 +1049,7 @@ body.custom-titlebar #titlebar-content {
   z-index: 240;
 }
 #delete-session-list {
-  max-height: 180px;
+  max-height: min(180px, 30vh);
   overflow-y: auto;
   margin: 8px 0;
   border: 1px solid var(--border);
@@ -1588,8 +1591,10 @@ button.collapsed-icon {
   inset: 0;
   background: rgba(0, 0, 0, 0.6);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 16px;
+  overflow: auto;
   z-index: 200;
 }
 
@@ -1601,7 +1606,7 @@ button.collapsed-icon {
   /* Wide enough that multi-repo rows (path + base-branch select + buttons)
      don't crush the path display into a few characters. */
   width: 560px;
-  max-width: calc(100vw - 48px);
+  max-width: min(calc(100vw - 48px), 100%);
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
 }
 
@@ -2193,7 +2198,8 @@ body.task-branchless #ahead-behind {
 }
 
 .dashboard-card:hover .card-arrow,
-.dashboard-card:focus-visible .card-arrow {
+.dashboard-card:focus-visible .card-arrow,
+.dashboard-card:has(.dashboard-card-action:focus-visible) .card-arrow {
   transform: translateX(2px);
   color: var(--accent-hover);
 }
@@ -2664,6 +2670,10 @@ body.task-branchless #ahead-behind {
   margin-top: 10px;
 }
 
+/* Overrides the inline fixed heights in index.html so the plan and file list shrink on short windows. */
+#plan-approval-content { max-height: min(250px, 35vh) !important; }
+#plan-approval-checklist { max-height: min(150px, 20vh) !important; }
+
 /* Plan modal action row handled by .klaus-modal-actions / .klaus-btn */
 
 /* Columns view */
@@ -2984,6 +2994,8 @@ body.task-branchless #ahead-behind {
   z-index: 1000;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  /* The glass is dark in every theme, so the focus ring is a fixed light blue (6.7:1) rather than the accent. */
+  --focus-ring: #9cc9ff;
 }
 
 #broadcast-bar.hidden {

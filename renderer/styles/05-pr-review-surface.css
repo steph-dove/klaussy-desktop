@@ -672,7 +672,6 @@ button.pr-check-toggle {
   align-self: flex-start;
   max-width: 85%;
 }
-.pr-check-debug-chat-streaming { opacity: 0.85; }
 .pr-check-debug-chat-error {
   color: var(--diff-del-fg, #e27c7c);
   font-size: 11px;
@@ -798,13 +797,15 @@ button.pr-check-toggle {
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 16px;
+  overflow: auto;
   z-index: 1000;
 }
 .pr-workflow-dispatch-modal {
   width: 480px;
-  max-width: 90vw;
+  max-width: min(90vw, 100%);
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1355,7 +1356,6 @@ button.pr-check-toggle {
 }
 .pr-ai-finding-chat-msg.assistant.streaming {
   border-style: dashed;
-  opacity: 0.9;
 }
 .pr-ai-finding-chat-error {
   padding: 6px 10px;
@@ -1473,7 +1473,6 @@ button.pr-check-toggle {
   color: var(--text);
 }
 .pr-ai-finding-investigate-body.streaming {
-  opacity: 0.9;
   border-left: 2px dashed var(--border);
   padding-left: 8px;
 }
@@ -1671,7 +1670,6 @@ button.pr-check-toggle {
 }
 .pr-conv-claude-investigate-body.streaming,
 .pr-conv-claude-implement-body.streaming {
-  opacity: 0.9;
   border-left: 2px dashed var(--border);
   padding-left: 8px;
 }
@@ -2362,7 +2360,7 @@ button.pr-check-toggle {
   word-break: break-word;
 }
 
-.pr-conv-thread.resolved { opacity: 0.75; }
+.pr-conv-thread.resolved { border-top-color: var(--diff-add-fg); }
 .pr-conv-thread.resolved .pr-conv-inline-path { color: var(--diff-add-fg, #7ce27c); }
 .pr-conv-thread.outdated .pr-conv-inline-path { color: var(--text-muted); }
 
@@ -2583,12 +2581,13 @@ button.pr-check-toggle {
 .diff-explanation-body.status-pulse {
   color: var(--text-dim);
   font-style: italic;
-  animation: pr-review-status-pulse 1.4s ease-in-out infinite;
+  animation: pr-review-status-pulse 1.4s ease-in-out 3;
 }
 
+/* Pulses between two text tokens that both keep 4.5:1, instead of fading the text. */
 @keyframes pr-review-status-pulse {
-  0%, 100% { opacity: 0.55; }
-  50%      { opacity: 1; }
+  0%, 100% { color: var(--text-dim); }
+  50%      { color: var(--text); }
 }
 
 /* G3: inline review threads */
@@ -2625,7 +2624,6 @@ button.pr-check-toggle {
 
 .pr-inline-thread.resolved {
   border-left-color: var(--diff-add-fg, #7ce27c);
-  opacity: 0.7;
 }
 
 .pr-inline-thread.outdated {
@@ -2887,12 +2885,14 @@ button.pr-check-toggle {
   background: rgba(0, 0, 0, 0.55);
   z-index: 700;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 16px;
+  overflow: auto;
 }
 .pr-submit-dialog {
   width: 520px;
-  max-width: calc(100vw - 40px);
+  max-width: min(calc(100vw - 40px), 100%);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2991,12 +2991,12 @@ button.pr-check-toggle {
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  padding-top: 80px;
+  padding-top: min(80px, 10vh);
 }
 .pr-picker {
   width: 640px;
   max-width: calc(100vw - 40px);
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - min(80px, 10vh) - 16px);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -3021,7 +3021,6 @@ button.pr-check-toggle {
   font-size: 12px;
   color: var(--text-dim, var(--text));
 }
-.pr-picker-account-label { opacity: 0.8; }
 .pr-picker-account {
   background: var(--input-bg, var(--bg));
   border: 1px solid var(--border);
@@ -3034,11 +3033,9 @@ button.pr-check-toggle {
 .pr-picker-account:focus { border-color: var(--accent); }
 .pr-picker-account-hint {
   margin-left: auto;
-  opacity: 0.7;
   font-size: 11px;
 }
 .pr-picker-account-hint.pr-picker-account-hint-error {
-  opacity: 1;
   color: var(--error);
   max-width: 60%;
   text-align: right;
@@ -3508,7 +3505,7 @@ button.pr-check-toggle {
   border-radius: 12px;
   width: 640px;
   max-width: calc(100vw - 60px);
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - min(80px, 10vh) - 16px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -3608,9 +3605,7 @@ button.pr-check-toggle {
   border-radius: 12px;
   width: 640px;
   max-width: calc(100vw - 60px);
-  /* Overlay has padding-top: 80px; reserve another 40px for breathing room
-     at the bottom so the dialog never runs off-screen. */
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - min(80px, 10vh) - 16px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -3671,7 +3666,7 @@ button.pr-check-toggle {
   width: 880px;
   max-width: calc(100vw - 60px);
   height: 600px;
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - min(80px, 10vh) - 16px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -3780,8 +3775,8 @@ button.pr-check-toggle {
 .skills-create-go:hover { filter: brightness(1.1); }
 .skills-create-go:disabled { opacity: 0.6; cursor: wait; }
 
-/* Memory dialog: gray-out missing-CLAUDE.md rows. */
-.skills-row.memory-missing { opacity: 0.65; }
+/* Memory dialog: missing-CLAUDE.md rows say so in text; italic marks them without dimming. */
+.skills-row.memory-missing .skills-row-desc { font-style: italic; }
 
 /* MCP server rows. */
 .mcp-type {
@@ -4053,7 +4048,7 @@ button.pr-check-toggle {
   border-radius: 12px;
   width: 540px;
   max-width: calc(100vw - 60px);
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - min(80px, 10vh) - 16px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -4579,7 +4574,8 @@ button.pr-check-toggle {
   border-radius: 12px;
   width: 560px;
   max-width: calc(100vw - 60px);
-  max-height: calc(100vh - 120px);
+  max-height: calc(100vh - min(80px, 10vh) - 16px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -5041,7 +5037,6 @@ mark.search-hit-replace {
    line numbers. */
 #file-viewer-view.blame-active .monaco-editor .line-numbers {
   font-size: 11px;
-  opacity: 0.85;
 }
 
 /* ---- Phase D: Git Gaps ---- */
@@ -5293,7 +5288,7 @@ mark.search-hit-replace {
 
 .file-viewer-breadcrumbs > * { direction: ltr; unicode-bidi: embed; }
 .file-viewer-breadcrumbs .crumb-leaf { color: var(--text); font-weight: 500; }
-.file-viewer-breadcrumbs .crumb-sep { margin: 0 4px; opacity: 0.5; }
+.file-viewer-breadcrumbs .crumb-sep { margin: 0 4px; color: var(--text-dim); }
 
 .file-viewer-problems-badge.has-error {
   color: var(--error);
@@ -6115,7 +6110,7 @@ body.task-branchless .file-viewer-blame-btn {
 .ci-status-icon.ci-pending {
   border: 2px solid var(--warning);
   opacity: 1;
-  animation: ci-pulse 1.5s ease-in-out infinite;
+  animation: ci-pulse 1.5s ease-in-out 3;
 }
 
 @keyframes ci-pulse {
@@ -6185,10 +6180,6 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .env-row.env-disabled {
-  opacity: 0.5;
-}
-
-.env-comment-row {
   opacity: 0.5;
 }
 
@@ -6272,7 +6263,7 @@ body.task-branchless .file-viewer-blame-btn {
 
 .env-row:hover .env-toggle-vis,
 .env-row:focus-within .env-toggle-vis {
-  opacity: 0.7;
+  opacity: 1;
 }
 
 .env-toggle-vis:hover,
