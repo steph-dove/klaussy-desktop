@@ -623,6 +623,8 @@ window.A11y = (function () {
     const silent = !!(opts && opts.silent);
     const id = ensureId(field, 'field') + '-error';
     let el = document.getElementById(id);
+    // A fresh alert node is what gets re-read, including one a silent repaint left without the role.
+    if (el && message && !silent) { el.remove(); el = null; }
     const describedBy = (field.getAttribute('aria-describedby') || '').split(' ').filter(function (t) { return t && t !== id; });
     if (!message) {
       if (el) el.remove();
@@ -643,6 +645,20 @@ window.A11y = (function () {
     field.setAttribute('aria-describedby', describedBy.concat(id).join(' '));
     if (!silent) field.focus();
     field.addEventListener('input', function () { fieldError(field, null); }, { once: true });
+  }
+
+  // Marks the button that started an operation as busy without `disabled`, which would drop focus; returns a restore function.
+  function busy(btn, label) {
+    if (!btn) return function () {};
+    const idleText = btn.textContent;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.setAttribute('aria-busy', 'true');
+    if (label) btn.textContent = label;
+    return function done(text) {
+      btn.removeAttribute('aria-disabled');
+      btn.removeAttribute('aria-busy');
+      btn.textContent = text != null ? text : idleText;
+    };
   }
 
   function makeButton(el, label) {
@@ -718,6 +734,7 @@ window.A11y = (function () {
   let lastFocused = null;
   let rescueQueued = false;
   let lastInputAt = 0;
+  let lastPointerAt = 0;
 
   function canTakeFocus(el) {
     return !!el && isShown(el) && !el.disabled && !el.closest('[inert]') && el.getAttribute('aria-hidden') !== 'true';
@@ -729,13 +746,19 @@ window.A11y = (function () {
   }
 
   // A control disabled while busy usually comes back; wait for it rather than moving focus somewhere unrelated.
+  function looksBusy(el) {
+    return !!el.closest('[aria-busy="true"]') || /(…|\.\.\.)\s*$/.test(el.textContent || '');
+  }
+
+  // Waits a few seconds (minutes if the control looks busy); a keypress or the timeout hands focus to a neighbour instead.
   function awaitReenable(el, lost, stillLost) {
     const startedAt = Date.now();
-    const deadline = startedAt + 120000;
+    const isLost = stillLost || focusLost;
     (function poll() {
-      if ((lost && lastFocused !== lost) || !(stillLost || focusLost)() || lastInputAt > startedAt || Date.now() > deadline) return;
-      if (el.isConnected && isShown(el) && el.disabled) { setTimeout(poll, 200); return; }
-      if (canTakeFocus(el)) el.focus({ preventScroll: true });
+      if ((lost && lastFocused !== lost) || !isLost() || lastPointerAt > startedAt) return;
+      const giveUp = lastInputAt > startedAt || Date.now() - startedAt > (looksBusy(el) ? 120000 : 4000);
+      if (!giveUp && el.isConnected && isShown(el) && el.disabled) { setTimeout(poll, 200); return; }
+      if (!giveUp && canTakeFocus(el)) el.focus({ preventScroll: true });
       else if (lost) rescueFocus(true);
     })();
   }
@@ -814,8 +837,13 @@ window.A11y = (function () {
     lastFocused = { el: el, key: captureFocusKey(document.body, el) || { selector: el.tagName.toLowerCase(), index: -1 }, keyed: hasOwnKey(el), ancestors: ancestors, slots: slots };
   });
   function noteInput() { lastInputAt = Date.now(); }
-  window.addEventListener('pointerdown', noteInput, true);
+  window.addEventListener('pointerdown', function () { lastInputAt = lastPointerAt = Date.now(); }, true);
   window.addEventListener('keydown', noteInput, true);
+  // A busy button stays focusable, so swallow its clicks here instead of in every handler.
+  window.addEventListener('click', function (e) {
+    const btn = e.target && e.target.closest && e.target.closest('button[aria-busy="true"]');
+    if (btn) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
   document.addEventListener('focusout', function (e) { if (!e.relatedTarget) queueRescue(); });
   // Window-level so any document or element Escape handler runs first.
   window.addEventListener('keydown', onEscapeCapture, true);
@@ -838,6 +866,7 @@ window.A11y = (function () {
     lineNav: lineNav,
     describeDiffLine: describeDiffLine,
     fieldError: fieldError,
+    busy: busy,
     dropdownMenu: dropdownMenu,
     preserveFocus: preserveFocus,
     tabs: tabs,

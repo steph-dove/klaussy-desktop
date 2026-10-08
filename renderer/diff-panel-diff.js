@@ -5,6 +5,12 @@
 
 (function (DP) {
 
+  // Busy buttons stay focusable (aria-disabled + aria-busy); a11y.js swallows their clicks.
+  function setBusy(btn, on) {
+    if (on) { btn.setAttribute('aria-disabled', 'true'); btn.setAttribute('aria-busy', 'true'); }
+    else { btn.removeAttribute('aria-disabled'); btn.removeAttribute('aria-busy'); }
+  }
+
   // Side-by-side split view, reusing parseAndHighlight to match the unified renderer.
   // Pairs consecutive - with + into rows; pure adds/dels get a blank opposite slot.
   // Checkboxes live in the pane owning the line (LEFT for -, RIGHT for +).
@@ -137,7 +143,7 @@
       DP.precommitCleared = false;
       DP.clearPrecommitFindings();
       var b = document.getElementById('btn-do-commit');
-      if (b) { b.textContent = DP.precommitPending ? 'Reviewing changes…' : 'Commit'; b.disabled = DP.precommitPending; }
+      if (b) { b.textContent = DP.precommitPending ? 'Reviewing changes…' : 'Commit'; setBusy(b, DP.precommitPending); }
     }
   };
 
@@ -233,14 +239,15 @@
       return;
     }
     var btn = document.getElementById('btn-do-commit');
-    
+    if (btn.getAttribute('aria-busy') === 'true') return;
+
     if (DP.currentSessionName) {
       var wts = DP.getSessionWorktrees();
       var committedCount = 0;
       var errors = [];
       
-      btn.disabled = true;
-      btn.textContent = 'Committing...';
+      setBusy(btn, true);
+      btn.textContent = 'Committing…';
       
       for (var i = 0; i < wts.length; i++) {
         var wt = wts[i];
@@ -260,7 +267,7 @@
         }
       }
       
-      btn.disabled = false;
+      setBusy(btn, false);
       btn.textContent = 'Commit';
       
       if (errors.length > 0) {
@@ -285,7 +292,7 @@
     }
 
     if (DP.precommitPending) return; // a review is already running for this panel
-    btn.disabled = true;
+    setBusy(btn, true);
 
     if (!DP.precommitCleared) {
       var gen = DP.commitFlowGen;
@@ -299,23 +306,23 @@
       if (gen !== DP.commitFlowGen) {
         // The commit area was closed/reopened mid-review — this flow is
         // stale; the fresh open starts from scratch.
-        btn.disabled = false;
+        setBusy(btn, false);
         btn.textContent = 'Commit';
         return;
       }
       if (!proceed) {
         DP.precommitCleared = true; // informed decision: next click commits
-        btn.disabled = false;
+        setBusy(btn, false);
         btn.textContent = 'Commit anyway';
         return;
       }
     }
     DP.clearPrecommitFindings();
 
-    btn.disabled = true;
-    btn.textContent = 'Committing...';
+    setBusy(btn, true);
+    btn.textContent = 'Committing…';
     result = await window.klaus.git.commit(DP.currentWorktreePath, msg);
-    btn.disabled = false;
+    setBusy(btn, false);
     btn.textContent = 'Commit';
     DP.precommitCleared = false;
     if (!result || result.error) {
@@ -354,7 +361,7 @@
       try { await window.klaus.ai.commitMessageCancel(DP.commitMsgRequestId); } catch (_) {}
       DP.resetCommitMsgState();
       btn.textContent = '✨';
-      btn.disabled = false;
+      setBusy(btn, false);
       return;
     }
     if (!DP.currentWorktreePath) return;
@@ -367,7 +374,7 @@
       return;
     }
 
-    btn.disabled = true;
+    setBusy(btn, true);
     btn.textContent = '…';
 
     var requestId = 'ccm-' + Date.now() + '-' + Math.floor(Math.random() * 9999);
@@ -382,7 +389,7 @@
     if (start && start.error) {
       DP.resetCommitMsgState();
       btn.textContent = '✨';
-      btn.disabled = false;
+      setBusy(btn, false);
       window.toast.error(start.error);
     }
   };
@@ -403,7 +410,7 @@
       }
       return;
     }
-    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    if (btn) { setBusy(btn, true); btn.textContent = '…'; }
     DP.commitMsgRequestId = agent.id;
     DP.bindCommitMessageStreaming(agent.id, btn);
   };
@@ -416,7 +423,7 @@
     DP.commitMsgUnsubDone = window.klaus.ai.onCommitMessageDone(requestId, function (msg) {
       if (DP.commitMsgRequestId !== requestId) return;
       DP.resetCommitMsgState();
-      if (btn) { btn.textContent = '✨'; btn.disabled = false; }
+      if (btn) { btn.textContent = '✨'; setBusy(btn, false); }
       if (msg && msg.error) {
         window.toast.error('Could not generate commit message: ' + msg.error);
         return;
@@ -468,8 +475,8 @@
 
   DP.pushChanges = async function() {
     var btn = document.getElementById('btn-push');
-    btn.disabled = true;
-    btn.textContent = 'Pushing...';
+    setBusy(btn, true);
+    btn.textContent = 'Pushing…';
     
     if (DP.currentSessionName) {
       var wts = DP.getSessionWorktrees();
@@ -481,7 +488,7 @@
           return { error: e.message || e };
         }
       }));
-      btn.disabled = false;
+      setBusy(btn, false);
       var errors = results.filter(function(r) { return r && r.error; });
       if (errors.length > 0) {
         btn.textContent = 'Failed';
@@ -497,7 +504,7 @@
       try { await DP.updateAheadBehind(); } catch (_) {}
     } else {
       var result = await window.klaus.git.push(DP.currentWorktreePath);
-      btn.disabled = false;
+      setBusy(btn, false);
       if (result.error) {
         btn.textContent = 'Failed';
         setTimeout(function () { btn.textContent = 'Push'; }, 2000);
@@ -534,8 +541,8 @@
     var title = answers[0];
     var body = answers[1];
     var btn = document.getElementById('btn-create-pr');
-    btn.disabled = true;
-    btn.textContent = 'Creating...';
+    setBusy(btn, true);
+    btn.textContent = 'Creating…';
     
     if (DP.currentSessionName && DP.viewScope === 'session') {
       var wts = DP.getSessionWorktrees();
@@ -546,7 +553,7 @@
           return { error: e.message || e };
         }
       }));
-      btn.disabled = false;
+      setBusy(btn, false);
       btn.textContent = 'PR';
       var errors = results.filter(function(r) { return r && r.error; });
       if (errors.length > 0) {
@@ -558,7 +565,7 @@
     } else {
       var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
       var result = await window.klaus.git.createPR(path, title, body);
-      btn.disabled = false;
+      setBusy(btn, false);
       btn.textContent = 'PR';
       if (result.error) {
         window.toast.error('PR creation failed: ' + result.error);

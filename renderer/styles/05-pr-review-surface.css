@@ -7176,6 +7176,9 @@ body.task-branchless .file-viewer-blame-btn {
   padding: 2px 4px;
   color-scheme: dark;
 }
+.light-syntax #token-tile-custom input[type="date"] {
+  color-scheme: light;
+}
 
 #token-tile-chart {
   width: 100%;
@@ -7183,16 +7186,13 @@ body.task-branchless .file-viewer-blame-btn {
   display: block;
 }
 .token-tile-bar {
-  opacity: 0.65;
-  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1), filter 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: filter 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   cursor: pointer;
 }
 .token-tile-bar.is-today {
-  opacity: 1;
   filter: drop-shadow(0 0 2px var(--accent-hover));
 }
 .token-tile-bar:hover {
-  opacity: 1;
   filter: drop-shadow(0 0 4px var(--accent));
 }
 

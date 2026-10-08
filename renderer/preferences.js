@@ -328,6 +328,7 @@
 
   var statusTimer = null;
   var invalidField = null;
+  var lastErrorAnnounce = { text: '', at: 0 };
   // An error stays up, tied to its field when known, until a later save succeeds.
   function showStatus(msg, isError, field) {
     if (invalidField) {
@@ -336,9 +337,14 @@
       else invalidField.el.removeAttribute('aria-describedby');
       invalidField = null;
     }
-    // Autosave fires per keystroke; rewriting the same text would re-announce it each time.
-    // An error is re-read on each failed save, since the text alone doesn't change.
-    if (statusMsg.textContent !== msg || isError) A11y.announce(msg, isError ? 'assertive' : 'polite');
+    // Autosave fires per keystroke pause, so the same error is repeated at most every 10s rather than on each save.
+    var now = Date.now();
+    var repeatError = isError && msg === lastErrorAnnounce.text && now - lastErrorAnnounce.at < 10000;
+    if ((statusMsg.textContent !== msg || isError) && !repeatError) {
+      A11y.announce(msg, isError ? 'assertive' : 'polite');
+      if (isError) lastErrorAnnounce = { text: msg, at: now };
+    }
+    if (!isError) lastErrorAnnounce = { text: '', at: 0 };
     if (statusMsg.textContent !== msg) statusMsg.textContent = msg;
     statusMsg.classList.add('visible');
     clearTimeout(statusTimer);
@@ -376,6 +382,13 @@
     var el = document.getElementById(id);
     el.addEventListener('change', saveAll);
     el.addEventListener('input', saveAll);
+  });
+
+  // Values under 30 are saved as 30, so say so instead of changing it silently.
+  var staleAfter = document.getElementById('pref-notify-stale-after');
+  staleAfter.addEventListener('change', function () {
+    var n = parseInt(staleAfter.value, 10);
+    if (staleAfter.value !== '' && n < 30) A11y.fieldError(staleAfter, 'The minimum is 30 seconds, so 30 is used.');
   });
 
   // Re-probe an agent's version when its path changes.

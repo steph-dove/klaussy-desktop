@@ -1407,7 +1407,7 @@ window.PrReview = window.PrReview || {};
   PR.renderSelectedFileDiff = function(files) {
     var file = files.find(function (f) { return f.path === PR.selectedFile; });
     if (!file) return '<div class="pr-review-empty">Select a file.</div>';
-    return '<pre class="pr-review-diff-pre" aria-label="Diff of ' + PR.escHtml(file.path) + '">' + PR.renderUnifiedDiff(file.raw) + '</pre>';
+    return '<pre class="pr-review-diff-pre" role="group" aria-label="Diff of ' + PR.escHtml(file.path) + '">' + PR.renderUnifiedDiff(file.raw) + '</pre>';
   };
 
   // Parse a `gh pr diff` unified diff into per-file blocks.

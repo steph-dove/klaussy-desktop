@@ -151,13 +151,15 @@ window.ConflictPanel = (function () {
         return;
       }
 
-      // Conflict block
-      var oursHtml = '<div class="conflict-block conflict-ours-highlight" data-idx="' + idx + '">' +
+      // Conflict block; the side is named, not just coloured.
+      conflictNo++;
+      var which = 'conflict ' + conflictNo + ' of ' + conflictTotal;
+      var oursHtml = '<div class="conflict-block conflict-ours-highlight" data-idx="' + idx + '" role="group" aria-label="Ours (current branch), ' + which + '">' +
         block.ours.map(escHtml).join('\n') +
         '</div>';
       oursBody.innerHTML += oursHtml;
 
-      var theirsHtml = '<div class="conflict-block conflict-theirs-highlight" data-idx="' + idx + '">' +
+      var theirsHtml = '<div class="conflict-block conflict-theirs-highlight" data-idx="' + idx + '" role="group" aria-label="Theirs (incoming), ' + which + '">' +
         block.theirs.map(escHtml).join('\n') +
         '</div>';
       theirsBody.innerHTML += theirsHtml;
@@ -178,8 +180,6 @@ window.ConflictPanel = (function () {
         resolvedClass = ' conflict-resolved';
       }
 
-      conflictNo++;
-      var which = 'conflict ' + conflictNo + ' of ' + conflictTotal;
       var resultHtml =
         '<div class="conflict-block conflict-result-block' + resolvedClass + '" data-idx="' + idx + '" role="group" aria-label="' + which + (resolvedClass ? ', resolved' : '') + '" data-which="' + which + '">' +
           '<div class="conflict-actions">' +
@@ -219,7 +219,9 @@ window.ConflictPanel = (function () {
 
         var resultBlock = textarea.closest('.conflict-result-block');
         if (resultBlock) markResolved(resultBlock);
-        A11y.announce(resultBlock ? resultBlock.dataset.which + ' resolved' : 'Resolved');
+        var left = currentBlocks.filter(function (b) { return b.type === 'conflict' && !b.resolved; }).length;
+        A11y.announce((resultBlock ? resultBlock.dataset.which + ' resolved' : 'Resolved')
+          + (left ? ', ' + left + ' left' : ', all conflicts in this file resolved'));
       });
     });
 
@@ -247,9 +249,15 @@ window.ConflictPanel = (function () {
     if (!currentFile || !currentWorktreePath) return;
 
     // Check all conflicts are resolved
-    var unresolved = currentBlocks.filter(function (b) { return b.type === 'conflict' && !b.resolved; });
-    if (unresolved.length > 0) {
-      window.toast.error(unresolved.length + ' conflict(s) still unresolved. Please resolve all conflicts before marking as resolved.');
+    var conflicts = currentBlocks.filter(function (b) { return b.type === 'conflict'; });
+    var unresolvedNos = [];
+    conflicts.forEach(function (b, i) { if (!b.resolved) unresolvedNos.push(i + 1); });
+    if (unresolvedNos.length > 0) {
+      window.toast.error((unresolvedNos.length === 1 ? 'Conflict ' : 'Conflicts ') + unresolvedNos.join(', ') + ' of ' + conflicts.length
+        + ' still unresolved. Resolve them before marking the file resolved.');
+      var firstIdx = currentBlocks.indexOf(conflicts[unresolvedNos[0] - 1]);
+      var firstField = resultBody.querySelector('.conflict-result-textarea[data-idx="' + firstIdx + '"]');
+      if (firstField) firstField.focus();
       return;
     }
 
@@ -265,11 +273,19 @@ window.ConflictPanel = (function () {
 
     var content = resultLines.join('\n');
     var btn = document.getElementById('btn-conflict-resolve');
-    btn.disabled = true;
-    btn.textContent = 'Saving...';
+    if (btn.getAttribute('aria-busy') === 'true') return;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.setAttribute('aria-busy', 'true');
+    btn.textContent = 'Saving…';
 
-    var result = await window.klaus.fs.writeResolvedFile(currentWorktreePath, currentFile, content);
-    btn.disabled = false;
+    var result;
+    try {
+      result = await window.klaus.fs.writeResolvedFile(currentWorktreePath, currentFile, content);
+    } catch (err) {
+      result = { error: (err && err.message) || String(err) };
+    }
+    btn.removeAttribute('aria-disabled');
+    btn.removeAttribute('aria-busy');
     btn.textContent = 'Mark Resolved';
 
     if (result.error) {

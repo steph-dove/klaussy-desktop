@@ -116,8 +116,7 @@ window.DiffPanel = window.DiffPanel || {};
       }
     };
     document.getElementById('btn-fetch').addEventListener('click', async function () {
-      this.disabled = true;
-      this.textContent = '...';
+      var done = A11y.busy(this, 'Fetching…');
       if (DP.currentSessionName && DP.viewScope === 'session') {
         var paths = DP.getSessionWorktrees().map(function(w) { return w.path; });
         var results = await Promise.all(paths.map(function(p) { return window.klaus.git.fetch(p); }));
@@ -125,15 +124,13 @@ window.DiffPanel = window.DiffPanel || {};
         var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
         results = [await window.klaus.git.fetch(path)];
       }
-      this.disabled = false;
-      this.textContent = 'Fetch';
+      done('Fetch');
       DP.reportGitResults('Fetch', 'Fetched', results);
       DP.updateAheadBehind();
       DP.refresh();
     });
     document.getElementById('btn-pull').addEventListener('click', async function () {
-      this.disabled = true;
-      this.textContent = '...';
+      var done = A11y.busy(this, 'Pulling…');
       if (DP.currentSessionName && DP.viewScope === 'session') {
         var paths = DP.getSessionWorktrees().map(function(w) { return w.path; });
         var results = await Promise.all(paths.map(function(p) { return window.klaus.git.pull(p); }));
@@ -141,8 +138,7 @@ window.DiffPanel = window.DiffPanel || {};
         var path = DP.currentWorktreePath || DP.getActiveWorktreePath();
         results = [await window.klaus.git.pull(path)];
       }
-      this.disabled = false;
-      this.textContent = 'Pull';
+      done('Pull');
       DP.reportGitResults('Pull', 'Pulled', results);
       DP.updateAheadBehind();
       DP.refresh();
@@ -328,8 +324,7 @@ window.DiffPanel = window.DiffPanel || {};
     postBtn.addEventListener('click', async function () {
       var body = ta.value.trim();
       if (!body) { A11y.fieldError(ta, 'Write a comment before posting.'); return; }
-      postBtn.disabled = true;
-      postBtn.textContent = 'Posting…';
+      var donePosting = A11y.busy(postBtn, 'Posting…');
       var result = await window.klaus.pr.addReviewComment({
         worktreePath: DP.currentWorktreePath,
         prNumber: pr.number,
@@ -343,8 +338,7 @@ window.DiffPanel = window.DiffPanel || {};
       });
       if (result && result.error) {
         window.toast.error('Post failed: ' + result.error);
-        postBtn.disabled = false;
-        postBtn.textContent = 'Post';
+        donePosting('Post');
         return;
       }
       close();

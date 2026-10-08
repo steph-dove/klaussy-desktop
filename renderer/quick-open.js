@@ -104,7 +104,7 @@ window.QuickOpen = (function () {
       selectedIndex = 0;
       render();
       if (results.length || !q) { saidNoMatch = false; return; }
-      list.innerHTML = '<div class="palette-empty">No matching files</div>';
+      list.innerHTML = '<div class="palette-empty" aria-hidden="true">No matching files</div>';
       // Once per run of empty results, not on every keystroke.
       if (!saidNoMatch) A11y.announce('No matching files');
       saidNoMatch = true;

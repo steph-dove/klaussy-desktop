@@ -297,13 +297,17 @@
       if (!PR.openAnnotations[checkId]) return; // user collapsed before fetch returned
       if (res && res.error) {
         PR.openAnnotations[checkId] = { data: null, error: res.error };
+        A11y.announce('Could not load annotations: ' + res.error, 'assertive');
       } else {
-        PR.openAnnotations[checkId] = { data: (res && res.annotations) || [], error: null };
+        var list = (res && res.annotations) || [];
+        PR.openAnnotations[checkId] = { data: list, error: null };
+        A11y.announce(list.length ? list.length + ' annotation' + (list.length === 1 ? '' : 's') + ' loaded' : 'No annotations');
       }
       PR.restoreOpenAnnotations();
     }).catch(function (err) {
       if (!PR.openAnnotations[checkId]) return;
       PR.openAnnotations[checkId] = { data: null, error: (err && err.message) || 'unknown error' };
+      A11y.announce('Could not load annotations: ' + PR.openAnnotations[checkId].error, 'assertive');
       PR.restoreOpenAnnotations();
     });
   };
@@ -344,6 +348,7 @@
     PR.openAnnotations[checkId] = { data: null, error: null };
     setAnnotationsExpanded(row, true);
     PR.mountAnnotationsPanel(row, checkId);
+    A11y.announce('Loading annotations…');
     PR.fetchAnnotations(checkId);
   };
 

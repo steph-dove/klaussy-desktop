@@ -54,6 +54,7 @@ window.App = window.App || {};
       overlay.style.display = 'none';
       input.value = '';
       errEl.textContent = '';
+      A11y.fieldError(input, null);
       drop.classList.remove('drag-over');
       closeRecents();
       activeRecentsKind = null;
@@ -62,7 +63,7 @@ window.App = window.App || {};
 
     okBtn.addEventListener('click', function () {
       const v = input.value.trim();
-      if (!v) { errEl.textContent = 'Enter a path or drag a folder in.'; return; }
+      if (!v) { A11y.fieldError(input, 'Enter a path or drag a folder in.'); return; }
       close(v);
     });
     cancelBtn.addEventListener('click', function () { close(null); });
@@ -1098,10 +1099,13 @@ window.App = window.App || {};
   }
 
   function setBroadcastExpanded(expanded) {
+    var hadFocus = broadcastBar && broadcastBar.contains(document.activeElement);
     broadcastExpanded = expanded;
     try { localStorage.setItem('broadcastExpanded', expanded ? '1' : '0'); } catch (e) {}
     updateBroadcastUI();
     if (expanded && broadcastInput) broadcastInput.focus();
+    // Collapsing hides the bar, so hand focus to the pill that reopens it.
+    else if (!expanded && hadFocus && broadcastToggle && !broadcastToggle.classList.contains('hidden')) broadcastToggle.focus();
   }
 
   async function sendBroadcast() {

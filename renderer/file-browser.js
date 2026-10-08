@@ -114,6 +114,7 @@ window.FileBrowser = (function () {
     currentModel = null;
     currentModelIsProject = false;
     currentBlameLines = null;
+    stopBlameReadout();
     currentViewerWorktree = null;
     currentFilePath = null;
   }
@@ -1669,6 +1670,7 @@ window.FileBrowser = (function () {
     }
     await reloadTabsAfterRename(oldAbs, newAbs);
     await refreshFileTree();
+    focusTreePath(toRel);
     A11y.announce('Moved ' + name + ' to ' + (dirRel || 'the root folder'));
   }
 
@@ -2099,7 +2101,9 @@ window.FileBrowser = (function () {
             highlightReplacements(afterText.substring(0, 200), replaceText) + '</div>';
         }
         line.innerHTML = html;
-        A11y.makeButton(line, file + ' line ' + match.line + ': ' + match.text.substring(0, 200));
+        var rowLabel = file + ' line ' + match.line + ': ' + text;
+        if (replaceText) rowLabel += ', becomes: ' + text.split(query).join(replaceText);
+        A11y.makeButton(line, rowLabel);
         line.addEventListener('click', function () { window.openFileViewer(wt + '/' + file, file, match.line); });
         projectSearchResults.appendChild(line);
       });
@@ -2139,7 +2143,7 @@ window.FileBrowser = (function () {
   async function doProjectReplace() {
     var query = lastSearchQuery;
     var replacement = projectReplaceInput.value;
-    if (!query) return;
+    if (!query || projectReplaceBtn.getAttribute('aria-busy') === 'true') return;
     var task = AppState.activeTaskId ? AppState.tasks.get(AppState.activeTaskId) : null;
     var wt = task ? task.worktreePath : null;
     if (!wt) return;
@@ -2157,9 +2161,17 @@ window.FileBrowser = (function () {
       (files.length === 1 ? '' : 's') + '?\n\nThis rewrites files on disk and cannot be undone from here.'
     );
     if (!ok) return;
-    projectReplaceBtn.disabled = true;
+    projectReplaceBtn.setAttribute('aria-disabled', 'true');
+    projectReplaceBtn.setAttribute('aria-busy', 'true');
     projectReplaceBtn.textContent = 'Replacing…';
-    var result = await window.klaus.fs.replaceInFiles(wt, files, query, replacement);
+    var result;
+    try {
+      result = await window.klaus.fs.replaceInFiles(wt, files, query, replacement);
+    } catch (err) {
+      result = { error: (err && err.message) || String(err) };
+    }
+    projectReplaceBtn.removeAttribute('aria-disabled');
+    projectReplaceBtn.removeAttribute('aria-busy');
     if (result.error) {
       window.toast.error('Replace failed: ' + result.error);
       updateReplaceButton();
@@ -2173,6 +2185,8 @@ window.FileBrowser = (function () {
       + ' in ' + changed + ' file' + (changed === 1 ? '' : 's');
     if (failed.length) window.toast.error('Could not replace in ' + failed.map(function (f) { return f.file + ' (' + f.error + ')'; }).join(', '));
     projectReplaceInput.value = '';
+    // The cleared field disables the button, so land on the field instead of <body>.
+    if (document.activeElement === projectReplaceBtn) projectReplaceInput.focus();
     await doProjectSearch(wt, summary);
     if (window.DiffPanel && window.DiffPanel.isVisible()) window.DiffPanel.refresh();
   }
@@ -2283,9 +2297,11 @@ window.FileBrowser = (function () {
     // Toggle off if blame is already rendering — restore default line numbers.
     if (currentBlameLines) {
       currentBlameLines = null;
+      stopBlameReadout();
       currentEditor.updateOptions({ lineNumbers: 'on', lineNumbersMinChars: 5 });
       fileViewerView.classList.remove('blame-active');
       setBlamePressed(false);
+      A11y.announce('Blame off');
       return;
     }
 
@@ -2309,7 +2325,39 @@ window.FileBrowser = (function () {
     });
     fileViewerView.classList.add('blame-active');
     setBlamePressed(true);
+    startBlameReadout();
   };
+
+  // The gutter is visual only, so the cursor line's blame is read out as the cursor moves between lines.
+  var blameCursorSub = null;
+  var blameReadTimer = null;
+  var blameReadLine = 0;
+
+  function describeBlame(ln) {
+    var b = currentBlameLines ? currentBlameLines[ln - 1] : null;
+    if (!b || !b.hash || /^0+$/.test(b.hash)) return 'Line ' + ln + ': not committed yet';
+    var when = b.time ? ', ' + new Date(b.time * 1000).toLocaleDateString() : '';
+    return 'Line ' + ln + ': ' + (b.author || 'unknown') + when + (b.summary ? ', ' + b.summary : '');
+  }
+
+  function startBlameReadout() {
+    stopBlameReadout();
+    var pos = currentEditor.getPosition();
+    blameReadLine = pos ? pos.lineNumber : 1;
+    A11y.announce('Blame on. ' + describeBlame(blameReadLine));
+    blameCursorSub = currentEditor.onDidChangeCursorPosition(function (e) {
+      var ln = e.position.lineNumber;
+      if (ln === blameReadLine) return;
+      blameReadLine = ln;
+      clearTimeout(blameReadTimer);
+      blameReadTimer = setTimeout(function () { if (currentBlameLines) A11y.announce(describeBlame(ln)); }, 500);
+    });
+  }
+
+  function stopBlameReadout() {
+    clearTimeout(blameReadTimer);
+    if (blameCursorSub) { blameCursorSub.dispose(); blameCursorSub = null; }
+  }
 
   function setBlamePressed(on) {
     var btn = fileViewerView.querySelector('.file-viewer-blame-btn');

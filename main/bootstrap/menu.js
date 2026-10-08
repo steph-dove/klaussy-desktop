@@ -7,7 +7,17 @@
 // is expected to work in input fields.
 
 const { app, BrowserWindow, Menu } = require('electron');
-const { createWindow } = require('../state/windows');
+const { createWindow, allWindows, getMainWindow } = require('../state/windows');
+
+// These dialogs live in the app window's renderer; PR review, Preferences and pop-outs don't listen for them.
+function appWindowFor(focusedWindow) {
+  const focused = focusedWindow || BrowserWindow.getFocusedWindow();
+  if (focused && !focused.isDestroyed() && allWindows.has(focused)) return focused;
+  const main = getMainWindow();
+  const win = main && !main.isDestroyed() ? main : Array.from(allWindows).find((w) => !w.isDestroyed());
+  if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+  return win;
+}
 const { openPreferencesWindow } = require('../ipc/windows-ipc');
 const { checkNow: checkForUpdatesNow } = require('./auto-updater');
 
@@ -66,49 +76,49 @@ function installAppMenu() {
         {
           label: 'Logs',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-logs');
           },
         },
         {
           label: 'How to use Klaussy',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-how-to-use');
           },
         },
         {
           label: 'Skills && Commands',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-skills');
           },
         },
         {
           label: 'Memory (CLAUDE.md)',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-memory');
           },
         },
         {
           label: 'MCP Servers',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-mcp');
           },
         },
         {
           label: 'Plugins',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-plugins');
           },
         },
         {
           label: 'Git Accounts (GitHub, GitLab & Bitbucket)',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-gh-accounts');
           },
         },
@@ -117,14 +127,14 @@ function installAppMenu() {
           // Not CmdOrCtrl+/: the renderer claims that for the slash-command launcher.
           accelerator: 'F1',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-shortcuts');
           },
         },
         {
           label: 'Send feedback…',
           click: (_item, focusedWindow) => {
-            const win = focusedWindow || BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+            const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-feedback');
           },
         },

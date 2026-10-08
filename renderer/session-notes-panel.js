@@ -11,6 +11,7 @@ window.SessionNotesPanel = (function () {
   // pushes an update here.
   var POLL_MS = 10000;
   var pollTimer = null;
+  var lastSignature = null;
 
   window.addEventListener('load-session-notes', function () { loadNotes(); startPolling(); });
   window.addEventListener('leave-session-notes', stopPolling);
@@ -84,7 +85,7 @@ window.SessionNotesPanel = (function () {
       item.innerHTML =
         '<div class="session-note-head">'
           + '<span class="session-note-agent">' + escHtml(who + provider) + '</span>'
-          + '<span class="session-note-time">' + escHtml(timeAgo(noteTime(note))) + '</span>'
+          + '<span class="session-note-time" data-time="' + noteTime(note) + '">' + escHtml(timeAgo(noteTime(note))) + '</span>'
         + '</div>'
         + '<div class="session-note-body">' + escHtml(note.body || '') + '</div>'
         + (files.length
@@ -103,16 +104,27 @@ window.SessionNotesPanel = (function () {
   async function loadNotes() {
     var wt = activeWorktree();
     if (!wt) {
+      lastSignature = null;
       notesList.innerHTML = '<div class="file-tree-empty">No active task</div>';
       notesDirLabel.textContent = '';
       return;
     }
     var notes = await window.klaus.task.sessionContext.listNotes(wt);
     if (notes && notes.error) {
+      lastSignature = null;
       notesList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(notes.error) + '</div>';
       return;
     }
     notes = notes || [];
+    // Unchanged notes only refresh their ages, so a screen reader's place in the list survives the poll.
+    var signature = wt + '\n' + JSON.stringify(notes);
+    if (signature === lastSignature) {
+      notesList.querySelectorAll('.session-note-time').forEach(function (el) {
+        el.textContent = timeAgo(Number(el.dataset.time));
+      });
+      return;
+    }
+    lastSignature = signature;
     render(notes);
     notesDirLabel.textContent = notes.length && notes[0].filePath
       ? notes[0].filePath.replace(/\/[^/]*$/, '') : '';
@@ -123,15 +135,18 @@ window.SessionNotesPanel = (function () {
 
   btnCapture.addEventListener('click', async function () {
     // Each eligible agent costs a headless summarizer call, so this can take seconds.
-    btnCapture.disabled = true;
-    btnCapture.textContent = 'Capturing...';
+    if (btnCapture.getAttribute('aria-busy') === 'true') return;
+    btnCapture.setAttribute('aria-disabled', 'true');
+    btnCapture.setAttribute('aria-busy', 'true');
+    btnCapture.textContent = 'Capturing…';
     var res;
     try {
       res = await window.klaus.task.sessionContext.captureNow(activeWorktree());
     } catch (err) {
       res = { error: (err && err.message) || String(err) };
     } finally {
-      btnCapture.disabled = false;
+      btnCapture.removeAttribute('aria-disabled');
+      btnCapture.removeAttribute('aria-busy');
       btnCapture.textContent = 'Capture now';
     }
     if (res && res.error) {
@@ -156,8 +171,11 @@ window.SessionNotesPanel = (function () {
     if (!wt) return;
     if (!confirm('Clear all session notes for this repo? Other agents in this session will lose them too.')) return;
     var ok = await window.klaus.task.sessionContext.clearNotes(wt);
-    if (ok && ok.error) window.toast.error('Clear failed: ' + ok.error);
-    loadNotes();
+    if (ok && ok.error) { window.toast.error('Clear failed: ' + ok.error); loadNotes(); return; }
+    // Clear all disables itself once the list is empty; move to Reload rather than strand focus.
+    if (document.activeElement === btnClear || document.activeElement === document.body) btnRefresh.focus();
+    await loadNotes();
+    A11y.announce('Notes cleared');
   });
 
   return {

@@ -679,9 +679,9 @@
             keys.add(hi + ':' + (b + 1));
           }
         }
-        btn.disabled = true;
-        btn.textContent = '...';
+        var done = A11y.busy(btn, DP.currentDiffStaged ? 'Unstaging…' : 'Staging…');
         await DP.applyPartialPatch(file, keys, DP.currentDiffStaged);
+        if (btn.isConnected) done();
       });
     });
 
@@ -716,9 +716,10 @@
       DP.updatePartialActionBar(file);
     });
     bar.querySelector('.partial-apply').addEventListener('click', async function () {
-      bar.querySelector('.partial-apply').disabled = true;
-      bar.querySelector('.partial-apply').textContent = '...';
+      var applyBtn = this;
+      var done = A11y.busy(applyBtn, verb === 'Stage' ? 'Staging…' : 'Unstaging…');
       await DP.applyPartialPatch(file, DP.selectedLineKeys, DP.currentDiffStaged);
+      if (applyBtn.isConnected) done();
     });
   };
 

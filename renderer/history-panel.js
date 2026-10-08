@@ -4,8 +4,10 @@ window.HistoryPanel = (function () {
   var historyList = document.getElementById('history-list');
   var historyDiffView = document.getElementById('history-diff-view');
   A11y.arrowNav(historyList, '.history-item');
+  historyList.setAttribute('role', 'group');
   historyList.setAttribute('aria-label', 'Commits');
   historyDiffView.tabIndex = 0;
+  historyDiffView.setAttribute('role', 'group');
   historyDiffView.setAttribute('aria-label', 'Commit diff');
   var historySubTabs = document.querySelectorAll('.history-sub-tab');
   var historyCommitsContent = document.getElementById('history-commits-content');
@@ -15,7 +17,6 @@ window.HistoryPanel = (function () {
   var tagNameInput = document.getElementById('tag-name-input');
   var tagMessageInput = document.getElementById('tag-message-input');
   var tagCommitInput = document.getElementById('tag-commit-input');
-  var tagError = document.getElementById('tag-error');
 
   // ---- Commit History (D4) ----
 
@@ -52,9 +53,12 @@ window.HistoryPanel = (function () {
         });
         item.classList.add('selected');
         item.setAttribute('aria-current', 'true');
-        historyDiffView.innerHTML = 'Loading...';
+        historyDiffView.innerHTML = 'Loading…';
         var diff = await window.klaus.git.show(wt, c.hash);
         historyDiffView.textContent = diff.diff || diff.error || 'No diff';
+        historyDiffView.setAttribute('aria-label', 'Diff of ' + c.short + ': ' + c.subject);
+        if (diff.error) A11y.announce('Could not load ' + c.short + ': ' + diff.error, 'assertive');
+        else A11y.announce('Showing ' + c.short + (diff.diff ? '' : ', no diff'));
       });
       historyList.appendChild(item);
     });
@@ -78,14 +82,15 @@ window.HistoryPanel = (function () {
     tagNameInput.value = '';
     tagMessageInput.value = '';
     tagCommitInput.value = '';
-    tagError.textContent = '';
     A11y.fieldError(tagNameInput, null);
+    A11y.fieldError(tagCommitInput, null);
     tagNameInput.focus();
   });
 
   function closeTagForm() {
     tagsCreateForm.style.display = 'none';
     A11y.fieldError(tagNameInput, null);
+    A11y.fieldError(tagCommitInput, null);
     document.getElementById('btn-create-tag').focus();
   }
 
@@ -108,11 +113,13 @@ window.HistoryPanel = (function () {
     }
     var message = tagMessageInput.value.trim() || undefined;
     var commit = tagCommitInput.value.trim() || undefined;
-    this.disabled = true;
+    var done = A11y.busy(this, 'Creating…');
     var result = await window.klaus.git.tagCreate(wt, name, message, commit);
-    this.disabled = false;
+    done();
     if (result.error) {
-      A11y.fieldError(tagNameInput, result.error);
+      // A bad ref is about the commit field, not the name.
+      var aboutCommit = commit && /commit|revision|object|ref|not a valid|unknown/i.test(result.error) && !/already exists/i.test(result.error);
+      A11y.fieldError(aboutCommit ? tagCommitInput : tagNameInput, result.error);
     } else {
       closeTagForm();
       A11y.announce('Created tag ' + name);
@@ -158,11 +165,9 @@ window.HistoryPanel = (function () {
         '</div>';
       item.querySelector('.tag-push-btn').addEventListener('click', async function (e) {
         e.stopPropagation();
-        this.disabled = true;
-        this.textContent = '...';
+        var done = A11y.busy(this, 'Pushing…');
         var res = await window.klaus.git.tagPush(wt, tag.name);
-        this.disabled = false;
-        this.textContent = '\u2191';
+        done('\u2191');
         if (res.error) window.toast.error('Push failed: ' + res.error);
         else A11y.announce('Pushed tag ' + tag.name);
       });

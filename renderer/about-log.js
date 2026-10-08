@@ -426,9 +426,19 @@ window.Dialogs = (function () {
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     dialog.querySelector('.deps-close').addEventListener('click', function () { overlay.remove(); });
     dialog.querySelector('.deps-skip').addEventListener('click', function () { overlay.remove(); });
-    dialog.querySelector('.deps-recheck').addEventListener('click', function () {
-      overlay.remove();
-      checkAndPromptDeps({ force: true });
+    var recheckBtn = dialog.querySelector('.deps-recheck');
+    recheckBtn.addEventListener('click', function () {
+      if (recheckBtn.getAttribute('aria-busy') === 'true') return;
+      recheckBtn.setAttribute('aria-disabled', 'true');
+      recheckBtn.setAttribute('aria-busy', 'true');
+      recheckBtn.textContent = 'Checking…';
+      // The rebuilt dialog replaces this one and puts focus back on its Re-check.
+      checkAndPromptDeps({ force: true, fromRecheck: true }).catch(function (err) {
+        recheckBtn.removeAttribute('aria-disabled');
+        recheckBtn.removeAttribute('aria-busy');
+        recheckBtn.textContent = 'Re-check';
+        A11y.announce('Re-check failed: ' + ((err && err.message) || err), 'assertive');
+      });
     });
     dialog.querySelectorAll('.deps-copy').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -477,6 +487,15 @@ window.Dialogs = (function () {
         installBtn.textContent = 'Installing in terminal…';
         stickyInfo('Installer running in your terminal. Click Re-check when it finishes.');
       });
+    }
+    if (opts && opts.fromRecheck) {
+      recheckBtn.focus();
+      var missing = [];
+      if (ghBad) missing.push(deps.gh.installed ? 'GitHub CLI sign-in' : 'GitHub CLI (gh)');
+      if (noAgent) missing.push('an AI agent CLI');
+      A11y.announce(missing.length
+        ? missing.length + ' missing: ' + missing.join(', ')
+        : 'All required dependencies found');
     }
   }
 
@@ -920,8 +939,11 @@ window.Dialogs = (function () {
     }
 
     function renderError(message) {
+      // Park on the dialog so the swap doesn't land focus on Retry before the error is read.
+      if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
+      dialog.focus({ preventScroll: true });
       body.innerHTML =
-        '<div class="gh-login-error" role="alert">'
+        '<div class="gh-login-error">'
           + '<p><strong>Sign-in failed.</strong></p>'
           + '<pre>' + escHtml(message || 'Unknown error') + '</pre>'
         + '</div>'
@@ -934,7 +956,12 @@ window.Dialogs = (function () {
         showGhLogin({ hostname: hostname, onSuccess: onSuccess });
       });
       body.querySelector('.gh-login-close').addEventListener('click', cleanup);
-      body.querySelector('.gh-login-retry').focus();
+      var text = 'Sign-in failed: ' + (message || 'Unknown error');
+      setTimeout(function () { A11y.announce(text, 'assertive'); }, 100);
+      var retry = body.querySelector('.gh-login-retry');
+      setTimeout(function () {
+        if (document.activeElement === dialog && retry.isConnected) retry.focus();
+      }, Math.min(6000, 1500 + text.length * 40));
     }
 
     unsubscribe = window.klaus.gh.onLoginEvent(function (evt) {
@@ -1081,7 +1108,7 @@ window.Dialogs = (function () {
         + '<h2>Git accounts</h2>'
         + '<button class="skills-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
-      + '<div class="gh-accounts-body"><div class="skills-loading">Reading accounts…</div></div>';
+      + '<div class="gh-accounts-body" role="group" aria-label="Accounts"><div class="skills-loading">Reading accounts…</div></div>';
     overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
@@ -1102,6 +1129,11 @@ window.Dialogs = (function () {
     }
 
     async function refresh() {
+      // Park focus on the list so the loading swap doesn't bounce it to Close and back.
+      if (body.contains(document.activeElement)) {
+        body.setAttribute('tabindex', '-1');
+        body.focus({ preventScroll: true });
+      }
       body.innerHTML = '<div class="skills-loading">Reading accounts…</div>';
       var ghRes = null, glabRes = null, bbRes = null;
       try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
@@ -1246,7 +1278,12 @@ window.Dialogs = (function () {
           if (orig) orig.textContent = 'Switching…';
           var result = await window.klaus.gh.switchAccount(username);
           if (result && result.needsLogin) {
-            showGhLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
+            var row = { forge: 'github', username: username };
+            showGhLogin({
+              onSuccess: function () { focusAfter = row; refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} },
+              // A cancelled sign-in re-renders the list so the row isn't left stuck on "Switching…".
+              onCancel: function () { focusAfter = row; refresh(); },
+            });
             return;
           }
           afterSwitch(btn, 'GitHub', result);
@@ -1590,14 +1627,18 @@ window.Dialogs = (function () {
           // Offer a sign-in button only when the server actually needs auth.
           if (connect) {
             if (st.status === 'auth') { connect.classList.remove('mcp-hidden'); wireConnect(connect); }
-            else connect.classList.add('mcp-hidden');
+            else { connect.classList.add('mcp-hidden'); connect.setAttribute('aria-expanded', 'false'); }
           }
           // Once connected, retire any open sign-in instructions for this row.
           if (st.status === 'connected') {
             var doneBox = row.querySelector('.mcp-authbox');
             var hadFocus = doneBox && doneBox.contains(document.activeElement);
             if (doneBox) { doneBox.classList.add('mcp-hidden'); doneBox.innerHTML = ''; }
-            if (hadFocus) { el.tabIndex = -1; el.focus(); }
+            if (hadFocus) {
+              el.tabIndex = -1;
+              el.setAttribute('aria-label', el.dataset.name + ': connected');
+              el.focus();
+            }
           }
         });
       }).catch(function () {
@@ -1624,19 +1665,30 @@ window.Dialogs = (function () {
     // Sign-in for a needs-auth server. `claude mcp login` is interactive, so it
     // can't run headless; the Connect button opens a persistent instructions box
     // that launches the flow in a real terminal. Stays until closed.
+    var authBoxSeq = 0;
     function wireConnect(btn) {
       if (btn._wired) return;
       btn._wired = true;
+      var row = btn.closest('.mcp-row');
+      var box = row && row.querySelector('.mcp-authbox');
+      if (!box) return;
+      box.id = box.id || 'mcp-authbox-' + (++authBoxSeq);
+      btn.setAttribute('aria-controls', box.id);
+      btn.setAttribute('aria-expanded', 'false');
+      function closeBox() {
+        var hadFocus = box.contains(document.activeElement);
+        box.classList.add('mcp-hidden');
+        box.innerHTML = '';
+        btn.setAttribute('aria-expanded', 'false');
+        if (hadFocus && !btn.classList.contains('mcp-hidden')) btn.focus();
+      }
       btn.addEventListener('click', function () {
         var name = btn.dataset.name;
-        var row = btn.closest('.mcp-row');
-        var box = row.querySelector('.mcp-authbox');
-        if (!box) return;
-        if (!box.classList.contains('mcp-hidden')) { box.classList.add('mcp-hidden'); box.innerHTML = ''; return; }
+        if (!box.classList.contains('mcp-hidden')) { closeBox(); return; }
         var cmd = 'claude mcp login ' + name;
         box.innerHTML =
           '<div class="mcp-auth-head">Sign in to ' + escHtml(name)
-            + '<button class="mcp-auth-close" type="button" title="Close" aria-label="Close">&times;</button></div>'
+            + '<button class="mcp-auth-close" type="button" title="Close" aria-label="Close sign-in for ' + escHtml(name) + '">&times;</button></div>'
           + '<div class="mcp-auth-text">This server uses an interactive sign-in. Open a terminal, approve access in your browser, then paste the redirect URL back into the terminal when it asks. Come back and Recheck when done.</div>'
           + '<pre class="mcp-exports">' + escHtml(cmd) + '</pre>'
           + '<div class="mcp-setup-actions">'
@@ -1645,7 +1697,8 @@ window.Dialogs = (function () {
             + '<button class="skills-create-cancel mcp-auth-recheck" type="button">Recheck status</button>'
           + '</div>';
         box.classList.remove('mcp-hidden');
-        box.querySelector('.mcp-auth-close').addEventListener('click', function () { box.classList.add('mcp-hidden'); box.innerHTML = ''; });
+        btn.setAttribute('aria-expanded', 'true');
+        box.querySelector('.mcp-auth-close').addEventListener('click', closeBox);
         box.querySelector('.mcp-auth-open').addEventListener('click', function () {
           window.klaus.mcp.loginTerminal(name).then(function (r) {
             if (r && r.error) { if (window.toast) window.toast.error('Could not open a terminal: ' + r.error); return; }
