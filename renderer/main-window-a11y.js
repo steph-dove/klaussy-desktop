@@ -17,17 +17,27 @@
     panelFor: function (tab) { return byId('history-' + tab.dataset.sub + '-content'); },
   });
   A11y.tabs(byId('plan-source-switch'), { itemSelector: '.plan-source-btn', label: 'Plan source' });
-  // Arrowing records the same choice a click does; only the agent-setup prompt waits for a real activation.
-  A11y.radios(document.querySelector('.shell-options'), {
+  // On a new session arrowing records the pick like a click; only the agent-setup prompt waits for a real activation.
+  var shellGroup = document.querySelector('.shell-options');
+  A11y.radios(shellGroup, {
     itemSelector: '.shell-option', label: 'Run', orientation: 'both',
     onMove: function (btn) {
+      // A pick on the Existing tab hands every saved agent off to one, so arrows only move focus there; Space picks.
+      if (window.App.activeTab === 'existing') return;
       window.App.selectedMode = btn.dataset.shell;
       window.App.shellUserPicked = true;
-      var resumeAll = byId('resume-all-agents-check');
-      if (resumeAll) resumeAll.checked = false;
       window.App.shellOptions.forEach(function (b) { b.classList.toggle('active', b === btn); });
     },
   });
+  var existingTab = byId('tab-existing');
+  function syncResumeHint() {
+    if (existingTab.classList.contains('active')) shellGroup.setAttribute('aria-describedby', 'resume-agent-hint');
+    else shellGroup.removeAttribute('aria-describedby');
+  }
+  if (existingTab && byId('resume-agent-hint')) {
+    syncResumeHint();
+    new MutationObserver(syncResumeHint).observe(existingTab, { attributes: true, attributeFilter: ['class'] });
+  }
 
   // The button sits inside the heading so the cards stay in heading navigation; clicks bubble to the card's handler.
   document.querySelectorAll('.dashboard-card').forEach(function (card) {

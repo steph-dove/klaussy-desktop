@@ -137,17 +137,22 @@ test.describe('main window keyboard access', () => {
   test('agent choice in the new-session dialog is a radio group', async ({ mainWindow }) => {
     await mainWindow.evaluate(() => {
       document.getElementById('modal-overlay').style.display = 'flex';
-      document.querySelector('#modal-tabs .modal-tab[data-tab="existing"]').click();
       window.App.shellUserPicked = false;
+      document.querySelector('#modal-tabs .modal-tab[data-tab="new"]').click();
     });
     const group = mainWindow.getByRole('radiogroup', { name: 'Run' });
     const checked = group.locator('[aria-checked="true"]');
-    await checked.focus();
+    // Opening the dialog and the New tab both move focus asynchronously; wait until the radio keeps it.
+    await expect(async () => {
+      await checked.focus();
+      await mainWindow.waitForTimeout(150);
+      await expect(checked).toBeFocused({ timeout: 100 });
+    }).toPass();
     const before = await checked.getAttribute('data-shell');
     await mainWindow.keyboard.press('ArrowRight');
     await expect(group.locator('[aria-checked="true"]')).not.toHaveAttribute('data-shell', before);
     await expect(group.locator('[aria-checked="true"]')).toBeFocused();
-    // Arrowing is the keyboard's way of choosing, so it records the pick like a click; only the setup prompt waits for activation.
+    // On the New tab arrowing records the pick like a click; the Existing tab is covered in a11y-r5-resume.spec.js.
     expect(await mainWindow.evaluate(() => !!window.App.shellUserPicked)).toBe(true);
     await expect(mainWindow.locator('.klaus-modal-overlay:visible')).toHaveCount(0);
     await mainWindow.evaluate(() => { document.getElementById('modal-overlay').style.display = 'none'; });
