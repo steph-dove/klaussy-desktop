@@ -58,7 +58,7 @@ window.InlineEdit = (function () {
     var dismissBtn = container.querySelector('.inline-edit-dismiss');
 
     container.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') { e.preventDefault(); submit(input.value); }
+      if (e.key === 'Enter' && e.target === input) { e.preventDefault(); submit(input.value); }
       else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
       e.stopPropagation();
     });
@@ -114,7 +114,7 @@ window.InlineEdit = (function () {
       '<pre class="inline-edit-stream-body"></pre>' +
       '<div class="inline-edit-stream-actions">' +
         '<button class="inline-edit-reject" type="button">Reject</button>' +
-        '<button class="inline-edit-accept" type="button" disabled>Accept ⏎</button>' +
+        '<button class="inline-edit-accept" type="button" disabled>Accept <span aria-hidden="true">⏎</span></button>' +
       '</div>';
     body.appendChild(dom);
     s.streamEl = dom.querySelector('.inline-edit-stream-body');
@@ -149,7 +149,8 @@ window.InlineEdit = (function () {
       var header = s.panelEl && s.panelEl.querySelector('.inline-edit-stream-header');
       var acceptBtn = s.actionsEl && s.actionsEl.querySelector('.inline-edit-accept');
       var active = document.activeElement;
-      var focusHere = !active || active === document.body || (s.panelEl && s.panelEl.contains(active));
+      // Only take focus the panel itself holds; a user already on Reject keeps it.
+      var focusHere = !active || active === document.body || active === s.panelEl;
       if (s.panelEl) s.panelEl.removeAttribute('aria-busy');
       if (msg && msg.error) {
         if (header) header.textContent = 'Error: ' + msg.error;

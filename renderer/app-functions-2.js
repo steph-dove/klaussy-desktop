@@ -384,6 +384,8 @@ window.App = window.App || {};
     App.prReviewMounted = false;
   };
 
+  var PICKER_CONNECT_STYLE = 'padding: 4px 10px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text); font-size: 11px; cursor: pointer;';
+
   App.showPrPicker = async function() {
     var overlay = document.createElement('div');
     overlay.className = 'pr-picker-overlay';
@@ -393,6 +395,8 @@ window.App = window.App || {};
         + '<div class="pr-picker-account-row">'
           + '<label class="pr-picker-account-label" for="pr-picker-account">Account:</label>'
           + '<select class="pr-picker-account" id="pr-picker-account"><option>Loading…</option></select>'
+          + '<button type="button" class="pr-picker-connect pr-picker-signin" style="' + PICKER_CONNECT_STYLE + '" hidden></button>'
+          + '<span class="pr-picker-connect-row" style="display: inline-flex; flex-wrap: wrap; gap: 6px;"></span>'
           + '<span class="pr-picker-account-hint" aria-live="polite"></span>'
         + '</div>'
         + '<div class="pr-picker-url-row">'
@@ -426,6 +430,8 @@ window.App = window.App || {};
     });
 
     var accountSelect = overlay.querySelector('.pr-picker-account');
+    var connectRow = overlay.querySelector('.pr-picker-connect-row');
+    var signInBtn = overlay.querySelector('.pr-picker-signin');
     var accountHint = overlay.querySelector('.pr-picker-account-hint');
     var recentEl = overlay.querySelector('.pr-picker-recent');
     var listEl = overlay.querySelector('.pr-picker-list');
@@ -527,16 +533,36 @@ window.App = window.App || {};
       }
     }
 
+    // One PR load at a time; a second Enter while loading is ignored.
+    var prLoading = false;
+    async function loadPr(url, label) {
+      prLoading = true;
+      A11y.announce('Loading ' + label + '…');
+      var result;
+      try {
+        result = await window.klaus.pr.load({ url: url, account: selectedAccount });
+      } catch (err) {
+        result = { error: (err && err.message) || String(err) };
+      }
+      prLoading = false;
+      return result;
+    }
+
     async function startFromUrl() {
       var url = urlInput.value.trim();
-      if (!url) return;
-      try { await ensureAccountCanSeeUrl(url); } catch (_) {}
-      urlInput.disabled = true;
-      startBtn.disabled = true;
+      if (!url || prLoading) return;
+      prLoading = true;
+      urlInput.readOnly = true;
+      startBtn.setAttribute('aria-disabled', 'true');
+      startBtn.setAttribute('aria-busy', 'true');
       startBtn.textContent = 'Loading…';
-      var result = await window.klaus.pr.load({ url: url, account: selectedAccount });
+      try { await ensureAccountCanSeeUrl(url); } catch (_) {}
+      var parsedUrl = parsePrUrl(url);
+      var result = await loadPr(url, parsedUrl ? (parsedUrl.forge === 'gitlab' ? 'MR !' : 'PR #') + parsedUrl.number : 'pull request');
       if (result.error) {
-        urlInput.disabled = false;
+        urlInput.readOnly = false;
+        startBtn.removeAttribute('aria-disabled');
+        startBtn.removeAttribute('aria-busy');
         startBtn.textContent = 'Start review';
         updateStartEnabled();
         if (result.errorSummary) {
@@ -604,11 +630,17 @@ window.App = window.App || {};
         });
       });
 
+      renderConnectButtons(ghAccounts.length === 0, glabAccounts.length === 0, bbAccounts.length === 0);
+      var accountLabel = overlay.querySelector('.pr-picker-account-label');
       if (allAccounts.length === 0) {
         var row = overlay.querySelector('.pr-picker-account-row');
-        if (row) row.style.display = 'none';
+        if (row && !connectRow.children.length) row.style.display = 'none';
+        accountSelect.hidden = true;
+        accountLabel.hidden = true;
         return;
       }
+      accountSelect.hidden = false;
+      accountLabel.hidden = false;
 
       var options = allAccounts.map(function (a) {
         var sel = (a.id === selectedAccount || a.username === selectedAccount) ? ' selected' : '';
@@ -619,16 +651,6 @@ window.App = window.App || {};
           + AppUtils.escHtml(a.label) + suffix
           + '</option>';
       });
-
-      if (bbAccounts.length === 0) {
-        options.push('<option value="__connect_bitbucket__">+ Connect Bitbucket account…</option>');
-      }
-      if (glabAccounts.length === 0) {
-        options.push('<option value="__connect_gitlab__">+ Connect GitLab (glab auth login)…</option>');
-      }
-      if (ghAccounts.length === 0) {
-        options.push('<option value="__connect_github__">+ Connect GitHub account…</option>');
-      }
 
       accountSelect.innerHTML = options.join('');
     }
@@ -680,29 +702,41 @@ window.App = window.App || {};
       + '</div>';
     }
 
+    async function openRow(row, detectAccount) {
+      if (prLoading) return;
+      prLoading = true;
+      row.setAttribute('aria-disabled', 'true');
+      row.setAttribute('aria-busy', 'true');
+      row.style.opacity = '0.5';
+      if (detectAccount) { try { await ensureAccountCanSeeUrl(row.dataset.url); } catch (_) {} }
+      var num = row.querySelector('.pr-picker-num');
+      var loadResult = await loadPr(row.dataset.url, 'PR ' + (num ? num.textContent : ''));
+      if (loadResult.error) {
+        window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
+        row.removeAttribute('aria-disabled');
+        row.removeAttribute('aria-busy');
+        row.style.opacity = '1';
+        return;
+      }
+      close();
+    }
+
     // Recent + project-open lists, extracted so account-switch can re-run it.
+    var listGen = 0;
     async function refreshLists() {
+      var gen = ++listGen;
       recentEl.innerHTML = '';
       recentEl.style.display = '';
       listEl.innerHTML = '<div class="pr-picker-loading">Loading open PRs…</div>';
 
       window.klaus.pr.recent().then(function (r) {
+        if (gen !== listGen) return;
         var items = (r && r.items) || [];
         if (items.length === 0) { recentEl.style.display = 'none'; return; }
         recentEl.innerHTML = '<div class="pr-picker-section-head">Recently reviewed</div>'
           + items.map(function (it) { return renderPrPickerItem(it); }).join('');
         recentEl.querySelectorAll('.pr-picker-item').forEach(function (row) {
-          row.addEventListener('click', async function () {
-            row.style.opacity = '0.5';
-            try { await ensureAccountCanSeeUrl(row.dataset.url); } catch (_) {}
-            var loadResult = await window.klaus.pr.load({ url: row.dataset.url, account: selectedAccount });
-            if (loadResult.error) {
-              window.toast.error('Failed to load PR:\n' + loadResult.error);
-              row.style.opacity = '1';
-              return;
-            }
-            close();
-          });
+          row.addEventListener('click', function () { openRow(row, true); });
         });
       });
 
@@ -710,22 +744,14 @@ window.App = window.App || {};
       // most recently opened first. Fire-and-forget; hidden when there are none.
       authoredEl.innerHTML = '';
       window.klaus.pr.authored(selectedAccount).then(function (r) {
+        if (gen !== listGen) return;
         var prs = (r && r.prs) || [];
         if (!prs.length) { authoredEl.style.display = 'none'; return; }
         authoredEl.style.display = '';
         authoredEl.innerHTML = '<div class="pr-picker-section-head">Opened by you</div>'
           + prs.map(function (pr) { return renderPrPickerItem(pr); }).join('');
         authoredEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
-          row.addEventListener('click', async function () {
-            row.style.opacity = '0.5';
-            var loadResult = await window.klaus.pr.load({ url: row.dataset.url, account: selectedAccount });
-            if (loadResult.error) {
-              window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
-              row.style.opacity = '1';
-              return;
-            }
-            close();
-          });
+          row.addEventListener('click', function () { openRow(row, false); });
         });
       });
 
@@ -733,6 +759,7 @@ window.App = window.App || {};
       // their recent open PRs — not the single "current project" (which fails
       // whenever the active account can't see that repo).
       var result = await window.klaus.pr.recentRepos(selectedAccount);
+      if (gen !== listGen) return {};
       if (result.error) {
         var isAccess = /^(not-found|auth|sso|scope)$/.test(result.errorKind || '');
         // An outage is nobody's fault and nothing to act on — say so plainly
@@ -763,27 +790,25 @@ window.App = window.App || {};
             }).join('');
         }).join('');
       listEl.querySelectorAll('.pr-picker-item[data-url]').forEach(function (row) {
-        row.addEventListener('click', async function () {
-          row.style.opacity = '0.5';
-          var loadResult = await window.klaus.pr.load({ url: row.dataset.url, account: selectedAccount });
-          if (loadResult.error) {
-            window.toast.error('Failed to load PR:\n' + (loadResult.errorSummary || loadResult.error));
-            row.style.opacity = '1';
-            return;
-          }
-          close();
-        });
+        row.addEventListener('click', function () { openRow(row, false); });
       });
       return {};
     }
 
-    accountSelect.addEventListener('change', async function () {
-      var target = accountSelect.value;
-      if (!target) return;
-      accountHint.textContent = '';
-      accountHint.classList.remove('pr-picker-account-hint-error');
+    function signInToGitHub() {
+      Dialogs.showGhLogin({
+        onSuccess: async function () {
+          accountHint.textContent = 'Signed in';
+          signInBtn.hidden = true;
+          await populateAccountSelect();
+          await refreshLists();
+        },
+        onCancel: function () { accountHint.textContent = ''; },
+      });
+    }
 
-      if (target === '__connect_bitbucket__') {
+    var CONNECT = {
+      bitbucket: { label: 'Connect Bitbucket…', run: function () {
         Dialogs.showBitbucketLogin({
           onSuccess: async function () {
             accountHint.textContent = 'Bitbucket account connected';
@@ -791,65 +816,67 @@ window.App = window.App || {};
             await refreshLists();
           },
         });
-        return;
-      }
-
-      if (target === '__connect_gitlab__') {
+      } },
+      gitlab: { label: 'Connect GitLab…', run: async function () {
         accountHint.textContent = 'Run "glab auth login" to sign in (or "brew install glab"). Copied to clipboard.';
         try { await navigator.clipboard.writeText('glab auth login'); } catch (_) {}
         if (window.toast && window.toast.info) {
           window.toast.info("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this picker.", { sticky: true });
         }
-        return;
-      }
+      } },
+      github: { label: 'Connect GitHub…', run: signInToGitHub },
+    };
 
-      if (target === '__connect_github__') {
-        Dialogs.showGhLogin({
-          onSuccess: async function () {
-            accountHint.textContent = 'Signed in';
-            await populateAccountSelect();
-            await refreshLists();
-          },
-          onCancel: async function () { accountHint.textContent = ''; await populateAccountSelect(); },
+    // Connecting opens a login or writes the clipboard, so it lives on buttons; in the select, arrowing past it would fire it.
+    function renderConnectButtons(github, gitlab, bitbucket) {
+      var hadFocus = connectRow.contains(document.activeElement);
+      connectRow.innerHTML = '';
+      [['bitbucket', bitbucket], ['gitlab', gitlab], ['github', github]].forEach(function (pair) {
+        if (!pair[1]) return;
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pr-picker-connect';
+        b.style.cssText = PICKER_CONNECT_STYLE;
+        b.textContent = CONNECT[pair[0]].label;
+        b.addEventListener('click', function () {
+          accountHint.classList.remove('pr-picker-account-hint-error');
+          CONNECT[pair[0]].run();
         });
+        connectRow.appendChild(b);
+      });
+      if (hadFocus) (connectRow.querySelector('button') || accountSelect).focus();
+    }
+
+    function offerSignIn(target, why) {
+      if (target.startsWith('gitlab:')) {
+        accountHint.textContent = 'Run "glab auth login" to re-authenticate this account.';
         return;
       }
+      accountHint.textContent = why;
+      signInBtn.textContent = 'Sign in to ' + target.replace(/^github:/, '') + '…';
+      signInBtn.hidden = false;
+    }
+    signInBtn.addEventListener('click', signInToGitHub);
+
+    accountSelect.addEventListener('change', async function () {
+      var target = accountSelect.value;
+      if (!target) return;
+      accountHint.textContent = '';
+      accountHint.classList.remove('pr-picker-account-hint-error');
+      signInBtn.hidden = true;
 
       selectedAccount = target;
       // Browsing only — we list as `target` via its token; the global gh/glab
       // account switch happens later, when a review is actually opened.
       var opt = accountSelect.options[accountSelect.selectedIndex];
-      var needsSignIn = opt && opt.dataset.valid === 'false';
-      if (needsSignIn) {
-        if (target.startsWith('gitlab:')) {
-          accountHint.textContent = 'Run "glab auth login" to re-authenticate this account.';
-          return;
-        }
-        accountHint.textContent = 'Signing in to ' + target + '…';
-        Dialogs.showGhLogin({
-          onSuccess: async function () {
-            accountHint.textContent = 'Signed in';
-            await populateAccountSelect();
-            await refreshLists();
-          },
-          onCancel: async function () { accountHint.textContent = ''; await populateAccountSelect(); },
-        });
+      if (opt && opt.dataset.valid === 'false') {
+        offerSignIn(target, 'This account needs to sign in again.');
         return;
       }
       var listed = (await refreshLists()) || {};
-      // Token looked valid to gh but the API rejected it (expired) — offer a
-      // re-sign-in. onSuccess re-lists directly, so a still-failing account just
-      // leaves the soft hint (no loop).
-      if (listed.listErrorKind === 'auth') {
-        accountHint.textContent = 'Signing in to ' + target + '…';
-        Dialogs.showGhLogin({
-          onSuccess: async function () {
-            accountHint.textContent = 'Signed in';
-            await populateAccountSelect();
-            await refreshLists();
-          },
-          onCancel: async function () { accountHint.textContent = ''; await populateAccountSelect(); },
-        });
+      // Expired token: offer a sign-in button rather than opening a login while the user arrows through accounts.
+      if (listed.listErrorKind === 'auth' && accountSelect.value === target) {
+        offerSignIn(target, 'Sign-in expired for this account.');
       }
     });
 

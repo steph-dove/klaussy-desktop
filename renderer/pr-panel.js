@@ -10,6 +10,12 @@ window.PRPanel = (function () {
   // Comment action has a PR without a fresh `gh pr view` spawn on every switch.
   var prCache = new Map();
 
+  // Busy buttons stay focusable (aria-disabled + aria-busy); a11y.js swallows their clicks.
+  function setBusy(btn, on) {
+    if (on) { btn.setAttribute('aria-disabled', 'true'); btn.setAttribute('aria-busy', 'true'); }
+    else { btn.removeAttribute('aria-disabled'); btn.removeAttribute('aria-busy'); }
+  }
+
   function isPrTabActive() {
     var activeTab = document.querySelector('#diff-tabs .diff-tab.active');
     return !!activeTab && activeTab.dataset.tab === 'pr';
@@ -439,7 +445,7 @@ window.PRPanel = (function () {
     var openReviewBtn = prInfoEl.querySelector('.pr-open-review-btn');
     if (openReviewBtn) {
       openReviewBtn.addEventListener('click', async function () {
-        openReviewBtn.disabled = true;
+        setBusy(openReviewBtn, true);
         var orig = openReviewBtn.textContent;
         openReviewBtn.textContent = 'Opening…';
         // URL form needs no active project — gh derives the repo from the URL.
@@ -448,7 +454,7 @@ window.PRPanel = (function () {
         var res = await window.klaus.pr.load({ number: pr.number, url: pr.url });
         if (res && res.error) {
           window.toast.error('Couldn\'t open PR review:\n' + (res.errorSummary || res.error));
-          openReviewBtn.disabled = false;
+          setBusy(openReviewBtn, false);
           openReviewBtn.textContent = orig;
         }
       });
@@ -669,8 +675,8 @@ window.PRPanel = (function () {
     var inputEl = document.getElementById(rid + '-input');
     if (!aiEl || !inputEl || !currentPR || !currentWorktreePath) return;
 
-    btn.disabled = true;
-    btn.textContent = 'Thinking...';
+    setBusy(btn, true);
+    btn.textContent = 'Thinking…';
     aiEl.style.display = '';
     aiEl.innerHTML = '<div class="pr-ai-loading">Claude is reviewing this comment...</div>';
 
@@ -684,7 +690,7 @@ window.PRPanel = (function () {
       diffHunk: btn.dataset.hunk || null,
     });
 
-    btn.disabled = false;
+    setBusy(btn, false);
     btn.textContent = 'Claude';
 
     if (result.error) {
@@ -725,8 +731,8 @@ window.PRPanel = (function () {
     var commentId = btn.dataset.commentId;
     var threadable = btn.dataset.threadable === '1';
 
-    btn.disabled = true;
-    btn.textContent = 'Posting...';
+    setBusy(btn, true);
+    btn.textContent = 'Posting…';
 
     var result;
     if (threadable && commentId) {
@@ -738,7 +744,7 @@ window.PRPanel = (function () {
     }
 
     if (result.error) {
-      btn.disabled = false;
+      setBusy(btn, false);
       btn.textContent = 'Reply';
       window.toast.error('Failed to post reply: ' + (result.error || 'Unknown error'));
       return;
@@ -754,7 +760,7 @@ window.PRPanel = (function () {
     replyArea.insertAdjacentHTML('beforebegin', postedHtml);
     inputEl.value = '';
     autoGrow(inputEl);
-    btn.disabled = false;
+    setBusy(btn, false);
     btn.textContent = 'Reply';
     A11y.announce('Reply posted');
 
@@ -775,14 +781,14 @@ window.PRPanel = (function () {
     if (!threadId) return;
 
     var origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = '...';
+    setBusy(btn, true);
+    btn.textContent = wasResolved ? 'Unresolving…' : 'Resolving…';
 
     var fn = wasResolved ? window.klaus.pr.unresolveThread : window.klaus.pr.resolveThread;
     var result = await fn(currentWorktreePath, threadId);
 
     if (result && result.error) {
-      btn.disabled = false;
+      setBusy(btn, false);
       btn.textContent = origText;
       window.toast.error('Failed to ' + (wasResolved ? 'unresolve' : 'resolve') + ' thread: ' + result.error);
       return;
@@ -795,7 +801,7 @@ window.PRPanel = (function () {
       thread.classList.remove('pr-thread-expanded', 'pr-thread-collapsed');
       syncThreadToggle(thread);
     }
-    btn.disabled = false;
+    setBusy(btn, false);
     btn.dataset.resolved = wasResolved ? '0' : '1';
     btn.textContent = wasResolved ? 'Resolve' : 'Unresolve';
     var label = btn.getAttribute('aria-label');
@@ -861,7 +867,7 @@ window.PRPanel = (function () {
       window.klaus.pr.aiReviewCancel(requestId);
     });
 
-    if (btn) { btn.disabled = true; btn.textContent = 'Reviewing…'; }
+    if (btn) { setBusy(btn, true); btn.textContent = 'Reviewing…'; }
 
     // Stream handler: parse stream-json events and accumulate the final
     // assistant text; show tool-use calls as progress chips.
@@ -928,7 +934,7 @@ window.PRPanel = (function () {
     window.klaus.pr.onAiReviewDone(requestId, function (result) {
       clearInterval(elapsedTimer);
       unsubscribe();
-      if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
+      if (btn) { setBusy(btn, false); btn.textContent = 'Review with Claude'; }
       if (currentAiReviewId !== requestId) return; // stale
       if (cancelBtn) {
         var cancelHadFocus = cancelBtn === document.activeElement;
@@ -965,7 +971,7 @@ window.PRPanel = (function () {
       clearInterval(elapsedTimer);
       unsubscribe();
       bodyEl.innerHTML = '<div class="pr-ai-error" role="alert">Failed to start: ' + escHtml(startResult.error) + '</div>';
-      if (btn) { btn.disabled = false; btn.textContent = 'Review with Claude'; }
+      if (btn) { setBusy(btn, false); btn.textContent = 'Review with Claude'; }
     }
   }
 
@@ -977,12 +983,12 @@ window.PRPanel = (function () {
     if (!body) { A11y.fieldError(commentInput, 'Write a comment before posting.'); return; }
 
     var btn = document.getElementById('btn-pr-comment');
-    btn.disabled = true;
-    btn.textContent = 'Posting...';
+    setBusy(btn, true);
+    btn.textContent = 'Posting…';
 
     var result = await window.klaus.pr.addComment(currentWorktreePath, currentPR.number, body);
 
-    btn.disabled = false;
+    setBusy(btn, false);
     btn.textContent = 'Comment';
 
     if (result.error) {
@@ -1002,12 +1008,12 @@ window.PRPanel = (function () {
     var btnId = event === 'approve' ? 'btn-pr-approve' : 'btn-pr-request-changes';
     var btn = document.getElementById(btnId);
     var origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Submitting...';
+    setBusy(btn, true);
+    btn.textContent = 'Submitting…';
 
     var result = await window.klaus.pr.review(currentWorktreePath, currentPR.number, event, body || undefined);
 
-    btn.disabled = false;
+    setBusy(btn, false);
     btn.textContent = origText;
 
     if (result.error) {
@@ -1227,6 +1233,7 @@ window.PRPanel = (function () {
     btn.setAttribute('aria-describedby', reasonEl.id);
     // aria-disabled rather than disabled so keyboard users can still reach the button and hear why.
     btn.disabled = false;
+    btn.removeAttribute('aria-busy');
     if (reason) {
       btn.setAttribute('aria-disabled', 'true');
       btn.title = reason;
@@ -1244,11 +1251,12 @@ window.PRPanel = (function () {
     if (!currentPR || !currentWorktreePath) return;
     var btn = document.getElementById('btn-pr-merge');
     var origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = 'Merging...';
+    setBusy(btn, true);
+    btn.textContent = 'Merging…';
 
     var result = await window.klaus.pr.merge(currentWorktreePath, currentPR.number, strategy);
 
+    setBusy(btn, false);
     btn.textContent = origText;
 
     if (result.error) {
@@ -1340,9 +1348,9 @@ window.PRPanel = (function () {
   async function sendFix(prompt, btn) {
     if (!currentWorktreePath) { window.toast.error('No worktree active.'); return; }
     var origText = btn ? btn.textContent : '';
-    if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+    if (btn) { setBusy(btn, true); btn.textContent = 'Sending…'; }
     var result = await window.klaus.pr.fixInTerminal(currentWorktreePath, prompt);
-    if (btn) { btn.disabled = false; btn.textContent = origText; }
+    if (btn) { setBusy(btn, false); btn.textContent = origText; }
     if (result && result.error) {
       window.toast.error('Could not send to terminal: ' + result.error);
       return;

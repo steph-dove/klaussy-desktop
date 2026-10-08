@@ -137,9 +137,11 @@
       var actionsHtml = (PR.localBanner.actions && PR.localBanner.actions.length)
         ? '<div class="pr-local-banner-actions">'
             + PR.localBanner.actions.map(function (a) {
+                var running = PR.localBusy && PR.localBusyAction === a.id;
                 return '<button class="pr-review-btn pr-local-banner-btn" type="button"'
-                  + ' data-action="' + PR.escHtml(a.id) + '"' + (PR.localBusy ? ' disabled' : '') + '>'
-                  + PR.escHtml(a.label) + '</button>';
+                  + ' data-action="' + PR.escHtml(a.id) + '"'
+                  + (running ? ' aria-disabled="true" aria-busy="true"' : (PR.localBusy ? ' disabled' : '')) + '>'
+                  + PR.escHtml(running ? a.busyLabel || 'Working…' : a.label) + '</button>';
               }).join('')
           + '</div>'
         : '';
@@ -228,7 +230,7 @@
   // The button running the operation stays focusable (aria-disabled) so focus isn't dropped while it works.
   function busyAttrs(op) {
     if (!PR.localBusy) return '';
-    return PR.localBusy === op ? ' aria-disabled="true" aria-busy="true"' : ' disabled';
+    return PR.localBusy === op && !PR.localBusyAction ? ' aria-disabled="true" aria-busy="true"' : ' disabled';
   }
 
   // Announced here rather than via a live role on the banner, which re-renders on every tab repaint.
@@ -323,6 +325,7 @@
     var bannerBtns = section.querySelectorAll('.pr-local-banner-btn');
     Array.prototype.forEach.call(bannerBtns, function (b) {
       b.addEventListener('click', function () {
+        if (PR.localBusy) return;
         var action = b.dataset.action;
         if (action === 'stash') PR.doPushLocal({ stash: true });
         else if (action === 'resolve') PR.resolveConflicts();
@@ -338,17 +341,20 @@
     opts = opts || {};
     if (PR.localBusy) return;
     PR.localBusy = 'pushing';
-    PR.localBanner = null;
+    // A retry from the banner keeps the banner so the pressed button holds focus until the result replaces it.
+    PR.localBusyAction = opts.stash ? 'stash' : null;
+    if (!opts.stash) PR.localBanner = null;
     PR.repaintAiReviewTab();
     window.klaus.pr.pushLocal(PR.aiReview.worktreePath || null, opts).then(PR.showPushResult);
   };
 
   PR.showPushResult = function (r) {
     PR.localBusy = null;
+    PR.localBusyAction = null;
     if (r && r.error) {
       var actions = [];
-      if (r.canStash) actions.push({ id: 'stash', label: 'Stash, pull & retry' });
-      if (r.canResolve) actions.push({ id: 'resolve', label: 'Resolve with agent' });
+      if (r.canStash) actions.push({ id: 'stash', label: 'Stash, pull & retry', busyLabel: 'Retrying…' });
+      if (r.canResolve) actions.push({ id: 'resolve', label: 'Resolve with agent', busyLabel: 'Starting agent…' });
       PR.setLocalBanner({ kind: 'error', text: r.error, actions: actions });
       PR.repaintAiReviewTab();
     } else {
@@ -371,9 +377,11 @@
   PR.resolveConflicts = function () {
     if (PR.localBusy) return;
     PR.localBusy = 'pushing';
+    PR.localBusyAction = 'resolve';
     PR.repaintAiReviewTab();
     window.klaus.pr.resolveConflicts(PR.aiReview.worktreePath || null).then(function (r) {
       PR.localBusy = null;
+      PR.localBusyAction = null;
       if (r && r.error) {
         PR.setLocalBanner({ kind: 'error', text: r.error });
         PR.repaintAiReviewTab();

@@ -214,6 +214,12 @@ window.AgentsPanel = (function () {
   panel.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') { e.preventDefault(); hide(); }
   });
+  // The panel floats over the task list, so leaving it by Tab or F6 closes it rather than hiding focus underneath.
+  panel.addEventListener('focusout', function (e) {
+    var to = e.relatedTarget;
+    if (!to || panel.contains(to) || btn.contains(to) || panel.style.display === 'none') return;
+    hide();
+  });
 
   function toggle() {
     if (panel.style.display === 'none') show(); else hide();
