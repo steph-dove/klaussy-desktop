@@ -688,7 +688,7 @@
 }
 
 #diff-view ::selection {
-  background: var(--diff-selection, #20395a);
+  background: var(--diff-selection, #002154);
 }
 
 .diff-line {
