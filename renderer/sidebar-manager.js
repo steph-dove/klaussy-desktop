@@ -6,6 +6,32 @@ window.Sidebar = (function () {
   // ---- Sidebar item rendering ----
 
   var collapsedSessions = new Set();
+  // Keyed so a rebuild mid-operation re-renders the button still busy.
+  var busyKeys = new Set();
+
+  // aria-disabled rather than disabled keeps keyboard focus on the button while it works.
+  function actionButton(cls, key, idleText, busyText, label, title) {
+    if (busyKeys.has(key)) return '<button class="' + cls + '" aria-disabled="true" aria-busy="true">' + busyText + '</button>';
+    return '<button class="' + cls + '" title="' + title + '" aria-label="' + escHtml(label) + '">' + idleText + '</button>';
+  }
+
+  function setBusy(btn, key, busyText) {
+    busyKeys.add(key);
+    btn.setAttribute('aria-disabled', 'true');
+    btn.setAttribute('aria-busy', 'true');
+    btn.removeAttribute('aria-label');
+    btn.textContent = busyText;
+  }
+
+  function revealExtraTerminals(extraCount) {
+    if (extraCount && window.TerminalManager && TerminalManager.currentLayout() === 'single') {
+      TerminalManager.setLayout(extraCount >= 2 ? 'grid' : 'columns');
+    }
+  }
+
+  function repoNameOf(wt) {
+    return wt.repoPath ? wt.repoPath.split(/[\\/]/).filter(Boolean).pop() : (wt.name || '');
+  }
 
   function selectSession(sessionName) {
     taskList.querySelectorAll('.task-item, .session-group-header').forEach(function(el) {
@@ -165,7 +191,7 @@ window.Sidebar = (function () {
 
     // Label by repo name from repoPath; wt.name is the worktree dir, which for
     // branch-checkout sessions duplicates the branch already shown in the detail.
-    var repoName = wt.repoPath ? wt.repoPath.split(/[\\/]/).filter(Boolean).pop() : (wt.name || '');
+    var repoName = repoNameOf(wt);
     var iconColor = AppUtils.iconColor(repoName);
     var iconLetter = (repoName || '?').charAt(0).toUpperCase();
 
@@ -175,15 +201,20 @@ window.Sidebar = (function () {
       var agents = wt.savedAgents || [];
       var modeLabel = wt.mode === 'shell' ? 'SH' : AppUtils.modeShortLabel(wt.mode);
       var modeTitle = wt.mode === 'shell' ? 'Previous shell session' : 'Previous ' + AppUtils.modeDisplayName(wt.mode) + ' session';
+      var agentNames = wt.mode === 'shell' ? 'Shell' : AppUtils.modeDisplayName(wt.mode);
       // A row stands for every agent the worktree had, so say so rather than
       // naming only the first and bringing back more than the label promised.
       if (agents.length > 1) {
         modeLabel = agents.length + '×';
-        modeTitle = 'Previous session: ' + agents.map(function (a) {
+        agentNames = agents.map(function (a) {
           return a.mode === 'shell' ? 'Shell' : AppUtils.modeDisplayName(a.mode);
         }).join(' + ');
+        modeTitle = 'Previous session: ' + agentNames;
       }
-      
+      var resumeKey = 'resume:' + wt.path;
+      var newKey = 'new:' + wt.path;
+      var onBranch = wt.branch ? ' on ' + wt.branch : '';
+
       item.innerHTML =
         '<span class="status-dot saved" aria-hidden="true"></span>' +
         '<button type="button" class="collapsed-icon" style="background:' + iconColor + '" title="' + escHtml(repoName) + '" aria-label="Resume ' + escHtml(repoName) + '">' + iconLetter + '</button>' +
@@ -194,17 +225,18 @@ window.Sidebar = (function () {
         '</div>' +
         '<div class="saved-session-actions">' +
           (wt.mode === 'shell'
-            ? '<button class="saved-session-resume" title="Open shell">Open</button>'
-            : '<button class="saved-session-resume" title="Resume conversation">Resume</button>' +
-              '<button class="saved-session-new" title="New session on this worktree">New</button>') +
+            ? actionButton('saved-session-resume', resumeKey, 'Open', 'Opening…', 'Open shell in ' + repoName + onBranch, 'Open shell')
+            : actionButton('saved-session-resume', resumeKey, 'Resume', 'Resuming…', 'Resume ' + repoName + onBranch + ' (' + agentNames + ')', 'Resume conversation') +
+              actionButton('saved-session-new', newKey, 'New', 'Opening…', 'New session in ' + repoName + onBranch, 'New session on this worktree')) +
         '</div>' +
         '<button class="saved-session-dismiss" title="Dismiss" aria-label="Dismiss saved session ' + escHtml(repoName) + '">&times;</button>';
 
       item.querySelector('.saved-session-resume').addEventListener('click', async function (e) {
         e.stopPropagation();
-        var btn = e.target;
-        btn.disabled = true;
-        btn.textContent = '...';
+        if (busyKeys.has(resumeKey)) return;
+        setBusy(e.currentTarget, resumeKey, wt.mode === 'shell' ? 'Opening…' : 'Resuming…');
+        // Rebuilding restores the idle label and puts focus back on this row's button.
+        function restore() { busyKeys.delete(resumeKey); rebuild(); }
         var result;
         var extraTasks = [];
         try {
@@ -217,21 +249,19 @@ window.Sidebar = (function () {
           }
         } catch (err) {
           window.toast.error('Resume failed: ' + (err && err.message || err));
-          btn.disabled = false;
-          btn.textContent = wt.mode === 'shell' ? 'Open' : 'Resume';
+          restore();
           return;
         }
         if (result && result.cancelled) {
-          btn.disabled = false;
-          btn.textContent = wt.mode === 'shell' ? 'Open' : 'Resume';
+          restore();
           return;
         }
         if (!result || result.error) {
           window.toast.error('Resume failed: ' + ((result && result.error) || 'no response from main process'));
-          btn.textContent = 'Err';
-          setTimeout(function () { btn.textContent = wt.mode === 'shell' ? 'Open' : 'Resume'; btn.disabled = false; }, 2000);
+          restore();
           return;
         }
+        busyKeys.delete(resumeKey);
         AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
         var extras = (wt.savedAgents && wt.savedAgents[0] && wt.savedAgents[0].subAgents) || wt.subAgents;
         if (!result.subAgentsToReopen && extras && extras.length) result.subAgentsToReopen = extras;
@@ -240,32 +270,30 @@ window.Sidebar = (function () {
         window.App.restoreUIState(result);
         extraTasks.forEach(function (t) { window.App.addTaskToUI(t); });
         // In single layout the extra agents would run with nothing on screen.
-        if (extraTasks.length && window.TerminalManager && TerminalManager.currentLayout() === 'single') {
-          TerminalManager.setLayout(extraTasks.length >= 2 ? 'grid' : 'columns');
-        }
+        revealExtraTerminals(extraTasks.length);
       });
 
       var newBtn = item.querySelector('.saved-session-new');
       if (newBtn) {
         newBtn.addEventListener('click', async function (e) {
           e.stopPropagation();
-          var btn = e.target;
-          btn.disabled = true;
-          btn.textContent = '...';
+          if (busyKeys.has(newKey)) return;
+          setBusy(e.currentTarget, newKey, 'Opening…');
           var result;
           try { result = await window.klaus.task.attachWorktree(wt.path, 'claude', wt.repoPath, wt.branch); }
           catch (err) {
             window.toast.error('Open failed: ' + (err && err.message || err));
-            btn.disabled = false;
-            btn.textContent = 'New';
+            busyKeys.delete(newKey);
+            rebuild();
             return;
           }
           if (!result || result.error) {
             window.toast.error('Open failed: ' + ((result && result.error) || 'no response from main process'));
-            btn.textContent = 'Err';
-            setTimeout(function () { btn.textContent = 'New'; btn.disabled = false; }, 2000);
+            busyKeys.delete(newKey);
+            rebuild();
             return;
           }
+          busyKeys.delete(newKey);
           AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function(x) { return x.path !== wt.path; });
           window.App.addTaskToUI(result);
           window.App.switchToTask(result.id);
@@ -347,8 +375,11 @@ window.Sidebar = (function () {
     var totalCount = activeList.length + inactiveList.length;
 
     var resumeBtnHtml = '';
+    var resumeAllKey = 'resume-all:' + sessionName;
     if (inactiveList.length > 0) {
-      resumeBtnHtml = '<button class="session-group-resume-btn" title="Resume All Repos in Session" aria-label="Resume all repos in session ' + escHtml(sessionName) + '"><span aria-hidden="true">&#9654;</span> Resume All</button>';
+      resumeBtnHtml = busyKeys.has(resumeAllKey)
+        ? '<button class="session-group-resume-btn" aria-disabled="true" aria-busy="true">Resuming…</button>'
+        : '<button class="session-group-resume-btn" title="Resume All Repos in Session" aria-label="Resume all repos in session ' + escHtml(sessionName) + '"><span aria-hidden="true">&#9654;</span> Resume All</button>';
     }
 
     header.innerHTML = 
@@ -399,9 +430,12 @@ window.Sidebar = (function () {
     if (resumeBtn) {
       resumeBtn.addEventListener('click', async function (e) {
         e.stopPropagation();
-        resumeBtn.disabled = true;
-        resumeBtn.textContent = 'Opening...';
-        
+        if (busyKeys.has(resumeAllKey)) return;
+        setBusy(resumeBtn, resumeAllKey, 'Resuming…');
+        var resumed = 0;
+        var extraCount = 0;
+        var failures = [];
+
         for (var i = 0; i < inactiveList.length; i++) {
           var wt = inactiveList[i];
           var opened = [];
@@ -414,16 +448,27 @@ window.Sidebar = (function () {
             } else {
               result = await window.klaus.task.attachWorktree(wt.path, window.App.defaultAgent(), wt.repoPath, wt.branch);
             }
-            if (result && !result.error) {
-              window.App.addTaskToUI(result);
-              opened.forEach(function (t) { window.App.addTaskToUI(t); });
-              if (i === 0) window.App.switchToTask(result.id);
+            if (result && result.cancelled) continue;
+            if (!result || result.error) {
+              failures.push(repoNameOf(wt) + ': ' + ((result && result.error) || 'no response from main process'));
+              continue;
             }
+            window.App.addTaskToUI(result);
+            opened.forEach(function (t) { window.App.addTaskToUI(t); });
+            if (!resumed) window.App.switchToTask(result.id);
+            resumed++;
+            extraCount += opened.length;
           } catch (err) {
-            console.error('Failed to resume worktree:', err);
+            failures.push(repoNameOf(wt) + ': ' + (err && err.message || err));
           }
         }
+        busyKeys.delete(resumeAllKey);
         rebuild();
+        revealExtraTerminals(extraCount);
+        if (resumed && window.A11y) A11y.announce('Resumed ' + resumed + (resumed === 1 ? ' session' : ' sessions'));
+        if (failures.length) {
+          window.toast.error('Could not resume ' + failures.length + ' of ' + inactiveList.length + ' in ' + sessionName + ': ' + failures.join('; '));
+        }
       });
     }
 

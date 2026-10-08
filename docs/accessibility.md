@@ -21,7 +21,8 @@ Klaussy aims to meet WCAG 2.2 AA and to be usable with the keyboard alone and wi
 
 Surface-specific keys:
 
-- **Sidebar**: F2 renames a task; Alt+Up/Down reorders it.
+- **Sidebar**: F2 renames a task; Alt+Up/Down reorders it. Saved-session Resume/New buttons name the repo, branch and agents they reopen, and stay focused while they work.
+- **New Session, Existing tab**: arrow keys move through the agents without choosing one, so the session resumes with every saved agent. Space picks one agent to hand the whole session to.
 - **Changes list**: Enter shows the diff; Shift+Enter opens the file in the editor.
 - **Diffs** (Changes panel and PR review): Tab into the diff, then Up/Down move line by line. Alt+Up/Down jump between hunks. Shift+Up/Down select a range of lines. Enter or C on a line opens a comment on it; E explains the selected lines, or the hunk the line is in. In the Changes panel, P posts the selected lines (or the current line) as a PR review comment, and Shift+F10 on a selection opens its menu.
 - **Terminal panes** (columns and grid layouts): Tab to a pane's name, then Alt+Arrow keys move the pane.
