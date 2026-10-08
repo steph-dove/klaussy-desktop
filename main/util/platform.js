@@ -13,6 +13,7 @@
 
 const { execFileSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 
 const IS_WIN = process.platform === 'win32';
 
@@ -68,7 +69,17 @@ function shellRunCmdArgs(shellPath, cmd) {
   return ['-l', '-c', cmd];
 }
 
+// Resolves symlinks (/var vs /private/var on macOS) and ignores case on Windows, where tools record c:\ and C:\ interchangeably.
+function samePath(a, b, platform = process.platform) {
+  if (!a || !b) return false;
+  const win = platform === 'win32';
+  const key = (x) => { const r = (win ? path.win32 : path.posix).resolve(x); return win ? r.toLowerCase() : r; };
+  const real = (x) => { try { return key(fs.realpathSync(x)); } catch { return key(x); } };
+  return key(a) === key(b) || real(a) === real(b);
+}
+
 module.exports = {
+  samePath,
   defaultShell,
   shellLoginArgs,
   shellRunCmdArgs,

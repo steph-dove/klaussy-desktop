@@ -82,20 +82,25 @@ test('remote backends declare themselves (special sandbox agents)', () => {
   }
 });
 
+// PowerShell gets single-quoted paths; POSIX shells get JSON double quotes.
+function addDir(dir) {
+  return process.platform === 'win32' ? `--add-dir '${dir}'` : `--add-dir ${JSON.stringify(dir)}`;
+}
+
 // Codex's sandbox counts `.git` as outside the project and rejects the write
 // ("patch rejected: writing outside of the project"), so without this grant it
 // can read session notes but never contribute one.
 test('codex gets the session notes dir as a writable root', () => {
   const p = providers.getProvider('codex');
   const cmd = p.buildInteractiveCmd('codex', { notesDir: '/repo/.git/klaussy-session/notes' });
-  assert.match(cmd, /--add-dir "\/repo\/\.git\/klaussy-session\/notes"/);
+  assert.ok(cmd.includes(addDir('/repo/.git/klaussy-session/notes')), cmd);
 
   const both = p.buildInteractiveCmd('codex', {
     sessionDirs: ['/repo/sibling'],
     notesDir: '/repo/.git/klaussy-session/notes',
   });
-  assert.match(both, /--add-dir "\/repo\/sibling"/);
-  assert.match(both, /--add-dir "\/repo\/\.git\/klaussy-session\/notes"/);
+  assert.ok(both.includes(addDir('/repo/sibling')), both);
+  assert.ok(both.includes(addDir('/repo/.git/klaussy-session/notes')), both);
 
   assert.equal(p.buildInteractiveCmd('codex', {}), 'codex');
 });
@@ -302,7 +307,7 @@ test('kimi builds the verified Kimi Code command shapes', () => {
   assert.match(p.buildInteractiveCmd('kimi', { resumeLatest: true }), /--continue/);
   assert.match(p.buildInteractiveCmd('kimi', { model: 'k2 turbo' }), /--model "k2 turbo"/);
   // Sibling worktrees ride --add-dir so cross-repo edits work.
-  assert.match(p.buildInteractiveCmd('kimi', { sessionDirs: ['/a', '/b'] }), /--add-dir "\/a" --add-dir "\/b"/);
+  assert.ok(p.buildInteractiveCmd('kimi', { sessionDirs: ['/a', '/b'] }).includes(`${addDir('/a')} ${addDir('/b')}`));
 
   // `--session` and `--continue` are mutually exclusive — an id must win alone.
   const both = p.buildInteractiveCmd('kimi', { resumeSessionId: 'abc123', resumeLatest: true });

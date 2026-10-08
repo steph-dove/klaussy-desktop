@@ -9,7 +9,7 @@ const { ensureOpenCodeOllamaConfig } = require('../../main/state/opencode-config
 // XDG and APPDATA are cleared as well as HOME: configHome()/dataHome() prefer
 // them, so overriding HOME alone would let a test write into the developer's
 // real ~/.config/opencode and auth.json.
-const SANDBOXED = ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'APPDATA', 'LOCALAPPDATA'];
+const SANDBOXED = ['HOME', 'USERPROFILE', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'APPDATA', 'LOCALAPPDATA'];
 
 function withSandboxedHome(fn) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode-config-test-'));
@@ -17,7 +17,9 @@ function withSandboxedHome(fn) {
   for (const k of SANDBOXED) saved[k] = process.env[k];
   try {
     for (const k of SANDBOXED) delete process.env[k];
+    // os.homedir() reads USERPROFILE on Windows.
     process.env.HOME = tmpDir;
+    process.env.USERPROFILE = tmpDir;
     fn(tmpDir);
   } finally {
     for (const k of SANDBOXED) {
