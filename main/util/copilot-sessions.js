@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const { samePath } = require('./platform');
 
 function defaultStateDir() {
   return path.join(process.env.HOME || os.homedir(), '.copilot', 'session-state');
@@ -16,13 +17,6 @@ function yamlScalar(text, key) {
   }
   if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1).replace(/''/g, "'");
   return raw;
-}
-
-// Copilot records /var or /private/var depending on how it was started.
-function samePath(a, b) {
-  if (!a || !b) return false;
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  return path.resolve(a) === path.resolve(b) || real(a) === real(b);
 }
 
 function listSessions(worktreePath, stateDir) {

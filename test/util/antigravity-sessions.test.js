@@ -6,9 +6,14 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+const { pathToFileURL } = require('node:url');
 
 const providers = require('../../main/state/ai-providers');
 const agy = providers.getProvider('antigravity');
+
+const WT_A = path.resolve('/wt/a');
+const A_URI = pathToFileURL(WT_A).href;
+const B_URI = pathToFileURL(path.resolve('/wt/b')).href;
 
 // The provider resolves its store under $HOME, so a temp home gives each test a
 // conversation store of its own.
@@ -37,42 +42,42 @@ function withStore(rows, fn) {
 // spotted as a file that appeared after spawn — it comes from the workspace.
 test('the conversation is the one recorded against this worktree', () => {
   withStore([
-    { id: 'other-conv', workspaces: ['file:///wt/b'], at: '2026-08-24 10:00:00+00:00' },
-    { id: 'mine-conv', workspaces: ['file:///wt/a'], at: '2026-08-24 09:00:00+00:00' },
+    { id: 'other-conv', workspaces: [B_URI], at: '2026-08-24 10:00:00+00:00' },
+    { id: 'mine-conv', workspaces: [A_URI], at: '2026-08-24 09:00:00+00:00' },
   ], () => {
-    const found = agy.findNewSession('/wt/a', new Set());
+    const found = agy.findNewSession(WT_A, new Set());
     assert.equal(found.sessionId, 'mine-conv');
-    assert.match(found.filePath, /conversations\/mine-conv\.db$/);
+    assert.match(found.filePath, /conversations[\\/]mine-conv\.db$/);
   });
 });
 
 test('the most recent conversation wins when a worktree has several', () => {
   withStore([
-    { id: 'stale', workspaces: ['file:///wt/a'], at: '2026-08-20 10:00:00+00:00' },
-    { id: 'current', workspaces: ['file:///wt/a'], at: '2026-08-24 10:00:00+00:00' },
+    { id: 'stale', workspaces: [A_URI], at: '2026-08-20 10:00:00+00:00' },
+    { id: 'current', workspaces: [A_URI], at: '2026-08-24 10:00:00+00:00' },
   ], () => {
-    assert.equal(agy.findNewSession('/wt/a', new Set()).sessionId, 'current');
+    assert.equal(agy.findNewSession(WT_A, new Set()).sessionId, 'current');
   });
 });
 
 test('a worktree agy has never run in has no conversation', () => {
-  withStore([{ id: 'c', workspaces: ['file:///wt/b'], at: '2026-08-24 10:00:00+00:00' }], () => {
-    assert.equal(agy.findNewSession('/wt/a', new Set()), null);
+  withStore([{ id: 'c', workspaces: [B_URI], at: '2026-08-24 10:00:00+00:00' }], () => {
+    assert.equal(agy.findNewSession(WT_A, new Set()), null);
   });
 });
 
 // agy may not be installed at all, and its store is written while it runs.
 test('an absent or unreadable store yields no session rather than throwing', () => {
   withStore(null, () => {
-    assert.equal(agy.findNewSession('/wt/a', new Set()), null);
+    assert.equal(agy.findNewSession(WT_A, new Set()), null);
   });
 });
 
 test('a multi-workspace conversation matches on any of its roots', () => {
   withStore([
-    { id: 'multi', workspaces: ['file:///wt/b', 'file:///wt/a'], at: '2026-08-24 10:00:00+00:00' },
+    { id: 'multi', workspaces: [B_URI, A_URI], at: '2026-08-24 10:00:00+00:00' },
   ], () => {
-    assert.equal(agy.findNewSession('/wt/a', new Set()).sessionId, 'multi');
+    assert.equal(agy.findNewSession(WT_A, new Set()).sessionId, 'multi');
   });
 });
 

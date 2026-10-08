@@ -285,8 +285,11 @@ test('scanOpencodeFile reads SQLite opencode.db part table and extracts token us
 
 test('rescan aggregates tokens from Claude, Codex, Gemini, Copilot, Antigravity, and OpenCode', async () => {
   const prevHome = process.env.HOME;
+  const prevXdgData = process.env.XDG_DATA_HOME;
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-all-agents-'));
   process.env.HOME = tempHome;
+  // On Windows the opencode DB would otherwise resolve under the runner's LOCALAPPDATA.
+  process.env.XDG_DATA_HOME = path.join(tempHome, '.local', 'share');
 
   try {
     const claudeDir = path.join(tempHome, '.claude', 'projects', 'proj1');
@@ -366,8 +369,55 @@ test('rescan aggregates tokens from Claude, Codex, Gemini, Copilot, Antigravity,
     assert.equal(agyTotal, 700);
     assert.equal(ocTotal, 950);
   } finally {
+    if (prevXdgData === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = prevXdgData;
     process.env.HOME = prevHome;
     fs.rmSync(tempHome, { recursive: true, force: true });
   }
 });
 
+
+test('watchSessionRoots: watches each agent folder once and reports a change inside it', { timeout: 20000 }, async () => {
+  const prevHome = process.env.HOME;
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-watch-'));
+  process.env.HOME = tempHome;
+  try {
+    const projects = path.join(tempHome, '.claude', 'projects', 'p1');
+    fs.mkdirSync(projects, { recursive: true });
+    let changed;
+    const sawChange = new Promise((resolve) => { changed = resolve; });
+
+    assert.equal(_test.watchSessionRoots(changed), true);
+    assert.equal(_test.watchSessionRoots(changed), false);
+    fs.writeFileSync(path.join(projects, 's.jsonl'), '{}\n');
+    await sawChange;
+
+    fs.mkdirSync(path.join(tempHome, '.codex', 'sessions'), { recursive: true });
+    assert.equal(_test.watchSessionRoots(() => {}), true);
+  } finally {
+    // Windows refuses to delete a folder that is still being watched.
+    for (const [root, watcher] of _test.rootWatchers) { watcher.close(); _test.rootWatchers.delete(root); }
+    process.env.HOME = prevHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});
+
+test('startAutoRescan: polls instead of watching on Linux', { timeout: 20000 }, async () => {
+  const prevHome = process.env.HOME;
+  const prevPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-linux-'));
+  process.env.HOME = tempHome;
+  Object.defineProperty(process, 'platform', { value: 'linux' });
+  try {
+    fs.mkdirSync(path.join(tempHome, '.gemini', 'tmp'), { recursive: true });
+    const before = _test.rootWatchers.size;
+    let scanned;
+    const firstScan = new Promise((resolve) => { scanned = resolve; });
+    tokenUsage.startAutoRescan(scanned);
+    await firstScan;
+    assert.equal(_test.rootWatchers.size, before);
+  } finally {
+    Object.defineProperty(process, 'platform', prevPlatform);
+    process.env.HOME = prevHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});

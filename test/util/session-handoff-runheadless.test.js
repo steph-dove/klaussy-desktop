@@ -11,14 +11,26 @@ const ollama = require('../../main/state/ollama');
 const { loadConfig, saveConfig } = require('../../main/util/config');
 const { runHeadless } = require('../../main/state/session-handoff');
 
+// Windows can't run a shebang script, so it gets the .cmd shim agent CLIs ship as there.
+function writeStub(dir, output, exitCode = 0) {
+  if (process.platform === 'win32') {
+    const bin = path.join(dir, 'stub.cmd');
+    fs.writeFileSync(bin, `@echo ${output}\r\n@exit /b ${exitCode}\r\n`);
+    return bin;
+  }
+  const bin = path.join(dir, 'stub');
+  fs.writeFileSync(bin, `#!/bin/sh\necho ${JSON.stringify(output)}\nexit ${exitCode}\n`);
+  fs.chmodSync(bin, 0o755);
+  return bin;
+}
+
 // Point the claude provider at a stub script so the test controls exit code and
 // stdout without needing the real CLI. binFor is destructured at require time,
 // so patch what it reads (defaultBin) rather than binFor itself.
-function withStubClaude(script, run) {
+function withStubClaude(output, exitCode, run) {
+  if (typeof exitCode === 'function') { run = exitCode; exitCode = 0; }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-cli-'));
-  const bin = path.join(dir, 'stub');
-  fs.writeFileSync(bin, script);
-  fs.chmodSync(bin, 0o755);
+  const bin = writeStub(dir, output, exitCode);
   const provider = providers.getProvider('claude');
   const origBuild = provider.buildHeadlessRun;
   const origBin = provider.defaultBin;
@@ -57,7 +69,7 @@ function withStubLocal(reply, run) {
 
 test('a clean run returns its output', async () => {
   await withConfig({ summarizeLocally: false }, () =>
-    withStubClaude('#!/bin/sh\necho "the nav is being restructured"\n', async () => {
+    withStubClaude('the nav is being restructured', async () => {
       assert.equal(await runHeadless('anything', 'claude'), 'the nav is being restructured');
     }));
 });
@@ -68,7 +80,7 @@ test('a clean run returns its output', async () => {
 test('a failed run returns nothing even when it printed to stdout', async () => {
   await withConfig({ summarizeLocally: false }, () =>
     withStubLocal('', () =>
-      withStubClaude('#!/bin/sh\necho "Not logged in · Please run /login"\nexit 1\n', async () => {
+      withStubClaude('Not logged in · Please run /login', 1, async () => {
         assert.equal(await runHeadless('anything', 'claude'), '');
       })));
 });
@@ -77,9 +89,7 @@ test('a failed run returns nothing even when it printed to stdout', async () => 
 // blindly meant a machine running only Codex/opencode/Kimi got no summary.
 test('falls through to an installed agent when claude is missing', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-fallthrough-'));
-  const bin = path.join(dir, 'stub');
-  fs.writeFileSync(bin, '#!/bin/sh\necho "codex summarized it"\n');
-  fs.chmodSync(bin, 0o755);
+  const bin = writeStub(dir, 'codex summarized it');
 
   const claude = providers.getProvider('claude');
   const codex = providers.getProvider('codex');
@@ -105,7 +115,7 @@ test('falls through to an installed agent when claude is missing', async () => {
 // model answers even when a cloud agent is sitting right there.
 test('the local model is preferred over an installed agent', async () => {
   await withStubLocal('summarized locally', () =>
-    withStubClaude('#!/bin/sh\necho "summarized by claude"\n', async () => {
+    withStubClaude('summarized by claude', async () => {
       assert.equal(await runHeadless('anything', 'claude'), 'summarized locally');
     }));
 });
@@ -114,7 +124,7 @@ test('the local model is preferred over an installed agent', async () => {
 // rather than the summary silently going missing.
 test('an installed agent covers for a local model that cannot answer', async () => {
   await withStubLocal('', () =>
-    withStubClaude('#!/bin/sh\necho "summarized by claude"\n', async () => {
+    withStubClaude('summarized by claude', async () => {
       assert.equal(await runHeadless('anything', 'claude'), 'summarized by claude');
     }));
 });

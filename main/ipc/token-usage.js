@@ -2,20 +2,12 @@
 //
 // `range` returns { today, series:[{day,tokens}], total } for one of the
 // preset ranges (7d / 14d / 30d / 6m / 1y / all) or a custom { from, to }
-// pair. The handler always triggers a rescan first so live sessions appear
-// without waiting for the periodic broadcast tick.
-//
-// The 5s broadcast loop runs a rescan and pushes `token-usage-updated` to
-// every window so the today total stays current while the user is in the
-// app. The rescan is incremental — unchanged files cost one statSync each,
-// and saveCache only writes when something actually changed — so a tight
-// interval is fine even with hundreds of project JSONLs.
+// pair, served from the cache. After each rescan (see startAutoRescan) the
+// today total is pushed to every window as `token-usage-updated`.
 
 const { ipcMain } = require('electron');
 const tokenUsage = require('../state/token-usage');
 const { allWindows } = require('../state/windows');
-
-const BROADCAST_INTERVAL_MS = 5_000;
 
 // Build a list of YYYY-MM-DD strings from `start` (inclusive) up to and
 // including `end`, in local time. Both args are Date objects.
@@ -83,17 +75,9 @@ function buildSeries(days, from, to) {
   return daysBetween(from, to).map((day) => ({ day, tokens: days[day] || 0 }));
 }
 
-// First scan on big histories (~hundreds of MB of JSONL) can take seconds.
-// Return the cached snapshot synchronously and let the rescan finish in the
-// background — the broadcast loop will push the updated total when it's
-// done. Renderers always get a fast response; freshness is bounded by the
-// broadcast cadence (see BROADCAST_INTERVAL_MS) and any new range request.
 ipcMain.handle('token-usage:range', async (_event, spec) => {
   const snap = tokenUsage.snapshot();
   const byAgentSnap = tokenUsage.snapshotByAgent();
-  tokenUsage.rescan().catch((err) => {
-    console.error('[token-usage] background rescan failed:', err.message);
-  });
   const today = snap[tokenUsage.todayKey()] || 0;
 
   // 1-day view: bucket today's usage by local hour (24 bars) instead of a
@@ -118,8 +102,6 @@ ipcMain.handle('token-usage:range', async (_event, spec) => {
   return { today, series, total, byAgent, granularity: 'day' };
 });
 
-// Background broadcast. Independent of any open handler so the tile stays
-// live even when the renderer hasn't requested a range recently.
 function broadcastUpdate() {
   const days = tokenUsage.snapshot();
   const today = days[tokenUsage.todayKey()] || 0;
@@ -130,18 +112,6 @@ function broadcastUpdate() {
   }
 }
 
-setInterval(async () => {
-  try { await tokenUsage.rescan(); } catch { /* logged in state module */ }
-  broadcastUpdate();
-}, BROADCAST_INTERVAL_MS).unref();
-
-// Warm the cache at app start so the first IPC call has data to serve.
-// Fired through whenReady because the cache writer needs app.getPath. The
-// promise is intentionally unawaited; the broadcast loop will pick up the
-// result whenever it finishes.
+// whenReady: the cache writer needs app.getPath.
 const { app } = require('electron');
-app.whenReady().then(() => {
-  tokenUsage.rescan().then(broadcastUpdate).catch((err) => {
-    console.error('[token-usage] initial scan failed:', err.message);
-  });
-});
+app.whenReady().then(() => tokenUsage.startAutoRescan(broadcastUpdate));

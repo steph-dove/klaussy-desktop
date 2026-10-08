@@ -8,6 +8,7 @@ const fs = require('fs');
 const { fileURLToPath } = require('url');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { loadConfig } = require('../util/config');
+const { samePath } = require('../util/platform');
 
 function home() {
   return process.env.HOME || os.homedir();
@@ -37,12 +38,6 @@ function listFilesByExt(dir, ext, recursive) {
 
 function listJsonlFiles(dir, recursive) {
   return listFilesByExt(dir, '.jsonl', recursive);
-}
-
-// Resolve a path through symlinks for comparison (macOS /tmp → /private/tmp).
-// Falls back to the input if the path can't be resolved.
-function realPath(p) {
-  try { return fs.realpathSync(p); } catch { return p; }
 }
 
 // Read a Codex rollout file's launch cwd from its session_meta first line
@@ -396,13 +391,12 @@ const PROVIDERS = {
     findNewSession(worktreePath, snapshot) {
       // Codex records the resolved realpath as cwd, so compare resolved paths
       // (macOS /tmp vs /private/tmp; PR worktrees can also sit behind symlinks).
-      const target = realPath(worktreePath);
       const files = listJsonlFiles(this.sessionDir(), true)
         .filter(f => !snapshot.has(f.path))
         .sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
       for (const f of files) {
         const cwd = readCodexSessionCwd(f.path);
-        if (cwd && realPath(cwd) === target) {
+        if (cwd && samePath(cwd, worktreePath)) {
           // rollout-<ts>-<uuid>.jsonl → sessionId is the trailing uuid.
           const base = path.basename(f.path).replace(/\.jsonl$/, '');
           const m = base.match(/([0-9a-f-]{36})$/i);
@@ -577,7 +571,6 @@ const PROVIDERS = {
     // starting one per launch, so there is no new file to spot; the snapshot is
     // unused and the workspace recorded in conversation_summaries.db is the key.
     findNewSession(worktreePath) {
-      const target = realPath(worktreePath);
       let db = null;
       try {
         const { DatabaseSync } = require('node:sqlite');
@@ -590,7 +583,7 @@ const PROVIDERS = {
           let uris = [];
           try { uris = JSON.parse(row.workspace_uris || '[]'); } catch { continue; }
           const match = uris.some((u) => {
-            try { return realPath(fileURLToPath(u)) === target; } catch { return false; }
+            try { return samePath(fileURLToPath(u), worktreePath); } catch { return false; }
           });
           if (match) {
             return {

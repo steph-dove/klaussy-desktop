@@ -6,6 +6,7 @@ const os = require('os');
 const path = require('path');
 const cs = require('../../main/util/copilot-sessions');
 const { getProvider } = require('../../main/state/ai-providers');
+const { samePath } = require('../../main/util/platform');
 
 function stateDir(sessions) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'copilot-state-'));
@@ -50,4 +51,10 @@ test('copilot: never falls back to --continue', () => {
   const p = getProvider('copilot');
   assert.equal(p.buildInteractiveCmd('copilot', { resumeLatest: true }), 'copilot');
   assert.equal(p.buildInteractiveCmd('copilot', { resumeSessionId: 'abc' }), 'copilot --resume=abc');
+});
+
+test('samePath: Windows paths match regardless of case', () => {
+  assert.equal(samePath('c:\\Users\\Me\\repo', 'C:\\users\\me\\Repo', 'win32'), true);
+  assert.equal(samePath('C:\\Users\\me\\repo', 'C:\\Users\\me\\other', 'win32'), false);
+  assert.equal(samePath('/Users/me/Repo', '/Users/me/repo', 'linux'), false);
 });
