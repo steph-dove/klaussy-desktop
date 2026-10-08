@@ -863,7 +863,7 @@
       onUsage: function (u) { PR.aiReview.implementAllUsage = u; },
       onTool: function (chip) { PR.aiReview.implementAllProgress.push(chip); },
       onDone: function () {
-        // Main pushes on IMPLEMENT_COMMITTED_MARKER (main/state/review-prompts.js); just hide it here.
+        // Main pushes on the new commit (main/util/commit-pusher.js), so the marker is only hidden here.
         var summary = (PR.aiReview.implementAllSummary || '').trim();
         if (/<IMPLEMENT_ALL_COMMITTED\/>$/.test(summary)) summary = summary.slice(0, -'<IMPLEMENT_ALL_COMMITTED/>'.length).trim();
         PR.aiReview.implementAllSummary = summary;
