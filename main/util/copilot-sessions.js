@@ -18,11 +18,13 @@ function yamlScalar(text, key) {
   return raw;
 }
 
-// Copilot records /var or /private/var depending on how it was started.
-function samePath(a, b) {
+// Copilot may record /var or /private/var, and Windows paths compare case-insensitively.
+function samePath(a, b, platform = process.platform) {
   if (!a || !b) return false;
-  const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
-  return path.resolve(a) === path.resolve(b) || real(a) === real(b);
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  const key = (x) => (platform === 'win32' ? p.resolve(x).toLowerCase() : p.resolve(x));
+  const real = (x) => { try { return key(fs.realpathSync(x)); } catch { return key(x); } };
+  return key(a) === key(b) || real(a) === real(b);
 }
 
 function listSessions(worktreePath, stateDir) {
@@ -58,4 +60,4 @@ function findNewSession(worktreePath, preSpawn, stateDir) {
   return fresh ? { sessionId: fresh.sessionId, filePath: fresh.filePath } : null;
 }
 
-module.exports = { listSessions, latestSession, snapshotSessionIds, findNewSession, yamlScalar };
+module.exports = { listSessions, latestSession, snapshotSessionIds, findNewSession, yamlScalar, samePath };

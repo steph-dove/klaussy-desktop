@@ -581,6 +581,8 @@ async function rescan() {
 // Watch-driven, not polled: re-listing every session file every few seconds read as a scanning loop to endpoint security.
 const CHANGE_SCAN_DELAY_MS = 30_000;
 const SAFETY_SCAN_MS = 10 * 60_000;
+// Linux's recursive fs.watch adds one inotify watch per subfolder and can hit the per-user limit, so it polls instead.
+const LINUX_POLL_MS = 60_000;
 const rootWatchers = new Map(); // root -> fs.FSWatcher
 let changeTimer = null;
 
@@ -603,6 +605,11 @@ function startAutoRescan(onScanned) {
   const run = () => rescan().then(onScanned, (err) => {
     console.error('[token-usage] rescan failed:', err.message);
   });
+  if (process.platform === 'linux') {
+    run();
+    setInterval(run, LINUX_POLL_MS).unref();
+    return;
+  }
   const scheduleScan = () => {
     if (changeTimer) return;
     changeTimer = setTimeout(() => { changeTimer = null; run(); }, CHANGE_SCAN_DELAY_MS);
@@ -732,6 +739,7 @@ module.exports = {
   todayKey,
   _test: {
     watchSessionRoots,
+    rootWatchers,
     extractClaude,
     extractCodex,
     extractGemini,

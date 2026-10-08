@@ -51,3 +51,9 @@ test('copilot: never falls back to --continue', () => {
   assert.equal(p.buildInteractiveCmd('copilot', { resumeLatest: true }), 'copilot');
   assert.equal(p.buildInteractiveCmd('copilot', { resumeSessionId: 'abc' }), 'copilot --resume=abc');
 });
+
+test('samePath: Windows paths match regardless of case', () => {
+  assert.equal(cs.samePath('c:\\Users\\Me\\repo', 'C:\\users\\me\\Repo', 'win32'), true);
+  assert.equal(cs.samePath('C:\\Users\\me\\repo', 'C:\\Users\\me\\other', 'win32'), false);
+  assert.equal(cs.samePath('/Users/me/Repo', '/Users/me/repo', 'linux'), false);
+});

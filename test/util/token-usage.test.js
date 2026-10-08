@@ -394,3 +394,24 @@ test('watchSessionRoots: watches each agent folder once and reports a change ins
     fs.rmSync(tempHome, { recursive: true, force: true });
   }
 });
+
+test('startAutoRescan: polls instead of watching on Linux', async () => {
+  const prevHome = process.env.HOME;
+  const prevPlatform = Object.getOwnPropertyDescriptor(process, 'platform');
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-linux-'));
+  process.env.HOME = tempHome;
+  Object.defineProperty(process, 'platform', { value: 'linux' });
+  try {
+    fs.mkdirSync(path.join(tempHome, '.gemini', 'tmp'), { recursive: true });
+    const before = _test.rootWatchers.size;
+    let scanned;
+    const firstScan = new Promise((resolve) => { scanned = resolve; });
+    tokenUsage.startAutoRescan(scanned);
+    await firstScan;
+    assert.equal(_test.rootWatchers.size, before);
+  } finally {
+    Object.defineProperty(process, 'platform', prevPlatform);
+    process.env.HOME = prevHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});
