@@ -395,56 +395,53 @@ const EXTRACTORS = {
   copilot: extractCopilot,
 };
 
-// Walk Claude's per-project dirs (one level) for *.jsonl.
-function* claudeFiles() {
+async function readdirSafe(dir, withFileTypes) {
+  try { return await fs.promises.readdir(dir, withFileTypes ? { withFileTypes: true } : undefined); } catch { return []; }
+}
+
+// Claude's per-project dirs, one level deep.
+async function claudeFiles(out) {
   const root = claudeProjectsDir();
-  let projects;
-  try {
-    projects = fs.readdirSync(root, { withFileTypes: true });
-  } catch { return; }
-  for (const ent of projects) {
+  for (const ent of await readdirSafe(root, true)) {
     if (!ent.isDirectory()) continue;
     const dir = path.join(root, ent.name);
-    let files;
-    try { files = fs.readdirSync(dir); } catch { continue; }
-    for (const name of files) {
-      if (name.endsWith('.jsonl')) yield path.join(dir, name);
+    for (const name of await readdirSafe(dir)) {
+      if (name.endsWith('.jsonl')) out.push({ file: path.join(dir, name), agent: 'claude' });
     }
   }
 }
 
-function* walkJsonl(dir) {
-  let ents;
-  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-  for (const ent of ents) {
+async function walkJsonl(dir, agent, out) {
+  for (const ent of await readdirSafe(dir, true)) {
     const p = path.join(dir, ent.name);
-    if (ent.isDirectory()) yield* walkJsonl(p);
-    else if (ent.isFile() && ent.name.endsWith('.jsonl')) yield p;
-  }
-}
-
-function* antigravityFiles() {
-  const root = antigravityConversationsDir();
-  let files;
-  try {
-    files = fs.readdirSync(root);
-  } catch { return; }
-  for (const name of files) {
-    if (name.endsWith('.db')) yield path.join(root, name);
+    if (ent.isDirectory()) await walkJsonl(p, agent, out);
+    else if (ent.isFile() && ent.name.endsWith('.jsonl')) out.push({ file: p, agent });
   }
 }
 
 // All session files across agents, each tagged with its agent.
-function* sessionFiles() {
-  for (const file of claudeFiles()) yield { file, agent: 'claude' };
-  for (const file of walkJsonl(codexSessionsDir())) yield { file, agent: 'codex' };
+async function sessionFiles() {
+  const out = [];
+  await claudeFiles(out);
+  await walkJsonl(codexSessionsDir(), 'codex', out);
   // Gemini's *.jsonl under tmp are the chat sessions; non-usage lines (e.g.
   // `$set` snapshots) are simply skipped by extractGemini.
-  for (const file of walkJsonl(geminiTmpDir())) yield { file, agent: 'gemini' };
-  for (const file of walkJsonl(copilotDir())) yield { file, agent: 'copilot' };
-  for (const file of antigravityFiles()) yield { file, agent: 'antigravity' };
+  await walkJsonl(geminiTmpDir(), 'gemini', out);
+  await walkJsonl(copilotDir(), 'copilot', out);
+  const agRoot = antigravityConversationsDir();
+  for (const name of await readdirSafe(agRoot)) {
+    if (name.endsWith('.db')) out.push({ file: path.join(agRoot, name), agent: 'antigravity' });
+  }
   const ocDb = opencodeDbPath();
-  if (fs.existsSync(ocDb)) yield { file: ocDb, agent: 'opencode' };
+  if (fs.existsSync(ocDb)) out.push({ file: ocDb, agent: 'opencode' });
+  return out;
+}
+
+// Every directory sessionFiles reads; a change under one of them is the only
+// reason a rescan could find anything new.
+function sessionRoots() {
+  return [claudeProjectsDir(), codexSessionsDir(), geminiTmpDir(), copilotDir(),
+    antigravityConversationsDir(), path.dirname(opencodeDbPath())];
 }
 
 // Stream a single file from `fromOffset` forward, line-by-line, applying
@@ -488,9 +485,10 @@ async function rescan() {
     const cache = loadCache();
     let dirty = false;
 
-    for (const { file, agent } of sessionFiles()) {
+    const listed = await sessionFiles();
+    for (const { file, agent } of listed) {
       let stat;
-      try { stat = fs.statSync(file); } catch { continue; }
+      try { stat = await fs.promises.stat(file); } catch { continue; }
       const cached = cache.files[file];
 
       // Unchanged file — skip.
@@ -564,8 +562,10 @@ async function rescan() {
 
     // Drop entries whose file no longer exists, so the days map stays
     // accurate after manual cleanup.
+    const listedFiles = new Set(listed.map((f) => f.file));
     for (const file of Object.keys(cache.files)) {
-      if (!fs.existsSync(file)) {
+      if (listedFiles.has(file)) continue;
+      try { await fs.promises.access(file); } catch {
         delete cache.files[file];
         dirty = true;
       }
@@ -576,6 +576,45 @@ async function rescan() {
     return aggregateDays(cache);
   })().finally(() => { scanInFlight = null; });
   return scanInFlight;
+}
+
+// Watch-driven, not polled: re-listing every session file every few seconds read as a scanning loop to endpoint security.
+const CHANGE_SCAN_DELAY_MS = 30_000;
+const SAFETY_SCAN_MS = 10 * 60_000;
+const rootWatchers = new Map(); // root -> fs.FSWatcher
+let changeTimer = null;
+
+function watchSessionRoots(scheduleScan) {
+  let added = false;
+  for (const root of sessionRoots()) {
+    if (rootWatchers.has(root) || !fs.existsSync(root)) continue;
+    try {
+      const watcher = fs.watch(root, { recursive: true }, scheduleScan);
+      watcher.on('error', () => { watcher.close(); rootWatchers.delete(root); });
+      watcher.unref();
+      rootWatchers.set(root, watcher);
+      added = true;
+    } catch { /* unwatchable roots are caught by the safety scan */ }
+  }
+  return added;
+}
+
+function startAutoRescan(onScanned) {
+  const run = () => rescan().then(onScanned, (err) => {
+    console.error('[token-usage] rescan failed:', err.message);
+  });
+  const scheduleScan = () => {
+    if (changeTimer) return;
+    changeTimer = setTimeout(() => { changeTimer = null; run(); }, CHANGE_SCAN_DELAY_MS);
+    changeTimer.unref();
+  };
+  watchSessionRoots(scheduleScan);
+  run();
+  setInterval(() => {
+    // An agent installed since launch creates its folder now; scan what it already wrote.
+    if (watchSessionRoots(scheduleScan)) scheduleScan();
+    run();
+  }, SAFETY_SCAN_MS).unref();
 }
 
 // Merge per-file day buckets into a single map.
@@ -686,11 +725,13 @@ function todayKey() {
 
 module.exports = {
   rescan,
+  startAutoRescan,
   snapshot,
   snapshotByAgent,
   todayByHour,
   todayKey,
   _test: {
+    watchSessionRoots,
     extractClaude,
     extractCodex,
     extractGemini,

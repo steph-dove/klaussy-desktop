@@ -172,15 +172,11 @@
   fromInput.addEventListener('change', refresh);
   toInput.addEventListener('change', refresh);
 
-  // Live updates: the main process pushes a fresh "today" number every
-  // few seconds (and after IPC-driven rescans). We only update the Today
-  // cell here — re-rendering the whole chart on every tick would feel
-  // jumpy.
+  // Only the Today cell updates; re-rendering the whole chart each rescan would feel jumpy.
   window.klaus.tokenUsage.onUpdate(({ today }) => {
     todayEl.textContent = fmt(today);
   });
 
-  // Initial pull. Wait a tick so the rest of the renderer has wired up;
-  // the IPC rescan is async and we don't want to block first paint.
+  // Wait a tick so the rest of the renderer has wired up.
   setTimeout(refresh, 0);
 })();

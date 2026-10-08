@@ -7,7 +7,7 @@ const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { ipcMain, shell, BrowserWindow } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { ghExec, clearGhTokenCache, execFileP } = require('../util/exec');
+const { ghExec, clearGhTokenCache, execFileP, openInMacTerminal } = require('../util/exec');
 const { reconcileOutage, clearOutageProbeCache } = require('../util/gh-outage');
 const { allProviders, getProvider, binFor, installCommandFor, authMetaFor } = require('../state/ai-providers');
 const { discoverReposOnDisk } = require('./repo');
@@ -831,14 +831,9 @@ ipcMain.handle('install-requirements', async () => {
 
   try {
     if (platform === 'darwin') {
-      const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
+      const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.command`);
       fs.writeFileSync(scriptPath, installScriptMac(agents), { mode: 0o755 });
-      // osascript opens Terminal.app and runs the script in a new tab; the
-      // script's trailing `read` keeps the window open for output review.
-      spawn('osascript', [
-        '-e', `tell application "Terminal" to do script "${scriptPath}"`,
-        '-e', 'tell application "Terminal" to activate',
-      ], { detached: true, stdio: 'ignore' }).unref();
+      await openInMacTerminal(scriptPath);
       return { ok: true };
     }
 

@@ -199,8 +199,14 @@ function sanitizeExtraEnv(extraEnv) {
   return out;
 }
 
+// Not osascript: macOS silently refuses AppleEvents from apps without the automation entitlement.
+function openInMacTerminal(scriptPath) {
+  return execFileP('open', ['-a', 'Terminal', scriptPath], { timeout: 15000 });
+}
+
 module.exports = {
   execFileP,
+  openInMacTerminal,
   execToolP,
   execToolSync,
   winShellQuote,

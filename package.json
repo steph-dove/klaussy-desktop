@@ -109,7 +109,14 @@
       "darkModeSupport": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}",
+      "extendInfo": {
+        "NSDesktopFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSDocumentsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSDownloadsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSRemovableVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSNetworkVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them."
+      }
     },
     "afterSign": "build/notarize.js",
     "dmg": {

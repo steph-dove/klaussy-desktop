@@ -371,3 +371,26 @@ test('rescan aggregates tokens from Claude, Codex, Gemini, Copilot, Antigravity,
   }
 });
 
+
+test('watchSessionRoots: watches each agent folder once and reports a change inside it', async () => {
+  const prevHome = process.env.HOME;
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-watch-'));
+  process.env.HOME = tempHome;
+  try {
+    const projects = path.join(tempHome, '.claude', 'projects', 'p1');
+    fs.mkdirSync(projects, { recursive: true });
+    let changed;
+    const sawChange = new Promise((resolve) => { changed = resolve; });
+
+    assert.equal(_test.watchSessionRoots(changed), true);
+    assert.equal(_test.watchSessionRoots(changed), false);
+    fs.writeFileSync(path.join(projects, 's.jsonl'), '{}\n');
+    await sawChange;
+
+    fs.mkdirSync(path.join(tempHome, '.codex', 'sessions'), { recursive: true });
+    assert.equal(_test.watchSessionRoots(() => {}), true);
+  } finally {
+    process.env.HOME = prevHome;
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+});

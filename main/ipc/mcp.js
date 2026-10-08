@@ -3,9 +3,13 @@
 // targets. The format-aware read/write lives in main/util/mcp-config.js; this
 // file just wires it to the renderer with the project/active-repo context.
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { execFileSync, execFile, spawn } = require('child_process');
 const { ipcMain } = require('electron');
 const { loadConfig } = require('../util/config');
+const { openInMacTerminal } = require('../util/exec');
 const { currentRepoPath } = require('../state/pr-review');
 const { allProviders, getProvider, binFor } = require('../state/ai-providers');
 const { mcpConfigFor } = require('../state/mcp-configs');
@@ -112,7 +116,7 @@ function findLinuxTerminal() {
 // `claude mcp login` is interactive (prompts to paste the redirect URL), so it
 // needs a real TTY — headless fails with "stdin isn't a terminal". Launch it in
 // the OS terminal where the user completes the flow; return the cmd for show/copy.
-ipcMain.handle('mcp-login-terminal', (_event, { name }) => {
+ipcMain.handle('mcp-login-terminal', async (_event, { name }) => {
   if (!name) return { error: 'No server name' };
   const config = loadConfig();
   const bin = binFor('claude', config);
@@ -120,9 +124,9 @@ ipcMain.handle('mcp-login-terminal', (_event, { name }) => {
   const shellCmd = `${shQuote(bin)} mcp login ${shQuote(name)}`;
   try {
     if (process.platform === 'darwin') {
-      const inner = `${shellCmd}; echo; echo '— sign-in finished; you can close this window —'`;
-      const script = `tell application "Terminal"\nactivate\ndo script ${JSON.stringify(inner)}\nend tell`;
-      spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+      const scriptPath = path.join(os.tmpdir(), `klaussy-mcp-login-${Date.now()}.command`);
+      fs.writeFileSync(scriptPath, `#!/bin/sh\n${shellCmd}\necho\necho '— sign-in finished; you can close this window —'\n`, { mode: 0o755 });
+      await openInMacTerminal(scriptPath);
     } else if (process.platform === 'win32') {
       spawn('cmd', ['/c', 'start', 'cmd', '/k', displayCmd], { detached: true, stdio: 'ignore' }).unref();
     } else {
