@@ -255,6 +255,15 @@
 .monaco-editor.vs .git-gutter-added, .monaco-editor.hc-light .git-gutter-added { --git-gutter-colour: #1a7f37; }
 .monaco-editor.vs .git-gutter-modified, .monaco-editor.hc-light .git-gutter-modified { --git-gutter-colour: #9a6700; }
 .monaco-editor.vs .git-gutter-deleted, .monaco-editor.hc-light .git-gutter-deleted { --git-gutter-colour: #cf222e; }
+/* Forced colours would repaint the solid "added" fill as Canvas; keep all three shapes in the system text colour. */
+@media (forced-colors: active) {
+  .git-gutter-added,
+  .git-gutter-modified,
+  .git-gutter-deleted {
+    forced-color-adjust: none;
+    --git-gutter-colour: CanvasText;
+  }
+}
 
 .file-viewer-tabs {
   display: flex;

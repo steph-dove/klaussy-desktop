@@ -87,7 +87,7 @@
     defs.innerHTML = `
       <linearGradient id="token-bar-grad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="var(--accent)"/>
-        <stop offset="100%" stop-color="color-mix(in srgb, var(--accent) 30%, transparent)"/>
+        <stop offset="100%" stop-color="var(--accent)"/>
       </linearGradient>
       <linearGradient id="token-bar-today-grad" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="var(--accent-hover)"/>

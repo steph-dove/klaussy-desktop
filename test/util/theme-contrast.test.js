@@ -186,7 +186,8 @@ for (const name of Object.keys(presets)) {
   test(`${name}: selected diff text keeps 4.5:1 on the opaque --diff-selection`, () => {
     const sel = v['--diff-selection'];
     assert.match(sel, /^#[0-9a-f]{6}$/i, 'must be opaque so line tints underneath cannot shift it');
-    const fgs = [t.text, v['--diff-text'], v['--diff-add-fg'], v['--diff-del-fg'], ...syntaxPalette(!!t.lightSyntax, '#diff-view')];
+    // Hunk headers, file headers (.diff-header, --accent) and meta lines (.diff-meta, --text-dim) are selectable too.
+    const fgs = [t.text, v['--diff-text'], v['--diff-add-fg'], v['--diff-del-fg'], v['--diff-hunk-fg'], t.accent, t.textDim, ...syntaxPalette(!!t.lightSyntax, '#diff-view')];
     for (const fg of new Set(fgs)) {
       assert.ok(ratio(fg, sel) >= 4.5, `${fg} on ${sel} is ${ratio(fg, sel).toFixed(2)}`);
     }
@@ -290,11 +291,11 @@ const OPACITY_NON_TEXT_ALLOWED = {
   '01-base.css': ['.sidebar-section-header::after'],
   '02-toolbar-diff.css': ['.actions-dropdown-btn .actions-chevron', '.terminal-container.dragging', '#diff-resize-handle:hover, #diff-resize-handle.active'],
   '04-editor.css': ['.inline-edit-prompt::before'],
-  '05-pr-review-surface.css': ['.task-item.dragging', '.plan-phase-icon-todo::before', '.token-tile-bar'],
+  '05-pr-review-surface.css': ['.task-item.dragging', '.plan-phase-icon-todo::before'],
   '06-searchable-select.css': ['.ss-trigger .ss-caret'],
 };
-// Keyframes that only animate background glows and status dots.
-const OPACITY_NON_TEXT_KEYFRAMES = ['pulseGlow', 'pulse-glow'];
+// Keyframes on purely decorative layers (the dashboard's empty-state glow).
+const OPACITY_NON_TEXT_KEYFRAMES = ['pulseGlow'];
 
 // Opacity multiplies down whatever text the element contains, so any rule may hold text unless allowlisted above; hidden (0) and disabled are exempt.
 test('stylesheets do not dim text with opacity', () => {

@@ -211,10 +211,11 @@
   animation: pulse-glow 1.5s 3;
 }
 
+/* Scale and glow only: these dots hold the phase number, so fading them would dim the text. */
 @keyframes pulse-glow {
-  0% { transform: scale(0.95); opacity: 0.7; }
-  50% { transform: scale(1.15); opacity: 1; }
-  100% { transform: scale(0.95); opacity: 0.7; }
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+  50% { transform: scale(1.15); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); }
 }
 
 /* Subnav within Dev Loop Panel */
