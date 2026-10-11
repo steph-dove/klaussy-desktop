@@ -1,5 +1,5 @@
-# gitleaks config: the full default ruleset, plus a surgical allowlist for the
-# one known-safe false positive. test/util/logging.test.js deliberately contains
+# gitleaks config: the full default ruleset, plus surgical allowlists for
+# known-safe false positives. test/util/logging.test.js deliberately contains
 # FAKE GitHub tokens (`ghp_abcdefghij1234567890abcde`, etc.) — they're fixtures
 # that verify scrubLogMsg() redacts tokens from logs. The regex below matches
 # only that placeholder shape, so real secrets anywhere (including in that file)
@@ -9,8 +9,16 @@ title = "klaussy-desktop gitleaks config"
 [extend]
 useDefault = true
 
-[allowlist]
+[[allowlists]]
 description = "Fake test-fixture tokens used by the log-scrubbing tests"
 regexes = [
   '''gh[a-z]_abcdefghij1234567890abcde''',
 ]
+
+# SHA-256 pins in main/util/voice-model.json; generic-api-key fires on keys like
+# "tokenizer.json". Exempts only a "<file>.json|.onnx" or "sha256" key holding 64 hex chars.
+# No paths: in gitleaks 8.30 a path match exempts the whole file even with condition = "AND".
+[[allowlists]]
+description = "SHA-256 pins of the bundled speech model and runtime"
+regexTarget = "line"
+regexes = ['''^\s*"([\w./-]+\.(json|onnx)|sha256)": "[0-9a-f]{64}",?$''']
