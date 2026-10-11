@@ -202,6 +202,8 @@ function install() {
   fixSpawnPath();
 
   app.whenReady().then(() => {
+    require('./permissions').install();
+
     // Force the macOS app menu name. In dev (`npx electron .`) the bundled
     // Info.plist still says "Electron" — setName at startup overrides what
     // the menu template's `label: app.name` resolves to so the menu bar

@@ -16,6 +16,10 @@
   <key>com.apple.security.network.client</key>
   <true/>
 
+  <!-- Voice input; hardened runtime denies the mic without it. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+
   <!-- NOTE: com.apple.security.files.user-selected.read-write was removed.
        It is a sandbox-only entitlement that activates PowerBox + scoped
        bookmark serialization for NSOpenPanel selections. Klaussy is

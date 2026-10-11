@@ -75,6 +75,11 @@ test('PR picker lists mocked PRs from the fake gh', async ({ mainWindow }) => {
   await expect(list.getByText('Fix the login flow')).toBeVisible();
   await expect(list.getByText('Add dark mode toggle')).toBeHidden();
 
+  // Fuzzy: any word order and small typos still find it.
+  await overlay.locator('.pr-picker-search').fill('flow logn');
+  await expect(list.getByText('Fix the login flow')).toBeVisible();
+  await expect(list.getByText('Add dark mode toggle')).toBeHidden();
+
   await overlay.locator('.pr-picker-cancel').click();
   await expect(overlay).toBeHidden();
 });

@@ -68,7 +68,7 @@ window.AppUtils = (function () {
   }
 
   // Mac matches e.key so layouts where the key moves still work; elsewhere Shift rewrites e.key, so match the physical code.
-  var KEY_CHARS = { Slash: ['/'], Equal: ['=', '+'], Minus: ['-'], Digit0: ['0'] };
+  var KEY_CHARS = { Slash: ['/'], Equal: ['=', '+'], Minus: ['-'], Digit0: ['0'], Space: [' '], Semicolon: [';', ':'] };
 
   // Ctrl+Shift off macOS because plain Ctrl+<letter> belongs to the shell, so opts.shift only matters on macOS.
   function isAppShortcut(e, key, opts) {
@@ -81,10 +81,10 @@ window.AppUtils = (function () {
     return (e.key || '').toLowerCase() === key;
   }
 
-  var CODE_LABELS = { Slash: '/', Equal: '=', Minus: '\u2212', Digit0: '0' };
-  function shortcutLabel(key) {
+  var CODE_LABELS = { Slash: '/', Equal: '=', Minus: '\u2212', Digit0: '0', Space: 'Space', Semicolon: ';' };
+  function shortcutLabel(key, shift) {
     var k = CODE_LABELS[key] || key.toUpperCase();
-    return isMac() ? '\u2318' + k : 'Ctrl+Shift+' + k;
+    return isMac() ? '\u2318' + (shift ? '\u21e7' : '') + k : 'Ctrl+Shift+' + k;
   }
 
   // Handled in app.js; terminals must not forward these to the shell.
@@ -93,7 +93,15 @@ window.AppUtils = (function () {
     quickOpen: { key: 'p', shift: false },
     slash: { key: 'Slash' },
     diff: { key: 'g' },
+    voiceDictate: { key: 'Space', shift: true, optIn: true },
+    voiceCommand: { key: 'Semicolon', shift: true, optIn: true },
   };
+
+  // Opt-in shortcuts only leave the terminal while their feature is on, so the shell keeps those keys otherwise.
+  var optInActive = {};
+  function setShortcutActive(name, on) {
+    optInActive[name] = !!on;
+  }
 
   function isNamedShortcut(e, name) {
     var s = APP_SHORTCUTS[name];
@@ -101,11 +109,14 @@ window.AppUtils = (function () {
   }
 
   function isAnyAppShortcut(e) {
-    return Object.keys(APP_SHORTCUTS).some(function (name) { return isNamedShortcut(e, name); });
+    return Object.keys(APP_SHORTCUTS).some(function (name) {
+      if (APP_SHORTCUTS[name].optIn && !optInActive[name]) return false;
+      return isNamedShortcut(e, name);
+    });
   }
 
   function appShortcutLabel(name) {
-    return shortcutLabel(APP_SHORTCUTS[name].key);
+    return shortcutLabel(APP_SHORTCUTS[name].key, APP_SHORTCUTS[name].shift === true);
   }
 
   // Elsewhere the shell's own Ctrl+L clears.
@@ -201,8 +212,45 @@ window.AppUtils = (function () {
     return Promise.resolve(write).then(function () { flash('Copied'); }, function () { flash('Copy failed'); });
   }
 
+  function words(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  }
+
+  // Levenshtein distance, giving up once it passes max.
+  function editDistance(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    var prev = [];
+    for (var j = 0; j <= b.length; j++) prev[j] = j;
+    for (var i = 1; i <= a.length; i++) {
+      var cur = [i];
+      var rowMin = i;
+      for (var k = 1; k <= b.length; k++) {
+        cur[k] = Math.min(prev[k] + 1, cur[k - 1] + 1, prev[k - 1] + (a[i - 1] === b[k - 1] ? 0 : 1));
+        if (cur[k] < rowMin) rowMin = cur[k];
+      }
+      if (rowMin > max) return max + 1;
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  // Every query word must appear in any order, as a substring or within one edit (two for long words).
+  function fuzzyMatch(query, text) {
+    var qWords = words(query);
+    if (!qWords.length) return true;
+    var haystack = words(text);
+    var joined = haystack.join(' ');
+    return qWords.every(function (q) {
+      if (joined.indexOf(q) !== -1) return true;
+      if (q.length < 4) return false;
+      var max = q.length >= 8 ? 2 : 1;
+      return haystack.some(function (w) { return editDistance(q, w, max) <= max; });
+    });
+  }
+
   return {
     copyText: copyText,
+    fuzzyMatch: fuzzyMatch,
     screenReaderMode: screenReaderMode,
     labelTerminal: labelTerminal,
     prefersReducedMotion: prefersReducedMotion,
@@ -213,6 +261,7 @@ window.AppUtils = (function () {
     isNamedShortcut: isNamedShortcut,
     isAnyAppShortcut: isAnyAppShortcut,
     appShortcutLabel: appShortcutLabel,
+    setShortcutActive: setShortcutActive,
     isClearShortcut: isClearShortcut,
     clearShortcutLabel: clearShortcutLabel,
     escHtml: escHtml,

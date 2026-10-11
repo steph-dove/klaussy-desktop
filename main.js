@@ -17,8 +17,8 @@ if (!acquirePrimaryOrExit()) {
 }
 
 require('./main/util/logging');
-// Before app ready — it registers a privileged scheme.
-require('./main/bootstrap/qa-media-protocol');
+// Before app ready — it registers the privileged schemes.
+require('./main/bootstrap/privileged-schemes');
 const pathGate = require('./main/util/path-gate');
 const { loadConfig } = require('./main/util/config');
 const { instances } = require('./main/state/instances');
@@ -56,6 +56,7 @@ require('./main/ipc/pr-review-comments');
 require('./main/ipc/ollama');
 require('./main/ipc/token-usage');
 require('./main/ipc/session-context');
+require('./main/ipc/voice');
 
 // Wired here so session-activity never imports the instances map back and closes a cycle.
 require('./main/state/session-activity').start(

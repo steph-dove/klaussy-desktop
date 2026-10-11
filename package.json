@@ -19,7 +19,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "lint": "eslint \"main/**/*.js\" main.js preload.js \"renderer/**/*.js\"",
+    "lint": "eslint \"main/**/*.js\" main.js preload.js \"renderer/**/*.js\" \"scripts/**/*.js\"",
     "test": "node --require ./test/setup.js --test test/util/*.test.js",
     "test:e2e": "playwright test",
     "rebuild": "electron-rebuild",
@@ -29,7 +29,8 @@
     "dist:win": "electron-builder --win --x64 --publish never && npm run rebuild",
     "dist:linux": "electron-builder --linux --x64 --publish never && npm run rebuild",
     "release:mac": "node scripts/release-mac.js",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "voice:fetch": "node scripts/fetch-voice-model.js"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
@@ -85,6 +86,12 @@
     "asarUnpack": [
       "node_modules/node-pty/**"
     ],
+    "extraResources": [
+      {
+        "from": "vendor/voice-model",
+        "to": "voice-model"
+      }
+    ],
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "icon.icns",
@@ -115,9 +122,11 @@
         "NSDocumentsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
         "NSDownloadsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
         "NSRemovableVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSNetworkVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them."
+        "NSNetworkVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSMicrophoneUsageDescription": "Klaussy uses the microphone only for voice input you start, and transcribes speech on this machine."
       }
     },
+    "beforePack": "scripts/fetch-voice-model.js",
     "afterSign": "build/notarize.js",
     "dmg": {
       "title": "Klaussy ${version} ${arch}",

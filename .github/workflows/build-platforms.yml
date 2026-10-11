@@ -92,6 +92,13 @@ jobs:
       - name: Rebuild native modules for Electron
         run: npm run rebuild
 
+      # The build's beforePack hook verifies these hashes and fetches only what's missing.
+      - name: Cache voice model
+        uses: actions/cache@v4
+        with:
+          path: vendor/voice-model
+          key: voice-model-${{ hashFiles('main/util/voice-model.json') }}
+
       - name: Build
         run: npm run ${{ matrix.script }}
         env:

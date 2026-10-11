@@ -147,3 +147,60 @@ test('shortcutLabel: platform-specific modifier text', () => {
     assert.equal(AppUtils.clearShortcutLabel(), 'Ctrl+L');
   });
 });
+
+test('voice shortcuts: Cmd+Shift on macOS matches the shifted character', () => {
+  withPlatform('darwin', () => {
+    assert.equal(AppUtils.isNamedShortcut(key({ metaKey: true, shiftKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ metaKey: true, shiftKey: true, key: ':', code: 'Semicolon' }), 'voiceCommand'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ metaKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), false);
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), false);
+  });
+});
+
+test('voice shortcuts: Ctrl+Shift by physical key elsewhere', () => {
+  withPlatform('win32', () => {
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, shiftKey: true, key: ':', code: 'Semicolon' }), 'voiceCommand'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), false);
+  });
+});
+
+test('voice shortcuts are kept from the terminal only while voice is on', () => {
+  const chord = key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' });
+  withPlatform('linux', () => {
+    assert.equal(AppUtils.isAnyAppShortcut(chord), false);
+    AppUtils.setShortcutActive('voiceDictate', true);
+    try {
+      assert.equal(AppUtils.isAnyAppShortcut(chord), true);
+    } finally {
+      AppUtils.setShortcutActive('voiceDictate', false);
+    }
+    assert.equal(AppUtils.isAnyAppShortcut(chord), false);
+  });
+});
+
+test('appShortcutLabel shows Shift for shortcuts that require it', () => {
+  withPlatform('darwin', () => {
+    assert.equal(AppUtils.appShortcutLabel('voiceDictate'), '⌘⇧Space');
+    assert.equal(AppUtils.appShortcutLabel('voiceCommand'), '⌘⇧;');
+    assert.equal(AppUtils.appShortcutLabel('palette'), '⌘K');
+    assert.equal(AppUtils.appShortcutLabel('slash'), '⌘/');
+  });
+  withPlatform('linux', () => {
+    assert.equal(AppUtils.appShortcutLabel('voiceDictate'), 'Ctrl+Shift+Space');
+    assert.equal(AppUtils.appShortcutLabel('voiceCommand'), 'Ctrl+Shift+;');
+  });
+});
+
+test('fuzzyMatch: any word order, substrings, and small typos', () => {
+  const title = '#96 fix(a11y): keep focus through re-renders klaussy-desktop steph-dove open';
+  assert.equal(AppUtils.fuzzyMatch('keep focus', title), true);
+  assert.equal(AppUtils.fuzzyMatch('rerenders focus', title), true);
+  assert.equal(AppUtils.fuzzyMatch('renders focus', title), true);
+  assert.equal(AppUtils.fuzzyMatch('fokus through', title), true);
+  assert.equal(AppUtils.fuzzyMatch('klausy', title), true);
+  assert.equal(AppUtils.fuzzyMatch('a11y steph', title), true);
+  assert.equal(AppUtils.fuzzyMatch('payments', title), false);
+  assert.equal(AppUtils.fuzzyMatch('fox', title), false);
+  assert.equal(AppUtils.fuzzyMatch('', title), true);
+});

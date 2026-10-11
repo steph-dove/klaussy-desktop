@@ -288,10 +288,34 @@ window.App = window.App || {};
         commands.push({ label: 'Grant Agent Permissions…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'grant-permissions'); } });
         commands.push({ label: 'Plan a Task…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'plan'); } });
         commands.push({ label: 'Debug an Issue…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'debug'); } });
-        commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
+        commands.push({ label: 'Review Changes…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'review'); } });
+        // The Dev Loop tab only exists once a loop has started, so there's nothing to show before that.
+        if (task.devLoop) commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
         commands.push({ label: 'Search in Terminal', action: function () { SearchBar.open(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
+        // The terminal in front: the open sub-terminal when there is one, else the agent's.
+        var shown = function () {
+          var sub = task.activeSubId != null && (task.subTerminals || []).find(function (s) { return s.subId === task.activeSubId; });
+          return (sub && sub.terminal) || task.terminal;
+        };
+        commands.push({ label: 'Scroll to Bottom', action: function () { shown().scrollToBottom(); } });
+        commands.push({ label: 'Scroll to Top', action: function () { shown().scrollToTop(); } });
+        commands.push({ label: 'Scroll Up', action: function () { shown().scrollPages(-1); } });
+        commands.push({ label: 'Scroll Down', action: function () { shown().scrollPages(1); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); App.btnDiff.classList.add('active'); } });
+        [['pr', 'Show Pull Request Panel'], ['plan', 'Show Plan'], ['files', 'Show Files'],
+          ['history', 'Show History'], ['notes', 'Show Session Notes']].forEach(function (tab) {
+          commands.push({ label: tab[1], action: function () {
+            App.btnDiff.classList.add('active');
+            // show() is async and resets the panel on first open, so switch tabs after it settles.
+            Promise.resolve(DiffPanel.show(task.worktreePath)).then(function () {
+              var btn = document.querySelector('#diff-tabs .diff-tab[data-tab="' + tab[0] + '"]');
+              if (btn) btn.click();
+            }).catch(function (err) {
+              window.toast.error('Could not open the panel: ' + ((err && err.message) || String(err)));
+            });
+          }});
+        });
         commands.push({ label: 'Pop Out', action: function () { window.klaus.task.popOut(AppState.activeTaskId); } });
         commands.push({ label: 'Kill Task', action: function () { window.klaus.task.kill(AppState.activeTaskId).then(function () { App.removeTaskFromUI(AppState.activeTaskId); }); } });
         if (!task.alive) {
@@ -317,10 +341,19 @@ window.App = window.App || {};
       if (AppState.activeTaskId && window.ActionModal) {
         window.ActionModal.run(AppState.activeTaskId, 'rest-of-the-owl');
       } else {
-        App.btnNewTask.click();
+        document.getElementById('card-dev-loop').click();
       }
     }});
     commands.push({ label: 'Review Pull Request / Merge Request…', action: function () { App.showPrPicker(); } });
+    if (window.AgentsPanel) commands.push({ label: 'Show Active Agents', action: function () { window.AgentsPanel.show(); } });
+    if (window.Voice && window.Voice.isEnabled()) {
+      commands.push({ label: 'Voice: What Can I Say?', action: function () { window.Voice.showHelp(); } });
+      commands.push({ label: 'Voice: History', action: function () { window.Voice.showHistory(); } });
+      commands.push({ label: 'Voice: Choose Microphone…', action: function () { window.Voice.chooseMic(); } });
+    }
+    if (App.prReviewMounted) {
+      commands.push({ label: 'Run AI Review', action: function () { window.Voice.reportAiReview(window.PrReview.runAiReviewNow()); } });
+    }
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
     commands.push({ label: 'Run Slash Command…', action: function () { Dialogs.showSlashLauncher(); } });
@@ -439,17 +472,19 @@ window.App = window.App || {};
     var searchEl = overlay.querySelector('.pr-picker-search');
     var noMatchesEl = overlay.querySelector('.pr-picker-no-matches');
 
-    // Client-side filter over whatever PRs are currently rendered across the
-    // three sections. Each row's textContent already carries number, title,
-    // author and (for the grouped list) repo, so a substring test covers them.
-    // Group/section headers hide when nothing under them survives.
+    // Row text carries number, title, author and repo, so one fuzzy match covers them; empty headers hide.
     function applyPrFilter() {
       var q = (searchEl.value || '').trim().toLowerCase();
+      // A bare number picks that PR exactly, so 103 doesn't also show #1030.
+      var num = /^#?(\d+)$/.exec(q);
       var anyVisible = false;
       [recentEl, listEl, authoredEl].forEach(function (container) {
         if (!container) return;
         container.querySelectorAll('.pr-picker-item').forEach(function (item) {
-          var match = !q || item.textContent.toLowerCase().indexOf(q) !== -1;
+          var numEl = item.querySelector('.pr-picker-num');
+          var match = !q || (num
+            ? !!numEl && numEl.textContent.trim() === '#' + num[1]
+            : AppUtils.fuzzyMatch(q, item.textContent));
           item.style.display = match ? '' : 'none';
           if (match) anyVisible = true;
         });

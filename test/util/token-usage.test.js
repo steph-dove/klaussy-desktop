@@ -388,8 +388,10 @@ test('watchSessionRoots: watches each agent folder once and reports a change ins
 
     assert.equal(_test.watchSessionRoots(changed), true);
     assert.equal(_test.watchSessionRoots(changed), false);
-    fs.writeFileSync(path.join(projects, 's.jsonl'), '{}\n');
-    await sawChange;
+    // macOS drops events from before its FSEvents stream starts, which can take seconds on a loaded runner, so keep writing until one lands.
+    let writes = 0;
+    const poke = setInterval(() => fs.writeFileSync(path.join(projects, 's.jsonl'), '{}\n'.repeat(++writes)), 250);
+    try { await sawChange; } finally { clearInterval(poke); }
 
     fs.mkdirSync(path.join(tempHome, '.codex', 'sessions'), { recursive: true });
     assert.equal(_test.watchSessionRoots(() => {}), true);

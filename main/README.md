@@ -11,6 +11,7 @@ entry point — it requires everything here and hands off to
   - `path-gate.js` — `pathUnder` / `pathUnderAnyRoot`: symlink-safe path containment.
   - `exec.js` — `execFileP`, `ghExec`/`ghExecP`, gh token cache, stderr tail cap, env sanitizer.
   - `config.js` — `loadConfig` / `saveConfig` (atomic + queued) + pr-review-cache migration.
+  - `voice-model.json` — pinned speech model and runtime files with their SHA-256s (read by `scripts/fetch-voice-model.js` and `bootstrap/voice-protocol.js`).
 
 - **state/** — owns long-lived mutable state. Import `util/` only; never each other (except `pr-review → instances`).
   - `windows.js` — `allWindows`, `mainWindow`, `hardenWindow`, `createWindow`.
@@ -22,10 +23,14 @@ entry point — it requires everything here and hands off to
 
 - **ipc/** — the handler layer. Each file registers its IPC handlers on load.
   - `windows-ipc.js`, `lsp.js`, `skills.js`, `files.js`, `gh.js`, `git.js`, `tasks.js`, `repo.js`, `claude-stream-ipc.js`, `pr-review.js`.
+  - `voice.js` — `voice-prepare`: voice pref, bundled model present, macOS mic access.
 
 - **bootstrap/** — app lifecycle.
   - `menu.js` — macOS menu template (`installAppMenu()`).
   - `app-events.js` — PATH fix + refresh, whenReady, before-quit, saveSessions. `install()` attaches everything.
+  - `privileged-schemes.js` — the one `registerSchemesAsPrivileged` call (Electron honours only one; a second replaces the first). A new custom scheme exports its entry and is added here. Required before app ready.
+  - `qa-media-protocol.js`, `voice-protocol.js` — the `klaussy-qa:` and `klaussy-voice:` handlers.
+  - `permissions.js` — the session's one permission handler. Default grant for everything except the mic, which only the main window gets while voice input is on.
 
 ## Injection
 

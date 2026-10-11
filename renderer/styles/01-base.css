@@ -571,6 +571,94 @@ body.custom-titlebar #titlebar-content {
   box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
 }
 
+.voice-btn[hidden] {
+  display: none !important;
+}
+
+.voice-btn.on {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-contrast) !important;
+}
+
+.voice-btn.recording {
+  background: var(--error) !important;
+  border-color: var(--error) !important;
+  color: var(--error-contrast) !important;
+  animation: btn-voice-pulse 1.2s ease-in-out infinite;
+}
+
+.voice-btn {
+  position: relative;
+}
+
+/* Processing: amber with a spinning ring, distinct from ready (accent) and listening (red). */
+.voice-btn.busy {
+  background: var(--warning) !important;
+  border-color: var(--warning) !important;
+  color: var(--accent-contrast) !important;
+  cursor: progress;
+}
+
+.voice-btn.busy::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-contrast);
+  border-right-color: var(--accent-contrast);
+  animation: btn-voice-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes btn-voice-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes btn-voice-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(240, 93, 84, 0.5); }
+  50% { box-shadow: 0 0 0 4px rgba(240, 93, 84, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-btn.recording,
+  .voice-btn.busy::after { animation: none; }
+}
+
+#voice-float {
+  display: none;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10050;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border, #33333d);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+body.dialog-open #voice-float:not([hidden]),
+body.pr-review-popout #voice-float:not([hidden]) {
+  display: flex;
+}
+#voice-float.docked {
+  position: static;
+  width: 26px;
+  height: 26px;
+  box-shadow: none;
+}
+
 #btn-review-pr {
   font-size: 11px;
   font-weight: 600;

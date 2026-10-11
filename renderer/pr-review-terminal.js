@@ -1474,6 +1474,20 @@
     if (PR.lastState) PR.render(PR.lastState);
   };
 
+  // Reruns go through the button so its cleanup runs; returns 'started', 'running' or 'not-loaded'.
+  PR.runAiReviewNow = function() {
+    var host = PR.hostEl;
+    if (!host) return 'not-loaded';
+    var tab = host.querySelector('.pr-review-tab[data-tab="ai-review"]');
+    if (tab) tab.click();
+    var btn = host.querySelector('.pr-ai-run') || host.querySelector('.pr-ai-rerun');
+    if (btn) {
+      btn.click();
+      return 'started';
+    }
+    return host.querySelector('.pr-ai-cancel') ? 'running' : 'not-loaded';
+  };
+
   PR.startAiReview = function(provider) {
     if (PR.aiReview.requestId) return;
     provider = provider || (window.AgentSplit && AgentSplit.getAgent('review'));

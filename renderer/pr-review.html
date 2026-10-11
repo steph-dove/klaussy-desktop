@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' klaussy-voice:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self' klaussy-voice:; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
   <title>Klaussy — Review</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,6 +17,13 @@
 </head>
 <body class="pr-review-popout">
   <main id="pr-review-root" aria-label="Pull request review"></main>
+  <button id="voice-float" class="voice-btn" aria-pressed="false" aria-label="Voice input: click to talk" title="Click to talk">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"></rect>
+      <path d="M3 7.5a5 5 0 0 0 10 0"></path>
+      <line x1="8" y1="12.5" x2="8" y2="14.5"></line>
+    </svg>
+  </button>
   <script src="a11y.js"></script>
   <!-- Theme must load + init here too: this popout is a separate window with
        its own document, so it has to read the shared theme from config and
@@ -43,6 +50,9 @@
   <script src="pr-review-conversation.js"></script>
   <script src="pr-review-checks.js"></script>
   <script src="focus-regions.js"></script>
+  <script src="command-palette.js"></script>
+  <script src="voice-text.js"></script>
+  <script src="voice.js"></script>
   <script>
     // Read the shared theme from config and apply it before/while mounting so
     // the popout matches the main window (init() is async but applies the CSS
@@ -59,13 +69,18 @@
         if (AppState.savedPrefs.fontFamily) rt.terminal.options.fontFamily = AppState.savedPrefs.fontFamily;
       });
     }
+    Voice.init();
     window.klaus.ui.getPreferences().then(function (prefs) {
       AppState.savedPrefs = prefs || {};
+      Voice.setEnabled(!prefs || prefs.voiceInput !== false);
+      Voice.setMicId(prefs && prefs.voiceMicId);
       if (prefs && prefs.fontSize) AppState.currentFontSize = prefs.fontSize;
       applyTerminalPrefs();
     }).catch(function (err) { console.error('[pr-review popout] getPreferences failed', err); });
     window.klaus.ui.onPreferencesChanged(function (prefs) {
       Object.assign(AppState.savedPrefs, prefs);
+      if (prefs.voiceInput !== undefined) Voice.setEnabled(prefs.voiceInput);
+      if (prefs.voiceMicId !== undefined) Voice.setMicId(prefs.voiceMicId);
       if (prefs.fontSize) AppState.currentFontSize = prefs.fontSize;
       applyTerminalPrefs();
     });

@@ -23,7 +23,7 @@
       "rules": { "no-undef": "error" }
     },
     {
-      "files": ["test/**/*.js"],
+      "files": ["test/**/*.js", "scripts/**/*.js"],
       "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
       "env": { "node": true, "es2022": true },
       "rules": { "no-undef": "error" }
@@ -99,9 +99,16 @@
         "ThemeManager": "writable",
         "toast": "writable",
         "toggleBlame": "writable",
+        "Voice": "writable",
+        "VoiceText": "writable",
         "WordComplete": "writable"
       },
       "rules": { "no-undef": "error", "no-redeclare": "error" }
+    },
+    {
+      "files": ["renderer/voice-worker.js"],
+      "parserOptions": { "ecmaVersion": 2022, "sourceType": "module" },
+      "env": { "worker": true, "es2022": true }
     },
     {
       "files": ["test/**/*.js", "e2e/**/*.js"],

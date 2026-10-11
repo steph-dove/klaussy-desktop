@@ -1429,6 +1429,8 @@ window.Dialogs = (function () {
       { keys: AppUtils.appShortcutLabel('slash'), label: 'Run a slash command in the active terminal' },
       { keys: AppUtils.appShortcutLabel('diff'), label: 'Toggle changes panel for current task' },
       { keys: mac ? '\u2318\u21e7A' : 'Ctrl+Shift+A', label: 'Show active agents' },
+      { keys: 'Hold ' + AppUtils.appShortcutLabel('voiceDictate'), label: 'Dictate into the active agent (voice input on)' },
+      { keys: 'Hold ' + AppUtils.appShortcutLabel('voiceCommand'), label: 'Speak a command, e.g. "open pr review" (voice input on)' },
       { keys: 'F1', label: 'Show this list' },
       { keys: key('f'), label: 'Search inside the active terminal' },
       { keys: AppUtils.clearShortcutLabel(), label: 'Clear the active terminal' },

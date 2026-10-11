@@ -38,8 +38,13 @@ const fakeApp = {
   setName: () => {},
   on: () => {},
   whenReady: () => Promise.resolve(),
+  isPackaged: false,
+  getAppPath: () => path.join(__dirname, '..'),
   dock: null,
 };
+
+// Records each registerSchemesAsPrivileged call; Electron honours only one.
+const privilegedSchemeCalls = [];
 
 const electronStub = {
   app: fakeApp,
@@ -50,7 +55,12 @@ const electronStub = {
   Menu: { setApplicationMenu: () => {}, buildFromTemplate: () => ({}) },
   nativeTheme: { shouldUseDarkColors: false, on: () => {} },
   Notification: class { on() {} show() {} close() {} },
-  protocol: { registerSchemesAsPrivileged: () => {}, handle: () => {} },
+  protocol: { registerSchemesAsPrivileged: (schemes) => privilegedSchemeCalls.push(schemes), handle: () => {} },
+  session: { defaultSession: { setPermissionRequestHandler: () => {} } },
+  systemPreferences: {
+    getMediaAccessStatus: () => 'granted',
+    askForMediaAccess: () => Promise.resolve(true),
+  },
   net: { fetch: () => Promise.resolve() },
   contextBridge: { exposeInMainWorld: () => {} },
   ipcRenderer: { invoke: () => Promise.resolve(), on: () => {}, send: () => {} },
@@ -63,4 +73,4 @@ Module._load = function (request, parent, ...rest) {
   return origLoad.call(this, request, parent, ...rest);
 };
 
-module.exports = { testUserData, fakeApp, electronStub };
+module.exports = { testUserData, fakeApp, electronStub, privilegedSchemeCalls };

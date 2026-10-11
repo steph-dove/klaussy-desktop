@@ -1,0 +1,368 @@
+// Pure text handling for voice input: cleaning a dictated transcript before it
+// is pasted into a PTY, and matching a spoken command to a palette entry.
+
+(function (root) {
+  'use strict';
+
+  var PASTE_MARKERS = /\x1b\[20[01]~/g;
+  var CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+  var NON_SPEECH = /^[[(](blank_audio|silence|music|inaudible|no speech)[\])]$/i;
+  // Ignored on both sides when scoring, so "open the PR panel" is judged on "pr panel".
+  var STOPWORDS = {
+    a: 1, an: 1, the: 1, my: 1, to: 1, or: 1, and: 1, for: 1, please: 1, me: 1, i: 1, you: 1,
+    can: 1, could: 1, would: 1, want: 1, like: 1, open: 1, show: 1, view: 1, see: 1, display: 1,
+  };
+
+  // Spoken phrasings that don't share enough words with a palette label to
+  // score; each lists labels in preference order, since some are task-only.
+  var ALIASES = [
+    // In PR review it's the AI review; in a session it's that session's diff, like its Review chip.
+    { re: /^(run|start|kick off|begin|do|rerun|re run) (the |an |a )?(ai |code |pr )?review( again)?$/,
+      labels: ['Run AI Review', 'Review Changes…', 'Review Pull Request / Merge Request…'] },
+    { re: /^((run|start|do) (a )?)?(code )?review (my|the|these|this|our) (changes|diff|code|work|session)$/,
+      labels: ['Review Changes…'] },
+    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code reviews?|co reviews?|review code)$|^(open |start )?(reviews?|cr|c r|a cr)$/,
+      labels: ['Review Pull Request / Merge Request…'] },
+    { re: /^(view|show|open|see) (changes|diff)$|^(show |open |toggle )?diff( panel)?$/,
+      labels: ['Show Changes', 'Toggle Diff Panel'] },
+    { re: /^(new|start|create|open) (a )?(new )?(session|task|agent)$/, labels: ['New Task'] },
+    // The sidebar bar reads "No active agents" or "1 result ready", so people say either.
+    { re: /^((open|show|view|see|check) )?(the |my )?(agent list|agents list|agent panel|agents|active agents|running agents|results?|\d+ results?( ready)?|results? ready)$/,
+      labels: ['Show Active Agents'] },
+    { re: /^(run|start|kick off|launch) (the )?(full )?(dev loop|rest of (the )?owl)$/,
+      labels: ['Run Full Dev Loop (Rest of the Owl)…'] },
+    // Shows a running loop; with none yet, starts one (that asks for the task first).
+    { re: /^((open|show|view|see) )?(the )?(full )?(dev loop|rest of (the )?owl)( panel| tab| progress)?$/,
+      labels: ['Show Dev Loop Progress', 'Run Full Dev Loop (Rest of the Owl)…'] },
+    { re: /^((open|show|view|see) )?(the )?(pr|pull request|merge request|mr) (panel|tab)$/,
+      labels: ['Show Pull Request Panel'] },
+    { re: /^(open )?(settings|preferences|prefs)$/, labels: ['Preferences'] },
+    { re: /^(help|voice help|what can i say|what can you do|what do i say|show voice commands|list (voice )?commands)$/, labels: ['Voice: What Can I Say?'] },
+    { re: /^((show|open) )?(voice history|what did you hear|what did you hear me say|what did i say)$/, labels: ['Voice: History'] },
+    { re: /^(choose|change|pick|select|switch|set)( the| my)? (microphone|mic|input)$|^use (another|different) (microphone|mic)$/, labels: ['Voice: Choose Microphone…'] },
+    { re: /^clear( terminal| screen)?$/, labels: ['Clear Terminal'] },
+    { re: /^((scroll|go|jump|skip|move)( all the way)?( down)?( to)?( the)? (bottom|end|latest|newest)|scroll all the way down|bottom|back to (the )?bottom)$/, labels: ['Scroll to Bottom'] },
+    { re: /^((scroll|go|jump|skip|move)( all the way)?( up)?( to)?( the)? (top|beginning|start)|scroll all the way up|top)$/, labels: ['Scroll to Top'] },
+    { re: /^(scroll up|page up)( (a )?(bit|little|page))?$/, labels: ['Scroll Up'] },
+    { re: /^(scroll down|page down)( (a )?(bit|little|page))?$/, labels: ['Scroll Down'] },
+  ];
+  // No bare "enter": a one-word mishearing could approve an agent's pending tool call.
+  var SEND = /^(send|submit|send it|press enter|hit enter)$/;
+  // "focus on the auth fix session", "go to session billing refactor", "open session auth fix".
+  var SWITCH = /^(?:(?:switch|go|jump|change|move|focus)(?: over)?(?: on| to)?|(?:open|show)(?= (?:session|tab|task|window) ))(?: the)? (?:(?:session|tab|task|window) )?(.+?)(?: (?:session|tab|task|window))?$/;
+  // A misheard word must never end an agent session, so these stay keyboard-only.
+  var NOT_BY_VOICE = /^(Kill Task|Restart )/;
+  var THRESHOLD = 0.6;
+  // One word buried in a long label ("gemini" in "Open Folder or File in Gemini CLI") isn't a match.
+  var MIN_DICE = 0.5;
+  var MIN_LEAD = 0.05;
+
+  function sanitizeDictation(text) {
+    var clean = String(text || '')
+      .replace(PASTE_MARKERS, '')
+      .replace(CONTROL_CHARS, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return NON_SPEECH.test(clean) ? '' : clean;
+  }
+
+  var UNITS = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+    ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+  var TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  var NUMBER_WORD = /^(zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|\d+)$/;
+
+  // "one oh three" -> 103 (digit by digit), "one hundred three" -> 103, "forty two" -> 42.
+  function wordsToNumber(words) {
+    var digitByDigit = words.every(function (w) { return Object.hasOwn(UNITS, w) && UNITS[w] < 10 || /^\d$/.test(w); });
+    if (digitByDigit && words.length > 1) {
+      return words.map(function (w) { return /^\d$/.test(w) ? w : String(UNITS[w]); }).join('');
+    }
+    var total = 0;
+    var current = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (/^\d+$/.test(w)) current += Number(w);
+      else if (Object.hasOwn(UNITS, w)) current += UNITS[w];
+      else if (Object.hasOwn(TENS, w)) current += TENS[w];
+      else if (w === 'hundred') current = (current || 1) * 100;
+      else if (w === 'thousand') { total += (current || 1) * 1000; current = 0; }
+    }
+    return String(total + current);
+  }
+
+  // Runs of two or more number words become digits; a lone one only after "pr", "number" or "issue".
+  function numbersToDigits(text) {
+    var words = text.split(' ');
+    var out = [];
+    var i = 0;
+    while (i < words.length) {
+      var j = i;
+      while (j < words.length && NUMBER_WORD.test(words[j])) j++;
+      var run = words.slice(i, j);
+      var spelled = run.some(function (w) { return !/^\d+$/.test(w); });
+      var afterPr = /^(pr|number|no|issue|request)$/.test(words[i - 1] || '');
+      if (spelled && (run.length > 1 || afterPr)) {
+        out.push(wordsToNumber(run));
+        i = j;
+      } else {
+        out.push(words[i]);
+        i++;
+      }
+    }
+    return out.join(' ');
+  }
+
+  function normalize(text) {
+    return numbersToDigits(String(text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\bp r\b/g, 'pr')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/^(hey |ok |okay )?klaussy /, '')
+      .replace(/^(please |can you |could you |would you |let s |lets |i want to |i d like to |go ahead and )+/, '')
+      .replace(/ please$/, '')
+      .replace(/\b(a|an) /g, ''));
+  }
+
+  // Spoken short forms count as the words the palette labels spell out.
+  var EXPAND = { pr: ['pull', 'request'], prs: ['pull', 'request'], mr: ['merge', 'request'] };
+
+  function tokens(text) {
+    var out = [];
+    normalize(text).split(' ').forEach(function (w) {
+      if (!w || STOPWORDS[w]) return;
+      if (EXPAND[w]) out.push.apply(out, EXPAND[w]);
+      else out.push(w);
+    });
+    return out;
+  }
+
+  // Half Dice similarity, half how much of what was said appears in the label:
+  // "dev loop" covers "Show Dev Loop Progress" fully even though the label is longer.
+  function score(spoken, label) {
+    if (!spoken.length || !label.length) return 0;
+    var setA = new Set(spoken);
+    var setB = new Set(label);
+    var shared = 0;
+    setA.forEach(function (w) { if (setB.has(w)) shared++; });
+    var dice = (2 * shared) / (setA.size + setB.size);
+    if (dice < MIN_DICE) return 0;
+    return (dice + shared / setA.size) / 2;
+  }
+
+  // Highest-scoring command, or null when nothing clears the threshold or two
+  // different labels score too close to call.
+  function best(spoken, candidates, labelOf) {
+    var words = tokens(spoken);
+    var top = null;
+    var runnerUp = 0;
+    candidates.forEach(function (cmd) {
+      var s = score(words, tokens(labelOf(cmd)));
+      if (!top || s > top.score) {
+        if (top && top.cmd.label !== cmd.label) runnerUp = top.score;
+        top = { cmd: cmd, score: s };
+      } else if (cmd.label !== top.cmd.label && s > runnerUp) {
+        runnerUp = s;
+      }
+    });
+    if (!top || top.score < THRESHOLD || top.score - runnerUp < MIN_LEAD) return null;
+    return top.cmd;
+  }
+
+  var PR_WORDS = '(?:pr|prs|pull request|merge request|mr)';
+  var PR_REQUEST = [
+    // "review pr 103", "open pr review for the login fix"
+    new RegExp('^(?:open |start |show )?(?:the )?(?:' + PR_WORDS + ' review|review (?:the )?' + PR_WORDS + ')(?: number| no)?(?: (?:for|of|on|called|about|titled|named|with))? (.+)$'),
+    // "review the voice pr"
+    new RegExp('^(?:open |start )?review (?:the )?(.+?) ' + PR_WORDS + '$'),
+  ];
+
+  // The PR named in a spoken review request ("review pr 103"), or null.
+  function parsePrRequest(text) {
+    var spoken = normalize(text);
+    for (var i = 0; i < PR_REQUEST.length; i++) {
+      var m = spoken.match(PR_REQUEST[i]);
+      if (m) {
+        var query = m[1].replace(/^(number|no|the) /, '').trim();
+        // "for me" names no PR.
+        var named = tokens(query).filter(function (w) { return !/^(pull|request|merge|review)$/.test(w); });
+        if (/^\d+$/.test(query) || named.length) return query;
+      }
+    }
+    return null;
+  }
+
+  var UNDO = /^(delete|scratch|undo|remove|erase) (that|it|this|the last (one|bit|part|thing))$/;
+  var DISCARD_TAIL = / (delete|scratch|undo|erase) (that|it|this)$/;
+  var STOP = /^(stop listening|stop|that s all|thats all|that s it|i m done|im done|done|we re done|never mind|nevermind|goodbye|bye)$/;
+  var RESTORE = /^(put (that|it) back|restore (that|it)|bring (that|it) back|type that|undo (the )?delete)$/;
+
+  // Branch-style text for session names: "Fix the login bug" -> "fix-the-login-bug".
+  function toBranchName(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
+  var CLICK = /^(?:select|click|press|tap|hit|choose|use|pick|open|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button|agent|option|model|provider))? (.+?)(?: (?:tab|button|agent|option|model|provider))?$/;
+  var DISMISS_WORDS = /^(close|cancel|dismiss|escape|exit|back|go|this|that|it|the|window|dialog|modal|popup|picker|please)$/;
+  var NEXT = /^(next|next field|move on|tab|(i m |im )?done (naming|typing|with (it|that|this|the name))( the session| it)?|that s the name)$/;
+
+  // Index of the control a phrase names, or -1; without a click verb it must cover most of a short name, so dictation can't press buttons.
+  function pickControl(text, names, fuzzy) {
+    var spoken = normalize(text);
+    var m = spoken.match(CLICK);
+    var phrase = m ? m[1] : spoken;
+    var words = phrase.split(' ').filter(Boolean);
+    if (!words.length || (!m && words.length > 4)) return -1;
+    var best = -1;
+    var bestScore = 0;
+    var tie = false;
+    // Two controls with the same name (a toolbar and a tab both saying "Run review") do the same thing, so that's no tie.
+    names.forEach(function (name, i) {
+      var nameWords = normalize(name).split(' ').filter(function (w) { return w && !/^\d+$/.test(w); });
+      if (!nameWords.length || !fuzzy(phrase, name)) return;
+      var covered = nameWords.filter(function (w) { return fuzzy(w, phrase); }).length / nameWords.length;
+      if (covered < (m ? 0.5 : 0.75)) return;
+      // Saying a name exactly, in order, beats a partial or typo match ("glab test" vs "test glab").
+      var whole = normalize(name);
+      var full = whole.replace(/ \d+$/, '');
+      var score = covered + (whole === phrase ? 2.5 : full === phrase ? 2 : (' ' + whole + ' ').indexOf(' ' + phrase + ' ') !== -1 ? 1 : 0);
+      if (score > bestScore) { best = i; bestScore = score; tie = false; } else if (score === bestScore && normalize(name) !== normalize(names[best])) tie = true;
+    });
+    return tie ? -1 : best;
+  }
+
+  // Index of the control whose whole name is exactly what was said (ignoring a trailing count), or -1.
+  function exactControl(text, names) {
+    var spoken = normalize(text);
+    // An exact name, number included, beats one that only matches once a trailing count is dropped.
+    var exact = names.filter(function (n) { return normalize(n) === spoken; });
+    var strip = exact.length ? function (n) { return n; } : function (n) { return n.replace(/ \d+$/, ''); };
+    var hit = -1;
+    for (var i = 0; i < names.length; i++) {
+      if (strip(normalize(names[i])) !== spoken) continue;
+      if (hit !== -1 && normalize(names[hit]) !== normalize(names[i])) return -1;
+      if (hit === -1) hit = i;
+    }
+    return hit;
+  }
+
+  var ORDINALS = { first: 0, '1st': 0, top: 0, latest: 0, newest: 0, 'most recent': 0, second: 1, '2nd': 1, third: 2, '3rd': 2, fourth: 3, '4th': 3, fifth: 4, '5th': 4, last: -1, oldest: -1 };
+  var ROW_PICK = /^(?:(?:open|show|view|select|pick|choose|go to) )?(?:the |my )?(first|1st|top|latest|newest|most recent|second|2nd|third|3rd|fourth|4th|fifth|5th|last|oldest|completed|complete|finished|done|ready|new|unread|failed|errored|broken|running|active)?(?: (?:one|agent|task|result|run))?$/;
+
+  // Which row of a list was meant: { index } for "the second one", { state } for "the completed one", or null.
+  function listPick(text) {
+    var spoken = normalize(text);
+    if (/^(open|show|view) (it|that|that one|this one|the results?|results?)$/.test(spoken)) return { state: 'done' };
+    var m = spoken.match(ROW_PICK);
+    if (!m || !m[1]) return null;
+    if (Object.hasOwn(ORDINALS, m[1])) return { index: ORDINALS[m[1]] };
+    if (/^(failed|errored|broken)$/.test(m[1])) return { state: 'error' };
+    if (/^(running|active)$/.test(m[1])) return { state: 'running' };
+    return { state: 'done' };
+  }
+
+  // "new session and then select gemini" -> ['new session', 'select gemini']; one part when there is no "then".
+  function splitChain(text) {
+    return String(text || '').split(/\s*,?\s*\b(?:and then|then)\b\s*,?\s*/i)
+      .map(function (p) { return p.replace(/^[.,\s]+|[,\s]+$/g, ''); })
+      .filter(Boolean);
+  }
+
+  // Shell input: no sentence punctuation, and "Git status." becomes "git status" (acronyms like "PR" stay).
+  function shellText(text) {
+    var out = String(text || '').replace(/[.!?]+$/, '');
+    return /^[A-Z][a-z]/.test(out) ? out.charAt(0).toLowerCase() + out.slice(1) : out;
+  }
+
+  function endsWithDiscard(text) {
+    return DISCARD_TAIL.test(normalize(text));
+  }
+
+  // What to look up when someone speaks to the open PR picker: "select the keep focus PR" is "keep focus".
+  function prQueryFromPicker(text) {
+    return normalize(text)
+      .replace(/^(select|pick|choose|open|review|go to|show|take|use)( me)? /, '')
+      .replace(/^(the|number|no) /, '')
+      .replace(/ (pr|pull request|merge request|mr|one)$/, '')
+      .trim();
+  }
+
+  // Returns { kind: 'send' | 'undo' | 'restore' | 'stop' | 'next' | 'dismiss' }, { kind: 'pr', query }, { kind: 'command', command } or null.
+  function matchCommand(text, allCommands) {
+    var commands = allCommands.filter(function (c) { return !NOT_BY_VOICE.test(c.label); });
+    var spoken = normalize(text);
+    if (!spoken) return null;
+    if (SEND.test(spoken)) return { kind: 'send' };
+    if (UNDO.test(spoken)) return { kind: 'undo' };
+    if (RESTORE.test(spoken)) return { kind: 'restore' };
+    if (STOP.test(spoken)) return { kind: 'stop' };
+    if (NEXT.test(spoken)) return { kind: 'next' };
+    var said = spoken.split(' ');
+    if (said.every(function (w) { return DISMISS_WORDS.test(w); }) && said.some(function (w) { return /^(close|cancel|dismiss|escape|exit|back)$/.test(w); })) {
+      return { kind: 'dismiss' };
+    }
+    var prQuery = parsePrRequest(text);
+    if (prQuery) return { kind: 'pr', query: prQuery };
+
+    // "open the code review window" tries "open code review window", then "open code review"; the fuller form wins so "pr panel" keeps its panel.
+    var bare = spoken.replace(/\b(the|my|this|that|our) /g, '');
+    var forms = [spoken, bare, bare.replace(/ (window|panel|screen|view|dialog|page)$/, '')];
+    for (var f = 0; f < forms.length; f++) {
+      for (var i = 0; i < ALIASES.length; i++) {
+        if (!ALIASES[i].re.test(forms[f])) continue;
+        for (var j = 0; j < ALIASES[i].labels.length; j++) {
+          var label = ALIASES[i].labels[j];
+          var hit = commands.find(function (c) { return c.label === label; });
+          if (hit) return { kind: 'command', command: hit, alias: true };
+        }
+      }
+    }
+
+    var sw = spoken.match(SWITCH);
+    if (sw) {
+      var switches = commands.filter(function (c) { return c.label.indexOf('Switch to: ') === 0; });
+      var target = best(sw[1], switches, function (c) { return c.label.slice('Switch to: '.length); });
+      if (target) return { kind: 'command', command: target };
+    }
+
+    var cmd = best(spoken, commands, function (c) { return c.label; });
+    return cmd ? { kind: 'command', command: cmd } : null;
+  }
+
+  var FOCUS = /^(focus|put (?:the |my )?cursor|click|go|jump|move|switch)(?: (?:on|in|into|to|inside))? (.+)$/;
+  var FOCUS_NOUN = /\b(input|box|field|text area|terminal|chat|prompt)\b/;
+
+  // Verbs other than focus/put need a box or terminal named, so "go to auth fix" still switches sessions; query '' means whatever is in front.
+  function parseFocus(text) {
+    var m = normalize(text).match(FOCUS);
+    if (!m) return null;
+    if (!/^(focus|put)/.test(m[1]) && !FOCUS_NOUN.test(m[2])) return null;
+    var query = m[2].replace(/\b(the|my|text|input|box|field|area|inside|in|on|of|into)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    return { query: query };
+  }
+
+  // Nouns for Klaussy's own UI; "pull request", "server" and "test" are left out because agents get asked about those.
+  var UI_NOUN = /\b(reviews?|revues?|cr|panel|window|picker|dialog|modal|tab|settings|preferences|prefs|history|microphone|mic|owl|agents|agent list|sidebar|palette|zoom)\b/;
+
+  // A short phrase naming part of Klaussy that nothing matched: worth asking Ollama before typing it into the agent.
+  function mentionsAppUi(text) {
+    var spoken = normalize(text);
+    return !!spoken && spoken.split(' ').length <= 6 && !/\b(and|then|so|because)\b/.test(spoken) && UI_NOUN.test(spoken);
+  }
+
+  // Whether a chosen action shares a word (or, for longer words, its first three letters) with what was said, so "show the failing test" can't become "Run Full Dev Loop".
+  function sharesWord(text, label) {
+    var said = tokens(text);
+    var named = tokens(label);
+    return said.some(function (w) {
+      return named.some(function (l) { return l === w || (w.length >= 4 && l.length >= 4 && l.slice(0, 3) === w.slice(0, 3)); });
+    });
+  }
+
+  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
+    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl, exactControl: exactControl, listPick: listPick,
+    splitChain: splitChain, shellText: shellText, mentionsAppUi: mentionsAppUi, sharesWord: sharesWord, parseFocus: parseFocus };
+  if (root) root.VoiceText = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : null);

@@ -25,7 +25,8 @@ window.A11y = (function () {
     '[tabindex]:not([tabindex="-1"])',
   ].join(',');
 
-  const KEEP_LIVE = '#klaussy-toast-stack, .a11y-live';
+  // #voice-float stays usable over dialogs so voice can keep talking to them.
+  const KEEP_LIVE = '#klaussy-toast-stack, .a11y-live, #voice-float';
   const CLOSE_LABEL = /^(cancel|close|dismiss|hide|not now|done|×|✕)$/i;
 
   const stack = [];
@@ -113,6 +114,7 @@ window.A11y = (function () {
     const opener = active && active !== document.body && !overlay.contains(active) ? active : (lower || lastFocusOutside);
     const entry = { overlay: overlay, dialog: dialog, opener: opener, inerted: inertOthers(overlay) };
     stack.push(entry);
+    document.body.classList.add('dialog-open');
     if (!overlay.contains(document.activeElement)) focusFirst(dialog, dialog);
   }
 
@@ -129,6 +131,7 @@ window.A11y = (function () {
 
   function closeEntry(entry) {
     stack.splice(stack.indexOf(entry), 1);
+    document.body.classList.toggle('dialog-open', stack.length > 0);
     entry.inerted.forEach(releaseInert);
     restoreFocus(entry);
   }

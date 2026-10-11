@@ -274,6 +274,8 @@ ipcMain.handle('get-preferences', () => {
     // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
+    voiceInput: config.voiceInput !== false,
+    voiceMicId: config.voiceMicId || '',
     // Nemesis8 named gateway profiles (migrates the legacy single-gateway keys
     // into one profile when none exist yet).
     nemesisProfiles: getNemesisProfiles(),
@@ -409,6 +411,8 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
       }
     }
   }
+  if (prefs.voiceInput !== undefined) config.voiceInput = !!prefs.voiceInput;
+  if (prefs.voiceMicId !== undefined) config.voiceMicId = String(prefs.voiceMicId || '');
   if (prefs.stripComments !== undefined) {
     config.stripComments = !!prefs.stripComments;
     if (config.stripComments) {
