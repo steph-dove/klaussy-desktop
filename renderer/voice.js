@@ -288,9 +288,13 @@
   function run(match, target, heard) {
     if (match.kind === 'pr') return reviewPr(match.query);
     if (match.kind === 'dismiss') return dismissDialog();
-    if (match.kind === 'next') return target && target.field ? focusNext(target.field) : false;
+    if (match.kind === 'next') {
+      if (target && target.field && focusNext(target.field)) return true;
+      announce('No text box to move on from');
+      return false;
+    }
     // "Done" while filling in a text box means done with that box, not done talking.
-    if (match.kind === 'stop' && target && target.field) return focusNext(target.field);
+    if (match.kind === 'stop' && target && target.field && focusNext(target.field)) return true;
     if (match.kind === 'undo') return undoLastInsert(heard);
     if (match.kind === 'restore') return restoreRemoved();
     if (match.kind === 'stop') return stopListening();
@@ -347,9 +351,12 @@
     if (pressControl('click cancel') || pressControl('click close')) return true;
     var el = document.activeElement || document.body;
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
-    var closed = !dialogOpen();
-    announce(closed ? 'Closed' : 'Couldn’t close this dialog');
-    return closed;
+    if (!dialogOpen()) {
+      announce('Closed');
+      return true;
+    }
+    window.toast.info('Couldn’t close this dialog by voice. Use its Cancel button or press Esc.');
+    return false;
   }
 
   function focusNext(from) {
