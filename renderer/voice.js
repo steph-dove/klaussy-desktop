@@ -148,10 +148,8 @@
 
   function dictate(text, target) {
     var clean = window.VoiceText.sanitizeDictation(text);
-    if (!clean) {
-      window.toast.info('Didn’t catch that. Try again a little closer to the mic.');
-      return false;
-    }
+    // Empty phrases are usually background noise between sentences; say nothing.
+    if (!clean) return false;
     if (!target) {
       window.toast.error('Open an agent tab to dictate into.');
       return false;
@@ -289,6 +287,10 @@
 
   function run(match, target, heard) {
     if (match.kind === 'pr') return reviewPr(match.query);
+    if (match.kind === 'dismiss') return dismissDialog();
+    if (match.kind === 'next') return target && target.field ? focusNext(target.field) : false;
+    // "Done" while filling in a text box means done with that box, not done talking.
+    if (match.kind === 'stop' && target && target.field) return focusNext(target.field);
     if (match.kind === 'undo') return undoLastInsert(heard);
     if (match.kind === 'restore') return restoreRemoved();
     if (match.kind === 'stop') return stopListening();
@@ -333,6 +335,37 @@
     return true;
   }
 
+  function dialogOpen() {
+    return document.body.classList.contains('dialog-open') || !!document.querySelector('.pr-picker-overlay');
+  }
+
+  function dismissDialog() {
+    if (!dialogOpen()) {
+      announce('Nothing to close');
+      return false;
+    }
+    if (pressControl('click cancel') || pressControl('click close')) return true;
+    var el = document.activeElement || document.body;
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+    var closed = !dialogOpen();
+    announce(closed ? 'Closed' : 'Couldn’t close this dialog');
+    return closed;
+  }
+
+  function focusNext(from) {
+    var scope = (from && from.closest('[role="dialog"], .pr-picker-overlay, .modal, #modal-overlay')) || document;
+    var items = Array.prototype.filter.call(
+      scope.querySelectorAll('input, textarea, select, button, [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'),
+      function (el) { return !el.disabled && !el.closest('[inert]') && el.getClientRects().length && !el.classList.contains('voice-btn'); });
+    var i = items.indexOf(from);
+    var next = items[i + 1] || items[0];
+    if (!next || next === from) return false;
+    next.focus();
+    forgetInsert();
+    announce('Next');
+    return true;
+  }
+
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
@@ -356,6 +389,8 @@
       return false;
     }
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
+    // With a dialog open, its own buttons and tabs win over palette commands.
+    if (heard && dialogOpen() && (!match || match.kind === 'command') && pressControl(heard)) return true;
     if (match) return run(match, target, heard);
     // With the PR picker open, anything but a URL names the PR to open.
     if (heard && isPickerBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) {

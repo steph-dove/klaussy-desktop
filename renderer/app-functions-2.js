@@ -335,6 +335,7 @@ window.App = window.App || {};
       }
     }});
     commands.push({ label: 'Review Pull Request / Merge Request…', action: function () { App.showPrPicker(); } });
+    if (window.AgentsPanel) commands.push({ label: 'Show Active Agents', action: function () { window.AgentsPanel.show(); } });
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
     commands.push({ label: 'Run Slash Command…', action: function () { Dialogs.showSlashLauncher(); } });

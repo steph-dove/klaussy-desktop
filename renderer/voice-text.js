@@ -21,6 +21,9 @@
     { re: /^(view|show|open|see) (changes|diff)$|^(show |open |toggle )?diff( panel)?$/,
       labels: ['Show Changes', 'Toggle Diff Panel'] },
     { re: /^(new|start|create|open) (a )?(new )?(session|task|agent)$/, labels: ['New Task'] },
+    // The sidebar bar reads "No active agents" or "1 result ready", so people say either.
+    { re: /^((open|show|view|see|check) )?(the |my )?(agent list|agents list|agent panel|agents|active agents|running agents|results?|\d+ results?( ready)?|results? ready)$/,
+      labels: ['Show Active Agents'] },
     { re: /^(run|start|kick off|launch) (the )?(full )?(dev loop|rest of (the )?owl)$/,
       labels: ['Run Full Dev Loop (Rest of the Owl)…'] },
     // Shows a running loop; with none yet, starts one (that asks for the task first).
@@ -38,6 +41,8 @@
   // A misheard word must never end an agent session, so these stay keyboard-only.
   var NOT_BY_VOICE = /^(Kill Task|Restart )/;
   var THRESHOLD = 0.6;
+  // One word buried in a long label ("gemini" in "Open Folder or File in Gemini CLI") isn't a match.
+  var MIN_DICE = 0.4;
   var MIN_LEAD = 0.05;
 
   function sanitizeDictation(text) {
@@ -84,6 +89,7 @@
     var shared = 0;
     setA.forEach(function (w) { if (setB.has(w)) shared++; });
     var dice = (2 * shared) / (setA.size + setB.size);
+    if (dice < MIN_DICE) return 0;
     return (dice + shared / setA.size) / 2;
   }
 
@@ -138,7 +144,9 @@
     return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   }
 
-  var CLICK = /^(?:select|click|press|tap|hit|choose|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button))? (.+?)(?: (?:tab|button))?$/;
+  var CLICK = /^(?:select|click|press|tap|hit|choose|use|pick|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button|agent|option|model|provider))? (.+?)(?: (?:tab|button|agent|option|model|provider))?$/;
+  var DISMISS_WORDS = /^(close|cancel|dismiss|escape|exit|back|go|this|that|it|the|window|dialog|modal|popup|picker|please)$/;
+  var NEXT = /^(next|next field|move on|tab|(i m |im )?done (naming|typing|with (it|that|this|the name))( the session| it)?|that s the name)$/;
 
   // Index of the control a phrase names, or -1; without a click verb it must cover most of a short name, so dictation can't press buttons.
   function pickControl(text, names, fuzzy) {
@@ -173,7 +181,7 @@
       .trim();
   }
 
-  // Returns { kind: 'send' | 'undo' | 'restore' | 'stop' }, { kind: 'pr', query }, { kind: 'command', command } or null.
+  // Returns { kind: 'send' | 'undo' | 'restore' | 'stop' | 'next' | 'dismiss' }, { kind: 'pr', query }, { kind: 'command', command } or null.
   function matchCommand(text, allCommands) {
     var commands = allCommands.filter(function (c) { return !NOT_BY_VOICE.test(c.label); });
     var spoken = normalize(text);
@@ -182,6 +190,11 @@
     if (UNDO.test(spoken)) return { kind: 'undo' };
     if (RESTORE.test(spoken)) return { kind: 'restore' };
     if (STOP.test(spoken)) return { kind: 'stop' };
+    if (NEXT.test(spoken)) return { kind: 'next' };
+    var said = spoken.split(' ');
+    if (said.every(function (w) { return DISMISS_WORDS.test(w); }) && said.some(function (w) { return /^(close|cancel|dismiss|escape|exit|back)$/.test(w); })) {
+      return { kind: 'dismiss' };
+    }
     var prQuery = parsePrRequest(text);
     if (prQuery) return { kind: 'pr', query: prQuery };
 

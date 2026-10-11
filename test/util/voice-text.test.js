@@ -31,6 +31,7 @@ const PALETTE = [
   'Review Pull Request / Merge Request…',
   'View Logs',
   'MCP Servers',
+  'Show Active Agents',
 ].map((label) => ({ label, action: noop }));
 
 const label = (text, commands = PALETTE) => {
@@ -206,4 +207,45 @@ test('pickControl presses the on-screen button or tab you name', () => {
   assert.equal(pick('review'), null);
   assert.equal(pick('please review the files and run the tests again'), null);
   assert.equal(pick('select payments'), null);
+});
+
+test('a single word buried in a long command name does not run it', () => {
+  const cmds = ['Open Folder or File in Gemini CLI…', 'Open Folder or File in Claude Code…', 'Show Dev Loop Progress', 'View Logs'].map((l) => ({ label: l, action: () => {} }));
+  const pick = (t) => { const m = matchCommand(t, cmds); return m && m.command ? m.command.label : m; };
+  assert.equal(pick('Gemini.'), null);
+  assert.equal(pick('dev loop'), 'Show Dev Loop Progress');
+  assert.equal(pick('logs'), 'View Logs');
+  assert.equal(pick('open folder in gemini'), 'Open Folder or File in Gemini CLI…');
+});
+
+test('close, cancel and close window dismiss the open dialog', () => {
+  for (const t of ['close', 'Cancel.', 'Close. Close window. Cancel.', 'close this window', 'dismiss', 'go back', 'escape']) {
+    assert.deepEqual(matchCommand(t, PALETTE), { kind: 'dismiss' }, t);
+  }
+  assert.equal(matchCommand('close the auth bug ticket', PALETTE), null);
+});
+
+test('next and done naming move on from a text box', () => {
+  for (const t of ['next', 'Next field.', 'move on', "I'm done naming the session", 'done naming', "that's the name"]) {
+    assert.deepEqual(matchCommand(t, PALETTE), { kind: 'next' }, t);
+  }
+  assert.deepEqual(matchCommand('done', PALETTE), { kind: 'stop' });
+});
+
+test('select agent gemini names the Gemini agent button', () => {
+  global.window = global.window || {};
+  require('../../renderer/utils');
+  const fuzzy = global.window.AppUtils.fuzzyMatch;
+  const names = ['Claude', 'Codex', 'Gemini', 'Antigravity', 'Cancel', 'Create'];
+  const pick = (t) => { const i = pickControl(t, names, fuzzy); return i < 0 ? null : names[i]; };
+  assert.equal(pick('select agent gemini'), 'Gemini');
+  assert.equal(pick('use gemini'), 'Gemini');
+  assert.equal(pick('Gemini.'), 'Gemini');
+  assert.equal(pick('pick the codex agent'), 'Codex');
+});
+
+test('the agents list opens by any of the names it shows', () => {
+  for (const t of ['open agent list', 'Open active agents.', 'open results', '1 result ready', 'show running agents', 'check results']) {
+    assert.equal(label(t), 'Show Active Agents', t);
+  }
 });
