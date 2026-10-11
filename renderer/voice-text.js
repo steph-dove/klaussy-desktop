@@ -41,6 +41,10 @@
     { re: /^((show|open) )?(voice history|what did you hear|what did you hear me say|what did i say)$/, labels: ['Voice: History'] },
     { re: /^(choose|change|pick|select|switch|set)( the| my)? (microphone|mic|input)$|^use (another|different) (microphone|mic)$/, labels: ['Voice: Choose Microphone…'] },
     { re: /^clear( terminal| screen)?$/, labels: ['Clear Terminal'] },
+    { re: /^((scroll|go|jump|skip|move)( all the way)?( down)?( to)?( the)? (bottom|end|latest|newest)|scroll all the way down|bottom|back to (the )?bottom)$/, labels: ['Scroll to Bottom'] },
+    { re: /^((scroll|go|jump|skip|move)( all the way)?( up)?( to)?( the)? (top|beginning|start)|scroll all the way up|top)$/, labels: ['Scroll to Top'] },
+    { re: /^(scroll up|page up)( (a )?(bit|little|page))?$/, labels: ['Scroll Up'] },
+    { re: /^(scroll down|page down)( (a )?(bit|little|page))?$/, labels: ['Scroll Down'] },
   ];
   // No bare "enter": a one-word mishearing could approve an agent's pending tool call.
   var SEND = /^(send|submit|send it|press enter|hit enter)$/;

@@ -293,6 +293,15 @@ window.App = window.App || {};
         if (task.devLoop) commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
         commands.push({ label: 'Search in Terminal', action: function () { SearchBar.open(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
+        // The terminal in front: the open sub-terminal when there is one, else the agent's.
+        var shown = function () {
+          var sub = task.activeSubId != null && (task.subTerminals || []).find(function (s) { return s.subId === task.activeSubId; });
+          return (sub && sub.terminal) || task.terminal;
+        };
+        commands.push({ label: 'Scroll to Bottom', action: function () { shown().scrollToBottom(); } });
+        commands.push({ label: 'Scroll to Top', action: function () { shown().scrollToTop(); } });
+        commands.push({ label: 'Scroll Up', action: function () { shown().scrollPages(-1); } });
+        commands.push({ label: 'Scroll Down', action: function () { shown().scrollPages(1); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); App.btnDiff.classList.add('active'); } });
         [['pr', 'Show Pull Request Panel'], ['plan', 'Show Plan'], ['files', 'Show Files'],
           ['history', 'Show History'], ['notes', 'Show Session Notes']].forEach(function (tab) {

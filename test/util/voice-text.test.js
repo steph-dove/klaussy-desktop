@@ -32,6 +32,10 @@ const PALETTE = [
   'View Logs',
   'MCP Servers',
   'Show Active Agents',
+  'Scroll to Bottom',
+  'Scroll to Top',
+  'Scroll Up',
+  'Scroll Down',
 ].map((label) => ({ label, action: noop }));
 
 const label = (text, commands = PALETTE) => {
@@ -397,4 +401,15 @@ test('an Ollama pick over an agent tab must share a word with what was said', ()
   assert.ok(sharesWord('open the code revue', 'Review Pull Request / Merge Request…'));
   assert.ok(sharesWord('show the agents', 'Show Active Agents'));
   assert.ok(!sharesWord('show me the failing test', 'Run Full Dev Loop (Rest of the Owl)…'));
+});
+
+test('scroll phrasings move the terminal in front', () => {
+  for (const said of ['Scroll to bottom.', 'scroll to the bottom', 'scroll down to the bottom', 'go to the bottom', 'jump to the end', 'scroll all the way down', 'back to the bottom', 'bottom']) {
+    assert.equal(label(said), 'Scroll to Bottom', said);
+  }
+  for (const said of ['scroll to top', 'go to the top', 'scroll all the way up', 'jump to the beginning']) assert.equal(label(said), 'Scroll to Top', said);
+  assert.equal(label('scroll up a bit'), 'Scroll Up');
+  assert.equal(label('page down'), 'Scroll Down');
+  assert.equal(label('scroll down'), 'Scroll Down');
+  assert.equal(label('go to auth fix'), 'Switch to: auth-fix');
 });
