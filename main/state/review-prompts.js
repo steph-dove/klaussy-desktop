@@ -637,7 +637,11 @@ function repoAwarePreamble(baseRef) {
 }
 
 // Read-only klaussy commands the review skill runs; a headless run can't approve them.
-const REVIEW_ALLOWED_TOOLS = ['Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)'];
+const REVIEW_ALLOWED_TOOLS = [
+  'Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)',
+  'Bash(python3 -m klaussy base:*)', 'Bash(python3 -m klaussy review-prep:*)',
+  'Bash(python -m klaussy base:*)', 'Bash(python -m klaussy review-prep:*)',
+];
 
 // Sibling klaussy skills whose names also end in `-review` but aren't the review.
 const NON_REVIEW_SKILL_SUFFIXES = ['-address-review', '-self-review'];

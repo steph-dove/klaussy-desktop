@@ -69,7 +69,10 @@ test('the repo-aware review never stops to ask the user', () => {
 });
 
 test('both AI review handlers let the run use the klaussy commands the skill needs', () => {
-  assert.deepEqual(REVIEW_ALLOWED_TOOLS, ['Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)']);
+  for (const cmd of ['klaussy', 'python3 -m klaussy', 'python -m klaussy']) {
+    assert.ok(REVIEW_ALLOWED_TOOLS.includes(`Bash(${cmd} base:*)`), cmd);
+    assert.ok(REVIEW_ALLOWED_TOOLS.includes(`Bash(${cmd} review-prep:*)`), cmd);
+  }
   const src = fs.readFileSync(require.resolve('../../main/ipc/claude-stream-ipc.js'), 'utf8');
   for (const channel of ['pr-review-ai-start', 'pr-ai-review-start']) {
     const start = src.indexOf(`ipcMain.handle('${channel}'`);

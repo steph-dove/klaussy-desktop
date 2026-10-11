@@ -34,6 +34,12 @@ function promptGoesOnStdin(bin) {
   return /\.(cmd|bat)$/i.test(resolved);
 }
 
+// shell:true joins args with bare spaces, so cmd.exe would split a rule like `Bash(klaussy base:*)`.
+function quoteShimArg(arg) {
+  const s = String(arg);
+  return /[\s&|<>()^"]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s;
+}
+
 function writeStdin(proc, stdinInput) {
   if (stdinInput == null || !proc.stdin) return;
   try {
@@ -57,11 +63,8 @@ function spawnHeadlessAgent(bin, args, opts = {}, stdinInput = null) {
   const resolved = whichBinSync(bin) || bin;
   const isShim = /\.(cmd|bat)$/i.test(resolved);
   const proc = isShim
-    // .cmd/.bat: go through the shell so cmd.exe runs the shim. The npm global
-    // shim path has no spaces (`%APPDATA%\npm\…`), and args are short flags (the
-    // prompt is on stdin), so shell:true's unquoted join is safe for the common
-    // case. NOTE: a username with a space in the profile path is a known gap.
-    ? spawn(resolved, args, { ...opts, shell: true })
+    // .cmd/.bat run through cmd.exe with the prompt on stdin; a space in the profile path is a known gap.
+    ? spawn(resolved, args.map(quoteShimArg), { ...opts, shell: true })
     // native .exe: spawn directly — a multi-line argv element is fine here.
     : spawn(resolved, args, opts);
   writeStdin(proc, stdinInput);
@@ -108,4 +111,4 @@ function execHeadlessAgent(bin, args, opts = {}, stdinInput = null) {
   });
 }
 
-module.exports = { spawnHeadlessAgent, execHeadlessAgent, promptGoesOnStdin };
+module.exports = { spawnHeadlessAgent, execHeadlessAgent, promptGoesOnStdin, quoteShimArg };
