@@ -18,6 +18,10 @@ const PALETTE = [
   'Plan a Task…',
   'Clear Terminal',
   'Show Changes',
+  'Show Dev Loop Progress',
+  'Show Pull Request Panel',
+  'Show Plan',
+  'Show History',
   'Pop Out',
   'Kill Task',
   'Restart Claude Code',
@@ -93,4 +97,31 @@ test('unclear or unrelated speech matches nothing', () => {
 
 test('commands that end an agent session cannot be run by voice', () => {
   for (const s of ['kill task', 'kill', 'restart', 'restart claude code']) assert.equal(label(s), null, s);
+});
+
+test('the phrasings from the second try map to the panels', () => {
+  assert.equal(label('Open the dev loop.'), 'Show Dev Loop Progress');
+  assert.equal(label('open the rest of the owl'), 'Show Dev Loop Progress');
+  assert.equal(label('open the PR panel'), 'Show Pull Request Panel');
+  assert.equal(label('show the pull request tab'), 'Show Pull Request Panel');
+  assert.equal(label('run the rest of the owl'), 'Run Full Dev Loop (Rest of the Owl)…');
+  assert.equal(label('open the history'), 'Show History');
+  assert.equal(label('view logs'), 'View Logs');
+});
+
+test('with no dev loop running, opening it starts one instead', () => {
+  const noLoop = PALETTE.filter((c) => c.label !== 'Show Dev Loop Progress');
+  assert.equal(label('open the dev loop', noLoop), 'Run Full Dev Loop (Rest of the Owl)…');
+  assert.equal(label('open the rest of the owl', noLoop), 'Run Full Dev Loop (Rest of the Owl)…');
+});
+
+test('ordinary dictation is not mistaken for a command', () => {
+  for (const s of [
+    'fix the zoom in bug on the settings page',
+    'plan the auth refactor and add tests',
+    'refactor the login handler and add a unit test for the token refresh',
+    'show me why the history query is slow',
+  ]) {
+    assert.equal(label(s), null, s);
+  }
 });

@@ -1,4 +1,4 @@
-// CI has no microphone or model, so transcripts go straight to Voice.handleTranscript and voice-prepare is stubbed.
+// CI has no microphone or model, so transcripts go straight to Voice.handleTranscript and voice-prepare is stubbed in main.
 
 /* global window,document */
 const fs = require('fs');
@@ -26,47 +26,72 @@ async function withShellTask(mainWindow, fn) {
   }
 }
 
-test.describe('voice input off', () => {
-  test('the mic button is always shown and starts off', async ({ mainWindow }) => {
+async function stubPrepare(electronApp, result) {
+  await electronApp.evaluate(({ ipcMain }, res) => {
+    ipcMain.removeHandler('voice-prepare');
+    ipcMain.handle('voice-prepare', () => res);
+  }, result);
+}
+
+async function openPrefs(electronApp, mainWindow) {
+  const [prefsWin] = await Promise.all([
+    electronApp.waitForEvent('window'),
+    mainWindow.evaluate(() => window.klaus.ui.openPreferences()),
+  ]);
+  await prefsWin.waitForLoadState('domcontentloaded');
+  return prefsWin;
+}
+
+test.describe('voice input defaults', () => {
+  test('the mic button is always shown and voice is on by default', async ({ electronApp, mainWindow }) => {
     await ready(mainWindow);
     const btn = mainWindow.locator('#btn-voice');
     await expect(btn).toBeVisible();
-    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+    await expect(btn).toHaveClass(/\bon\b/);
+    const prefsWin = await openPrefs(electronApp, mainWindow);
+    await expect(prefsWin.locator('#pref-voice-input')).toBeChecked();
+    await prefsWin.close();
   });
 
-  test('clicking the mic button turns voice on and off and saves it', async ({ electronApp, mainWindow, userDataDir }) => {
+  test('a blocked microphone points at the OS microphone settings', async ({ electronApp, mainWindow }) => {
+    await ready(mainWindow);
+    await stubPrepare(electronApp, { ok: false, code: 'mic-denied', error: 'Klaussy can’t use the microphone (stubbed).' });
+    await mainWindow.locator('#btn-voice').click();
+    const toastEl = mainWindow.locator('.klaussy-toast', { hasText: 'can’t use the microphone' });
+    await expect(toastEl).toBeVisible();
+    const help = await mainWindow.evaluate(() => window.klaus.voice.micHelp());
+    if (help.canOpenSettings) await expect(toastEl.getByRole('button', { name: 'Open microphone settings' })).toBeVisible();
+    await expect(mainWindow.locator('#btn-voice')).not.toHaveClass(/recording|busy/);
+  });
+});
+
+test.describe('voice input turned off', () => {
+  test.use({ configSeed: { voiceInput: false } });
+
+  test('the button stays shown, and clicking it turns voice back on and starts listening', async ({ electronApp, mainWindow, userDataDir }) => {
     await ready(mainWindow);
     const btn = mainWindow.locator('#btn-voice');
-    const [prefsWin] = await Promise.all([
-      electronApp.waitForEvent('window'),
-      mainWindow.evaluate(() => window.klaus.ui.openPreferences()),
-    ]);
-    await prefsWin.waitForLoadState('domcontentloaded');
+    await expect(btn).toBeVisible();
+    await expect(btn).not.toHaveClass(/\bon\b/);
+    await stubPrepare(electronApp, { ok: false, error: 'stubbed: no microphone in e2e' });
+    const prefsWin = await openPrefs(electronApp, mainWindow);
     const box = prefsWin.locator('#pref-voice-input');
     await expect(box).not.toBeChecked();
 
     await btn.click();
-    await expect(btn).toHaveAttribute('aria-pressed', 'true');
+    await expect(btn).toHaveClass(/\bon\b/);
     await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(true);
     await expect(box).toBeChecked();
-
-    await btn.click();
-    await expect(btn).toHaveAttribute('aria-pressed', 'false');
-    await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(false);
-    await expect(box).not.toBeChecked();
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'stubbed: no microphone' })).toBeVisible();
     await prefsWin.close();
   });
 
   test('ticking the Preferences checkbox turns voice on right away', async ({ electronApp, mainWindow, userDataDir }) => {
     await ready(mainWindow);
-    const [prefsWin] = await Promise.all([
-      electronApp.waitForEvent('window'),
-      mainWindow.evaluate(() => window.klaus.ui.openPreferences()),
-    ]);
-    await prefsWin.waitForLoadState('domcontentloaded');
+    const prefsWin = await openPrefs(electronApp, mainWindow);
     await prefsWin.locator('#pref-voice-input').check();
     await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(true);
-    await expect(mainWindow.locator('#btn-voice')).toHaveAttribute('aria-pressed', 'true');
+    await expect(mainWindow.locator('#btn-voice')).toHaveClass(/\bon\b/);
     await prefsWin.close();
   });
 });
@@ -76,7 +101,33 @@ test.describe('voice input on', () => {
 
   test.beforeEach(async ({ mainWindow }) => {
     await ready(mainWindow);
-    await expect(mainWindow.locator('#btn-voice')).toHaveAttribute('aria-pressed', 'true');
+    await expect(mainWindow.locator('#btn-voice')).toHaveClass(/\bon\b/);
+  });
+
+  test('click-to-talk runs a matching command and says what it heard', async ({ mainWindow }) => {
+    await withShellTask(mainWindow, async () => {
+      await mainWindow.evaluate(() => window.Voice.handleTranscript('Open the PR panel.', 'auto'));
+      await expect(mainWindow.locator('#diff-tabs .diff-tab[data-tab="pr"]')).toHaveClass(/active/);
+      await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Show Pull Request Panel' })).toBeVisible();
+      // No loop has run on this task, so "open the dev loop" offers to start one.
+      await mainWindow.evaluate(() => window.Voice.handleTranscript('open the rest of the owl', 'auto'));
+      await expect(mainWindow.locator('#plan-modal-overlay')).toBeVisible();
+    });
+  });
+
+  test('click-to-talk types anything that is not a command into the agent', async ({ mainWindow }) => {
+    await withShellTask(mainWindow, async (id) => {
+      const pasted = await mainWindow.evaluate((taskId) => {
+        const term = window.AppState.tasks.get(taskId).terminal;
+        const calls = [];
+        const orig = term.paste.bind(term);
+        term.paste = (s) => { calls.push(s); orig(s); };
+        window.Voice.handleTranscript('refactor the login handler and add a test', 'auto');
+        term.paste = orig;
+        return calls;
+      }, id);
+      expect(pasted).toEqual(['refactor the login handler and add a test ']);
+    });
   });
 
   test('"open pr review" opens the PR picker', async ({ mainWindow }) => {
@@ -126,10 +177,7 @@ test.describe('voice input on', () => {
   });
 
   test('the dictate shortcut starts voice input and never reaches the terminal', async ({ electronApp, mainWindow }) => {
-    await electronApp.evaluate(({ ipcMain }) => {
-      ipcMain.removeHandler('voice-prepare');
-      ipcMain.handle('voice-prepare', () => ({ ok: false, error: 'stubbed: no microphone in e2e' }));
-    });
+    await stubPrepare(electronApp, { ok: false, error: 'stubbed: no microphone in e2e' });
     await withShellTask(mainWindow, async (id) => {
       await mainWindow.evaluate((taskId) => {
         const term = window.AppState.tasks.get(taskId).terminal;

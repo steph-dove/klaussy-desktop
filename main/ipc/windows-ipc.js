@@ -274,7 +274,7 @@ ipcMain.handle('get-preferences', () => {
     // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
-    voiceInput: config.voiceInput === true,
+    voiceInput: config.voiceInput !== false,
     // Nemesis8 named gateway profiles (migrates the legacy single-gateway keys
     // into one profile when none exist yet).
     nemesisProfiles: getNemesisProfiles(),

@@ -288,10 +288,24 @@ window.App = window.App || {};
         commands.push({ label: 'Grant Agent Permissions…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'grant-permissions'); } });
         commands.push({ label: 'Plan a Task…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'plan'); } });
         commands.push({ label: 'Debug an Issue…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'debug'); } });
-        commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
+        // The Dev Loop tab only exists once a loop has started, so there's nothing to show before that.
+        if (task.devLoop) commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
         commands.push({ label: 'Search in Terminal', action: function () { SearchBar.open(AppState.activeTaskId); } });
         commands.push({ label: 'Clear Terminal', action: function () { task.terminal.clear(); } });
         commands.push({ label: 'Show Changes', action: function () { DiffPanel.show(task.worktreePath); App.btnDiff.classList.add('active'); } });
+        [['pr', 'Show Pull Request Panel'], ['plan', 'Show Plan'], ['files', 'Show Files'],
+          ['history', 'Show History'], ['notes', 'Show Session Notes']].forEach(function (tab) {
+          commands.push({ label: tab[1], action: function () {
+            App.btnDiff.classList.add('active');
+            // show() is async and resets the panel on first open, so switch tabs after it settles.
+            Promise.resolve(DiffPanel.show(task.worktreePath)).then(function () {
+              var btn = document.querySelector('#diff-tabs .diff-tab[data-tab="' + tab[0] + '"]');
+              if (btn) btn.click();
+            }).catch(function (err) {
+              window.toast.error('Could not open the panel: ' + ((err && err.message) || String(err)));
+            });
+          }});
+        });
         commands.push({ label: 'Pop Out', action: function () { window.klaus.task.popOut(AppState.activeTaskId); } });
         commands.push({ label: 'Kill Task', action: function () { window.klaus.task.kill(AppState.activeTaskId).then(function () { App.removeTaskFromUI(AppState.activeTaskId); }); } });
         if (!task.alive) {

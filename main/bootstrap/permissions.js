@@ -1,4 +1,4 @@
-// Electron keeps one permission handler per session; everything stays granted except the mic, which only the app's own main page gets while voice input is on.
+// Electron keeps one permission handler per session; everything stays granted except the mic, which only the app's own main page gets while voice input is on (the default).
 
 const path = require('path');
 const { pathToFileURL } = require('url');
@@ -30,7 +30,7 @@ function decidePermission(permission, details = {}, voiceEnabled = false, pageUr
 
 function install() {
   session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
-    const voiceEnabled = permission === 'media' && loadConfig().voiceInput === true;
+    const voiceEnabled = permission === 'media' && loadConfig().voiceInput !== false;
     callback(decidePermission(permission, details, voiceEnabled));
   });
 }

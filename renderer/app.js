@@ -550,7 +550,7 @@ window.App = window.App || {};
   // Load saved terminal preferences on startup
   window.klaus.ui.getPreferences().then(function (prefs) {
     AppState.savedPrefs = prefs;
-    Voice.setEnabled(prefs.voiceInput === true);
+    Voice.setEnabled(prefs.voiceInput !== false);
     if (prefs.fontSize && prefs.fontSize !== 13) AppState.currentFontSize = prefs.fontSize;
   });
 

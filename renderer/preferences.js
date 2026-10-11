@@ -106,7 +106,7 @@
   document.getElementById('pref-strip-comments').checked = prefs.stripComments !== false;
   document.getElementById('pref-session-activity').checked = prefs.sessionActivityNotes !== false;
   document.getElementById('pref-summarize-locally').checked = prefs.summarizeLocally !== false;
-  document.getElementById('pref-voice-input').checked = prefs.voiceInput === true;
+  document.getElementById('pref-voice-input').checked = prefs.voiceInput !== false;
   // null = config.toml unreadable; disable rather than untick, so a Save can't
   // revoke a grant that may still be live.
   var kimiBash = document.getElementById('pref-kimi-autonomous-bash');

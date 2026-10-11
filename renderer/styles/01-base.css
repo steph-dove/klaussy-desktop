@@ -588,10 +588,36 @@ body.custom-titlebar #titlebar-content {
   animation: btn-voice-pulse 1.2s ease-in-out infinite;
 }
 
+#btn-voice {
+  position: relative;
+}
+
+/* Processing: amber with a spinning ring, distinct from ready (accent) and listening (red). */
 #btn-voice.busy {
-  border-color: var(--accent) !important;
-  color: var(--accent) !important;
+  background: var(--warning) !important;
+  border-color: var(--warning) !important;
+  color: var(--accent-contrast) !important;
   cursor: progress;
+}
+
+#btn-voice.busy::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  margin: -10px 0 0 -10px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent-contrast);
+  border-right-color: var(--accent-contrast);
+  animation: btn-voice-spin 0.8s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes btn-voice-spin {
+  to { transform: rotate(360deg); }
 }
 
 @keyframes btn-voice-pulse {
@@ -600,7 +626,8 @@ body.custom-titlebar #titlebar-content {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #btn-voice.recording { animation: none; }
+  #btn-voice.recording,
+  #btn-voice.busy::after { animation: none; }
 }
 
 #btn-review-pr {
