@@ -468,8 +468,10 @@
       }
       setTimeout(function () { step(i + 1); }, 400);
     };
-    step(0);
+    var first = routeTranscript(parts[0], 'auto', activeTarget());
+    if (first === false) return false;
     outcome('chain of ' + parts.length + ' steps: ' + parts.join(' → '));
+    setTimeout(function () { step(1); }, 400);
     return true;
   }
 
