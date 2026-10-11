@@ -41,6 +41,19 @@ test('picks the review skill by name when the skills predate the alias', () => {
   assert.doesNotMatch(p, /ADDRESS_REVIEW_BODY|SELF_REVIEW_BODY/);
 });
 
+test('finds the alias in a SKILL.md with CRLF line endings', () => {
+  const wt = makeWorktree({
+    'a-review': { body: 'DECOY_BODY' },
+    'acme-review': { alias: 'klaussy-review', body: 'REVIEW_BODY' },
+  });
+  const file = path.join(wt, '.claude', 'skills', 'acme-review', 'SKILL.md');
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').replace(/\n/g, '\r\n'));
+  const p = buildReviewPrompt({ worktreePath: wt, baseRef: 'abc123' });
+  assert.match(p, /REVIEW_BODY/);
+  assert.doesNotMatch(p, /DECOY_BODY/);
+  assert.doesNotMatch(p, /name: acme-review/);
+});
+
 test('falls back to the built-in template when only sibling -review skills exist', () => {
   const wt = makeWorktree(SIBLINGS);
   const p = buildReviewPrompt({ worktreePath: wt, baseRef: 'abc123' });

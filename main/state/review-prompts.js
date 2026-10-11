@@ -654,7 +654,7 @@ function findRepoReviewSkill(worktreePath) {
 
   const aliased = candidates.find((c) => {
     try {
-      const head = fs.readFileSync(c.file, 'utf-8').match(/^---\n[\s\S]*?\n---/);
+      const head = fs.readFileSync(c.file, 'utf-8').match(/^---\r?\n[\s\S]*?\r?\n---/);
       return !!head && head[0].includes('`klaussy-review`');
     } catch { return false; }
   });
@@ -670,7 +670,7 @@ function findRepoReviewSkill(worktreePath) {
 // the repo's default branch, but a PR review diffs against the PR's fork point).
 function adaptSkillBody(skillMd, baseRef, repoSpecificChecks) {
   let body = skillMd
-    .replace(/^---\n[\s\S]*?\n---\n+/, '')                       // YAML frontmatter
+    .replace(/^---\r?\n[\s\S]*?\r?\n---(\r?\n)+/, '')            // YAML frontmatter
     .replace(/\{\{BASE_BRANCH\}\}/g, () => baseRef)              // any leftover placeholder
     .replace(/[\w.\/-]+?(\.\.\.?)HEAD/g, (_m, dots) => baseRef + dots + 'HEAD') // baked X...HEAD ranges
     .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoSpecificChecks || '');
