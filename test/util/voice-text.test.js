@@ -249,3 +249,15 @@ test('the agents list opens by any of the names it shows', () => {
     assert.equal(label(t), 'Show Active Agents', t);
   }
 });
+
+test('code review opens the picker and run review starts the AI review', () => {
+  const cmds = ['Review Pull Request / Merge Request…', 'Run AI Review', 'View Logs'].map((l) => ({ label: l, action: () => {} }));
+  const pick = (t, list = cmds) => { const m = matchCommand(t, list); return m && m.command ? m.command.label : m; };
+  assert.equal(pick('code review'), 'Review Pull Request / Merge Request…');
+  assert.equal(pick('Open code review.'), 'Review Pull Request / Merge Request…');
+  for (const t of ['run review', 'Run the AI review.', 'run code review', 'start the review', 'rerun review', 'run review again']) {
+    assert.equal(pick(t), 'Run AI Review', t);
+  }
+  const notInReview = cmds.filter((c) => c.label !== 'Run AI Review');
+  assert.equal(pick('run code review', notInReview), 'Review Pull Request / Merge Request…');
+});

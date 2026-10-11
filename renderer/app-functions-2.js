@@ -336,6 +336,18 @@ window.App = window.App || {};
     }});
     commands.push({ label: 'Review Pull Request / Merge Request…', action: function () { App.showPrPicker(); } });
     if (window.AgentsPanel) commands.push({ label: 'Show Active Agents', action: function () { window.AgentsPanel.show(); } });
+    if (App.prReviewMounted) {
+      commands.push({ label: 'Run AI Review', action: function () {
+        var root = App.prReviewRoot;
+        var tab = root.querySelector('.pr-review-tab[data-tab="ai-review"]');
+        if (tab) tab.click();
+        // Rerun after a finished review, through its button so its cleanup runs.
+        var btn = root.querySelector('.pr-ai-run') || root.querySelector('.pr-ai-rerun');
+        if (btn) btn.click();
+        else if (root.querySelector('.pr-ai-cancel')) window.toast.info('An AI review is already running.');
+        else window.toast.info('No pull request is loaded to review yet.');
+      }});
+    }
     commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
     commands.push({ label: 'Run Slash Command…', action: function () { Dialogs.showSlashLauncher(); } });

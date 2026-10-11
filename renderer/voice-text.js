@@ -16,7 +16,9 @@
   // Spoken phrasings that don't share enough words with a palette label to
   // score; each lists labels in preference order, since some are task-only.
   var ALIASES = [
-    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$/,
+    { re: /^(run|start|kick off|begin|do|rerun|re run) (the |an |a )?(ai |code |pr )?review( again)?$/,
+      labels: ['Run AI Review', 'Review Pull Request / Merge Request…'] },
+    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code review|review code)$/,
       labels: ['Review Pull Request / Merge Request…'] },
     { re: /^(view|show|open|see) (changes|diff)$|^(show |open |toggle )?diff( panel)?$/,
       labels: ['Show Changes', 'Toggle Diff Panel'] },
