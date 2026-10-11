@@ -145,7 +145,7 @@
       return false;
     }
     if (target.field && !target.field.isConnected) {
-      window.toast.info('The text box closed before “' + clean + '” could be typed into it.');
+      window.toast.info('The text box closed before your words could be typed into it.');
       return false;
     }
     if (target.field) return typeInto(target.field, clean);
@@ -170,7 +170,64 @@
     return true;
   }
 
-  function run(match, heard, target) {
+  var PR_ROW = '.pr-picker-item[data-url]';
+
+  // Resolves 'loaded', 'failed' (an error or still loading after 15s) or 'closed'.
+  function pickerLoaded(overlay) {
+    return new Promise(function (resolve) {
+      var waited = 0;
+      (function poll() {
+        if (!overlay.isConnected) return resolve('closed');
+        if (overlay.querySelector('.pr-picker-error')) return resolve('failed');
+        if (!overlay.querySelector('.pr-picker-loading')) return resolve('loaded');
+        if (waited >= 15000) return resolve('failed');
+        waited += 200;
+        setTimeout(poll, 200);
+      })();
+    });
+  }
+
+  // Opens the PR the user named, from the picker's loaded list; with several matches it filters the list instead.
+  function reviewPr(query) {
+    if (!document.querySelector('.pr-picker-overlay')) window.App.showPrPicker();
+    var overlay = document.querySelector('.pr-picker-overlay');
+    if (!overlay) return false;
+    pickerLoaded(overlay).then(function (state) {
+      if (state === 'closed') return;
+      if (state === 'failed') {
+        window.toast.info('Couldn’t load the open pull requests to pick from. Choose one in the picker once it loads.');
+        return;
+      }
+      var seen = {};
+      var rows = Array.prototype.filter.call(overlay.querySelectorAll(PR_ROW), function (r) {
+        if (seen[r.dataset.url]) return false;
+        seen[r.dataset.url] = true;
+        return true;
+      });
+      var info = rows.map(function (r) {
+        var num = r.querySelector('.pr-picker-num');
+        return { number: num ? num.textContent.replace('#', '') : '', text: r.textContent };
+      });
+      var hits = window.VoiceText.pickPr(query, info);
+      if (hits.length === 1) {
+        announce('Opening pull request ' + info[hits[0]].number);
+        rows[hits[0]].click();
+        return;
+      }
+      var search = overlay.querySelector('.pr-picker-search');
+      if (search) {
+        search.value = /^\d+$/.test(query) ? '#' + query : query;
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+        search.focus();
+      }
+      if (hits.length) window.toast.info(hits.length + ' pull requests match. Say the number of the one you want.');
+      else window.toast.info('No open pull request matches that.');
+    });
+    return true;
+  }
+
+  function run(match, target) {
+    if (match.kind === 'pr') return reviewPr(match.query);
     if (match.kind === 'send') {
       if (target && target.field) target = terminalTarget();
       if (!target) {
@@ -178,30 +235,36 @@
         return false;
       }
       window.klaus.terminal.write(target.id, '\r', target.subId);
-      window.toast.info('Heard “' + heard + '” → Enter');
+      announce('Sent');
       return true;
     }
-    window.toast.info('Heard “' + heard + '” → ' + match.command.label);
+    announce(match.command.label);
     match.command.action();
     return true;
   }
 
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
-    var match = window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
+    var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
     if (!match) {
-      window.toast.info(heard ? 'No command matched “' + heard + '”.' : 'Didn’t catch a command.');
+      window.toast.info(heard ? 'That didn’t match a command.' : 'Didn’t catch a command.');
       return false;
     }
-    return run(match, heard, target);
+    return run(match, target);
+  }
+
+  function isPickerUrlBox(target) {
+    return !!(target && target.field && target.field.classList.contains('pr-picker-url'));
   }
 
   function runAuto(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
-    if (match) return run(match, heard, target);
+    if (match) return run(match, target);
+    // With the PR picker open, anything but a URL names the PR to open.
+    if (heard && isPickerUrlBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) return reviewPr(heard);
     if (heard && !target) {
-      window.toast.info('No command matched “' + heard + '”, and there’s no agent tab to type it into.');
+      window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.');
       return false;
     }
     return dictate(text, target);

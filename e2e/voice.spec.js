@@ -108,7 +108,7 @@ test.describe('voice input on', () => {
     await withShellTask(mainWindow, async () => {
       await mainWindow.evaluate(() => window.Voice.handleTranscript('Open the PR panel.', 'auto'));
       await expect(mainWindow.locator('#diff-tabs .diff-tab[data-tab="pr"]')).toHaveClass(/active/);
-      await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Show Pull Request Panel' })).toBeVisible();
+      await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Heard' })).toHaveCount(0);
       // No loop has run on this task, so "open the dev loop" offers to start one.
       await mainWindow.evaluate(() => window.Voice.handleTranscript('open the rest of the owl', 'auto'));
       await expect(mainWindow.locator('#plan-modal-overlay')).toBeVisible();
@@ -183,7 +183,7 @@ test.describe('voice input on', () => {
   test('an unmatched command says so instead of guessing', async ({ mainWindow }) => {
     const ran = await mainWindow.evaluate(() => window.Voice.handleTranscript('what is the weather', 'command'));
     expect(ran).toBe(false);
-    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'No command matched' })).toBeVisible();
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'didn’t match a command' })).toBeVisible();
   });
 
   test('dictation pastes sanitized text into the active terminal without Enter', async ({ mainWindow }) => {

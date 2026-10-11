@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, pickPr } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -132,4 +132,29 @@ test('articles, politeness and PR/MR short forms do not get in the way', () => {
   }
   assert.equal(label('can you open the pr panel'), 'Show Pull Request Panel');
   assert.equal(label('please start a new session'), 'New Task');
+});
+
+test('a review request can name the PR', () => {
+  assert.equal(parsePrRequest('Review PR 103.'), '103');
+  assert.equal(parsePrRequest('open a pr review for 103'), '103');
+  assert.equal(parsePrRequest('review pull request number 42'), '42');
+  assert.equal(parsePrRequest('open the PR review for the login fix'), 'login fix');
+  assert.equal(parsePrRequest('review the voice PR'), 'voice');
+  assert.equal(parsePrRequest('open a pr review'), null);
+  assert.equal(parsePrRequest('review pull requests'), null);
+  assert.deepEqual(matchCommand('review pr 103', [{ label: 'Review Pull Request / Merge Request…', action: () => {} }]), { kind: 'pr', query: '103' });
+});
+
+test('pickPr finds a PR by number or by the words in its title', () => {
+  const rows = [
+    { number: '103', text: '#103 feat(voice): on-device dictation and voice commands klaussy-desktop GitHub steph-dove open' },
+    { number: '1030', text: '#1030 fix(login): flaky login test klaussy-desktop GitHub steph-dove open' },
+    { number: '99', text: '#99 fix(a11y): focus and announcements klaussy-desktop GitHub steph-dove open' },
+  ];
+  assert.deepEqual(pickPr('103', rows), [0]);
+  assert.deepEqual(pickPr('voice', rows), [0]);
+  assert.deepEqual(pickPr('the login fix', rows), [1]);
+  assert.deepEqual(pickPr('klaussy desktop', rows).length, 3);
+  assert.deepEqual(pickPr('payments', rows), []);
+  assert.deepEqual(pickPr('pull request', rows), []);
 });

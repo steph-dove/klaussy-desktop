@@ -105,12 +105,50 @@
     return top.cmd;
   }
 
-  // Returns { kind: 'send' }, { kind: 'command', command } or null.
+  var PR_WORDS = '(?:pr|prs|pull request|merge request|mr)';
+  var PR_REQUEST = [
+    // "review pr 103", "open pr review for the login fix"
+    new RegExp('^(?:open |start |show )?(?:the )?(?:' + PR_WORDS + ' review|review (?:the )?' + PR_WORDS + ')(?: number| no)?(?: (?:for|of|on|called|about|titled|named|with))? (.+)$'),
+    // "review the voice pr"
+    new RegExp('^(?:open |start )?review (?:the )?(.+?) ' + PR_WORDS + '$'),
+  ];
+
+  // The PR named in a spoken review request ("review pr 103"), or null.
+  function parsePrRequest(text) {
+    var spoken = normalize(text);
+    for (var i = 0; i < PR_REQUEST.length; i++) {
+      var m = spoken.match(PR_REQUEST[i]);
+      if (m) {
+        var query = m[1].replace(/^(number|no|the) /, '').trim();
+        // "for me" names no PR.
+        if (/^\d+$/.test(query) || tokens(query).length) return query;
+      }
+    }
+    return null;
+  }
+
+  // Indexes of rows ({ number, text }) matching the spoken PR number exactly, or containing every spoken word.
+  function pickPr(query, rows) {
+    var q = normalize(query);
+    if (/^\d+$/.test(q)) {
+      return rows.reduce(function (hits, row, i) { return String(row.number) === q ? hits.concat(i) : hits; }, []);
+    }
+    var words = tokens(q).filter(function (w) { return !/^(pr|pull|request|merge|mr|review)$/.test(w); });
+    if (!words.length) return [];
+    return rows.reduce(function (hits, row, i) {
+      var have = new Set(tokens(row.text));
+      return words.every(function (w) { return have.has(w); }) ? hits.concat(i) : hits;
+    }, []);
+  }
+
+  // Returns { kind: 'send' }, { kind: 'pr', query }, { kind: 'command', command } or null.
   function matchCommand(text, allCommands) {
     var commands = allCommands.filter(function (c) { return !NOT_BY_VOICE.test(c.label); });
     var spoken = normalize(text);
     if (!spoken) return null;
     if (SEND.test(spoken)) return { kind: 'send' };
+    var prQuery = parsePrRequest(text);
+    if (prQuery) return { kind: 'pr', query: prQuery };
 
     for (var i = 0; i < ALIASES.length; i++) {
       if (!ALIASES[i].re.test(spoken)) continue;
@@ -132,7 +170,7 @@
     return cmd ? { kind: 'command', command: cmd } : null;
   }
 
-  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand };
+  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest, pickPr: pickPr };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);
