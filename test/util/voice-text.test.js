@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick, splitChain, shellText } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -363,4 +363,17 @@ test('help, history and microphone phrases reach the voice commands', () => {
   for (const t of ['help', 'What can I say?', 'voice help']) assert.equal(pick(t), 'Voice: What Can I Say?', t);
   for (const t of ['voice history', 'what did you hear']) assert.equal(pick(t), 'Voice: History', t);
   for (const t of ['choose microphone', 'change mic', 'switch the microphone', 'use another mic']) assert.equal(pick(t), 'Voice: Choose Microphone…', t);
+});
+
+test('"and then" splits a chain of steps', () => {
+  assert.deepEqual(splitChain('New session and then select agent Gemini.'), ['New session', 'select agent Gemini.']);
+  assert.deepEqual(splitChain('open the dev loop, then run review'), ['open the dev loop', 'run review']);
+  assert.deepEqual(splitChain('fix the login bug'), ['fix the login bug']);
+});
+
+test('shell dictation drops sentence punctuation', () => {
+  assert.equal(shellText('Git status.'), 'git status');
+  assert.equal(shellText('npm test!'), 'npm test');
+  assert.equal(shellText('PR list'), 'PR list');
+  assert.equal(shellText('ls -la'), 'ls -la');
 });

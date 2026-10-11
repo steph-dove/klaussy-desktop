@@ -126,9 +126,9 @@
     if (!entry) return null;
     if (entry.activeSubId != null) {
       var sub = (entry.subTerminals || []).find(function (s) { return s.subId === entry.activeSubId; });
-      if (sub && sub.alive) return { id: id, subId: sub.subId, terminal: sub.terminal };
+      if (sub && sub.alive) return { id: id, subId: sub.subId, terminal: sub.terminal, shell: sub.mode === 'shell' };
     }
-    return entry.alive ? { id: id, subId: null, terminal: entry.terminal } : null;
+    return entry.alive ? { id: id, subId: null, terminal: entry.terminal, shell: entry.mode === 'shell' } : null;
   }
 
   function activeTarget() {
@@ -170,6 +170,7 @@
     // paste() lets xterm add bracketed-paste markers when the agent asked for
     // them, so the text is inserted, not submitted.
     forgetInsert();
+    if (target.shell) clean = window.VoiceText.shellText(clean);
     target.terminal.paste(clean + ' ');
     outcome('typed into the agent');
     // Any keystroke after this means the backspaces would hit something else.
@@ -448,8 +449,34 @@
     return !!(target && target.field && target.field.closest('.pr-picker-overlay'));
   }
 
+  // Something that would run as a command or press a control, rather than be typed.
+  function isActionable(text) {
+    var names = visibleControls().map(controlName);
+    return !!window.VoiceText.matchCommand(text, window.App.buildPaletteCommands())
+      || window.VoiceText.pickControl(text, names, window.AppUtils.fuzzyMatch) >= 0
+      || !!window.VoiceText.listPick(text);
+  }
+
+  // Runs "X and then Y" one step at a time, giving each step's UI a moment to appear.
+  function runChain(parts) {
+    var step = function (i) {
+      if (i >= parts.length) return;
+      var ok = routeTranscript(parts[i], 'auto', activeTarget());
+      if (ok === false && i < parts.length - 1) {
+        window.toast.info('A step didn’t work, so the rest of that request was skipped.');
+        return;
+      }
+      setTimeout(function () { step(i + 1); }, 400);
+    };
+    step(0);
+    outcome('chain of ' + parts.length + ' steps: ' + parts.join(' → '));
+    return true;
+  }
+
   function runAuto(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
+    var parts = heard ? window.VoiceText.splitChain(heard) : [];
+    if (parts.length > 1 && parts.slice(0, -1).every(isActionable)) return runChain(parts);
     if (heard && window.VoiceText.endsWithDiscard(heard)) {
       remember(target || terminalTarget(), '', heard);
       announce('Discarded. Say put that back to type it after all.');

@@ -258,6 +258,19 @@
     return { state: 'done' };
   }
 
+  // "new session and then select gemini" -> ['new session', 'select gemini']; one part when there is no "then".
+  function splitChain(text) {
+    return String(text || '').split(/\s*,?\s*\b(?:and then|then)\b\s*,?\s*/i)
+      .map(function (p) { return p.replace(/^[.,\s]+|[,\s]+$/g, ''); })
+      .filter(Boolean);
+  }
+
+  // Shell input: no sentence punctuation, and "Git status." becomes "git status" (acronyms like "PR" stay).
+  function shellText(text) {
+    var out = String(text || '').replace(/[.!?]+$/, '');
+    return /^[A-Z][a-z]/.test(out) ? out.charAt(0).toLowerCase() + out.slice(1) : out;
+  }
+
   function endsWithDiscard(text) {
     return DISCARD_TAIL.test(normalize(text));
   }
@@ -309,7 +322,8 @@
   }
 
   var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
-    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl, exactControl: exactControl, listPick: listPick };
+    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl, exactControl: exactControl, listPick: listPick,
+    splitChain: splitChain, shellText: shellText };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);
