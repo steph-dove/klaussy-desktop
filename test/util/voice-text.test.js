@@ -345,3 +345,14 @@ test('review and CR on their own open the PR picker', () => {
     assert.equal(m.alias, true, t);
   }
 });
+
+test('spoken numbers become digits where a number is meant', () => {
+  assert.equal(normalize('review PR one oh three'), 'review pr 103');
+  assert.equal(normalize('review pr one hundred three'), 'review pr 103');
+  assert.equal(normalize('open pr review for forty two'), 'open pr review for 42');
+  assert.equal(normalize('review pr three'), 'review pr 3');
+  assert.equal(normalize('two thousand twenty six'), '2026');
+  assert.equal(normalize('open the second one'), 'open the second one');
+  assert.equal(normalize('one result ready'), 'one result ready');
+  assert.equal(parsePrRequest('Review PR one oh three.'), '103');
+});

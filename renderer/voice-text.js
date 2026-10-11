@@ -59,8 +59,54 @@
     return NON_SPEECH.test(clean) ? '' : clean;
   }
 
+  var UNITS = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+    ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+  var TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  var NUMBER_WORD = /^(zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|\d+)$/;
+
+  // "one oh three" -> 103 (digit by digit), "one hundred three" -> 103, "forty two" -> 42.
+  function wordsToNumber(words) {
+    var digitByDigit = words.every(function (w) { return Object.hasOwn(UNITS, w) && UNITS[w] < 10 || /^\d$/.test(w); });
+    if (digitByDigit && words.length > 1) {
+      return words.map(function (w) { return /^\d$/.test(w) ? w : String(UNITS[w]); }).join('');
+    }
+    var total = 0;
+    var current = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (/^\d+$/.test(w)) current += Number(w);
+      else if (Object.hasOwn(UNITS, w)) current += UNITS[w];
+      else if (Object.hasOwn(TENS, w)) current += TENS[w];
+      else if (w === 'hundred') current = (current || 1) * 100;
+      else if (w === 'thousand') { total += (current || 1) * 1000; current = 0; }
+    }
+    return String(total + current);
+  }
+
+  // Runs of two or more number words become digits; a lone one only after "pr", "number" or "issue".
+  function numbersToDigits(text) {
+    var words = text.split(' ');
+    var out = [];
+    var i = 0;
+    while (i < words.length) {
+      var j = i;
+      while (j < words.length && NUMBER_WORD.test(words[j])) j++;
+      var run = words.slice(i, j);
+      var spelled = run.some(function (w) { return !/^\d+$/.test(w); });
+      var afterPr = /^(pr|number|no|issue|request)$/.test(words[i - 1] || '');
+      if (spelled && (run.length > 1 || afterPr)) {
+        out.push(wordsToNumber(run));
+        i = j;
+      } else {
+        out.push(words[i]);
+        i++;
+      }
+    }
+    return out.join(' ');
+  }
+
   function normalize(text) {
-    return String(text || '')
+    return numbersToDigits(String(text || '')
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, ' ')
       .replace(/\bp r\b/g, 'pr')
@@ -69,7 +115,7 @@
       .replace(/^(hey |ok |okay )?klaussy /, '')
       .replace(/^(please |can you |could you |would you |let s |lets |i want to |i d like to |go ahead and )+/, '')
       .replace(/ please$/, '')
-      .replace(/\b(a|an) /g, '');
+      .replace(/\b(a|an) /g, ''));
   }
 
   // Spoken short forms count as the words the palette labels spell out.
