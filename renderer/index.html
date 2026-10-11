@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: klaussy-qa:; media-src 'self' klaussy-qa:; connect-src 'self'; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' klaussy-voice:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: klaussy-qa:; media-src 'self' klaussy-qa:; connect-src 'self' klaussy-voice:; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
   <title>Klaussy</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -74,6 +74,13 @@
               <circle cx="12" cy="12" r="2.5"></circle>
               <line x1="4" y1="6.5" x2="4" y2="12"></line>
               <path d="M4 8.5h4a2 2 0 0 0 2-2V4"></path>
+            </svg>
+          </button>
+          <button id="btn-voice" hidden aria-pressed="false" aria-label="Voice dictation" title="Voice dictation (hold the shortcut, or click to start and stop)">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="5.5" y="1.5" width="5" height="8.5" rx="2.5"></rect>
+              <path d="M3 7.5a5 5 0 0 0 10 0"></path>
+              <line x1="8" y1="12.5" x2="8" y2="14.5"></line>
             </svg>
           </button>
           <button id="btn-layout" aria-label="Cycle terminal layout" title="Cycle layout: single / columns / grid">
@@ -825,6 +832,8 @@
   <script src="main-window-a11y.js"></script>
   <!-- app-functions-*.js define window.App.* and must load BEFORE app.js,
        which runs the bootstrap and calls them. -->
+  <script src="voice-text.js"></script>
+  <script src="voice.js"></script>
   <script src="app-functions-1.js"></script>
   <script src="app-functions-2.js"></script>
   <script src="app.js"></script>

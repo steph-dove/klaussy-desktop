@@ -1,0 +1,91 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { sanitizeDictation, normalize, matchCommand } = require('../../renderer/voice-text');
+
+const noop = () => {};
+const PALETTE = [
+  'New Task',
+  'Open Folder or File…',
+  'Open Folder or File in Claude…',
+  'Open Folder or File in Shell…',
+  'Toggle Diff Panel',
+  'Change Theme',
+  'Preferences',
+  'Zoom In',
+  'Zoom Out',
+  'Reset Zoom',
+  'Run Full Dev Loop (Rest of the Owl)…',
+  'Plan a Task…',
+  'Clear Terminal',
+  'Show Changes',
+  'Pop Out',
+  'Kill Task',
+  'Switch to: auth-fix',
+  'Switch to: billing-refactor',
+  'Run Full Dev Loop (Rest of the Owl)…',
+  'Review Pull Request / Merge Request…',
+  'View Logs',
+  'MCP Servers',
+].map((label) => ({ label, action: noop }));
+
+const label = (text, commands = PALETTE) => {
+  const m = matchCommand(text, commands);
+  return m && (m.kind === 'send' ? 'SEND' : m.command.label);
+};
+
+test('dictation keeps the words and drops paste markers and control chars', () => {
+  assert.equal(sanitizeDictation('  Refactor the login handler. '), 'Refactor the login handler.');
+  assert.equal(sanitizeDictation('hello\x1b[201~\rrm -rf ~\r\x1b[200~world'), 'hello rm -rf ~ world');
+  assert.equal(sanitizeDictation('a\nb\tc\x7f\x9bd'), 'a b c d');
+  assert.equal(sanitizeDictation('esc\x1b[31m'), 'esc [31m');
+});
+
+test('non-speech markers become empty', () => {
+  for (const s of ['[BLANK_AUDIO]', '(silence)', ' [Music] ', '', null, undefined]) {
+    assert.equal(sanitizeDictation(s), '', String(s));
+  }
+});
+
+test('normalize lowercases, strips punctuation, joins "p r" and a wake word', () => {
+  assert.equal(normalize('Open P.R. review!'), 'open pr review');
+  assert.equal(normalize('Klaussy, view changes please.'), 'view changes');
+});
+
+test('the phrasings from the request map to app actions', () => {
+  assert.equal(label('Open PR review.'), 'Review Pull Request / Merge Request…');
+  assert.equal(label('review pull requests'), 'Review Pull Request / Merge Request…');
+  assert.equal(label('View changes'), 'Show Changes');
+  assert.equal(label('new session'), 'New Task');
+  assert.equal(label('start a new task'), 'New Task');
+  assert.equal(label('settings'), 'Preferences');
+});
+
+test('show changes falls back to the diff toggle when no task is open', () => {
+  const noTask = PALETTE.filter((c) => c.label !== 'Show Changes');
+  assert.equal(label('view changes', noTask), 'Toggle Diff Panel');
+});
+
+test('any palette label spoken directly matches', () => {
+  assert.equal(label('view logs'), 'View Logs');
+  assert.equal(label('kill task'), 'Kill Task');
+  assert.equal(label('zoom in'), 'Zoom In');
+  assert.equal(label('plan task'), 'Plan a Task…');
+  assert.equal(label('MCP servers'), 'MCP Servers');
+  assert.equal(label('run the full dev loop'), 'Run Full Dev Loop (Rest of the Owl)…');
+});
+
+test('switch to matches only task names', () => {
+  assert.equal(label('switch to auth fix'), 'Switch to: auth-fix');
+  assert.equal(label('go to the billing refactor task'), 'Switch to: billing-refactor');
+});
+
+test('send, submit and enter press Enter', () => {
+  for (const s of ['send', 'Submit.', 'press enter', 'send it']) assert.equal(label(s), 'SEND', s);
+});
+
+test('unclear or unrelated speech matches nothing', () => {
+  assert.equal(label('zoom'), null);
+  assert.equal(label('what is the weather'), null);
+  assert.equal(label(''), null);
+  assert.equal(label('switch to payments'), null);
+});

@@ -145,6 +145,11 @@ contextBridge.exposeInMainWorld('klaus', {
     },
   },
 
+  // ---- voice: on-device dictation and voice commands ----
+  voice: {
+    prepare: () => ipcRenderer.invoke('voice-prepare'),
+  },
+
   // ---- terminal: PTY I/O + sub-terminals ----
   terminal: {
     write: (id, data, subId) => ipcRenderer.send('write-terminal', { id, data, subId }),

@@ -2,7 +2,7 @@
 // arbitrary local files, so QA media is served over this scheme and only for
 // paths the QA scanner returned.
 //
-// Must be required before app ready — registerSchemesAsPrivileged is pre-ready.
+// The scheme is registered as privileged by privileged-schemes.js.
 
 const fs = require('fs');
 const path = require('path');
@@ -29,10 +29,10 @@ function qaMediaUrl(absPath) {
 
 // stream: true so <video> range requests work; without it seeking a recording
 // re-downloads from zero.
-protocol.registerSchemesAsPrivileged([{
+const PRIVILEGED = {
   scheme: SCHEME,
   privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
-}]);
+};
 
 // net.fetch on a file: URL always returns the whole file, so a seek has to be
 // served by hand: 206 plus Content-Range, or the element cannot scrub.
@@ -100,4 +100,4 @@ function protocolError() {
   return registrationError;
 }
 
-module.exports = { allowQaPaths, qaMediaUrl, protocolError, SCHEME };
+module.exports = { allowQaPaths, qaMediaUrl, protocolError, SCHEME, PRIVILEGED };

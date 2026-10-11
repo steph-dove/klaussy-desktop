@@ -68,7 +68,7 @@ window.AppUtils = (function () {
   }
 
   // Mac matches e.key so layouts where the key moves still work; elsewhere Shift rewrites e.key, so match the physical code.
-  var KEY_CHARS = { Slash: ['/'], Equal: ['=', '+'], Minus: ['-'], Digit0: ['0'] };
+  var KEY_CHARS = { Slash: ['/'], Equal: ['=', '+'], Minus: ['-'], Digit0: ['0'], Space: [' '], Semicolon: [';', ':'] };
 
   // Ctrl+Shift off macOS because plain Ctrl+<letter> belongs to the shell, so opts.shift only matters on macOS.
   function isAppShortcut(e, key, opts) {
@@ -81,10 +81,10 @@ window.AppUtils = (function () {
     return (e.key || '').toLowerCase() === key;
   }
 
-  var CODE_LABELS = { Slash: '/', Equal: '=', Minus: '\u2212', Digit0: '0' };
-  function shortcutLabel(key) {
+  var CODE_LABELS = { Slash: '/', Equal: '=', Minus: '\u2212', Digit0: '0', Space: 'Space', Semicolon: ';' };
+  function shortcutLabel(key, shift) {
     var k = CODE_LABELS[key] || key.toUpperCase();
-    return isMac() ? '\u2318' + k : 'Ctrl+Shift+' + k;
+    return isMac() ? '\u2318' + (shift ? '\u21e7' : '') + k : 'Ctrl+Shift+' + k;
   }
 
   // Handled in app.js; terminals must not forward these to the shell.
@@ -93,6 +93,8 @@ window.AppUtils = (function () {
     quickOpen: { key: 'p', shift: false },
     slash: { key: 'Slash' },
     diff: { key: 'g' },
+    voiceDictate: { key: 'Space', shift: true },
+    voiceCommand: { key: 'Semicolon', shift: true },
   };
 
   function isNamedShortcut(e, name) {
@@ -105,7 +107,7 @@ window.AppUtils = (function () {
   }
 
   function appShortcutLabel(name) {
-    return shortcutLabel(APP_SHORTCUTS[name].key);
+    return shortcutLabel(APP_SHORTCUTS[name].key, APP_SHORTCUTS[name].shift === true);
   }
 
   // Elsewhere the shell's own Ctrl+L clears.

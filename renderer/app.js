@@ -492,8 +492,11 @@ window.App = window.App || {};
     window.klaus.ui.openPreferences();
   });
 
+  Voice.init();
+
   // Apply preference changes broadcast from main process
   window.klaus.ui.onPreferencesChanged(function (prefs) {
+    if (prefs.voiceInput !== undefined) Voice.setEnabled(prefs.voiceInput);
     if (prefs.fontSize !== undefined || prefs.fontFamily !== undefined ||
         prefs.lineHeight !== undefined || prefs.cursorStyle !== undefined) {
       App.tasks.forEach(function (task, id) {
@@ -547,6 +550,7 @@ window.App = window.App || {};
   // Load saved terminal preferences on startup
   window.klaus.ui.getPreferences().then(function (prefs) {
     AppState.savedPrefs = prefs;
+    Voice.setEnabled(prefs.voiceInput === true);
     if (prefs.fontSize && prefs.fontSize !== 13) AppState.currentFontSize = prefs.fontSize;
   });
 

@@ -147,3 +147,39 @@ test('shortcutLabel: platform-specific modifier text', () => {
     assert.equal(AppUtils.clearShortcutLabel(), 'Ctrl+L');
   });
 });
+
+test('voice shortcuts: Cmd+Shift on macOS matches the shifted character', () => {
+  withPlatform('darwin', () => {
+    assert.equal(AppUtils.isNamedShortcut(key({ metaKey: true, shiftKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ metaKey: true, shiftKey: true, key: ':', code: 'Semicolon' }), 'voiceCommand'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ metaKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), false);
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), false);
+  });
+});
+
+test('voice shortcuts: Ctrl+Shift by physical key elsewhere', () => {
+  withPlatform('win32', () => {
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, shiftKey: true, key: ':', code: 'Semicolon' }), 'voiceCommand'), true);
+    assert.equal(AppUtils.isNamedShortcut(key({ ctrlKey: true, key: ' ', code: 'Space' }), 'voiceDictate'), false);
+  });
+});
+
+test('voice shortcuts are kept from the terminal', () => {
+  withPlatform('linux', () => {
+    assert.equal(AppUtils.isAnyAppShortcut(key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' })), true);
+  });
+});
+
+test('appShortcutLabel shows Shift for shortcuts that require it', () => {
+  withPlatform('darwin', () => {
+    assert.equal(AppUtils.appShortcutLabel('voiceDictate'), '⌘⇧Space');
+    assert.equal(AppUtils.appShortcutLabel('voiceCommand'), '⌘⇧;');
+    assert.equal(AppUtils.appShortcutLabel('palette'), '⌘K');
+    assert.equal(AppUtils.appShortcutLabel('slash'), '⌘/');
+  });
+  withPlatform('linux', () => {
+    assert.equal(AppUtils.appShortcutLabel('voiceDictate'), 'Ctrl+Shift+Space');
+    assert.equal(AppUtils.appShortcutLabel('voiceCommand'), 'Ctrl+Shift+;');
+  });
+});

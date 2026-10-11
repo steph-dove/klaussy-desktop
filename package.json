@@ -29,9 +29,11 @@
     "dist:win": "electron-builder --win --x64 --publish never && npm run rebuild",
     "dist:linux": "electron-builder --linux --x64 --publish never && npm run rebuild",
     "release:mac": "node scripts/release-mac.js",
-    "postinstall": "node scripts/postinstall.js"
+    "postinstall": "node scripts/postinstall.js",
+    "voice:fetch": "node scripts/fetch-voice-model.js"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -80,10 +82,23 @@
       "!playwright.config.js",
       "!playwright-report/**",
       "!test-results/**",
+      "!node_modules/onnxruntime-node/**",
+      "!node_modules/sharp/**",
+      "!node_modules/@img/**",
+      "!node_modules/onnxruntime-web/dist/**",
+      "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.{mjs,wasm}",
+      "!node_modules/@huggingface/transformers/dist/**",
+      "node_modules/@huggingface/transformers/dist/transformers.min.js",
       "!**/*.md"
     ],
     "asarUnpack": [
       "node_modules/node-pty/**"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/voice-model",
+        "to": "voice-model"
+      }
     ],
     "mac": {
       "category": "public.app-category.developer-tools",
@@ -115,9 +130,11 @@
         "NSDocumentsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
         "NSDownloadsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
         "NSRemovableVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSNetworkVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them."
+        "NSNetworkVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSMicrophoneUsageDescription": "Klaussy uses the microphone only for voice input you start, and transcribes speech on this machine."
       }
     },
+    "beforePack": "scripts/fetch-voice-model.js",
     "afterSign": "build/notarize.js",
     "dmg": {
       "title": "Klaussy ${version} ${arch}",
