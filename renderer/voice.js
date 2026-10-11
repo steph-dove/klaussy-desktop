@@ -89,7 +89,8 @@
     if (!el || el.disabled || el.readOnly || el.closest('[inert]')) return null;
     if (el.closest('.xterm, .monaco-editor')) return null;
     if (el.tagName === 'TEXTAREA') return el;
-    if (el.tagName === 'INPUT' && /^(text|search|url|email|)$/.test(el.type || '')) return el;
+    // setRangeText throws on other input types (email, number).
+    if (el.tagName === 'INPUT' && /^(text|search|url|)$/.test(el.type || '')) return el;
     return el.isContentEditable ? el : null;
   }
 
@@ -141,6 +142,10 @@
     }
     if (!target) {
       window.toast.error('Open an agent tab to dictate into.');
+      return false;
+    }
+    if (target.field && !target.field.isConnected) {
+      window.toast.info('The text box closed before “' + clean + '” could be typed into it.');
       return false;
     }
     if (target.field) return typeInto(target.field, clean);
