@@ -125,7 +125,7 @@ window.App = window.App || {};
     var noProject = !AppState.repoPath;
     if (noProject) {
       titleEl.textContent = 'Welcome to Klaussy';
-      subEl.textContent = 'Create or attach a git worktree to get started — pick a repo, name a branch, and Klaussy spawns an agent session.';
+      subEl.textContent = 'Pick a repo, name a branch, and Klaussy spawns an agent session.';
       if (cardTitleEl && cardDescEl) {
         cardTitleEl.textContent = 'Add a Worktree';
         cardDescEl.textContent = 'Attach a local git repository to start managing worktrees.';
