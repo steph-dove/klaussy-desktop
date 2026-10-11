@@ -652,6 +652,12 @@ body.dialog-open #voice-float:not([hidden]),
 body.pr-review-popout #voice-float:not([hidden]) {
   display: flex;
 }
+#voice-float.docked {
+  position: static;
+  width: 26px;
+  height: 26px;
+  box-shadow: none;
+}
 
 #btn-review-pr {
   font-size: 11px;

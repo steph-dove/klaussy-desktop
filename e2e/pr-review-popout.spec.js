@@ -77,4 +77,5 @@ test('voice works in the popout: the mic is shown and "run review" starts the AI
   }, { number: 5, meta: { title: 'Popout voice', state: 'OPEN', author: { login: 'dev' }, headRefName: 'f', baseRefName: 'main' }, diff: '', threads: [] });
   expect(started).toBe(1);
   await expect(popout.locator('.pr-review-tab[data-tab="ai-review"]')).toHaveClass(/active/);
+  await expect(popout.locator('.pr-review-actions #voice-float.docked')).toBeVisible();
 });

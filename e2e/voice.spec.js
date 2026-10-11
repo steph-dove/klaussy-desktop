@@ -180,10 +180,10 @@ test.describe('voice input on', () => {
     });
   });
 
+  // Unmatched phrases go to Ollama first (absent on CI, or answering "none" locally), so the message arrives after it replies.
   test('an unmatched command says so instead of guessing', async ({ mainWindow }) => {
-    const ran = await mainWindow.evaluate(() => window.Voice.handleTranscript('what is the weather', 'command'));
-    expect(ran).toBe(false);
-    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'didn’t match a command' })).toBeVisible();
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('what is the weather', 'command'));
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'didn’t match a command' })).toBeVisible({ timeout: 15000 });
   });
 
   test('dictation pastes sanitized text into the active terminal without Enter', async ({ mainWindow }) => {

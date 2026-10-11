@@ -1020,6 +1020,19 @@
     });
   }
 
+  // The pop-out's PR toolbar is rebuilt on every repaint, so the mic is moved back into it each time; until a PR loads it floats.
+  function dockInPopout(float) {
+    if (!float || !document.body.classList.contains('pr-review-popout')) return;
+    var dock = function () {
+      var bar = document.querySelector('.pr-review-actions');
+      if (!bar || float.parentElement === bar) return;
+      float.classList.add('docked');
+      bar.appendChild(float);
+    };
+    new MutationObserver(dock).observe(document.body, { childList: true, subtree: true });
+    dock();
+  }
+
   function init() {
     buttons = [document.getElementById('btn-voice'), document.getElementById('voice-float')].filter(Boolean);
     buttons.forEach(function (button) {
@@ -1028,6 +1041,7 @@
       button.addEventListener('mousedown', function (e) { e.preventDefault(); });
       button.addEventListener('click', onButtonClick);
     });
+    dockInPopout(document.getElementById('voice-float'));
     // Capture phase: Monaco binds Ctrl/Cmd+Shift+Space and stops propagation.
     window.addEventListener('keydown', function (e) {
       if (!enabled) return;
