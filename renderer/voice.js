@@ -12,7 +12,9 @@
   // until the user stops it, says so, or goes quiet for CONVERSATION_IDLE_MS.
   var SILENCE_MS = 1300;
   var NO_SPEECH_MS = 8000;
-  var CONVERSATION_IDLE_MS = 20000;
+  var CONVERSATION_IDLE_MS = 15000;
+  // A phrase much quieter than the loudest one so far is probably someone else in the room.
+  var BACKGROUND_RATIO = 0.35;
   var PRE_ROLL_SECONDS = 0.5;
   var SPEECH_RMS = 0.015;
   // The loaded model holds 100+ MB in this renderer, so drop it when unused.
@@ -665,7 +667,9 @@
           if (session.length >= RATE * MAX_SECONDS) stop();
           return;
         }
-        if (rms(chunk) >= SPEECH_RMS) {
+        var level = rms(chunk);
+        if (level >= SPEECH_RMS) {
+          session.phraseLevel = Math.max(session.phraseLevel || 0, level);
           session.heardSpeech = true;
           session.spokeAtAll = true;
           session.quietMs = 0;
@@ -743,7 +747,16 @@
 
   // A pause in click-to-talk: handle the phrase and keep listening.
   function handlePhrase(session) {
-    transcribeAndHandle(takeAudio(session), session.mode, activeTarget());
+    var level = session.phraseLevel || 0;
+    session.phraseLevel = 0;
+    var audio = takeAudio(session);
+    if (session.loudest && level < session.loudest * BACKGROUND_RATIO) {
+      history.unshift({ at: new Date(), heard: '(quiet speech)', did: 'ignored quiet background speech' });
+      history.length = Math.min(history.length, 50);
+      return;
+    }
+    session.loudest = Math.max(session.loudest || 0, level);
+    transcribeAndHandle(audio, session.mode, activeTarget());
   }
 
   function finish(session) {
