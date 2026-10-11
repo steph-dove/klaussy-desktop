@@ -628,6 +628,7 @@ function repoAwarePreamble(baseRef) {
 
 - **Base ref:** use \`${baseRef}\` for every \`git diff\` / \`git log\` range (e.g. \`git diff ${baseRef}...HEAD\`), ignoring any other base branch named in the skill.
 - **Gather context yourself:** any fenced \`\`\`! command blocks in the skill are NOT pre-executed here — run them yourself with the Bash tool before reviewing.
+- **Non-interactive run:** nobody can answer a question here, and stopping to ask ends the review. Where the skill says to stop and ask (a stale or diverged checkout, an ambiguous base, which commit to review), don't: review local HEAD against the base ref above and note that in the summary.
 - **Output:** do NOT write any file (ignore instructions to write REVIEW_OUTPUT.md or similar). Emit the review using the output contract at the very end of this prompt; the desktop parses it into cards.
 
 --- repository review skill ---
@@ -635,20 +636,40 @@ function repoAwarePreamble(baseRef) {
 `;
 }
 
-// Locate the repo's generated review skill in a worktree. klaussy namespaces it
-// as <sanitized-repo-name>-review, so we match by the `-review` suffix rather
-// than reconstructing the sanitized name.
+// Read-only klaussy commands the review skill runs; a headless run can't approve them.
+const REVIEW_ALLOWED_TOOLS = [
+  'Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)',
+  'Bash(python3 -m klaussy base:*)', 'Bash(python3 -m klaussy review-prep:*)',
+  'Bash(python -m klaussy base:*)', 'Bash(python -m klaussy review-prep:*)',
+];
+
+// Sibling klaussy skills whose names also end in `-review` but aren't the review.
+const NON_REVIEW_SKILL_SUFFIXES = ['-address-review', '-self-review'];
+
+// Find <repo>-review by its `klaussy-review` alias (klaussy-agents >= 0.31); the
+// bare `-review` suffix also matches address-review, which sorts first.
 function findRepoReviewSkill(worktreePath) {
   if (!worktreePath) return null;
+  let candidates;
   try {
     const skillsDir = path.join(worktreePath, '.claude', 'skills');
-    for (const e of fs.readdirSync(skillsDir, { withFileTypes: true })) {
-      if (!e.isDirectory() || !e.name.endsWith('-review')) continue;
-      const p = path.join(skillsDir, e.name, 'SKILL.md');
-      if (fs.existsSync(p)) return p;
-    }
-  } catch { /* no .claude/skills — not generated yet */ }
-  return null;
+    candidates = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && e.name.endsWith('-review'))
+      .map((e) => ({ name: e.name, file: path.join(skillsDir, e.name, 'SKILL.md') }))
+      .filter((c) => fs.existsSync(c.file));
+  } catch { return null; /* no .claude/skills — not generated yet */ }
+
+  const aliased = candidates.find((c) => {
+    try {
+      const head = fs.readFileSync(c.file, 'utf-8').match(/^---\r?\n[\s\S]*?\r?\n---/);
+      return !!head && head[0].includes('`klaussy-review`');
+    } catch { return false; }
+  });
+  if (aliased) return aliased.file;
+  const plain = candidates
+    .filter((c) => !NON_REVIEW_SKILL_SUFFIXES.some((s) => c.name.endsWith(s)))
+    .sort((a, b) => a.name.length - b.name.length)[0];
+  return plain ? plain.file : null;
 }
 
 // Adapt a generated skill body for use as a raw prompt: drop frontmatter, and
@@ -656,7 +677,7 @@ function findRepoReviewSkill(worktreePath) {
 // the repo's default branch, but a PR review diffs against the PR's fork point).
 function adaptSkillBody(skillMd, baseRef, repoSpecificChecks) {
   let body = skillMd
-    .replace(/^---\n[\s\S]*?\n---\n+/, '')                       // YAML frontmatter
+    .replace(/^---\r?\n[\s\S]*?\r?\n---(\r?\n)+/, '')            // YAML frontmatter
     .replace(/\{\{BASE_BRANCH\}\}/g, () => baseRef)              // any leftover placeholder
     .replace(/[\w.\/-]+?(\.\.\.?)HEAD/g, (_m, dots) => baseRef + dots + 'HEAD') // baked X...HEAD ranges
     .replace(/\{\{REPO_SPECIFIC_CHECKS\}\}/g, () => repoSpecificChecks || '');
@@ -786,4 +807,4 @@ function buildImplementPrompt({ mode, body, intel } = {}) {
   return prompt + (intel ? '\n' + intel : '');
 }
 
-module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };
+module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, REVIEW_ALLOWED_TOOLS, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };

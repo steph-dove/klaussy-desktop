@@ -144,6 +144,6 @@ npm run dist:linux    # Linux AppImage + DEB (requires Linux host)
 
 Klaussy Desktop is source-available under the **Sustainable Use License (SUL 1.0)**. You can run, modify, and self-host the software for personal, non-commercial, and internal business use. Reselling or offering Klaussy Desktop as a paid hosted service requires a commercial license.
 
-The underlying generator engine, [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents), is open-source under the MIT license.
+The underlying generator engine, [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents), is source-available under the [Functional Source License (FSL-1.1-MIT)](https://github.com/steph-dove/klaussy-agents/blob/main/LICENSE).
 
-© 2026 Stephanie Dover
+© 2026 Dovatech LLC
