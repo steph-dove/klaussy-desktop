@@ -331,7 +331,7 @@ window.App = window.App || {};
       if (AppState.activeTaskId && window.ActionModal) {
         window.ActionModal.run(AppState.activeTaskId, 'rest-of-the-owl');
       } else {
-        App.btnNewTask.click();
+        document.getElementById('card-dev-loop').click();
       }
     }});
     commands.push({ label: 'Review Pull Request / Merge Request…', action: function () { App.showPrPicker(); } });

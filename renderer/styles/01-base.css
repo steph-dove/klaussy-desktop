@@ -571,36 +571,36 @@ body.custom-titlebar #titlebar-content {
   box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
 }
 
-#btn-voice[hidden] {
+.voice-btn[hidden] {
   display: none !important;
 }
 
-#btn-voice.on {
+.voice-btn.on {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
   color: var(--accent-contrast) !important;
 }
 
-#btn-voice.recording {
+.voice-btn.recording {
   background: var(--error) !important;
   border-color: var(--error) !important;
   color: var(--error-contrast) !important;
   animation: btn-voice-pulse 1.2s ease-in-out infinite;
 }
 
-#btn-voice {
+.voice-btn {
   position: relative;
 }
 
 /* Processing: amber with a spinning ring, distinct from ready (accent) and listening (red). */
-#btn-voice.busy {
+.voice-btn.busy {
   background: var(--warning) !important;
   border-color: var(--warning) !important;
   color: var(--accent-contrast) !important;
   cursor: progress;
 }
 
-#btn-voice.busy::after {
+.voice-btn.busy::after {
   content: '';
   position: absolute;
   top: 50%;
@@ -626,8 +626,30 @@ body.custom-titlebar #titlebar-content {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #btn-voice.recording,
-  #btn-voice.busy::after { animation: none; }
+  .voice-btn.recording,
+  .voice-btn.busy::after { animation: none; }
+}
+
+#voice-float {
+  display: none;
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 10050;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border, #33333d);
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+body.dialog-open #voice-float:not([hidden]) {
+  display: flex;
 }
 
 #btn-review-pr {

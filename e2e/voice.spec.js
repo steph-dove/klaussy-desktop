@@ -115,6 +115,37 @@ test.describe('voice input on', () => {
     });
   });
 
+  test('"run the rest of the owl" with no task opens a new session with the dev loop ticked', async ({ mainWindow }) => {
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('run the rest of the owl', 'auto'));
+    await expect(mainWindow.locator('#modal-overlay')).toBeVisible();
+    await expect(mainWindow.locator('#modal-devloop-check')).toBeChecked();
+  });
+
+  test('voice keeps working over a dialog and dictates into its focused text box', async ({ electronApp, mainWindow }) => {
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('run the rest of the owl', 'auto'));
+    await expect(mainWindow.locator('#modal-overlay')).toBeVisible();
+    const float = mainWindow.locator('#voice-float');
+    await expect(float).toBeVisible();
+    expect(await mainWindow.evaluate(() => !!document.getElementById('btn-voice').closest('[inert]'))).toBe(true);
+    expect(await mainWindow.evaluate(() => !!document.getElementById('voice-float').closest('[inert]'))).toBe(false);
+
+    const box = mainWindow.locator('#modal-devloop-prompt');
+    await box.click();
+    await stubPrepare(electronApp, { ok: false, error: 'stubbed: no microphone in e2e' });
+    await float.click();
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'stubbed: no microphone' })).toBeVisible();
+    await expect(box).toBeFocused();
+
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('fix the flaky login test', 'auto'));
+    await expect(box).toHaveValue('fix the flaky login test');
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('and add a regression check', 'auto'));
+    await expect(box).toHaveValue('fix the flaky login test and add a regression check');
+  });
+
+  test('the floating mic is hidden when no dialog is open', async ({ mainWindow }) => {
+    await expect(mainWindow.locator('#voice-float')).toBeHidden();
+  });
+
   test('click-to-talk types anything that is not a command into the agent', async ({ mainWindow }) => {
     await withShellTask(mainWindow, async (id) => {
       const pasted = await mainWindow.evaluate((taskId) => {

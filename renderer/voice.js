@@ -16,7 +16,7 @@
   var IDLE_MS = 10 * 60 * 1000;
 
   var enabled = false;
-  var button = null;
+  var buttons = [];
   var worker = null;
   var loading = null;
   var pending = {};
@@ -84,9 +84,16 @@
     return run;
   }
 
-  // The live terminal input would go to: the active Shell/split sub-tab when
-  // one is open, otherwise the task's own terminal.
-  function activeTarget() {
+  function focusedField() {
+    var el = document.activeElement;
+    if (!el || el.disabled || el.readOnly || el.closest('[inert]')) return null;
+    if (el.closest('.xterm, .monaco-editor')) return null;
+    if (el.tagName === 'TEXTAREA') return el;
+    if (el.tagName === 'INPUT' && /^(text|search|url|email|)$/.test(el.type || '')) return el;
+    return el.isContentEditable ? el : null;
+  }
+
+  function terminalTarget() {
     var state = window.AppState;
     var id = state && state.activeTaskId;
     var entry = id != null && state.tasks.get(id);
@@ -98,12 +105,18 @@
     return entry.alive ? { id: id, subId: null, terminal: entry.terminal } : null;
   }
 
+  function activeTarget() {
+    var field = focusedField();
+    return field ? { field: field } : terminalTarget();
+  }
+
   // preparing: mic requested but not live yet; listening: audio is being captured; transcribing: working out what was said.
   function setState(state) {
-    if (!button) return;
-    button.classList.toggle('recording', state === 'listening');
-    button.classList.toggle('busy', state === 'preparing' || state === 'transcribing');
-    button.setAttribute('aria-pressed', state === 'listening' ? 'true' : 'false');
+    buttons.forEach(function (button) {
+      button.classList.toggle('recording', state === 'listening');
+      button.classList.toggle('busy', state === 'preparing' || state === 'transcribing');
+      button.setAttribute('aria-pressed', state === 'listening' ? 'true' : 'false');
+    });
     if (state === 'listening') announce('Listening');
     else if (state === 'transcribing') announce('Processing');
   }
@@ -130,6 +143,7 @@
       window.toast.error('Open an agent tab to dictate into.');
       return false;
     }
+    if (target.field) return typeInto(target.field, clean);
     // paste() lets xterm add bracketed-paste markers when the agent asked for
     // them, so the text is inserted, not submitted.
     target.terminal.paste(clean + ' ');
@@ -137,8 +151,23 @@
     return true;
   }
 
+  function typeInto(el, text) {
+    el.focus();
+    if (typeof el.setRangeText === 'function') {
+      var start = el.selectionStart;
+      var before = el.value.slice(0, start);
+      el.setRangeText((before && !/\s$/.test(before) ? ' ' : '') + text, start, el.selectionEnd, 'end');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    } else {
+      document.execCommand('insertText', false, text);
+    }
+    announce('Inserted ' + text);
+    return true;
+  }
+
   function run(match, heard, target) {
     if (match.kind === 'send') {
+      if (target && target.field) target = terminalTarget();
       if (!target) {
         window.toast.error('Open an agent tab first.');
         return false;
@@ -344,14 +373,16 @@
   }
 
   function renderButton() {
-    if (!button) return;
-    button.classList.toggle('on', enabled);
-    button.setAttribute('aria-label', enabled ? 'Voice input: click to talk' : 'Voice input is off: click to turn it on and talk');
-    button.title = enabled
+    var title = enabled
       ? 'Click and say a command ("open pr review", "open the dev loop") or what to type into the agent. Or hold '
         + window.AppUtils.appShortcutLabel('voiceDictate') + ' to dictate, '
         + window.AppUtils.appShortcutLabel('voiceCommand') + ' for a command.'
       : 'Voice input is off. Click to turn it on and talk.';
+    buttons.forEach(function (button) {
+      button.classList.toggle('on', enabled);
+      button.setAttribute('aria-label', enabled ? 'Voice input: click to talk' : 'Voice input is off: click to turn it on and talk');
+      button.title = title;
+    });
   }
 
   function setEnabled(on) {
@@ -384,9 +415,13 @@
   }
 
   function init() {
-    button = document.getElementById('btn-voice');
-    if (button && window.App && window.App.isSecondaryWindow) button.hidden = true;
-    if (button) button.addEventListener('click', onButtonClick);
+    buttons = [document.getElementById('btn-voice'), document.getElementById('voice-float')].filter(Boolean);
+    buttons.forEach(function (button) {
+      if (window.App && window.App.isSecondaryWindow) button.hidden = true;
+      // Keep focus in the text box being dictated into rather than moving it to the button.
+      button.addEventListener('mousedown', function (e) { e.preventDefault(); });
+      button.addEventListener('click', onButtonClick);
+    });
     // Capture phase: Monaco binds Ctrl/Cmd+Shift+Space and stops propagation.
     window.addEventListener('keydown', function (e) {
       if (!enabled) return;
