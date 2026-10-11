@@ -129,6 +129,7 @@
 
   var UNDO = /^(delete|scratch|undo|remove|erase) (that|it|this|the last (one|bit|part|thing))$/;
   var DISCARD_TAIL = / (delete|scratch|undo|erase) (that|it|this)$/;
+  var STOP = /^(stop listening|stop|that s all|thats all|that s it|i m done|im done|done|we re done|never mind|nevermind|goodbye|bye)$/;
   var RESTORE = /^(put (that|it) back|restore (that|it)|bring (that|it) back|type that|undo (the )?delete)$/;
 
   function endsWithDiscard(text) {
@@ -144,7 +145,7 @@
       .trim();
   }
 
-  // Returns { kind: 'send' | 'undo' | 'restore' }, { kind: 'pr', query }, { kind: 'command', command } or null.
+  // Returns { kind: 'send' | 'undo' | 'restore' | 'stop' }, { kind: 'pr', query }, { kind: 'command', command } or null.
   function matchCommand(text, allCommands) {
     var commands = allCommands.filter(function (c) { return !NOT_BY_VOICE.test(c.label); });
     var spoken = normalize(text);
@@ -152,6 +153,7 @@
     if (SEND.test(spoken)) return { kind: 'send' };
     if (UNDO.test(spoken)) return { kind: 'undo' };
     if (RESTORE.test(spoken)) return { kind: 'restore' };
+    if (STOP.test(spoken)) return { kind: 'stop' };
     var prQuery = parsePrRequest(text);
     if (prQuery) return { kind: 'pr', query: prQuery };
 

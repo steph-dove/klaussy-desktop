@@ -167,3 +167,10 @@ test('put that back, restore that and type that restore what was deleted', () =>
     assert.deepEqual(matchCommand(s, PALETTE), { kind: 'restore' }, s);
   }
 });
+
+test('stop listening, that\'s all and I\'m done end the conversation', () => {
+  for (const s of ['Stop listening.', 'stop', "That's all.", "I'm done", 'never mind']) {
+    assert.deepEqual(matchCommand(s, PALETTE), { kind: 'stop' }, s);
+  }
+  assert.equal(matchCommand('stop the dev server and restart it', PALETTE), null);
+});

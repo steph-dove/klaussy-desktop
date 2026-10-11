@@ -8,9 +8,12 @@
   var MAX_SECONDS = 60;
   // Keep capturing briefly after release so the last word isn't cut off.
   var TAIL_MS = 150;
-  // Click-to-talk stops by itself after this much quiet following speech.
+  // Click-to-talk handles each phrase after this much quiet, and keeps listening
+  // until the user stops it, says so, or goes quiet for CONVERSATION_IDLE_MS.
   var SILENCE_MS = 1300;
   var NO_SPEECH_MS = 8000;
+  var CONVERSATION_IDLE_MS = 20000;
+  var PRE_ROLL_SECONDS = 0.5;
   var SPEECH_RMS = 0.015;
   // The loaded model holds 100+ MB in this renderer, so drop it when unused.
   var IDLE_MS = 10 * 60 * 1000;
@@ -125,20 +128,15 @@
     return field ? { field: field } : terminalTarget();
   }
 
-  // preparing: mic requested but not live yet; listening: audio is being captured; transcribing: working out what was said.
-  function setState(state) {
+  // Red while the mic is live; amber while it is opening or a phrase is being worked out.
+  function renderState() {
+    var live = !!(rec && rec.live);
+    var busy = !!(rec && !rec.live) || inFlight > 0;
     buttons.forEach(function (button) {
-      button.classList.toggle('recording', state === 'listening');
-      button.classList.toggle('busy', state === 'preparing' || state === 'transcribing');
-      button.setAttribute('aria-pressed', state === 'listening' ? 'true' : 'false');
+      button.classList.toggle('recording', live);
+      button.classList.toggle('busy', busy);
+      button.setAttribute('aria-pressed', live ? 'true' : 'false');
     });
-    if (state === 'listening') announce('Listening');
-    else if (state === 'transcribing') announce('Processing');
-  }
-
-  // A newer recording or a queued transcription may still own the button.
-  function idleUnlessBusy() {
-    if (!rec) setState(inFlight ? 'transcribing' : 'idle');
   }
 
   function scheduleIdleStop() {
@@ -289,6 +287,7 @@
     if (match.kind === 'pr') return reviewPr(match.query);
     if (match.kind === 'undo') return undoLastInsert(heard);
     if (match.kind === 'restore') return restoreRemoved();
+    if (match.kind === 'stop') return stopListening();
     forgetInsert();
     if (match.kind === 'send') {
       if (target && target.field) target = terminalTarget();
@@ -384,7 +383,7 @@
 
   function release(session) {
     session.closed = true;
-    clearTimeout(session.noSpeechTimer);
+    clearInterval(session.idleCheck);
     if (session.stream) session.stream.getTracks().forEach(function (t) { t.stop(); });
     if (session.ctx) session.ctx.close();
   }
@@ -397,8 +396,11 @@
 
   function start(mode, byClick) {
     if (!enabled || rec) return;
-    var session = rec = { mode: mode, byClick: byClick, chunks: [], length: 0, released: false, closed: false, heardSpeech: false, quietMs: 0 };
-    setState('preparing');
+    var session = rec = {
+      mode: mode, byClick: byClick, chunks: [], length: 0, released: false, closed: false,
+      live: false, heardSpeech: false, spokeAtAll: false, quietMs: 0, lastSpeechAt: Date.now(),
+    };
+    renderState();
     clearTimeout(idleTimer);
     // Load the model while the user is still talking.
     startWorker().catch(function () {});
@@ -430,62 +432,102 @@
         session.chunks.push(chunk);
         session.length += chunk.length;
         if (rec !== session) return;
-        if (session.length >= RATE * MAX_SECONDS) return stop();
-        if (!session.byClick) return;
+        if (!session.byClick) {
+          if (session.length >= RATE * MAX_SECONDS) stop();
+          return;
+        }
         if (rms(chunk) >= SPEECH_RMS) {
           session.heardSpeech = true;
+          session.spokeAtAll = true;
           session.quietMs = 0;
+          session.lastSpeechAt = Date.now();
         } else if (session.heardSpeech) {
           session.quietMs += (chunk.length / RATE) * 1000;
-          if (session.quietMs >= SILENCE_MS) stop();
+          if (session.quietMs >= SILENCE_MS) handlePhrase(session);
+        } else {
+          // Before anyone speaks, keep only a short lead-in so long silences aren't transcribed.
+          while (session.length > RATE * PRE_ROLL_SECONDS && session.chunks.length > 1) {
+            session.length -= session.chunks.shift().length;
+          }
         }
+        if (session.length >= RATE * MAX_SECONDS) handlePhrase(session);
       };
       source.connect(node);
       node.connect(ctx.destination);
       if (session.byClick) {
-        session.noSpeechTimer = setTimeout(function () {
-          if (rec === session && !session.heardSpeech) {
+        session.idleCheck = setInterval(function () {
+          if (rec !== session || session.heardSpeech) return;
+          var quiet = Date.now() - session.lastSpeechAt;
+          if (!session.spokeAtAll && quiet >= NO_SPEECH_MS) {
             cancel();
             window.toast.info('Didn’t hear anything. Click the mic and try again.');
+          } else if (session.spokeAtAll && quiet >= CONVERSATION_IDLE_MS) {
+            cancel();
+            announce('Stopped listening');
           }
-        }, NO_SPEECH_MS);
+        }, 1000);
       }
-      if (rec === session) setState('listening');
+      if (rec === session) {
+        session.live = true;
+        renderState();
+        announce('Listening');
+      }
     }).catch(function (err) {
       if (rec === session) rec = null;
       release(session);
-      idleUnlessBusy();
+      renderState();
       if (!session.cancelled) reportStartError(err);
     });
   }
 
-  function finish(session) {
-    release(session);
-    if (session.length < RATE * MIN_SECONDS) {
-      idleUnlessBusy();
-      scheduleIdleStop();
-      return;
-    }
+  function takeAudio(session) {
     var audio = new Float32Array(session.length);
     var offset = 0;
     session.chunks.forEach(function (c) { audio.set(c, offset); offset += c.length; });
+    session.chunks = [];
+    session.length = 0;
+    session.heardSpeech = false;
+    session.quietMs = 0;
+    return audio;
+  }
+
+  function transcribeAndHandle(audio, mode, target) {
+    if (audio.length < RATE * MIN_SECONDS) return;
     inFlight++;
-    idleUnlessBusy();
+    renderState();
     transcribe(audio).then(function (text) {
       inFlight--;
-      idleUnlessBusy();
+      renderState();
       scheduleIdleStop();
       if (!enabled) return;
       try {
-        handleTranscript(text, session.mode, session.target);
+        handleTranscript(text, mode, target);
       } catch (err) {
         window.toast.error('Voice command failed: ' + ((err && err.message) || String(err)));
       }
     }, function (err) {
       inFlight--;
-      idleUnlessBusy();
+      renderState();
       if (enabled) window.toast.error('Voice transcription failed: ' + err.message);
     });
+  }
+
+  // A pause in click-to-talk: handle the phrase and keep listening.
+  function handlePhrase(session) {
+    transcribeAndHandle(takeAudio(session), session.mode, activeTarget());
+  }
+
+  function finish(session) {
+    release(session);
+    renderState();
+    scheduleIdleStop();
+    transcribeAndHandle(takeAudio(session), session.mode, session.target);
+  }
+
+  function stopListening() {
+    if (rec && rec.byClick) cancel();
+    announce('Stopped listening');
+    return true;
   }
 
   function stop() {
@@ -496,7 +538,7 @@
     session.target = activeTarget();
     if (!session.ctx) {
       release(session);
-      idleUnlessBusy();
+      renderState();
       return;
     }
     setTimeout(function () { finish(session); }, TAIL_MS);
@@ -509,7 +551,7 @@
     session.released = true;
     session.cancelled = true;
     release(session);
-    idleUnlessBusy();
+    renderState();
   }
 
   function shortcutMode(e) {
