@@ -138,6 +138,28 @@
     return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   }
 
+  var CLICK = /^(?:select|click|press|tap|hit|choose|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button))? (.+?)(?: (?:tab|button))?$/;
+
+  // Index of the control a phrase names, or -1; without a click verb it must cover most of a short name, so dictation can't press buttons.
+  function pickControl(text, names, fuzzy) {
+    var spoken = normalize(text);
+    var m = spoken.match(CLICK);
+    var phrase = m ? m[1] : spoken;
+    var words = phrase.split(' ').filter(Boolean);
+    if (!words.length || (!m && words.length > 4)) return -1;
+    var best = -1;
+    var bestScore = 0;
+    var tie = false;
+    names.forEach(function (name, i) {
+      var nameWords = normalize(name).split(' ').filter(function (w) { return w && !/^\d+$/.test(w); });
+      if (!nameWords.length || !fuzzy(phrase, name)) return;
+      var covered = nameWords.filter(function (w) { return fuzzy(w, phrase); }).length / nameWords.length;
+      if (covered < (m ? 0.5 : 0.75)) return;
+      if (covered > bestScore) { best = i; bestScore = covered; tie = false; } else if (covered === bestScore) tie = true;
+    });
+    return tie ? -1 : best;
+  }
+
   function endsWithDiscard(text) {
     return DISCARD_TAIL.test(normalize(text));
   }
@@ -184,7 +206,7 @@
   }
 
   var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
-    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName };
+    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);

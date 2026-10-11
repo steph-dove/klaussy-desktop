@@ -308,9 +308,35 @@
     return true;
   }
 
+  var CONTROL_SELECTOR = 'button, [role="tab"], [role="button"], [role="menuitem"], a[href]';
+
+  function visibleControls() {
+    return Array.prototype.filter.call(document.querySelectorAll(CONTROL_SELECTOR), function (el) {
+      if (el.classList.contains('voice-btn') || el.disabled || el.getAttribute('aria-disabled') === 'true') return false;
+      if (el.closest('[inert]') || !el.getClientRects().length) return false;
+      var name = controlName(el);
+      return name && name.length <= 60;
+    });
+  }
+
+  function controlName(el) {
+    return (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function pressControl(text) {
+    var controls = visibleControls();
+    var i = window.VoiceText.pickControl(text, controls.map(controlName), window.AppUtils.fuzzyMatch);
+    if (i < 0) return false;
+    forgetInsert();
+    announce(controlName(controls[i]));
+    controls[i].click();
+    return true;
+  }
+
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
+    if (!match && heard && pressControl(heard)) return true;
     if (!match) {
       window.toast.info(heard ? 'That didn’t match a command.' : 'Didn’t catch a command.');
       return false;
@@ -335,6 +361,7 @@
     if (heard && isPickerBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) {
       return reviewPr(window.VoiceText.prQueryFromPicker(heard));
     }
+    if (heard && pressControl(heard)) return true;
     if (heard && !target) {
       window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.');
       return false;

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -187,4 +187,23 @@ test('focusing a session by its spoken name finds the dashed name', () => {
   }
   assert.equal(label('focus on billing refactor'), 'Switch to: billing-refactor');
   assert.equal(label('open the dev loop'), 'Show Dev Loop Progress');
+});
+
+test('pickControl presses the on-screen button or tab you name', () => {
+  global.window = global.window || {};
+  require('../../renderer/utils');
+  const fuzzy = global.window.AppUtils.fuzzyMatch;
+  const names = ['Overview', 'Files 12', 'AI Review 3', 'Checks', 'Run review', 'Post comments', 'Cancel'];
+  const pick = (s) => { const i = pickControl(s, names, fuzzy); return i < 0 ? null : names[i]; };
+  assert.equal(pick('select AI review'), 'AI Review 3');
+  assert.equal(pick('select tab AI review'), 'AI Review 3');
+  assert.equal(pick('Click the AI review tab.'), 'AI Review 3');
+  assert.equal(pick('run review'), 'Run review');
+  assert.equal(pick('Run review.'), 'Run review');
+  assert.equal(pick('press post comments'), 'Post comments');
+  assert.equal(pick('go to checks'), 'Checks');
+  assert.equal(pick('select files'), 'Files 12');
+  assert.equal(pick('review'), null);
+  assert.equal(pick('please review the files and run the tests again'), null);
+  assert.equal(pick('select payments'), null);
 });
