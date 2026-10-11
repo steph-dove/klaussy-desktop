@@ -160,12 +160,13 @@
     var best = -1;
     var bestScore = 0;
     var tie = false;
+    // Two controls with the same name (a toolbar and a tab both saying "Run review") do the same thing, so that's no tie.
     names.forEach(function (name, i) {
       var nameWords = normalize(name).split(' ').filter(function (w) { return w && !/^\d+$/.test(w); });
       if (!nameWords.length || !fuzzy(phrase, name)) return;
       var covered = nameWords.filter(function (w) { return fuzzy(w, phrase); }).length / nameWords.length;
       if (covered < (m ? 0.5 : 0.75)) return;
-      if (covered > bestScore) { best = i; bestScore = covered; tie = false; } else if (covered === bestScore) tie = true;
+      if (covered > bestScore) { best = i; bestScore = covered; tie = false; } else if (covered === bestScore && normalize(name) !== normalize(names[best])) tie = true;
     });
     return tie ? -1 : best;
   }

@@ -261,3 +261,11 @@ test('code review opens the picker and run review starts the AI review', () => {
   const notInReview = cmds.filter((c) => c.label !== 'Run AI Review');
   assert.equal(pick('run code review', notInReview), 'Review Pull Request / Merge Request…');
 });
+
+test('two controls with the same name are pressed, different names that tie are not', () => {
+  global.window = global.window || {};
+  require('../../renderer/utils');
+  const fuzzy = global.window.AppUtils.fuzzyMatch;
+  assert.equal(pickControl('run review', ['Files', 'Run Review', 'AI Review', 'Run review'], fuzzy), 1);
+  assert.equal(pickControl('select review', ['Run review', 'Submit review'], fuzzy), -1);
+});
