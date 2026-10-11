@@ -2,6 +2,18 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.24.0
+
+### 🦉 Voice Input
+
+- **Talk to Your Agents**: Click the mic in the toolbar and talk. What you say is typed into the agent, or into whatever text box has focus, and it's never sent until you say "send". "Delete that" takes it back out, and "put that back" undoes the delete for a few seconds.
+- **Drive the App by Voice**: "Open pr review", "new session", "view changes", "show the agents", "run review", "scroll to bottom", "focus on terminal view". Any button or tab on screen can be pressed by name, "cancel" and "next" work in dialogs, and "X and then Y" runs steps in order. Say "what can I say?" for the list.
+- **Stays on Your Machine**: Speech-to-text runs locally with a model bundled in the installer. Nothing is sent to a server, and it works on macOS, Windows and Linux with every agent.
+- **Keeps Listening**: The mic stays on across pauses so you can work through a task, and turns off after 15 seconds of quiet. Quieter background talk is ignored.
+- **Ollama Help**: When a phrase doesn't match anything and you have a local Ollama model of 7B or larger, Klaussy asks it which on-screen action you meant. It can only choose from the actions it's shown.
+- **Shortcuts and Settings**: ⌘⇧Space (Ctrl+Shift+Space) to dictate, ⌘⇧; for a command. Voice is on by default; turn it off in Preferences › Voice Input, and pick a microphone with "choose microphone". If macOS or Windows blocks the mic, the error has a button that opens the microphone settings.
+- **Also New**: The PR picker's search is fuzzy, and the command palette gains Show Plan, Show Files, Show History, Show Session Notes, Show Active Agents, Run AI Review, and terminal scroll commands.
+
 ## 0.23.1
 
 ### 🦉 PR AI Review Does a Full Review Again
