@@ -16,9 +16,12 @@
   // Spoken phrasings that don't share enough words with a palette label to
   // score; each lists labels in preference order, since some are task-only.
   var ALIASES = [
+    // In PR review it's the AI review; in a session it's that session's diff, like its Review chip.
     { re: /^(run|start|kick off|begin|do|rerun|re run) (the |an |a )?(ai |code |pr )?review( again)?$/,
-      labels: ['Run AI Review', 'Review Pull Request / Merge Request…'] },
-    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code review|review code)$/,
+      labels: ['Run AI Review', 'Review Changes…', 'Review Pull Request / Merge Request…'] },
+    { re: /^((run|start|do) (a )?)?(code )?review (my|the|these|this|our) (changes|diff|code|work|session)$/,
+      labels: ['Review Changes…'] },
+    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code review|review code)$|^(open |start )?(review|cr|c r|a cr)$/,
       labels: ['Review Pull Request / Merge Request…'] },
     { re: /^(view|show|open|see) (changes|diff)$|^(show |open |toggle )?diff( panel)?$/,
       labels: ['Show Changes', 'Toggle Diff Panel'] },
@@ -241,7 +244,7 @@
       for (var j = 0; j < ALIASES[i].labels.length; j++) {
         var label = ALIASES[i].labels[j];
         var hit = commands.find(function (c) { return c.label === label; });
-        if (hit) return { kind: 'command', command: hit };
+        if (hit) return { kind: 'command', command: hit, alias: true };
       }
     }
 

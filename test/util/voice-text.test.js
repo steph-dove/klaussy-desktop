@@ -322,3 +322,26 @@ test('list rows can be picked by position or state', () => {
   assert.equal(listPick('open the dev loop'), null);
   assert.equal(listPick('open pr review'), null);
 });
+
+test('run review means the PR review in PR review, and the session review in a session', () => {
+  const mk = (labels) => labels.map((l) => ({ label: l, action: () => {} }));
+  const pick = (t, list) => { const m = matchCommand(t, list); return m && m.command ? m.command.label : m; };
+  const inSession = mk(['Review Changes…', 'Review Pull Request / Merge Request…']);
+  const inPrReview = mk(['Run AI Review', 'Review Changes…', 'Review Pull Request / Merge Request…']);
+  const nothingOpen = mk(['Review Pull Request / Merge Request…']);
+  assert.equal(pick('run review', inSession), 'Review Changes…');
+  assert.equal(pick('Run code review.', inSession), 'Review Changes…');
+  assert.equal(pick('review my changes', inSession), 'Review Changes…');
+  assert.equal(pick('review the diff', inSession), 'Review Changes…');
+  assert.equal(pick('run review', inPrReview), 'Run AI Review');
+  assert.equal(pick('run review', nothingOpen), 'Review Pull Request / Merge Request…');
+});
+
+test('review and CR on their own open the PR picker', () => {
+  const cmds = ['Review Changes…', 'Review Pull Request / Merge Request…'].map((l) => ({ label: l, action: () => {} }));
+  for (const t of ['review', 'Review.', 'CR', 'C.R.', 'open a CR', 'code review']) {
+    const m = matchCommand(t, cmds);
+    assert.equal(m && m.command && m.command.label, 'Review Pull Request / Merge Request…', t);
+    assert.equal(m.alias, true, t);
+  }
+});

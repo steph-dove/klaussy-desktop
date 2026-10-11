@@ -288,6 +288,7 @@ window.App = window.App || {};
         commands.push({ label: 'Grant Agent Permissions…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'grant-permissions'); } });
         commands.push({ label: 'Plan a Task…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'plan'); } });
         commands.push({ label: 'Debug an Issue…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'debug'); } });
+        commands.push({ label: 'Review Changes…', action: function () { window.ActionModal.run(AppState.activeTaskId, 'review'); } });
         // The Dev Loop tab only exists once a loop has started, so there's nothing to show before that.
         if (task.devLoop) commands.push({ label: 'Show Dev Loop Progress', action: function () { DiffPanel.show(task.worktreePath); if (window.DevLoopPanel) window.DevLoopPanel.switchDiffTabToDevLoop(); } });
         commands.push({ label: 'Search in Terminal', action: function () { SearchBar.open(AppState.activeTaskId); } });

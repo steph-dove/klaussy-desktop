@@ -445,8 +445,10 @@
     if (heard && pickAgentRow(heard)) return true;
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
     // An on-screen control named exactly what was said beats a similar palette command; with a dialog open, any of its controls do.
-    if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
-    if (heard && dialogOpen() && (!match || match.kind === 'command') && pressControl(heard)) return true;
+    // A deliberately mapped phrase ("review" -> PR picker) still wins outside dialogs.
+    var preferControl = !match || (match.kind === 'command' && (!match.alias || dialogOpen()));
+    if (heard && preferControl && pressControl(heard, true)) return true;
+    if (heard && dialogOpen() && preferControl && pressControl(heard)) return true;
     if (match) return run(match, target, heard);
     // With the PR picker open, anything but a URL names the PR to open.
     if (heard && isPickerBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) {
