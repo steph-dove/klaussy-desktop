@@ -22,6 +22,8 @@
   ];
   var SEND = /^(send|submit|enter|send it|press enter|hit enter)$/;
   var SWITCH = /^(switch|go|jump|change) (to )?(task |tab |session )?(.+)$/;
+  // A misheard word must never end an agent session, so these stay keyboard-only.
+  var NOT_BY_VOICE = /^(Kill Task|Restart )/;
   var THRESHOLD = 0.6;
   var MIN_LEAD = 0.05;
 
@@ -52,10 +54,11 @@
 
   function dice(a, b) {
     if (!a.length || !b.length) return 0;
-    var setB = {};
-    b.forEach(function (w) { setB[w] = true; });
-    var shared = a.filter(function (w, i) { return setB[w] && a.indexOf(w) === i; }).length;
-    return (2 * shared) / (new Set(a).size + new Set(b).size);
+    var setA = new Set(a);
+    var setB = new Set(b);
+    var shared = 0;
+    setA.forEach(function (w) { if (setB.has(w)) shared++; });
+    return (2 * shared) / (setA.size + setB.size);
   }
 
   // Highest-scoring command, or null when nothing clears the threshold or two
@@ -78,7 +81,8 @@
   }
 
   // Returns { kind: 'send' }, { kind: 'command', command } or null.
-  function matchCommand(text, commands) {
+  function matchCommand(text, allCommands) {
+    var commands = allCommands.filter(function (c) { return !NOT_BY_VOICE.test(c.label); });
     var spoken = normalize(text);
     if (!spoken) return null;
     if (SEND.test(spoken)) return { kind: 'send' };

@@ -8,6 +8,8 @@
   var RATE = 16000;
   var MIN_SECONDS = 0.3;
   var MAX_SECONDS = 60;
+  // Keep capturing briefly after release so the last word isn't cut off.
+  var TAIL_MS = 150;
 
   var enabled = false;
   var button = null;
@@ -66,7 +68,10 @@
 
   // One transcription at a time: the ONNX session can't run two concurrently.
   function transcribe(audio) {
-    var run = queue.then(startWorker).then(function () {
+    var run = queue.then(function () {
+      if (!enabled) throw new Error('Voice input turned off');
+      return startWorker();
+    }).then(function () {
       return call({ type: 'transcribe', audio: audio }, [audio.buffer]);
     }).then(function (d) { return d.text; });
     queue = run.catch(function () {});
@@ -87,14 +92,19 @@
     return entry.alive ? { id: id, subId: null, terminal: entry.terminal } : null;
   }
 
+  // preparing: mic requested but not live yet; listening: audio is being captured.
   function setState(state, mode) {
     if (!button) return;
-    var recording = state === 'listening';
-    button.classList.toggle('recording', recording);
-    button.classList.toggle('busy', state === 'transcribing');
-    button.setAttribute('aria-pressed', recording ? 'true' : 'false');
+    button.classList.toggle('recording', state === 'listening');
+    button.classList.toggle('busy', state === 'preparing' || state === 'transcribing');
+    button.setAttribute('aria-pressed', state === 'preparing' || state === 'listening' ? 'true' : 'false');
     if (state === 'listening') announce(mode === 'command' ? 'Listening for a command' : 'Listening');
     else if (state === 'transcribing') announce('Transcribing');
+  }
+
+  // A later recording may already own the button; only go idle when none does.
+  function idleUnlessRecording() {
+    if (!rec) setState('idle');
   }
 
   function dictate(text) {
@@ -150,46 +160,73 @@
   }
 
   function release(session) {
-    session.stopped = true;
+    session.closed = true;
     if (session.stream) session.stream.getTracks().forEach(function (t) { t.stop(); });
     if (session.ctx) session.ctx.close();
   }
 
   function start(mode, viaKey) {
     if (!enabled || rec) return;
-    var session = rec = { mode: mode, viaKey: viaKey, chunks: [], length: 0, stopped: false };
-    setState('listening', mode);
+    var session = rec = { mode: mode, viaKey: viaKey, chunks: [], length: 0, released: false, closed: false };
+    setState('preparing', mode);
+    // Load the model while the user is still talking.
+    startWorker().catch(function () {});
     window.klaus.voice.prepare().then(function (res) {
       if (!res.ok) throw new Error(res.error);
-      if (session.stopped) return null;
+      if (session.released) return null;
       return navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
     }).then(function (stream) {
       if (!stream) return;
       session.stream = stream;
-      if (session.stopped) {
-        stream.getTracks().forEach(function (t) { t.stop(); });
+      if (session.released) {
+        release(session);
         return;
       }
       // Chromium resamples the mic to the context rate, which is what the model expects.
       var ctx = session.ctx = new AudioContext({ sampleRate: RATE });
       var source = ctx.createMediaStreamSource(stream);
-      var node = ctx.createScriptProcessor(4096, 1, 1);
+      var node = ctx.createScriptProcessor(1024, 1, 1);
       node.onaudioprocess = function (ev) {
-        if (session.stopped) return;
+        if (session.closed) return;
         var chunk = new Float32Array(ev.inputBuffer.getChannelData(0));
         session.chunks.push(chunk);
         session.length += chunk.length;
-        if (session.length >= RATE * MAX_SECONDS) stop();
+        if (session.length >= RATE * MAX_SECONDS && rec === session) stop();
       };
       source.connect(node);
       node.connect(ctx.destination);
+      if (rec === session) setState('listening', mode);
     }).catch(function (err) {
       if (rec === session) rec = null;
       release(session);
-      setState('idle');
-      window.toast.error(micError(err));
+      idleUnlessRecording();
+      if (!session.cancelled) window.toast.error(micError(err));
+    });
+  }
+
+  function finish(session) {
+    release(session);
+    if (session.length < RATE * MIN_SECONDS) {
+      idleUnlessRecording();
+      return;
+    }
+    var audio = new Float32Array(session.length);
+    var offset = 0;
+    session.chunks.forEach(function (c) { audio.set(c, offset); offset += c.length; });
+    if (!rec) setState('transcribing');
+    transcribe(audio).then(function (text) {
+      idleUnlessRecording();
+      if (!enabled) return;
+      try {
+        handleTranscript(text, session.mode);
+      } catch (err) {
+        window.toast.error('Voice command failed: ' + ((err && err.message) || String(err)));
+      }
+    }, function (err) {
+      idleUnlessRecording();
+      if (enabled) window.toast.error('Voice transcription failed: ' + err.message);
     });
   }
 
@@ -197,26 +234,23 @@
     var session = rec;
     if (!session) return;
     rec = null;
-    release(session);
-    if (session.length < RATE * MIN_SECONDS) {
-      setState('idle');
+    session.released = true;
+    if (!session.ctx) {
+      release(session);
+      idleUnlessRecording();
       return;
     }
-    var audio = new Float32Array(session.length);
-    var offset = 0;
-    session.chunks.forEach(function (c) { audio.set(c, offset); offset += c.length; });
-    setState('transcribing');
-    transcribe(audio).then(function (text) {
-      setState('idle');
-      try {
-        handleTranscript(text, session.mode);
-      } catch (err) {
-        window.toast.error('Voice command failed: ' + ((err && err.message) || String(err)));
-      }
-    }, function (err) {
-      setState('idle');
-      window.toast.error('Voice transcription failed: ' + err.message);
-    });
+    setTimeout(function () { finish(session); }, TAIL_MS);
+  }
+
+  function cancel() {
+    var session = rec;
+    if (!session) return;
+    rec = null;
+    session.released = true;
+    session.cancelled = true;
+    release(session);
+    setState('idle');
   }
 
   function shortcutMode(e) {
@@ -229,13 +263,8 @@
     if (window.App && window.App.isSecondaryWindow) on = false;
     enabled = !!on;
     if (button) button.hidden = !enabled;
-    if (enabled) {
-      // Warm the model in the background so the first dictation isn't the slow one.
-      var warm = function () { if (enabled) startWorker().catch(function () {}); };
-      if (window.requestIdleCallback) window.requestIdleCallback(warm);
-      else setTimeout(warm, 0);
-    } else {
-      stop();
+    if (!enabled) {
+      cancel();
       stopWorker('Voice input turned off');
     }
   }
@@ -267,5 +296,5 @@
     });
   }
 
-  window.Voice = { init: init, setEnabled: setEnabled, start: start, stop: stop, handleTranscript: handleTranscript };
+  window.Voice = { init: init, setEnabled: setEnabled, handleTranscript: handleTranscript };
 })();

@@ -1,4 +1,4 @@
-const { electronStub } = require('../setup');
+const { electronStub, testUserData } = require('../setup');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -8,9 +8,15 @@ const path = require('path');
 const { prepareVoice } = require('../../main/ipc/voice');
 const manifest = require('../../main/util/voice-model.json');
 
+function setVoicePref(on) {
+  fs.writeFileSync(path.join(testUserData, 'config.json'), JSON.stringify({ voiceInput: on }));
+}
+
+test.beforeEach(() => setVoicePref(true));
+
 function modelDir({ complete }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-ipc-'));
-  const files = Object.keys(manifest.files);
+  const files = Object.keys(manifest.files).concat(Object.keys(manifest.runtime).map((n) => 'runtime/' + n));
   for (const rel of complete ? files : files.slice(1)) {
     fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
     fs.writeFileSync(path.join(dir, rel), '');
@@ -25,6 +31,13 @@ function withMic(status, askResult, fn) {
   sp.askForMediaAccess = () => Promise.resolve(askResult);
   return fn().finally(() => Object.assign(sp, orig));
 }
+
+test('refuses while voice input is off, so no page can raise the mic prompt', async () => {
+  setVoicePref(false);
+  const res = await prepareVoice({ modelDir: modelDir({ complete: true }) });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /Voice input is off/);
+});
 
 test('a missing model reports how to get it in dev', async () => {
   const res = await prepareVoice({ modelDir: modelDir({ complete: false }) });

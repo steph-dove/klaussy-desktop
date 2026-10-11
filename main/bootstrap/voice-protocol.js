@@ -1,33 +1,33 @@
-// Serves only manifest-listed model files and ORT WASM, by exact lookup, because the page CSP blocks file: and https:.
+// Serves only manifest-listed files by exact lookup (never joining the request path), since the page CSP blocks file: and https:.
 
 const fs = require('fs');
 const path = require('path');
-const { protocol, session, app } = require('electron');
+const { protocol, app } = require('electron');
 const manifest = require('../util/voice-model.json');
+const { voiceFiles } = require('../util/voice-files');
 
 const SCHEME = 'klaussy-voice';
+// The model name voice-worker.js asks for; kept fixed so a model bump only touches the manifest.
+const MODEL_ID = 'bundled';
 const PRIVILEGED = {
   scheme: SCHEME,
   privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true },
 };
-const ORT_FILES = ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.asyncify.wasm'];
 const CONTENT_TYPES = {
   '.json': 'application/json',
   '.onnx': 'application/octet-stream',
+  '.js': 'text/javascript',
   '.mjs': 'text/javascript',
   '.wasm': 'application/wasm',
 };
 
-function voiceDirs() {
-  return {
-    modelDir: app.isPackaged
-      ? path.join(process.resourcesPath, 'voice-model')
-      : path.join(app.getAppPath(), 'vendor', 'voice-model'),
-    ortDir: path.join(app.getAppPath(), 'node_modules', 'onnxruntime-web', 'dist'),
-  };
+function voiceDir() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'voice-model')
+    : path.join(app.getAppPath(), 'vendor', 'voice-model');
 }
 
-function resolveVoicePath(url, { modelDir, ortDir }) {
+function resolveVoicePath(url, dir) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -35,38 +35,26 @@ function resolveVoicePath(url, { modelDir, ortDir }) {
     return null;
   }
   if (parsed.protocol !== SCHEME + ':') return null;
-  const prefix = '/' + manifest.repo + '/';
+  const prefix = '/' + MODEL_ID + '/';
   if (parsed.host === 'model' && parsed.pathname.startsWith(prefix)) {
     const rel = parsed.pathname.slice(prefix.length);
-    return Object.hasOwn(manifest.files, rel) ? path.join(modelDir, ...rel.split('/')) : null;
+    return Object.hasOwn(manifest.files, rel) ? path.join(dir, ...rel.split('/')) : null;
   }
-  if (parsed.host === 'ort') {
+  if (parsed.host === 'runtime') {
     const name = parsed.pathname.slice(1);
-    return ORT_FILES.includes(name) ? path.join(ortDir, name) : null;
+    return Object.hasOwn(manifest.runtime, name) ? path.join(dir, 'runtime', name) : null;
   }
   return null;
 }
 
-// First manifest file not on disk, or null when the model is complete.
-function modelMissing(modelDir = voiceDirs().modelDir) {
-  return Object.keys(manifest.files).find((rel) => !fs.existsSync(path.join(modelDir, rel))) || null;
-}
-
-// Electron grants every permission when no handler is set; keep that for
-// everything but media, and allow the mic only to the app's own pages.
-function decideMediaPermission(permission, details = {}) {
-  if (permission !== 'media') return true;
-  const url = String(details.requestingUrl || details.securityOrigin || '');
-  const types = details.mediaTypes || [];
-  return url.startsWith('file://') && types.length > 0 && types.every((t) => t === 'audio');
+function modelMissing(dir = voiceDir()) {
+  const missing = voiceFiles().find(({ rel }) => !fs.existsSync(path.join(dir, rel)));
+  return missing ? missing.rel : null;
 }
 
 app.whenReady().then(() => {
-  session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
-    callback(decideMediaPermission(permission, details));
-  });
   protocol.handle(SCHEME, async (request) => {
-    const target = resolveVoicePath(request.url, voiceDirs());
+    const target = resolveVoicePath(request.url, voiceDir());
     if (!target) return new Response('not found', { status: 404 });
     try {
       const body = await fs.promises.readFile(target);
@@ -84,4 +72,4 @@ app.whenReady().then(() => {
   console.error('[voice-protocol] scheme registration failed', err);
 });
 
-module.exports = { SCHEME, PRIVILEGED, resolveVoicePath, modelMissing, decideMediaPermission, voiceDirs };
+module.exports = { SCHEME, PRIVILEGED, resolveVoicePath, modelMissing };

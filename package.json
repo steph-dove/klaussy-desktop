@@ -19,7 +19,7 @@
   },
   "scripts": {
     "start": "electron .",
-    "lint": "eslint \"main/**/*.js\" main.js preload.js \"renderer/**/*.js\"",
+    "lint": "eslint \"main/**/*.js\" main.js preload.js \"renderer/**/*.js\" \"scripts/**/*.js\"",
     "test": "node --require ./test/setup.js --test test/util/*.test.js",
     "test:e2e": "playwright test",
     "rebuild": "electron-rebuild",
@@ -33,7 +33,6 @@
     "voice:fetch": "node scripts/fetch-voice-model.js"
   },
   "dependencies": {
-    "@huggingface/transformers": "4.3.1",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -82,13 +81,6 @@
       "!playwright.config.js",
       "!playwright-report/**",
       "!test-results/**",
-      "!node_modules/onnxruntime-node/**",
-      "!node_modules/sharp/**",
-      "!node_modules/@img/**",
-      "!node_modules/onnxruntime-web/dist/**",
-      "node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.{mjs,wasm}",
-      "!node_modules/@huggingface/transformers/dist/**",
-      "node_modules/@huggingface/transformers/dist/transformers.min.js",
       "!**/*.md"
     ],
     "asarUnpack": [

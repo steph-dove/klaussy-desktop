@@ -1,26 +1,30 @@
 // wasmPaths must point at klaussy-voice:, or the library pulls ORT from a CDN.
 
-import { pipeline, env } from '../node_modules/@huggingface/transformers/dist/transformers.min.js';
+// voice-protocol.js maps this name to the bundled model's files.
+const MODEL = 'bundled';
 
-const MODEL = 'onnx-community/moonshine-base-ONNX';
-
-env.allowRemoteModels = false;
-env.allowLocalModels = true;
-env.localModelPath = 'klaussy-voice://model/';
-env.useBrowserCache = false;
-env.useWasmCache = false;
-env.backends.onnx.wasm.wasmPaths = {
-  mjs: 'klaussy-voice://ort/ort-wasm-simd-threaded.asyncify.mjs',
-  wasm: 'klaussy-voice://ort/ort-wasm-simd-threaded.asyncify.wasm',
-};
-// file:// pages aren't cross-origin isolated, so there is no SharedArrayBuffer.
-env.backends.onnx.wasm.numThreads = 1;
+// A file:// worker can't statically import from another scheme, so import() it and set onmessage before it resolves.
+const runtime = import('klaussy-voice://runtime/transformers.min.js').then(({ pipeline, env }) => {
+  env.allowRemoteModels = false;
+  env.allowLocalModels = true;
+  env.localModelPath = 'klaussy-voice://model/';
+  env.useBrowserCache = false;
+  env.useWasmCache = false;
+  env.backends.onnx.wasm.wasmPaths = {
+    mjs: 'klaussy-voice://runtime/ort-wasm-simd-threaded.asyncify.mjs',
+    wasm: 'klaussy-voice://runtime/ort-wasm-simd-threaded.asyncify.wasm',
+  };
+  // file:// pages aren't cross-origin isolated, so there is no SharedArrayBuffer.
+  env.backends.onnx.wasm.numThreads = 1;
+  return pipeline;
+});
 
 let transcriber = null;
 
 function load() {
   if (!transcriber) {
-    transcriber = pipeline('automatic-speech-recognition', MODEL, { dtype: 'q8', device: 'wasm' });
+    transcriber = runtime.then((pipeline) =>
+      pipeline('automatic-speech-recognition', MODEL, { dtype: 'q8', device: 'wasm' }));
     transcriber.catch(() => { transcriber = null; });
   }
   return transcriber;

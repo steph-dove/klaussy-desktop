@@ -5,12 +5,12 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { resolveVoicePath, modelMissing, decideMediaPermission } = require('../../main/bootstrap/voice-protocol');
+const { resolveVoicePath, modelMissing } = require('../../main/bootstrap/voice-protocol');
 const { SCHEMES } = require('../../main/bootstrap/privileged-schemes');
 const manifest = require('../../main/util/voice-model.json');
 
-const dirs = { modelDir: '/models', ortDir: '/ort' };
-const base = `klaussy-voice://model/${manifest.repo}/`;
+const dir = '/voice';
+const base = 'klaussy-voice://model/bundled/';
 
 test('every privileged scheme is registered in a single call', () => {
   assert.equal(privilegedSchemeCalls.length, 1);
@@ -21,18 +21,22 @@ test('every privileged scheme is registered in a single call', () => {
 
 test('manifest files resolve inside the model dir', () => {
   assert.equal(
-    resolveVoicePath(base + 'onnx/encoder_model_quantized.onnx', dirs),
-    path.join('/models', 'onnx', 'encoder_model_quantized.onnx'),
+    resolveVoicePath(base + 'onnx/encoder_model_quantized.onnx', dir),
+    path.join('/voice', 'onnx', 'encoder_model_quantized.onnx'),
   );
-  assert.equal(resolveVoicePath(base + 'config.json', dirs), path.join('/models', 'config.json'));
+  assert.equal(resolveVoicePath(base + 'config.json', dir), path.join('/voice', 'config.json'));
 });
 
-test('only the ORT asyncify pair is served from the ort host', () => {
+test('only manifest runtime files are served from the runtime host', () => {
   assert.equal(
-    resolveVoicePath('klaussy-voice://ort/ort-wasm-simd-threaded.asyncify.wasm', dirs),
-    path.join('/ort', 'ort-wasm-simd-threaded.asyncify.wasm'),
+    resolveVoicePath('klaussy-voice://runtime/ort-wasm-simd-threaded.asyncify.wasm', dir),
+    path.join('/voice', 'runtime', 'ort-wasm-simd-threaded.asyncify.wasm'),
   );
-  assert.equal(resolveVoicePath('klaussy-voice://ort/ort.min.js', dirs), null);
+  assert.equal(
+    resolveVoicePath('klaussy-voice://runtime/transformers.min.js', dir),
+    path.join('/voice', 'runtime', 'transformers.min.js'),
+  );
+  assert.equal(resolveVoicePath('klaussy-voice://runtime/ort.min.js', dir), null);
 });
 
 test('traversal and unknown paths are refused', () => {
@@ -43,36 +47,27 @@ test('traversal and unknown paths are refused', () => {
     base + 'onnx\\..\\..\\secret',
     base + 'onnx/model.onnx',
     'klaussy-voice://model/other/repo/config.json',
-    'klaussy-voice://ort/../package.json',
+    'klaussy-voice://runtime/../package.json',
+    'klaussy-voice://runtime/%2e%2e/config.json',
+    base + 'runtime/transformers.min.js',
+    'klaussy-voice://model/' + manifest.repo + '/config.json',
     'klaussy-voice://evil/config.json',
-    'klaussy-qa://model/' + manifest.repo + '/config.json',
+    'klaussy-qa://model/bundled/config.json',
     'not a url',
   ]) {
-    assert.equal(resolveVoicePath(url, dirs), null, url);
+    assert.equal(resolveVoicePath(url, dir), null, url);
   }
 });
 
-test('modelMissing names the first absent file, null when complete', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-dir-'));
-  assert.equal(modelMissing(dir), Object.keys(manifest.files)[0]);
+test('modelMissing names the first absent file, including the runtime, null when complete', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'voice-dir-'));
+  assert.equal(modelMissing(tmp), Object.keys(manifest.files)[0]);
   for (const rel of Object.keys(manifest.files)) {
-    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
-    fs.writeFileSync(path.join(dir, rel), '');
+    fs.mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true });
+    fs.writeFileSync(path.join(tmp, rel), '');
   }
-  assert.equal(modelMissing(dir), null);
-});
-
-test('mic is allowed only for app pages asking for audio alone', () => {
-  assert.equal(decideMediaPermission('media', { requestingUrl: 'file:///app/index.html', mediaTypes: ['audio'] }), true);
-  assert.equal(decideMediaPermission('media', { requestingUrl: 'file:///app/index.html', mediaTypes: ['video'] }), false);
-  assert.equal(decideMediaPermission('media', { requestingUrl: 'file:///app/index.html', mediaTypes: ['audio', 'video'] }), false);
-  assert.equal(decideMediaPermission('media', { requestingUrl: 'file:///app/index.html', mediaTypes: [] }), false);
-  assert.equal(decideMediaPermission('media', { requestingUrl: 'https://example.com', mediaTypes: ['audio'] }), false);
-  assert.equal(decideMediaPermission('media', {}), false);
-});
-
-test('non-media permissions keep the default grant', () => {
-  for (const p of ['clipboard-read', 'clipboard-sanitized-write', 'notifications', 'fullscreen']) {
-    assert.equal(decideMediaPermission(p, { requestingUrl: 'file:///app/index.html' }), true, p);
-  }
+  assert.equal(modelMissing(tmp), 'runtime/transformers.min.js');
+  fs.mkdirSync(path.join(tmp, 'runtime'));
+  for (const name of Object.keys(manifest.runtime)) fs.writeFileSync(path.join(tmp, 'runtime', name), '');
+  assert.equal(modelMissing(tmp), null);
 });

@@ -20,6 +20,7 @@ const PALETTE = [
   'Show Changes',
   'Pop Out',
   'Kill Task',
+  'Restart Claude Code',
   'Switch to: auth-fix',
   'Switch to: billing-refactor',
   'Run Full Dev Loop (Rest of the Owl)…',
@@ -67,7 +68,6 @@ test('show changes falls back to the diff toggle when no task is open', () => {
 
 test('any palette label spoken directly matches', () => {
   assert.equal(label('view logs'), 'View Logs');
-  assert.equal(label('kill task'), 'Kill Task');
   assert.equal(label('zoom in'), 'Zoom In');
   assert.equal(label('plan task'), 'Plan a Task…');
   assert.equal(label('MCP servers'), 'MCP Servers');
@@ -88,4 +88,8 @@ test('unclear or unrelated speech matches nothing', () => {
   assert.equal(label('what is the weather'), null);
   assert.equal(label(''), null);
   assert.equal(label('switch to payments'), null);
+});
+
+test('commands that end an agent session cannot be run by voice', () => {
+  for (const s of ['kill task', 'kill', 'restart', 'restart claude code']) assert.equal(label(s), null, s);
 });

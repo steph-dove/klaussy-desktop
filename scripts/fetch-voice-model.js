@@ -1,4 +1,4 @@
-// Also electron-builder's beforePack hook, so no installer can be built without the verified model.
+// Also electron-builder's beforePack hook, so no installer can be built without the verified model and runtime.
 
 const fs = require('fs');
 const path = require('path');
@@ -6,8 +6,11 @@ const crypto = require('crypto');
 const { Readable } = require('stream');
 const { pipeline } = require('stream/promises');
 const manifest = require('../main/util/voice-model.json');
+const { voiceFiles } = require('../main/util/voice-files');
 
 const DEFAULT_DEST = path.join(__dirname, '..', 'vendor', 'voice-model');
+const ATTEMPT_TIMEOUT_MS = 10 * 60 * 1000;
+const RETRY_DELAYS_MS = [2000, 8000];
 
 function sha256File(file) {
   return new Promise((resolve, reject) => {
@@ -22,27 +25,56 @@ function sha256File(file) {
 async function verifyModel(dir, model = manifest) {
   const missing = [];
   const bad = [];
-  for (const [rel, expected] of Object.entries(model.files)) {
+  for (const { rel, sha256 } of voiceFiles(model)) {
     const file = path.join(dir, rel);
     if (!fs.existsSync(file)) missing.push(rel);
-    else if (await sha256File(file) !== expected) bad.push(rel);
+    else if (await sha256File(file) !== sha256) bad.push(rel);
   }
   return { ok: missing.length === 0 && bad.length === 0, missing, bad };
 }
 
-async function fetchModel({ dest = DEFAULT_DEST, fetchImpl = fetch, log = console.log, model = manifest } = {}) {
+async function download(url, part, fetchImpl, delays, sleep) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetchImpl(url, { signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS) });
+      if (!res.ok || !res.body) {
+        const err = new Error(`HTTP ${res.status}`);
+        err.retryable = res.status === 429 || res.status >= 500;
+        throw err;
+      }
+      await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(part));
+      return;
+    } catch (err) {
+      if (err.retryable === false || attempt >= delays.length) throw err;
+      await sleep(delays[attempt]);
+    }
+  }
+}
+
+async function fetchModel({
+  dest = DEFAULT_DEST,
+  fetchImpl = fetch,
+  log = console.log,
+  model = manifest,
+  delays = RETRY_DELAYS_MS,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+} = {}) {
   const { missing, bad } = await verifyModel(dest, model);
-  for (const rel of [...missing, ...bad]) {
-    const url = `https://huggingface.co/${model.repo}/resolve/${model.revision}/${rel}`;
+  const todo = new Set([...missing, ...bad]);
+  for (const { rel, sha256, url } of voiceFiles(model)) {
+    if (!todo.has(rel)) continue;
     const file = path.join(dest, rel);
     const part = file + '.part';
     fs.mkdirSync(path.dirname(file), { recursive: true });
     log(`[voice-model] fetching ${rel}`);
-    const res = await fetchImpl(url);
-    if (!res.ok || !res.body) throw new Error(`voice model: ${rel} download failed (HTTP ${res.status})`);
-    await pipeline(Readable.fromWeb(res.body), fs.createWriteStream(part));
+    try {
+      await download(url, part, fetchImpl, delays, sleep);
+    } catch (err) {
+      fs.rmSync(part, { force: true });
+      throw new Error(`voice model: ${rel} download failed (${err.message})`);
+    }
     const actual = await sha256File(part);
-    if (actual !== model.files[rel]) {
+    if (actual !== sha256) {
       fs.rmSync(part, { force: true });
       throw new Error(`voice model: ${rel} sha256 mismatch (got ${actual})`);
     }
@@ -56,7 +88,6 @@ module.exports = async function beforePack() {
 };
 module.exports.fetchModel = fetchModel;
 module.exports.verifyModel = verifyModel;
-module.exports.sha256File = sha256File;
 
 if (require.main === module) {
   fetchModel().then(

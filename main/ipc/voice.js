@@ -2,8 +2,12 @@
 
 const { ipcMain, app, systemPreferences } = require('electron');
 const { modelMissing } = require('../bootstrap/voice-protocol');
+const { loadConfig } = require('../util/config');
 
 async function prepareVoice({ modelDir } = {}) {
+  if (loadConfig().voiceInput !== true) {
+    return { ok: false, error: 'Voice input is off. Turn it on in Preferences › Voice Input.' };
+  }
   const missing = modelMissing(modelDir);
   if (missing) {
     return {
