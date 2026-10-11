@@ -374,6 +374,8 @@
   // than riding along with whatever control the user touches next.
   kimiBash.addEventListener('change', saveAll);
   screenReader.addEventListener('change', saveAll);
+  // Voice input is off by default, so this checkbox is the only way to turn it on.
+  document.getElementById('pref-voice-input').addEventListener('change', saveAll);
 
   ['pref-slack-webhook', 'pref-discord-webhook', 'pref-notify-completed',
     'pref-notify-failed', 'pref-notify-approval', 'pref-notify-new-sessions',

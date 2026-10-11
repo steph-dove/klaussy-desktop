@@ -1,8 +1,14 @@
 // CI has no microphone or model, so transcripts go straight to Voice.handleTranscript and voice-prepare is stubbed.
 
 /* global window,document */
+const fs = require('fs');
+const path = require('path');
 const { test, expect } = require('./fixtures');
 const { openShellTask, tmpDir, rm } = require('./helpers');
+
+function readConfig(userDataDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(userDataDir, 'config.json'), 'utf-8')); } catch { return {}; }
+}
 
 async function ready(mainWindow) {
   await mainWindow.waitForLoadState('networkidle');
@@ -24,6 +30,19 @@ test.describe('voice input off', () => {
   test('the mic button stays hidden by default', async ({ mainWindow }) => {
     await ready(mainWindow);
     await expect(mainWindow.locator('#btn-voice')).toBeHidden();
+  });
+
+  test('ticking the Preferences checkbox turns voice on right away', async ({ electronApp, mainWindow, userDataDir }) => {
+    await ready(mainWindow);
+    const [prefsWin] = await Promise.all([
+      electronApp.waitForEvent('window'),
+      mainWindow.evaluate(() => window.klaus.ui.openPreferences()),
+    ]);
+    await prefsWin.waitForLoadState('domcontentloaded');
+    await prefsWin.locator('#pref-voice-input').check();
+    await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(true);
+    await expect(mainWindow.locator('#btn-voice')).toBeVisible();
+    await prefsWin.close();
   });
 });
 
