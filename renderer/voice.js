@@ -25,6 +25,20 @@
   var rec = null;
   var inFlight = 0;
   var idleTimer = null;
+  // What the last dictation typed and where, so "delete that" can take it back.
+  var lastInsert = null;
+  // What "delete that" / "scratch that" removed, kept briefly in case the words were meant literally.
+  var lastRemoved = null;
+  var RESTORE_MS = 10000;
+
+  function forgetInsert() {
+    if (lastInsert && lastInsert.watch) lastInsert.watch.dispose();
+    lastInsert = null;
+  }
+
+  function remember(target, text, spoken) {
+    lastRemoved = { at: Date.now(), target: target, text: text, spoken: spoken };
+  }
 
   function announce(msg) {
     if (window.A11y) window.A11y.announce(msg);
@@ -151,9 +165,54 @@
     if (target.field) return typeInto(target.field, clean);
     // paste() lets xterm add bracketed-paste markers when the agent asked for
     // them, so the text is inserted, not submitted.
+    forgetInsert();
     target.terminal.paste(clean + ' ');
+    // Any keystroke after this means the backspaces would hit something else.
+    var watch = target.terminal.onData(forgetInsert);
+    lastInsert = { terminal: target, text: clean + ' ', watch: watch };
     announce('Inserted ' + clean);
     return true;
+  }
+
+  function undoLastInsert(spoken) {
+    var last = lastInsert;
+    forgetInsert();
+    if (last && last.field && last.field.isConnected
+        && last.field.value.slice(last.start, last.start + last.text.length) === last.text) {
+      last.field.setRangeText('', last.start, last.start + last.text.length, 'end');
+      last.field.dispatchEvent(new Event('input', { bubbles: true }));
+      remember({ field: last.field }, last.text, spoken);
+      announce('Deleted. Say put that back to restore it.');
+      return true;
+    }
+    if (last && last.terminal) {
+      // Backspaces only reach text still on the agent's input line, which is where dictation lands.
+      window.klaus.terminal.write(last.terminal.id, '\x7f'.repeat(last.text.length), last.terminal.subId);
+      remember(last.terminal, last.text, spoken);
+      announce('Deleted. Say put that back to restore it.');
+      return true;
+    }
+    window.toast.info('Nothing to delete.');
+    return false;
+  }
+
+  // Puts back what was just removed plus the words that removed it, typed literally.
+  function restoreRemoved() {
+    var last = lastRemoved;
+    lastRemoved = null;
+    if (!last || Date.now() - last.at > RESTORE_MS) {
+      window.toast.info('Nothing to put back.');
+      return false;
+    }
+    var words = (last.text.trim() + ' ' + last.spoken).trim();
+    if (last.target && last.target.field) {
+      if (!last.target.field.isConnected) {
+        window.toast.info('The text box closed, so there is nothing to put back.');
+        return false;
+      }
+      return typeInto(last.target.field, words);
+    }
+    return dictate(words, last.target);
   }
 
   function typeInto(el, text) {
@@ -161,10 +220,14 @@
     if (typeof el.setRangeText === 'function') {
       var start = el.selectionStart;
       var before = el.value.slice(0, start);
-      el.setRangeText((before && !/\s$/.test(before) ? ' ' : '') + text, start, el.selectionEnd, 'end');
+      var inserted = (before && !/\s$/.test(before) ? ' ' : '') + text;
+      el.setRangeText(inserted, start, el.selectionEnd, 'end');
       el.dispatchEvent(new Event('input', { bubbles: true }));
+      forgetInsert();
+      lastInsert = { field: el, start: start, text: inserted };
     } else {
       document.execCommand('insertText', false, text);
+      forgetInsert();
     }
     announce('Inserted ' + text);
     return true;
@@ -226,8 +289,11 @@
     return true;
   }
 
-  function run(match, target) {
+  function run(match, target, heard) {
     if (match.kind === 'pr') return reviewPr(match.query);
+    if (match.kind === 'undo') return undoLastInsert(heard);
+    if (match.kind === 'restore') return restoreRemoved();
+    forgetInsert();
     if (match.kind === 'send') {
       if (target && target.field) target = terminalTarget();
       if (!target) {
@@ -250,19 +316,26 @@
       window.toast.info(heard ? 'That didn’t match a command.' : 'Didn’t catch a command.');
       return false;
     }
-    return run(match, target);
+    return run(match, target, heard);
   }
 
-  function isPickerUrlBox(target) {
-    return !!(target && target.field && target.field.classList.contains('pr-picker-url'));
+  function isPickerBox(target) {
+    return !!(target && target.field && target.field.closest('.pr-picker-overlay'));
   }
 
   function runAuto(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
+    if (heard && window.VoiceText.endsWithDiscard(heard)) {
+      remember(target || terminalTarget(), '', heard);
+      announce('Discarded. Say put that back to type it after all.');
+      return false;
+    }
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
-    if (match) return run(match, target);
+    if (match) return run(match, target, heard);
     // With the PR picker open, anything but a URL names the PR to open.
-    if (heard && isPickerUrlBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) return reviewPr(heard);
+    if (heard && isPickerBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) {
+      return reviewPr(window.VoiceText.prQueryFromPicker(heard));
+    }
     if (heard && !target) {
       window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.');
       return false;
@@ -276,6 +349,15 @@
     if (target === undefined) target = activeTarget();
     if (mode === 'command') return runCommand(text, target);
     if (mode === 'auto') return runAuto(text, target);
+    var heard = window.VoiceText.sanitizeDictation(text);
+    var edit = window.VoiceText.matchCommand(text, []);
+    if (edit && edit.kind === 'undo') return undoLastInsert(heard);
+    if (edit && edit.kind === 'restore') return restoreRemoved();
+    if (window.VoiceText.endsWithDiscard(heard)) {
+      remember(target || terminalTarget(), '', heard);
+      announce('Discarded. Say put that back to type it after all.');
+      return false;
+    }
     return dictate(text, target);
   }
 

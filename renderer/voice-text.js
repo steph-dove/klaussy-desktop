@@ -141,12 +141,31 @@
     }, []);
   }
 
-  // Returns { kind: 'send' }, { kind: 'pr', query }, { kind: 'command', command } or null.
+  var UNDO = /^(delete|scratch|undo|remove|erase) (that|it|this|the last (one|bit|part|thing))$/;
+  var DISCARD_TAIL = / (delete|scratch|undo|erase) (that|it|this)$/;
+  var RESTORE = /^(put (that|it) back|restore (that|it)|bring (that|it) back|type that|undo (the )?delete)$/;
+
+  function endsWithDiscard(text) {
+    return DISCARD_TAIL.test(normalize(text));
+  }
+
+  // What to look up when someone speaks to the open PR picker: "select the keep focus PR" is "keep focus".
+  function prQueryFromPicker(text) {
+    return normalize(text)
+      .replace(/^(select|pick|choose|open|review|go to|show|take|use)( me)? /, '')
+      .replace(/^(the|number|no) /, '')
+      .replace(/ (pr|pull request|merge request|mr|one)$/, '')
+      .trim();
+  }
+
+  // Returns { kind: 'send' | 'undo' | 'restore' }, { kind: 'pr', query }, { kind: 'command', command } or null.
   function matchCommand(text, allCommands) {
     var commands = allCommands.filter(function (c) { return !NOT_BY_VOICE.test(c.label); });
     var spoken = normalize(text);
     if (!spoken) return null;
     if (SEND.test(spoken)) return { kind: 'send' };
+    if (UNDO.test(spoken)) return { kind: 'undo' };
+    if (RESTORE.test(spoken)) return { kind: 'restore' };
     var prQuery = parsePrRequest(text);
     if (prQuery) return { kind: 'pr', query: prQuery };
 
@@ -170,7 +189,8 @@
     return cmd ? { kind: 'command', command: cmd } : null;
   }
 
-  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest, pickPr: pickPr };
+  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest, pickPr: pickPr,
+    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);

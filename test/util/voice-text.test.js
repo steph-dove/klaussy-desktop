@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, pickPr } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, pickPr, prQueryFromPicker, endsWithDiscard } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -157,4 +157,29 @@ test('pickPr finds a PR by number or by the words in its title', () => {
   assert.deepEqual(pickPr('klaussy desktop', rows).length, 3);
   assert.deepEqual(pickPr('payments', rows), []);
   assert.deepEqual(pickPr('pull request', rows), []);
+});
+
+test('delete that, scratch that and undo that are edits, not text', () => {
+  for (const s of ['Delete that.', 'scratch that', 'undo that', 'delete the last bit']) {
+    assert.deepEqual(matchCommand(s, PALETTE), { kind: 'undo' }, s);
+  }
+  assert.equal(endsWithDiscard('Select "Keep Focus" through re-renders. Delete that'), true);
+  assert.equal(endsWithDiscard('fix the bug, scratch that'), true);
+  assert.equal(endsWithDiscard('delete that file from the repo'), false);
+  assert.equal(endsWithDiscard('add a test'), false);
+});
+
+test('speaking to the open PR picker strips the picking words', () => {
+  assert.equal(prQueryFromPicker('Select "Keep Focus" through re-renders.'), 'keep focus through re renders');
+  assert.equal(prQueryFromPicker('pick the voice PR'), 'voice');
+  assert.equal(prQueryFromPicker('number 103'), '103');
+  assert.equal(prQueryFromPicker('open 99'), '99');
+  const rows = [{ number: '96', text: '#96 fix(a11y): keep focus through re-renders and announce results' }, { number: '99', text: '#99 fix(a11y): focus and announcements' }];
+  assert.deepEqual(pickPr(prQueryFromPicker('Select "Keep Focus" through re-renders.'), rows), [0]);
+});
+
+test('put that back, restore that and type that restore what was deleted', () => {
+  for (const s of ['Put that back.', 'restore it', 'bring that back', 'type that', 'undo the delete']) {
+    assert.deepEqual(matchCommand(s, PALETTE), { kind: 'restore' }, s);
+  }
 });
