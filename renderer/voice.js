@@ -261,28 +261,24 @@
         window.toast.info('Couldn’t load the open pull requests to pick from. Choose one in the picker once it loads.');
         return;
       }
+      // The picker's own search does the matching, so voice and typing find the same PRs.
+      var search = overlay.querySelector('.pr-picker-search');
+      if (!search) return;
+      search.value = query;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
       var seen = {};
-      var rows = Array.prototype.filter.call(overlay.querySelectorAll(PR_ROW), function (r) {
-        if (seen[r.dataset.url]) return false;
+      var hits = Array.prototype.filter.call(overlay.querySelectorAll(PR_ROW), function (r) {
+        if (r.style.display === 'none' || seen[r.dataset.url]) return false;
         seen[r.dataset.url] = true;
         return true;
       });
-      var info = rows.map(function (r) {
-        var num = r.querySelector('.pr-picker-num');
-        return { number: num ? num.textContent.replace('#', '') : '', text: r.textContent };
-      });
-      var hits = window.VoiceText.pickPr(query, info);
       if (hits.length === 1) {
-        announce('Opening pull request ' + info[hits[0]].number);
-        rows[hits[0]].click();
+        var num = hits[0].querySelector('.pr-picker-num');
+        announce('Opening pull request ' + (num ? num.textContent : ''));
+        hits[0].click();
         return;
       }
-      var search = overlay.querySelector('.pr-picker-search');
-      if (search) {
-        search.value = /^\d+$/.test(query) ? '#' + query : query;
-        search.dispatchEvent(new Event('input', { bubbles: true }));
-        search.focus();
-      }
+      search.focus();
       if (hits.length) window.toast.info(hits.length + ' pull requests match. Say the number of the one you want.');
       else window.toast.info('No open pull request matches that.');
     });

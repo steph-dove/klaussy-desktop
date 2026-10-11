@@ -127,20 +127,6 @@
     return null;
   }
 
-  // Indexes of rows ({ number, text }) matching the spoken PR number exactly, or containing every spoken word.
-  function pickPr(query, rows) {
-    var q = normalize(query);
-    if (/^\d+$/.test(q)) {
-      return rows.reduce(function (hits, row, i) { return String(row.number) === q ? hits.concat(i) : hits; }, []);
-    }
-    var words = tokens(q).filter(function (w) { return !/^(pr|pull|request|merge|mr|review)$/.test(w); });
-    if (!words.length) return [];
-    return rows.reduce(function (hits, row, i) {
-      var have = new Set(tokens(row.text));
-      return words.every(function (w) { return have.has(w); }) ? hits.concat(i) : hits;
-    }, []);
-  }
-
   var UNDO = /^(delete|scratch|undo|remove|erase) (that|it|this|the last (one|bit|part|thing))$/;
   var DISCARD_TAIL = / (delete|scratch|undo|erase) (that|it|this)$/;
   var RESTORE = /^(put (that|it) back|restore (that|it)|bring (that|it) back|type that|undo (the )?delete)$/;
@@ -189,7 +175,7 @@
     return cmd ? { kind: 'command', command: cmd } : null;
   }
 
-  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest, pickPr: pickPr,
+  var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
     prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -453,17 +453,19 @@ window.App = window.App || {};
     var searchEl = overlay.querySelector('.pr-picker-search');
     var noMatchesEl = overlay.querySelector('.pr-picker-no-matches');
 
-    // Client-side filter over whatever PRs are currently rendered across the
-    // three sections. Each row's textContent already carries number, title,
-    // author and (for the grouped list) repo, so a substring test covers them.
-    // Group/section headers hide when nothing under them survives.
+    // Row text carries number, title, author and repo, so one fuzzy match covers them; empty headers hide.
     function applyPrFilter() {
       var q = (searchEl.value || '').trim().toLowerCase();
+      // A bare number picks that PR exactly, so 103 doesn't also show #1030.
+      var num = /^#?(\d+)$/.exec(q);
       var anyVisible = false;
       [recentEl, listEl, authoredEl].forEach(function (container) {
         if (!container) return;
         container.querySelectorAll('.pr-picker-item').forEach(function (item) {
-          var match = !q || item.textContent.toLowerCase().indexOf(q) !== -1;
+          var numEl = item.querySelector('.pr-picker-num');
+          var match = !q || (num
+            ? !!numEl && numEl.textContent.trim() === '#' + num[1]
+            : AppUtils.fuzzyMatch(q, item.textContent));
           item.style.display = match ? '' : 'none';
           if (match) anyVisible = true;
         });

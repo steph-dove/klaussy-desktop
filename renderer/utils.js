@@ -212,8 +212,45 @@ window.AppUtils = (function () {
     return Promise.resolve(write).then(function () { flash('Copied'); }, function () { flash('Copy failed'); });
   }
 
+  function words(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ').filter(Boolean);
+  }
+
+  // Levenshtein distance, giving up once it passes max.
+  function editDistance(a, b, max) {
+    if (Math.abs(a.length - b.length) > max) return max + 1;
+    var prev = [];
+    for (var j = 0; j <= b.length; j++) prev[j] = j;
+    for (var i = 1; i <= a.length; i++) {
+      var cur = [i];
+      var rowMin = i;
+      for (var k = 1; k <= b.length; k++) {
+        cur[k] = Math.min(prev[k] + 1, cur[k - 1] + 1, prev[k - 1] + (a[i - 1] === b[k - 1] ? 0 : 1));
+        if (cur[k] < rowMin) rowMin = cur[k];
+      }
+      if (rowMin > max) return max + 1;
+      prev = cur;
+    }
+    return prev[b.length];
+  }
+
+  // Every query word must appear in any order, as a substring or within one edit (two for long words).
+  function fuzzyMatch(query, text) {
+    var qWords = words(query);
+    if (!qWords.length) return true;
+    var haystack = words(text);
+    var joined = haystack.join(' ');
+    return qWords.every(function (q) {
+      if (joined.indexOf(q) !== -1) return true;
+      if (q.length < 4) return false;
+      var max = q.length >= 8 ? 2 : 1;
+      return haystack.some(function (w) { return editDistance(q, w, max) <= max; });
+    });
+  }
+
   return {
     copyText: copyText,
+    fuzzyMatch: fuzzyMatch,
     screenReaderMode: screenReaderMode,
     labelTerminal: labelTerminal,
     prefersReducedMotion: prefersReducedMotion,

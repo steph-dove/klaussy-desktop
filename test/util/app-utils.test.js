@@ -191,3 +191,16 @@ test('appShortcutLabel shows Shift for shortcuts that require it', () => {
     assert.equal(AppUtils.appShortcutLabel('voiceCommand'), 'Ctrl+Shift+;');
   });
 });
+
+test('fuzzyMatch: any word order, substrings, and small typos', () => {
+  const title = '#96 fix(a11y): keep focus through re-renders klaussy-desktop steph-dove open';
+  assert.equal(AppUtils.fuzzyMatch('keep focus', title), true);
+  assert.equal(AppUtils.fuzzyMatch('rerenders focus', title), true);
+  assert.equal(AppUtils.fuzzyMatch('renders focus', title), true);
+  assert.equal(AppUtils.fuzzyMatch('fokus through', title), true);
+  assert.equal(AppUtils.fuzzyMatch('klausy', title), true);
+  assert.equal(AppUtils.fuzzyMatch('a11y steph', title), true);
+  assert.equal(AppUtils.fuzzyMatch('payments', title), false);
+  assert.equal(AppUtils.fuzzyMatch('fox', title), false);
+  assert.equal(AppUtils.fuzzyMatch('', title), true);
+});
