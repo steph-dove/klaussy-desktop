@@ -69,3 +69,11 @@ test('the installed handler reads the voice pref on every request', () => {
     assert.equal(await ask('notifications'), true);
   })();
 });
+
+test('the PR review pop-out gets the mic too, look-alikes do not', () => {
+  const pages = [MAIN, MAIN.replace('index.html', 'pr-review.html')];
+  assert.equal(decidePermission('media', audio(pages[1]), true, pages), true);
+  assert.equal(decidePermission('media', audio(MAIN), true, pages), true);
+  assert.equal(decidePermission('media', audio('file:///tmp/clone/renderer/pr-review.html'), true, pages), false);
+  assert.equal(decidePermission('media', audio(MAIN.replace('index.html', 'preferences.html')), true, pages), false);
+});

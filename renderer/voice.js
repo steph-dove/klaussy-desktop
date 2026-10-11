@@ -265,6 +265,10 @@
 
   // Opens the PR the user named, from the picker's loaded list; with several matches it filters the list instead.
   function reviewPr(query) {
+    if (!window.App) {
+      window.toast.info('Open the PR picker from the main Klaussy window.');
+      return false;
+    }
     if (!document.querySelector('.pr-picker-overlay')) window.App.showPrPicker();
     var overlay = document.querySelector('.pr-picker-overlay');
     if (!overlay) return false;
@@ -435,9 +439,29 @@
     return true;
   }
 
+  function reportAiReview(state) {
+    if (state === 'running') window.toast.info('An AI review is already running.');
+    else if (state === 'not-loaded') window.toast.info('No pull request is loaded to review yet.');
+  }
+
+  // The main window's command palette; the pop-out PR review window has no App, so it offers its own few.
+  function paletteCommands() {
+    if (window.App && window.App.buildPaletteCommands) return window.App.buildPaletteCommands();
+    var commands = [];
+    if (window.PrReview && window.PrReview.runAiReviewNow) {
+      commands.push({ label: 'Run AI Review', action: function () { reportAiReview(window.PrReview.runAiReviewNow()); } });
+    }
+    if (enabled) {
+      commands.push({ label: 'Voice: What Can I Say?', action: showHelp });
+      commands.push({ label: 'Voice: History', action: showHistory });
+      commands.push({ label: 'Voice: Choose Microphone…', action: chooseMic });
+    }
+    return commands;
+  }
+
   // What a local model may pick from: palette commands and up to 40 controls in view (the dialog's when one is open).
   function offeredActions() {
-    var palette = window.App.buildPaletteCommands().filter(function (c) { return !/^(Kill Task|Restart )/.test(c.label); });
+    var palette = paletteCommands().filter(function (c) { return !/^(Kill Task|Restart )/.test(c.label); });
     var inDialog = dialogOpen();
     var controls = visibleControls().filter(function (el) { return inDialog || !el.closest('#sidebar'); }).slice(0, 40);
     var actions = [];
@@ -475,7 +499,7 @@
 
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
-    var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
+    var match = heard && window.VoiceText.matchCommand(text, paletteCommands());
     if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
     if (!match && heard && pressControl(heard)) return true;
     if (!match && heard) {
@@ -495,7 +519,7 @@
   // Something that would run as a command or press a control, rather than be typed.
   function isActionable(text) {
     var names = visibleControls().map(controlName);
-    return !!window.VoiceText.matchCommand(text, window.App.buildPaletteCommands())
+    return !!window.VoiceText.matchCommand(text, paletteCommands())
       || window.VoiceText.pickControl(text, names, window.AppUtils.fuzzyMatch) >= 0
       || !!window.VoiceText.listPick(text);
   }
@@ -528,7 +552,7 @@
       return false;
     }
     if (heard && pickAgentRow(heard)) return true;
-    var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
+    var match = heard && window.VoiceText.matchCommand(text, paletteCommands());
     // An on-screen control named exactly what was said beats a similar palette command; with a dialog open, any of its controls do.
     // A deliberately mapped phrase ("review" -> PR picker) still wins outside dialogs.
     var preferControl = !match || (match.kind === 'command' && (!match.alias || dialogOpen()));
@@ -816,7 +840,7 @@
     var items = EXAMPLES.map(function (e) {
       return { label: '“' + e[0] + '” — ' + e[1], action: function () { if (!/\//.test(e[0])) handleTranscript(e[0], 'auto'); } };
     });
-    window.App.buildPaletteCommands().forEach(function (c) {
+    paletteCommands().forEach(function (c) {
       items.push({ label: '“' + c.label.replace(/…$/, '') + '”', action: c.action });
     });
     items.push({ label: 'Or say the name of any button or tab on screen', action: function () {} });
@@ -948,5 +972,6 @@
   window.Voice = {
     init: init, setEnabled: setEnabled, setMicId: setMicId, handleTranscript: handleTranscript,
     isEnabled: function () { return enabled; }, showHelp: showHelp, showHistory: showHistory, chooseMic: chooseMic,
+    reportAiReview: reportAiReview,
   };
 })();

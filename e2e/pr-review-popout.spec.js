@@ -1,3 +1,4 @@
+/* global window */
 // PR review popout smoke test: pr-review.html boots in its own
 // BrowserWindow, the PrReview module mounts against #pr-review-root, and
 // without an active review state it lands on the empty placeholder.
@@ -57,4 +58,23 @@ test('pr-review popout loads and renders empty state', async ({ electronApp, mai
   expect(errors, `Popout console errors:\n${errors.join('\n')}`).toEqual([]);
 
   await popout.close();
+});
+
+test('voice works in the popout: the mic is shown and "run review" starts the AI review', async ({ electronApp, mainWindow }) => {
+  await mainWindow.waitForLoadState('domcontentloaded');
+  const popout = await openPrReviewPopout(electronApp);
+  await expect(popout.locator('#voice-float')).toBeVisible();
+  await expect.poll(() => popout.locator('#pr-review-root .pr-review-loading').textContent(), { timeout: 8000 }).toMatch(/No active/);
+  const started = await popout.evaluate((s) => {
+    const PR = window.PrReview;
+    PR.render(s);
+    let calls = 0;
+    PR.startAiReview = () => { calls++; };
+    PR.activeTab = 'files';
+    PR.render(s);
+    window.Voice.handleTranscript('Run review.', 'auto');
+    return calls;
+  }, { number: 5, meta: { title: 'Popout voice', state: 'OPEN', author: { login: 'dev' }, headRefName: 'f', baseRefName: 'main' }, diff: '', threads: [] });
+  expect(started).toBe(1);
+  await expect(popout.locator('.pr-review-tab[data-tab="ai-review"]')).toHaveClass(/active/);
 });

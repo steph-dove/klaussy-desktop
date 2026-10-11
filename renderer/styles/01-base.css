@@ -648,7 +648,8 @@ body.custom-titlebar #titlebar-content {
   cursor: pointer;
 }
 
-body.dialog-open #voice-float:not([hidden]) {
+body.dialog-open #voice-float:not([hidden]),
+body.pr-review-popout #voice-float:not([hidden]) {
   display: flex;
 }
 

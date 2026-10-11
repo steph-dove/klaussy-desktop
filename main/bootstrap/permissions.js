@@ -1,15 +1,15 @@
-// Electron keeps one permission handler per session; everything stays granted except the mic, which only the app's own main page gets while voice input is on (the default).
+// Electron keeps one permission handler per session; everything stays granted except the mic, which only the app's main window and PR review pop-out get while voice input is on (the default).
 
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { session, app } = require('electron');
 const { loadConfig } = require('../util/config');
 
-function mainPageUrl() {
-  return pathToFileURL(path.join(app.getAppPath(), 'renderer', 'index.html')).href;
+function voicePageUrls() {
+  return ['index.html', 'pr-review.html'].map((page) => pathToFileURL(path.join(app.getAppPath(), 'renderer', page)).href);
 }
 
-function decidePermission(permission, details = {}, voiceEnabled = false, pageUrl = mainPageUrl()) {
+function decidePermission(permission, details = {}, voiceEnabled = false, pageUrls = voicePageUrls()) {
   if (permission !== 'media') return true;
   if (!voiceEnabled) return false;
   let url;
@@ -23,7 +23,7 @@ function decidePermission(permission, details = {}, voiceEnabled = false, pageUr
   url.search = '';
   url.hash = '';
   const types = details.mediaTypes || [];
-  return url.href === new URL(pageUrl).href
+  return [].concat(pageUrls).some((u) => url.href === new URL(u).href)
     && types.length > 0
     && types.every((t) => t === 'audio');
 }
