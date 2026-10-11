@@ -125,3 +125,11 @@ test('ordinary dictation is not mistaken for a command', () => {
     assert.equal(label(s), null, s);
   }
 });
+
+test('articles, politeness and PR/MR short forms do not get in the way', () => {
+  for (const s of ['open a pr review', 'Open a PR review.', 'can you open the pull request review please', 'let\'s review a pr', 'review an MR', 'open pr review for me']) {
+    assert.equal(label(s), 'Review Pull Request / Merge Request…', s);
+  }
+  assert.equal(label('can you open the pr panel'), 'Show Pull Request Panel');
+  assert.equal(label('please start a new session'), 'New Task');
+});

@@ -56,12 +56,22 @@
       .replace(/\s+/g, ' ')
       .trim()
       .replace(/^(hey |ok |okay )?klaussy /, '')
-      .replace(/^please /, '')
-      .replace(/ please$/, '');
+      .replace(/^(please |can you |could you |would you |let s |lets |i want to |i d like to |go ahead and )+/, '')
+      .replace(/ please$/, '')
+      .replace(/\b(a|an) /g, '');
   }
 
+  // Spoken short forms count as the words the palette labels spell out.
+  var EXPAND = { pr: ['pull', 'request'], prs: ['pull', 'request'], mr: ['merge', 'request'] };
+
   function tokens(text) {
-    return normalize(text).split(' ').filter(function (w) { return w && !STOPWORDS[w]; });
+    var out = [];
+    normalize(text).split(' ').forEach(function (w) {
+      if (!w || STOPWORDS[w]) return;
+      if (EXPAND[w]) out.push.apply(out, EXPAND[w]);
+      else out.push(w);
+    });
+    return out;
   }
 
   // Half Dice similarity, half how much of what was said appears in the label:
