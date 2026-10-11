@@ -134,6 +134,9 @@ function shQuote(s, platform = process.platform) {
     : `'${v.replace(/'/g, "'\\''")}'`;
 }
 
+// Claude tools that schedule a later turn; a headless run must finish in one go.
+const HEADLESS_DISALLOWED_TOOLS = ['ScheduleWakeup', 'CronCreate'];
+
 const PROVIDERS = {
   claude: {
     id: 'claude',
@@ -162,21 +165,26 @@ const PROVIDERS = {
     // Headless one-shot. mode 'text' → caller wants the clean final answer on
     // stdout; mode 'stream' → structured stream-json events. outputMode tells
     // spawnAgentStream how to read stdout: 'passthrough' (stdout IS the
-    buildHeadlessRun(_bin, { prompt, mode, model, promptOnStdin /*, allowEdits */ } = {}) {
+    buildHeadlessRun(_bin, { prompt, mode, model, promptOnStdin, allowedTools /*, allowEdits */ } = {}) {
       // Claude's headless `-p` already edits within cwd on the autonomous
       // surfaces today, so allowEdits needs no extra flag here.
       const m = model ? ['--model', model] : [];
+      // Tool flags are variadic so they go last; wakeup tools are blocked because they'd keep `-p` alive.
+      const toolFlags = [
+        ...(allowedTools && allowedTools.length ? ['--allowedTools', ...allowedTools] : []),
+        '--disallowedTools', ...HEADLESS_DISALLOWED_TOOLS,
+      ];
       // Windows (promptOnStdin): `claude -p` with no positional reads the prompt
       // from stdin, so the multi-line prompt never has to survive a cmd.exe
       // command line (see util/agent-spawn). stdinInput carries it to the child.
       if (promptOnStdin) {
         return mode === 'stream'
-          ? { args: [...m, '-p', '--output-format', 'stream-json', '--verbose'], stdinInput: prompt, outputMode: 'passthrough' }
-          : { args: [...m, '-p'], stdinInput: prompt, outputMode: 'passthrough' };
+          ? { args: [...m, '-p', '--output-format', 'stream-json', '--verbose', ...toolFlags], stdinInput: prompt, outputMode: 'passthrough' }
+          : { args: [...m, '-p', ...toolFlags], stdinInput: prompt, outputMode: 'passthrough' };
       }
       return mode === 'stream'
-        ? { args: [...m, '-p', prompt, '--output-format', 'stream-json', '--verbose'], outputMode: 'passthrough' }
-        : { args: [...m, '-p', prompt], outputMode: 'passthrough' };
+        ? { args: [...m, '-p', prompt, '--output-format', 'stream-json', '--verbose', ...toolFlags], outputMode: 'passthrough' }
+        : { args: [...m, '-p', prompt, ...toolFlags], outputMode: 'passthrough' };
     },
     sessionDir(worktreePath) {
       if (!worktreePath) return null;

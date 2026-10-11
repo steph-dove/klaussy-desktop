@@ -181,6 +181,29 @@ test('stream/session parsers are total — never throw on junk input', () => {
 
 // ---- Provider-specific shapes the spawn path depends on ----
 
+test('claude headless runs cannot schedule a wakeup that keeps -p alive', () => {
+  const p = providers.getProvider('claude');
+  for (const mode of ['text', 'stream']) {
+    for (const promptOnStdin of [false, true]) {
+      const run = p.buildHeadlessRun('claude', { prompt: 'PROMPT', mode, promptOnStdin });
+      const at = run.args.indexOf('--disallowedTools');
+      assert.ok(at !== -1, `${mode}/${promptOnStdin}: no --disallowedTools`);
+      // The flag is variadic: anything after it is read as a tool name.
+      assert.deepEqual(run.args.slice(at + 1), ['ScheduleWakeup', 'CronCreate'], `${mode}/${promptOnStdin}`);
+    }
+  }
+});
+
+test('claude headless allowedTools sit with the other tool flags, after the prompt', () => {
+  const p = providers.getProvider('claude');
+  const tools = ['Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)'];
+  const run = p.buildHeadlessRun('claude', { prompt: 'PROMPT', mode: 'stream', allowedTools: tools });
+  const at = run.args.indexOf('--allowedTools');
+  assert.ok(run.args.indexOf('PROMPT') < at);
+  assert.deepEqual(run.args.slice(at), ['--allowedTools', ...tools, '--disallowedTools', 'ScheduleWakeup', 'CronCreate']);
+  assert.ok(!p.buildHeadlessRun('claude', { prompt: 'PROMPT', mode: 'stream' }).args.includes('--allowedTools'));
+});
+
 test('cursor builds the documented cursor-agent command shapes', () => {
   const p = providers.getProvider('cursor');
   assert.equal(p.defaultBin, 'cursor-agent');
