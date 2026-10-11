@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { prepareVoice, micHelp, openMicSettings } = require('../../main/ipc/voice');
+const { prepareVoice, micHelp, openMicSettings, buildIntentPrompt, pickFromReply } = require('../../main/ipc/voice');
 const manifest = require('../../main/util/voice-model.json');
 
 function setVoicePref(on) {
@@ -91,4 +91,18 @@ test('the settings button opens the OS microphone privacy page', async () => {
     'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
     'ms-settings:privacy-microphone',
   ]);
+});
+
+test('the Ollama intent prompt numbers the actions and the reply must be one of them', () => {
+  const actions = ['New Task', 'Show Active Agents', 'Press "Run review"'];
+  const prompt = buildIntentPrompt('show me what my agents finished', actions);
+  assert.match(prompt, /1\. New Task\n2\. Show Active Agents\n3\. Press "Run review"/);
+  assert.match(prompt, /reply with only its number/);
+  assert.match(prompt, /a question, a coding instruction.*reply 0/);
+  assert.equal(pickFromReply('2', actions), 'Show Active Agents');
+  assert.equal(pickFromReply(' 3. Press "Run review"', actions), 'Press "Run review"');
+  assert.equal(pickFromReply('0', actions), null);
+  assert.equal(pickFromReply('7', actions), null);
+  assert.equal(pickFromReply('I think the second one', actions), null);
+  assert.equal(pickFromReply('', actions), null);
 });

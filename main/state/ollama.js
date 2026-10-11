@@ -164,6 +164,22 @@ async function pickChatModel({ prefer } = {}) {
   return loaded.find(usable) || installed.find((n) => !isBaseModel(n)) || null;
 }
 
+// Smallest installed instruction model of at least minBytes, for one-shot choices such as voice intent.
+// Models under ~4 GB (about 7B parameters) picked wrong actions too often to trust; null when none qualifies.
+async function pickIntentModel({ minBytes = 4e9 } = {}) {
+  try {
+    const res = await fetch(`${getBaseUrl()}/api/tags`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const models = (Array.isArray(body.models) ? body.models : [])
+      .filter((m) => m && m.name && !isBaseModel(m.name) && (m.size || 0) >= minBytes);
+    models.sort((a, b) => (a.size || 0) - (b.size || 0));
+    return models.length ? models[0].name : null;
+  } catch {
+    return null;
+  }
+}
+
 // Best-effort prose ('' on any failure); num_ctx must be explicit or Ollama caps at 4096.
 async function generateText(prompt, { timeoutMs = 60000, numCtx = DEFAULT_NUM_CTX, numPredict = 400, prefer } = {}) {
   const model = await pickChatModel({ prefer });
@@ -667,6 +683,7 @@ module.exports = {
   generateFIM,
   generateText,
   pickChatModel,
+  pickIntentModel,
   warmup,
   getModel,
   getSetupState,

@@ -150,6 +150,7 @@ contextBridge.exposeInMainWorld('klaus', {
     prepare: () => ipcRenderer.invoke('voice-prepare'),
     micHelp: () => ipcRenderer.invoke('voice-mic-help'),
     openMicSettings: () => ipcRenderer.invoke('voice-open-mic-settings'),
+    interpret: (text, actions) => ipcRenderer.invoke('voice-interpret', { text, actions }),
   },
 
   // ---- terminal: PTY I/O + sub-terminals ----

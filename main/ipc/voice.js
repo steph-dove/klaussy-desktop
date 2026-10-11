@@ -3,6 +3,7 @@
 const { ipcMain, app, shell, systemPreferences } = require('electron');
 const { modelMissing } = require('../bootstrap/voice-protocol');
 const { loadConfig } = require('../util/config');
+const ollama = require('../state/ollama');
 
 const MIC_SETTINGS_URLS = {
   darwin: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
@@ -62,8 +63,37 @@ async function openMicSettings(platform = process.platform) {
   }
 }
 
+// Numbered so a small local model only has to answer with a digit.
+function buildIntentPrompt(text, actions) {
+  return 'You map a spoken request to one action in a desktop app for coding agents.\n'
+    + 'Request: "' + String(text).replace(/"/g, "'") + '"\n'
+    + 'Actions:\n'
+    + actions.map((a, i) => (i + 1) + '. ' + a).join('\n')
+    + '\nIf the request asks for one of these actions, reply with only its number.'
+    + '\nIf it is a question, a coding instruction, or anything none of these actions does, reply 0.';
+}
+
+// The action the model picked, or null for "none" or anything that isn't one of the numbers offered.
+function pickFromReply(reply, actions) {
+  const m = /\d+/.exec(String(reply || ''));
+  if (!m) return null;
+  const n = Number(m[0]);
+  return n >= 1 && n <= actions.length ? actions[n - 1] : null;
+}
+
+async function interpretWithOllama({ text, actions } = {}) {
+  const list = (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && a).slice(0, 120);
+  if (!text || !list.length) return { action: null };
+  const model = await ollama.pickIntentModel();
+  if (!model) return { action: null, unavailable: true };
+  const reply = await ollama.generateText(buildIntentPrompt(text, list), { timeoutMs: 12000, numPredict: 8, prefer: model });
+  if (!reply) return { action: null, unavailable: true };
+  return { action: pickFromReply(reply, list) };
+}
+
 ipcMain.handle('voice-prepare', () => prepareVoice());
+ipcMain.handle('voice-interpret', (_e, payload) => interpretWithOllama(payload));
 ipcMain.handle('voice-mic-help', () => micHelp());
 ipcMain.handle('voice-open-mic-settings', () => openMicSettings());
 
-module.exports = { prepareVoice, micHelp, openMicSettings };
+module.exports = { prepareVoice, micHelp, openMicSettings, buildIntentPrompt, pickFromReply, interpretWithOllama };

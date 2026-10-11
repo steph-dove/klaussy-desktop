@@ -433,13 +433,54 @@
     return true;
   }
 
+  // What a local model may pick from: palette commands and up to 40 controls in view (the dialog's when one is open).
+  function offeredActions() {
+    var palette = window.App.buildPaletteCommands().filter(function (c) { return !/^(Kill Task|Restart )/.test(c.label); });
+    var inDialog = dialogOpen();
+    var controls = visibleControls().filter(function (el) { return inDialog || !el.closest('#sidebar'); }).slice(0, 40);
+    var actions = [];
+    palette.forEach(function (c) { actions.push({ name: c.label, run: c.action }); });
+    controls.forEach(function (el) { actions.push({ name: 'Press "' + controlName(el) + '"', run: function () { el.click(); } }); });
+    var seen = {};
+    return actions.filter(function (a) { return !seen[a.name] && (seen[a.name] = true); });
+  }
+
+  // Last resort when nothing matched: let a local Ollama model pick one of the offered actions.
+  function askOllama(heard, fallback) {
+    var actions = offeredActions();
+    inFlight++;
+    renderState();
+    window.klaus.voice.interpret(heard, actions.map(function (a) { return a.name; })).then(function (res) {
+      inFlight--;
+      renderState();
+      var pick = res && res.action && actions.find(function (a) { return a.name === res.action; });
+      var entry = history.find(function (h) { return h.heard === heard; });
+      if (!pick) {
+        if (entry) entry.did = res && res.unavailable ? 'nothing matched (no suitable Ollama model)' : 'nothing matched (Ollama found nothing either)';
+        return fallback();
+      }
+      announce(pick.name);
+      if (entry) entry.did = 'Ollama chose ' + pick.name;
+      pick.run();
+    }, function () {
+      inFlight--;
+      renderState();
+      fallback();
+    });
+    outcome('asked Ollama');
+    return true;
+  }
+
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
     if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
     if (!match && heard && pressControl(heard)) return true;
+    if (!match && heard) {
+      return askOllama(heard, function () { window.toast.info('That didn’t match a command.'); });
+    }
     if (!match) {
-      window.toast.info(heard ? 'That didn’t match a command.' : 'Didn’t catch a command.');
+      window.toast.info('Didn’t catch a command.');
       return false;
     }
     return run(match, target, heard);
@@ -498,8 +539,13 @@
     }
     if (heard && pressControl(heard)) return true;
     if (heard && !target) {
-      window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.');
-      return false;
+      return askOllama(heard, function () {
+        window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.');
+      });
+    }
+    // In a dialog with no text box focused there's nothing to type into, so it was meant as an action.
+    if (heard && dialogOpen() && !target.field) {
+      return askOllama(heard, function () { window.toast.info('That didn’t match anything in this dialog.'); });
     }
     return dictate(text, target);
   }
