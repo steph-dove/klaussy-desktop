@@ -374,8 +374,12 @@
   // than riding along with whatever control the user touches next.
   kimiBash.addEventListener('change', saveAll);
   screenReader.addEventListener('change', saveAll);
-  // Voice input is off by default, so this checkbox is the only way to turn it on.
-  document.getElementById('pref-voice-input').addEventListener('change', saveAll);
+  var voiceInput = document.getElementById('pref-voice-input');
+  voiceInput.addEventListener('change', saveAll);
+  // The mic button in the main window toggles this too; without the sync the next autosave would undo it.
+  window.klaus.ui.onPreferencesChanged(function (changed) {
+    if (changed.voiceInput !== undefined) voiceInput.checked = !!changed.voiceInput;
+  });
 
   ['pref-slack-webhook', 'pref-discord-webhook', 'pref-notify-completed',
     'pref-notify-failed', 'pref-notify-approval', 'pref-notify-new-sessions',

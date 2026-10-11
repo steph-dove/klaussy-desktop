@@ -27,9 +27,34 @@ async function withShellTask(mainWindow, fn) {
 }
 
 test.describe('voice input off', () => {
-  test('the mic button stays hidden by default', async ({ mainWindow }) => {
+  test('the mic button is always shown and starts off', async ({ mainWindow }) => {
     await ready(mainWindow);
-    await expect(mainWindow.locator('#btn-voice')).toBeHidden();
+    const btn = mainWindow.locator('#btn-voice');
+    await expect(btn).toBeVisible();
+    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('clicking the mic button turns voice on and off and saves it', async ({ electronApp, mainWindow, userDataDir }) => {
+    await ready(mainWindow);
+    const btn = mainWindow.locator('#btn-voice');
+    const [prefsWin] = await Promise.all([
+      electronApp.waitForEvent('window'),
+      mainWindow.evaluate(() => window.klaus.ui.openPreferences()),
+    ]);
+    await prefsWin.waitForLoadState('domcontentloaded');
+    const box = prefsWin.locator('#pref-voice-input');
+    await expect(box).not.toBeChecked();
+
+    await btn.click();
+    await expect(btn).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(true);
+    await expect(box).toBeChecked();
+
+    await btn.click();
+    await expect(btn).toHaveAttribute('aria-pressed', 'false');
+    await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(false);
+    await expect(box).not.toBeChecked();
+    await prefsWin.close();
   });
 
   test('ticking the Preferences checkbox turns voice on right away', async ({ electronApp, mainWindow, userDataDir }) => {
@@ -41,7 +66,7 @@ test.describe('voice input off', () => {
     await prefsWin.waitForLoadState('domcontentloaded');
     await prefsWin.locator('#pref-voice-input').check();
     await expect.poll(() => readConfig(userDataDir).voiceInput, { timeout: 5000 }).toBe(true);
-    await expect(mainWindow.locator('#btn-voice')).toBeVisible();
+    await expect(mainWindow.locator('#btn-voice')).toHaveAttribute('aria-pressed', 'true');
     await prefsWin.close();
   });
 });
@@ -51,7 +76,7 @@ test.describe('voice input on', () => {
 
   test.beforeEach(async ({ mainWindow }) => {
     await ready(mainWindow);
-    await expect(mainWindow.locator('#btn-voice')).toBeVisible();
+    await expect(mainWindow.locator('#btn-voice')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('"open pr review" opens the PR picker', async ({ mainWindow }) => {
@@ -118,7 +143,7 @@ test.describe('voice input on', () => {
       await mainWindow.keyboard.type('x');
       await expect.poll(() => mainWindow.evaluate(() => window.__typed)).toBe('x');
       await mainWindow.evaluate(() => window.__typedSub.dispose());
-      await expect(mainWindow.locator('#btn-voice')).toHaveAttribute('aria-pressed', 'false');
+      await expect(mainWindow.locator('#btn-voice')).not.toHaveClass(/recording/);
     });
   });
 

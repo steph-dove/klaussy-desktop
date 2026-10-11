@@ -1,6 +1,4 @@
-// Voice input: hold a shortcut (or toggle the mic button) to record, then the
-// on-device worker transcribes and the text is either typed into the active
-// terminal or matched to a command palette entry.
+// Hold a voice shortcut to record; the on-device worker transcribes, then the text is typed into the active terminal or matched to a palette command.
 
 (function () {
   'use strict';
@@ -101,7 +99,6 @@
     if (!button) return;
     button.classList.toggle('recording', state === 'listening');
     button.classList.toggle('busy', state === 'preparing' || state === 'transcribing');
-    button.setAttribute('aria-pressed', state === 'preparing' || state === 'listening' ? 'true' : 'false');
     if (state === 'listening') announce(mode === 'command' ? 'Listening for a command' : 'Listening');
     else if (state === 'transcribing') announce('Transcribing');
   }
@@ -176,9 +173,9 @@
     if (session.ctx) session.ctx.close();
   }
 
-  function start(mode, viaKey) {
+  function start(mode) {
     if (!enabled || rec) return;
-    var session = rec = { mode: mode, viaKey: viaKey, chunks: [], length: 0, released: false, closed: false };
+    var session = rec = { mode: mode, chunks: [], length: 0, released: false, closed: false };
     setState('preparing', mode);
     clearTimeout(idleTimer);
     // Load the model while the user is still talking.
@@ -278,10 +275,21 @@
     return null;
   }
 
+  function renderButton() {
+    if (!button) return;
+    var dictate = window.AppUtils.appShortcutLabel('voiceDictate');
+    var command = window.AppUtils.appShortcutLabel('voiceCommand');
+    button.classList.toggle('on', enabled);
+    button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+    button.title = enabled
+      ? 'Voice input is on. Hold ' + dictate + ' to dictate or ' + command + ' for a command. Click to turn it off.'
+      : 'Voice input is off. Click to turn it on.';
+  }
+
   function setEnabled(on) {
     if (window.App && window.App.isSecondaryWindow) on = false;
     enabled = !!on;
-    if (button) button.hidden = !enabled;
+    renderButton();
     window.AppUtils.setShortcutActive('voiceDictate', enabled);
     window.AppUtils.setShortcutActive('voiceCommand', enabled);
     if (!enabled) {
@@ -293,10 +301,17 @@
 
   function init() {
     button = document.getElementById('btn-voice');
+    if (button && window.App && window.App.isSecondaryWindow) button.hidden = true;
     if (button) {
+      // Saving the pref broadcasts it back here and to an open Preferences window.
       button.addEventListener('click', function () {
-        if (rec) stop();
-        else start('dictate', false);
+        var on = !enabled;
+        setEnabled(on);
+        announce(on ? 'Voice input on' : 'Voice input off');
+        window.klaus.ui.setPreferences({ voiceInput: on }).catch(function (err) {
+          setEnabled(!on);
+          window.toast.error('Could not save the voice setting: ' + ((err && err.message) || String(err)));
+        });
       });
     }
     // Capture phase: Monaco binds Ctrl/Cmd+Shift+Space and stops propagation.
@@ -306,16 +321,16 @@
       if (!mode) return;
       e.preventDefault();
       e.stopPropagation();
-      if (!e.repeat) start(mode, true);
+      if (!e.repeat) start(mode);
     }, true);
     // macOS drops the key's keyup while Cmd is held, so releasing any part of the chord stops.
     window.addEventListener('keyup', function (e) {
-      if (!rec || !rec.viaKey) return;
+      if (!rec) return;
       if (e.code === 'Space' || e.code === 'Semicolon' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') stop();
     }, true);
     // The first-use macOS mic prompt also blurs the window; say why nothing was recorded.
     window.addEventListener('blur', function () {
-      if (!rec || !rec.viaKey) return;
+      if (!rec) return;
       if (!rec.ctx) rec.interrupted = true;
       stop();
     });

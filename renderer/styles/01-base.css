@@ -575,6 +575,12 @@ body.custom-titlebar #titlebar-content {
   display: none !important;
 }
 
+#btn-voice.on {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-contrast) !important;
+}
+
 #btn-voice.recording {
   background: var(--error) !important;
   border-color: var(--error) !important;
