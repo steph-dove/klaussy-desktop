@@ -356,3 +356,11 @@ test('spoken numbers become digits where a number is meant', () => {
   assert.equal(normalize('one result ready'), 'one result ready');
   assert.equal(parsePrRequest('Review PR one oh three.'), '103');
 });
+
+test('help, history and microphone phrases reach the voice commands', () => {
+  const cmds = ['Voice: What Can I Say?', 'Voice: History', 'Voice: Choose Microphone…', 'Preferences'].map((l) => ({ label: l, action: () => {} }));
+  const pick = (t) => { const m = matchCommand(t, cmds); return m && m.command ? m.command.label : m; };
+  for (const t of ['help', 'What can I say?', 'voice help']) assert.equal(pick(t), 'Voice: What Can I Say?', t);
+  for (const t of ['voice history', 'what did you hear']) assert.equal(pick(t), 'Voice: History', t);
+  for (const t of ['choose microphone', 'change mic', 'switch the microphone', 'use another mic']) assert.equal(pick(t), 'Voice: Choose Microphone…', t);
+});

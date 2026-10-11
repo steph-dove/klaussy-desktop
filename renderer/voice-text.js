@@ -37,6 +37,9 @@
     { re: /^((open|show|view|see) )?(the )?(pr|pull request|merge request|mr) (panel|tab)$/,
       labels: ['Show Pull Request Panel'] },
     { re: /^(open )?(settings|preferences|prefs)$/, labels: ['Preferences'] },
+    { re: /^(help|voice help|what can i say|what can you do|what do i say|show voice commands|list (voice )?commands)$/, labels: ['Voice: What Can I Say?'] },
+    { re: /^((show|open) )?(voice history|what did you hear|what did you hear me say|what did i say)$/, labels: ['Voice: History'] },
+    { re: /^(choose|change|pick|select|switch|set)( the| my)? (microphone|mic|input)$|^use (another|different) (microphone|mic)$/, labels: ['Voice: Choose Microphone…'] },
     { re: /^clear( terminal| screen)?$/, labels: ['Clear Terminal'] },
   ];
   // No bare "enter": a one-word mishearing could approve an agent's pending tool call.

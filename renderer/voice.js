@@ -32,7 +32,15 @@
   var lastInsert = null;
   // What "delete that" / "scratch that" removed, kept briefly in case the words were meant literally.
   var lastRemoved = null;
+  // The last 50 phrases and what each did, in memory only (dictation can hold anything).
+  var history = [];
+  var lastOutcome = null;
+  var micId = '';
   var RESTORE_MS = 10000;
+
+  function outcome(text) {
+    lastOutcome = text;
+  }
 
   function forgetInsert() {
     if (lastInsert && lastInsert.watch) lastInsert.watch.dispose();
@@ -163,6 +171,7 @@
     // them, so the text is inserted, not submitted.
     forgetInsert();
     target.terminal.paste(clean + ' ');
+    outcome('typed into the agent');
     // Any keystroke after this means the backspaces would hit something else.
     var watch = target.terminal.onData(forgetInsert);
     lastInsert = { terminal: target, text: clean + ' ', watch: watch };
@@ -225,6 +234,7 @@
       el.dispatchEvent(new Event('input', { bubbles: true }));
       forgetInsert();
       lastInsert = { field: el, start: start, text: inserted };
+      outcome('typed into a text box');
     } else {
       document.execCommand('insertText', false, text);
       forgetInsert();
@@ -286,6 +296,7 @@
   }
 
   function run(match, target, heard) {
+    outcome(match.kind === 'command' ? 'ran ' + match.command.label : match.kind === 'pr' ? 'looked up PR “' + match.query + '”' : match.kind);
     if (match.kind === 'pr') return reviewPr(match.query);
     if (match.kind === 'dismiss') return dismissDialog();
     if (match.kind === 'next') {
@@ -339,6 +350,7 @@
       : window.VoiceText.pickControl(text, names, window.AppUtils.fuzzyMatch);
     if (i < 0) return false;
     forgetInsert();
+    outcome('pressed ' + controlName(controls[i]));
     announce(controlName(controls[i]));
     controls[i].click();
     return true;
@@ -415,6 +427,7 @@
       return true;
     }
     var open = row.querySelector('button[data-action="open"]');
+    outcome('opened agent ' + ((row.querySelector('.agent-item-title') || row).textContent || '').trim());
     (open || row).click();
     return true;
   }
@@ -465,6 +478,19 @@
   // Entry point after transcription; e2e tests call it directly since CI has no mic.
   // target is the terminal that was active when recording ended.
   function handleTranscript(text, mode, target) {
+    lastOutcome = null;
+    try {
+      return routeTranscript(text, mode, target);
+    } finally {
+      var heard = window.VoiceText.sanitizeDictation(text);
+      if (heard) {
+        history.unshift({ at: new Date(), heard: heard, did: lastOutcome || 'nothing matched' });
+        history.length = Math.min(history.length, 50);
+      }
+    }
+  }
+
+  function routeTranscript(text, mode, target) {
     if (target === undefined) target = activeTarget();
     if (mode === 'command') return runCommand(text, target);
     if (mode === 'auto') return runAuto(text, target);
@@ -536,8 +562,12 @@
       }
       if (session.interrupted) window.toast.info('Microphone ready. Hold the shortcut again to talk.');
       if (session.released) return null;
-      return navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      var audio = { channelCount: 1, echoCancellation: true, noiseSuppression: true };
+      if (!micId) return navigator.mediaDevices.getUserMedia({ audio: audio });
+      return navigator.mediaDevices.getUserMedia({ audio: Object.assign({ deviceId: { exact: micId } }, audio) }).catch(function (err) {
+        if (!err || !/Overconstrained|NotFound|NotReadable/.test(err.name)) throw err;
+        window.toast.info('The chosen microphone isn’t available, so Klaussy is using the default.');
+        return navigator.mediaDevices.getUserMedia({ audio: audio });
       });
     }).then(function (stream) {
       if (!stream) return;
@@ -678,6 +708,77 @@
     renderState();
   }
 
+  var EXAMPLES = [
+    ['open pr review', 'pick a pull request to review'],
+    ['review pr 103', 'open that pull request'],
+    ['run review', 'AI review in PR review, or review this session'],
+    ['new session', 'start a session'],
+    ['select agent gemini', 'press a button or tab by its name'],
+    ['open the dev loop', 'show or start the dev loop'],
+    ['open agent list', 'running and finished agents'],
+    ['switch to auth fix', 'focus a session by name'],
+    ['delete that / put that back', 'undo the last dictation, or restore it'],
+    ['next / done naming', 'leave the text box'],
+    ['close / cancel', 'close the dialog'],
+    ['send', 'press Enter in the agent'],
+    ['stop listening', 'end click-to-talk'],
+  ];
+
+  function showHelp() {
+    var items = EXAMPLES.map(function (e) {
+      return { label: '“' + e[0] + '” — ' + e[1], action: function () { if (!/\//.test(e[0])) handleTranscript(e[0], 'auto'); } };
+    });
+    window.App.buildPaletteCommands().forEach(function (c) {
+      items.push({ label: '“' + c.label.replace(/…$/, '') + '”', action: c.action });
+    });
+    items.push({ label: 'Or say the name of any button or tab on screen', action: function () {} });
+    window.CommandPalette.show(items);
+  }
+
+  function showHistory() {
+    if (!history.length) {
+      window.toast.info('Nothing said yet.');
+      return;
+    }
+    window.CommandPalette.show(history.map(function (h) {
+      var line = h.at.toLocaleTimeString() + '  “' + h.heard + '” → ' + h.did;
+      return { label: line, action: function () {
+        navigator.clipboard.writeText(line).then(function () { announce('Copied'); }, function (err) {
+          window.toast.error('Copy failed: ' + ((err && err.message) || String(err)));
+        });
+      } };
+    }));
+  }
+
+  function chooseMic() {
+    navigator.mediaDevices.enumerateDevices().then(function (devices) {
+      var mics = devices.filter(function (d) { return d.kind === 'audioinput' && d.deviceId !== 'default'; });
+      if (!mics.length || !mics.some(function (d) { return d.label; })) {
+        window.toast.info('Use voice once so Klaussy can list your microphones, then try again.');
+        return;
+      }
+      var save = function (id, name) {
+        setMicId(id);
+        announce('Using ' + name);
+        window.klaus.ui.setPreferences({ voiceMicId: id }).catch(function (err) {
+          window.toast.error('Could not save the microphone choice: ' + ((err && err.message) || String(err)));
+        });
+      };
+      var items = [{ label: (micId ? '' : '✓ ') + 'System default', action: function () { save('', 'the system default microphone'); } }];
+      mics.forEach(function (d, i) {
+        var name = d.label || 'Microphone ' + (i + 1);
+        items.push({ label: (d.deviceId === micId ? '✓ ' : '') + name, action: function () { save(d.deviceId, name); } });
+      });
+      window.CommandPalette.show(items);
+    }, function (err) {
+      window.toast.error('Could not list microphones: ' + ((err && err.message) || String(err)));
+    });
+  }
+
+  function setMicId(id) {
+    micId = id || '';
+  }
+
   function shortcutMode(e) {
     if (window.AppUtils.isNamedShortcut(e, 'voiceDictate')) return 'dictate';
     if (window.AppUtils.isNamedShortcut(e, 'voiceCommand')) return 'command';
@@ -756,5 +857,8 @@
     });
   }
 
-  window.Voice = { init: init, setEnabled: setEnabled, handleTranscript: handleTranscript };
+  window.Voice = {
+    init: init, setEnabled: setEnabled, setMicId: setMicId, handleTranscript: handleTranscript,
+    isEnabled: function () { return enabled; }, showHelp: showHelp, showHistory: showHistory, chooseMic: chooseMic,
+  };
 })();
