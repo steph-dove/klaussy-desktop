@@ -133,9 +133,25 @@
     return entry.alive ? { id: id, subId: null, terminal: entry.terminal, shell: entry.mode === 'shell' } : null;
   }
 
+  // The PR review's Terminal View, when it's on screen; its xterm forwards input() to the review chat or implement run.
+  function prTerminalTarget() {
+    var pr = window.PrReview;
+    var host = document.querySelector('#pr-implement-terminal-host .pr-implement-terminal-body');
+    if (!pr || !pr.visibleTerminal || !host || !host.getClientRects().length) return null;
+    var rt = pr.visibleTerminal();
+    var term = rt && rt.terminal;
+    if (!term || !term.element || !host.contains(term.element)) return null;
+    return { terminal: term, write: function (data) { term.input(data); }, name: rt === pr.chatTerminal ? 'review chat terminal' : 'implement run terminal' };
+  }
+
+  function writeTo(target, data) {
+    if (target.write) target.write(data);
+    else window.klaus.terminal.write(target.id, data, target.subId);
+  }
+
   function activeTarget() {
     var field = focusedField();
-    return field ? { field: field } : terminalTarget();
+    return field ? { field: field } : prTerminalTarget() || terminalTarget();
   }
 
   // Red while the mic is live; amber while it is opening or a phrase is being worked out.
@@ -195,7 +211,7 @@
     }
     if (last && last.terminal) {
       // Backspaces only reach text still on the agent's input line, which is where dictation lands.
-      window.klaus.terminal.write(last.terminal.id, '\x7f'.repeat(last.text.length), last.terminal.subId);
+      writeTo(last.terminal, '\x7f'.repeat(last.text.length));
       remember(last.terminal, last.text, spoken);
       announce('Deleted. Say put that back to restore it.');
       return true;
@@ -319,12 +335,12 @@
     forgetInsert();
     if (match.kind === 'send') {
       if (target && target.field && pressNearbySend(target.field)) return true;
-      if (target && target.field) target = terminalTarget();
+      if (target && target.field) target = prTerminalTarget() || terminalTarget();
       if (!target) {
         window.toast.error('Open an agent tab first.');
         return false;
       }
-      window.klaus.terminal.write(target.id, '\r', target.subId);
+      writeTo(target, '\r');
       announce('Sent');
       return true;
     }
@@ -504,6 +520,8 @@
 
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
+    var focus = heard && window.VoiceText.parseFocus(heard);
+    if (focus && focusOrOpen(focus.query)) return true;
     var match = heard && window.VoiceText.matchCommand(text, paletteCommands());
     if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
     if (!match && heard && pressControl(heard)) return true;
@@ -547,16 +565,71 @@
     return true;
   }
 
+  // Text boxes and terminals on screen that "focus on ..." can name.
+  function focusables() {
+    var list = [];
+    var pr = prTerminalTarget();
+    if (pr) list.push({ names: ['terminal view', 'terminal', 'chat', pr.name], el: pr.terminal });
+    var task = terminalTarget();
+    var entry = window.AppState && window.AppState.tasks.get(window.AppState.activeTaskId);
+    if (task && task.terminal.element && task.terminal.element.getClientRects().length) {
+      list.push({ names: ['terminal', 'agent', entry ? entry.name : ''], el: task.terminal });
+    }
+    document.querySelectorAll('input, textarea, [contenteditable="true"]').forEach(function (el) {
+      if (el.disabled || el.readOnly || el.closest('[inert], .xterm, .monaco-editor') || !el.getClientRects().length) return;
+      if (el.tagName === 'INPUT' && !/^(text|search|url|)$/.test(el.type || '')) return;
+      var label = el.labels && el.labels[0] ? el.labels[0].textContent : '';
+      list.push({ names: [el.getAttribute('aria-label') || '', el.getAttribute('placeholder') || '', label], el: el });
+    });
+    return list;
+  }
+
+  // "focus on the commit message box", "focus on terminal view"; with no name, the terminal (or only text box) in front.
+  function focusByName(query) {
+    var list = focusables();
+    var pick = null;
+    if (!query) {
+      pick = list.find(function (f) { return f.el.element; }) || (list.length === 1 ? list[0] : null);
+    } else {
+      var names = [];
+      var owners = [];
+      list.forEach(function (f) {
+        f.names.forEach(function (n) { if (n.trim()) { names.push(n.trim()); owners.push(f); } });
+      });
+      var i = window.VoiceText.pickControl(query, names, window.AppUtils.fuzzyMatch);
+      pick = i >= 0 ? owners[i] : null;
+    }
+    if (!pick) return false;
+    pick.el.focus();
+    forgetInsert();
+    outcome('focused ' + (query || 'the text box in front'));
+    announce('Focused');
+    return true;
+  }
+
+  // Focus what was named; if that's a tab ("Terminal View") not yet open, open it and then focus its terminal.
+  function focusOrOpen(query) {
+    if (focusByName(query)) return true;
+    if (!query || !pressControl(query)) return false;
+    setTimeout(function () {
+      var pr = prTerminalTarget();
+      if (pr && /terminal|chat/.test(query)) pr.terminal.focus();
+    }, 150);
+    return true;
+  }
+
   function runAuto(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
     var parts = heard ? window.VoiceText.splitChain(heard) : [];
     if (parts.length > 1 && parts.slice(0, -1).every(isActionable)) return runChain(parts);
     if (heard && window.VoiceText.endsWithDiscard(heard)) {
-      remember(target || terminalTarget(), '', heard);
+      remember(target || prTerminalTarget() || terminalTarget(), '', heard);
       announce('Discarded. Say put that back to type it after all.');
       return false;
     }
     if (heard && pickAgentRow(heard)) return true;
+    var focus = heard && window.VoiceText.parseFocus(heard);
+    if (focus && focusOrOpen(focus.query)) return true;
     var match = heard && window.VoiceText.matchCommand(text, paletteCommands());
     // An on-screen control named exactly what was said beats a similar palette command; with a dialog open, any of its controls do.
     // A deliberately mapped phrase ("review" -> PR picker) still wins outside dialogs.
@@ -608,7 +681,7 @@
     if (edit && edit.kind === 'undo') return undoLastInsert(heard);
     if (edit && edit.kind === 'restore') return restoreRemoved();
     if (window.VoiceText.endsWithDiscard(heard)) {
-      remember(target || terminalTarget(), '', heard);
+      remember(target || prTerminalTarget() || terminalTarget(), '', heard);
       announce('Discarded. Say put that back to type it after all.');
       return false;
     }

@@ -330,6 +330,18 @@
     return cmd ? { kind: 'command', command: cmd } : null;
   }
 
+  var FOCUS = /^(focus|put (?:the |my )?cursor|click|go|jump|move|switch)(?: (?:on|in|into|to|inside))? (.+)$/;
+  var FOCUS_NOUN = /\b(input|box|field|text area|terminal|chat|prompt)\b/;
+
+  // Verbs other than focus/put need a box or terminal named, so "go to auth fix" still switches sessions; query '' means whatever is in front.
+  function parseFocus(text) {
+    var m = normalize(text).match(FOCUS);
+    if (!m) return null;
+    if (!/^(focus|put)/.test(m[1]) && !FOCUS_NOUN.test(m[2])) return null;
+    var query = m[2].replace(/\b(the|my|text|input|box|field|area|inside|in|on|of|into)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    return { query: query };
+  }
+
   // Nouns for Klaussy's own UI; "pull request", "server" and "test" are left out because agents get asked about those.
   var UI_NOUN = /\b(reviews?|revues?|cr|panel|window|picker|dialog|modal|tab|settings|preferences|prefs|history|microphone|mic|owl|agents|agent list|sidebar|palette|zoom)\b/;
 
@@ -350,7 +362,7 @@
 
   var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
     prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl, exactControl: exactControl, listPick: listPick,
-    splitChain: splitChain, shellText: shellText, mentionsAppUi: mentionsAppUi, sharesWord: sharesWord };
+    splitChain: splitChain, shellText: shellText, mentionsAppUi: mentionsAppUi, sharesWord: sharesWord, parseFocus: parseFocus };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);

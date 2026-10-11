@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick, splitChain, shellText, mentionsAppUi, sharesWord } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick, splitChain, shellText, mentionsAppUi, sharesWord, parseFocus } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -412,4 +412,15 @@ test('scroll phrasings move the terminal in front', () => {
   assert.equal(label('page down'), 'Scroll Down');
   assert.equal(label('scroll down'), 'Scroll Down');
   assert.equal(label('go to auth fix'), 'Switch to: auth-fix');
+});
+
+test('focus phrases name a text box or terminal, and other verbs need one named', () => {
+  assert.deepEqual(parseFocus('Focus on text input in terminal view.'), { query: 'terminal view' });
+  assert.deepEqual(parseFocus('focus on terminal view'), { query: 'terminal view' });
+  assert.deepEqual(parseFocus('focus on the commit message box'), { query: 'commit message' });
+  assert.deepEqual(parseFocus('put the cursor in the text box'), { query: '' });
+  assert.deepEqual(parseFocus('click in the search field'), { query: 'search' });
+  assert.equal(parseFocus('go to auth fix'), null);
+  assert.equal(parseFocus('go to the bottom'), null);
+  assert.equal(parseFocus('fix the focus bug'), null);
 });
