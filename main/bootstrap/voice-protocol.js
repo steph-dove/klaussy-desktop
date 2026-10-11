@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { Readable } = require('stream');
 const { protocol, app } = require('electron');
 const manifest = require('../util/voice-model.json');
 const { voiceFiles } = require('../util/voice-files');
@@ -56,17 +57,20 @@ app.whenReady().then(() => {
   protocol.handle(SCHEME, async (request) => {
     const target = resolveVoicePath(request.url, voiceDir());
     if (!target) return new Response('not found', { status: 404 });
+    let size;
     try {
-      const body = await fs.promises.readFile(target);
-      return new Response(body, {
-        headers: {
-          'Content-Type': CONTENT_TYPES[path.extname(target)] || 'application/octet-stream',
-          'Access-Control-Allow-Origin': '*',
-        },
-      });
+      ({ size } = await fs.promises.stat(target));
     } catch {
       return new Response('voice model not installed', { status: 404 });
     }
+    // Streamed: the decoder and the WASM are tens of MB each.
+    return new Response(Readable.toWeb(fs.createReadStream(target)), {
+      headers: {
+        'Content-Type': CONTENT_TYPES[path.extname(target)] || 'application/octet-stream',
+        'Content-Length': String(size),
+        'Access-Control-Allow-Origin': '*',
+      },
+    });
   });
 }).catch((err) => {
   console.error('[voice-protocol] scheme registration failed', err);

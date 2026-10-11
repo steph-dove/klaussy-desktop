@@ -93,9 +93,15 @@ window.AppUtils = (function () {
     quickOpen: { key: 'p', shift: false },
     slash: { key: 'Slash' },
     diff: { key: 'g' },
-    voiceDictate: { key: 'Space', shift: true },
-    voiceCommand: { key: 'Semicolon', shift: true },
+    voiceDictate: { key: 'Space', shift: true, optIn: true },
+    voiceCommand: { key: 'Semicolon', shift: true, optIn: true },
   };
+
+  // Opt-in shortcuts only leave the terminal while their feature is on, so the shell keeps those keys otherwise.
+  var optInActive = {};
+  function setShortcutActive(name, on) {
+    optInActive[name] = !!on;
+  }
 
   function isNamedShortcut(e, name) {
     var s = APP_SHORTCUTS[name];
@@ -103,7 +109,10 @@ window.AppUtils = (function () {
   }
 
   function isAnyAppShortcut(e) {
-    return Object.keys(APP_SHORTCUTS).some(function (name) { return isNamedShortcut(e, name); });
+    return Object.keys(APP_SHORTCUTS).some(function (name) {
+      if (APP_SHORTCUTS[name].optIn && !optInActive[name]) return false;
+      return isNamedShortcut(e, name);
+    });
   }
 
   function appShortcutLabel(name) {
@@ -215,6 +224,7 @@ window.AppUtils = (function () {
     isNamedShortcut: isNamedShortcut,
     isAnyAppShortcut: isAnyAppShortcut,
     appShortcutLabel: appShortcutLabel,
+    setShortcutActive: setShortcutActive,
     isClearShortcut: isClearShortcut,
     clearShortcutLabel: clearShortcutLabel,
     escHtml: escHtml,

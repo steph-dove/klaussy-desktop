@@ -165,9 +165,17 @@ test('voice shortcuts: Ctrl+Shift by physical key elsewhere', () => {
   });
 });
 
-test('voice shortcuts are kept from the terminal', () => {
+test('voice shortcuts are kept from the terminal only while voice is on', () => {
+  const chord = key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' });
   withPlatform('linux', () => {
-    assert.equal(AppUtils.isAnyAppShortcut(key({ ctrlKey: true, shiftKey: true, key: ' ', code: 'Space' })), true);
+    assert.equal(AppUtils.isAnyAppShortcut(chord), false);
+    AppUtils.setShortcutActive('voiceDictate', true);
+    try {
+      assert.equal(AppUtils.isAnyAppShortcut(chord), true);
+    } finally {
+      AppUtils.setShortcutActive('voiceDictate', false);
+    }
+    assert.equal(AppUtils.isAnyAppShortcut(chord), false);
   });
 });
 

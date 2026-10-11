@@ -79,8 +79,9 @@ test('switch to matches only task names', () => {
   assert.equal(label('go to the billing refactor task'), 'Switch to: billing-refactor');
 });
 
-test('send, submit and enter press Enter', () => {
+test('send, submit and press enter press Enter, a bare enter does not', () => {
   for (const s of ['send', 'Submit.', 'press enter', 'send it']) assert.equal(label(s), 'SEND', s);
+  assert.notEqual(label('enter'), 'SEND');
 });
 
 test('unclear or unrelated speech matches nothing', () => {

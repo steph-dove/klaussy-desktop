@@ -20,7 +20,8 @@
     { re: /^(open )?(settings|preferences|prefs)$/, labels: ['Preferences'] },
     { re: /^clear( terminal| screen)?$/, labels: ['Clear Terminal'] },
   ];
-  var SEND = /^(send|submit|enter|send it|press enter|hit enter)$/;
+  // No bare "enter": a one-word mishearing could approve an agent's pending tool call.
+  var SEND = /^(send|submit|send it|press enter|hit enter)$/;
   var SWITCH = /^(switch|go|jump|change) (to )?(task |tab |session )?(.+)$/;
   // A misheard word must never end an agent session, so these stay keyboard-only.
   var NOT_BY_VOICE = /^(Kill Task|Restart )/;

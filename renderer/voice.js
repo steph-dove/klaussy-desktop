@@ -10,6 +10,8 @@
   var MAX_SECONDS = 60;
   // Keep capturing briefly after release so the last word isn't cut off.
   var TAIL_MS = 150;
+  // The loaded model holds 100+ MB in this renderer, so drop it when unused.
+  var IDLE_MS = 10 * 60 * 1000;
 
   var enabled = false;
   var button = null;
@@ -19,6 +21,8 @@
   var nextId = 0;
   var queue = Promise.resolve();
   var rec = null;
+  var inFlight = 0;
+  var idleTimer = null;
 
   function announce(msg) {
     if (window.A11y) window.A11y.announce(msg);
@@ -102,18 +106,24 @@
     else if (state === 'transcribing') announce('Transcribing');
   }
 
-  // A later recording may already own the button; only go idle when none does.
-  function idleUnlessRecording() {
-    if (!rec) setState('idle');
+  // A newer recording or a queued transcription may still own the button.
+  function idleUnlessBusy() {
+    if (!rec) setState(inFlight ? 'transcribing' : 'idle');
   }
 
-  function dictate(text) {
+  function scheduleIdleStop() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(function () {
+      if (!rec && !inFlight) stopWorker('Voice engine idle');
+    }, IDLE_MS);
+  }
+
+  function dictate(text, target) {
     var clean = window.VoiceText.sanitizeDictation(text);
     if (!clean) {
       window.toast.info('Didn’t catch that. Try again a little closer to the mic.');
       return false;
     }
-    var target = activeTarget();
     if (!target) {
       window.toast.error('Open an agent tab to dictate into.');
       return false;
@@ -125,7 +135,7 @@
     return true;
   }
 
-  function runCommand(text) {
+  function runCommand(text, target) {
     var match = window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
     if (!match) {
       var heard = window.VoiceText.sanitizeDictation(text);
@@ -133,7 +143,6 @@
       return false;
     }
     if (match.kind === 'send') {
-      var target = activeTarget();
       if (!target) {
         window.toast.error('Open an agent tab first.');
         return false;
@@ -148,8 +157,10 @@
   }
 
   // Entry point after transcription; e2e tests call it directly since CI has no mic.
-  function handleTranscript(text, mode) {
-    return mode === 'command' ? runCommand(text) : dictate(text);
+  // target is the terminal that was active when recording ended.
+  function handleTranscript(text, mode, target) {
+    if (target === undefined) target = activeTarget();
+    return mode === 'command' ? runCommand(text, target) : dictate(text, target);
   }
 
   function micError(err) {
@@ -169,10 +180,12 @@
     if (!enabled || rec) return;
     var session = rec = { mode: mode, viaKey: viaKey, chunks: [], length: 0, released: false, closed: false };
     setState('preparing', mode);
+    clearTimeout(idleTimer);
     // Load the model while the user is still talking.
     startWorker().catch(function () {});
     window.klaus.voice.prepare().then(function (res) {
       if (!res.ok) throw new Error(res.error);
+      if (session.interrupted) window.toast.info('Microphone ready. Hold the shortcut again to talk.');
       if (session.released) return null;
       return navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
@@ -201,7 +214,7 @@
     }).catch(function (err) {
       if (rec === session) rec = null;
       release(session);
-      idleUnlessRecording();
+      idleUnlessBusy();
       if (!session.cancelled) window.toast.error(micError(err));
     });
   }
@@ -209,23 +222,28 @@
   function finish(session) {
     release(session);
     if (session.length < RATE * MIN_SECONDS) {
-      idleUnlessRecording();
+      idleUnlessBusy();
+      scheduleIdleStop();
       return;
     }
     var audio = new Float32Array(session.length);
     var offset = 0;
     session.chunks.forEach(function (c) { audio.set(c, offset); offset += c.length; });
-    if (!rec) setState('transcribing');
+    inFlight++;
+    idleUnlessBusy();
     transcribe(audio).then(function (text) {
-      idleUnlessRecording();
+      inFlight--;
+      idleUnlessBusy();
+      scheduleIdleStop();
       if (!enabled) return;
       try {
-        handleTranscript(text, session.mode);
+        handleTranscript(text, session.mode, session.target);
       } catch (err) {
         window.toast.error('Voice command failed: ' + ((err && err.message) || String(err)));
       }
     }, function (err) {
-      idleUnlessRecording();
+      inFlight--;
+      idleUnlessBusy();
       if (enabled) window.toast.error('Voice transcription failed: ' + err.message);
     });
   }
@@ -235,9 +253,10 @@
     if (!session) return;
     rec = null;
     session.released = true;
+    session.target = activeTarget();
     if (!session.ctx) {
       release(session);
-      idleUnlessRecording();
+      idleUnlessBusy();
       return;
     }
     setTimeout(function () { finish(session); }, TAIL_MS);
@@ -263,8 +282,11 @@
     if (window.App && window.App.isSecondaryWindow) on = false;
     enabled = !!on;
     if (button) button.hidden = !enabled;
+    window.AppUtils.setShortcutActive('voiceDictate', enabled);
+    window.AppUtils.setShortcutActive('voiceCommand', enabled);
     if (!enabled) {
       cancel();
+      clearTimeout(idleTimer);
       stopWorker('Voice input turned off');
     }
   }
@@ -291,8 +313,11 @@
       if (!rec || !rec.viaKey) return;
       if (e.code === 'Space' || e.code === 'Semicolon' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') stop();
     }, true);
+    // The first-use macOS mic prompt also blurs the window; say why nothing was recorded.
     window.addEventListener('blur', function () {
-      if (rec && rec.viaKey) stop();
+      if (!rec || !rec.viaKey) return;
+      if (!rec.ctx) rec.interrupted = true;
+      stop();
     });
   }
 
