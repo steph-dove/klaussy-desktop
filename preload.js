@@ -1,7 +1,7 @@
 // Preload: the only bridge between the sandboxed renderer and main.
 //
 // API is namespaced (`window.klaus.git.status(...)`) so each IPC target's
-// owning module is obvious. See M-ARCH-2 in REVIEW_OUTPUT.md.
+// owning module is obvious.
 //
 // Every entry is a thin `ipcRenderer.invoke` / `.send` / `.on` wrapper —
 // the handlers live in main/ipc/<feature>.js and the state modules.
