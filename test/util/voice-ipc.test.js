@@ -106,3 +106,10 @@ test('the Ollama intent prompt numbers the actions and the reply must be one of 
   assert.equal(pickFromReply('I think the second one', actions), null);
   assert.equal(pickFromReply('', actions), null);
 });
+
+test('over an agent tab the intent prompt says most speech is for the agent', () => {
+  const prompt = buildIntentPrompt('open code revue', ['New Task'], { agentTab: true });
+  assert.match(prompt, /instruction for the coding agent .* Those must get 0/);
+  assert.match(prompt, /1\. New Task/);
+  assert.doesNotMatch(buildIntentPrompt('open code revue', ['New Task']), /Those must get 0/);
+});

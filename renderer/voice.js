@@ -472,17 +472,22 @@
   }
 
   // Last resort when nothing matched: let a local Ollama model pick one of the offered actions.
-  function askOllama(heard, fallback) {
+  // With agentTab, the phrase is typed into the agent unless Ollama picks an action that shares a word with it.
+  function askOllama(heard, fallback, agentTab) {
     var actions = offeredActions();
     inFlight++;
     renderState();
-    window.klaus.voice.interpret(heard, actions.map(function (a) { return a.name; })).then(function (res) {
+    window.klaus.voice.interpret(heard, actions.map(function (a) { return a.name; }), agentTab).then(function (res) {
       inFlight--;
       renderState();
       var pick = res && res.action && actions.find(function (a) { return a.name === res.action; });
+      if (pick && agentTab && !window.VoiceText.sharesWord(heard, pick.name)) pick = null;
       var entry = history.find(function (h) { return h.heard === heard; });
       if (!pick) {
-        if (entry) entry.did = res && res.unavailable ? 'nothing matched (no suitable Ollama model)' : 'nothing matched (Ollama found nothing either)';
+        if (entry) {
+          entry.did = agentTab ? 'typed into the agent (Ollama saw no app action)'
+            : res && res.unavailable ? 'nothing matched (no suitable Ollama model)' : 'nothing matched (Ollama found nothing either)';
+        }
         return fallback();
       }
       announce(pick.name);
@@ -572,6 +577,9 @@
     // In a dialog with no text box focused there's nothing to type into, so it was meant as an action.
     if (heard && dialogOpen() && !target.field) {
       return askOllama(heard, function () { window.toast.info('That didn’t match anything in this dialog.'); });
+    }
+    if (heard && !target.field && window.VoiceText.mentionsAppUi(heard)) {
+      return askOllama(heard, function () { dictate(text, target); }, true);
     }
     return dictate(text, target);
   }

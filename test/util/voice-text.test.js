@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick, splitChain, shellText } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick, splitChain, shellText, mentionsAppUi, sharesWord } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -376,4 +376,25 @@ test('shell dictation drops sentence punctuation', () => {
   assert.equal(shellText('npm test!'), 'npm test');
   assert.equal(shellText('PR list'), 'PR list');
   assert.equal(shellText('ls -la'), 'ls -la');
+});
+
+test('code review phrasings with articles, plurals or a window word still open the PR picker', () => {
+  for (const said of ['Open the code review.', 'Open code reviews.', 'Open co-review.', 'Open the code review window.', 'Show my code review panel']) {
+    assert.equal(label(said), 'Review Pull Request / Merge Request…', said);
+  }
+  assert.equal(label('open the PR panel'), 'Show Pull Request Panel');
+  assert.equal(label('open the settings window'), 'Preferences');
+});
+
+test('only short phrases naming part of Klaussy are offered to Ollama over an agent tab', () => {
+  for (const said of ['open the code revue', 'show the agent list', 'open the history window']) assert.ok(mentionsAppUi(said), said);
+  for (const said of ['run the tests', 'start the dev server', 'open a pull request for this', 'review the auth module and then fix the bugs it finds']) {
+    assert.ok(!mentionsAppUi(said), said);
+  }
+});
+
+test('an Ollama pick over an agent tab must share a word with what was said', () => {
+  assert.ok(sharesWord('open the code revue', 'Review Pull Request / Merge Request…'));
+  assert.ok(sharesWord('show the agents', 'Show Active Agents'));
+  assert.ok(!sharesWord('show me the failing test', 'Run Full Dev Loop (Rest of the Owl)…'));
 });

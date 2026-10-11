@@ -21,7 +21,7 @@
       labels: ['Run AI Review', 'Review Changes…', 'Review Pull Request / Merge Request…'] },
     { re: /^((run|start|do) (a )?)?(code )?review (my|the|these|this|our) (changes|diff|code|work|session)$/,
       labels: ['Review Changes…'] },
-    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code review|review code)$|^(open |start )?(review|cr|c r|a cr)$/,
+    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code reviews?|co reviews?|review code)$|^(open |start )?(reviews?|cr|c r|a cr)$/,
       labels: ['Review Pull Request / Merge Request…'] },
     { re: /^(view|show|open|see) (changes|diff)$|^(show |open |toggle )?diff( panel)?$/,
       labels: ['Show Changes', 'Toggle Diff Panel'] },
@@ -301,12 +301,17 @@
     var prQuery = parsePrRequest(text);
     if (prQuery) return { kind: 'pr', query: prQuery };
 
-    for (var i = 0; i < ALIASES.length; i++) {
-      if (!ALIASES[i].re.test(spoken)) continue;
-      for (var j = 0; j < ALIASES[i].labels.length; j++) {
-        var label = ALIASES[i].labels[j];
-        var hit = commands.find(function (c) { return c.label === label; });
-        if (hit) return { kind: 'command', command: hit, alias: true };
+    // "open the code review window" tries "open code review window", then "open code review"; the fuller form wins so "pr panel" keeps its panel.
+    var bare = spoken.replace(/\b(the|my|this|that|our) /g, '');
+    var forms = [spoken, bare, bare.replace(/ (window|panel|screen|view|dialog|page)$/, '')];
+    for (var f = 0; f < forms.length; f++) {
+      for (var i = 0; i < ALIASES.length; i++) {
+        if (!ALIASES[i].re.test(forms[f])) continue;
+        for (var j = 0; j < ALIASES[i].labels.length; j++) {
+          var label = ALIASES[i].labels[j];
+          var hit = commands.find(function (c) { return c.label === label; });
+          if (hit) return { kind: 'command', command: hit, alias: true };
+        }
       }
     }
 
@@ -321,9 +326,27 @@
     return cmd ? { kind: 'command', command: cmd } : null;
   }
 
+  // Nouns for Klaussy's own UI; "pull request", "server" and "test" are left out because agents get asked about those.
+  var UI_NOUN = /\b(reviews?|revues?|cr|panel|window|picker|dialog|modal|tab|settings|preferences|prefs|history|microphone|mic|owl|agents|agent list|sidebar|palette|zoom)\b/;
+
+  // A short phrase naming part of Klaussy that nothing matched: worth asking Ollama before typing it into the agent.
+  function mentionsAppUi(text) {
+    var spoken = normalize(text);
+    return !!spoken && spoken.split(' ').length <= 6 && !/\b(and|then|so|because)\b/.test(spoken) && UI_NOUN.test(spoken);
+  }
+
+  // Whether a chosen action shares a word (or, for longer words, its first three letters) with what was said, so "show the failing test" can't become "Run Full Dev Loop".
+  function sharesWord(text, label) {
+    var said = tokens(text);
+    var named = tokens(label);
+    return said.some(function (w) {
+      return named.some(function (l) { return l === w || (w.length >= 4 && l.length >= 4 && l.slice(0, 3) === w.slice(0, 3)); });
+    });
+  }
+
   var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
     prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl, exactControl: exactControl, listPick: listPick,
-    splitChain: splitChain, shellText: shellText };
+    splitChain: splitChain, shellText: shellText, mentionsAppUi: mentionsAppUi, sharesWord: sharesWord };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);

@@ -64,8 +64,14 @@ async function openMicSettings(platform = process.platform) {
 }
 
 // Numbered so a small local model only has to answer with a digit.
-function buildIntentPrompt(text, actions) {
-  return 'You map a spoken request to one action in a desktop app for coding agents.\n'
+// With an agent tab open most speech is for the agent, so the model is told to pick only requests aimed at Klaussy itself.
+function buildIntentPrompt(text, actions, { agentTab = false } = {}) {
+  const intro = agentTab
+    ? 'Someone is talking to Klaussy, a desktop app where they dictate instructions to an AI coding agent.\n'
+      + 'Almost everything they say is an instruction for the coding agent (run tests, edit code, start servers, open files, make pull requests). Those must get 0.\n'
+      + 'Only when they are clearly asking Klaussy itself to open or show one of its own windows, panels or dialogs, pick that action.\n'
+    : 'You map a spoken request to one action in a desktop app for coding agents.\n';
+  return intro
     + 'Request: "' + String(text).replace(/"/g, "'") + '"\n'
     + 'Actions:\n'
     + actions.map((a, i) => (i + 1) + '. ' + a).join('\n')
@@ -81,12 +87,12 @@ function pickFromReply(reply, actions) {
   return n >= 1 && n <= actions.length ? actions[n - 1] : null;
 }
 
-async function interpretWithOllama({ text, actions } = {}) {
+async function interpretWithOllama({ text, actions, agentTab = false } = {}) {
   const list = (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && a).slice(0, 120);
   if (!text || !list.length) return { action: null };
   const model = await ollama.pickIntentModel();
   if (!model) return { action: null, unavailable: true };
-  const reply = await ollama.generateText(buildIntentPrompt(text, list), { timeoutMs: 12000, numPredict: 8, prefer: model });
+  const reply = await ollama.generateText(buildIntentPrompt(text, list, { agentTab: agentTab === true }), { timeoutMs: 12000, numPredict: 8, prefer: model });
   if (!reply) return { action: null, unavailable: true };
   return { action: pickFromReply(reply, list) };
 }
