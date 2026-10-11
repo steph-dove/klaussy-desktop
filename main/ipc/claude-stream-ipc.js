@@ -14,7 +14,7 @@ const { prReview, ensureWorktreeForActivePr, currentRepoPath, resolveFallbackBas
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
 const { getRepoIntelBlock, ensureRepoIntel } = require('../state/repo-intel');
-const { buildReviewPrompt, explainPrompt } = require('../state/review-prompts');
+const { buildReviewPrompt, explainPrompt, REVIEW_ALLOWED_TOOLS } = require('../state/review-prompts');
 
 const {
   spawnClaudeStream, makeClaudeCancelHandler,
@@ -444,6 +444,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {})
     prompt,
     streamJson: true,
     provider: reviewProvider,
+    allowedTools: REVIEW_ALLOWED_TOOLS,
     agentMeta: {
       kind: 'pr-review-ai',
       // Only one full AI review per PR makes sense — re-clicking "Run AI
@@ -742,6 +743,7 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
     prompt,
     streamJson: true,
     provider: pickProvider(provider, defaultAgentProvider()),
+    allowedTools: REVIEW_ALLOWED_TOOLS,
     agentMeta: {
       kind: 'pr-ai-review',
       // One AI review per (worktree, base) — re-running while it's still

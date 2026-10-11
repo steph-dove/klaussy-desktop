@@ -636,6 +636,9 @@ function repoAwarePreamble(baseRef) {
 `;
 }
 
+// Read-only klaussy commands the review skill runs; a headless run can't approve them.
+const REVIEW_ALLOWED_TOOLS = ['Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)'];
+
 // Sibling klaussy skills whose names also end in `-review` but aren't the review.
 const NON_REVIEW_SKILL_SUFFIXES = ['-address-review', '-self-review'];
 
@@ -800,4 +803,4 @@ function buildImplementPrompt({ mode, body, intel } = {}) {
   return prompt + (intel ? '\n' + intel : '');
 }
 
-module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };
+module.exports = { PR_REVIEW_TEMPLATE, JSON_OUTPUT_CONTRACT, REVIEW_ALLOWED_TOOLS, buildReviewPrompt, buildImplementPrompt, IMPLEMENT_COMMITTED_MARKER, explainPrompt };

@@ -5,7 +5,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { buildReviewPrompt } = require('../../main/state/review-prompts');
+const { buildReviewPrompt, REVIEW_ALLOWED_TOOLS } = require('../../main/state/review-prompts');
 
 function makeWorktree(skills) {
   const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'review-prompts-'));
@@ -66,4 +66,14 @@ test('the repo-aware review never stops to ask the user', () => {
   const p = buildReviewPrompt({ worktreePath: wt, baseRef: 'abc123' });
   assert.match(p, /non-interactive/i);
   assert.match(p, /review local HEAD/i);
+});
+
+test('both AI review handlers let the run use the klaussy commands the skill needs', () => {
+  assert.deepEqual(REVIEW_ALLOWED_TOOLS, ['Bash(klaussy base:*)', 'Bash(klaussy review-prep:*)']);
+  const src = fs.readFileSync(require.resolve('../../main/ipc/claude-stream-ipc.js'), 'utf8');
+  for (const channel of ['pr-review-ai-start', 'pr-ai-review-start']) {
+    const start = src.indexOf(`ipcMain.handle('${channel}'`);
+    const body = src.slice(start, src.indexOf('ipcMain.handle(', start + 1));
+    assert.match(body, /allowedTools: REVIEW_ALLOWED_TOOLS/, channel);
+  }
 });

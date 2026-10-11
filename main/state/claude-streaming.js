@@ -108,6 +108,8 @@ function spawnClaudeStream({
   // prompt; rapid auto-fire surfaces (inline completion / ghost text) pass
   // false and reuse stored consent only, so a prompt never pops mid-typing.
   promptConsent = true,
+  // Bash rules a headless run may use without approval (Claude only; others ignore it).
+  allowedTools = null,
   extraDoneFields = null,
   agentMeta = null,
 }) {
@@ -153,7 +155,7 @@ function spawnClaudeStream({
   // binaries and everywhere off Windows — the prompt stays a normal arg and
   // behaviour is unchanged.
   const promptOnStdin = promptGoesOnStdin(bin);
-  const run = prov.buildHeadlessRun(bin, { prompt, mode, allowEdits, trust, model, promptOnStdin });
+  const run = prov.buildHeadlessRun(bin, { prompt, mode, allowEdits, trust, model, promptOnStdin, allowedTools });
   let proc;
   try {
     proc = spawnHeadlessAgent(bin, run.args, {
