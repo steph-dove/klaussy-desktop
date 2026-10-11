@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -173,4 +173,18 @@ test('stop listening, that\'s all and I\'m done end the conversation', () => {
     assert.deepEqual(matchCommand(s, PALETTE), { kind: 'stop' }, s);
   }
   assert.equal(matchCommand('stop the dev server and restart it', PALETTE), null);
+});
+
+test('session names become dashed branch names', () => {
+  assert.equal(toBranchName('Fix the flaky login test.'), 'fix-the-flaky-login-test');
+  assert.equal(toBranchName("Add O'Brien's PR #12 support!"), 'add-o-brien-s-pr-12-support');
+  assert.equal(toBranchName('  '), '');
+});
+
+test('focusing a session by its spoken name finds the dashed name', () => {
+  for (const s of ['focus on the auth fix session', 'go to session auth fix', 'open session auth fix', 'switch over to auth fix', 'jump to the auth-fix tab', 'focus auth fix window']) {
+    assert.equal(label(s), 'Switch to: auth-fix', s);
+  }
+  assert.equal(label('focus on billing refactor'), 'Switch to: billing-refactor');
+  assert.equal(label('open the dev loop'), 'Show Dev Loop Progress');
 });

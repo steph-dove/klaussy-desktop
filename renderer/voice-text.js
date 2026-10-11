@@ -33,7 +33,8 @@
   ];
   // No bare "enter": a one-word mishearing could approve an agent's pending tool call.
   var SEND = /^(send|submit|send it|press enter|hit enter)$/;
-  var SWITCH = /^(switch|go|jump|change) (to )?(task |tab |session )?(.+)$/;
+  // "focus on the auth fix session", "go to session billing refactor", "open session auth fix".
+  var SWITCH = /^(?:(?:switch|go|jump|change|move|focus)(?: over)?(?: on| to)?|(?:open|show)(?= (?:session|tab|task|window) ))(?: the)? (?:(?:session|tab|task|window) )?(.+?)(?: (?:session|tab|task|window))?$/;
   // A misheard word must never end an agent session, so these stay keyboard-only.
   var NOT_BY_VOICE = /^(Kill Task|Restart )/;
   var THRESHOLD = 0.6;
@@ -132,6 +133,11 @@
   var STOP = /^(stop listening|stop|that s all|thats all|that s it|i m done|im done|done|we re done|never mind|nevermind|goodbye|bye)$/;
   var RESTORE = /^(put (that|it) back|restore (that|it)|bring (that|it) back|type that|undo (the )?delete)$/;
 
+  // Branch-style text for session names: "Fix the login bug" -> "fix-the-login-bug".
+  function toBranchName(text) {
+    return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  }
+
   function endsWithDiscard(text) {
     return DISCARD_TAIL.test(normalize(text));
   }
@@ -169,7 +175,7 @@
     var sw = spoken.match(SWITCH);
     if (sw) {
       var switches = commands.filter(function (c) { return c.label.indexOf('Switch to: ') === 0; });
-      var target = best(sw[4], switches, function (c) { return c.label.slice('Switch to: '.length); });
+      var target = best(sw[1], switches, function (c) { return c.label.slice('Switch to: '.length); });
       if (target) return { kind: 'command', command: target };
     }
 
@@ -178,7 +184,7 @@
   }
 
   var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
-    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard };
+    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);

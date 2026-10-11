@@ -218,7 +218,11 @@
     if (typeof el.setRangeText === 'function') {
       var start = el.selectionStart;
       var before = el.value.slice(0, start);
-      var inserted = (before && !/\s$/.test(before) ? ' ' : '') + text;
+      // Session-name boxes become branch names, so dictation joins with dashes.
+      var branch = el.dataset.voiceFormat === 'branch';
+      if (branch) text = window.VoiceText.toBranchName(text);
+      var gap = branch ? (before && !/-$/.test(before) ? '-' : '') : (before && !/\s$/.test(before) ? ' ' : '');
+      var inserted = gap + text;
       el.setRangeText(inserted, start, el.selectionEnd, 'end');
       el.dispatchEvent(new Event('input', { bubbles: true }));
       forgetInsert();
