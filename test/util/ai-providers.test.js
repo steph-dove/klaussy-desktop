@@ -181,6 +181,19 @@ test('stream/session parsers are total — never throw on junk input', () => {
 
 // ---- Provider-specific shapes the spawn path depends on ----
 
+test('claude headless runs cannot schedule a wakeup that keeps -p alive', () => {
+  const p = providers.getProvider('claude');
+  for (const mode of ['text', 'stream']) {
+    for (const promptOnStdin of [false, true]) {
+      const run = p.buildHeadlessRun('claude', { prompt: 'PROMPT', mode, promptOnStdin });
+      const at = run.args.indexOf('--disallowedTools');
+      assert.ok(at !== -1, `${mode}/${promptOnStdin}: no --disallowedTools`);
+      // The flag is variadic: anything after it is read as a tool name.
+      assert.deepEqual(run.args.slice(at + 1), ['ScheduleWakeup', 'CronCreate'], `${mode}/${promptOnStdin}`);
+    }
+  }
+});
+
 test('cursor builds the documented cursor-agent command shapes', () => {
   const p = providers.getProvider('cursor');
   assert.equal(p.defaultBin, 'cursor-agent');

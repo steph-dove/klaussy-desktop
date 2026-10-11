@@ -134,6 +134,9 @@ function shQuote(s, platform = process.platform) {
     : `'${v.replace(/'/g, "'\\''")}'`;
 }
 
+// Claude tools that schedule a later turn; a headless run must finish in one go.
+const HEADLESS_DISALLOWED_TOOLS = ['ScheduleWakeup', 'CronCreate'];
+
 const PROVIDERS = {
   claude: {
     id: 'claude',
@@ -166,17 +169,19 @@ const PROVIDERS = {
       // Claude's headless `-p` already edits within cwd on the autonomous
       // surfaces today, so allowEdits needs no extra flag here.
       const m = model ? ['--model', model] : [];
+      // A scheduled wakeup would keep `-p` alive, and the flag is variadic so it must stay last.
+      const noWake = ['--disallowedTools', ...HEADLESS_DISALLOWED_TOOLS];
       // Windows (promptOnStdin): `claude -p` with no positional reads the prompt
       // from stdin, so the multi-line prompt never has to survive a cmd.exe
       // command line (see util/agent-spawn). stdinInput carries it to the child.
       if (promptOnStdin) {
         return mode === 'stream'
-          ? { args: [...m, '-p', '--output-format', 'stream-json', '--verbose'], stdinInput: prompt, outputMode: 'passthrough' }
-          : { args: [...m, '-p'], stdinInput: prompt, outputMode: 'passthrough' };
+          ? { args: [...m, '-p', '--output-format', 'stream-json', '--verbose', ...noWake], stdinInput: prompt, outputMode: 'passthrough' }
+          : { args: [...m, '-p', ...noWake], stdinInput: prompt, outputMode: 'passthrough' };
       }
       return mode === 'stream'
-        ? { args: [...m, '-p', prompt, '--output-format', 'stream-json', '--verbose'], outputMode: 'passthrough' }
-        : { args: [...m, '-p', prompt], outputMode: 'passthrough' };
+        ? { args: [...m, '-p', prompt, '--output-format', 'stream-json', '--verbose', ...noWake], outputMode: 'passthrough' }
+        : { args: [...m, '-p', prompt, ...noWake], outputMode: 'passthrough' };
     },
     sessionDir(worktreePath) {
       if (!worktreePath) return null;
