@@ -2,6 +2,16 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.23.1
+
+### 🦉 PR AI Review Does a Full Review Again
+
+- **The Right Skill**: Run AI Review loaded the repo's address-review skill instead of its review skill, because both folder names end in `-review`. It did a quick comment-triage pass and the whole reply showed up as one finding. It now loads the review skill.
+- **No Questions Mid-Review**: The review skill stops to ask when the checkout is stale or the base is unclear, and a background review has nobody to answer. It now reviews local HEAD and says so in the summary.
+- **Done Means Done**: A finished review could keep showing "running" for up to 20 minutes, waiting on a wakeup it had scheduled for itself, and didn't save until then. Background agent runs can't schedule wakeups anymore.
+- **Consistent Depth**: `klaussy review-prep` picks a quick review or the full fan-out, but it needed an approval a background run can't give, so review depth changed from run to run. Review runs are now allowed to call it.
+- **Windows**: Review skills saved with Windows line endings load correctly, and permission rules containing spaces reach the agent intact through the `.cmd` shim.
+
 ## 0.21.4
 
 ### 🦉 Drag-and-Drop Images Into a Dev Loop Task
