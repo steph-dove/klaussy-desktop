@@ -300,6 +300,7 @@
     if (match.kind === 'stop') return stopListening();
     forgetInsert();
     if (match.kind === 'send') {
+      if (target && target.field && pressNearbySend(target.field)) return true;
       if (target && target.field) target = terminalTarget();
       if (!target) {
         window.toast.error('Open an agent tab first.');
@@ -329,9 +330,13 @@
     return (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
   }
 
-  function pressControl(text) {
+  // exactOnly needs the control's whole name said, so it can safely run before palette commands.
+  function pressControl(text, exactOnly) {
     var controls = visibleControls();
-    var i = window.VoiceText.pickControl(text, controls.map(controlName), window.AppUtils.fuzzyMatch);
+    var names = controls.map(controlName);
+    var i = exactOnly
+      ? window.VoiceText.exactControl(text, names)
+      : window.VoiceText.pickControl(text, names, window.AppUtils.fuzzyMatch);
     if (i < 0) return false;
     forgetInsert();
     announce(controlName(controls[i]));
@@ -373,9 +378,51 @@
     return true;
   }
 
+  function pressNearbySend(field) {
+    var scope = field.parentElement;
+    for (var up = 0; scope && up < 4; up++, scope = scope.parentElement) {
+      var btn = Array.prototype.find.call(scope.querySelectorAll('button'), function (b) {
+        return /^send\b/i.test(controlName(b)) && !b.disabled && b.getClientRects().length;
+      });
+      if (btn) {
+        btn.click();
+        announce('Sent');
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // With the agents list open, "the completed one" or "the second one" opens that row.
+  function pickAgentRow(text) {
+    var panel = document.getElementById('agents-panel');
+    if (!panel || !panel.getClientRects().length) return false;
+    var want = window.VoiceText.listPick(text);
+    if (!want) return false;
+    var rows = Array.prototype.slice.call(panel.querySelectorAll('.agent-item'));
+    var stateOf = function (row) {
+      var dot = row.querySelector('.agent-item-status');
+      return dot ? (dot.getAttribute('aria-label') || '') : '';
+    };
+    var row = null;
+    if (want.index !== undefined) row = rows[want.index < 0 ? rows.length - 1 : want.index];
+    else if (want.state === 'done') {
+      row = rows.find(function (r) { return r.classList.contains('unread') && stateOf(r) === 'done'; })
+        || rows.find(function (r) { return stateOf(r) === 'done'; });
+    } else row = rows.find(function (r) { return stateOf(r) === want.state; });
+    if (!row) {
+      window.toast.info(rows.length ? 'No agent in the list matches that.' : 'There are no agents in the list yet.');
+      return true;
+    }
+    var open = row.querySelector('button[data-action="open"]');
+    (open || row).click();
+    return true;
+  }
+
   function runCommand(text, target) {
     var heard = window.VoiceText.sanitizeDictation(text);
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
+    if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
     if (!match && heard && pressControl(heard)) return true;
     if (!match) {
       window.toast.info(heard ? 'That didn’t match a command.' : 'Didn’t catch a command.');
@@ -395,8 +442,10 @@
       announce('Discarded. Say put that back to type it after all.');
       return false;
     }
+    if (heard && pickAgentRow(heard)) return true;
     var match = heard && window.VoiceText.matchCommand(text, window.App.buildPaletteCommands());
-    // With a dialog open, its own buttons and tabs win over palette commands.
+    // An on-screen control named exactly what was said beats a similar palette command; with a dialog open, any of its controls do.
+    if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
     if (heard && dialogOpen() && (!match || match.kind === 'command') && pressControl(heard)) return true;
     if (match) return run(match, target, heard);
     // With the PR picker open, anything but a URL names the PR to open.

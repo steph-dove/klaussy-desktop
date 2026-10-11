@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl } = require('../../renderer/voice-text');
+const { sanitizeDictation, normalize, matchCommand, parsePrRequest, prQueryFromPicker, endsWithDiscard, toBranchName, pickControl, exactControl, listPick } = require('../../renderer/voice-text');
 
 const noop = () => {};
 const PALETTE = [
@@ -268,4 +268,57 @@ test('two controls with the same name are pressed, different names that tie are 
   const fuzzy = global.window.AppUtils.fuzzyMatch;
   assert.equal(pickControl('run review', ['Files', 'Run Review', 'AI Review', 'Run review'], fuzzy), 1);
   assert.equal(pickControl('select review', ['Run review', 'Submit review'], fuzzy), -1);
+});
+
+test('a name said exactly and in order beats similar or reordered names', () => {
+  global.window = global.window || {};
+  require('../../renderer/utils');
+  const fuzzy = global.window.AppUtils.fuzzyMatch;
+  const names = ['Session glab-test', 'Session test-glab', 'Session change-color-scheme', 'Session scheme-color-change', 'bbb1, 1 repo', 'brb1, 1 repo'];
+  const pick = (t) => { const i = pickControl(t, names, fuzzy); return i < 0 ? null : names[i]; };
+  assert.equal(pick('select session test glab'), 'Session test-glab');
+  assert.equal(pick('select session glab test'), 'Session glab-test');
+  assert.equal(pick('select session scheme color change'), 'Session scheme-color-change');
+  assert.equal(pick('select bbb1 1 repo'), 'bbb1, 1 repo');
+});
+
+test('exactControl only fires on a whole, exact name', () => {
+  const names = ['Files 12', 'Search', 'Run Review', 'Run review', 'Send'];
+  assert.equal(exactControl('files', names), 0);
+  assert.equal(exactControl('Search.', names), 1);
+  assert.equal(exactControl('run review', names), 2);
+  assert.equal(exactControl('search the files', names), -1);
+  assert.equal(exactControl('file', names), -1);
+});
+
+test('single-word overlaps and PR connectors no longer misfire', () => {
+  const cmds = ['Review Pull Request / Merge Request…', 'Clear Terminal'].map((l) => ({ label: l, action: () => {} }));
+  assert.equal(matchCommand('pull', cmds), null);
+  assert.equal(parsePrRequest('review PR or MR'), null);
+});
+
+test('a name ending in a number is not confused with the same name without it', () => {
+  global.window = global.window || {};
+  require('../../renderer/utils');
+  const fuzzy = global.window.AppUtils.fuzzyMatch;
+  const names = ['Session test-delete', 'Session test-delete-0'];
+  assert.equal(pickControl('select session test delete', names, fuzzy), 0);
+  assert.equal(pickControl('select session test delete 0', names, fuzzy), 1);
+  assert.equal(exactControl('session test delete', names), 0);
+  assert.equal(exactControl('AI review', ['AI Review 3']), 0);
+});
+
+test('list rows can be picked by position or state', () => {
+  assert.deepEqual(listPick('open the first one'), { index: 0 });
+  assert.deepEqual(listPick('the second one'), { index: 1 });
+  assert.deepEqual(listPick('open the latest'), { index: 0 });
+  assert.deepEqual(listPick('open the last agent'), { index: -1 });
+  assert.deepEqual(listPick('open the completed one'), { state: 'done' });
+  assert.deepEqual(listPick('Open the finished task.'), { state: 'done' });
+  assert.deepEqual(listPick('open the result'), { state: 'done' });
+  assert.deepEqual(listPick('open it'), { state: 'done' });
+  assert.deepEqual(listPick('open the failed one'), { state: 'error' });
+  assert.deepEqual(listPick('show the running agent'), { state: 'running' });
+  assert.equal(listPick('open the dev loop'), null);
+  assert.equal(listPick('open pr review'), null);
 });

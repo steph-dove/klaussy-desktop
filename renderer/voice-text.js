@@ -44,7 +44,7 @@
   var NOT_BY_VOICE = /^(Kill Task|Restart )/;
   var THRESHOLD = 0.6;
   // One word buried in a long label ("gemini" in "Open Folder or File in Gemini CLI") isn't a match.
-  var MIN_DICE = 0.4;
+  var MIN_DICE = 0.5;
   var MIN_LEAD = 0.05;
 
   function sanitizeDictation(text) {
@@ -130,7 +130,8 @@
       if (m) {
         var query = m[1].replace(/^(number|no|the) /, '').trim();
         // "for me" names no PR.
-        if (/^\d+$/.test(query) || tokens(query).length) return query;
+        var named = tokens(query).filter(function (w) { return !/^(pull|request|merge|review)$/.test(w); });
+        if (/^\d+$/.test(query) || named.length) return query;
       }
     }
     return null;
@@ -146,7 +147,7 @@
     return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   }
 
-  var CLICK = /^(?:select|click|press|tap|hit|choose|use|pick|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button|agent|option|model|provider))? (.+?)(?: (?:tab|button|agent|option|model|provider))?$/;
+  var CLICK = /^(?:select|click|press|tap|hit|choose|use|pick|open|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button|agent|option|model|provider))? (.+?)(?: (?:tab|button|agent|option|model|provider))?$/;
   var DISMISS_WORDS = /^(close|cancel|dismiss|escape|exit|back|go|this|that|it|the|window|dialog|modal|popup|picker|please)$/;
   var NEXT = /^(next|next field|move on|tab|(i m |im )?done (naming|typing|with (it|that|this|the name))( the session| it)?|that s the name)$/;
 
@@ -166,9 +167,43 @@
       if (!nameWords.length || !fuzzy(phrase, name)) return;
       var covered = nameWords.filter(function (w) { return fuzzy(w, phrase); }).length / nameWords.length;
       if (covered < (m ? 0.5 : 0.75)) return;
-      if (covered > bestScore) { best = i; bestScore = covered; tie = false; } else if (covered === bestScore && normalize(name) !== normalize(names[best])) tie = true;
+      // Saying a name exactly, in order, beats a partial or typo match ("glab test" vs "test glab").
+      var whole = normalize(name);
+      var full = whole.replace(/ \d+$/, '');
+      var score = covered + (whole === phrase ? 2.5 : full === phrase ? 2 : (' ' + whole + ' ').indexOf(' ' + phrase + ' ') !== -1 ? 1 : 0);
+      if (score > bestScore) { best = i; bestScore = score; tie = false; } else if (score === bestScore && normalize(name) !== normalize(names[best])) tie = true;
     });
     return tie ? -1 : best;
+  }
+
+  // Index of the control whose whole name is exactly what was said (ignoring a trailing count), or -1.
+  function exactControl(text, names) {
+    var spoken = normalize(text);
+    // An exact name, number included, beats one that only matches once a trailing count is dropped.
+    var exact = names.filter(function (n) { return normalize(n) === spoken; });
+    var strip = exact.length ? function (n) { return n; } : function (n) { return n.replace(/ \d+$/, ''); };
+    var hit = -1;
+    for (var i = 0; i < names.length; i++) {
+      if (strip(normalize(names[i])) !== spoken) continue;
+      if (hit !== -1 && normalize(names[hit]) !== normalize(names[i])) return -1;
+      if (hit === -1) hit = i;
+    }
+    return hit;
+  }
+
+  var ORDINALS = { first: 0, '1st': 0, top: 0, latest: 0, newest: 0, 'most recent': 0, second: 1, '2nd': 1, third: 2, '3rd': 2, fourth: 3, '4th': 3, fifth: 4, '5th': 4, last: -1, oldest: -1 };
+  var ROW_PICK = /^(?:(?:open|show|view|select|pick|choose|go to) )?(?:the |my )?(first|1st|top|latest|newest|most recent|second|2nd|third|3rd|fourth|4th|fifth|5th|last|oldest|completed|complete|finished|done|ready|new|unread|failed|errored|broken|running|active)?(?: (?:one|agent|task|result|run))?$/;
+
+  // Which row of a list was meant: { index } for "the second one", { state } for "the completed one", or null.
+  function listPick(text) {
+    var spoken = normalize(text);
+    if (/^(open|show|view) (it|that|that one|this one|the results?|results?)$/.test(spoken)) return { state: 'done' };
+    var m = spoken.match(ROW_PICK);
+    if (!m || !m[1]) return null;
+    if (Object.hasOwn(ORDINALS, m[1])) return { index: ORDINALS[m[1]] };
+    if (/^(failed|errored|broken)$/.test(m[1])) return { state: 'error' };
+    if (/^(running|active)$/.test(m[1])) return { state: 'running' };
+    return { state: 'done' };
   }
 
   function endsWithDiscard(text) {
@@ -222,7 +257,7 @@
   }
 
   var api = { sanitizeDictation: sanitizeDictation, normalize: normalize, matchCommand: matchCommand, parsePrRequest: parsePrRequest,
-    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl };
+    prQueryFromPicker: prQueryFromPicker, endsWithDiscard: endsWithDiscard, toBranchName: toBranchName, pickControl: pickControl, exactControl: exactControl, listPick: listPick };
   if (root) root.VoiceText = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null);
