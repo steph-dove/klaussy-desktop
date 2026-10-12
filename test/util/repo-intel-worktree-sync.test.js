@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const { syncIntelIntoWorktree } = require('../../main/state/repo-intel');
+const { syncIntelIntoWorktree, syncSkillsIntoWorktree } = require('../../main/state/repo-intel');
 
 // The conventions docs are generated and git-excluded, so the worktree starts
 // without any of them.
@@ -69,4 +69,88 @@ test('a committed conventions doc is left alone', () => {
   syncIntelIntoWorktree(worktree);
 
   assert.equal(fs.readFileSync(path.join(worktree, 'CLAUDE.md'), 'utf-8'), 'hand written\n');
+});
+
+function writeSkill(root, version, body) {
+  const dir = path.join(root, '.claude', 'skills');
+  fs.mkdirSync(path.join(dir, 'acme-review'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'acme-review', 'SKILL.md'), body);
+  if (version) fs.writeFileSync(path.join(dir, '.klaussy-version'), `${version}\n`);
+}
+
+const wtSkill = (worktree) => fs.readFileSync(path.join(worktree, '.claude', 'skills', 'acme-review', 'SKILL.md'), 'utf-8');
+
+// copyMissing never overwrote, so a worktree kept its first skills forever and a
+// PR review ran a skill several klaussy releases old.
+test('skills from an older klaussy are replaced when the base has a newer version', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeSkill(worktree, '0.36.1', 'old single-pass review\n');
+  writeSkill(base, '0.38.0', 'new parallel review\n');
+  fs.writeFileSync(path.join(base, '.claude', 'skills', 'acme-review', 'parallel.md'), 'lenses\n');
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.equal(wtSkill(worktree), 'new parallel review\n');
+  assert.ok(fs.existsSync(path.join(worktree, '.claude', 'skills', 'acme-review', 'parallel.md')));
+  assert.equal(fs.readFileSync(path.join(worktree, '.claude', 'skills', '.klaussy-version'), 'utf-8').trim(), '0.38.0');
+});
+
+test('skills with no version stamp count as older than the base', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeSkill(worktree, null, 'pre-stamp skill\n');
+  writeSkill(base, '0.38.0', 'new parallel review\n');
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.equal(wtSkill(worktree), 'new parallel review\n');
+});
+
+test('skills on the same klaussy version keep local edits', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeSkill(base, '0.38.0', 'generated\n');
+  writeSkill(worktree, '0.38.0', 'hand-edited in this worktree\n');
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.equal(wtSkill(worktree), 'hand-edited in this worktree\n');
+});
+
+test('a skill file the repo commits is never replaced', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeSkill(worktree, '0.36.1', 'committed skill\n');
+  execFileSync('git', ['add', '-f', '.claude/skills/acme-review/SKILL.md'], { cwd: worktree, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-qm', 'commit a skill'], { cwd: worktree, stdio: 'pipe' });
+  writeSkill(base, '0.38.0', 'new parallel review\n');
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.equal(wtSkill(worktree), 'committed skill\n');
+});
+
+test('a PR checkout gets newer skills without the base .env or settings', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeSkill(worktree, '0.36.1', 'old single-pass review\n');
+  writeSkill(base, '0.38.0', 'new parallel review\n');
+  fs.writeFileSync(path.join(base, '.env'), 'SECRET=1\n');
+  fs.writeFileSync(path.join(base, '.claude', 'settings.json'), '{}\n');
+
+  syncSkillsIntoWorktree(worktree);
+
+  assert.equal(wtSkill(worktree), 'new parallel review\n');
+  assert.ok(!fs.existsSync(path.join(worktree, '.env')), '.env must not be linked into a PR checkout');
+  assert.ok(!fs.existsSync(path.join(worktree, '.claude', 'settings.json')));
+});
+
+test('a refresh that fails partway keeps the old stamp so the next sync retries', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeSkill(base, '0.38.0', 'new parallel review\n');
+  const wtSkills = path.join(worktree, '.claude', 'skills');
+  fs.mkdirSync(wtSkills, { recursive: true });
+  fs.writeFileSync(path.join(wtSkills, '.klaussy-version'), '0.36.1\n');
+  // A file where the base has a directory makes the copy throw mid-walk.
+  fs.writeFileSync(path.join(wtSkills, 'acme-review'), 'not a directory\n');
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.equal(fs.readFileSync(path.join(wtSkills, '.klaussy-version'), 'utf-8').trim(), '0.36.1');
 });

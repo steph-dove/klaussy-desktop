@@ -13,7 +13,7 @@ const { isAgentMode } = require('../state/ai-providers');
 const { prReview, ensureWorktreeForActivePr, currentRepoPath, resolveFallbackBaseBranch } = require('../state/pr-review');
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
-const { getRepoIntelBlock, ensureRepoIntel } = require('../state/repo-intel');
+const { getRepoIntelBlock, ensureRepoIntel, syncSkillsIntoWorktree } = require('../state/repo-intel');
 const { buildReviewPrompt, explainPrompt, REVIEW_ALLOWED_TOOLS } = require('../state/review-prompts');
 
 const {
@@ -424,6 +424,7 @@ ipcMain.handle('pr-review-ai-start', async (event, { requestId, provider } = {})
   // in the PR into `<base>...HEAD`. Fall back to the branch name if the SHA
   // couldn't be resolved (e.g. offline base fetch).
   const baseRef = ensured.baseSha || baseBranch;
+  syncSkillsIntoWorktree(ensured.worktreePath);
   // Function replacements: the intel block is arbitrary repo content — a
   // string replacement would interpret `$&`/`$'`/`$$` in it as patterns and
   // silently mangle the prompt.
@@ -728,6 +729,7 @@ ipcMain.handle('pr-ai-review-start', (event, { worktreePath, baseBranch, request
   // Prefer the repo's conventions-aware review skill when present; fall back to
   // the built-in template. See pr-review-ai-start for the repo-aware rationale.
   const reviewAgent = pickProvider(provider, defaultAgentProvider());
+  syncSkillsIntoWorktree(worktreePath);
   const prompt = buildReviewPrompt({
     worktreePath,
     baseRef: baseBranch || 'main',
