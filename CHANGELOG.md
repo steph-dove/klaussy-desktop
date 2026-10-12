@@ -2,6 +2,12 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.24.1
+
+### 🦉 PR Reviews Use Current Skills
+
+- **Fresh Skills in PR Checkouts**: A PR review reads its skill from the PR's own checkout, and those copies never updated, so a review could run a skill several klaussy-agents releases old and skip the full fan-out on a big diff. Klaussy now refreshes a checkout's skills before each review when the repo has a newer klaussy-agents version, and on every sync for open worktrees. Files the repo commits are left alone.
+
 ## 0.24.0
 
 ### 🦉 Voice Input
