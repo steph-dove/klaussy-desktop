@@ -745,6 +745,70 @@ function isTrackedInWorktree(worktreePath, relPath) {
   }
 }
 
+// The klaussy version that generated a skills/hooks dir, or '' when unstamped.
+function readKlaussyStamp(dir) {
+  try { return fs.readFileSync(path.join(dir, '.klaussy-version'), 'utf-8').trim(); } catch { return ''; }
+}
+
+function copyNewerKlaussyDir(worktreePath, src, dst, relDir) {
+  let tracked = new Set();
+  try {
+    const out = execFileSync('git', ['ls-files', '-z', '--', relDir], { cwd: worktreePath, stdio: 'pipe' }).toString();
+    tracked = new Set(out.split('\0').filter(Boolean).map((p) => path.normalize(p)));
+  } catch (e) {
+    // Can't tell what's committed, so don't overwrite anything.
+    console.warn('[repo-intel] git ls-files failed, skipping klaussy refresh of', relDir, 'in', worktreePath, e.message);
+    return;
+  }
+  const stampRel = path.normalize(path.join(relDir, '.klaussy-version'));
+  const walk = (s, d, rel) => {
+    if (fs.statSync(s).isDirectory()) {
+      fs.mkdirSync(d, { recursive: true });
+      for (const child of fs.readdirSync(s)) walk(path.join(s, child), path.join(d, child), path.join(rel, child));
+    } else if (path.normalize(rel) !== stampRel && !tracked.has(path.normalize(rel))) {
+      fs.cpSync(s, d);
+    }
+  };
+  walk(src, dst, relDir);
+  // Stamp last: a walk that throws midway must leave the old version so the next sync retries.
+  if (!tracked.has(stampRel)) fs.cpSync(path.join(src, '.klaussy-version'), path.join(dst, '.klaussy-version'));
+}
+
+// Copy only children missing from dst, so new base skills land without clobbering local edits.
+function copyMissing(src, dst) {
+  if (fs.statSync(src).isDirectory()) {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const child of fs.readdirSync(src)) copyMissing(path.join(src, child), path.join(dst, child));
+  } else if (!fs.existsSync(dst)) {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.cpSync(src, dst);
+  }
+}
+
+// .claude/{rules,skills,commands,hooks}: replace a dir klaussy regenerated since, else merge in missing children.
+function syncAgentDir(worktreePath, src, dst, relDir) {
+  if (versionBelow(readKlaussyStamp(dst) || '0.0.0', readKlaussyStamp(src))) {
+    copyNewerKlaussyDir(worktreePath, src, dst, relDir);
+  } else {
+    copyMissing(src, dst);
+  }
+}
+
+// Skills only, for a PR checkout: unlike syncIntelIntoWorktree it links no .env and edits no settings.
+function syncSkillsIntoWorktree(worktreePath) {
+  try {
+    const base = baseFor(worktreePath);
+    if (!base || base === worktreePath) return;
+    const rel = path.join('.claude', 'skills');
+    const src = path.join(base, rel);
+    if (!fs.existsSync(src)) return;
+    syncAgentDir(worktreePath, src, path.join(worktreePath, rel), rel);
+    excludeBootstrapArtifacts(worktreePath);
+  } catch (e) {
+    console.warn('[repo-intel] skills sync failed for', worktreePath, e.message);
+  }
+}
+
 // Copy the base repo's intel into a worktree, which holds only COMMITTED files
 // and so has none of the generated conventions. Generated docs refresh when the
 // base moves on; committed docs and settings.local.json are never touched.
@@ -767,20 +831,6 @@ function syncIntelIntoWorktree(worktreePath) {
     for (const root of AGENT_ROOTS) {
       for (const sub of AGENT_SUBS) entries.push([root, sub]);
     }
-    // Recursively copy any child of src that's missing in dst. Used for the
-    // .claude/* directories so skills/commands ADDED to the base after the
-    // worktree was created still land — a directory-level existence check
-    // would skip the whole dir and strand every new skill/command. Never
-    // overwrites an existing worktree file (preserves local edits).
-    const copyMissing = (src, dst) => {
-      if (fs.statSync(src).isDirectory()) {
-        fs.mkdirSync(dst, { recursive: true });
-        for (const child of fs.readdirSync(src)) copyMissing(path.join(src, child), path.join(dst, child));
-      } else if (!fs.existsSync(dst)) {
-        fs.mkdirSync(path.dirname(dst), { recursive: true });
-        fs.cpSync(src, dst);
-      }
-    };
     for (const segs of entries) {
       const src = path.join(base, ...segs);
       const dst = path.join(worktreePath, ...segs);
@@ -814,8 +864,7 @@ function syncIntelIntoWorktree(worktreePath) {
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         fs.cpSync(src, dst);
       } else {
-        // .claude/{rules,skills,commands,hooks}: merge in missing children.
-        copyMissing(src, dst);
+        syncAgentDir(worktreePath, src, dst, path.join(...segs));
       }
     }
     // Heal a stale klausify-era settings.json — whether just copied from a
@@ -1363,7 +1412,7 @@ function ensureWorktreeBootstrap(worktreePath) {
   ensureEnvLinks(worktreePath);
 }
 
-module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, ensureWorktreeBootstrap, ensureEnvLinks, ensureReviewTools, upgradeReviewToolsIfDue,
+module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, syncSkillsIntoWorktree, ensureWorktreeBootstrap, ensureEnvLinks, ensureReviewTools, upgradeReviewToolsIfDue,
   warnIfKlaussyOutdated, upgradeReviewToolsNow,
   // Exported for unit testing of the prompt-minimization logic (Item 4).
   loadStructuredIntel, ruleMatchesTouchedPaths, filterGraphSummary, assembleBlock,
