@@ -235,3 +235,58 @@ test.describe('voice input on', () => {
     expect(rows).toContain('Speak a command');
   });
 });
+
+test.describe('voice in the New Task dialog', () => {
+  test.beforeEach(async ({ mainWindow }) => { await ready(mainWindow); });
+
+  test('"new code review" opens the PR picker', async ({ mainWindow }) => {
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('New code review.', 'auto'));
+    await expect(mainWindow.locator('.pr-picker-overlay')).toBeVisible();
+  });
+
+  test('the existing session dropdown opens and picks a session by voice', async ({ mainWindow }) => {
+    const say = (t) => mainWindow.evaluate((text) => window.Voice.handleTranscript(text, 'auto'), t);
+    await say('new session');
+    await expect(mainWindow.locator('#modal-overlay')).toBeVisible();
+    await say('existing session');
+    await expect(mainWindow.locator('#tab-existing')).toBeVisible();
+    await mainWindow.evaluate(() => {
+      document.getElementById('existing-session-select').innerHTML =
+        '<option value="/tmp/wt-auth">auth-fix</option><option value="/tmp/wt-billing">billing-refactor</option>';
+    });
+    const value = () => mainWindow.evaluate(() => document.getElementById('existing-session-select').value);
+
+    await say('open the existing session dropdown');
+    await expect(mainWindow.locator('#tab-existing .searchable-select.ss-open')).toBeVisible();
+    await say('select billing refactor');
+    await expect.poll(value).toBe('/tmp/wt-billing');
+    await expect(mainWindow.locator('#tab-existing .searchable-select.ss-open')).toHaveCount(0);
+
+    await say('select auth fix');
+    await expect.poll(value).toBe('/tmp/wt-auth');
+    await mainWindow.locator('#modal-cancel').click();
+  });
+});
+
+test.describe('voice keeps spoken words only briefly', () => {
+  test.beforeEach(async ({ mainWindow }) => { await ready(mainWindow); });
+
+  test('"delete that" works right after dictating, and finds nothing once the words are forgotten', async ({ mainWindow }) => {
+    await mainWindow.evaluate(() => window.Voice.handleTranscript('new session', 'auto'));
+    const input = mainWindow.locator('#modal-input');
+    const dictateThenUndo = async (wait) => {
+      await input.fill('');
+      await input.focus();
+      await mainWindow.evaluate(() => window.Voice.handleTranscript('fix login', 'dictate'));
+      await expect(input).toHaveValue('fix-login');
+      if (wait) await mainWindow.waitForTimeout(wait);
+      await input.focus();
+      await mainWindow.evaluate(() => window.Voice.handleTranscript('delete that', 'dictate'));
+    };
+    await dictateThenUndo(0);
+    await expect(input).toHaveValue('');
+    await dictateThenUndo(5500);
+    await expect(input).toHaveValue('fix-login');
+    await mainWindow.locator('#modal-cancel').click();
+  });
+});

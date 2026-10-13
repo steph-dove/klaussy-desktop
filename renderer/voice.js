@@ -30,27 +30,29 @@
   var rec = null;
   var inFlight = 0;
   var idleTimer = null;
-  // What the last dictation typed and where, so "delete that" can take it back.
+  // Spoken words are kept only for "delete that" / "put that back", and only this long.
+  var KEEP_WORDS_MS = 5000;
   var lastInsert = null;
-  // What "delete that" / "scratch that" removed, kept briefly in case the words were meant literally.
   var lastRemoved = null;
-  // The last 50 phrases and what each did, in memory only (dictation can hold anything).
-  var history = [];
-  var lastOutcome = null;
+  var forgetTimer = null;
   var micId = '';
-  var RESTORE_MS = 10000;
-
-  function outcome(text) {
-    lastOutcome = text;
-  }
 
   function forgetInsert() {
     if (lastInsert && lastInsert.watch) lastInsert.watch.dispose();
     lastInsert = null;
   }
 
+  function forgetWordsSoon() {
+    clearTimeout(forgetTimer);
+    forgetTimer = setTimeout(function () {
+      forgetInsert();
+      lastRemoved = null;
+    }, KEEP_WORDS_MS);
+  }
+
   function remember(target, text, spoken) {
-    lastRemoved = { at: Date.now(), target: target, text: text, spoken: spoken };
+    lastRemoved = { target: target, text: text, spoken: spoken };
+    forgetWordsSoon();
   }
 
   function announce(msg) {
@@ -190,10 +192,10 @@
     forgetInsert();
     if (target.shell) clean = window.VoiceText.shellText(clean);
     target.terminal.paste(clean + ' ');
-    outcome('typed into the agent');
     // Any keystroke after this means the backspaces would hit something else.
     var watch = target.terminal.onData(forgetInsert);
     lastInsert = { terminal: target, text: clean + ' ', watch: watch };
+    forgetWordsSoon();
     announce('Inserted ' + clean);
     return true;
   }
@@ -224,7 +226,7 @@
   function restoreRemoved() {
     var last = lastRemoved;
     lastRemoved = null;
-    if (!last || Date.now() - last.at > RESTORE_MS) {
+    if (!last) {
       window.toast.info('Nothing to put back.');
       return false;
     }
@@ -253,7 +255,7 @@
       el.dispatchEvent(new Event('input', { bubbles: true }));
       forgetInsert();
       lastInsert = { field: el, start: start, text: inserted };
-      outcome('typed into a text box');
+      forgetWordsSoon();
     } else {
       document.execCommand('insertText', false, text);
       forgetInsert();
@@ -319,7 +321,6 @@
   }
 
   function run(match, target, heard) {
-    outcome(match.kind === 'command' ? 'ran ' + match.command.label : match.kind === 'pr' ? 'looked up PR “' + match.query + '”' : match.kind);
     if (match.kind === 'pr') return reviewPr(match.query);
     if (match.kind === 'dismiss') return dismissDialog();
     if (match.kind === 'next') {
@@ -349,7 +350,7 @@
     return true;
   }
 
-  var CONTROL_SELECTOR = 'button, [role="tab"], [role="button"], [role="menuitem"], a[href]';
+  var CONTROL_SELECTOR = 'button, [role="tab"], [role="button"], [role="menuitem"], [role="option"], a[href]';
 
   function visibleControls() {
     return Array.prototype.filter.call(document.querySelectorAll(CONTROL_SELECTOR), function (el) {
@@ -361,7 +362,19 @@
   }
 
   function controlName(el) {
+    // A dropdown's aria-label ends with its current value, which can be long and isn't what people call it.
+    if (el.classList.contains('ss-trigger')) {
+      var select = el.parentNode.querySelector('select');
+      var label = select && select.getAttribute('aria-label');
+      if (label) return label + ' dropdown';
+    }
     return (el.getAttribute('aria-label') || el.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  // Searchable-select options choose on mousedown; palette options on click.
+  function activate(el) {
+    if (el.getAttribute('role') === 'option') el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    if (el.isConnected && el.getClientRects().length) el.click();
   }
 
   // exactOnly needs the control's whole name said, so it can safely run before palette commands.
@@ -373,9 +386,48 @@
       : window.VoiceText.pickControl(text, names, window.AppUtils.fuzzyMatch);
     if (i < 0) return false;
     forgetInsert();
-    outcome('pressed ' + controlName(controls[i]));
     announce(controlName(controls[i]));
-    controls[i].click();
+    activate(controls[i]);
+    return true;
+  }
+
+  function visibleDropdowns() {
+    return Array.prototype.filter.call(document.querySelectorAll('.searchable-select select'), function (sel) {
+      var trigger = sel.__ss && sel.__ss.trigger;
+      return trigger && !trigger.disabled && !trigger.closest('[inert]') && trigger.getClientRects().length;
+    });
+  }
+
+  function openOnlyDropdown(text) {
+    if (!/^(?:(?:open|show|expand|click) )?(?:the )?(?:dropdown|drop down|menu|list)$/.test(window.VoiceText.normalize(text))) return false;
+    var selects = visibleDropdowns();
+    if (selects.length !== 1) return false;
+    announce(controlName(selects[0].__ss.trigger));
+    selects[0].__ss.open();
+    return true;
+  }
+
+  // Works while the dropdown is closed, so "select auth fix" is enough.
+  function pickDropdownOption(text) {
+    var owners = [];
+    var names = [];
+    visibleDropdowns().forEach(function (sel) {
+      if (!sel.closest('[role="dialog"], .modal, #modal-overlay')) return;
+      Array.prototype.forEach.call(sel.options, function (opt) {
+        if (opt.disabled || !opt.value) return;
+        owners.push({ select: sel, option: opt });
+        names.push(opt.textContent.trim());
+      });
+    });
+    var i = window.VoiceText.pickControl(text, names, window.AppUtils.fuzzyMatch);
+    if (i < 0) return false;
+    var pick = owners[i];
+    forgetInsert();
+    if (pick.select.value !== pick.option.value) {
+      pick.select.value = pick.option.value;
+      pick.select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    announce('Selected ' + names[i]);
     return true;
   }
 
@@ -450,7 +502,6 @@
       return true;
     }
     var open = row.querySelector('button[data-action="open"]');
-    outcome('opened agent ' + ((row.querySelector('.agent-item-title') || row).textContent || '').trim());
     (open || row).click();
     return true;
   }
@@ -469,7 +520,6 @@
     }
     if (enabled) {
       commands.push({ label: 'Voice: What Can I Say?', action: showHelp });
-      commands.push({ label: 'Voice: History', action: showHistory });
       commands.push({ label: 'Voice: Choose Microphone…', action: chooseMic });
     }
     return commands;
@@ -487,6 +537,14 @@
     return actions.filter(function (a) { return !seen[a.name] && (seen[a.name] = true); });
   }
 
+  // '' when Ollama ran and found nothing.
+  function ollamaNote(res) {
+    if (res && res.unavailable === 'not-running') return ' Ollama isn’t running, so it couldn’t help.';
+    if (res && res.unavailable === 'no-model') return ' Ollama has no model big enough to help.';
+    if (res && res.unavailable) return ' Ollama didn’t answer.';
+    return '';
+  }
+
   // Last resort when nothing matched: let a local Ollama model pick one of the offered actions.
   // With agentTab, the phrase is typed into the agent unless Ollama picks an action that shares a word with it.
   function askOllama(heard, fallback, agentTab) {
@@ -498,23 +556,14 @@
       renderState();
       var pick = res && res.action && actions.find(function (a) { return a.name === res.action; });
       if (pick && agentTab && !window.VoiceText.sharesWord(heard, pick.name)) pick = null;
-      var entry = history.find(function (h) { return h.heard === heard; });
-      if (!pick) {
-        if (entry) {
-          entry.did = agentTab ? 'typed into the agent (Ollama saw no app action)'
-            : res && res.unavailable ? 'nothing matched (no suitable Ollama model)' : 'nothing matched (Ollama found nothing either)';
-        }
-        return fallback();
-      }
+      if (!pick) return fallback(ollamaNote(res));
       announce(pick.name);
-      if (entry) entry.did = 'Ollama chose ' + pick.name;
       pick.run();
     }, function () {
       inFlight--;
       renderState();
-      fallback();
+      fallback(ollamaNote({ unavailable: 'no-reply' }));
     });
-    outcome('asked Ollama');
     return true;
   }
 
@@ -525,8 +574,9 @@
     var match = heard && window.VoiceText.matchCommand(text, paletteCommands());
     if (heard && (!match || match.kind === 'command') && pressControl(heard, true)) return true;
     if (!match && heard && pressControl(heard)) return true;
+    if (!match && heard && (openOnlyDropdown(heard) || (dialogOpen() && pickDropdownOption(heard)))) return true;
     if (!match && heard) {
-      return askOllama(heard, function () { window.toast.info('That didn’t match a command.'); });
+      return askOllama(heard, function (note) { window.toast.info('That didn’t match a command.' + note); });
     }
     if (!match) {
       window.toast.info('Didn’t catch a command.');
@@ -560,7 +610,6 @@
     };
     var first = routeTranscript(parts[0], 'auto', activeTarget());
     if (first === false) return false;
-    outcome('chain of ' + parts.length + ' steps: ' + parts.join(' → '));
     setTimeout(function () { step(1); }, 400);
     return true;
   }
@@ -602,7 +651,6 @@
     if (!pick) return false;
     pick.el.focus();
     forgetInsert();
-    outcome('focused ' + (query || 'the text box in front'));
     announce('Focused');
     return true;
   }
@@ -636,6 +684,7 @@
     var preferControl = !match || (match.kind === 'command' && (!match.alias || dialogOpen()));
     if (heard && preferControl && pressControl(heard, true)) return true;
     if (heard && dialogOpen() && preferControl && pressControl(heard)) return true;
+    if (heard && (openOnlyDropdown(heard) || (dialogOpen() && preferControl && pickDropdownOption(heard)))) return true;
     if (match) return run(match, target, heard);
     // With the PR picker open, anything but a URL names the PR to open.
     if (heard && isPickerBox(target) && !/^(https?:|www\.)|github|gitlab/i.test(heard)) {
@@ -643,16 +692,19 @@
     }
     if (heard && pressControl(heard)) return true;
     if (heard && !target) {
-      return askOllama(heard, function () {
-        window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.');
+      return askOllama(heard, function (note) {
+        window.toast.info('That didn’t match a command, and there’s no agent tab to type it into.' + note);
       });
     }
     // In a dialog with no text box focused there's nothing to type into, so it was meant as an action.
     if (heard && dialogOpen() && !target.field) {
-      return askOllama(heard, function () { window.toast.info('That didn’t match anything in this dialog.'); });
+      return askOllama(heard, function (note) { window.toast.info('That didn’t match anything in this dialog.' + note); });
     }
     if (heard && !target.field && window.VoiceText.mentionsAppUi(heard)) {
-      return askOllama(heard, function () { dictate(text, target); }, true);
+      return askOllama(heard, function (note) {
+        if (note) window.toast.info('Typed into the agent.' + note);
+        dictate(text, target);
+      }, true);
     }
     return dictate(text, target);
   }
@@ -660,16 +712,7 @@
   // Entry point after transcription; e2e tests call it directly since CI has no mic.
   // target is the terminal that was active when recording ended.
   function handleTranscript(text, mode, target) {
-    lastOutcome = null;
-    try {
-      return routeTranscript(text, mode, target);
-    } finally {
-      var heard = window.VoiceText.sanitizeDictation(text);
-      if (heard) {
-        history.unshift({ at: new Date(), heard: heard, did: lastOutcome || 'nothing matched' });
-        history.length = Math.min(history.length, 50);
-      }
-    }
+    return routeTranscript(text, mode, target);
   }
 
   function routeTranscript(text, mode, target) {
@@ -856,8 +899,6 @@
     session.phraseLevel = 0;
     var audio = takeAudio(session);
     if (session.loudest && level < session.loudest * BACKGROUND_RATIO) {
-      history.unshift({ at: new Date(), heard: '(quiet speech)', did: 'ignored quiet background speech' });
-      history.length = Math.min(history.length, 50);
       return;
     }
     session.loudest = Math.max(session.loudest || 0, level);
@@ -926,21 +967,6 @@
     });
     items.push({ label: 'Or say the name of any button or tab on screen', action: function () {} });
     window.CommandPalette.show(items);
-  }
-
-  function showHistory() {
-    if (!history.length) {
-      window.toast.info('Nothing said yet.');
-      return;
-    }
-    window.CommandPalette.show(history.map(function (h) {
-      var line = h.at.toLocaleTimeString() + '  “' + h.heard + '” → ' + h.did;
-      return { label: line, action: function () {
-        navigator.clipboard.writeText(line).then(function () { announce('Copied'); }, function (err) {
-          window.toast.error('Copy failed: ' + ((err && err.message) || String(err)));
-        });
-      } };
-    }));
   }
 
   function chooseMic() {
@@ -1066,7 +1092,7 @@
 
   window.Voice = {
     init: init, setEnabled: setEnabled, setMicId: setMicId, handleTranscript: handleTranscript,
-    isEnabled: function () { return enabled; }, showHelp: showHelp, showHistory: showHistory, chooseMic: chooseMic,
+    isEnabled: function () { return enabled; }, showHelp: showHelp, chooseMic: chooseMic,
     reportAiReview: reportAiReview,
   };
 })();

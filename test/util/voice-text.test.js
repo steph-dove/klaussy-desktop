@@ -361,11 +361,10 @@ test('spoken numbers become digits where a number is meant', () => {
   assert.equal(parsePrRequest('Review PR one oh three.'), '103');
 });
 
-test('help, history and microphone phrases reach the voice commands', () => {
-  const cmds = ['Voice: What Can I Say?', 'Voice: History', 'Voice: Choose Microphone…', 'Preferences'].map((l) => ({ label: l, action: () => {} }));
+test('help and microphone phrases reach the voice commands', () => {
+  const cmds = ['Voice: What Can I Say?', 'Voice: Choose Microphone…', 'Preferences'].map((l) => ({ label: l, action: () => {} }));
   const pick = (t) => { const m = matchCommand(t, cmds); return m && m.command ? m.command.label : m; };
   for (const t of ['help', 'What can I say?', 'voice help']) assert.equal(pick(t), 'Voice: What Can I Say?', t);
-  for (const t of ['voice history', 'what did you hear']) assert.equal(pick(t), 'Voice: History', t);
   for (const t of ['choose microphone', 'change mic', 'switch the microphone', 'use another mic']) assert.equal(pick(t), 'Voice: Choose Microphone…', t);
 });
 
@@ -423,4 +422,23 @@ test('focus phrases name a text box or terminal, and other verbs need one named'
   assert.equal(parseFocus('go to auth fix'), null);
   assert.equal(parseFocus('go to the bottom'), null);
   assert.equal(parseFocus('fix the focus bug'), null);
+});
+
+test('new code review and new review open the PR picker', () => {
+  for (const t of ['new code review', 'New code review.', 'new review', 'start a new code review', 'new pr review']) {
+    assert.equal(label(t), 'Review Pull Request / Merge Request…', t);
+  }
+});
+
+test('a dropdown is named by its label, with dropdown, menu or list said after it', () => {
+  global.window = global.window || {};
+  require('../../renderer/utils');
+  const fuzzy = global.window.AppUtils.fuzzyMatch;
+  const names = ['New Session', 'Existing Session', 'Existing session dropdown', 'Create', 'Cancel'];
+  const pick = (s) => { const i = pickControl(s, names, fuzzy); return i < 0 ? null : names[i]; };
+  assert.equal(pick('open existing session dropdown'), 'Existing session dropdown');
+  assert.equal(pick('open the existing session menu'), 'Existing session dropdown');
+  assert.equal(pick('show the existing session list'), 'Existing session dropdown');
+  assert.equal(pick('existing session drop down'), 'Existing session dropdown');
+  assert.equal(pick('existing session'), 'Existing Session');
 });

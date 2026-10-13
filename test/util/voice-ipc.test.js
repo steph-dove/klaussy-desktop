@@ -113,3 +113,51 @@ test('over an agent tab the intent prompt says most speech is for the agent', ()
   assert.match(prompt, /1\. New Task/);
   assert.doesNotMatch(buildIntentPrompt('open code revue', ['New Task']), /Those must get 0/);
 });
+
+function withOllama(stubs, consent, fn) {
+  const ollama = require('../../main/state/ollama');
+  const orig = {};
+  for (const k of Object.keys(stubs)) { orig[k] = ollama[k]; ollama[k] = stubs[k]; }
+  fs.writeFileSync(path.join(testUserData, 'config.json'), JSON.stringify({ voiceInput: true, ollamaConsent: consent }));
+  return fn().finally(() => Object.assign(ollama, orig));
+}
+
+test('a stopped Ollama is started when its setup was accepted, then asked', async () => {
+  const { interpretWithOllama } = require('../../main/ipc/voice');
+  let running = false;
+  let started = 0;
+  await withOllama({
+    probeNow: async () => ({ running }),
+    ensureServerRunning: async () => { started++; running = true; return { ok: true }; },
+    pickIntentModel: async () => 'qwen2.5-coder:7b',
+    generateText: async () => '2',
+  }, 'accepted', async () => {
+    const res = await interpretWithOllama({ text: 'new code review', actions: ['New Task', 'Review Pull Request / Merge Request…'] });
+    assert.equal(started, 1);
+    assert.equal(res.action, 'Review Pull Request / Merge Request…');
+  });
+});
+
+test('Ollama is never started without accepted setup, and says it is not running', async () => {
+  const { interpretWithOllama } = require('../../main/ipc/voice');
+  let started = 0;
+  await withOllama({
+    probeNow: async () => ({ running: false }),
+    ensureServerRunning: async () => { started++; return { ok: true }; },
+  }, undefined, async () => {
+    const res = await interpretWithOllama({ text: 'new code review', actions: ['New Task'] });
+    assert.equal(started, 0);
+    assert.deepEqual(res, { action: null, unavailable: 'not-running' });
+  });
+});
+
+test('a running Ollama with no big enough model says so', async () => {
+  const { interpretWithOllama } = require('../../main/ipc/voice');
+  await withOllama({
+    probeNow: async () => ({ running: true }),
+    pickIntentModel: async () => null,
+  }, 'accepted', async () => {
+    const res = await interpretWithOllama({ text: 'new code review', actions: ['New Task'] });
+    assert.deepEqual(res, { action: null, unavailable: 'no-model' });
+  });
+});

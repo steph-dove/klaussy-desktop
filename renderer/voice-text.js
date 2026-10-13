@@ -21,7 +21,7 @@
       labels: ['Run AI Review', 'Review Changes…', 'Review Pull Request / Merge Request…'] },
     { re: /^((run|start|do) (a )?)?(code )?review (my|the|these|this|our) (changes|diff|code|work|session)$/,
       labels: ['Review Changes…'] },
-    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show )?(code reviews?|co reviews?|review code)$|^(open |start )?(reviews?|cr|c r|a cr)$/,
+    { re: /^(open |start |show )?(pr|pull request|merge request|mr)( review)?$|^review (pr|pull request|merge request|mr)s?$|^(open |show |start )?(new )?(code reviews?|co reviews?|review code)$|^(open |start )?(new )?(reviews?|cr|c r|a cr)$/,
       labels: ['Review Pull Request / Merge Request…'] },
     { re: /^(view|show|open|see) (changes|diff)$|^(show |open |toggle )?diff( panel)?$/,
       labels: ['Show Changes', 'Toggle Diff Panel'] },
@@ -38,7 +38,6 @@
       labels: ['Show Pull Request Panel'] },
     { re: /^(open )?(settings|preferences|prefs)$/, labels: ['Preferences'] },
     { re: /^(help|voice help|what can i say|what can you do|what do i say|show voice commands|list (voice )?commands)$/, labels: ['Voice: What Can I Say?'] },
-    { re: /^((show|open) )?(voice history|what did you hear|what did you hear me say|what did i say)$/, labels: ['Voice: History'] },
     { re: /^(choose|change|pick|select|switch|set)( the| my)? (microphone|mic|input)$|^use (another|different) (microphone|mic)$/, labels: ['Voice: Choose Microphone…'] },
     { re: /^clear( terminal| screen)?$/, labels: ['Clear Terminal'] },
     { re: /^((scroll|go|jump|skip|move)( all the way)?( down)?( to)?( the)? (bottom|end|latest|newest)|scroll all the way down|bottom|back to (the )?bottom)$/, labels: ['Scroll to Bottom'] },
@@ -203,7 +202,7 @@
     return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   }
 
-  var CLICK = /^(?:select|click|press|tap|hit|choose|use|pick|open|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button|agent|option|model|provider))? (.+?)(?: (?:tab|button|agent|option|model|provider))?$/;
+  var CLICK = /^(?:select|click|press|tap|hit|choose|use|pick|open|show|expand|go to|switch to)(?: on)?(?: the)?(?: (?:tab|button|agent|option|model|provider))? (.+?)(?: (?:tab|button|agent|option|model|provider))?$/;
   var DISMISS_WORDS = /^(close|cancel|dismiss|escape|exit|back|go|this|that|it|the|window|dialog|modal|popup|picker|please)$/;
   var NEXT = /^(next|next field|move on|tab|(i m |im )?done (naming|typing|with (it|that|this|the name))( the session| it)?|that s the name)$/;
 
@@ -211,7 +210,8 @@
   function pickControl(text, names, fuzzy) {
     var spoken = normalize(text);
     var m = spoken.match(CLICK);
-    var phrase = m ? m[1] : spoken;
+    // "the existing session menu" names the dropdown labelled "Existing session".
+    var phrase = (m ? m[1] : spoken).replace(/ (drop down|menu|list|picker|selector)$/, ' dropdown');
     var words = phrase.split(' ').filter(Boolean);
     if (!words.length || (!m && words.length > 4)) return -1;
     var best = -1;
