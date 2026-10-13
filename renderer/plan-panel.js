@@ -131,6 +131,8 @@ window.PlanPanel = (function () {
 
     planDoc = docOrNull(results[0]);
     designDoc = docOrNull(results[1]);
+    // A root file like design-plan.md matches both finders; it's the plan.
+    if (planDoc && designDoc && planDoc.path === designDoc.path) designDoc = null;
     renderSource();
   }
 

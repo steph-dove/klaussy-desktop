@@ -289,27 +289,16 @@ ipcMain.handle('write-env-file', async (_event, { worktreePath, filename, conten
 // repo with several matches resolves deterministically, then fall back to the
 // shortest matching name. Root-only (the hook uses cwd), so there's no
 // recursive walk and no path-traversal surface to gate.
-const EXCLUDE_DOCS = new Set([
-  'readme.md', 'claude.md', 'agents.md', 'gemini.md',
-  'contributing.md', 'license.md', 'changelog.md', 'code_of_conduct.md', 'security.md'
-]);
-
-function findRootDoc(worktreePath, keywordRe, preferred, allowAnyNonBoilerplate = false) {
+function findRootDoc(worktreePath, keywordRe, preferred) {
   let entries;
   try {
     entries = fs.readdirSync(worktreePath, { withFileTypes: true });
   } catch (err) {
     return { error: err.message };
   }
-  let names = entries
+  const names = entries
     .filter((e) => e.isFile() && keywordRe.test(e.name) && /\.md$/i.test(e.name))
     .map((e) => e.name);
-
-  if (names.length === 0 && allowAnyNonBoilerplate) {
-    names = entries
-      .filter((e) => e.isFile() && /\.md$/i.test(e.name) && !EXCLUDE_DOCS.has(e.name.toLowerCase()))
-      .map((e) => e.name);
-  }
 
   if (names.length === 0) return { error: 'not found' };
   const lower = names.map((n) => n.toLowerCase());
@@ -334,48 +323,74 @@ function findRootDoc(worktreePath, keywordRe, preferred, allowAnyNonBoilerplate 
 const { listSessionNotes } = require('../state/session-context');
 const { klaussySessionDir } = require('../util/git-repo');
 
-async function findPlanDoc(worktreePath) {
-  if (!worktreePath) return { error: 'no worktreePath' };
-  let rootRes = findRootDoc(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
+// Root first, then each first-level folder (the worktree may be a session
+// root holding several repos).
+function findDocInTree(worktreePath, keywordRe, preferred) {
+  const rootRes = findRootDoc(worktreePath, keywordRe, preferred);
   if (!rootRes.error && rootRes.content) return rootRes;
-
-  // Check child directories if worktreePath is a session root folder
-  if (fs.existsSync(worktreePath)) {
-    try {
-      const entries = fs.readdirSync(worktreePath, { withFileTypes: true });
-      for (const ent of entries) {
-        if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
-          const childRes = findRootDoc(path.join(worktreePath, ent.name), /plan/i, ['implementation_plan.md', 'plan.md']);
-          if (!childRes.error && childRes.content) return childRes;
-        }
-      }
-    } catch {}
-  }
-
   try {
-    const notes = listSessionNotes(worktreePath);
-    for (const note of notes) {
-      const meta = note.metadata || {};
-      const tags = Array.isArray(meta.tags) ? meta.tags : [];
-      const isPlan = tags.some((t) => /plan/i.test(t))
-        || /plan/i.test(note.id || '')
-        || /plan/i.test(note.filePath || '')
-        || /plan/i.test(meta.title || '')
-        || /^#+\s*(?:Plan|Implementation)/i.test(note.body || '');
-      if (isPlan && (note.body || note.content)) {
+    for (const ent of fs.readdirSync(worktreePath, { withFileTypes: true })) {
+      if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
+        const childRes = findRootDoc(path.join(worktreePath, ent.name), keywordRe, preferred);
+        if (!childRes.error && childRes.content) return childRes;
+      }
+    }
+  } catch {}
+  return rootRes;
+}
+
+// Match a note on its own name, never its full path: every note lives under
+// .../sessions/<session>/notes/, so a path match hits every note in a session
+// whose name contains the keyword.
+function noteMatches(note, keywordRe, tagRe, headingRe) {
+  const meta = note.metadata || {};
+  const tags = Array.isArray(meta.tags) ? meta.tags : [];
+  return tags.some((t) => tagRe.test(t))
+    || keywordRe.test(note.id || '')
+    || keywordRe.test(path.basename(note.filePath || ''))
+    || keywordRe.test(meta.title || '')
+    || headingRe.test(note.body || '');
+}
+
+function isPlanNote(note) {
+  return noteMatches(note, /plan/i, /plan/i, /^#+\s*(?:Plan|Implementation)/i);
+}
+
+// The plan prompts tag plan notes `[plan, design]`, so a design match alone
+// would put the plan in the Design tab. A note is the plan or the design,
+// never both.
+function isDesignNote(note) {
+  return noteMatches(note, DESIGN_KEYWORD_RE, /^(design|spec|architecture|rfc)/i,
+    /^#+\s*(?:Design|Spec|Architecture)/i) && !isPlanNote(note);
+}
+
+function noteDoc(worktreePath, matches, fallbackName) {
+  try {
+    for (const note of listSessionNotes(worktreePath)) {
+      if (matches(note) && note.body) {
+        const meta = note.metadata || {};
         return {
-          name: (meta.title || note.id || path.basename(note.filePath, '.md') || 'plan') + '.md',
+          name: (meta.title || note.id || path.basename(note.filePath, '.md') || fallbackName) + '.md',
           path: note.filePath,
-          content: note.body || note.content || '',
+          content: note.body,
         };
       }
     }
   } catch {}
-
-  return rootRes;
+  return null;
 }
 
-const DESIGN_KEYWORD_RE = /(?:design|spec|architecture|rfc|palette|theme|requirement|ui[-_]|prompt|task|notes)/i;
+async function findPlanDoc(worktreePath) {
+  if (!worktreePath) return { error: 'no worktreePath' };
+  const res = findDocInTree(worktreePath, /plan/i, ['implementation_plan.md', 'plan.md']);
+  if (!res.error && res.content) return res;
+  return noteDoc(worktreePath, isPlanNote, 'plan') || res;
+}
+
+// Only names that say "design doc". Broader words (task, notes, prompt) and a
+// fall back to any markdown file put task files, NOTICE.md and the newest
+// session note in the Design tab.
+const DESIGN_KEYWORD_RE = /(?:design|spec|architecture|rfc|palette|theme|requirement|ui[-_])/i;
 const DESIGN_PREFERRED = [
   'design.md', 'design_doc.md', 'design-doc.md', 'design-spec.md', 'ui-design.md',
   'spec.md', 'specs.md', 'architecture.md', 'rfc.md', 'requirements.md'
@@ -383,52 +398,9 @@ const DESIGN_PREFERRED = [
 
 async function findDesignDoc(worktreePath) {
   if (!worktreePath) return { error: 'no worktreePath' };
-  let rootRes = findRootDoc(worktreePath, DESIGN_KEYWORD_RE, DESIGN_PREFERRED, true);
-  if (!rootRes.error && rootRes.content) return rootRes;
-
-  // Check child directories if worktreePath is a session root folder
-  if (fs.existsSync(worktreePath)) {
-    try {
-      const entries = fs.readdirSync(worktreePath, { withFileTypes: true });
-      for (const ent of entries) {
-        if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
-          const childRes = findRootDoc(path.join(worktreePath, ent.name), DESIGN_KEYWORD_RE, DESIGN_PREFERRED, true);
-          if (!childRes.error && childRes.content) return childRes;
-        }
-      }
-    } catch {}
-  }
-
-  try {
-    const notes = listSessionNotes(worktreePath);
-    for (const note of notes) {
-      const meta = note.metadata || {};
-      const tags = Array.isArray(meta.tags) ? meta.tags : [];
-      const isDesign = tags.some((t) => /^(design|spec|architecture|rfc|task|ui)/i.test(t))
-        || DESIGN_KEYWORD_RE.test(note.id || '')
-        || DESIGN_KEYWORD_RE.test(note.filePath || '')
-        || DESIGN_KEYWORD_RE.test(meta.title || '')
-        || /^#+\s*(?:Design|Spec|Architecture)/i.test(note.body || '');
-      if (isDesign && (note.body || note.content)) {
-        return {
-          name: (meta.title || note.id || path.basename(note.filePath, '.md') || 'design') + '.md',
-          path: note.filePath,
-          content: note.body || note.content || '',
-        };
-      }
-    }
-    // If no note specifically matched design tags but session notes exist, use the first non-plan note
-    if (notes.length > 0) {
-      const firstNote = notes[0];
-      return {
-        name: (firstNote.metadata?.title || firstNote.id || path.basename(firstNote.filePath, '.md') || 'note') + '.md',
-        path: firstNote.filePath,
-        content: firstNote.body || firstNote.content || '',
-      };
-    }
-  } catch {}
-
-  return rootRes;
+  const res = findDocInTree(worktreePath, DESIGN_KEYWORD_RE, DESIGN_PREFERRED);
+  if (!res.error && res.content) return res;
+  return noteDoc(worktreePath, isDesignNote, 'design') || res;
 }
 
 ipcMain.handle('find-plan-file', async (_event, { worktreePath }) => findPlanDoc(worktreePath));

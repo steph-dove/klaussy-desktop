@@ -69,3 +69,89 @@ test('findDesignDoc: falls back to OKF session notes when root design is absent'
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('findDesignDoc: skips a plan note tagged [plan, design]', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-design-plan-'));
+  const worktreeDir = path.join(tempRoot, 'my-repo');
+  fs.mkdirSync(worktreeDir, { recursive: true });
+
+  writeSessionNote(worktreeDir, {
+    id: 'agent-design-note',
+    agent: 'gemini',
+    provider: 'google',
+    tags: ['design'],
+    title: 'Architecture Blueprint',
+    content: '## Component Diagram',
+    timestamp: '2026-10-01T00:00:00Z',
+  });
+  // Newer, and tagged the way the plan prompts tell agents to tag plans.
+  writeSessionNote(worktreeDir, {
+    id: 'claude-plan',
+    agent: 'claude',
+    provider: 'anthropic',
+    tags: ['plan', 'design'],
+    content: '# Plan\n- [ ] Step 1',
+    timestamp: '2026-10-02T00:00:00Z',
+  });
+
+  try {
+    const design = await findDesignDoc(worktreeDir);
+    assert.ok(design.content.includes('## Component Diagram'));
+    const plan = await findPlanDoc(worktreeDir);
+    assert.ok(plan.content.includes('- [ ] Step 1'));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('findDesignDoc: no design doc when nothing is one', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-design-none-'));
+  const worktreeDir = path.join(tempRoot, 'my-repo');
+  fs.mkdirSync(path.join(worktreeDir, 'docs'), { recursive: true });
+  // Each of these used to land in the Design tab.
+  fs.writeFileSync(path.join(worktreeDir, 'NOTICE.md'), 'notice');
+  fs.writeFileSync(path.join(worktreeDir, 'task-artifact-preview.md'), 'a task');
+  fs.writeFileSync(path.join(worktreeDir, 'docs', 'CONTRACT.md'), 'contract');
+  writeSessionNote(worktreeDir, {
+    id: 'claude-plan',
+    agent: 'claude',
+    provider: 'anthropic',
+    tags: ['plan', 'design', 'devloop'],
+    content: '# Plan\n- [ ] Step 1',
+  });
+  writeSessionNote(worktreeDir, {
+    id: 'claude-port-moved',
+    agent: 'claude',
+    provider: 'anthropic',
+    tags: ['infra'],
+    content: 'The dev server moved to port 4000.',
+  });
+  writeSessionNote(worktreeDir, {
+    id: 'antigravity-dev-loop-feature',
+    agent: 'antigravity',
+    provider: 'google',
+    tags: ['dev-loop', 'ui'],
+    content: 'Implemented the Dev Loop panel.',
+  });
+
+  try {
+    const res = await findDesignDoc(worktreeDir);
+    assert.ok(res.error, 'expected no design doc, got ' + JSON.stringify(res.path || res.name));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('findDesignDoc: still finds a spec in a first-level folder', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-design-child-'));
+  const worktreeDir = path.join(tempRoot, 'session-root');
+  fs.mkdirSync(path.join(worktreeDir, 'my-repo'), { recursive: true });
+  fs.writeFileSync(path.join(worktreeDir, 'my-repo', 'design-spec.md'), '# Spec');
+
+  try {
+    const res = await findDesignDoc(worktreeDir);
+    assert.equal(res.name, 'design-spec.md');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
