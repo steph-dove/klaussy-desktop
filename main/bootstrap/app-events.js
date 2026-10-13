@@ -19,7 +19,7 @@ const instancesModule = require('../state/instances');
 const {
   instances,
   subscribeTerminalChannel, unsubscribeTerminalChannel,
-  detectClaudeSessionId, findLatestSessionId,
+  assignDetectedSessionIds, findLatestSessionId,
 } = instancesModule;
 const { getProvider, isAgentMode, allProviders, binFor } = require('../state/ai-providers');
 const { startAutoFetch, startCIPolling, stopCIPolling } = require('../state/ci-poll');
@@ -91,23 +91,16 @@ function saveSessions() {
     exactByWorktree.get(inst.worktreePath).push(inst);
   }
 
-  // For each worktree, resolve instance session IDs by picking .jsonl files
-  // that (a) weren't present at that instance's spawn and (b) haven't already
-  // been claimed by another instance on the same worktree. This covers fresh
-  // spawns (detect picks up the new file) and resumes where Claude forks the
-  // session into a new .jsonl (detect supersedes the initial resume id).
-  for (const [, insts] of exactByWorktree) {
-    insts.sort((a, b) => (a.spawnTime || 0) - (b.spawnTime || 0));
-    const claimed = new Set();
-    for (const inst of insts) {
-      const detected = detectClaudeSessionId(inst, claimed);
-      if (detected) inst.claudeSessionId = detected;
-      if (inst.claudeSessionId) claimed.add(inst.claudeSessionId);
-    }
+  // Main tabs and their sub-tabs write transcripts into the same directory.
+  const subOwned = new Set();
+  for (const [, inst] of instances) {
+    for (const s of (inst.subTerminals || [])) if (s && s.sessionId) subOwned.add(s.sessionId);
   }
+  for (const [, insts] of exactByWorktree) assignDetectedSessionIds(insts, subOwned);
 
   const sessions = [];
   const claimedSubSessions = new Set();
+  for (const [, inst] of instances) if (inst.claudeSessionId) claimedSubSessions.add(inst.claudeSessionId);
   for (const [, inst] of instances) {
     const saveMode = inst.originalMode || inst.mode;
     const provider = getProvider(saveMode);

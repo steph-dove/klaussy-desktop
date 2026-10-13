@@ -142,7 +142,9 @@ async function ghExecP(args, opts = {}) {
 // the global active account. Returns { GH_TOKEN } or {} if no token. Cached
 // (keyed distinctly from the repo-owner cache).
 function ghEnvForAccount(username) {
-  if (!username) return {};
+  // The PR picker passes its account ids ('github:<user>', 'gitlab:...').
+  if (typeof username === 'string' && username.startsWith('github:')) username = username.slice('github:'.length);
+  if (!username || /^(gitlab|bitbucket):/.test(username)) return {};
   const key = 'acct:' + username;
   const cached = ghTokenCache.get(key);
   if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {

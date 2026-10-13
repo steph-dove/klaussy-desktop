@@ -402,3 +402,11 @@ test('kimi parseStreamLine maps the PromptJsonWriter line shapes', () => {
   assert.deepEqual(p.parseStreamLine({ role: 'tool', tool_call_id: 'tc_1', content: 'a.txt' }), []);
   assert.deepEqual(p.parseStreamLine({ role: 'meta', type: 'session.resume_hint', session_id: 'abc' }), []);
 });
+
+// Callers only ask for "latest" after finding no transcript in the worktree, and
+// a bare `claude --resume` then opens Claude's session picker.
+test('claude with nothing to resume starts plainly instead of opening the picker', () => {
+  const p = providers.getProvider('claude');
+  assert.equal(p.buildInteractiveCmd('claude', { resumeLatest: true }), 'claude');
+  assert.equal(p.buildInteractiveCmd('claude', { resumeSessionId: 'abc', resumeLatest: false }), 'claude --resume abc');
+});

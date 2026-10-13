@@ -891,3 +891,5 @@ ipcMain.handle('ci-run-logs', async (_event, { worktreePath, runId }) => {
     return { logs: '', error: err.stderr ? err.stderr.toString() : err.message };
   }
 });
+
+module.exports = { readGhAccountsChecked };

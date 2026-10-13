@@ -18,6 +18,7 @@ const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { claudeProjectDir } = require('../util/claude-paths');
+const { isInteractiveTranscript } = require('../util/claude-entrypoint');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const { allWindows, getMainWindow } = require('./windows');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-providers');
@@ -158,12 +159,18 @@ function snapshotSessionIds(worktreePath) {
   return new Set(listSessionFiles(worktreePath).map(f => f.sessionId));
 }
 
+function listInteractiveSessionFiles(worktreePath) {
+  const dir = claudeProjectDir(worktreePath);
+  // A file whose entrypoint isn't written yet waits for a later pass rather than being guessed at.
+  return listSessionFiles(worktreePath).filter(f => isInteractiveTranscript(path.join(dir, f.name)));
+}
+
 // Find the session id for a freshly-spawned claude instance: pick the .jsonl
 // that didn't exist at spawn and isn't claimed by another instance. Prefer the
 // oldest-created "new" file so concurrent spawns pair up in spawn order.
 function detectClaudeSessionId(inst, claimed) {
   const preSpawn = inst.preSpawnSessionIds || new Set();
-  const files = listSessionFiles(inst.worktreePath)
+  const files = listInteractiveSessionFiles(inst.worktreePath)
     .filter(f => !preSpawn.has(f.sessionId))
     .filter(f => !claimed || !claimed.has(f.sessionId))
     // Sort on ns-precision ctime. BigInt subtraction returns BigInt — convert
@@ -176,10 +183,24 @@ function detectClaudeSessionId(inst, claimed) {
   return files.length > 0 ? files[0].sessionId : null;
 }
 
+// A known id is kept: resuming appends to the same transcript, and hooks move it on after /clear.
+function assignDetectedSessionIds(insts, alreadyClaimed = new Set()) {
+  const ordered = insts.slice().sort((a, b) => (a.spawnTime || 0) - (b.spawnTime || 0));
+  const claimed = new Set([...alreadyClaimed, ...ordered.map(i => i.claudeSessionId).filter(Boolean)]);
+  for (const inst of ordered) {
+    if (inst.claudeSessionId) continue;
+    const detected = detectClaudeSessionId(inst, claimed);
+    if (detected) {
+      inst.claudeSessionId = detected;
+      claimed.add(detected);
+    }
+  }
+}
+
 // `sinceMs` narrows the answer to transcripts written during a given session; a
 // worktree accumulates them, and the newest overall is often an older session's.
 function findLatestSessionId(worktreePath, sinceMs) {
-  const files = listSessionFiles(worktreePath)
+  const files = listInteractiveSessionFiles(worktreePath)
     .filter((f) => !sinceMs || f.mtime >= sinceMs)
     .sort((a, b) => b.mtime - a.mtime);
   return files.length > 0 ? files[0].sessionId : null;
@@ -1123,6 +1144,7 @@ module.exports = {
   listSessionFiles,
   snapshotSessionIds,
   detectClaudeSessionId,
+  assignDetectedSessionIds,
   findLatestSessionId,
   processIdleDetection,
   processSubOutput,

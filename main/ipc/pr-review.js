@@ -31,6 +31,8 @@ const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
 const { normalizeGitLabMr, normalizeBitbucketPr } = require('../util/forge-adapter');
 const { glabEnvForAccount, getGlabToken } = require('../util/glab-exec');
 const { humanizeComment } = require('../util/humanize-comment');
+const { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls } = require('../util/review-history');
+const { readGhAccountsChecked } = require('./gh');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
 
@@ -402,9 +404,27 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   }
 });
 
-ipcMain.handle('pr-recent', () => {
-  const config = loadConfig();
-  return { items: config.reviewHistory || [] };
+const probeRepoCached = cachedProbe(probeRepoAccess, 60 * 60 * 1000);
+
+ipcMain.handle('pr-recent', async () => {
+  const items = loadConfig().reviewHistory || [];
+  let pruned;
+  try {
+    const { accounts } = await readGhAccountsChecked();
+    const tokens = accounts.filter((a) => a.valid)
+      .map((a) => ghEnvForAccount(a.username).GH_TOKEN).filter(Boolean);
+    pruned = await pruneUnreachableHistory(items, (owner, repo) => probeRepoCached(owner, repo, tokens));
+  } catch (err) {
+    console.warn('[pr-recent] access check failed, showing unpruned history:', err.message);
+    return { items };
+  }
+  if (pruned.removed > 0) {
+    // Re-read: a review opened while the probes ran must survive.
+    const config = loadConfig();
+    config.reviewHistory = withoutUrls(config.reviewHistory, pruned.dropped);
+    saveConfig(config);
+  }
+  return { items: pruned.items };
 });
 
 ipcMain.handle('pr-refresh-threads', async () => {
