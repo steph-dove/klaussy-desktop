@@ -12,6 +12,7 @@ async function probeRepoAccess(owner, repo, tokens, fetchFn = fetch) {
     try {
       const res = await fetchFn(url, {
         method: 'GET',
+        signal: AbortSignal.timeout(5000),
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/vnd.github+json',

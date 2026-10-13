@@ -406,10 +406,16 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
 
 ipcMain.handle('pr-recent', async () => {
   const items = loadConfig().reviewHistory || [];
-  const { accounts } = await readGhAccountsChecked();
-  const tokens = accounts.filter((a) => a.valid)
-    .map((a) => ghEnvForAccount(a.username).GH_TOKEN).filter(Boolean);
-  const pruned = await pruneUnreachableHistory(items, (owner, repo) => probeRepoAccess(owner, repo, tokens));
+  let pruned;
+  try {
+    const { accounts } = await readGhAccountsChecked();
+    const tokens = accounts.filter((a) => a.valid)
+      .map((a) => ghEnvForAccount(a.username).GH_TOKEN).filter(Boolean);
+    pruned = await pruneUnreachableHistory(items, (owner, repo) => probeRepoAccess(owner, repo, tokens));
+  } catch (err) {
+    console.warn('[pr-recent] access check failed, showing unpruned history:', err.message);
+    return { items };
+  }
   if (pruned.removed > 0) {
     const config = loadConfig();
     const keep = new Set(pruned.items.map((e) => e.url));
