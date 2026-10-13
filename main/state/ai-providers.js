@@ -7,6 +7,7 @@ const os = require('os');
 const fs = require('fs');
 const { fileURLToPath } = require('url');
 const { claudeProjectDir } = require('../util/claude-paths');
+const { isHeadlessTranscript } = require('../util/claude-entrypoint');
 const { loadConfig } = require('../util/config');
 const { samePath } = require('../util/platform');
 
@@ -154,8 +155,9 @@ const PROVIDERS = {
     perWorktreeSessions: true,
     supportsExactResume: true,
 
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs } = {}) {
-      let base = resumeSessionId ? `${bin} --resume ${resumeSessionId}` : (resumeLatest ? `${bin} --resume` : bin);
+    // resumeLatest is ignored: callers already looked up the latest id, and a bare --resume opens the picker.
+    buildInteractiveCmd(bin, { resumeSessionId, model, sessionDirs } = {}) {
+      let base = resumeSessionId ? `${bin} --resume ${resumeSessionId}` : bin;
       if (model) base += ` --model ${model}`; // alias (opus/sonnet/haiku) or full id
       // Grant access to sibling session worktrees so cross-repo edits work.
       const dirs = quotedSessionDirs(sessionDirs);
@@ -239,7 +241,7 @@ const PROVIDERS = {
     },
     findNewSession(worktreePath, snapshot) {
       const files = listJsonlFiles(this.sessionDir(worktreePath), false)
-        .filter(f => !snapshot.has(f.path))
+        .filter(f => !snapshot.has(f.path) && !isHeadlessTranscript(f.path))
         .sort((a, b) => (a.ctimeNs < b.ctimeNs ? -1 : a.ctimeNs > b.ctimeNs ? 1 : 0));
       if (!files.length) return null;
       return { filePath: files[0].path, sessionId: path.basename(files[0].path).replace(/\.jsonl$/, '') };

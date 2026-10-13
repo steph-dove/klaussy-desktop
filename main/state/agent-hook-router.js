@@ -5,6 +5,7 @@
 const { interpret } = require('../util/claude-hooks');
 const nemesisEvents = require('../util/nemesis-events');
 const agentTranscript = require('../util/agent-transcript');
+const { isInteractiveTranscript } = require('../util/claude-entrypoint');
 
 // A hook reports its cwd; that is the worktree the session runs in.
 function instanceForCwd(cwd) {
@@ -60,11 +61,22 @@ function baseEvent(inst) {
   };
 }
 
+// Headless `claude -p` runs fire the same hooks from the same cwd, so only an interactive transcript counts.
+function adoptSessionId(inst, hook) {
+  if (!hook.sessionId || inst.claudeSessionId === hook.sessionId) return;
+  const { instances } = require('./instances');
+  if (instances.get(inst.id) !== inst || (inst.originalMode || inst.mode) !== 'claude') return;
+  if (!hook.transcriptPath || !isInteractiveTranscript(hook.transcriptPath)) return;
+  inst.claudeSessionId = hook.sessionId;
+}
+
 function handleClaudeHook(payload) {
   const hook = interpret(payload);
   if (!hook) return;
   const inst = targetForHook(hook);
-  if (!inst || !bellOn(inst)) return;
+  if (!inst) return;
+  adoptSessionId(inst, hook);
+  if (!bellOn(inst)) return;
 
   // The hook names the transcript, before the sweep has noticed the session. The
   // cursor counts into that file, so both move together or the poll path rewinds

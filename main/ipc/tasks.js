@@ -1220,7 +1220,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
       const sessionDirs = sessionSiblingWorktrees(inst.worktreePath);
       // Deliberately not resumeLatest: that adopts whatever ran last in this
       // worktree, which is another tab as often as this one.
-      preSpawnSessions = provider.snapshotSessions ? provider.snapshotSessions() : new Set();
+      preSpawnSessions = provider.snapshotSessions ? provider.snapshotSessions(inst.worktreePath) : new Set();
       let agentCmd = provider.buildInteractiveCmd(bin, {
         trust: consent.trust, model, sessionDirs, profile: nemProfile,
         resumeSessionId: resumeSessionId || null,
