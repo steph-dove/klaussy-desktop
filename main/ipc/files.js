@@ -289,7 +289,7 @@ ipcMain.handle('write-env-file', async (_event, { worktreePath, filename, conten
 // repo with several matches resolves deterministically, then fall back to the
 // shortest matching name. Root-only (the hook uses cwd), so there's no
 // recursive walk and no path-traversal surface to gate.
-function findRootDoc(worktreePath, keywordRe, preferred) {
+function findRootDoc(worktreePath, keywordRe, preferred, excludeRe = null) {
   let entries;
   try {
     entries = fs.readdirSync(worktreePath, { withFileTypes: true });
@@ -297,7 +297,8 @@ function findRootDoc(worktreePath, keywordRe, preferred) {
     return { error: err.message };
   }
   const names = entries
-    .filter((e) => e.isFile() && keywordRe.test(e.name) && /\.md$/i.test(e.name))
+    .filter((e) => e.isFile() && keywordRe.test(e.name) && /\.md$/i.test(e.name)
+      && !(excludeRe && excludeRe.test(e.name)))
     .map((e) => e.name);
 
   if (names.length === 0) return { error: 'not found' };
@@ -325,13 +326,13 @@ const { klaussySessionDir } = require('../util/git-repo');
 
 // Root first, then each first-level folder (the worktree may be a session
 // root holding several repos).
-function findDocInTree(worktreePath, keywordRe, preferred) {
-  const rootRes = findRootDoc(worktreePath, keywordRe, preferred);
+function findDocInTree(worktreePath, keywordRe, preferred, excludeRe = null) {
+  const rootRes = findRootDoc(worktreePath, keywordRe, preferred, excludeRe);
   if (!rootRes.error && rootRes.content) return rootRes;
   try {
     for (const ent of fs.readdirSync(worktreePath, { withFileTypes: true })) {
       if (ent.isDirectory() && !ent.name.startsWith('.') && ent.name !== 'node_modules') {
-        const childRes = findRootDoc(path.join(worktreePath, ent.name), keywordRe, preferred);
+        const childRes = findRootDoc(path.join(worktreePath, ent.name), keywordRe, preferred, excludeRe);
         if (!childRes.error && childRes.content) return childRes;
       }
     }
@@ -349,7 +350,17 @@ function noteMatches(note, keywordRe, tagRe, headingRe) {
     || keywordRe.test(note.id || '')
     || keywordRe.test(path.basename(note.filePath || ''))
     || keywordRe.test(meta.title || '')
-    || headingRe.test(note.body || '');
+    || headingRe.test(bodyAfterTitle(note.body || '', meta.title));
+}
+
+// writeSessionNote puts `# <title>` at the top of the body. The title is
+// matched above on its own; matching it again as a heading would file a
+// design note titled "Implementation notes for X" as a plan.
+function bodyAfterTitle(body, title) {
+  if (!title) return body;
+  const first = body.split('\n', 1)[0];
+  if (first.replace(/^#+\s*/, '').trim() !== String(title).trim()) return body;
+  return body.slice(first.length).replace(/^\s+/, '');
 }
 
 function isPlanNote(note) {
@@ -398,7 +409,8 @@ const DESIGN_PREFERRED = [
 
 async function findDesignDoc(worktreePath) {
   if (!worktreePath) return { error: 'no worktreePath' };
-  const res = findDocInTree(worktreePath, DESIGN_KEYWORD_RE, DESIGN_PREFERRED);
+  // A plan-named file (design-plan.md) belongs to the Plan tab, as plan notes do.
+  const res = findDocInTree(worktreePath, DESIGN_KEYWORD_RE, DESIGN_PREFERRED, /plan/i);
   if (!res.error && res.content) return res;
   return noteDoc(worktreePath, isDesignNote, 'design') || res;
 }

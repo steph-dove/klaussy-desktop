@@ -155,3 +155,45 @@ test('findDesignDoc: still finds a spec in a first-level folder', async () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('findDesignDoc: a design note titled "Implementation notes" is not a plan', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-design-title-'));
+  const worktreeDir = path.join(tempRoot, 'my-repo');
+  fs.mkdirSync(worktreeDir, { recursive: true });
+
+  // writeSessionNote puts "# Implementation notes for the cache" atop the body.
+  writeSessionNote(worktreeDir, {
+    id: 'gemini-cache',
+    agent: 'gemini',
+    provider: 'google',
+    tags: ['design'],
+    title: 'Implementation notes for the cache',
+    content: '## Layers\nMemory, then disk.',
+  });
+
+  try {
+    const design = await findDesignDoc(worktreeDir);
+    assert.ok(design.content && design.content.includes('## Layers'));
+    const plan = await findPlanDoc(worktreeDir);
+    assert.ok(plan.error, 'expected no plan, got ' + JSON.stringify(plan.path || plan.name));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('findDesignDoc: skips plan-named files and reaches a design doc below', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-design-planfile-'));
+  const worktreeDir = path.join(tempRoot, 'session-root');
+  fs.mkdirSync(path.join(worktreeDir, 'my-repo'), { recursive: true });
+  fs.writeFileSync(path.join(worktreeDir, 'design-plan.md'), '# Plan');
+  fs.writeFileSync(path.join(worktreeDir, 'my-repo', 'design.md'), '# Design');
+
+  try {
+    const design = await findDesignDoc(worktreeDir);
+    assert.equal(design.path, path.join(worktreeDir, 'my-repo', 'design.md'));
+    const plan = await findPlanDoc(worktreeDir);
+    assert.equal(plan.name, 'design-plan.md');
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
