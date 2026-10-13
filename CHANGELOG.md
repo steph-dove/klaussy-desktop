@@ -2,6 +2,13 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.24.3
+
+### 🦉 Design Tab Shows Real Design Docs
+
+- **No More Wrong Docs in the Design Tab**: with no design doc around, the Design tab picked whatever it could find, such as `NOTICE.md`, a `docs/` file, a task file, a plan, or a note from another repo in the session. It now shows a design doc only when there is one, and plans stay in the Plan tab.
+- **Plans Come With a Design Doc**: the plan flow and Rest of the Owl now have the agent save a design note next to the plan, with the approach it chose and why, so the Design tab has something real to show.
+
 ## 0.24.2
 
 ### 🦉 Resume and PR Picker Fixes
