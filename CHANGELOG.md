@@ -2,6 +2,15 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.24.2
+
+### 🦉 Resume and PR Picker Fixes
+
+- **Resume Opens the Right Conversation**: Claude tabs could resume into the wrong transcript, often one from the pre-commit reviewer's background runs, so Resume looked like a fresh session. Background transcripts are now ignored, a tab follows its session through `/clear`, and a tab with nothing to resume starts plain instead of opening Claude's session picker.
+- **Recently Reviewed Drops Repos You Lost Access To**: PRs from an org you'd left stayed in "Recently reviewed" with stale titles. The picker checks each repo against every signed-in GitHub account and removes it only when none of them can see it. Outages and bad tokens leave the list alone.
+- **Picker Uses the Account You Chose**: "Recent pull requests" and "Opened by you" ran as whichever gh account was active instead of the one picked.
+- **Voice Fixes**: "new code review" opens the PR picker, voice can open and pick from searchable dropdowns, the Ollama fallback starts the server if it's stopped and says why when it can't help, and voice keeps only your last phrase, for 5 seconds.
+
 ## 0.24.1
 
 ### 🦉 PR Reviews Use Current Skills
