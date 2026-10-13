@@ -197,3 +197,38 @@ test('findDesignDoc: skips plan-named files and reaches a design doc below', asy
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });
+
+test('plan and design notes saved the way the plan prompts ask land in their own tabs', async () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-prompt-notes-'));
+  const worktreeDir = path.join(tempRoot, 'my-repo');
+  fs.mkdirSync(worktreeDir, { recursive: true });
+
+  // renderer/plan-modal.js: <agent>-plan.md tagged [plan, devloop], and
+  // <agent>-design.md tagged [design, devloop] titled "Design: <task>".
+  writeSessionNote(worktreeDir, {
+    id: 'claude-plan',
+    agent: 'claude',
+    provider: 'anthropic',
+    tags: ['plan', 'devloop'],
+    content: '- [ ] Add the cache\n- [ ] Wire it up',
+    timestamp: '2026-10-13T10:00:00Z',
+  });
+  writeSessionNote(worktreeDir, {
+    id: 'claude-design',
+    agent: 'claude',
+    provider: 'anthropic',
+    tags: ['design', 'devloop'],
+    title: 'Design: add a response cache',
+    content: '## Approach\nAn LRU in front of the client.',
+    timestamp: '2026-10-13T10:00:01Z',
+  });
+
+  try {
+    const plan = await findPlanDoc(worktreeDir);
+    assert.ok(plan.content.includes('- [ ] Add the cache'));
+    const design = await findDesignDoc(worktreeDir);
+    assert.ok(design.content.includes('## Approach'));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
