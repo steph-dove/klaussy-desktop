@@ -348,7 +348,6 @@ window.App = window.App || {};
     if (window.AgentsPanel) commands.push({ label: 'Show Active Agents', action: function () { window.AgentsPanel.show(); } });
     if (window.Voice && window.Voice.isEnabled()) {
       commands.push({ label: 'Voice: What Can I Say?', action: function () { window.Voice.showHelp(); } });
-      commands.push({ label: 'Voice: History', action: function () { window.Voice.showHistory(); } });
       commands.push({ label: 'Voice: Choose Microphone…', action: function () { window.Voice.chooseMic(); } });
     }
     if (App.prReviewMounted) {

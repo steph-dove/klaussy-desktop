@@ -90,10 +90,14 @@ function pickFromReply(reply, actions) {
 async function interpretWithOllama({ text, actions, agentTab = false } = {}) {
   const list = (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && a).slice(0, 120);
   if (!text || !list.length) return { action: null };
+  let { running } = await ollama.probeNow();
+  // Only start a server the user already agreed to in Ollama setup.
+  if (!running && loadConfig().ollamaConsent === 'accepted') running = !!(await ollama.ensureServerRunning()).ok;
+  if (!running) return { action: null, unavailable: 'not-running' };
   const model = await ollama.pickIntentModel();
-  if (!model) return { action: null, unavailable: true };
+  if (!model) return { action: null, unavailable: 'no-model' };
   const reply = await ollama.generateText(buildIntentPrompt(text, list, { agentTab: agentTab === true }), { timeoutMs: 12000, numPredict: 8, prefer: model });
-  if (!reply) return { action: null, unavailable: true };
+  if (!reply) return { action: null, unavailable: 'no-reply' };
   return { action: pickFromReply(reply, list) };
 }
 
