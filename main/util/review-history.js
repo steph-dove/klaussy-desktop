@@ -6,9 +6,7 @@ const { parseForgeUrl } = require('./forge-url');
 async function probeRepoAccess(owner, repo, tokens, fetchFn = fetch) {
   if (!tokens.length) return 'unknown';
   const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-  let allGone = true;
-  for (const token of tokens) {
-    let status;
+  const statusFor = async (token) => {
     try {
       const res = await fetchFn(url, {
         method: 'GET',
@@ -20,14 +18,42 @@ async function probeRepoAccess(owner, repo, tokens, fetchFn = fetch) {
           'User-Agent': 'klaussy-desktop',
         },
       });
-      status = res.status;
+      return res.status;
     } catch {
-      status = null;
+      return null;
     }
-    if (status === 200) return 'ok';
-    if (status !== 404) allGone = false;
-  }
-  return allGone ? 'gone' : 'unknown';
+  };
+  // Accounts are asked at once; the first 200 answers without waiting on the rest.
+  return new Promise((resolve) => {
+    let left = tokens.length;
+    let allGone = true;
+    for (const token of tokens) {
+      statusFor(token).then((status) => {
+        if (status === 200) return resolve('ok');
+        if (status !== 404) allGone = false;
+        if (--left === 0) resolve(allGone ? 'gone' : 'unknown');
+      });
+    }
+  });
+}
+
+// Definite verdicts are reused for ttlMs so opening the picker doesn't probe every time; 'unknown' is asked again.
+function cachedProbe(probe, ttlMs, now = Date.now) {
+  const cache = new Map();
+  return async (owner, repo, ...rest) => {
+    const key = owner + '/' + repo;
+    const hit = cache.get(key);
+    if (hit && now() - hit.at < ttlMs) return hit.verdict;
+    const verdict = await probe(owner, repo, ...rest);
+    if (verdict === 'unknown') cache.delete(key);
+    else cache.set(key, { verdict, at: now() });
+    return verdict;
+  };
+}
+
+function withoutUrls(history, urls) {
+  const drop = new Set(urls);
+  return (history || []).filter((e) => !drop.has(e.url));
 }
 
 async function pruneUnreachableHistory(items, probe) {
@@ -45,7 +71,8 @@ async function pruneUnreachableHistory(items, probe) {
     if (!p || p.forge !== 'github' || p.host !== 'github.com') return true;
     return settled.get(p.owner + '/' + p.repo) !== 'gone';
   });
-  return { items: kept, removed: items.length - kept.length };
+  const keptSet = new Set(kept);
+  return { items: kept, removed: items.length - kept.length, dropped: items.filter((it) => !keptSet.has(it)).map((it) => it.url) };
 }
 
-module.exports = { probeRepoAccess, pruneUnreachableHistory };
+module.exports = { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls };

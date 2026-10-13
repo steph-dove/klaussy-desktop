@@ -62,10 +62,24 @@ function baseEvent(inst) {
 }
 
 // Headless `claude -p` runs fire the same hooks from the same cwd, so only an interactive transcript counts.
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function ownedBySubTab(instances, sessionId) {
+  for (const [, i] of instances) {
+    for (const sub of (i.subTerminals || [])) {
+      if (sub && (sub.sessionId === sessionId || sub.claudeSessionId === sessionId)) return true;
+    }
+  }
+  return false;
+}
+
 function adoptSessionId(inst, hook) {
-  if (!hook.sessionId || inst.claudeSessionId === hook.sessionId) return;
+  // The id ends up on a shell command line (--resume <id>), so only a UUID is stored.
+  if (!SESSION_ID.test(hook.sessionId || '') || inst.claudeSessionId === hook.sessionId) return;
   const { instances } = require('./instances');
   if (instances.get(inst.id) !== inst || (inst.originalMode || inst.mode) !== 'claude') return;
+  // A Claude started by hand in a shell sub-tab reports from the same cwd.
+  if (ownedBySubTab(instances, hook.sessionId)) return;
   if (!hook.transcriptPath || !isInteractiveTranscript(hook.transcriptPath)) return;
   inst.claudeSessionId = hook.sessionId;
 }

@@ -91,13 +91,13 @@ test('a tab with no id yet still gets the new transcript', () => {
 test('after /clear, the next hook moves the tab to the new session', () => {
   reset();
   const wt = worktree();
-  writeTranscript(wt, 'before-clear', 'cli');
-  const file = writeTranscript(wt, 'after-clear', 'cli');
-  const inst = agent(1, wt, { claudeSessionId: 'before-clear' });
+  writeTranscript(wt, '1e0b8c3d-6a2b-4b4c-8d7e-9f0a1b2c3d4e', 'cli');
+  const file = writeTranscript(wt, '2f1c9d4e-7a3b-4c5d-9e8f-0a1b2c3d4e5f', 'cli');
+  const inst = agent(1, wt, { claudeSessionId: '1e0b8c3d-6a2b-4b4c-8d7e-9f0a1b2c3d4e' });
   instances.set(1, inst);
   try {
-    router.handleClaudeHook({ hook_event_name: 'Stop', cwd: wt, session_id: 'after-clear', transcript_path: file });
-    assert.equal(inst.claudeSessionId, 'after-clear');
+    router.handleClaudeHook({ hook_event_name: 'Stop', cwd: wt, session_id: '2f1c9d4e-7a3b-4c5d-9e8f-0a1b2c3d4e5f', transcript_path: file });
+    assert.equal(inst.claudeSessionId, '2f1c9d4e-7a3b-4c5d-9e8f-0a1b2c3d4e5f');
   } finally {
     reset();
   }
@@ -134,4 +134,69 @@ test('a main tab does not adopt a transcript a sub-tab already owns', () => {
   writeTranscript(wt, 'sub-owned', 'cli');
   assignDetectedSessionIds([inst], new Set(['sub-owned']));
   assert.equal(inst.claudeSessionId, undefined);
+});
+
+test('a transcript with no entrypoint yet is not adopted until it says what it is', () => {
+  const wt = worktree();
+  const inst = agent(1, wt, { preSpawnSessionIds: snapshotSessionIds(wt) });
+  const dir = claudeProjectDir(wt);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'just-created.jsonl'), '');
+  assert.equal(detectClaudeSessionId(inst, new Set()), null);
+  assert.equal(findLatestSessionId(wt), null);
+});
+
+test('a transcript with no entrypoint is read again only once it grows', () => {
+  const { isHeadlessTranscript } = require('../../main/util/claude-entrypoint');
+  const wt = worktree();
+  const dir = claudeProjectDir(wt);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'growing.jsonl');
+  fs.writeFileSync(file, JSON.stringify({ type: 'queue-operation' }) + '\n');
+  const realOpen = fs.openSync;
+  let opens = 0;
+  fs.openSync = (...a) => { opens++; return realOpen(...a); };
+  try {
+    isHeadlessTranscript(file);
+    isHeadlessTranscript(file);
+    assert.equal(opens, 1);
+    fs.appendFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'sdk-cli' }) + '\n');
+    assert.equal(isHeadlessTranscript(file), true);
+  } finally {
+    fs.openSync = realOpen;
+  }
+});
+
+test('a hook naming a session a sub-tab owns leaves the main tab alone', () => {
+  reset();
+  const wt = worktree();
+  const mainId = '3a2b1c0d-9e8f-4a7b-8c6d-5e4f3a2b1c0d';
+  const subId = '4b3c2d1e-0f9a-4b8c-9d7e-6f5a4b3c2d1e';
+  writeTranscript(wt, mainId, 'cli');
+  const file = writeTranscript(wt, subId, 'cli');
+  const inst = agent(1, wt, { claudeSessionId: mainId, subTerminals: [{ alive: true, mode: 'claude', sessionId: subId }] });
+  instances.set(1, inst);
+  try {
+    router.handleClaudeHook({ hook_event_name: 'Stop', cwd: wt, session_id: subId, transcript_path: file });
+    assert.equal(inst.claudeSessionId, mainId);
+  } finally {
+    reset();
+  }
+});
+
+test('a hook session id that is not a UUID is never stored', () => {
+  reset();
+  const wt = worktree();
+  const mainId = '5c4d3e2f-1a0b-4c9d-8e7f-6a5b4c3d2e1f';
+  const bad = 'x; rm -rf ~';
+  writeTranscript(wt, mainId, 'cli');
+  const file = writeTranscript(wt, 'bad', 'cli');
+  const inst = agent(1, wt, { claudeSessionId: mainId });
+  instances.set(1, inst);
+  try {
+    router.handleClaudeHook({ hook_event_name: 'Stop', cwd: wt, session_id: bad, transcript_path: file });
+    assert.equal(inst.claudeSessionId, mainId);
+  } finally {
+    reset();
+  }
 });

@@ -18,7 +18,7 @@ const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
 const { claudeProjectDir } = require('../util/claude-paths');
-const { isHeadlessTranscript } = require('../util/claude-entrypoint');
+const { isInteractiveTranscript } = require('../util/claude-entrypoint');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const { allWindows, getMainWindow } = require('./windows');
 const { getProvider, isAgentMode, binFor, displayNameFor } = require('./ai-providers');
@@ -161,7 +161,8 @@ function snapshotSessionIds(worktreePath) {
 
 function listInteractiveSessionFiles(worktreePath) {
   const dir = claudeProjectDir(worktreePath);
-  return listSessionFiles(worktreePath).filter(f => !isHeadlessTranscript(path.join(dir, f.name)));
+  // A file whose entrypoint isn't written yet waits for a later pass rather than being guessed at.
+  return listSessionFiles(worktreePath).filter(f => isInteractiveTranscript(path.join(dir, f.name)));
 }
 
 // Find the session id for a freshly-spawned claude instance: pick the .jsonl

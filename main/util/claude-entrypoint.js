@@ -6,11 +6,15 @@ const fs = require('fs');
 const CHUNK_BYTES = 64 * 1024;
 const MAX_BYTES = 4 * 1024 * 1024;
 const cache = new Map();
+// Size at which a file had no entrypoint yet, so it's only read again once it grows.
+const missingAt = new Map();
 
 function transcriptEntrypoint(file) {
   if (cache.has(file)) return cache.get(file);
   let fd;
   try {
+    const size = fs.statSync(file).size;
+    if (missingAt.get(file) === size) return null;
     fd = fs.openSync(file, 'r');
     const buf = Buffer.alloc(CHUNK_BYTES);
     let tail = '';
@@ -22,11 +26,13 @@ function transcriptEntrypoint(file) {
       const m = text.match(/"entrypoint":"([^"]+)"/);
       if (m) {
         cache.set(file, m[1]);
+        missingAt.delete(file);
         return m[1];
       }
       tail = text.slice(-64);
     }
-    return null; // not written yet; ask again next time
+    missingAt.set(file, size);
+    return null;
   } catch {
     return null;
   } finally {

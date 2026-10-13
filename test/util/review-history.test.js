@@ -2,7 +2,7 @@ require('../setup');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { probeRepoAccess, pruneUnreachableHistory } = require('../../main/util/review-history');
+const { probeRepoAccess, pruneUnreachableHistory, withoutUrls, cachedProbe } = require('../../main/util/review-history');
 
 function fakeFetch(statusByToken) {
   return async (_url, opts) => {
@@ -54,4 +54,41 @@ test('pruneUnreachableHistory drops PRs from repos no account can see', async ()
   ]);
   assert.equal(removed, 2);
   assert.deepEqual(probed.sort(), ['OldOrg/property', 'me/flaky', 'me/keep']);
+});
+
+test('probeRepoAccess answers as soon as one account sees the repo, without waiting on a slow one', async () => {
+  const slow = () => new Promise((resolve) => setTimeout(() => resolve({ status: 404 }), 1000));
+  const fetchFn = async (_url, opts) => (opts.headers.Authorization.endsWith('slow') ? slow() : { status: 200 });
+  const started = Date.now();
+  assert.equal(await probeRepoAccess('o', 'r', ['slow', 'fast'], fetchFn), 'ok');
+  assert.ok(Date.now() - started < 500);
+});
+
+test('pruneUnreachableHistory reports the URLs it dropped', async () => {
+  const items = [{ url: 'https://github.com/me/keep/pull/1' }, { url: 'https://github.com/Old/gone/pull/2' }];
+  const { dropped } = await pruneUnreachableHistory(items, async (o) => (o === 'Old' ? 'gone' : 'ok'));
+  assert.deepEqual(dropped, ['https://github.com/Old/gone/pull/2']);
+});
+
+test('dropping pruned URLs keeps an entry added while the probes ran', () => {
+  const now = [{ url: 'https://github.com/me/new/pull/9' }, { url: 'https://github.com/me/keep/pull/1' }, { url: 'https://github.com/Old/gone/pull/2' }];
+  assert.deepEqual(withoutUrls(now, ['https://github.com/Old/gone/pull/2']).map((e) => e.url),
+    ['https://github.com/me/new/pull/9', 'https://github.com/me/keep/pull/1']);
+});
+
+test('cachedProbe reuses a definite verdict within its TTL but asks again after an unknown', async () => {
+  let calls = 0;
+  let verdict = 'unknown';
+  let now = 0;
+  const probe = cachedProbe(async () => { calls++; return verdict; }, 1000, () => now);
+  await probe('o', 'r');
+  await probe('o', 'r');
+  assert.equal(calls, 2);
+  verdict = 'gone';
+  await probe('o', 'r');
+  await probe('o', 'r');
+  assert.equal(calls, 3);
+  now = 2000;
+  await probe('o', 'r');
+  assert.equal(calls, 4);
 });

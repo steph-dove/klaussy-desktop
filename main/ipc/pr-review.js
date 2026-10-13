@@ -31,7 +31,7 @@ const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
 const { normalizeGitLabMr, normalizeBitbucketPr } = require('../util/forge-adapter');
 const { glabEnvForAccount, getGlabToken } = require('../util/glab-exec');
 const { humanizeComment } = require('../util/humanize-comment');
-const { probeRepoAccess, pruneUnreachableHistory } = require('../util/review-history');
+const { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls } = require('../util/review-history');
 const { readGhAccountsChecked } = require('./gh');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
@@ -404,6 +404,8 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   }
 });
 
+const probeRepoCached = cachedProbe(probeRepoAccess, 60 * 60 * 1000);
+
 ipcMain.handle('pr-recent', async () => {
   const items = loadConfig().reviewHistory || [];
   let pruned;
@@ -411,15 +413,15 @@ ipcMain.handle('pr-recent', async () => {
     const { accounts } = await readGhAccountsChecked();
     const tokens = accounts.filter((a) => a.valid)
       .map((a) => ghEnvForAccount(a.username).GH_TOKEN).filter(Boolean);
-    pruned = await pruneUnreachableHistory(items, (owner, repo) => probeRepoAccess(owner, repo, tokens));
+    pruned = await pruneUnreachableHistory(items, (owner, repo) => probeRepoCached(owner, repo, tokens));
   } catch (err) {
     console.warn('[pr-recent] access check failed, showing unpruned history:', err.message);
     return { items };
   }
   if (pruned.removed > 0) {
+    // Re-read: a review opened while the probes ran must survive.
     const config = loadConfig();
-    const keep = new Set(pruned.items.map((e) => e.url));
-    config.reviewHistory = (config.reviewHistory || []).filter((e) => keep.has(e.url));
+    config.reviewHistory = withoutUrls(config.reviewHistory, pruned.dropped);
     saveConfig(config);
   }
   return { items: pruned.items };

@@ -7,7 +7,7 @@ const os = require('os');
 const fs = require('fs');
 const { fileURLToPath } = require('url');
 const { claudeProjectDir } = require('../util/claude-paths');
-const { isHeadlessTranscript } = require('../util/claude-entrypoint');
+const { isInteractiveTranscript } = require('../util/claude-entrypoint');
 const { loadConfig } = require('../util/config');
 const { samePath } = require('../util/platform');
 
@@ -241,7 +241,7 @@ const PROVIDERS = {
     },
     findNewSession(worktreePath, snapshot) {
       const files = listJsonlFiles(this.sessionDir(worktreePath), false)
-        .filter(f => !snapshot.has(f.path) && !isHeadlessTranscript(f.path))
+        .filter(f => !snapshot.has(f.path) && isInteractiveTranscript(f.path))
         .sort((a, b) => (a.ctimeNs < b.ctimeNs ? -1 : a.ctimeNs > b.ctimeNs ? 1 : 0));
       if (!files.length) return null;
       return { filePath: files[0].path, sessionId: path.basename(files[0].path).replace(/\.jsonl$/, '') };
