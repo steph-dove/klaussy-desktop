@@ -8011,3 +8011,38 @@ button.js-ai-review:hover,
 .pr-review-diff-pre .diff-line:focus-visible {
   outline-offset: -2px;
 }
+
+/* Hosted review App promo, under the verdict banner */
+.pr-ai-app-promo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px 0;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  font-size: 12px;
+  color: var(--text);
+}
+.pr-ai-app-promo-text { flex: 0 1 auto; }
+.pr-ai-app-promo-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.pr-ai-app-promo-link:hover { text-decoration: underline; }
+.pr-ai-app-promo-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pr-ai-app-promo-dismiss:hover { color: var(--text); }

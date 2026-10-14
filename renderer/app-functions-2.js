@@ -363,6 +363,7 @@ window.App = window.App || {};
     commands.push({ label: 'Git accounts (GitHub & GitLab)', action: function () { Dialogs.showGhAccounts(); } });
     commands.push({ label: 'Check dependencies…', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: App.showLogViewer });
+    commands.push({ label: 'Add klaussy review to GitHub\u2026', action: function () { window.klaus.gh.openExternal('https://github.com/apps/klaussy-review'); } });
     commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
     commands.push({ label: 'About Klaussy', action: App.showAboutDialog });
 
