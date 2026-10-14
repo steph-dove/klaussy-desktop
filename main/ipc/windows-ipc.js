@@ -2,6 +2,7 @@
 // claude-info, system-theme forwarding, and the log-ring viewer. Handlers
 // register on require — main.js just needs to `require()` this file.
 
+const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { app, ipcMain, BrowserWindow, nativeTheme } = require('electron');
@@ -87,6 +88,7 @@ ipcMain.handle('get-about-info', async () => {
     appVersion: app.getVersion(),
     electronVersion: process.versions.electron,
     nodeVersion: process.versions.node,
+    os: `${process.platform} ${os.release()} (${process.arch})`,
     // Per-agent path/version for the About panel's CLI list.
     agents,
     // Back-compat: older renderer code reads these two directly.

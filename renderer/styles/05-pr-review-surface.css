@@ -3486,6 +3486,7 @@ button.pr-check-toggle {
 .about-licenses:hover { background: var(--surface-hover); }
 
 .about-discord,
+.about-feedback,
 .about-manage-license {
   background: transparent;
   color: var(--text);
@@ -3496,6 +3497,7 @@ button.pr-check-toggle {
   cursor: pointer;
 }
 .about-discord:hover,
+.about-feedback:hover,
 .about-manage-license:hover { background: var(--surface-hover); }
 
 /* Open Source Licenses dialog */
