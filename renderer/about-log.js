@@ -65,6 +65,7 @@ window.Dialogs = (function () {
           '<button class="about-howto" type="button">How to use</button>' +
           '<button class="about-licenses" type="button">Licenses</button>' +
           '<button class="about-discord" type="button">Join Discord</button>' +
+          '<button class="about-feedback" type="button">Send feedback</button>' +
           '<button class="about-close" type="button">Close</button>' +
         '</div>';
       dialog.querySelector('.about-close').addEventListener('click', function () { overlay.remove(); });
@@ -76,6 +77,10 @@ window.Dialogs = (function () {
       if (licBtn) licBtn.addEventListener('click', function () {
         overlay.remove();
         showLicenses();
+      });
+      dialog.querySelector('.about-feedback').addEventListener('click', function () {
+        overlay.remove();
+        openFeedback();
       });
       var discBtn = dialog.querySelector('.about-discord');
       if (discBtn) discBtn.addEventListener('click', function () {
@@ -530,7 +535,9 @@ window.Dialogs = (function () {
   function openFeedback() {
     window.klaus.ui.getAboutInfo().then(function (info) {
       var lines = [
+        '**Product**: Klaussy Desktop',
         '**Klaussy**: ' + (info.appVersion || ''),
+        '**OS**: ' + (info.os || ''),
         '**Electron**: ' + (info.electronVersion || ''),
         '**Node**: ' + (info.nodeVersion || ''),
         '**Claude CLI**: ' + (info.claudeVersion || 'not detected'),
@@ -549,8 +556,7 @@ window.Dialogs = (function () {
         '### Logs',
         '<!-- Cmd+K → View Logs → Copy and paste here -->',
       ];
-      // Source repo is private — issues live in the public mirror so the
-      // first batch of devs can file without source-repo access.
+      // One public issues home for every klaussy product (Desktop, review App and Action, CLI).
       var url = 'https://github.com/steph-dove/klaussy-desktop-feedback/issues/new'
         + '?labels=feedback'
         + '&title=' + encodeURIComponent('[feedback] ')
