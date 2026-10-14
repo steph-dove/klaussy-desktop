@@ -5,7 +5,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/steph-dove/klaussy-desktop?style=social)](https://github.com/steph-dove/klaussy-desktop/stargazers)
 [![Downloads served](https://img.shields.io/badge/downloads%20served-316-1f6feb?logo=github&logoColor=white&labelColor=2ea043)](https://github.com/steph-dove/klaussy-desktop/releases)
 
-⬇️ **[Download Klaussy Desktop](https://github.com/steph-dove/klaussy-desktop/releases/latest)** for macOS, Windows and Linux. Free for individual use.
+⬇️ **[Download Klaussy Desktop](https://www.klaussy.com/#download)** for macOS, Windows and Linux. Free for individual use.
 
 > **The desktop is the face. The [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents) engine is the spine.** While other orchestrators give you a worktree grid, Klaussy brings the conventions, custom skills, and active git-level guardrails that actually keep agents aligned with your codebase.
 
