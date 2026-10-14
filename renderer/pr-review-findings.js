@@ -550,7 +550,25 @@
     }
 
     return '<div class="pr-ai-tab pr-ai-' + status + '">'
-      + localBlock + head + PR.renderReviewSummary() + progress + implementAllSummary + implementAllError + body
+      + localBlock + head + PR.renderReviewSummary() + (status === 'done' ? PR.renderAppPromo() : '')
+      + progress + implementAllSummary + implementAllError + body
+    + '</div>';
+  };
+
+  PR.APP_PROMO_URL = 'https://github.com/apps/klaussy-review';
+  PR.APP_PROMO_DISMISSED_KEY = 'reviewAppPromoDismissed';
+
+  PR.appPromoDismissed = function() {
+    try { return localStorage.getItem(PR.APP_PROMO_DISMISSED_KEY) === '1'; } catch (_) { return false; }
+  };
+
+  // Offer the hosted GitHub App under a finished review, GitHub PRs only, until dismissed.
+  PR.renderAppPromo = function() {
+    if (PR.forgeName() !== 'GitHub' || PR.appPromoDismissed()) return '';
+    return '<div class="pr-ai-app-promo">'
+      + '<span class="pr-ai-app-promo-text">Want this on every pull request, including your teammates\u2019?</span>'
+      + '<button class="pr-ai-app-promo-link" type="button">Add klaussy review to GitHub \u2192</button>'
+      + '<button class="pr-ai-app-promo-dismiss" type="button" title="Don\u2019t show this again" aria-label="Don\u2019t show this again">&times;</button>'
     + '</div>';
   };
 

@@ -790,6 +790,15 @@
     var runBtn = PR.hostEl.querySelector('.pr-ai-run');
     if (runBtn) runBtn.addEventListener('click', function () { PR.startAiReview(); });
 
+    var promoLink = PR.hostEl.querySelector('.pr-ai-app-promo-link');
+    if (promoLink) promoLink.addEventListener('click', function () { window.klaus.gh.openExternal(PR.APP_PROMO_URL); });
+    var promoDismiss = PR.hostEl.querySelector('.pr-ai-app-promo-dismiss');
+    if (promoDismiss) promoDismiss.addEventListener('click', function () {
+      try { localStorage.setItem(PR.APP_PROMO_DISMISSED_KEY, '1'); } catch (_) {}
+      var promo = PR.hostEl.querySelector('.pr-ai-app-promo');
+      if (promo) promo.remove();
+    });
+
     var rerunBtn = PR.hostEl.querySelector('.pr-ai-rerun');
     if (rerunBtn) rerunBtn.addEventListener('click', function () {
       // Cancel any in-flight implement run so its PTY exits, but KEEP the

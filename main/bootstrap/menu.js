@@ -6,7 +6,7 @@
 // though the renderer does its own paste handling — the system shortcut path
 // is expected to work in input fields.
 
-const { app, BrowserWindow, Menu } = require('electron');
+const { app, BrowserWindow, Menu, shell } = require('electron');
 const { createWindow, allWindows, getMainWindow } = require('../state/windows');
 
 // These dialogs live in the app window's renderer; PR review, Preferences and pop-outs don't listen for them.
@@ -130,6 +130,10 @@ function installAppMenu() {
             const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-shortcuts');
           },
+        },
+        {
+          label: 'Add klaussy review to GitHub…',
+          click: () => { shell.openExternal('https://github.com/apps/klaussy-review'); },
         },
         {
           label: 'Send feedback…',
