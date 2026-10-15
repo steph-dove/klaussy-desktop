@@ -647,6 +647,21 @@ function baseFor(repoOrWorktreePath) {
 // committed files would be destructive. For a worktree this writes to the
 // shared common git dir, so the base repo and every sibling worktree inherit it.
 const BOOTSTRAP_EXCLUDE_MARKER = '# klaussy: agent bootstrap (generated, not committed)';
+// First klaussy-agents release whose `init --local` also hides scaffolding an
+// earlier plain init left behind.
+const LOCAL_INIT_MIN_VERSION = '0.44.1';
+
+// --local keeps everything init writes out of git for this clone, which
+// excludeBootstrapArtifacts' fixed list can't: every agent's dirs, the
+// .gitignore entries, and edits to committed files (put back, or moved to
+// settings.local.json). Older klaussy rejects the flag.
+function klaussyInitArgs(base, branch, version, enrich) {
+  const args = ['init', '--repo', base, '-b', branch];
+  if (!enrich) args.push('--skip-enrich');
+  // versionBelow is false for an unparseable version, so check it parses first.
+  if (parseVersionTriple(version) && !versionBelow(version, LOCAL_INIT_MIN_VERSION)) args.push('--local');
+  return args;
+}
 // Generated root conventions docs — Claude reads CLAUDE.md, Gemini GEMINI.md,
 // everything else AGENTS.md; shared with syncIntelIntoWorktree so the excluded
 // and synced sets can't drift apart.
@@ -810,9 +825,27 @@ function syncSkillsIntoWorktree(worktreePath) {
   }
 }
 
+// Hooks only: the rest of settings.local.json is the user's own permissions and
+// preferences, which stay per-checkout.
+function syncLocalSettingsHooks(base, worktreePath) {
+  const rel = path.join('.claude', 'settings.local.json');
+  const src = path.join(base, rel);
+  const dst = path.join(worktreePath, rel);
+  if (!fs.existsSync(src) || isTrackedInWorktree(worktreePath, rel)) return;
+  let srcHooks = null;
+  try { srcHooks = JSON.parse(fs.readFileSync(src, 'utf-8')).hooks; } catch { return; }
+  if (!srcHooks || typeof srcHooks !== 'object' || !Object.keys(srcHooks).length) return;
+  if (!fs.existsSync(dst)) {
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.writeFileSync(dst, '{}\n');
+  }
+  mergeMissingHooksIntoWorktree(src, dst);
+}
+
 // Copy the base repo's intel into a worktree, which holds only COMMITTED files
 // and so has none of the generated conventions. Generated docs refresh when the
-// base moves on; committed docs and settings.local.json are never touched.
+// base moves on; committed docs are never touched, and settings.local.json only
+// ever gains klaussy hooks it's missing.
 function syncIntelIntoWorktree(worktreePath) {
   try {
     const base = baseFor(worktreePath);
@@ -868,6 +901,9 @@ function syncIntelIntoWorktree(worktreePath) {
         syncAgentDir(worktreePath, src, dst, path.join(...segs));
       }
     }
+    // `init --local` puts klaussy's hooks in settings.local.json when the repo
+    // commits settings.json, so they'd never reach a worktree via the copy above.
+    syncLocalSettingsHooks(base, worktreePath);
     // Heal a stale klausify-era settings.json — whether just copied from a
     // not-yet-repaired base or already present in this worktree (the copy loop
     // skips existing files, so an old bad one would otherwise survive).
@@ -1241,8 +1277,7 @@ function ensureRepoIntel(repoOrWorktreePath) {
         // skills/rules/settings + a templated CLAUDE.md, just without the
         // LLM rewrite.
         const enrich = loadConfig().repoIntelEnrich === true;
-        const initArgs = ['init', '--repo', base, '-b', defaultBranchOf(base)];
-        if (!enrich) initArgs.push('--skip-enrich');
+        const initArgs = klaussyInitArgs(base, defaultBranchOf(base), currentVersion, enrich);
         //
         // Guard: klaussy's exists-check → write window isn't atomic (it
         // even runs a pip upgrade in between). Snapshot a pre-existing
@@ -1420,4 +1455,5 @@ module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, sy
   // Exported for unit testing of the version-floor comparison.
   versionBelow, latestKlaussyVersion, _resetLatestCache,
   // Exported for unit testing of the regeneration stamp.
-  stampFor, listPkgVersion };
+  stampFor, listPkgVersion,
+  klaussyInitArgs };

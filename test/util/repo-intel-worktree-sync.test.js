@@ -154,3 +154,46 @@ test('a refresh that fails partway keeps the old stamp so the next sync retries'
 
   assert.equal(fs.readFileSync(path.join(wtSkills, '.klaussy-version'), 'utf-8').trim(), '0.36.1');
 });
+
+function writeLocalSettings(root, data) {
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude', 'settings.local.json'), JSON.stringify(data, null, 2) + '\n');
+}
+
+function readLocalSettings(root) {
+  return JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.local.json'), 'utf-8'));
+}
+
+const GUARD_HOOK = { matcher: 'Read', hooks: [{ type: 'command', command: 'klaussy-hook guard.py' }] };
+
+// `init --local` moves klaussy's hooks here when the repo commits settings.json.
+test('klaussy hooks in the base settings.local.json reach the worktree, without its permissions', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeLocalSettings(base, { permissions: { allow: ['Bash(ls)'] }, hooks: { PreToolUse: [GUARD_HOOK] } });
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.deepEqual(readLocalSettings(worktree), { hooks: { PreToolUse: [GUARD_HOOK] } });
+});
+
+test('a worktree settings.local.json keeps its own entries and gains missing hooks', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeLocalSettings(base, { hooks: { PreToolUse: [GUARD_HOOK] } });
+  writeLocalSettings(worktree, { permissions: { allow: ['Bash(npm test)'] } });
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.deepEqual(readLocalSettings(worktree), {
+    permissions: { allow: ['Bash(npm test)'] },
+    hooks: { PreToolUse: [GUARD_HOOK] },
+  });
+});
+
+test('no hooks in the base settings.local.json means no file in the worktree', () => {
+  const { base, worktree } = makeBaseAndWorktree();
+  writeLocalSettings(base, { permissions: { allow: ['Bash(ls)'] } });
+
+  syncIntelIntoWorktree(worktree);
+
+  assert.equal(fs.existsSync(path.join(worktree, '.claude', 'settings.local.json')), false);
+});
