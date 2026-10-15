@@ -65,3 +65,34 @@ test('flushTerminalOutput delivers pending output synchronously', (t) => {
   flushTerminalOutput(904);
   assert.deepEqual(wc.received, [['terminal-data-904', 'Goodbye!']]);
 });
+
+test('idle detection sees each batch once, after the flush', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const { instances, clearIdleTimer } = require('../../main/state/instances');
+  const inst = { id: 905, mode: 'claude', alive: true, name: 'idle-test', worktreePath: '/wt/idle', recentOutput: '' };
+  instances.set(905, inst);
+  try {
+    sendToTerminalSubscribers('terminal-data-905', 'Reading ');
+    sendToTerminalSubscribers('terminal-data-905', 'plan.md');
+    assert.equal(inst.recentOutput, '', 'nothing is scanned before the batch flushes');
+    t.mock.timers.tick(4);
+    assert.equal(inst.recentOutput, 'Reading plan.md');
+  } finally {
+    clearIdleTimer(inst);
+    instances.delete(905);
+  }
+});
+
+test('a converted shell is not run through idle detection', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { instances } = require('../../main/state/instances');
+  const inst = { id: 906, mode: 'shell', alive: true, recentOutput: '' };
+  instances.set(906, inst);
+  try {
+    sendToTerminalSubscribers('terminal-data-906', '$ ls\r\n');
+    t.mock.timers.tick(4);
+    assert.equal(inst.recentOutput, '');
+  } finally {
+    instances.delete(906);
+  }
+});

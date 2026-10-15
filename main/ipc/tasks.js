@@ -17,7 +17,7 @@ const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
-  processIdleDetection, processSubOutput, clearIdleTimer, convertInstanceToShell,
+  processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
@@ -1466,7 +1466,6 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   inst.restarting = false;
 
   ptyProc.onData((data) => {
-    processIdleDetection(inst, data);
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 

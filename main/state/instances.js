@@ -113,7 +113,15 @@ function unsubscribeTerminalChannel(channel, webContents) {
   if (subs.size === 0) terminalSubscribers.delete(channel);
 }
 
+const AGENT_DATA_CHANNEL_RE = /^terminal-data-(\d+)$/;
+
 function deliverToSubscribers(channel, ...args) {
+  // Idle and approval detection runs once per coalesced batch rather than once per PTY chunk.
+  const agentData = typeof args[0] === 'string' && AGENT_DATA_CHANNEL_RE.exec(channel);
+  if (agentData) {
+    const inst = instances.get(Number(agentData[1]));
+    if (inst) processIdleDetection(inst, args[0]);
+  }
   const subs = terminalSubscribers.get(channel);
   if (!subs || subs.size === 0) {
     if (!everSubscribed.has(channel)) holdTerminalOutput(channel, args);
@@ -930,7 +938,6 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   }
 
   ptyProc.onData((data) => {
-    processIdleDetection(instance, data);
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
