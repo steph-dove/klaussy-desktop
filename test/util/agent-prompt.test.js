@@ -42,7 +42,8 @@ test('copilot gets its prompt behind -i, never as a bare argument', () => {
   // `copilot "<prompt>"` reads the prompt as a subcommand: "Invalid command format".
   const { getProvider } = require('../../main/state/ai-providers');
   const staged = stageInitialPrompt(getProvider('copilot'), 'copilot', 'run the owl');
-  assert.match(staged.agentCmd, /^copilot -i "\$\(cat '/);
+  // The file read after -i is $(cat …) on POSIX, (Get-Content …) on Windows.
+  assert.match(staged.agentCmd, /^copilot -i ["(]/);
 });
 
 test('an empty prompt stages nothing, paste provider or not', () => {
