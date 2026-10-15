@@ -48,10 +48,18 @@ window.CommandPalette = (function () {
         });
         item.addEventListener('mouseenter', function () {
           selectedIndex = i;
-          render();
+          updateSelection(false);
         });
         list.appendChild(item);
       });
+    }
+
+    // Hover passes scroll=false so the list doesn't jump under the pointer.
+    function updateSelection(scroll) {
+      var items = list.querySelectorAll('.palette-item');
+      items.forEach(function (el, i) { el.classList.toggle('selected', i === selectedIndex); });
+      var el = items[selectedIndex];
+      if (scroll && el) el.scrollIntoView({ block: 'nearest' });
     }
 
     input.addEventListener('input', function () {
@@ -65,11 +73,11 @@ window.CommandPalette = (function () {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1);
-        render();
+        updateSelection(true);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         selectedIndex = Math.max(selectedIndex - 1, 0);
-        render();
+        updateSelection(true);
       } else if (e.key === 'Enter') {
         e.preventDefault();
         if (filtered[selectedIndex]) {
