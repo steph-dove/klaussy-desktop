@@ -1,5 +1,4 @@
-// Batches PTY output per channel so a burst becomes one IPC message per tick
-// instead of one per chunk; the renderer's input handling shares that thread.
+// Batches PTY output per channel into one IPC message per tick, since the renderer's input handling shares that thread.
 
 function createOutputCoalescer({
   send,
@@ -41,7 +40,7 @@ function createOutputCoalescer({
     if (!timer) timer = setTimer(flushAll, flushMs);
   }
 
-  return { push, flush, flushAll };
+  return { push, flush };
 }
 
 module.exports = { createOutputCoalescer };

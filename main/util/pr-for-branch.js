@@ -1,5 +1,4 @@
-// Looks up the PR for a worktree's branch for the PR tab and the dev-loop panel.
-// Runs on the main process, so every gh call here must be async.
+// Runs on the main process for the PR tab and dev-loop panel, so every gh call here must be async.
 const { classifyGhError, activeGhAccountP } = require('./gh-error');
 
 const PR_JSON_FIELDS = 'number,title,state,body,url,headRefName,baseRefName,headRefOid,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft';
@@ -11,8 +10,7 @@ function errText(err) {
 
 // Never rejects: pr-panel reads result.error without a try/catch.
 async function prForBranch(worktreePath, { hint, gh }) {
-  // A worktree from "Check out locally" knows its PR number and base repo,
-  // which branch matching misses for fork PRs.
+  // A "Check out locally" worktree knows its PR number and base repo, which branch matching misses for forks.
   if (hint && hint.prNumber) {
     try {
       const args = ['pr', 'view', String(hint.prNumber), '--json', PR_JSON_FIELDS];
@@ -36,4 +34,4 @@ async function prForBranch(worktreePath, { hint, gh }) {
   }
 }
 
-module.exports = { prForBranch, PR_JSON_FIELDS };
+module.exports = { prForBranch };
