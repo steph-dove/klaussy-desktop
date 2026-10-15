@@ -821,19 +821,12 @@ ipcMain.handle('pr-reply-to-comment', async (_event, { worktreePath, prNumber, c
 
 // ---- PR Interaction ----
 
-// The PR tab and the dev-loop panel often ask for the same worktree at once on a task switch.
-const prForBranchInFlight = new Map();
-
 ipcMain.handle('pr-for-branch', (_event, { worktreePath }) => {
-  if (prForBranchInFlight.has(worktreePath)) return prForBranchInFlight.get(worktreePath);
   let hint = null;
   for (const inst of instances.values()) {
     if (inst.worktreePath === worktreePath && inst.prNumber) { hint = inst; break; }
   }
-  const p = prForBranch(worktreePath, { hint, gh: ghExecP })
-    .finally(() => prForBranchInFlight.delete(worktreePath));
-  prForBranchInFlight.set(worktreePath, p);
-  return p;
+  return prForBranch(worktreePath, { hint, gh: ghExecP });
 });
 
 ipcMain.handle('pr-add-review-comment', async (_event, { worktreePath, prNumber, body, path: filePath, line, side, startLine, startSide, commitId }) => {

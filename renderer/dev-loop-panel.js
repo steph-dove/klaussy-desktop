@@ -350,7 +350,8 @@ window.DevLoopPanel = (function () {
       }
       state.evidence = res.evidence || null;
       var prChanged = false;
-      if (res.evidence && res.evidence.prUrl && !state.prUrl) {
+      // The branch's own PR wins over one scraped from terminal output or left from a closed PR.
+      if (res.evidence && res.evidence.prUrl && res.evidence.prUrl !== state.prUrl) {
         state.prUrl = res.evidence.prUrl;
         state.prNumber = res.evidence.prNumber;
         prChanged = true;
@@ -863,7 +864,7 @@ window.DevLoopPanel = (function () {
         // Painting from cache first: waiting on the refresh left the click dead.
         loading = Boolean(refreshes);
         renderActiveView();
-        if (refreshes) load(currentWorktreePath);
+        if (refreshes) load(currentWorktreePath, true);
       });
     });
 

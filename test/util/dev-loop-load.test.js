@@ -133,3 +133,23 @@ test('a tab that starts a loop later is tracked again', () => {
   panel.feedTerminalData(3, '## Phase 4 - QA the change');
   assert.equal(panel.getState(3).currentPhase, 4);
 });
+
+test('the branch PR from evidence replaces a stale PR link', async () => {
+  const fs = global.window.klaus.fs;
+  const original = fs.devLoopEvidence;
+  fs.devLoopEvidence = () => Promise.resolve({
+    evidence: { prNumber: 42, prUrl: 'https://github.com/o/r/pull/42', qaMedia: 0 },
+    phase: 6,
+  });
+  try {
+    const state = panel.getState(1);
+    state.prUrl = 'https://github.com/other/repo/pull/7';
+    state.prNumber = 7;
+    panel.load('/wt/a', true);
+    await settle();
+    assert.equal(panel.getState(1).prUrl, 'https://github.com/o/r/pull/42');
+    assert.equal(panel.getState(1).prNumber, 42);
+  } finally {
+    fs.devLoopEvidence = original;
+  }
+});

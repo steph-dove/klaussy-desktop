@@ -69,17 +69,17 @@ test('concurrent lookups for one worktree share a single git spawn', async () =>
   assert.deepEqual(await b, { GH_TOKEN: 'tok-owner-c' });
 });
 
-test('a worktree with no readable remote resolves to {} and never asks gh for a token', async () => {
+test('a worktree with no readable remote resolves to {} and retries once origin exists', async () => {
   gitFails = true;
   try {
     const authBefore = asyncCalls.filter((c) => c[0] === 'gh').length;
     assert.deepEqual(await resolveGhEnvP({ cwd: '/wt/not-a-repo' }), {});
     assert.equal(asyncCalls.filter((c) => c[0] === 'gh').length, authBefore);
-    assert.deepEqual(await resolveGhEnvP({ cwd: '/wt/not-a-repo' }), {});
-    assert.equal(count(asyncCalls, 'git', '/wt/not-a-repo'), 1, 'the miss is cached too');
   } finally {
     gitFails = false;
   }
+  assert.deepEqual(await resolveGhEnvP({ cwd: '/wt/not-a-repo' }), { GH_TOKEN: 'tok-not-a-repo' });
+  assert.equal(count(asyncCalls, 'git', '/wt/not-a-repo'), 2, 'a failed lookup is not cached');
 });
 
 test('the sync ghEnvForRepo reuses an owner the async path already cached', () => {

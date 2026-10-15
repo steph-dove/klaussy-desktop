@@ -94,7 +94,8 @@ function repoOwnerSync(cwd) {
   try {
     owner = ownerFromRemoteUrl(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString());
   } catch {}
-  repoOwnerCache.set(cwd, { owner, at: Date.now() });
+  // A failed lookup isn't cached: origin may be added moments later.
+  if (owner) repoOwnerCache.set(cwd, { owner, at: Date.now() });
   return owner;
 }
 
@@ -107,7 +108,7 @@ async function repoOwnerP(cwd) {
       const { stdout } = await execFileP('git', ['remote', 'get-url', 'origin'], { cwd });
       owner = ownerFromRemoteUrl(stdout);
     } catch {}
-    repoOwnerCache.set(cwd, { owner, at: Date.now() });
+    if (owner) repoOwnerCache.set(cwd, { owner, at: Date.now() });
     return owner;
   });
 }
@@ -190,10 +191,6 @@ async function ghExecP(args, opts = {}) {
   });
 }
 
-// Resolve a gh token for a specific logged-in account (by username), so a
-// caller can run a gh command AS that account without `gh auth switch` flipping
-// the global active account. Returns { GH_TOKEN } or {} if no token. Cached
-// (keyed distinctly from the repo-owner cache).
 function ghAccountUser(username) {
   // The PR picker passes its account ids ('github:<user>', 'gitlab:...').
   if (typeof username === 'string' && username.startsWith('github:')) username = username.slice('github:'.length);
@@ -201,6 +198,10 @@ function ghAccountUser(username) {
   return username;
 }
 
+// Resolve a gh token for a specific logged-in account (by username), so a
+// caller can run a gh command AS that account without `gh auth switch` flipping
+// the global active account. Returns { GH_TOKEN } or {} if no token. Cached
+// (keyed distinctly from the repo-owner cache).
 function ghEnvForAccount(username) {
   const user = ghAccountUser(username);
   return user ? tokenEnvSync('acct:' + user, user) : {};

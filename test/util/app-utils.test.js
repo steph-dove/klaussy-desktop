@@ -215,54 +215,84 @@ function fakeWebglAddon({ failLoad = false } = {}) {
   WebglAddon.prototype.onContextLoss = function (fn) { this.lossHandlers.push(fn); };
   WebglAddon.prototype.dispose = function () { this.disposed = true; };
   const terminal = {
-    loaded: [],
+    element: {},
+    addons: [],
     loadAddon(addon) {
-      if (failLoad) throw new Error('WebGL2 not supported');
-      this.loaded.push(addon);
+      if (failLoad && addon instanceof WebglAddon) throw new Error('WebGL2 not supported');
+      this.addons.push(addon);
     },
+    dispose() { this.addons.forEach((a) => a.dispose()); },
   };
   return { ns: { WebglAddon }, made, terminal };
 }
 
-test('attachWebgl: loads the GPU renderer when the addon is present', () => {
-  const { ns, made, terminal } = fakeWebglAddon();
-  global.window.WebglAddon = ns;
-  try {
-    const addon = AppUtils.attachWebgl(terminal);
-    assert.equal(addon, made[0]);
-    assert.deepEqual(terminal.loaded, [addon]);
-  } finally {
-    delete global.window.WebglAddon;
-  }
-});
+let observers = [];
+function FakeObserver(cb) { this.cb = cb; this.disconnected = false; observers.push(this); }
+FakeObserver.prototype.observe = function (el) { this.el = el; };
+FakeObserver.prototype.disconnect = function () { this.disconnected = true; };
+function setVisible(visible) { observers.at(-1).cb([{ isIntersecting: visible }]); }
 
-test('attachWebgl: a lost GPU context drops back to the DOM renderer', () => {
-  const { ns, made, terminal } = fakeWebglAddon();
-  global.window.WebglAddon = ns;
-  try {
-    AppUtils.attachWebgl(terminal);
-    made[0].lossHandlers.forEach((fn) => fn());
-    assert.equal(made[0].disposed, true);
-  } finally {
-    delete global.window.WebglAddon;
-  }
-});
-
-test('attachWebgl: a failed load leaves the DOM renderer and does not throw', () => {
-  const { ns, made, terminal } = fakeWebglAddon({ failLoad: true });
-  global.window.WebglAddon = ns;
+function withWebgl(opts, fn) {
+  const fake = fakeWebglAddon(opts);
+  global.window.WebglAddon = fake.ns;
+  global.IntersectionObserver = FakeObserver;
+  observers = [];
   const warn = console.warn;
   console.warn = () => {};
-  try {
-    assert.equal(AppUtils.attachWebgl(terminal), null);
-    assert.equal(made[0].disposed, true);
-  } finally {
+  try { fn(fake); } finally {
     console.warn = warn;
     delete global.window.WebglAddon;
+    delete global.IntersectionObserver;
   }
+}
+
+test('attachWebgl: a terminal holds a GPU context only while it is on screen', () => {
+  withWebgl({}, ({ made, terminal }) => {
+    AppUtils.attachWebgl(terminal);
+    assert.equal(made.length, 0, 'nothing until the terminal is visible');
+    setVisible(true);
+    assert.equal(made.length, 1);
+    setVisible(false);
+    assert.equal(made[0].disposed, true, 'hidden terminals give their context back');
+    setVisible(true);
+    assert.equal(made.length, 2, 'showing it again re-attaches');
+  });
+});
+
+test('attachWebgl: a lost context falls back to DOM and recovers on the next show', () => {
+  withWebgl({}, ({ made, terminal }) => {
+    AppUtils.attachWebgl(terminal);
+    setVisible(true);
+    made[0].lossHandlers.forEach((fn) => fn());
+    assert.equal(made[0].disposed, true);
+    setVisible(false);
+    setVisible(true);
+    assert.equal(made.length, 2);
+  });
+});
+
+test('attachWebgl: a machine without WebGL stays on the DOM renderer and stops retrying', () => {
+  withWebgl({ failLoad: true }, ({ made, terminal }) => {
+    AppUtils.attachWebgl(terminal);
+    setVisible(true);
+    setVisible(false);
+    setVisible(true);
+    assert.equal(made.length, 1, 'one failed attempt, no retry loop');
+    assert.equal(made[0].disposed, true);
+  });
+});
+
+test('attachWebgl: disposing the terminal disconnects the observer', () => {
+  withWebgl({}, ({ made, terminal }) => {
+    AppUtils.attachWebgl(terminal);
+    setVisible(true);
+    terminal.dispose();
+    assert.equal(observers[0].disconnected, true);
+    assert.equal(made[0].disposed, true);
+  });
 });
 
 test('attachWebgl: no addon script means no-op', () => {
-  assert.equal(AppUtils.attachWebgl({ loadAddon() { throw new Error('should not load'); } }), null);
-  assert.equal(AppUtils.attachWebgl(null), null);
+  assert.doesNotThrow(() => AppUtils.attachWebgl({ element: {}, loadAddon() { throw new Error('should not load'); } }));
+  assert.doesNotThrow(() => AppUtils.attachWebgl(null));
 });
