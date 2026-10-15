@@ -47,6 +47,7 @@
 
     var container = document.getElementById('popout-terminal');
     terminal.open(container);
+    AppUtils.attachWebgl(terminal);
     AppUtils.labelTerminal(terminal, function () { return name + ' terminal'; });
 
     setTimeout(function () {

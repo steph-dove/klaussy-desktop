@@ -204,3 +204,65 @@ test('fuzzyMatch: any word order, substrings, and small typos', () => {
   assert.equal(AppUtils.fuzzyMatch('fox', title), false);
   assert.equal(AppUtils.fuzzyMatch('', title), true);
 });
+
+function fakeWebglAddon({ failLoad = false } = {}) {
+  const made = [];
+  function WebglAddon() {
+    this.disposed = false;
+    this.lossHandlers = [];
+    made.push(this);
+  }
+  WebglAddon.prototype.onContextLoss = function (fn) { this.lossHandlers.push(fn); };
+  WebglAddon.prototype.dispose = function () { this.disposed = true; };
+  const terminal = {
+    loaded: [],
+    loadAddon(addon) {
+      if (failLoad) throw new Error('WebGL2 not supported');
+      this.loaded.push(addon);
+    },
+  };
+  return { ns: { WebglAddon }, made, terminal };
+}
+
+test('attachWebgl: loads the GPU renderer when the addon is present', () => {
+  const { ns, made, terminal } = fakeWebglAddon();
+  global.window.WebglAddon = ns;
+  try {
+    const addon = AppUtils.attachWebgl(terminal);
+    assert.equal(addon, made[0]);
+    assert.deepEqual(terminal.loaded, [addon]);
+  } finally {
+    delete global.window.WebglAddon;
+  }
+});
+
+test('attachWebgl: a lost GPU context drops back to the DOM renderer', () => {
+  const { ns, made, terminal } = fakeWebglAddon();
+  global.window.WebglAddon = ns;
+  try {
+    AppUtils.attachWebgl(terminal);
+    made[0].lossHandlers.forEach((fn) => fn());
+    assert.equal(made[0].disposed, true);
+  } finally {
+    delete global.window.WebglAddon;
+  }
+});
+
+test('attachWebgl: a failed load leaves the DOM renderer and does not throw', () => {
+  const { ns, made, terminal } = fakeWebglAddon({ failLoad: true });
+  global.window.WebglAddon = ns;
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.equal(AppUtils.attachWebgl(terminal), null);
+    assert.equal(made[0].disposed, true);
+  } finally {
+    console.warn = warn;
+    delete global.window.WebglAddon;
+  }
+});
+
+test('attachWebgl: no addon script means no-op', () => {
+  assert.equal(AppUtils.attachWebgl({ loadAddon() { throw new Error('should not load'); } }), null);
+  assert.equal(AppUtils.attachWebgl(null), null);
+});

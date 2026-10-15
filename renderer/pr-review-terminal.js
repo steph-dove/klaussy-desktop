@@ -1335,6 +1335,7 @@
     } else {
       // First mount — xterm.open creates the element under the host.
       term.open(host);
+      AppUtils.attachWebgl(term);
       AppUtils.labelTerminal(term, function () { return rt === PR.chatTerminal ? 'Review chat terminal' : 'Implement run terminal'; });
       try { rt.fitAddon.fit(); } catch (_) {}
     }

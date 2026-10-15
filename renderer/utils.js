@@ -195,6 +195,23 @@ window.AppUtils = (function () {
     input.addEventListener('focus', apply);
   }
 
+  // Draws on the GPU instead of laying out DOM rows; on any failure xterm keeps its DOM renderer.
+  function attachWebgl(terminal) {
+    if (!terminal || !window.WebglAddon || !window.WebglAddon.WebglAddon) return null;
+    var addon = null;
+    try {
+      addon = new window.WebglAddon.WebglAddon();
+      // Chromium drops the oldest contexts past ~16, and on sleep/wake or a driver reset.
+      addon.onContextLoss(function () { addon.dispose(); });
+      terminal.loadAddon(addon);
+      return addon;
+    } catch (err) {
+      console.warn('[webgl] using the DOM renderer:', err && err.message);
+      try { if (addon) addon.dispose(); } catch (_) { /* never attached */ }
+      return null;
+    }
+  }
+
   // Flips the button's label briefly and announces the outcome, which the label change alone doesn't.
   var copyTimers = new WeakMap();
   function copyText(btn, text, ms) {
@@ -253,6 +270,7 @@ window.AppUtils = (function () {
     fuzzyMatch: fuzzyMatch,
     screenReaderMode: screenReaderMode,
     labelTerminal: labelTerminal,
+    attachWebgl: attachWebgl,
     prefersReducedMotion: prefersReducedMotion,
     promptDialog: promptDialog,
     isMac: isMac,

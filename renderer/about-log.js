@@ -95,7 +95,7 @@ window.Dialogs = (function () {
       { name: 'Monaco Editor', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/monaco-editor/blob/main/LICENSE.md' },
       { name: 'node-pty', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/node-pty/blob/main/LICENSE' },
       { name: 'xterm.js', license: 'MIT License', copyright: '© The xterm.js authors', url: 'https://github.com/xtermjs/xterm.js/blob/master/LICENSE' },
-      { name: '@xterm addons (fit, search, web-links)', license: 'MIT License', copyright: '© The xterm.js authors', url: 'https://github.com/xtermjs/xterm.js/blob/master/LICENSE' },
+      { name: '@xterm addons (fit, search, web-links, webgl)', license: 'MIT License', copyright: '© The xterm.js authors', url: 'https://github.com/xtermjs/xterm.js/blob/master/LICENSE' },
       { name: 'highlight.js', license: 'BSD 3-Clause License', copyright: '© 2006, Ivan Sagalaev', url: 'https://github.com/highlightjs/highlight.js/blob/main/LICENSE' },
       { name: 'vscode-languageserver-protocol, vscode-jsonrpc', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/vscode-languageserver-node/blob/main/License.txt' },
       { name: 'Ollama (invoked locally for inline AI)', license: 'MIT License', copyright: '© Ollama Inc.', url: 'https://github.com/ollama/ollama/blob/main/LICENSE' },
