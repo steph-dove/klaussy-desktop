@@ -2,6 +2,18 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.25.0
+
+### 🦉 A Clean Git Status, and Copilot Sessions That Start
+
+- **Klaussy's Files Stay Out of Git**: Klaussy now runs `klaussy init --local` (klaussy-agents 0.44.1 or newer), so the skills, conventions and settings it generates for every agent stay out of `git status` in your clone and out of your commits. Files your repo already commits are left as they were. If it commits `.claude/settings.json`, Klaussy's hooks go to `.claude/settings.local.json` instead, and reach your worktrees from there. Repos set up by earlier versions get cleaned up the next time repo intel runs.
+- **Copilot Sessions Start Again**: Copilot tabs that open with a prompt (Full Dev Loop, Plan, Debug, Review, and switching a session to Copilot) failed straight away with "Invalid command format". Klaussy now passes the prompt with `-i`.
+- **QA Screenshots Reach the PR**: the dev loop's QA step now uploads screenshots and recordings with GitHub's attachment upload, instead of pointing at commands that don't work.
+- **Send Feedback From About**: About has a Send feedback button, and new reports say which product and OS they came from.
+- **klaussy review on Every Pull Request**: when an AI review finishes on a GitHub PR, one line under the verdict links to the hosted klaussy review App. The × hides it for good. It's also in the Help menu and the command palette.
+- **Command Palette**: arrowing down scrolls the list along with the selection, and the "No matching commands" line now lines up with the commands.
+- **License Up Front**: the README opens with the license terms, and every source file carries a copyright and license line.
+
 ## 0.24.3
 
 ### 🦉 Design Tab Shows Real Design Docs
