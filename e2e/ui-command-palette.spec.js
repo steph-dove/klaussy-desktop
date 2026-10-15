@@ -123,8 +123,7 @@ test('selecting a filtered command runs it (New Task modal)', async ({ mainWindo
   await mainWindow.evaluate(() => window.App.showCommandPalette());
   await expect(overlay).toBeVisible();
 
-  // Filter to the single "New Task" entry, then run it. (Item click races with
-  // the palette's mouseenter re-render, so the keyboard path is the stable one.)
+  // Filter to the single "New Task" entry, then run it from the keyboard.
   await mainWindow.locator('.palette-input').fill('New Task');
   await expect(mainWindow.locator('.palette-overlay .palette-item')).toHaveCount(1);
   await mainWindow.locator('.palette-input').press('Enter');
@@ -134,4 +133,70 @@ test('selecting a filtered command runs it (New Task modal)', async ({ mainWindo
 
   await mainWindow.locator('#modal-cancel').click();
   await expect(modal).toBeHidden();
+});
+
+test('arrow keys keep the selected command in view; hover does not scroll', async ({ mainWindow }) => {
+  const overlay = mainWindow.locator('.palette-overlay');
+  const list = mainWindow.locator('.palette-overlay .palette-list');
+  const input = mainWindow.locator('.palette-input');
+
+  // Synthetic commands so the list overflows its max-height no matter how many
+  // real commands exist.
+  await mainWindow.evaluate(() => {
+    const commands = [];
+    for (let i = 1; i <= 40; i++) commands.push({ label: 'Scroll test command ' + i, action() {} });
+    window.CommandPalette.show(commands);
+  });
+  await expect(overlay).toBeVisible();
+  await expect(input).toBeFocused();
+
+  const overflows = await list.evaluate((el) => el.scrollHeight > el.clientHeight);
+  expect(overflows).toBe(true);
+
+  // toBeInViewport checks the page viewport, not the scroll container, so
+  // compare the selected row's rect against the list's rect.
+  const selectedInView = () => list.evaluate((el) => {
+    const sel = el.querySelector('.palette-item.selected');
+    const a = el.getBoundingClientRect();
+    const b = sel.getBoundingClientRect();
+    return b.top >= a.top - 1 && b.bottom <= a.bottom + 1;
+  });
+
+  for (let i = 0; i < 25; i++) await input.press('ArrowDown');
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 26');
+  expect(await selectedInView()).toBe(true);
+
+  for (let i = 0; i < 25; i++) await input.press('ArrowUp');
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 1');
+  expect(await selectedInView()).toBe(true);
+
+  const before = await list.evaluate((el) => el.scrollTop);
+  await mainWindow.locator('.palette-item', { hasText: /^Scroll test command 3$/ }).hover();
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 3');
+  expect(await list.evaluate((el) => el.scrollTop)).toBe(before);
+
+  await input.press('Escape');
+  await expect(overlay).toBeHidden();
+});
+
+test('arrowing with the mouse resting on the list does not hand the selection to the pointer', async ({ mainWindow }) => {
+  const overlay = mainWindow.locator('.palette-overlay');
+  const input = mainWindow.locator('.palette-input');
+
+  await mainWindow.evaluate(() => {
+    const commands = [];
+    for (let i = 1; i <= 40; i++) commands.push({ label: 'Scroll test command ' + i, action() {} });
+    window.CommandPalette.show(commands);
+  });
+  await expect(overlay).toBeVisible();
+  await expect(input).toBeFocused();
+
+  await mainWindow.locator('.palette-item', { hasText: /^Scroll test command 3$/ }).hover();
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 3');
+
+  for (let i = 0; i < 25; i++) await input.press('ArrowDown');
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 28');
+
+  await input.press('Escape');
+  await expect(overlay).toBeHidden();
 });
