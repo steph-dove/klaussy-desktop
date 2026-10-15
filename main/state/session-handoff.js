@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Cross-agent session handoff. When a session started by one agent is resumed
 // with a DIFFERENT agent, native resume is impossible (each agent only
 // understands its own transcripts), so we distill the prior session into a

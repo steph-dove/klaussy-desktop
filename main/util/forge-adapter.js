@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Reshape GitLab API payloads into the PR-review shapes the GitHub path already produces.
 
 const { ghJson, ghText } = require('./gh-json');

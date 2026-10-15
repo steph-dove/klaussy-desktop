@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Electron main entry point. Almost everything has moved into main/ — this
 // file just wires modules together and hands control to the app-events
 // bootstrap.

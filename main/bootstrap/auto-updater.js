@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Auto-update wiring via electron-updater + GitHub Releases.
 //
 // Silent-until-relevant behavior:

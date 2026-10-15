@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Normalizers that reshape gh's check-rollup / commit-status payloads into
 // the { name, state, bucket, link, ... } shape the renderer draws. Pure;
 // shared by the review-surface checks (pr-review-checks.js) and the

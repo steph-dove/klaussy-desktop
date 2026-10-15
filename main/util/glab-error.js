@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Classify glab CLI and GitLab REST API error strings into actionable categories.
 const { execFileSync } = require('child_process');
 

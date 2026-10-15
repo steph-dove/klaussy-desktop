@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Nemesis8 helpers: the routing check plus a /health probe for the prefs "Test
 // connection" button. Tabs run `nemesis8 interactive` in a real pty (see
 // ai-providers.js / instances.js), not the gateway's HTTP /completion, which

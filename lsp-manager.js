@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Language server lifecycle + JSON-RPC plumbing (Phase I3).
 //
 // Each LSP server runs as a child process in the main process; we shuttle

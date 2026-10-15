@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Thin promise wrappers around the `gh` CLI, shared by the PR-review IPC
 // modules. ghJson parses stdout as JSON; ghText returns it raw. Both attach
 // stderr to the rejected error so callers can surface gh's message. An optional

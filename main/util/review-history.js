@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Review history is a local snapshot, so revoked repos' PRs would otherwise stay listed forever.
 
 const { parseForgeUrl } = require('./forge-url');

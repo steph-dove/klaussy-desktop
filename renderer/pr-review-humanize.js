@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Part of the PrReview surface (window.PrReview); see pr-review.js for the
 // core. Drives klaussy's multi-pass humanize over a finding's text: cut
 // (content), voice (register), check (did the meaning survive), scrub

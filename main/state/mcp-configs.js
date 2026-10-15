@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Per-agent MCP config file + format (JSON `mcpServers` map, or Codex's TOML
 // `[mcp_servers.*]`). Paths verified against each CLI's docs (mid-2026).
 // `envRef` = how the agent pulls a secret FROM the environment without storing

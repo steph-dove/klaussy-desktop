@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Every git IPC handler: status, diff, hunks, branch ops, stage/unstage,
 // apply-patch, discard, commit, push/fetch/pull, stash, log/show/blame,
 // tags, conflicts, create-pr. Also exports collectWorktreeState — the

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Token-usage IPC: serves the sidebar leaderboard tile.
 //
 // `range` returns { today, series:[{day,tokens}], total } for one of the

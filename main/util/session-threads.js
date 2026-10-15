@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // One chat thread per agent session, on both platforms: routing follows the
 // thread you typed in, so no capped message->task map can forget an old alert.
 

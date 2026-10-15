@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PR-review prompt templates and builders, extracted from
 // claude-stream-ipc.js to keep that file focused on IPC wiring. The
 // {{BASE_BRANCH}} and {{REPO_SPECIFIC_CHECKS}} placeholders are substituted by

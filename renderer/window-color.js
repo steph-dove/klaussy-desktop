@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Applies this window's accent color (set via Preferences → Window). The color
 // shows as a thin top strip plus a subtle sidebar-header tint, so multiple
 // windows are easy to tell apart. Source of truth lives in main; we just fetch

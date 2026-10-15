@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Agents only volunteer session notes for runtime triggers they recognise (ports,
 // schemas, env vars), so klaussy writes them itself at the two moments they miss:
 // a session changing hands, and two agents live on the same channel.

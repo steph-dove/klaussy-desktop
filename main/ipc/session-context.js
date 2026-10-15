@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // IPC handlers for managing uncommitted OKF session context notes.
 
 const { ipcMain } = require('electron');

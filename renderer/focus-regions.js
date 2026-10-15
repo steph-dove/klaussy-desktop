@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // F6 / Shift+F6 cycle focus between regions; it's the way out of a terminal, which keeps Tab and Escape.
 (function () {
   function byId(id) { return function () { return document.getElementById(id); }; }

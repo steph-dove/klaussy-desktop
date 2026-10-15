@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Claude Code tells us what it is doing; we no longer have to infer it from a
 // repainting screen. Its hooks fire with JSON on stdin — a Notification when it
 // wants permission, a Stop when a turn ends — which is exactly the half of this

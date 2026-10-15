@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Background timers: per-task GitHub CI polling (30s cadence) and repo-wide
 // auto-fetch (60s default). Both push update events out to every window.
 //

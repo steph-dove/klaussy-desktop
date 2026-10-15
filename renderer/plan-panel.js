@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Plan panel module — find the worktree's markdown plan and (optional) design
 // doc, render whichever is selected, and track task-checkbox progress (overall
 // + per-phase) for the plan. The progress card is collapsible; a source

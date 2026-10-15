@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Headless `claude -p` runs (pre-commit review, comment cleanup) write transcripts beside the tab's.
 
 const fs = require('fs');

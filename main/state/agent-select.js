@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Agent-selection + repo-intel helpers shared by the streaming-IPC handlers
 // (check debug/fix, review, implement, chat). Pulled out of claude-stream-ipc.js
 // so handler groups can live in their own modules without duplicating this

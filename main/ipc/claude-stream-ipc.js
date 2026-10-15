@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // All 8 Claude streaming IPC surfaces plus the explain-diff helpers and
 // the review-prompt builder (buildReviewPrompt). Each start-handler spawns a
 // claude stream via spawnClaudeStream (from state/claude-streaming.js) and each

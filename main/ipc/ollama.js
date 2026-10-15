@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // IPC surface for Ollama-backed inline completion. Mirrors the channel
 // layout of claude-stream-ipc.js (chunk-/done- suffixes keyed by requestId)
 // so the renderer can reuse the same streaming-subscription pattern.

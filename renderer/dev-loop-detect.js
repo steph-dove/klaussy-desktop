@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Phase detection for the dev loop, kept free of DOM and storage and UMD-wrapped
 // so node unit tests exercise the shipping regexes instead of copies that drift.
 (function (root) {

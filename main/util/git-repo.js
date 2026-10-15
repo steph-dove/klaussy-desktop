@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Resolve the base (main) repository root for a worktree path.
 //
 // Every linked worktree shares its parent repo's *common* git dir

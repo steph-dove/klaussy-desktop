@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Tell "this token is dead" apart from "GitHub is having an outage".
 //
 // `gh auth status` verifies a token by calling the REST API. When GitHub has a

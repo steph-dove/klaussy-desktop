@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Live artifact preview: HTML/SVG in a sandboxed iframe (allow-scripts only,
 // so an opaque origin that can't touch the app), Markdown via MarkdownPreview.
 // UMD-wrapped so node unit tests can require the pure helpers.

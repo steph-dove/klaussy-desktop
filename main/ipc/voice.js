@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Never throws; the renderer shows `error`, and offers the OS mic settings when `code` is 'mic-denied'.
 
 const { ipcMain, app, shell, systemPreferences } = require('electron');

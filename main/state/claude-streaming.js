@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Shared primitive for every `claude -p` streaming request the main process
 // fires on behalf of a renderer: Cmd+K inline edit, inline completion,
 // pr-debug-check, pr-review-ai, explain-diff, pr-ai-review, and

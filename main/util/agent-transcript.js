@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Reads what an agent actually said from its own session store, rather than
 // reconstructing it from a repainting pty where every agent draws differently.
 // Each reader takes a cursor and returns only what is new, so a caller can poll;

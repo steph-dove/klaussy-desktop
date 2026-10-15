@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Process-execution primitives: promisified execFile, gh auth/env helpers,
 // stderr tail cap, concurrency limiter, and PTY env sanitizer. Every git IPC
 // handler should import `execFileP` here rather than promisifying locally,

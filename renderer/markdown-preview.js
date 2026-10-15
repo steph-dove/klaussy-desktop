@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Shared markdown renderer used by the file viewer and the diff/Changes
 // panel. markdown-it for parsing, hljs for fenced-code highlighting,
 // DOMPurify for sanitization. Singleton markdown-it instance — created on

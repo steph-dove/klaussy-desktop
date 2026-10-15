@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Thin IPC wrappers over lsp-manager.js. The renderer never touches
 // child_process; lsp-manager owns server lifecycles and proxies JSON-RPC.
 // Each renderer webContents registers servers tied to it so we can tear

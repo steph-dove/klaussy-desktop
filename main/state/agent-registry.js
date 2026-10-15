@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Background-agent registry. Tracks every backgroundable Claude streaming
 // request so the renderer can navigate away from the originating surface,
 // see the agent in the global "Agents" panel, and re-attach to it later

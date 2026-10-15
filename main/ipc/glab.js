@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // GitLab CLI (glab) IPC surface: list accounts and switch the active one.
 
 const { execFileSync } = require('child_process');

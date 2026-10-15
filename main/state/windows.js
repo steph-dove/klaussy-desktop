@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Owns every BrowserWindow reference the rest of main cares about: the
 // primary window, the set of all live windows (for broadcasts), and the
 // hardening + construction helpers.

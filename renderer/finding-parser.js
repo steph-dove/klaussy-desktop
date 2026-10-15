@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Shared review-finding parser for both PR review surfaces (pr-review.js,
 // pr-panel.js). Previously each kept a hand-synced copy ("lockstep") and they
 // still drifted; this is now the single source of truth, loaded by

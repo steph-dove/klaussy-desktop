@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // opencode exact-resume: sessions live in SQLite (no tailable .jsonl), queried
 // via `session list`. Shells out synchronously — use only on user-initiated
 // resume/restart, never the 10s autosave loop; failures yield [] (degrade clean).

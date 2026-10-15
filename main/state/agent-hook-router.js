@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Turns a Claude Code hook report into a gateway event, for the session it came
 // from. The hook knows things the terminal only hints at: that a prompt is a
 // permission ask, and that a turn has genuinely ended.

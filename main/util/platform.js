@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Cross-platform helpers for spawning a user shell (PTY tasks, sub-terminals).
 //
 // macOS/Linux: $SHELL or /bin/zsh, invoked as a login shell with -l (or

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 window.ContextMenu = (function () {
   var contextMenu = null;
   var opener = null;

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // The saver only describes worktrees open right now, so overwriting the stored
 // list with that snapshot drops closed sessions and their agent — which is what
 // made a closed Copilot session come back as Claude.

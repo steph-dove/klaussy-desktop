@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // GitHub CLI surface: account list/switch/detect, CI status and logs,
 // dependency probe, and the scheme-restricted external URL opener.
 

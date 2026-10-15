@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Correlates a chat button click back to the agent session that asked for
 // permission. A click carries only an opaque token, so a channel member cannot
 // approve an arbitrary session by editing the payload — the token must have

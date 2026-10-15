@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Click the mic button (or hold a voice shortcut) to record; the on-device worker transcribes, then the text runs as a palette command or is typed into the active terminal.
 
 (function () {

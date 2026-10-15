@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Classify Bitbucket REST API and HTTP error strings into actionable categories.
 
 function classifyBitbucketError(raw, ctx = {}) {

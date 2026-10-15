@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Skills, slash commands, CLAUDE.md memory files, MCP servers, and plugins.
 // Everything lives under ~/.claude (user scope) or <project>/.claude (project
 // scope); list-* reads across both, create-* writes to the chosen scope.

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Whether an agent CLI is installed is decided by resolving its binary, never
 // by the exit status of `agent --version`: a probe that times out or exits
 // non-zero says nothing about whether the CLI is there.

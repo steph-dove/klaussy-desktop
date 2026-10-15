@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Part of the DiffPanel surface (window.DiffPanel); see diff-panel.js for the core.
 // diff rendering, staging, commit area, inline comments, keybinds.
 // Cross-references go through the shared `DP` object; load order only

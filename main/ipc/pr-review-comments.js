@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PR-review comment + review-submission IPC: issue comments, inline review
 // comment edits/replies, the batched review submission (G4), and the cached
 // current-user lookup. Split out of pr-review.js; required for its

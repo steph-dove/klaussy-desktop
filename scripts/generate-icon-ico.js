@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Regenerates icon.ico from icon.png when the source icon changes.
 //
 // Standard Windows ICO sizes are 16, 32, 48, 256. We render each by

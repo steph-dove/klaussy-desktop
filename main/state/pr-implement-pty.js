@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PTY-backed "Implement" runner for the PR-review AI tab.
 //
 // The headless `claude -p` path used to spawn this work hit two walls:

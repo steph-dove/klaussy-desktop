@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Standalone pyright LSP repro — spawns pyright-langserver, sends a handcrafted
 // initialize + didOpen for a file with an obvious type error, and logs every
 // server message. Lets us see whether diagnostics flow outside our renderer.

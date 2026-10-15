@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Works out what a session has newly said, so a thread can mirror it.
 //
 // A pty carries a repainting screen, not a stream of messages: the same lines

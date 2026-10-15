@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 window.AppState = {
   tasks: new Map(),          // id -> { name, terminal, fitAddon, container, cleanup[], alive, ... }
   inactiveWorktrees: [],     // list of inactive worktrees/sessions

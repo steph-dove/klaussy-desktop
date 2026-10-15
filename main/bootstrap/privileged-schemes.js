@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Electron honours only one registerSchemesAsPrivileged call, so all privileged schemes register here, before app ready.
 
 const { protocol } = require('electron');

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Serves only manifest-listed files by exact lookup (never joining the request path), since the page CSP blocks file: and https:.
 
 const fs = require('fs');

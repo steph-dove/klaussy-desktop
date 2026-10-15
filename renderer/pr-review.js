@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Phase G: PR review surface. Shared renderer module, mounted in two hosts:
 //   - main window: host = #pr-review-root, coexists with the rest of app.js
 //   - pop-out:     host = document.body inside pr-review.html (see init call

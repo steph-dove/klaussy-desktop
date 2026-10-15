@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Also electron-builder's beforePack hook, so no installer can be built without the verified model and runtime.
 
 const fs = require('fs');

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Path containment guard for every IPC that takes a filesystem path from the
 // renderer. `pathUnder` canonicalizes both sides via realpath and refuses `..`
 // or symlink escapes — this is what keeps a compromised renderer from asking

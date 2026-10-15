@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PR-review Terminal-tab backends: the per-finding "Implement" runs and the
 // always-on PR-aware chat session. Both stream a node-pty agent into the
 // renderer's shared xterm and survive backgrounding (pop-out, navigate-away)

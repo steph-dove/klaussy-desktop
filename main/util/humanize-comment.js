@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Deterministic humanizer applied to every outbound PR comment body just
 // before it's posted to GitHub. Strips the most reliable agent tells and
 // trims filler so comments read like a person wrote them. No LLM (the project

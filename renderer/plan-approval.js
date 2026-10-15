@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 window.PlanApproval = (function () {
   var overlay = document.getElementById('plan-approval-overlay');
   var contentEl = document.getElementById('plan-approval-content');

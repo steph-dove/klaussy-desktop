@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // "Agent isn't installed" setup prompt.
 //
 // When a user picks an AI agent whose CLI isn't on their machine, spawning it

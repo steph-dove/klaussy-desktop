@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Prompts for the multi-pass humanize flow; the deterministic scrubber
 // (humanize-comment.js) is the last pass and runs in-process.
 //

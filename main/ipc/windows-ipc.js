@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Small-surface IPC: preferences window, font/theme prefs, about info,
 // claude-info, system-theme forwarding, and the log-ring viewer. Handlers
 // register on require — main.js just needs to `require()` this file.

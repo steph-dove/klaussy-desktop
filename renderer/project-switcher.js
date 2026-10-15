@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Repo + session filters for the sidebar. The repo dropdown lists the
 // distinct base repos of whatever worktrees are currently in the sidebar
 // (running tasks, resumable worktrees, and saved sessions); the session

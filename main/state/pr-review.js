@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // ---- Phase G: Review others' PRs ----
 //
 // prReview.active is the single source of truth so the main-window panel and
