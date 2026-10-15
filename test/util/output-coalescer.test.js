@@ -77,3 +77,18 @@ test('a throwing send for one channel does not strand the others', (t) => {
   }
   assert.deepEqual(sent, [['good', 'y']]);
 });
+
+test('a lone chunk after a quiet spell goes out at once; only the burst behind it waits', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
+  const { c, sent } = harness();
+  c.push('terminal-data-7', 'k');
+  assert.deepEqual(sent, [['terminal-data-7', 'k']], 'a keystroke echo is not held for the timer');
+  c.push('terminal-data-7', 'a');
+  c.push('terminal-data-7', 'b');
+  assert.equal(sent.length, 1, 'chunks right behind it are batched');
+  t.mock.timers.tick(4);
+  assert.deepEqual(sent.at(-1), ['terminal-data-7', 'ab']);
+  t.mock.timers.tick(50);
+  c.push('terminal-data-7', 'z');
+  assert.deepEqual(sent.at(-1), ['terminal-data-7', 'z'], 'quiet again, so straight through');
+});
