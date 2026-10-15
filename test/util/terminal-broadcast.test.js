@@ -1,0 +1,67 @@
+require('../setup');
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  subscribeTerminalChannel, sendToTerminalSubscribers, flushTerminalOutput,
+} = require('../../main/state/instances');
+
+function fakeWebContents() {
+  const received = [];
+  return {
+    received,
+    send: (channel, ...args) => received.push([channel, ...args]),
+    isDestroyed: () => false,
+    once: () => {},
+  };
+}
+
+test('output pushed just before an exit reaches the window before the exit', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const wc = fakeWebContents();
+  subscribeTerminalChannel('terminal-data-901', wc);
+  subscribeTerminalChannel('terminal-exit-901', wc);
+
+  sendToTerminalSubscribers('terminal-data-901', 'last ');
+  sendToTerminalSubscribers('terminal-data-901', 'words');
+  sendToTerminalSubscribers('terminal-exit-901', 0);
+
+  assert.deepEqual(wc.received, [['terminal-data-901', 'last words'], ['terminal-exit-901', 0]]);
+});
+
+test('a sub-terminal exit flushes its own data channel first', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const wc = fakeWebContents();
+  subscribeTerminalChannel('terminal-data-902-1', wc);
+  subscribeTerminalChannel('terminal-exit-902-1', wc);
+
+  sendToTerminalSubscribers('terminal-data-902-1', '$ exit\r\n');
+  sendToTerminalSubscribers('terminal-exit-902-1');
+
+  assert.deepEqual(wc.received, [['terminal-data-902-1', '$ exit\r\n'], ['terminal-exit-902-1']]);
+});
+
+test('output from before anyone subscribed replays ahead of newer output', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  sendToTerminalSubscribers('terminal-data-903', '\x1b[?1049h');
+  t.mock.timers.tick(4);
+
+  const wc = fakeWebContents();
+  sendToTerminalSubscribers('terminal-data-903', 'prompt> ');
+  subscribeTerminalChannel('terminal-data-903', wc);
+  t.mock.timers.tick(4);
+
+  assert.deepEqual(wc.received, [['terminal-data-903', '\x1b[?1049h'], ['terminal-data-903', 'prompt> ']]);
+});
+
+test('flushTerminalOutput delivers pending output synchronously', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const wc = fakeWebContents();
+  subscribeTerminalChannel('terminal-data-904', wc);
+
+  sendToTerminalSubscribers('terminal-data-904', 'Goodbye!');
+  assert.deepEqual(wc.received, []);
+  flushTerminalOutput(904);
+  assert.deepEqual(wc.received, [['terminal-data-904', 'Goodbye!']]);
+});
