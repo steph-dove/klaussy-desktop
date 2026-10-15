@@ -12,6 +12,13 @@ let monitorIntervalId = null;
 const processedKeys = new Set(); // Track processed SHAs/commentIds to prevent double-runs
 const activeFixes = new Set(); // Track taskId currently being fixed to prevent concurrent runs
 
+// A dev loop handles its own CI and review; a background fixer would race its pushes.
+function shouldPoll(inst, fixesInProgress) {
+  return Boolean(inst.alive && inst.worktreePath && inst.branch)
+    && !fixesInProgress.has(inst.id)
+    && inst.devLoop !== true;
+}
+
 function startPrMonitor() {
   if (monitorIntervalId) {
     clearInterval(monitorIntervalId);
@@ -19,7 +26,7 @@ function startPrMonitor() {
 
   const poll = async () => {
     for (const [id, inst] of instances.entries()) {
-      if (!inst.alive || !inst.worktreePath || !inst.branch || activeFixes.has(id)) {
+      if (!shouldPoll(inst, activeFixes)) {
         continue;
       }
 
@@ -206,5 +213,6 @@ async function triggerAutoFix(inst, pr, event) {
 
 module.exports = {
   startPrMonitor,
-  stopPrMonitor
+  stopPrMonitor,
+  shouldPoll
 };
