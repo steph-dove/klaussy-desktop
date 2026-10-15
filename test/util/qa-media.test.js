@@ -303,3 +303,28 @@ test('resolveUnderRoots: an absolute path is never rewritten into another root',
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('findQaMediaFilesCached: callers inside one load share a scan and its meta', async () => {
+  const { findQaMediaFilesCached } = require('../../main/ipc/files');
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-qa-test-'));
+  const worktreeDir = makeRepo(path.join(tempRoot, 'cache-repo'), 'feat-cache');
+  const e2eDir = path.join(worktreeDir, 'e2e-artifacts');
+  fs.mkdirSync(e2eDir, { recursive: true });
+  fs.writeFileSync(path.join(e2eDir, '01-first.png'), 'png');
+
+  try {
+    const first = findQaMediaFilesCached(worktreeDir);
+    assert.equal(findQaMediaFilesCached(worktreeDir), first, 'a concurrent caller reuses the in-flight scan');
+    const scan = await first;
+    assert.deepEqual(scan.media.map((m) => m.name), ['01-first.png']);
+    assert.equal(typeof scan.meta.branchStartUnknown, 'boolean');
+
+    fs.writeFileSync(path.join(e2eDir, '02-second.png'), 'png');
+    const stale = await findQaMediaFilesCached(worktreeDir);
+    assert.equal(stale.media.length, 1, 'within maxAgeMs the earlier scan is reused');
+    const fresh = await findQaMediaFilesCached(worktreeDir, { maxAgeMs: 0 });
+    assert.deepEqual(fresh.media.map((m) => m.name).sort(), ['01-first.png', '02-second.png']);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});

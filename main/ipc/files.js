@@ -730,6 +730,19 @@ function phaseFromEvidence(ev) {
   return phase;
 }
 
+// devLoopEvidence and find-qa-media both scan within one panel load; the scan walks directories synchronously.
+const qaScanCache = new Map(); // worktreePath -> { at, promise: Promise<{ media, meta }> }
+
+function findQaMediaFilesCached(worktreePath, { maxAgeMs = 2000 } = {}) {
+  const hit = qaScanCache.get(worktreePath);
+  if (hit && Date.now() - hit.at < maxAgeMs) return hit.promise;
+  const meta = {};
+  const promise = findQaMediaFiles(worktreePath, meta).then((media) => ({ media, meta }));
+  promise.catch(() => { if (qaScanCache.get(worktreePath)?.promise === promise) qaScanCache.delete(worktreePath); });
+  qaScanCache.set(worktreePath, { at: Date.now(), promise });
+  return promise;
+}
+
 async function devLoopEvidence(worktreePath) {
   const ev = {
     hasPlan: false, commits: 0, qaMedia: 0,
@@ -765,7 +778,7 @@ async function devLoopEvidence(worktreePath) {
 
   // A failed scan and an empty one both leave qaMedia at 0, so say which.
   try {
-    ev.qaMedia = (await findQaMediaFiles(worktreePath)).length;
+    ev.qaMedia = (await findQaMediaFilesCached(worktreePath)).media.length;
   } catch (err) {
     ev.qaMediaError = err.message;
   }
@@ -845,8 +858,9 @@ ipcMain.handle('authorize-qa-media', async (_event, { worktreePath, paths } = {}
 ipcMain.handle('find-qa-media', async (_event, { worktreePath }) => {
   if (!worktreePath) return { media: [] };
   try {
-    const meta = {};
-    const media = await findQaMediaFiles(worktreePath, meta);
+    const scan = await findQaMediaFilesCached(worktreePath);
+    const meta = scan.meta;
+    const media = scan.media.map((m) => ({ ...m }));
     allowQaPaths(media.map((m) => m.path));
     for (const m of media) m.url = qaMediaUrl(m.path);
     const protoErr = protocolError();
@@ -1072,6 +1086,7 @@ ipcMain.handle('clipboard-write-text', async (_event, { text }) => {
 
 module.exports = {
   findQaMediaFiles,
+  findQaMediaFilesCached,
   qaCandidateDirs,
   resolveUnderRoots,
   isInside,
