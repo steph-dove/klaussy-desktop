@@ -71,6 +71,7 @@ test('command palette shows an empty state when nothing matches', async ({ mainW
   await expect(items).toHaveCount(0);
   // The message is not a listbox option, so nothing can be active.
   await expect(empty).not.toHaveAttribute('role', 'option');
+  await expect(empty).toHaveAttribute('aria-hidden', 'true');
   await expect(input).not.toHaveAttribute('aria-activedescendant');
 
   // Enter has nothing to run: the palette stays open and no command fires.
