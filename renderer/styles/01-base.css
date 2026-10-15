@@ -3268,7 +3268,7 @@ body.task-branchless #ahead-behind {
   border-radius: var(--radius-md);
 }
 
-.palette-list > .palette-empty { padding: 8px 12px; color: var(--text-muted); font-size: 13px; }
+.palette-list > .palette-empty { padding: 8px 16px; color: var(--text-muted); font-size: 13px; cursor: default; user-select: none; }
 
 /* Reflow at high zoom (WCAG 1.4.10): drag-set widths are inline, so the caps need !important. */
 @media (max-width: 900px) {
