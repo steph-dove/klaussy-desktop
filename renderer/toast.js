@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Toast notifications — replacement for window.alert().
 //
 // Usage:

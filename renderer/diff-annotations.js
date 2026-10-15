@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Aggregation + prompt-formatting helpers for inline diff annotations.
 // Deliberately free of DOM/Electron access so it can be unit-tested from Node
 // by stubbing `window`, the same pattern finding-parser.js uses.

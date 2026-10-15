@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Persistent PR-aware chat session for the PR-review Terminal tab.
 //
 // Unlike pr-implement-pty (one prompt, runs to end_turn, finalizes, dies), the

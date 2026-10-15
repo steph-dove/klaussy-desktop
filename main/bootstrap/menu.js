@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Application menu. Call installAppMenu() from whenReady — after app.setName
 // so the app-name submenu label picks up "Klaussy" instead of "Electron".
 //

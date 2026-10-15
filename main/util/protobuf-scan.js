@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // A minimal protobuf wire reader. The wire format is self-describing — every
 // field carries its number and type — so a message can be walked for the string
 // at a known field path without the .proto that defined it.

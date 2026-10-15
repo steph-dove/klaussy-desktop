@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Agents write GitHub-flavoured markdown, and a code fence shows its source
 // rather than its formatting, so each platform gets the dialect it renders.
 

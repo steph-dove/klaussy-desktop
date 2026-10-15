@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // H3: Worktree file watcher for instant diff refresh.
 //
 // One fs.watch per worktree, shared across all subscribers (diff panel +

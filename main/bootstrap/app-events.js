@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Application lifecycle: PATH-fixing for Finder launches, external-CLI probe,
 // whenReady (menu + window + auto-fetch + periodic save), window-all-closed /
 // before-quit / will-quit, and the saveSessions helper that the save path

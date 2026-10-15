@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Startup guards that MUST run before any module reads userData (config.json,
 // logs, license). Two problems this fixes:
 //

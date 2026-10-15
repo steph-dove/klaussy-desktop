@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // wasmPaths must point at klaussy-voice:, or the library pulls ORT from a CDN.
 
 // voice-protocol.js maps this name to the bundled model's files.

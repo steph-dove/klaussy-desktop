@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Kept out of the media protocol so it is testable without Electron.
 
 // Parses a Range header against a known size. Returns { start, end } inclusive, or null when the header is unusable and

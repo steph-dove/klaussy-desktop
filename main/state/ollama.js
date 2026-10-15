@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Ollama HTTP client for inline AI completion. Probes the local server,
 // streams fill-in-middle completions, and surfaces model-presence state so
 // the renderer can decide whether to activate passive ghost-text or fall

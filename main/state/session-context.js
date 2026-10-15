@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Session context sharing: uncommitted OKF notes under
 // ~/.klaussy/sessions/<channel>/notes/, one channel per klaussy session.
 

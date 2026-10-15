@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Builds the gateway bring-up script Klaussy runs in an in-app terminal (a real
 // node-pty TTY, which the interactive `nemesis8 login` requires). It reuses the
 // token Klaussy stores so the app and gateway can't drift.

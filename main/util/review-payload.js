@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Helpers for the "submit review" payload. Kept out of the IPC handler so they
 // can be unit-tested without stubbing electron.
 

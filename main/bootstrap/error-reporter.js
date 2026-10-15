@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Catch-all error logging so uncaught errors end up somewhere actionable
 // instead of disappearing into a silent renderer. Three sources funnel into
 // electron-log:

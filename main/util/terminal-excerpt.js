@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Turns a raw TUI capture into something worth reading in a chat message: the
 // buffer holds spinner frames, token counters, the input box and echoed
 // keystrokes, which bury whatever the agent actually said.

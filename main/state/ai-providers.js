@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // AI CLI provider registry — the single source of truth for the per-tool
 // differences between the coding agents Klaussy can drive (Claude Code, OpenAI
 // Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI, Cursor CLI, Cline

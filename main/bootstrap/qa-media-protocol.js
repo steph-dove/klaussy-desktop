@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // The page CSP blocks file:, and widening it would let renderer-side XSS read
 // arbitrary local files, so QA media is served over this scheme and only for
 // paths the QA scanner returned.

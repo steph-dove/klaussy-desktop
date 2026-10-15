@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 (async function () {
   var prefs = await window.klaus.ui.getPreferences();
 

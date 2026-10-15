@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PR panel module — view PR details, comments, leave comments, approve/request changes
 window.PRPanel = (function () {
   var prInfoEl, commentsListEl, commentInput;

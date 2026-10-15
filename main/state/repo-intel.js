@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Repo intelligence: conventions + import-graph context for agent prompts.
 //
 // On session create we analyze the BASE repo:

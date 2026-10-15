@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Git hook bridge: terminal/agent commits AND pushes get the same agent
 // review as the app's buttons.
 //

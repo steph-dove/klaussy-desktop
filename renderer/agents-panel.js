@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Global Agents panel — surfaces every backgrounded Claude request the
 // main process is tracking. Hidden in the typical flow: the trigger
 // button (#btn-agents) only appears when there's at least one active

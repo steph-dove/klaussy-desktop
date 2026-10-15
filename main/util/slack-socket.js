@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Slack Socket Mode: the inbound half of the notification gateway. A desktop
 // app has no public endpoint for Slack to POST interactions to, so we hold a
 // WebSocket open instead. Needs an app-level token (xapp-…), not the bot token.

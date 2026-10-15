@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Electron keeps one permission handler per session; everything stays granted except the mic, which only the app's main window and PR review pop-out get while voice input is on (the default).
 
 const path = require('path');

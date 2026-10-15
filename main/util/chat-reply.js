@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Applies a chat response to the agent that asked for it: an Approve/Reject
 // button click, or a freeform line typed back in Slack/Discord.
 //

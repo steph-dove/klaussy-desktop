@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Pure formatters: normalized Nemesis8 lifecycle event -> Slack / Discord
 // webhook payloads. No electron, no network, no config — just data in, JSON
 // body out — so the shapes are cheap to unit-test and the gateway

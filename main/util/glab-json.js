@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Promise wrappers around the `glab` CLI, mirroring gh-json.js.
 
 const { execFile } = require('child_process');

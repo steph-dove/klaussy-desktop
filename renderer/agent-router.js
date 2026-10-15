@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Routes "Open" clicks from the Agents panel back to the surface that
 // originated the agent. Best-effort: for v1 we navigate to the broad
 // context (the right PR, the right task) and let the user find the

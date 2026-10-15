@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Per-worktree Claude permission setup for the PR-implement flow.
 //
 // When the user clicks Implement, we want Claude to be able to edit files

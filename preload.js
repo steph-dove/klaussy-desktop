@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Preload: the only bridge between the sandboxed renderer and main.
 //
 // API is namespaced (`window.klaus.git.status(...)`) so each IPC target's

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Cmd+P quick-open palette — fuzzy filename search across the active
 // worktree. Reuses the existing .palette-overlay styling from
 // command-palette.js; renders basename-first so typing a filename jumps

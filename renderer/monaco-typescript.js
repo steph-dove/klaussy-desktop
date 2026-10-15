@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Project-wide TS/JS awareness for Monaco (Phase I2).
 //
 // Monaco ships a TypeScript worker that can cross-reference multiple files

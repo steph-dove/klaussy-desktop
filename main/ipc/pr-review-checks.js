@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PR-review CI/checks IPC: the status rollup, required contexts, workflow
 // list/dispatch, run log tail/cancel/rerun, and check annotations for the
 // PR-review surface. Split out of pr-review.js; required for its

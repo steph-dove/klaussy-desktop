@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Owns the `instances` Map (id → instance descriptor), the PTY lifecycle
 // (spawnInWorktree, convertInstanceToShell), the subscription-based terminal
 // broadcast, and the idle-detection machinery that fires Notifications when

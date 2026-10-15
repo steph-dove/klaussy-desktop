@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // All task-lifecycle IPC: saved sessions, create/checkout/open, list-tasks,
 // terminal write/resize, sub-terminals, kill/restart/rename/duplicate,
 // notify toggle, dirty-worktree aggregator, transcripts, pop-out, task notes.

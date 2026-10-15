@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Cross-platform postinstall: rebrands the dev-mode Electron app on macOS
 // so `npx electron .` shows "Klaussy" in the menu bar instead of "Electron".
 //

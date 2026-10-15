@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Nemesis8 agent-lifecycle event stream, the source the notification gateway
 // subscribes to. Embedded by default (instances.js calls publish() off the pty
 // lifecycle); connect() attaches to a real SSE endpoint if one is configured.

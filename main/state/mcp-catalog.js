@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Built-in catalog of common MCP servers shown as one-click "add" cards. Each
 // entry is a template the add form pre-fills; verified against vendors' MCP docs
 // (mid-2026), fully editable. See main/util/mcp-config.js for how they're written.

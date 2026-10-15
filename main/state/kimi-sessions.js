@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Kimi Code exact-resume. Sessions are bucketed by workdir on disk, but every
 // one is also appended to a flat ~/.kimi-code/session_index.jsonl as
 // {sessionId, sessionDir, workDir} — cheaper to read than shelling out to the

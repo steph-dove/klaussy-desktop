@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // All Phase G PR-review IPC handlers (30 pr-* endpoints: list, load, threads,
 // checks, merge, checkout, cache, comments, reviews, pop-out, fix-in-terminal,
 // etc.) plus the ghJson / ghText helpers they share. State + fetch helpers

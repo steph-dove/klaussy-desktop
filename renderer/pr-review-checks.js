@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Part of the PrReview surface (window.PrReview); see pr-review.js for the
 // core. Checks/CI tab UI, debug/fix panels, merge controls.
 // All cross-references go through the shared `PR` object, so load order

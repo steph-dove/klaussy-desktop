@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Overlays matching DIALOG_SELECTOR become modal dialogs automatically; Escape clicks [data-dialog-close], else the backdrop, else a Cancel/Close button.
 
 window.A11y = (function () {

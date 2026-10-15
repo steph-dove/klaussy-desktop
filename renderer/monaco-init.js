@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Boot Monaco via its AMD loader. The renderer has `contextIsolation: true`
 // and `nodeIntegration: false`, so the loader's web path is what runs here.
 //

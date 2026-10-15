@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 const manifest = require('./voice-model.json');
 
 // Model files keep their repo path; runtime files live under runtime/.

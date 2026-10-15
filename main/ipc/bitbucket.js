@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Bitbucket IPC surface: list accounts, switch account, save and remove accounts.
 
 const { ipcMain } = require('electron');

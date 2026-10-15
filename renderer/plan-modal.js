@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 window.ActionModal = (function () {
   var overlay = document.getElementById('plan-modal-overlay');
   var titleEl = document.getElementById('plan-modal-title');

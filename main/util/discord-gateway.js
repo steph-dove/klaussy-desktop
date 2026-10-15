@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Discord Gateway: the inbound half for Discord, mirroring slack-socket.js.
 //
 // Same reason as Slack — no public endpoint on a desktop machine — but Discord

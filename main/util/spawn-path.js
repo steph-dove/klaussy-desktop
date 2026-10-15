@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // PATH management for spawned processes. In util/, not bootstrap/, so binary
 // lookup can reach it without requiring the Electron main process.
 

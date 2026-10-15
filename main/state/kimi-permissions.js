@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Opt-in Bash grant for kimi's autonomous surfaces. It approves Write/Edit in a
 // worktree itself but never Bash, and offers no project config, no `-p`-compatible
 // flag and no env var — so the only lever is the global ~/.kimi-code/config.toml.

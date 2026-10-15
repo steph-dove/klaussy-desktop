@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Conflict resolution panel — 3-pane merge conflict resolver
 window.ConflictPanel = (function () {
   var overlay, fileSelect, oursBody, theirsBody, resultBody;

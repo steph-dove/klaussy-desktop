@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Process-wide log capture: in-memory ring buffer + rotating file + token
 // scrubber. Installs console hooks and uncaughtException / unhandledRejection
 // handlers on require, so this module MUST be required early in main.js

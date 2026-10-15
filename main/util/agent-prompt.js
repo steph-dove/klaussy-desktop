@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Stage an initial prompt for an interactive agent CLI so it's delivered at
 // spawn — as a positional argument (or the provider's `interactivePromptFlag`)
 // rather than typed into the TUI after boot. Typing races the TUI's startup and

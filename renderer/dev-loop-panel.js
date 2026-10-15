@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Tracks the 9-phase "Rest of the Owl" dev loop by reading the agent's own PTY
 // output plus on-disk artifacts (plan/design docs, QA media, PR state), so
 // progress costs no extra API calls.

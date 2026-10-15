@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Copilot's sessions are global, so a worktree's own is found by the cwd in each workspace.yaml.
 const fs = require('fs');
 const path = require('path');

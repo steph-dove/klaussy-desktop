@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Attachment handling shared by the surfaces that take a task definition: the
 // action modal and the New Session dialog's dev-loop field. Both need the same
 // thing, prose plus the screenshots it refers to, sent together.

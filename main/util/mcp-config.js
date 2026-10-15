@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Read/add/remove MCP servers in each agent's own config. Format-aware: JSON
 // `mcpServers` map for most agents, TOML `[mcp_servers.*]` for Codex. Per-agent
 // locations live in main/state/mcp-configs.js.

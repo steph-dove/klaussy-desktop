@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 window.TerminalManager = (function () {
   var escHtml = AppUtils.escHtml;
   var tasks = AppState.tasks;

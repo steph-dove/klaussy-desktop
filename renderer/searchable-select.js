@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Progressive-enhancement searchable dropdown.
 //
 // Wraps a native <select> — which stays the source of truth — with a custom

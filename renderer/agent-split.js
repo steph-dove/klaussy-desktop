@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Reusable "split button + agent picker" for the built-in AI actions.
 //
 // There is ONE global default agent (persisted as config.defaultProvider). The

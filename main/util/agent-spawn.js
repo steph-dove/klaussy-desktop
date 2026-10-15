@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Cross-platform headless spawn for the agent CLIs.
 //
 // macOS/Linux: a bare `spawn(bin, args)` resolves the CLI on PATH and passes

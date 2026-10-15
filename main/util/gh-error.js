@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Turn a raw `gh` / GraphQL error string into something actionable. These
 // failures are almost always environmental (wrong gh account, un-authorized
 // SSO org, missing token scope, expired login, transient network) rather than

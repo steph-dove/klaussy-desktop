@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Function definitions (2/2) for the app entry module (window.App). Loaded
 // BEFORE app.js so every App.fn exists when app.js runs its bootstrap. Pure
 // definitions (no load-time execution); they read App state and other App.fns

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Static word-based inline completion. When the user is typing a
 // partial word, this provider scans the current buffer for words that
 // start with that prefix and shows the most frequent completion as

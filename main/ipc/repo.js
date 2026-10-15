@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Project + worktree management: select-repo, get-repo, list-branches,
 // and the list-projects/add/remove/switch suite, plus list-worktrees +
 // hide-worktree and the new-window opener.

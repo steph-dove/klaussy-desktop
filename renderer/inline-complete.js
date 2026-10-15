@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Inline AI completion. Two backends share the same Monaco ghost-text
 // provider + state machine so the UX (Tab accepts, Esc dismisses) is
 // identical regardless of who produced the text:

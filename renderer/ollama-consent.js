@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Consent + install flow for the local Ollama inline-completion backend.
 //
 // Entry point: OllamaConsent.openIfNeeded().

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Notification gateway: turns Nemesis8 lifecycle events into Slack/Discord
 // messages, and routes the replies back. ensureStarted() subscribes to the bus,
 // dispatches each event to the configured targets, and — when tokens are

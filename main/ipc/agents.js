@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // IPC surface for the global Agents panel. All handlers are thin wrappers
 // over agent-registry — the registry owns state and broadcasts
 // `agents-changed` to every BrowserWindow on every mutation, so renderers

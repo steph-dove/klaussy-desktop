@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Automated OpenCode provider configuration helper for local Ollama models.
 // Ensures ~/.config/opencode/opencode.jsonc includes the provider.ollama mapping
 // (pointing to http://127.0.0.1:11434/v1) and model entry whenever an ollama model

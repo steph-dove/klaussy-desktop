@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Pushes an implement run's work whenever HEAD has moved past the last pushed (or failed) commit.
 function createCommitPusher({ getHead, push, onResult, log }) {
   let pushedSha = '';

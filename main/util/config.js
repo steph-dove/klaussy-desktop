@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Persistent config living at userData/config.json: repo path, project list, UI
 // prefs, notify toggles, per-agent CLI paths (claudePath / codexPath /
 // geminiPath / antigravityPath / copilotPath / cursorPath / clinePath /

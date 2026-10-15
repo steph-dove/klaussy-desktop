@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // IPC surface for the MCP server manager: list/add/remove servers across every
 // agent's config, plus the built-in catalog and the list of installable
 // targets. The format-aware read/write lives in main/util/mcp-config.js; this

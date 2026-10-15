@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Diff panel module — git status, diff viewer, staging, commits, inline comments
 window.DiffPanel = window.DiffPanel || {};
 

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Pure text handling for voice input: cleaning a dictated transcript before it
 // is pasted into a PTY, and matching a spoken command to a palette entry.
 

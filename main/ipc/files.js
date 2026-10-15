@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // File IPC: tree listing, bulk read, search + replace, merge-conflict
 // read/write, .env viewer/editor, worktree watch subscriptions, and the
 // single-file read/write used by the Monaco viewer.

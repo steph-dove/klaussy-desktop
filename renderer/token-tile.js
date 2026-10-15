@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Sidebar token-spend leaderboard.
 //
 // Pulls daily totals from the main process via `window.klaus.tokenUsage`,

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Parse and normalize PR/MR URLs and git remotes across GitHub, GitLab, and Bitbucket.
 
 function stripGitSuffix(s) {

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Pre-commit / pre-push agent review: a provider-agnostic, read-only pass
 // over a diff that is about to leave the developer's hands. Surfaces:
 //   - diff panel Commit button (staged diff; renderer shows findings, user

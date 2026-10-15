@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
 const fs = require('fs');

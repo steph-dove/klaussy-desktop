@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Guard against concurrent sessions for agents whose CLI signs in with
 // single-use, rotating OAuth refresh tokens (Codex today). When two such
 // processes refresh the token at the same moment they rotate it out from under

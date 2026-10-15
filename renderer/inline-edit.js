@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // K3: Cmd+K inline AI edit. Select code (or place the cursor on a line),
 // press Cmd+K, type an instruction, and claude streams a replacement.
 // Accept or Reject the proposal.

@@ -1,3 +1,4 @@
+// Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Tiny renderer-side event bus. Decouples modules that need to react to
 // cross-cutting state changes (task switch, worktree change, pr load) from
 // whoever triggers them — before this, terminal-manager called DiffPanel,
