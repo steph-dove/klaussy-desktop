@@ -1,7 +1,7 @@
 # <img src="brand-mark.png" width="32" height="32" align="absmiddle" alt="Klaussy Logo"> Klaussy Desktop
 
 > [!IMPORTANT]
-> **License: source-available, not open source.** © 2026 Dovatech LLC, licensed under the [Sustainable Use License](https://github.com/steph-dove/klaussy-desktop/blob/main/LICENSE). It's free for personal use, non-commercial use, and use inside your own company. Copying, redistributing, reselling, or offering this code or the app as a paid product or service is not permitted and is copyright infringement. For a commercial license, email stephanie@klaussy.com.
+> **License: source-available, not open source.** © 2026 Dovatech LLC, licensed under the [Sustainable Use License](https://github.com/steph-dove/klaussy-desktop/blob/main/LICENSE). It's free for personal use, non-commercial use, and use inside your own company. Selling it, or distributing or offering this code or the app as part of a paid or commercial product or service, is not permitted without a commercial license and is copyright infringement. For a commercial license, email stephanie@klaussy.com.
 
 **The agent-first IDE that reviews its own code before you commit.**
 
