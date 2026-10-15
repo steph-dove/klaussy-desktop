@@ -630,6 +630,10 @@ const PROVIDERS = {
     perWorktreeSessions: false,
     supportsExactResume: false,
     sessionTracking: 'copilot-state',
+    // VERIFIED (copilot 1.0.95 --help): a bare `copilot "<prompt>"` is read as a
+    // subcommand and fails with "Invalid command format"; `-i` runs the prompt
+    // and stays interactive.
+    interactivePromptFlag: '-i',
 
     buildInteractiveCmd(bin, { resumeSessionId } = {}) {
       if (resumeSessionId) return `${bin} --resume=${resumeSessionId}`;

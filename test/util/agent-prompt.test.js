@@ -38,6 +38,13 @@ test('arg-delivery providers keep staging the prompt as an argument', () => {
   require('node:fs').unlinkSync(staged.promptFile);
 });
 
+test('copilot gets its prompt behind -i, never as a bare argument', () => {
+  // `copilot "<prompt>"` reads the prompt as a subcommand: "Invalid command format".
+  const { getProvider } = require('../../main/state/ai-providers');
+  const staged = stageInitialPrompt(getProvider('copilot'), 'copilot', 'run the owl');
+  assert.match(staged.agentCmd, /^copilot -i "\$\(cat '/);
+});
+
 test('an empty prompt stages nothing, paste provider or not', () => {
   for (const provider of [{}, { promptDelivery: 'paste' }]) {
     const staged = stageInitialPrompt(provider, 'kimi', '   ');
