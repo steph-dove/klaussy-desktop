@@ -226,7 +226,7 @@ window.ActionModal = (function () {
     '  - Capture before and after screenshots for visual comparison.',
     '  - Record a full-flow video (.mp4) showing the complete interaction. The video MUST showcase responsive UI behaviors by resizing (growing and shrinking) the window/viewport.',
     '  - Save all media in your user Downloads directory under `klaussy-qa-<branch>/` (e.g. `~/Downloads/klaussy-qa-<branch>/` on macOS/Linux or `%USERPROFILE%\\Downloads\\klaussy-qa-<branch>\\` on Windows).',
-    '  - Programmatically upload QA media assets (e.g. using `gh release upload` / `gh api` assets endpoint or image host) so you have direct asset URLs ready to attach to the PR description without requiring manual drag-and-drop.',
+    '  - Upload the screenshots and recordings you will show so the PR body can embed them. On GitHub: `gh api -X POST "https://uploads.github.com/user-attachments/assets?name=<file>&repository_id=<id>" -H "Content-Type: <mime-type>" --input <path> --jq .url` (the id is `gh api repos/{owner}/{repo} --jq .id`). Embed images with `<img src="<url>" width="420">` and put each video URL on a line of its own so GitHub shows a player. On GitLab, use project uploads (`POST /projects/:id/uploads`) and paste the returned `markdown`. If an upload fails, list the files still to attach by hand.',
     '- **CLI / Backend changes**:',
     '  - Run the relevant test suites, linters, and capture execution output.',
     '',
