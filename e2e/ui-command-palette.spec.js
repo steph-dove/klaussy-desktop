@@ -138,3 +138,25 @@ test('arrow keys keep the selected command in view; hover does not scroll', asyn
   await input.press('Escape');
   await expect(overlay).toBeHidden();
 });
+
+test('arrowing with the mouse resting on the list does not hand the selection to the pointer', async ({ mainWindow }) => {
+  const overlay = mainWindow.locator('.palette-overlay');
+  const input = mainWindow.locator('.palette-input');
+
+  await mainWindow.evaluate(() => {
+    const commands = [];
+    for (let i = 1; i <= 40; i++) commands.push({ label: 'Scroll test command ' + i, action() {} });
+    window.CommandPalette.show(commands);
+  });
+  await expect(overlay).toBeVisible();
+  await expect(input).toBeFocused();
+
+  await mainWindow.locator('.palette-item', { hasText: /^Scroll test command 3$/ }).hover();
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 3');
+
+  for (let i = 0; i < 25; i++) await input.press('ArrowDown');
+  await expect(mainWindow.locator('.palette-item.selected')).toHaveText('Scroll test command 28');
+
+  await input.press('Escape');
+  await expect(overlay).toBeHidden();
+});

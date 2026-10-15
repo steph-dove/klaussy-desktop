@@ -41,14 +41,11 @@ window.CommandPalette = (function () {
       filtered.forEach(function (cmd, i) {
         var item = document.createElement('div');
         item.className = 'palette-item' + (i === selectedIndex ? ' selected' : '');
+        item.dataset.index = i;
         item.textContent = cmd.label;
         item.addEventListener('click', function () {
           hide();
           cmd.action();
-        });
-        item.addEventListener('mouseenter', function () {
-          selectedIndex = i;
-          updateSelection(false);
         });
         list.appendChild(item);
       });
@@ -61,6 +58,18 @@ window.CommandPalette = (function () {
       var el = items[selectedIndex];
       if (scroll && el) el.scrollIntoView({ block: 'nearest' });
     }
+
+    // Scrolling a list under a still pointer fires hover events too; only a
+    // pointer that actually moved may take the selection from the arrow keys.
+    var lastPointer = null;
+    list.addEventListener('mousemove', function (e) {
+      if (lastPointer && lastPointer.x === e.clientX && lastPointer.y === e.clientY) return;
+      lastPointer = { x: e.clientX, y: e.clientY };
+      var item = e.target.closest('.palette-item');
+      if (!item || Number(item.dataset.index) === selectedIndex) return;
+      selectedIndex = Number(item.dataset.index);
+      updateSelection(false);
+    });
 
     input.addEventListener('input', function () {
       var q = input.value.toLowerCase();
