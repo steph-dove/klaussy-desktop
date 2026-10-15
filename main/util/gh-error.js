@@ -4,6 +4,7 @@
 // bugs, and they only surface on certain repos/machines — so a clear summary
 // plus the exact `gh` command to fix it saves a lot of guessing.
 const { execFileSync } = require('child_process');
+const { execFileP } = require('./exec');
 
 // Best-effort active GitHub CLI account (the common "two accounts, wrong one
 // active on this machine" case). Cached briefly so repeated classifications
@@ -25,6 +26,22 @@ function activeGhAccount() {
   }
   _acctCache = { at: now, value: account };
   return account;
+}
+
+// Async twin for main-process callers on a hot path; shares the cache above.
+let _acctInFlight = null;
+function activeGhAccountP() {
+  if (Date.now() - _acctCache.at < 30000) return Promise.resolve(_acctCache.value);
+  if (_acctInFlight) return _acctInFlight;
+  _acctInFlight = execFileP('gh', ['auth', 'status'], { timeout: 5000 })
+    .then(({ stdout, stderr }) => parseGhAccount(`${stdout || ''}${stderr || ''}`))
+    .catch((err) => parseGhAccount(`${err.stdout || ''}${err.stderr || ''}`))
+    .then((account) => {
+      _acctCache = { at: Date.now(), value: account };
+      return account;
+    })
+    .finally(() => { _acctInFlight = null; });
+  return _acctInFlight;
 }
 
 function parseGhAccount(text) {
@@ -57,7 +74,8 @@ function classifyGhError(raw, ctx = {}) {
   const msg = String(raw == null ? '' : raw).trim();
   const lower = msg.toLowerCase();
   const target = ctx.target ? ` for ${ctx.target}` : '';
-  const acct = activeGhAccount();
+  // An account resolved via activeGhAccountP skips the sync `gh auth status`.
+  const acct = 'account' in ctx ? ctx.account : activeGhAccount();
   const acctNote = acct ? ` You're signed in to gh as "${acct}".` : '';
 
   const has = (re) => re.test(msg) || re.test(lower);
@@ -150,4 +168,4 @@ function classifyGhError(raw, ctx = {}) {
   };
 }
 
-module.exports = { classifyGhError, activeGhAccount, envTokenVar };
+module.exports = { classifyGhError, activeGhAccount, activeGhAccountP, envTokenVar };

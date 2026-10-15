@@ -63,46 +63,91 @@ function appendStderr(buf, chunk) {
 // token on every outbound gh call. The `gh-switch-account` handler also clears
 // the cache explicitly via clearGhTokenCache().
 const GH_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
-const ghTokenCache = new Map(); // remote owner -> { token: string|null, at: ms }
+const ghTokenCache = new Map(); // remote owner | 'acct:<user>' -> { token: string|null, at: ms }
+// A remote's owner barely ever changes, so skip `git remote get-url` on every gh call.
+const repoOwnerCache = new Map(); // cwd -> { owner: string|null, at: ms }
+const ghEnvInFlight = new Map(); // key -> Promise, so concurrent pollers share one spawn
+
+function freshEntry(map, key) {
+  const entry = map.get(key);
+  return entry && (Date.now() - entry.at) < GH_TOKEN_CACHE_TTL_MS ? entry : null;
+}
+
+function shareInFlight(key, fn) {
+  if (ghEnvInFlight.has(key)) return ghEnvInFlight.get(key);
+  const p = fn().finally(() => ghEnvInFlight.delete(key));
+  ghEnvInFlight.set(key, p);
+  return p;
+}
+
+// ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
+// Any hostname is accepted so GitHub Enterprise works the same as github.com.
+function ownerFromRemoteUrl(remoteUrl) {
+  const m = String(remoteUrl || '').trim().match(/[:/]([^/:]+)\/[^/]+?(?:\.git)?$/);
+  return m ? m[1] : null;
+}
+
+function repoOwnerSync(cwd) {
+  const cached = freshEntry(repoOwnerCache, cwd);
+  if (cached) return cached.owner;
+  let owner = null;
+  try {
+    owner = ownerFromRemoteUrl(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString());
+  } catch {}
+  repoOwnerCache.set(cwd, { owner, at: Date.now() });
+  return owner;
+}
+
+async function repoOwnerP(cwd) {
+  const cached = freshEntry(repoOwnerCache, cwd);
+  if (cached) return cached.owner;
+  return shareInFlight('owner:' + cwd, async () => {
+    let owner = null;
+    try {
+      const { stdout } = await execFileP('git', ['remote', 'get-url', 'origin'], { cwd });
+      owner = ownerFromRemoteUrl(stdout);
+    } catch {}
+    repoOwnerCache.set(cwd, { owner, at: Date.now() });
+    return owner;
+  });
+}
+
+function tokenEnv(token) { return token ? { GH_TOKEN: token } : {}; }
+
+function tokenEnvSync(key, user) {
+  const cached = freshEntry(ghTokenCache, key);
+  if (cached) return tokenEnv(cached.token);
+  let token = null;
+  try {
+    token = execFileSync('gh', ['auth', 'token', '--user', user], { stdio: 'pipe', timeout: 5000 }).toString().trim() || null;
+  } catch {}
+  ghTokenCache.set(key, { token, at: Date.now() });
+  return tokenEnv(token);
+}
+
+async function tokenEnvP(key, user) {
+  const cached = freshEntry(ghTokenCache, key);
+  if (cached) return tokenEnv(cached.token);
+  const token = await shareInFlight('token:' + key, async () => {
+    let t = null;
+    try {
+      const { stdout } = await execFileP('gh', ['auth', 'token', '--user', user], { timeout: 5000 });
+      t = String(stdout).trim() || null;
+    } catch {}
+    ghTokenCache.set(key, { token: t, at: Date.now() });
+    return t;
+  });
+  return tokenEnv(token);
+}
 
 function ghEnvForRepo(repoDir) {
-  try {
-    // Get the remote URL
-    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: repoDir, stdio: 'pipe',
-    }).toString().trim();
+  const owner = repoOwnerSync(repoDir);
+  return owner ? tokenEnvSync(owner, owner) : {};
+}
 
-    // Extract owner from SSH or HTTPS remote
-    // ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
-    // Accept arbitrary hostnames so GitHub Enterprise (github.corp.example)
-    // works the same way as github.com.
-    let owner;
-    const m = remoteUrl.match(/[:/]([^/:]+)\/[^/]+?(?:\.git)?$/);
-    if (m) owner = m[1];
-    if (!owner) return {};
-
-    const cached = ghTokenCache.get(owner);
-    if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
-      if (cached.token) return { GH_TOKEN: cached.token };
-      return {};
-    }
-
-    // Try to get a token for this owner from gh auth
-    try {
-      const token = execFileSync('gh', ['auth', 'token', '--user', owner], {
-        stdio: 'pipe', timeout: 5000,
-      }).toString().trim();
-      if (token) {
-        ghTokenCache.set(owner, { token, at: Date.now() });
-        return { GH_TOKEN: token };
-      }
-    } catch {}
-
-    ghTokenCache.set(owner, { token: null, at: Date.now() });
-    return {};
-  } catch {
-    return {};
-  }
+async function ghEnvForRepoP(repoDir) {
+  const owner = await repoOwnerP(repoDir);
+  return owner ? tokenEnvP(owner, owner) : {};
 }
 
 // Resolve the GH_TOKEN env for a gh call, most specific first: an explicit
@@ -114,6 +159,14 @@ function resolveGhEnv({ account, cwd } = {}) {
     if (acct.GH_TOKEN) return acct;
   }
   return ghEnvForRepo(cwd);
+}
+
+async function resolveGhEnvP({ account, cwd } = {}) {
+  if (account) {
+    const acct = await ghEnvForAccountP(account);
+    if (acct.GH_TOKEN) return acct;
+  }
+  return ghEnvForRepoP(cwd);
 }
 
 function ghExec(args, opts = {}) {
@@ -130,7 +183,7 @@ function ghExec(args, opts = {}) {
 // 30-second cadence across N tasks.
 async function ghExecP(args, opts = {}) {
   const { ghAccount, ...rest } = opts;
-  const env = resolveGhEnv({ account: ghAccount, cwd: rest.cwd });
+  const env = await resolveGhEnvP({ account: ghAccount, cwd: rest.cwd });
   return execFileP('gh', args, {
     ...rest,
     env: { ...process.env, ...env },
@@ -141,26 +194,21 @@ async function ghExecP(args, opts = {}) {
 // caller can run a gh command AS that account without `gh auth switch` flipping
 // the global active account. Returns { GH_TOKEN } or {} if no token. Cached
 // (keyed distinctly from the repo-owner cache).
-function ghEnvForAccount(username) {
+function ghAccountUser(username) {
   // The PR picker passes its account ids ('github:<user>', 'gitlab:...').
   if (typeof username === 'string' && username.startsWith('github:')) username = username.slice('github:'.length);
-  if (!username || /^(gitlab|bitbucket):/.test(username)) return {};
-  const key = 'acct:' + username;
-  const cached = ghTokenCache.get(key);
-  if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
-    return cached.token ? { GH_TOKEN: cached.token } : {};
-  }
-  try {
-    const token = execFileSync('gh', ['auth', 'token', '--user', username], {
-      stdio: 'pipe', timeout: 5000,
-    }).toString().trim();
-    if (token) {
-      ghTokenCache.set(key, { token, at: Date.now() });
-      return { GH_TOKEN: token };
-    }
-  } catch {}
-  ghTokenCache.set(key, { token: null, at: Date.now() });
-  return {};
+  if (!username || /^(gitlab|bitbucket):/.test(username)) return null;
+  return username;
+}
+
+function ghEnvForAccount(username) {
+  const user = ghAccountUser(username);
+  return user ? tokenEnvSync('acct:' + user, user) : {};
+}
+
+async function ghEnvForAccountP(username) {
+  const user = ghAccountUser(username);
+  return user ? tokenEnvP('acct:' + user, user) : {};
 }
 
 function clearGhTokenCache() { ghTokenCache.clear(); }
@@ -214,9 +262,13 @@ module.exports = {
   winShellQuote,
   STDERR_CAP_BYTES,
   appendStderr,
+  ownerFromRemoteUrl,
   ghEnvForRepo,
+  ghEnvForRepoP,
   ghEnvForAccount,
+  ghEnvForAccountP,
   resolveGhEnv,
+  resolveGhEnvP,
   ghExec,
   ghExecP,
   clearGhTokenCache,
