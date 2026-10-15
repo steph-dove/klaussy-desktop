@@ -2,7 +2,8 @@
 // Command Palette (Cmd+K) — distinct from quick-open (Cmd+P). Drives the real
 // renderer: App.showCommandPalette() builds the command list and CommandPalette.show
 // mounts a .palette-overlay. Proves the overlay appears, lists known commands,
-// filters live as you type, Enter runs the selected command (Change Theme ->
+// filters live as you type, shows a "No matching commands" line when nothing
+// matches, Enter runs the selected command (Change Theme ->
 // the #theme-overlay surfaces), and Escape tears the palette down. Targets the
 // palette's own .palette-overlay/.palette-item, never a shared backdrop class.
 
