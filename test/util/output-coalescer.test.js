@@ -5,9 +5,10 @@ const assert = require('node:assert/strict');
 
 const { createOutputCoalescer } = require('../../main/util/output-coalescer');
 
+// A clock pinned at 0 keeps every channel mid-burst, so pushes batch; the leading-edge test opts out.
 function harness(opts = {}) {
   const sent = [];
-  const c = createOutputCoalescer({ send: (ch, data) => sent.push([ch, data]), ...opts });
+  const c = createOutputCoalescer({ send: (ch, data) => sent.push([ch, data]), now: () => 0, ...opts });
   return { c, sent };
 }
 
@@ -65,6 +66,7 @@ test('a throwing send for one channel does not strand the others', (t) => {
   const sent = [];
   const c = createOutputCoalescer({
     send: (ch, data) => { if (ch === 'bad') throw new Error('destroyed'); sent.push([ch, data]); },
+    now: () => 0,
   });
   const origError = console.error;
   console.error = () => {};
@@ -80,7 +82,7 @@ test('a throwing send for one channel does not strand the others', (t) => {
 
 test('a lone chunk after a quiet spell goes out at once; only the burst behind it waits', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000_000 });
-  const { c, sent } = harness();
+  const { c, sent } = harness({ now: () => Date.now() });
   c.push('terminal-data-7', 'k');
   assert.deepEqual(sent, [['terminal-data-7', 'k']], 'a keystroke echo is not held for the timer');
   c.push('terminal-data-7', 'a');

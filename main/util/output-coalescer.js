@@ -6,8 +6,10 @@ function createOutputCoalescer({
   maxBytes = 64 * 1024,
   setTimer = (fn, ms) => setTimeout(fn, ms),
   clearTimer = (t) => clearTimeout(t),
+  now = () => Date.now(),
 } = {}) {
   const pending = new Map(); // channel -> { parts: string[], size: number }
+  const lastSentAt = new Map(); // channel -> ms
   let timer = null;
 
   function stopTimer() {
@@ -19,6 +21,7 @@ function createOutputCoalescer({
     if (!entry) return;
     pending.delete(channel);
     if (pending.size === 0) stopTimer();
+    lastSentAt.set(channel, now());
     send(channel, entry.parts.length === 1 ? entry.parts[0] : entry.parts.join(''));
   }
 
@@ -33,6 +36,12 @@ function createOutputCoalescer({
   function push(channel, data) {
     if (!data) return;
     let entry = pending.get(channel);
+    // A lone chunk after a quiet spell (usually a keystroke echo) goes out now; only a burst waits for the timer.
+    if (!entry && now() - (lastSentAt.get(channel) || 0) >= flushMs) {
+      lastSentAt.set(channel, now());
+      send(channel, data);
+      return;
+    }
     if (!entry) { entry = { parts: [], size: 0 }; pending.set(channel, entry); }
     entry.parts.push(data);
     entry.size += data.length;
