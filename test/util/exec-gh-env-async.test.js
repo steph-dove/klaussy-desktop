@@ -8,6 +8,8 @@ const asyncCalls = [];
 const syncCalls = [];
 let gitFails = false;
 let releaseGit = null;
+let releaseAuth = null;
+let authToken = 'tok-';
 
 childProcess.execFile = (cmd, args, opts, cb) => {
   if (typeof opts === 'function') { cb = opts; opts = {}; }
@@ -17,10 +19,11 @@ childProcess.execFile = (cmd, args, opts, cb) => {
       if (gitFails) return cb(new Error('not a git repository'));
       return cb(null, { stdout: `git@github.com:${opts.cwd.split('/').pop()}/repo.git\n`, stderr: '' });
     }
-    if (cmd === 'gh' && args[0] === 'auth') return cb(null, { stdout: 'tok-' + args[args.length - 1] + '\n', stderr: '' });
+    if (cmd === 'gh' && args[0] === 'auth') return cb(null, { stdout: authToken + args[args.length - 1] + '\n', stderr: '' });
     return cb(null, { stdout: JSON.stringify({ env: opts.env.GH_TOKEN || null }), stderr: '' });
   };
   if (cmd === 'git' && releaseGit === 'hold') { releaseGit = reply; return; }
+  if (cmd === 'gh' && args[0] === 'auth' && releaseAuth === 'hold') { releaseAuth = reply; return; }
   setImmediate(reply);
 };
 childProcess.execFileSync = (cmd, args, opts) => {
@@ -29,7 +32,7 @@ childProcess.execFileSync = (cmd, args, opts) => {
   return Buffer.from('tok-' + args[args.length - 1]);
 };
 
-const { ghExecP, ghEnvForRepo, ownerFromRemoteUrl, resolveGhEnvP } = require('../../main/util/exec');
+const { ghExecP, ghEnvForRepo, ownerFromRemoteUrl, resolveGhEnvP, clearGhTokenCache } = require('../../main/util/exec');
 
 function count(list, cmd, cwd) {
   return list.filter((c) => c[0] === cmd && (cwd === undefined || c[c.length - 1] === cwd)).length;
@@ -86,4 +89,31 @@ test('the sync ghEnvForRepo reuses an owner the async path already cached', () =
   const before = count(syncCalls, 'git');
   assert.deepEqual(ghEnvForRepo('/wt/owner-a'), { GH_TOKEN: 'tok-owner-a' });
   assert.equal(count(syncCalls, 'git'), before);
+});
+
+test('a token lookup that straddles a login does not re-cache the old token', async () => {
+  clearGhTokenCache();
+  await resolveGhEnvP({ cwd: '/wt/owner-d' });
+  clearGhTokenCache();
+  authToken = 'old-';
+  releaseAuth = 'hold';
+  const stale = resolveGhEnvP({ cwd: '/wt/owner-d' });
+  await new Promise((r) => setImmediate(r));
+  const finishStale = releaseAuth;
+  releaseAuth = null;
+  try {
+    clearGhTokenCache();
+    authToken = 'fresh-';
+    assert.deepEqual(await resolveGhEnvP({ cwd: '/wt/owner-d' }), { GH_TOKEN: 'fresh-owner-d' },
+      'a caller after the clear does not join the lookup that started before it');
+
+    authToken = 'old-';
+    finishStale();
+    assert.deepEqual(await stale, { GH_TOKEN: 'old-owner-d' });
+    authToken = 'never-';
+    assert.deepEqual(await resolveGhEnvP({ cwd: '/wt/owner-d' }), { GH_TOKEN: 'fresh-owner-d' },
+      'the late stale result was not written over the fresh token');
+  } finally {
+    authToken = 'tok-';
+  }
 });

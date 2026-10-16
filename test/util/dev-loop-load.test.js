@@ -103,7 +103,7 @@ test('a redrawn "Write(plan.md)" line reloads the active loop at most once per c
   for (let i = 0; i < 50; i++) panel.feedTerminalData(1, '⏺ Write(plan.md)\n');
   t.mock.timers.tick(10_000);
   await settle();
-  assert.ok(calls.plan.length - before <= 1, `expected at most one reload, saw ${calls.plan.length - before}`);
+  assert.equal(calls.plan.length - before, 1, 'one reload for the whole burst, and not zero');
 });
 
 test('a plan line from a background loop does not reload the active worktree', async (t) => {
@@ -149,6 +149,23 @@ test('the branch PR from evidence replaces a stale PR link', async () => {
     await settle();
     assert.equal(panel.getState(1).prUrl, 'https://github.com/o/r/pull/42');
     assert.equal(panel.getState(1).prNumber, 42);
+  } finally {
+    fs.devLoopEvidence = original;
+  }
+});
+
+test('a PR URL printed in the terminal does not replace the PR evidence found', async () => {
+  const fs = global.window.klaus.fs;
+  const original = fs.devLoopEvidence;
+  fs.devLoopEvidence = () => Promise.resolve({
+    evidence: { prNumber: 42, prUrl: 'https://github.com/o/r/pull/42', qaMedia: 0 },
+    phase: 6,
+  });
+  try {
+    panel.load('/wt/a', true);
+    await settle();
+    panel.feedTerminalData(1, 'Task from https://github.com/other/repo/pull/7\n');
+    assert.equal(panel.getState(1).prUrl, 'https://github.com/o/r/pull/42');
   } finally {
     fs.devLoopEvidence = original;
   }

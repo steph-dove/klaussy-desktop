@@ -420,7 +420,8 @@ window.DevLoopPanel = (function () {
       }
     }
 
-    if (signals.prUrl && state.prUrl !== signals.prUrl) {
+    // Once gh has found the branch's PR, a URL printed in the terminal (e.g. the PR a loop started from) can't replace it.
+    if (signals.prUrl && state.prUrl !== signals.prUrl && !(state.evidence && state.evidence.prUrl)) {
       state.prUrl = signals.prUrl;
       state.prNumber = signals.prNumber;
       if (advancePhase(state, 6, 'PR #' + signals.prNumber + ' opened')) {

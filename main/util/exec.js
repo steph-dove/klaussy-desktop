@@ -67,6 +67,8 @@ const ghTokenCache = new Map(); // remote owner | 'acct:<user>' -> { token: stri
 // A remote's owner barely ever changes, so skip `git remote get-url` on every gh call.
 const repoOwnerCache = new Map(); // cwd -> { owner: string|null, at: ms }
 const ghEnvInFlight = new Map(); // key -> Promise, so concurrent pollers share one spawn
+// Bumped by clearGhTokenCache, so a lookup that started before a login can't re-cache the old token.
+let ghTokenGeneration = 0;
 
 function freshEntry(map, key) {
   const entry = map.get(key);
@@ -129,13 +131,14 @@ function tokenEnvSync(key, user) {
 async function tokenEnvP(key, user) {
   const cached = freshEntry(ghTokenCache, key);
   if (cached) return tokenEnv(cached.token);
-  const token = await shareInFlight('token:' + key, async () => {
+  const generation = ghTokenGeneration;
+  const token = await shareInFlight(`token:${generation}:${key}`, async () => {
     let t = null;
     try {
       const { stdout } = await execFileP('gh', ['auth', 'token', '--user', user], { timeout: 5000 });
       t = String(stdout).trim() || null;
     } catch {}
-    ghTokenCache.set(key, { token: t, at: Date.now() });
+    if (generation === ghTokenGeneration) ghTokenCache.set(key, { token: t, at: Date.now() });
     return t;
   });
   return tokenEnv(token);
@@ -212,7 +215,7 @@ async function ghEnvForAccountP(username) {
   return user ? tokenEnvP('acct:' + user, user) : {};
 }
 
-function clearGhTokenCache() { ghTokenCache.clear(); }
+function clearGhTokenCache() { ghTokenCache.clear(); ghTokenGeneration++; }
 
 // Process `items` in parallel with at most `cap` in flight at once. Used by
 // background timers so a 20-task setup doesn't spawn 20 simultaneous `git
