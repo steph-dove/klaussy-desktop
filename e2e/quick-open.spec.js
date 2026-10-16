@@ -1,3 +1,4 @@
+/* global window */
 // Quick-open palette: shows a fuzzy filename picker over the active
 // worktree, types narrow the list, Escape closes. UI-driven test —
 // drives QuickOpen.show against a stubbed AppState pointing at a real
@@ -117,6 +118,12 @@ test('arrowing with the mouse resting on the list keeps the selection where the 
       return b.top >= a.top - 1 && b.bottom <= a.bottom + 1;
     });
     expect(inView).toBe(true);
+
+    const before = await list.evaluate((el) => el.scrollTop);
+    const hovered = items.nth(25);
+    await hovered.hover();
+    await expect(selected).toHaveText(await hovered.locator('.quick-open-basename').textContent());
+    expect(await list.evaluate((el) => el.scrollTop)).toBe(before);
 
     await input.press('Escape');
     await expect(overlay).toHaveCount(0);
