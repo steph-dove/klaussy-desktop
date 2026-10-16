@@ -69,3 +69,63 @@ test('quick-open palette opens, filters, and closes on Escape', async ({ mainWin
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('arrowing with the mouse resting on the list keeps the selection where the keys put it', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  // Enough files that the list overflows its max-height (results cap at 50).
+  const repo = buildRepo();
+  for (let i = 1; i <= 40; i++) {
+    fs.writeFileSync(path.join(repo, 'src', 'file' + String(i).padStart(2, '0') + '.js'), '');
+  }
+  execFileSync('git', ['add', '.'], { cwd: repo, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-q', '-m', 'more'], { cwd: repo, stdio: 'pipe' });
+
+  try {
+    await mainWindow.evaluate((wt) => {
+      window.AppState.activeTaskId = 999;
+      window.AppState.tasks.set(999, { id: 999, worktreePath: wt });
+      window.QuickOpen.invalidate();
+    }, repo);
+
+    await mainWindow.evaluate(() => window.QuickOpen.show());
+
+    const overlay = mainWindow.locator('.quick-open-overlay');
+    const input = overlay.locator('.palette-input');
+    const list = overlay.locator('.palette-list');
+    const items = overlay.locator('.quick-open-item');
+    const selected = overlay.locator('.quick-open-item.selected .quick-open-basename');
+
+    await expect(overlay).toBeVisible();
+    await expect(input).toBeFocused();
+    await expect(items).toHaveCount(44);
+    expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+    const third = await items.nth(2).locator('.quick-open-basename').textContent();
+    const target = await items.nth(27).locator('.quick-open-basename').textContent();
+
+    await items.nth(2).hover();
+    await expect(selected).toHaveText(third);
+
+    for (let i = 0; i < 25; i++) await input.press('ArrowDown');
+    await expect(selected).toHaveText(target);
+
+    // toBeInViewport checks the page viewport, not the scroll container.
+    const inView = await list.evaluate((el) => {
+      const a = el.getBoundingClientRect();
+      const b = el.querySelector('.quick-open-item.selected').getBoundingClientRect();
+      return b.top >= a.top - 1 && b.bottom <= a.bottom + 1;
+    });
+    expect(inView).toBe(true);
+
+    await input.press('Escape');
+    await expect(overlay).toHaveCount(0);
+  } finally {
+    await mainWindow.evaluate(() => {
+      window.AppState.activeTaskId = null;
+      window.AppState.tasks.delete(999);
+      window.QuickOpen.invalidate();
+    });
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
