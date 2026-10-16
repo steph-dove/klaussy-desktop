@@ -72,26 +72,36 @@ window.QuickOpen = (function () {
       results.forEach(function (entry, i) {
         var item = document.createElement('div');
         item.className = 'palette-item quick-open-item' + (i === selectedIndex ? ' selected' : '');
+        item.dataset.index = i;
         var dir = entry.path.slice(0, entry.path.length - entry.basename.length).replace(/\/$/, '');
         item.innerHTML = '<span class="quick-open-basename">' + escapeHtml(entry.basename) + '</span>' +
           (dir ? ' <span class="quick-open-dir">' + escapeHtml(dir) + '</span>' : '');
         item.addEventListener('click', function () {
           openEntry(entry);
         });
-        item.addEventListener('mouseenter', function () {
-          selectedIndex = i;
-          updateSelection();
-        });
         list.appendChild(item);
       });
     }
 
-    function updateSelection() {
+    // Hover passes scroll=false so the list doesn't jump under the pointer.
+    function updateSelection(scroll) {
       var items = list.querySelectorAll('.palette-item');
       items.forEach(function (el, i) { el.classList.toggle('selected', i === selectedIndex); });
       var el = items[selectedIndex];
-      if (el) el.scrollIntoView({ block: 'nearest' });
+      if (scroll && el) el.scrollIntoView({ block: 'nearest' });
     }
+
+    // Scrolling a list under a still pointer fires hover events too; only a
+    // pointer that actually moved may take the selection from the arrow keys.
+    var lastPointer = null;
+    list.addEventListener('mousemove', function (e) {
+      if (lastPointer && lastPointer.x === e.clientX && lastPointer.y === e.clientY) return;
+      lastPointer = { x: e.clientX, y: e.clientY };
+      var item = e.target.closest('.quick-open-item');
+      if (!item || Number(item.dataset.index) === selectedIndex) return;
+      selectedIndex = Number(item.dataset.index);
+      updateSelection(false);
+    });
 
     var saidNoMatch = false;
     function refilter() {
@@ -121,11 +131,11 @@ window.QuickOpen = (function () {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         selectedIndex = Math.min(selectedIndex + 1, results.length - 1);
-        updateSelection();
+        updateSelection(true);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         selectedIndex = Math.max(selectedIndex - 1, 0);
-        updateSelection();
+        updateSelection(true);
       } else if (e.key === 'Enter') {
         e.preventDefault();
         if (results[selectedIndex]) openEntry(results[selectedIndex]);
