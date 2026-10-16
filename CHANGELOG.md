@@ -2,6 +2,14 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.25.1
+
+### 🦉 Typing Keeps Up During a Dev Loop
+
+- **No More Lag While a Dev Loop Runs**: typing in a terminal could stall while Rest of the Owl ran. The app kept reloading the dev-loop panel and waiting on GitHub in the background. Now the panel reloads at most every few seconds, and only when its docs or QA media change. Background GitHub lookups don't hold up the app anymore, and the file watcher skips test and coverage output.
+- **Faster Terminals**: terminals on screen draw with the GPU. Under heavy output, what you type shows up in about 12ms instead of a third of a second.
+- **The PR Auto-Fixer Leaves Dev Loops Alone**: it won't start a second agent on a task whose dev loop is already handling CI and review.
+
 ## 0.25.0
 
 ### 🦉 A Clean Git Status, and Copilot Sessions That Start
