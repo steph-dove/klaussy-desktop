@@ -119,11 +119,18 @@ test('arrowing with the mouse resting on the list keeps the selection where the 
     });
     expect(inView).toBe(true);
 
-    const before = await list.evaluate((el) => el.scrollTop);
-    const hovered = items.nth(25);
-    await hovered.hover();
-    await expect(selected).toHaveText(await hovered.locator('.quick-open-basename').textContent());
-    expect(await list.evaluate((el) => el.scrollTop)).toBe(before);
+    // Point at a half-clipped row; hover() would scroll it in, so move the mouse.
+    const point = await list.evaluate((el) => {
+      const row = el.querySelectorAll('.quick-open-item')[10];
+      const r = row.getBoundingClientRect();
+      el.scrollTop += r.top - el.getBoundingClientRect().top - el.clientTop + r.height / 2;
+      const a = el.getBoundingClientRect();
+      const b = row.getBoundingClientRect();
+      return { x: b.left + 20, y: (a.top + b.bottom) / 2, scrollTop: el.scrollTop };
+    });
+    await mainWindow.mouse.move(point.x, point.y);
+    await expect(selected).toHaveText(await items.nth(10).locator('.quick-open-basename').textContent());
+    expect(await list.evaluate((el) => el.scrollTop)).toBe(point.scrollTop);
 
     await input.press('Escape');
     await expect(overlay).toHaveCount(0);
