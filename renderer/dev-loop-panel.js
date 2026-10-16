@@ -82,7 +82,20 @@ window.DevLoopPanel = (function () {
   var qaMediaError = null;
   var qaMediaWarning = null;
   var containerEl = null;
-  var reloadTimer = null;
+
+  // Each load spawns ~10 git/gh processes, so background triggers share one run at a time.
+  var LOAD_MIN_GAP_MS = 3000;
+  var PLAN_RELOAD_COOLDOWN_MS = 5000;
+  var DEVLOOP_RELEVANT_RE = /\.(?:md|png|jpe?g|webp|gif|avif|bmp|mp4|webm|mov|m4v|mkv)$/i;
+  var loadRunId = 0;
+  var loadBusy = false;
+  var loadQueuedPath;
+  var loadTimer = null;
+  var lastLoadAt = 0;
+  var loadedWorktreePath = null;
+  var lastScannedQaCount = null;
+  var noLoopIds = new Set();
+  var planReloadAt = new Map();
 
   function normId(id) {
     if (id == null) return '';
@@ -189,6 +202,7 @@ window.DevLoopPanel = (function () {
   function createState(taskId, taskDescription) {
     var id = normId(taskId || activeTaskId());
     var state = defaultState(id || 'default', taskDescription);
+    noLoopIds.delete(id);
     state.devLoop = true;
     state.worktreePath = worktreeFor(id);
     if (id) {
@@ -267,7 +281,7 @@ window.DevLoopPanel = (function () {
     }
     emitUpdate(id);
     switchDiffTabToDevLoop();
-    load(currentWorktreePath);
+    load(currentWorktreePath, true);
     return state;
   }
 
@@ -337,7 +351,8 @@ window.DevLoopPanel = (function () {
       }
       state.evidence = res.evidence || null;
       var prChanged = false;
-      if (res.evidence && res.evidence.prUrl && !state.prUrl) {
+      // The branch's own PR wins over one scraped from terminal output or left from a closed PR.
+      if (res.evidence && res.evidence.prUrl && res.evidence.prUrl !== state.prUrl) {
         state.prUrl = res.evidence.prUrl;
         state.prNumber = res.evidence.prNumber;
         prChanged = true;
@@ -366,13 +381,22 @@ window.DevLoopPanel = (function () {
     if (await applyEvidence(currentWorktreePath, state)) {
       emitUpdate(id);
     }
+    // QA media can land under dirs the watcher ignores (test-results, playwright-report).
+    if (state.evidence && lastScannedQaCount !== null && state.evidence.qaMedia !== lastScannedQaCount) {
+      load(currentWorktreePath);
+    }
   }
 
   function feedTerminalData(taskId, rawData) {
     if (!rawData) return;
     var id = normId(taskId || activeTaskId());
+    if (noLoopIds.has(id)) return;
     var state = getState(id);
-    if (!state) return;
+    if (!state) {
+      // Without a task the worktree lookup is not definitive, so only a known task is cached as not-a-loop.
+      if (taskFor(id)) noLoopIds.add(id);
+      return;
+    }
 
     var signals = DevLoopDetect.detect(rawData);
     var changed = false;
@@ -388,12 +412,17 @@ window.DevLoopPanel = (function () {
       }
     });
 
-    // A written plan means new docs on disk worth re-reading.
-    if (signals.planWritten && currentWorktreePath) {
-      load(currentWorktreePath);
+    // A written plan means new docs on disk; the TUI redraws that line, so the reload is rate-limited.
+    if (signals.planWritten && currentWorktreePath && id === normId(activeTaskId())) {
+      var now = Date.now();
+      if (now - (planReloadAt.get(id) || 0) > PLAN_RELOAD_COOLDOWN_MS) {
+        planReloadAt.set(id, now);
+        load(currentWorktreePath);
+      }
     }
 
-    if (signals.prUrl && state.prUrl !== signals.prUrl) {
+    // Once gh has found the branch's PR, a URL printed in the terminal (e.g. the PR a loop started from) can't replace it.
+    if (signals.prUrl && state.prUrl !== signals.prUrl && !(state.evidence && state.evidence.prUrl)) {
       state.prUrl = signals.prUrl;
       state.prNumber = signals.prNumber;
       if (advancePhase(state, 6, 'PR #' + signals.prNumber + ' opened')) {
@@ -416,14 +445,57 @@ window.DevLoopPanel = (function () {
     }
   }
 
+  // A switch or a user action runs now; background refreshes run one at a time, at least LOAD_MIN_GAP_MS apart.
+  function load(worktreePath, immediate) {
+    if (immediate || !worktreePath || worktreePath !== loadedWorktreePath) {
+      if (loadTimer) { clearTimeout(loadTimer); loadTimer = null; }
+      loadQueuedPath = undefined;
+      startLoad(worktreePath);
+      return;
+    }
+    if (loadBusy) {
+      loadQueuedPath = worktreePath;
+      return;
+    }
+    var wait = lastLoadAt + LOAD_MIN_GAP_MS - Date.now();
+    if (wait > 0) {
+      loadQueuedPath = worktreePath;
+      if (!loadTimer) loadTimer = setTimeout(runQueuedLoad, wait);
+      return;
+    }
+    startLoad(worktreePath);
+  }
+
+  function runQueuedLoad() {
+    loadTimer = null;
+    var queued = loadQueuedPath;
+    loadQueuedPath = undefined;
+    if (queued !== undefined) load(queued);
+  }
+
+  function startLoad(worktreePath) {
+    var runId = ++loadRunId;
+    loadBusy = true;
+    lastLoadAt = Date.now();
+    loadNow(worktreePath, runId).finally(function () {
+      if (runId !== loadRunId) return;
+      loadBusy = false;
+      if (loadQueuedPath !== undefined && !loadTimer) runQueuedLoad();
+    });
+  }
+
   // Hydrates phase state from what's on disk, so a reopened task isn't stuck at Phase 1.
-  async function load(worktreePath) {
+  async function loadNow(worktreePath, runId) {
+    // A newer load (a task switch) owns the shared caches; this one drops its results.
+    function superseded() { return runId !== loadRunId; }
+    var switchedWorktree = loadedWorktreePath !== worktreePath;
+    loadedWorktreePath = worktreePath || null;
+    if (switchedWorktree) lastScannedQaCount = null;
     if (!worktreePath) {
       currentWorktreePath = null;
       renderActiveView();
       return;
     }
-    var switchedWorktree = currentWorktreePath !== worktreePath;
     currentWorktreePath = worktreePath;
     var taskId = activeTaskId();
     var state = getState(taskId);
@@ -456,17 +528,20 @@ window.DevLoopPanel = (function () {
       }
 
       var planRes = await window.klaus.fs.findPlanFile(worktreePath);
+      if (superseded()) return;
       if (planRes && !planRes.error && planRes.content) {
         addDoc({ name: planRes.name || 'plan.md', path: planRes.path || (worktreePath + '/plan.md'), content: planRes.content, type: 'plan' });
       }
 
       var designRes = await window.klaus.fs.findDesignFile(worktreePath);
+      if (superseded()) return;
       if (designRes && !designRes.error && designRes.content) {
         addDoc({ name: designRes.name || 'design.md', path: designRes.path || (worktreePath + '/design.md'), content: designRes.content, type: 'design' });
       }
 
       if (window.klaus.fs.listFiles) {
         var filesRes = await window.klaus.fs.listFiles(worktreePath);
+        if (superseded()) return;
         var fileList = (filesRes && filesRes.files) || (Array.isArray(filesRes) ? filesRes : []);
         var EXCLUDE_DOC_NAMES = /^(readme|claude|agents|gemini|contributing|license|changelog|security|code_of_conduct|skill)\.md$/i;
         var ROOT_SPEC_RE = /^(?:plan|design|spec|architecture|rfc|task|requirement|ui[-_]|prompt|todo|notes|review_output)/i;
@@ -494,6 +569,7 @@ window.DevLoopPanel = (function () {
       if (sessionCtxApi && sessionCtxApi.listNotes) {
         try {
           var sessionNotes = await sessionCtxApi.listNotes(worktreePath);
+          if (superseded()) return;
           if (Array.isArray(sessionNotes)) {
             sessionNotes.forEach(function (note) {
               var meta = note.metadata || {};
@@ -517,6 +593,7 @@ window.DevLoopPanel = (function () {
         }
       }
 
+      if (superseded()) return;
       cachedDocs = docs;
       if (!selectedDocPath && docs.length > 0) {
         selectedDocPath = docs[0].path;
@@ -533,10 +610,13 @@ window.DevLoopPanel = (function () {
 
       // Runs after the plan check so artifacts outrank terminal narration.
       await applyEvidence(worktreePath, state);
+      if (superseded()) return;
 
       var qaMedia = [];
       if (window.klaus && window.klaus.fs && window.klaus.fs.findQaMedia) {
         var qaRes = await window.klaus.fs.findQaMedia(worktreePath);
+        if (superseded()) return;
+        lastScannedQaCount = (qaRes && Array.isArray(qaRes.media)) ? qaRes.media.length : 0;
         qaMediaError = (qaRes && qaRes.error) || null;
         qaMediaWarning = (qaRes && qaRes.warning) || null;
         if (qaRes && Array.isArray(qaRes.media)) {
@@ -584,6 +664,7 @@ window.DevLoopPanel = (function () {
         var urls = (granted && granted.urls) || {};
         unserved.forEach(function (m) { m.url = urls[m.path] || ''; });
       }
+      if (superseded()) return;
       cachedQaMedia = qaMedia.filter(function (m) { return m && (m.url || m.path); });
 
       // The PR lookup below spawns `gh`, so paint first and land the content a
@@ -592,8 +673,11 @@ window.DevLoopPanel = (function () {
       renderActiveView();
       updateMiniHuds(taskId);
 
-      if (window.klaus.pr && window.klaus.pr.forBranch) {
+      // The evidence poll already ran `gh pr view`; this lookup only adds the hinted (fork) PR case.
+      var evidencePr = state.evidence && state.evidence.prNumber;
+      if (!evidencePr && window.klaus.pr && window.klaus.pr.forBranch) {
         var prRes = await window.klaus.pr.forBranch(worktreePath);
+        if (superseded()) return;
         if (prRes && prRes.pr) {
           var url = prRes.pr.url || (prRes.pr.number ? ('#' + prRes.pr.number) : null);
           if (url !== state.prUrl || prRes.pr.number !== state.prNumber) {
@@ -605,6 +689,7 @@ window.DevLoopPanel = (function () {
       }
     } catch (err) {
       console.warn('[dev-loop-panel load]', err);
+      if (superseded()) return;
       loading = false;
       renderActiveView();
     }
@@ -615,7 +700,7 @@ window.DevLoopPanel = (function () {
     syncTabVisibility(Boolean(getState(activeTaskId())));
 
     window.addEventListener('load-devloop', function () {
-      load(currentWorktreePath || getActiveWorktreePath());
+      load(currentWorktreePath || getActiveWorktreePath(), true);
     });
 
     // Long enough not to hammer `gh` on a loop that runs for an hour.
@@ -626,20 +711,24 @@ window.DevLoopPanel = (function () {
       window.Events.on('task:switched', function (detail) {
         var task = detail && detail.task;
         currentWorktreePath = task ? task.worktreePath : null;
+        noLoopIds.clear();
         var taskId = task ? task.id : activeTaskId();
         var existing = getState(taskId);
         if (existing && existing.currentPhase > 0) {
           switchDiffTabToDevLoop();
         }
-        load(currentWorktreePath);
+        load(currentWorktreePath, true);
       });
     }
 
     if (window.klaus && window.klaus.fs && window.klaus.fs.onWorktreeChanged) {
       window.klaus.fs.onWorktreeChanged(function (data) {
         if (!data || !currentWorktreePath || data.worktreePath !== currentWorktreePath) return;
-        if (reloadTimer) clearTimeout(reloadTimer);
-        reloadTimer = setTimeout(function () { load(currentWorktreePath); }, 300);
+        if (!getState(activeTaskId())) return;
+        // Source edits don't change the panel; commits arrive through the evidence poll.
+        var changed = Array.isArray(data.changedFiles) ? data.changedFiles : null;
+        if (changed && !changed.some(function (f) { return DEVLOOP_RELEVANT_RE.test(f); })) return;
+        load(currentWorktreePath);
       });
     }
   }
@@ -777,7 +866,7 @@ window.DevLoopPanel = (function () {
         // Painting from cache first: waiting on the refresh left the click dead.
         loading = Boolean(refreshes);
         renderActiveView();
-        if (refreshes) load(currentWorktreePath);
+        if (refreshes) load(currentWorktreePath, true);
       });
     });
 

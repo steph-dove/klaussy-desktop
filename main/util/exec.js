@@ -64,46 +64,98 @@ function appendStderr(buf, chunk) {
 // token on every outbound gh call. The `gh-switch-account` handler also clears
 // the cache explicitly via clearGhTokenCache().
 const GH_TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 min
-const ghTokenCache = new Map(); // remote owner -> { token: string|null, at: ms }
+const ghTokenCache = new Map(); // remote owner | 'acct:<user>' -> { token: string|null, at: ms }
+// A remote's owner barely ever changes, so skip `git remote get-url` on every gh call.
+const repoOwnerCache = new Map(); // cwd -> { owner: string|null, at: ms }
+const ghEnvInFlight = new Map(); // key -> Promise, so concurrent pollers share one spawn
+// Bumped by clearGhTokenCache, so a lookup that started before a login can't re-cache the old token.
+let ghTokenGeneration = 0;
+
+// Short enough that a re-pointed origin (a fork, `git remote set-url`) is picked up quickly.
+const REPO_OWNER_TTL_MS = 30 * 1000;
+
+function freshEntry(map, key, ttlMs = GH_TOKEN_CACHE_TTL_MS) {
+  const entry = map.get(key);
+  return entry && (Date.now() - entry.at) < ttlMs ? entry : null;
+}
+
+function shareInFlight(key, fn) {
+  if (ghEnvInFlight.has(key)) return ghEnvInFlight.get(key);
+  const p = fn().finally(() => ghEnvInFlight.delete(key));
+  ghEnvInFlight.set(key, p);
+  return p;
+}
+
+// ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
+// Any hostname is accepted so GitHub Enterprise works the same as github.com.
+function ownerFromRemoteUrl(remoteUrl) {
+  const m = String(remoteUrl || '').trim().match(/[:/]([^/:]+)\/[^/]+?(?:\.git)?$/);
+  return m ? m[1] : null;
+}
+
+function repoOwnerSync(cwd) {
+  const cached = freshEntry(repoOwnerCache, cwd, REPO_OWNER_TTL_MS);
+  if (cached) return cached.owner;
+  let owner = null;
+  try {
+    owner = ownerFromRemoteUrl(execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString());
+  } catch {}
+  // A failed lookup isn't cached: origin may be added moments later.
+  if (owner) repoOwnerCache.set(cwd, { owner, at: Date.now() });
+  return owner;
+}
+
+async function repoOwnerP(cwd) {
+  const cached = freshEntry(repoOwnerCache, cwd, REPO_OWNER_TTL_MS);
+  if (cached) return cached.owner;
+  return shareInFlight('owner:' + cwd, async () => {
+    let owner = null;
+    try {
+      const { stdout } = await execFileP('git', ['remote', 'get-url', 'origin'], { cwd });
+      owner = ownerFromRemoteUrl(stdout);
+    } catch {}
+    if (owner) repoOwnerCache.set(cwd, { owner, at: Date.now() });
+    return owner;
+  });
+}
+
+function tokenEnv(token) { return token ? { GH_TOKEN: token } : {}; }
+
+function tokenEnvSync(key, user) {
+  const cached = freshEntry(ghTokenCache, key);
+  if (cached) return tokenEnv(cached.token);
+  let token = null;
+  try {
+    token = execFileSync('gh', ['auth', 'token', '--user', user], { stdio: 'pipe', timeout: 5000 }).toString().trim() || null;
+  } catch {}
+  ghTokenCache.set(key, { token, at: Date.now() });
+  return tokenEnv(token);
+}
+
+async function tokenEnvP(key, user) {
+  const cached = freshEntry(ghTokenCache, key);
+  if (cached) return tokenEnv(cached.token);
+  const generation = ghTokenGeneration;
+  const token = await shareInFlight(`token:${generation}:${key}`, async () => {
+    let t = null;
+    try {
+      const { stdout } = await execFileP('gh', ['auth', 'token', '--user', user], { timeout: 5000 });
+      t = String(stdout).trim() || null;
+    } catch {}
+    if (generation === ghTokenGeneration) ghTokenCache.set(key, { token: t, at: Date.now() });
+    return t;
+  });
+  return tokenEnv(token);
+}
 
 function ghEnvForRepo(repoDir) {
-  try {
-    // Get the remote URL
-    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], {
-      cwd: repoDir, stdio: 'pipe',
-    }).toString().trim();
+  const owner = repoOwnerSync(repoDir);
+  return owner ? tokenEnvSync(owner, owner) : {};
+}
 
-    // Extract owner from SSH or HTTPS remote
-    // ssh: git@github.com:owner/repo.git  https: https://github.com/owner/repo.git
-    // Accept arbitrary hostnames so GitHub Enterprise (github.corp.example)
-    // works the same way as github.com.
-    let owner;
-    const m = remoteUrl.match(/[:/]([^/:]+)\/[^/]+?(?:\.git)?$/);
-    if (m) owner = m[1];
-    if (!owner) return {};
-
-    const cached = ghTokenCache.get(owner);
-    if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
-      if (cached.token) return { GH_TOKEN: cached.token };
-      return {};
-    }
-
-    // Try to get a token for this owner from gh auth
-    try {
-      const token = execFileSync('gh', ['auth', 'token', '--user', owner], {
-        stdio: 'pipe', timeout: 5000,
-      }).toString().trim();
-      if (token) {
-        ghTokenCache.set(owner, { token, at: Date.now() });
-        return { GH_TOKEN: token };
-      }
-    } catch {}
-
-    ghTokenCache.set(owner, { token: null, at: Date.now() });
-    return {};
-  } catch {
-    return {};
-  }
+async function ghEnvForRepoP(repoDir) {
+  const owner = await repoOwnerP(repoDir);
+  return owner ? tokenEnvP(owner, owner) : {};
 }
 
 // Resolve the GH_TOKEN env for a gh call, most specific first: an explicit
@@ -115,6 +167,14 @@ function resolveGhEnv({ account, cwd } = {}) {
     if (acct.GH_TOKEN) return acct;
   }
   return ghEnvForRepo(cwd);
+}
+
+async function resolveGhEnvP({ account, cwd } = {}) {
+  if (account) {
+    const acct = await ghEnvForAccountP(account);
+    if (acct.GH_TOKEN) return acct;
+  }
+  return ghEnvForRepoP(cwd);
 }
 
 function ghExec(args, opts = {}) {
@@ -131,11 +191,18 @@ function ghExec(args, opts = {}) {
 // 30-second cadence across N tasks.
 async function ghExecP(args, opts = {}) {
   const { ghAccount, ...rest } = opts;
-  const env = resolveGhEnv({ account: ghAccount, cwd: rest.cwd });
+  const env = await resolveGhEnvP({ account: ghAccount, cwd: rest.cwd });
   return execFileP('gh', args, {
     ...rest,
     env: { ...process.env, ...env },
   });
+}
+
+function ghAccountUser(username) {
+  // The PR picker passes its account ids ('github:<user>', 'gitlab:...').
+  if (typeof username === 'string' && username.startsWith('github:')) username = username.slice('github:'.length);
+  if (!username || /^(gitlab|bitbucket):/.test(username)) return null;
+  return username;
 }
 
 // Resolve a gh token for a specific logged-in account (by username), so a
@@ -143,28 +210,16 @@ async function ghExecP(args, opts = {}) {
 // the global active account. Returns { GH_TOKEN } or {} if no token. Cached
 // (keyed distinctly from the repo-owner cache).
 function ghEnvForAccount(username) {
-  // The PR picker passes its account ids ('github:<user>', 'gitlab:...').
-  if (typeof username === 'string' && username.startsWith('github:')) username = username.slice('github:'.length);
-  if (!username || /^(gitlab|bitbucket):/.test(username)) return {};
-  const key = 'acct:' + username;
-  const cached = ghTokenCache.get(key);
-  if (cached && (Date.now() - cached.at) < GH_TOKEN_CACHE_TTL_MS) {
-    return cached.token ? { GH_TOKEN: cached.token } : {};
-  }
-  try {
-    const token = execFileSync('gh', ['auth', 'token', '--user', username], {
-      stdio: 'pipe', timeout: 5000,
-    }).toString().trim();
-    if (token) {
-      ghTokenCache.set(key, { token, at: Date.now() });
-      return { GH_TOKEN: token };
-    }
-  } catch {}
-  ghTokenCache.set(key, { token: null, at: Date.now() });
-  return {};
+  const user = ghAccountUser(username);
+  return user ? tokenEnvSync('acct:' + user, user) : {};
 }
 
-function clearGhTokenCache() { ghTokenCache.clear(); }
+async function ghEnvForAccountP(username) {
+  const user = ghAccountUser(username);
+  return user ? tokenEnvP('acct:' + user, user) : {};
+}
+
+function clearGhTokenCache() { ghTokenCache.clear(); ghTokenGeneration++; }
 
 // Process `items` in parallel with at most `cap` in flight at once. Used by
 // background timers so a 20-task setup doesn't spawn 20 simultaneous `git
@@ -215,9 +270,11 @@ module.exports = {
   winShellQuote,
   STDERR_CAP_BYTES,
   appendStderr,
+  ownerFromRemoteUrl,
   ghEnvForRepo,
   ghEnvForAccount,
   resolveGhEnv,
+  resolveGhEnvP,
   ghExec,
   ghExecP,
   clearGhTokenCache,

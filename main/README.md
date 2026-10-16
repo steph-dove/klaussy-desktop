@@ -9,7 +9,9 @@ entry point — it requires everything here and hands off to
 - **util/** — pure helpers, no module-level state that matters.
   - `logging.js` — console hooks + ring buffer + rolling file (required early).
   - `path-gate.js` — `pathUnder` / `pathUnderAnyRoot`: symlink-safe path containment.
-  - `exec.js` — `execFileP`, `ghExec`/`ghExecP`, gh token cache, stderr tail cap, env sanitizer.
+  - `exec.js` — `execFileP`, `ghExec`/`ghExecP`, gh token and repo-owner caches, stderr tail cap, env sanitizer.
+  - `output-coalescer.js` — batches PTY output per channel into one IPC send per tick.
+  - `pr-for-branch.js` — async PR lookup for a worktree; never rejects.
   - `config.js` — `loadConfig` / `saveConfig` (atomic + queued) + pr-review-cache migration.
   - `voice-model.json` — pinned speech model and runtime files with their SHA-256s (read by `scripts/fetch-voice-model.js` and `bootstrap/voice-protocol.js`).
 

@@ -196,6 +196,38 @@ window.AppUtils = (function () {
     input.addEventListener('focus', apply);
   }
 
+  // Draws on the GPU instead of laying out DOM rows; on any failure xterm keeps its DOM renderer.
+  function attachWebgl(terminal) {
+    if (!terminal || !window.WebglAddon || !window.WebglAddon.WebglAddon) return;
+    var addon = null;
+    var unsupported = false;
+    function detach() {
+      var current = addon;
+      addon = null;
+      try { if (current) current.dispose(); } catch (_) { /* already gone */ }
+    }
+    function attach() {
+      if (addon || unsupported) return;
+      try {
+        addon = new window.WebglAddon.WebglAddon();
+        addon.onContextLoss(detach);
+        terminal.loadAddon(addon);
+      } catch (err) {
+        unsupported = true;
+        console.warn('[webgl] using the DOM renderer:', err && err.message);
+        detach();
+      }
+    }
+    // Chromium caps a renderer at ~16 GPU contexts, so only terminals on screen hold one.
+    if (typeof IntersectionObserver !== 'function' || !terminal.element) { attach(); return; }
+    var observer = new IntersectionObserver(function (entries) {
+      if (entries[entries.length - 1].isIntersecting) attach();
+      else detach();
+    });
+    observer.observe(terminal.element);
+    terminal.loadAddon({ activate: function () {}, dispose: function () { observer.disconnect(); detach(); } });
+  }
+
   // Flips the button's label briefly and announces the outcome, which the label change alone doesn't.
   var copyTimers = new WeakMap();
   function copyText(btn, text, ms) {
@@ -254,6 +286,7 @@ window.AppUtils = (function () {
     fuzzyMatch: fuzzyMatch,
     screenReaderMode: screenReaderMode,
     labelTerminal: labelTerminal,
+    attachWebgl: attachWebgl,
     prefersReducedMotion: prefersReducedMotion,
     promptDialog: promptDialog,
     isMac: isMac,

@@ -1230,6 +1230,9 @@ window.App = window.App || {};
       if (isDevLoop && result && result.id && window.DevLoopPanel && window.DevLoopPanel.startDevLoop) {
         window.DevLoopPanel.startDevLoop(result.id, devLoopTask);
       }
+    } else if (isDevLoop && result && result.id) {
+      // The PR auto-fixer keys off this flag, and startDevLoop (which normally sets it) only runs here.
+      window.klaus.task.markDevLoop(result.id);
     }
 
     var flushResumedExtras = function () {

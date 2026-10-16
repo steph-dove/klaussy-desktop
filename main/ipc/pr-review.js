@@ -26,6 +26,7 @@ const { ghJson, ghText } = require('../util/gh-json');
 const { glabJson, glabText } = require('../util/glab-json');
 const { bitbucketJson, bitbucketText, bitbucketFetch, getBitbucketAuth } = require('../util/bitbucket-api');
 const { classifyGhError } = require('../util/gh-error');
+const { prForBranch } = require('../util/pr-for-branch');
 const { classifyGlabError } = require('../util/glab-error');
 const { classifyBitbucketError } = require('../util/bitbucket-error');
 const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
@@ -821,48 +822,12 @@ ipcMain.handle('pr-reply-to-comment', async (_event, { worktreePath, prNumber, c
 
 // ---- PR Interaction ----
 
-ipcMain.handle('pr-for-branch', async (_event, { worktreePath }) => {
-  const jsonFields = 'number,title,state,body,url,headRefName,baseRefName,headRefOid,additions,deletions,reviewDecision,comments,reviews,mergeable,mergeStateStatus,isDraft';
-
-  // G5 fast path: if this worktree was created from "Check out locally",
-  // look up the PR by its recorded number + base repo. Avoids gh's default
-  // branch-matching lookup which fails for cross-repo (fork) PRs and for
-  // any situation where the local branch name doesn't match the head ref.
-  let hintedInst = null;
+ipcMain.handle('pr-for-branch', (_event, { worktreePath }) => {
+  let hint = null;
   for (const inst of instances.values()) {
-    if (inst.worktreePath === worktreePath && inst.prNumber) { hintedInst = inst; break; }
+    if (inst.worktreePath === worktreePath && inst.prNumber) { hint = inst; break; }
   }
-  if (hintedInst) {
-    try {
-      const args = ['pr', 'view', String(hintedInst.prNumber), '--json', jsonFields];
-      if (hintedInst.prBaseOwner && hintedInst.prBaseRepo) {
-        args.push('-R', `${hintedInst.prBaseOwner}/${hintedInst.prBaseRepo}`);
-      }
-      const result = ghExec(args, { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
-      return { pr: JSON.parse(result) };
-    } catch (err) {
-      // Fall through to branch-matching lookup if the hinted one errors.
-    }
-  }
-
-  try {
-    const result = ghExec([
-      'pr', 'view', '--json', jsonFields,
-    ], { cwd: worktreePath, stdio: 'pipe', timeout: 15000 }).toString();
-    return { pr: JSON.parse(result) };
-  } catch (err) {
-    const msg = (err.stderr ? err.stderr.toString() : err.message) || '';
-    if (msg.includes('no pull requests found')) {
-      return { pr: null };
-    }
-    // Classify so the PR tab can offer an actionable fix — switch gh accounts
-    // or sign in — instead of a dead-end "check that gh is authenticated"
-    // string. Access failures (wrong account for this repo, expired token,
-    // missing scope, un-authorized SSO org) all carry an errorKind the
-    // renderer keys its switch/login affordances off of.
-    const cls = classifyGhError(msg, {});
-    return { pr: null, error: cls.summary, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
-  }
+  return prForBranch(worktreePath, { hint, gh: ghExecP });
 });
 
 ipcMain.handle('pr-add-review-comment', async (_event, { worktreePath, prNumber, body, path: filePath, line, side, startLine, startSide, commitId }) => {

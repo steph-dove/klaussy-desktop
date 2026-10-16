@@ -18,6 +18,7 @@ const { loadConfig, saveConfig, getNemesisProfile, getNotificationConfig } = req
 const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
 const { sanitizeExtraEnv } = require('../util/exec');
+const { createOutputCoalescer } = require('../util/output-coalescer');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { isInteractiveTranscript } = require('../util/claude-entrypoint');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
@@ -113,7 +114,15 @@ function unsubscribeTerminalChannel(channel, webContents) {
   if (subs.size === 0) terminalSubscribers.delete(channel);
 }
 
-function sendToTerminalSubscribers(channel, ...args) {
+const AGENT_DATA_CHANNEL_RE = /^terminal-data-(\d+)$/;
+
+function deliverToSubscribers(channel, ...args) {
+  // Idle and approval detection runs once per coalesced batch rather than once per PTY chunk.
+  const agentData = typeof args[0] === 'string' && AGENT_DATA_CHANNEL_RE.exec(channel);
+  if (agentData) {
+    const inst = instances.get(Number(agentData[1]));
+    if (inst) processIdleDetection(inst, args[0]);
+  }
   const subs = terminalSubscribers.get(channel);
   if (!subs || subs.size === 0) {
     if (!everSubscribed.has(channel)) holdTerminalOutput(channel, args);
@@ -122,6 +131,22 @@ function sendToTerminalSubscribers(channel, ...args) {
   for (const wc of subs) {
     if (!wc.isDestroyed()) wc.send(channel, ...args);
   }
+}
+
+const terminalOutput = createOutputCoalescer({ send: deliverToSubscribers });
+
+function sendToTerminalSubscribers(channel, ...args) {
+  if (args.length === 1 && typeof args[0] === 'string' && channel.startsWith('terminal-data-')) {
+    terminalOutput.push(channel, args[0]);
+    return;
+  }
+  // An exit must land after the output that preceded it.
+  if (channel.startsWith('terminal-exit-')) terminalOutput.flush('terminal-data-' + channel.slice('terminal-exit-'.length));
+  deliverToSubscribers(channel, ...args);
+}
+
+function flushTerminalOutput(id) {
+  terminalOutput.flush(`terminal-data-${id}`);
 }
 
 // ---- Session file helpers ----
@@ -914,7 +939,6 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   }
 
   ptyProc.onData((data) => {
-    processIdleDetection(instance, data);
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
@@ -962,6 +986,8 @@ function resumeHintFor(inst) {
 function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
   const id = instance.id;
   return ({ exitCode } = {}) => {
+    // The natural-exit convert path sends no terminal-exit, and its logsTail needs the last output.
+    flushTerminalOutput(id);
     clearIdleTimer(instance);
     if (session) session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch { /* already gone */ } }
@@ -1084,6 +1110,7 @@ function reclaimOrphanedTasks(closingWc) {
     // handler skips the Claude→shell auto-convert (which would spawn an orphan
     // PTY with no instances entry that nothing could ever stop).
     inst.killed = true;
+    flushTerminalOutput(id);
     clearIdleTimer(inst);
     _stopCIPolling(id);
     try { inst.pty.kill(); } catch {}
@@ -1142,6 +1169,7 @@ module.exports = {
   subscribeTerminalChannel,
   unsubscribeTerminalChannel,
   sendToTerminalSubscribers,
+  flushTerminalOutput,
   listSessionFiles,
   snapshotSessionIds,
   detectClaudeSessionId,

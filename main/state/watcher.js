@@ -19,17 +19,25 @@ const worktreeWatchers = new Map(); // worktreePath -> { watcher, subscribers: M
 // drop the index lock, which would re-fire the watcher → reload → git → … an
 // infinite loop. Lock files are NEVER a meaningful UI signal, so drop them.
 // `.git/index` itself stays watched so real terminal commits/stages refresh.
-const WATCH_IGNORE_RE = /(^|\/)(node_modules|dist|build|out|\.next|\.nuxt|__pycache__|\.pytest_cache|\.mypy_cache|\.turbo|target|\.DS_Store)(\/|$)|^\.git\/(objects|logs|refs|packed-refs|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG|info)|^\.git\/.*\.lock$/;
+const WATCH_IGNORE_RE = /(^|\/)(node_modules|dist|build|out|\.next|\.nuxt|__pycache__|\.pytest_cache|\.mypy_cache|\.turbo|target|\.DS_Store|test-results|playwright-report|blob-report|coverage|\.nyc_output|\.cache|\.parcel-cache|\.vite|\.svelte-kit|\.gradle|\.venv|venv|\.tox)(\/|$)|^\.git\/(objects|logs|refs|packed-refs|FETCH_HEAD|ORIG_HEAD|COMMIT_EDITMSG|info)|^\.git\/.*\.lock$/;
 
 // Set KLAUSSY_WATCH_DEBUG=1 to log every change that survives the ignore filter
 // — the fastest way to find what's churning behind an "infinite reload".
 const WATCH_DEBUG = process.env.KLAUSSY_WATCH_DEBUG === '1';
 
+const DEBOUNCE_MS = 200;
+const MIN_EMIT_INTERVAL_MS = 1000;
+
+// Every subscriber spawns git per emit, so a burst (an agent writing files, a test run) emits at most once a second.
+function emitDelay(now, lastEmitAt) {
+  return Math.max(DEBOUNCE_MS, lastEmitAt + MIN_EMIT_INTERVAL_MS - now);
+}
+
 function startWorktreeWatcher(worktreePath) {
   let state = worktreeWatchers.get(worktreePath);
   if (state) return state;
 
-  state = { watcher: null, subscribers: new Map(), debounceTimer: null };
+  state = { watcher: null, subscribers: new Map(), debounceTimer: null, lastEmitAt: 0 };
 
   try {
     // Coalesce filenames over the debounce window so listeners can scope
@@ -44,15 +52,16 @@ function startWorktreeWatcher(worktreePath) {
       if (WATCH_DEBUG) console.log('[watch]', worktreePath, '→', rel);
       state.changed.add(rel);
 
-      if (state.debounceTimer) clearTimeout(state.debounceTimer);
+      if (state.debounceTimer) return;
       state.debounceTimer = setTimeout(() => {
         state.debounceTimer = null;
+        state.lastEmitAt = Date.now();
         const changedFiles = Array.from(state.changed);
         state.changed.clear();
         for (const wc of state.subscribers.keys()) {
           if (!wc.isDestroyed()) wc.send('worktree-changed', { worktreePath, changedFiles });
         }
-      }, 200);
+      }, emitDelay(Date.now(), state.lastEmitAt));
     });
     state.watcher.on('error', (err) => {
       console.error('[watch]', worktreePath, err.message);
@@ -75,6 +84,8 @@ function stopWorktreeWatcher(worktreePath) {
 }
 
 module.exports = {
+  WATCH_IGNORE_RE,
+  emitDelay,
   worktreeWatchers,
   startWorktreeWatcher,
   stopWorktreeWatcher,

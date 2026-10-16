@@ -210,6 +210,7 @@ window.TerminalManager = (function () {
     termBody.className = 'terminal-body';
     container.appendChild(termBody);
     terminal.open(termBody);
+    AppUtils.attachWebgl(terminal);
     AppUtils.labelTerminal(terminal, function () {
       return task.name + ', ' + AppUtils.modeDisplayName(task.mode) + ' terminal';
     });
@@ -660,6 +661,7 @@ window.TerminalManager = (function () {
     subWrapper.style.display = 'none';
     container.appendChild(subWrapper);
     subTerminal.open(subWrapper);
+    AppUtils.attachWebgl(subTerminal);
     AppUtils.labelTerminal(subTerminal, function () {
       return taskEntry.name + ', ' + labelSpan.textContent + ' terminal';
     });

@@ -18,8 +18,8 @@ const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
-  processIdleDetection, processSubOutput, clearIdleTimer, convertInstanceToShell,
-  sendToTerminalSubscribers, makeAgentExitHandler,
+  processSubOutput, clearIdleTimer, convertInstanceToShell,
+  sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
@@ -1359,6 +1359,7 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   // flag to skip the Claude→shell auto-convert branch. Without it, killing a
   // Claude task would spawn an orphan shell with no instances entry — nothing
   inst.killed = true;
+  flushTerminalOutput(id);
   clearIdleTimer(inst);
   stopCIPolling(id);
   try { inst.pty.kill(); } catch {}
@@ -1458,6 +1459,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
 
   inst.pty = ptyProc;
   inst.alive = true;
+  flushTerminalOutput(id);
   inst.recentOutput = '';
   inst.notifiedIdle = false;
   // New pty is live; clear the restart guard so this one's natural exit
@@ -1465,7 +1467,6 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   inst.restarting = false;
 
   ptyProc.onData((data) => {
-    processIdleDetection(inst, data);
     sendToTerminalSubscribers(`terminal-data-${id}`, data);
   });
 
