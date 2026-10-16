@@ -324,6 +324,8 @@ test('findQaMediaFilesCached: callers inside one load share a scan and its meta'
     assert.equal(stale.media.length, 1, 'within maxAgeMs the earlier scan is reused');
     const fresh = await findQaMediaFilesCached(worktreeDir, { maxAgeMs: 0 });
     assert.deepEqual(fresh.media.map((m) => m.name).sort(), ['01-first.png', '02-second.png']);
+    const reused = await findQaMediaFilesCached(worktreeDir);
+    assert.equal(reused.media.length, 2, 'a forced scan seeds the cache the next caller reads');
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

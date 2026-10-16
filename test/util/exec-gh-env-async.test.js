@@ -117,3 +117,13 @@ test('a token lookup that straddles a login does not re-cache the old token', as
     authToken = 'tok-';
   }
 });
+
+test('a re-pointed origin is picked up once the 30s owner cache lapses', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  await resolveGhEnvP({ cwd: '/wt/owner-e' });
+  await resolveGhEnvP({ cwd: '/wt/owner-e' });
+  assert.equal(count(asyncCalls, 'git', '/wt/owner-e'), 1, 'cached inside the window');
+  t.mock.timers.tick(31_000);
+  await resolveGhEnvP({ cwd: '/wt/owner-e' });
+  assert.equal(count(asyncCalls, 'git', '/wt/owner-e'), 2, 're-read after the window');
+});

@@ -778,7 +778,8 @@ async function devLoopEvidence(worktreePath) {
 
   // A failed scan and an empty one both leave qaMedia at 0, so say which.
   try {
-    ev.qaMedia = (await findQaMediaFilesCached(worktreePath)).media.length;
+    // Every load starts here, so a fresh scan seeds the cache that find-qa-media reuses moments later.
+    ev.qaMedia = (await findQaMediaFilesCached(worktreePath, { maxAgeMs: 0 })).media.length;
   } catch (err) {
     ev.qaMediaError = err.message;
   }

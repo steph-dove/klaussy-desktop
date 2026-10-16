@@ -70,9 +70,12 @@ const ghEnvInFlight = new Map(); // key -> Promise, so concurrent pollers share 
 // Bumped by clearGhTokenCache, so a lookup that started before a login can't re-cache the old token.
 let ghTokenGeneration = 0;
 
-function freshEntry(map, key) {
+// Short enough that a re-pointed origin (a fork, `git remote set-url`) is picked up quickly.
+const REPO_OWNER_TTL_MS = 30 * 1000;
+
+function freshEntry(map, key, ttlMs = GH_TOKEN_CACHE_TTL_MS) {
   const entry = map.get(key);
-  return entry && (Date.now() - entry.at) < GH_TOKEN_CACHE_TTL_MS ? entry : null;
+  return entry && (Date.now() - entry.at) < ttlMs ? entry : null;
 }
 
 function shareInFlight(key, fn) {
@@ -90,7 +93,7 @@ function ownerFromRemoteUrl(remoteUrl) {
 }
 
 function repoOwnerSync(cwd) {
-  const cached = freshEntry(repoOwnerCache, cwd);
+  const cached = freshEntry(repoOwnerCache, cwd, REPO_OWNER_TTL_MS);
   if (cached) return cached.owner;
   let owner = null;
   try {
@@ -102,7 +105,7 @@ function repoOwnerSync(cwd) {
 }
 
 async function repoOwnerP(cwd) {
-  const cached = freshEntry(repoOwnerCache, cwd);
+  const cached = freshEntry(repoOwnerCache, cwd, REPO_OWNER_TTL_MS);
   if (cached) return cached.owner;
   return shareInFlight('owner:' + cwd, async () => {
     let owner = null;
