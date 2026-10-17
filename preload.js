@@ -310,6 +310,7 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.invoke('pr-edit-review-comment', { commentId, body }),
     currentUser: () => ipcRenderer.invoke('pr-current-user'),
     humanizePreview: (body) => ipcRenderer.invoke('pr-humanize-preview', { body }),
+    botCommentBodies: (findings) => ipcRenderer.invoke('pr-bot-comment-bodies', { findings }),
     reviewChecks: () => ipcRenderer.invoke('pr-review-checks'),
     reviewMerge: (strategy) => ipcRenderer.invoke('pr-review-merge', { strategy }),
     debugCheckStart: (requestId, checkLink, checkName, checkRunId) =>

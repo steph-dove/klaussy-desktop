@@ -649,6 +649,36 @@
     return postedBodies.has(body) ? postedBodies.get(body) : body;
   };
 
+  // klaussy review-post's body per finding text; null means klaussy couldn't build one.
+  var botBodies = new Map();
+  var botPending = false;
+
+  PR.botCommentBody = function(f) {
+    return (f && f.text && botBodies.get(f.text)) || null;
+  };
+
+  function requestBotBodies() {
+    if (botPending || !window.klaus.pr.botCommentBodies) return;
+    var missing = PR.aiReview.findings.filter(function (f) { return f.text && !botBodies.has(f.text); });
+    if (!missing.length) return;
+    botPending = true;
+    window.klaus.pr.botCommentBodies(missing.map(function (f) {
+      return { text: f.text, severity: f.severity, category: f.category };
+    })).then(function (res) {
+      var bodies = res && res.bodies;
+      missing.forEach(function (f, i) {
+        var body = bodies ? bodies[i] : null;
+        botBodies.set(f.text, body);
+        if (body) postedBodies.set(body, body);
+      });
+    }, function () {
+      missing.forEach(function (f) { botBodies.set(f.text, null); });
+    }).then(function () {
+      botPending = false;
+      PR.repaintAiReviewTab();
+    });
+  }
+
   function requestPostedBody(f, body) {
     if (postedBodies.has(body) || postedPending.has(body)) return;
     if (!window.klaus.pr.humanizePreview) return;
@@ -684,6 +714,7 @@
   // The finding as GitHub will show it once posted: a review thread on its diff
   // lines, or a comment on the PR conversation when it has no line in the diff.
   PR.renderFindingCommentPreview = function(f, body) {
+    requestBotBodies();
     requestPostedBody(f, body);
     var inline = f.postMode === 'inline' && f.locationVerified && f.path && f.line;
     var diff = PR.lastState && PR.lastState.diff;

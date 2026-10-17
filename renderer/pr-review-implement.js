@@ -329,9 +329,12 @@
     return first.replace(/\s+/g, ' ').trim();
   };
 
-  // The klaussy-review bot's shape (klaussy/review_post.py Finding.comment): one
-  // line of why and the change, then the whole explanation collapsed.
+  // The klaussy-review bot's body from klaussy itself, else the same shape built
+  // here (review_post.py Finding.comment): the why and the change, then the
+  // whole explanation collapsed.
   PR.findingCommentBody = function(f) {
+    var bot = PR.botCommentBody && PR.botCommentBody(f);
+    if (bot) return bot;
     var labelled = /(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '');
     var suggestion = labelled ? PR.findingSuggestionText(f) : '';
     var lead = [PR.findingWhyText(f), suggestion].filter(Boolean).join('\n\n');
@@ -341,9 +344,7 @@
     return lead ? lead + '\n\n' + details : details;
   };
 
-  // Full explanation prose above the "Suggested change:" label (or the whole
-  // body if no suggestion is present), stripped of metadata headers and quoted
-  // code blocks so it can be viewed in an expandable Explanation section.
+  // The prose above the "Suggested change:" label, without metadata headers; quoted code stays, as the bot keeps it.
   PR.findingExplanationText = function(f) {
     var text = (f && f.text) || (typeof f === 'string' ? f : '');
     var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
@@ -358,9 +359,6 @@
       .replace(/^[^\S\n]*\*{1,3}[^\S\n]*$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-    if (f && f.verifiedSnippet && f.verifiedSnippet.text) {
-      prose = prose.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
-    }
     return prose.trim();
   };
 
@@ -369,6 +367,7 @@
       id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
       fromFindingId: f.id,
       body: PR.findingCommentBody(f),
+      humanized: !!(PR.botCommentBody && PR.botCommentBody(f)),
     };
     if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
       entry.path = f.path;

@@ -101,6 +101,14 @@ test('a finding with no suggestion label leads with its first sentence', () => {
   assert.equal(PR.findingCommentBody(noLabel), 'Rename `foo` to `bar`.\n\n' + details('Rename `foo` to `bar`. It reads better.'));
 });
 
+test('the collapsed explanation keeps quoted code, as the bot does', () => {
+  const quoted = {
+    verifiedSnippet: { path: 'a.js', startLine: 1, endLine: 1, text: 'x()' },
+    text: 'It throws.\n\n```js\nx()\n```\n\nSuggested change:\nguard it',
+  };
+  assert.equal(PR.findingCommentBody(quoted), 'It throws.\n\nguard it\n\n' + details('It throws.\n\n```js\nx()\n```'));
+});
+
 test('a suggestion with no prose above it posts just the suggestion', () => {
   const bare = { text: 'Suggested change:\n```suggestion\nx = 1;\n```' };
   assert.equal(PR.findingCommentBody(bare), '```suggestion\nx = 1;\n```');
