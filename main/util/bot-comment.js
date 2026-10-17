@@ -27,6 +27,20 @@ function buildReportAndDiff(findings) {
   return { report: report.join('\n'), diff: diff.join('\n') + '\n' };
 }
 
+const DETAILS = /^([\s\S]*?)\n\n<details>\n<summary><\/summary>\n\n([\s\S]*)\n\n<\/details>$/;
+
+// klaussy 0.44 repeats the lead sentence at the top of the collapsed part; drop it there.
+function withoutRepeatedLead(body) {
+  const m = DETAILS.exec(body);
+  if (!m) return body;
+  const words = m[1].split('\n\n')[0].split(/\s+/).filter(Boolean);
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const lead = words.length && new RegExp('^\\s*' + escaped.join('\\s+')).exec(m[2]);
+  if (!lead) return body;
+  const rest = m[2].slice(lead[0].length).trim();
+  return rest ? `${m[1]}\n\n<details>\n<summary></summary>\n\n${rest}\n\n</details>` : m[1];
+}
+
 // Comment bodies in input order, or null when klaussy can't build them.
 async function botCommentBodies(findings) {
   if (!Array.isArray(findings) || !findings.length) return [];
@@ -43,7 +57,7 @@ async function botCommentBodies(findings) {
     const bodies = new Array(findings.length).fill(null);
     for (const c of JSON.parse(stdout).comments || []) {
       const m = /^f(\d+)\.txt$/.exec(c.path || '');
-      if (m && +m[1] < bodies.length) bodies[+m[1]] = c.body;
+      if (m && +m[1] < bodies.length) bodies[+m[1]] = withoutRepeatedLead(c.body);
     }
     return bodies.every((b) => typeof b === 'string') ? bodies : null;
   } catch {
@@ -53,4 +67,4 @@ async function botCommentBodies(findings) {
   }
 }
 
-module.exports = { botCommentBodies, buildReportAndDiff };
+module.exports = { botCommentBodies, buildReportAndDiff, withoutRepeatedLead };

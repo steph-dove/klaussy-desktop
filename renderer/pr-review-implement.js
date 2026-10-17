@@ -311,12 +311,7 @@
   // change:" label. First sentence only, with newlines collapsed, so a wrapped
   // paragraph still posts as a single line.
   PR.findingWhyText = function(f) {
-    var text = (f && f.text) || '';
-    var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
-    var prose = (m ? text.slice(0, m.index) : text)
-      .replace(/```[\s\S]*?```/g, '')                 // fenced code
-      .replace(/^[ \t]*\*\*[^\n]*\*\*[ \t]*$/gm, '')  // severity/category/location line
-      .trim();
+    var prose = PR.findingExplanationText(f).replace(/```[\s\S]*?```/g, '').trim();
     if (!prose) return '';
     var breaks = /(?<=[.!?])\s+(?=[A-Z"'`([])/g;
     var first = prose;
@@ -329,18 +324,36 @@
     return first.replace(/\s+/g, ' ').trim();
   };
 
+  // The explanation after its first sentence, which already leads the comment.
+  PR.withoutLeadSentence = function(explanation, sentence) {
+    var words = String(sentence || '').split(/\s+/).filter(Boolean);
+    if (!words.length) return explanation;
+    var escaped = words.map(function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); });
+    var m = new RegExp('^\\s*' + escaped.join('\\s+')).exec(explanation);
+    return m ? explanation.slice(m[0].length).trim() : explanation;
+  };
+
+  // The finding as the report text klaussy review-post reads, legacy headers gone.
+  PR.findingReportText = function(f) {
+    var labelled = /(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '');
+    var parts = [PR.findingExplanationText(f)];
+    if (labelled) parts.push('Suggested change:\n' + PR.findingSuggestionText(f));
+    return parts.filter(Boolean).join('\n\n');
+  };
+
   // The klaussy-review bot's body from klaussy itself, else the same shape built
   // here (review_post.py Finding.comment): the why and the change, then the
-  // whole explanation collapsed.
+  // rest of the explanation collapsed.
   PR.findingCommentBody = function(f) {
     var bot = PR.botCommentBody && PR.botCommentBody(f);
     if (bot) return bot;
     var labelled = /(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '');
     var suggestion = labelled ? PR.findingSuggestionText(f) : '';
-    var lead = [PR.findingWhyText(f), suggestion].filter(Boolean).join('\n\n');
-    var explanation = PR.findingExplanationText(f);
-    if (!explanation) return lead;
-    var details = '<details>\n<summary></summary>\n\n' + explanation + '\n\n</details>';
+    var why = PR.findingWhyText(f);
+    var lead = [why, suggestion].filter(Boolean).join('\n\n');
+    var rest = PR.withoutLeadSentence(PR.findingExplanationText(f), why);
+    if (!rest) return lead;
+    var details = '<details>\n<summary></summary>\n\n' + rest + '\n\n</details>';
     return lead ? lead + '\n\n' + details : details;
   };
 
@@ -355,7 +368,7 @@
     }
     prose = prose
       .replace(/\*{0,2}\[(?:Severity|Location|Category)\s*:[\s\S]*?\]\*{0,2}/gi, '')
-      .replace(/^[^\S\n]*\*{0,2}Comment\*{0,2}\s*:\s*/gim, '')
+      .replace(/^[^\S\n]*\*{0,2}Comment\*{0,2}\s*:\*{0,2}\s*/gim, '')
       .replace(/^[^\S\n]*\*{1,3}[^\S\n]*$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
