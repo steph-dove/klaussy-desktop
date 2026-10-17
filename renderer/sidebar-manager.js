@@ -24,12 +24,6 @@ window.Sidebar = (function () {
     btn.textContent = busyText;
   }
 
-  function revealExtraTerminals(extraCount) {
-    if (extraCount && window.TerminalManager && TerminalManager.currentLayout() === 'single') {
-      TerminalManager.setLayout(extraCount >= 2 ? 'grid' : 'columns');
-    }
-  }
-
   function repoNameOf(wt) {
     return wt.repoPath ? wt.repoPath.split(/[\\/]/).filter(Boolean).pop() : (wt.name || '');
   }
@@ -240,10 +234,9 @@ window.Sidebar = (function () {
         // Rebuilding restores the idle label and puts focus back on this row's button.
         function restore() { busyKeys.delete(resumeKey); rebuild(); }
         var result;
-        var extraTasks = [];
         try {
           if (wt.savedAgents && wt.savedAgents.length > 1) {
-            result = await window.App.resumeAllSavedAgents(wt, function (t) { extraTasks.push(t); });
+            result = await window.App.resumeAllSavedAgents(wt);
           } else if (wt.mode === 'shell') {
             result = await window.klaus.task.attachWorktree(wt.path, 'shell', wt.repoPath, wt.branch);
           } else {
@@ -270,9 +263,6 @@ window.Sidebar = (function () {
         window.App.addTaskToUI(result);
         window.App.switchToTask(result.id);
         window.App.restoreUIState(result);
-        extraTasks.forEach(function (t) { window.App.addTaskToUI(t); });
-        // In single layout the extra agents would run with nothing on screen.
-        revealExtraTerminals(extraTasks.length);
       });
 
       var newBtn = item.querySelector('.saved-session-new');
@@ -435,18 +425,16 @@ window.Sidebar = (function () {
         if (busyKeys.has(resumeAllKey)) return;
         setBusy(resumeBtn, resumeAllKey, 'Resuming…');
         var resumed = 0;
-        var extraCount = 0;
         var failures = [];
 
         for (var i = 0; i < inactiveList.length; i++) {
           var wt = inactiveList[i];
-          var opened = [];
           try {
             var result;
             if (wt.isSavedSession && wt.savedAgents && wt.savedAgents.length) {
               // A plain attach would replace every agent the session had with a
               // single default-agent terminal.
-              result = await window.App.resumeAllSavedAgents(wt, function (t) { opened.push(t); });
+              result = await window.App.resumeAllSavedAgents(wt);
             } else {
               result = await window.klaus.task.attachWorktree(wt.path, window.App.defaultAgent(), wt.repoPath, wt.branch);
             }
@@ -456,17 +444,14 @@ window.Sidebar = (function () {
               continue;
             }
             window.App.addTaskToUI(result);
-            opened.forEach(function (t) { window.App.addTaskToUI(t); });
             if (!resumed) window.App.switchToTask(result.id);
             resumed++;
-            extraCount += opened.length;
           } catch (err) {
             failures.push(repoNameOf(wt) + ': ' + (err && err.message || err));
           }
         }
         busyKeys.delete(resumeAllKey);
         rebuild();
-        revealExtraTerminals(extraCount);
         if (resumed && window.A11y) A11y.announce('Resumed ' + resumed + (resumed === 1 ? ' session' : ' sessions'));
         if (failures.length) {
           window.toast.error('Could not resume ' + failures.length + ' of ' + inactiveList.length + ' in ' + sessionName + ': ' + failures.join('; '));

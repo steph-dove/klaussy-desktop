@@ -17,7 +17,7 @@ const { baseRepoForWorktree, sessionSiblingWorktrees, defaultBranchRefusal } = r
 const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
-  instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds, describeInstanceSession,
+  instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds, describeInstanceSession, resolveSubSessionId,
   processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler,
 } = require('../state/instances');
@@ -1346,9 +1346,19 @@ ipcMain.handle('kill-sub-terminal', (_event, { taskId, subId }) => {
   const idx = inst.subTerminals.findIndex(s => s.subId === subId);
   if (idx === -1) return { error: 'Sub-terminal not found' };
   const sub = inst.subTerminals[idx];
+  let reopen = null;
+  try {
+    const claimed = new Set();
+    for (const [, other] of instances) {
+      if (other.claudeSessionId) claimed.add(other.claudeSessionId);
+      for (const s of (other.subTerminals || [])) if (s && s !== sub && s.sessionId) claimed.add(s.sessionId);
+    }
+    const sessionId = isAgentMode(sub.mode) ? resolveSubSessionId(inst, sub, claimed) : null;
+    reopen = { mode: sub.mode, label: sub.label || null, sessionId };
+  } catch { /* reopen just won't be offered */ }
   try { sub.pty.kill(); } catch {}
   inst.subTerminals.splice(idx, 1);
-  return { ok: true };
+  return { ok: true, reopen };
 });
 
 ipcMain.handle('kill-task', (_event, { id }) => {
