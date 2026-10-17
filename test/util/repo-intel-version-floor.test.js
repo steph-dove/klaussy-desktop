@@ -110,13 +110,13 @@ test('a failed lookup is not cached as the answer', async () => {
   }
 });
 
-test('init passes --local only to a klaussy that supports it', () => {
+test('init always runs with --local, and not at all on a klaussy too old for it', () => {
   const { klaussyInitArgs } = require('../../main/state/repo-intel');
   const has = (version) => klaussyInitArgs('/r', 'main', version, false).includes('--local');
   assert.equal(has('klaussy 0.44.1'), true);
   assert.equal(has('0.45.0'), true);
-  assert.equal(has('0.44.0'), false); // misses files an earlier plain init left
-  assert.equal(has('0.30.2'), false); // rejects the flag outright
-  assert.equal(has('unknown'), false);
+  assert.equal(has('unknown'), true); // can't convict an unparseable version
+  assert.equal(klaussyInitArgs('/r', 'main', '0.44.0', false), null); // misses files an earlier plain init left
+  assert.equal(klaussyInitArgs('/r', 'main', '0.30.2', false), null); // rejects the flag outright
   assert.deepEqual(klaussyInitArgs('/r', 'dev', '0.44.1', true), ['init', '--repo', '/r', '-b', 'dev', '--local']);
 });

@@ -207,8 +207,10 @@ window.App = window.App || {};
         return;
       }
       if (ev.type === 'tools-outdated') {
-        var msg = 'klaussy-agents is out of date (' + (ev.current || '?') + ' → needs ' + (ev.min || '?')
-          + '). New agent skills won’t appear in your repos until you upgrade.';
+        var msg = 'klaussy-agents is out of date (' + (ev.current || '?') + ' → needs ' + (ev.min || '?') + '). '
+          + (ev.reason === 'local-init'
+            ? 'Agent skills aren’t set up in your repos until you upgrade, so klaussy’s files stay out of git.'
+            : 'New agent skills won’t appear in your repos until you upgrade.');
         if (window.klaus.task.upgradeReviewTools) {
           window.toast.action('warn', msg, 'Upgrade now', function () {
             window.toast.info('Upgrading klaussy-agents…');
