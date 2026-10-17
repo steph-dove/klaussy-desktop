@@ -663,7 +663,7 @@
     if (!missing.length) return;
     botPending = true;
     window.klaus.pr.botCommentBodies(missing.map(function (f) {
-      return { text: f.text, severity: f.severity, category: f.category };
+      return { text: PR.findingReportText(f), severity: f.severity, category: f.category };
     })).then(function (res) {
       var bodies = res && res.bodies;
       missing.forEach(function (f, i) {

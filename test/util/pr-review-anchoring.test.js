@@ -69,13 +69,13 @@ const FINDING = {
 const details = (text) => '<details>\n<summary></summary>\n\n' + text + '\n\n</details>';
 
 // Same shape the klaussy-review bot posts (klaussy/review_post.py Finding.comment).
-test('posted body is the why and the change, then the explanation collapsed', () => {
+test('posted body is the why and the change, then the rest of the explanation collapsed', () => {
   const body = PR.findingCommentBody(FINDING);
   assert.equal(
     body,
     'The retry loop eats the 429, so a rate-limited call comes back looking fine.'
       + '\n\n```suggestion\n    if (attempt === last) throw err;\n```'
-      + '\n\n' + details('The retry loop eats the 429, so a rate-limited call comes back looking fine.\nIt only shows up under load.'),
+      + '\n\n' + details('It only shows up under load.'),
   );
   // No label of our own, and the card's metadata line never posts.
   assert.doesNotMatch(body, /[Ss]uggested change/);
@@ -91,14 +91,14 @@ test('why is one sentence, on one line', () => {
   assert.equal(PR.findingWhyText(wrapped), 'It drops the error silently.');
 });
 
-test('a finding with why but no suggestion posts the why and its explanation', () => {
+test('a one-sentence finding gets no dropdown, the lead already says it all', () => {
   const noSuggestion = { text: 'This leaks a handle.\n\nSuggested change:\n' };
-  assert.equal(PR.findingCommentBody(noSuggestion), 'This leaks a handle.\n\n' + details('This leaks a handle.'));
+  assert.equal(PR.findingCommentBody(noSuggestion), 'This leaks a handle.');
 });
 
 test('a finding with no suggestion label leads with its first sentence', () => {
   const noLabel = { text: 'Rename `foo` to `bar`. It reads better.' };
-  assert.equal(PR.findingCommentBody(noLabel), 'Rename `foo` to `bar`.\n\n' + details('Rename `foo` to `bar`. It reads better.'));
+  assert.equal(PR.findingCommentBody(noLabel), 'Rename `foo` to `bar`.\n\n' + details('It reads better.'));
 });
 
 test('the collapsed explanation keeps quoted code, as the bot does', () => {
@@ -106,7 +106,7 @@ test('the collapsed explanation keeps quoted code, as the bot does', () => {
     verifiedSnippet: { path: 'a.js', startLine: 1, endLine: 1, text: 'x()' },
     text: 'It throws.\n\n```js\nx()\n```\n\nSuggested change:\nguard it',
   };
-  assert.equal(PR.findingCommentBody(quoted), 'It throws.\n\nguard it\n\n' + details('It throws.\n\n```js\nx()\n```'));
+  assert.equal(PR.findingCommentBody(quoted), 'It throws.\n\nguard it\n\n' + details('```js\nx()\n```'));
 });
 
 test('a suggestion with no prose above it posts just the suggestion', () => {
@@ -120,8 +120,16 @@ test('a suggestion is posted without extra Suggested change label', () => {
   };
   assert.equal(
     PR.findingCommentBody(prose),
-    'Breaks on empty input.\n\nGuard the empty case before the loop.\n\n' + details('Breaks on empty input.'),
+    'Breaks on empty input.\n\nGuard the empty case before the loop.',
   );
+});
+
+test('legacy headers stay out of the lead and the dropdown', () => {
+  const legacy = {
+    text: '**[Severity: High]**\n**[Location: a.js:3]**\n**Comment:** It drops the error. Only on retry.\n\nSuggested change:\nrethrow it',
+  };
+  assert.equal(PR.findingCommentBody(legacy), 'It drops the error.\n\nrethrow it\n\n' + details('Only on retry.'));
+  assert.equal(PR.findingReportText(legacy), 'It drops the error. Only on retry.\n\nSuggested change:\nrethrow it');
 });
 
 test('an abbreviation does not cut the why short', () => {
