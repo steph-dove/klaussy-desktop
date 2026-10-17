@@ -707,6 +707,59 @@ window.App = window.App || {};
     });
   };
 
+  var CLOSED_TASKS_MAX = 20;
+  var reopening = false;
+
+  App.rememberClosedTask = function(record) {
+    if (!record || !record.worktreePath) return;
+    AppState.closedTasks.push(record);
+    if (AppState.closedTasks.length > CLOSED_TASKS_MAX) AppState.closedTasks.shift();
+  };
+
+  // resume-session would recreate a deleted worktree from its branch.
+  App.forgetClosedTasks = function(paths) {
+    AppState.closedTasks = AppState.closedTasks.filter(function (r) { return paths.indexOf(r.worktreePath) === -1; });
+  };
+
+  // Resuming a session that is already open would put two agents on one transcript.
+  function isOpen(record) {
+    return Array.from(AppState.tasks.values()).some(function (t) {
+      return t.worktreePath === record.worktreePath && (AppUtils.exitedAgent(t) || t.mode) === record.mode;
+    });
+  }
+
+  App.reopenClosedTask = async function() {
+    if (reopening) return;
+    var record = AppState.closedTasks.pop();
+    while (record && isOpen(record)) record = AppState.closedTasks.pop();
+    if (!record) {
+      window.toast.info('No recently closed tabs to reopen');
+      return;
+    }
+    reopening = true;
+    var result;
+    try {
+      result = record.mode === 'shell'
+        ? await window.klaus.task.attachWorktree(record.worktreePath, 'shell', record.repoPath, record.branch)
+        : await window.klaus.session.resume(record);
+    } catch (err) {
+      result = { error: (err && err.message) || String(err) };
+    } finally {
+      reopening = false;
+    }
+    if (!result || result.cancelled || result.error) AppState.closedTasks.push(record);
+    if (result && result.cancelled) return;
+    if (!result || result.error) {
+      window.toast.error('Could not reopen ' + (record.name || 'tab') + ': ' + ((result && result.error) || 'no response from main process'));
+      return;
+    }
+    AppState.inactiveWorktrees = (AppState.inactiveWorktrees || []).filter(function (x) { return x.path !== record.worktreePath; });
+    if (!result.subAgentsToReopen && record.subAgents && record.subAgents.length) result.subAgentsToReopen = record.subAgents;
+    App.addTaskToUI(result);
+    App.switchToTask(result.id);
+    App.restoreUIState(result);
+  };
+
   App.closeTasksOnPaths = function(paths) {
     return window.klaus.task.list().then(function (all) {
       var chain = Promise.resolve();
@@ -732,6 +785,7 @@ window.App = window.App || {};
     var paths = wts.map(function (w) { return w.path; });
     try {
       await App.closeTasksOnPaths(paths);
+      App.forgetClosedTasks(paths);
       var res = await window.klaus.task.deleteSession(paths);
       if (!res || res.error) {
         window.toast.error((res && res.error) || 'Delete failed');

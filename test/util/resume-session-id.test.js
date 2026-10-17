@@ -8,6 +8,7 @@ const path = require('path');
 const { claudeProjectDir } = require('../../main/util/claude-paths');
 const {
   instances, detectClaudeSessionId, findLatestSessionId, snapshotSessionIds, assignDetectedSessionIds,
+  describeInstanceSession,
 } = require('../../main/state/instances');
 const router = require('../../main/state/agent-hook-router');
 
@@ -199,4 +200,42 @@ test('a hook session id that is not a UUID is never stored', () => {
   } finally {
     reset();
   }
+});
+
+test('a closed tab is described well enough to reopen it with its agents', () => {
+  const wt = worktree();
+  writeTranscript(wt, 'main-convo', 'cli');
+  const inst = agent(1, wt, {
+    branch: 'feat', repoPath: '/repo', mode: 'shell', devLoop: true,
+    subTerminals: [
+      { mode: 'codex', label: 'Codex', alive: true, sessionId: 'codex-1' },
+      { mode: 'shell', alive: true },
+      { mode: 'gemini', alive: false, sessionId: 'gone' },
+    ],
+  });
+  const rec = describeInstanceSession(inst);
+  // A converted tab reopens as the agent that started it, on its latest transcript.
+  assert.equal(rec.mode, 'claude');
+  assert.equal(rec.sessionId, 'main-convo');
+  assert.equal(rec.worktreePath, wt);
+  assert.equal(rec.branch, 'feat');
+  assert.equal(rec.repoPath, '/repo');
+  assert.equal(rec.devLoop, true);
+  assert.deepEqual(rec.subAgents, [{ mode: 'codex', label: 'Codex', sessionId: 'codex-1' }]);
+});
+
+test('a shell tab is described as a shell with no session to resume', () => {
+  const rec = describeInstanceSession(agent(2, worktree(), { mode: 'shell', originalMode: 'shell' }));
+  assert.equal(rec.mode, 'shell');
+  assert.equal(rec.sessionId, null);
+});
+
+test('a closing tab’s sub-agent does not adopt the main agent’s transcript', () => {
+  const claude = require('../../main/state/ai-providers').getProvider('claude');
+  const wt = worktree();
+  const sub = { mode: 'claude', label: 'Claude 2', alive: true, sessionId: null, preSpawnSessions: claude.snapshotSessions(wt) };
+  writeTranscript(wt, 'main-convo', 'cli');
+  const rec = describeInstanceSession(agent(3, wt, { subTerminals: [sub] }));
+  assert.equal(rec.sessionId, 'main-convo');
+  assert.deepEqual(rec.subAgents, [{ mode: 'claude', label: 'Claude 2', sessionId: null }]);
 });

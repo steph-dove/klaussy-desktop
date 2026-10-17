@@ -659,7 +659,7 @@
       bodyHtml = PR.renderFindingHeader(f)
         + '<div class="pr-ai-finding-body">'
         + originalSnippetHtml
-        + (commentBody ? PR.renderMarkdown(commentBody) : '')
+        + (commentBody ? PR.renderFindingCommentPreview(f, commentBody) : '')
         + explanationHtml
       + '</div>';
     }
@@ -673,6 +673,74 @@
       + PR.renderChatPanel(f)
       + implementOut
       + PR.renderDraftCommentBlock(f)
+    + '</div>';
+  };
+
+  // Posting humanizes every body; keyed by the draft so an edit fetches afresh.
+  var postedBodies = new Map();
+  var postedPending = new Set();
+  // Each preview spawns `klaussy humanize`; a large review would start dozens at once.
+  var HUMANIZE_CONCURRENCY = 2;
+  var humanizeRunning = 0;
+  var humanizeQueue = [];
+
+  function runQueuedHumanize() {
+    while (humanizeRunning < HUMANIZE_CONCURRENCY && humanizeQueue.length) {
+      var job = humanizeQueue.shift();
+      humanizeRunning++;
+      window.klaus.pr.humanizePreview(job.body).then(job.resolve, job.reject).then(function () {
+        humanizeRunning--;
+        runQueuedHumanize();
+      });
+    }
+  }
+
+  function queueHumanize(body) {
+    return new Promise(function (resolve, reject) {
+      humanizeQueue.push({ body: body, resolve: resolve, reject: reject });
+      runQueuedHumanize();
+    });
+  }
+
+  PR.postedBodyOf = function(body) {
+    return postedBodies.has(body) ? postedBodies.get(body) : body;
+  };
+
+  function requestPostedBody(f, body) {
+    if (postedBodies.has(body) || postedPending.has(body)) return;
+    if (!window.klaus.pr.humanizePreview) return;
+    postedPending.add(body);
+    queueHumanize(body).then(function (res) {
+      postedBodies.set(body, (res && typeof res.body === 'string' && res.body) ? res.body : body);
+    }).catch(function () {
+      postedBodies.set(body, body);
+    }).then(function () {
+      postedPending.delete(body);
+      if (PR.postedBodyOf(body) === body || !PR.hostEl) return;
+      var card = PR.hostEl.querySelector('.pr-ai-finding[data-finding-id="' + CSS.escape(String(f.id)) + '"] .pr-ai-finding-gh-comment');
+      if (card) card.outerHTML = PR.renderFindingCommentPreview(f, body);
+    });
+  }
+
+  PR.renderFindingCommentPreview = function(f, body) {
+    requestPostedBody(f, body);
+    var inline = f.postMode === 'inline' && f.locationVerified && f.path && f.line;
+    var original = null;
+    var vs = f.verifiedSnippet;
+    if (inline && vs && vs.text && vs.startLine && f.line >= vs.startLine) {
+      var line = vs.text.split('\n')[f.line - vs.startLine];
+      if (line != null) original = line;
+    }
+    return '<div class="pr-inline-thread pr-ai-finding-gh-comment">'
+      + '<div class="pr-inline-comment">'
+        + '<div class="pr-inline-comment-head">'
+          + '<span class="pr-inline-author">' + PR.escHtml(PR.currentUserLogin || 'You') + '</span>'
+          + '<span class="pr-inline-when">' + PR.escHtml(inline ? 'on ' + f.path + ':' + f.line : 'on the PR conversation') + '</span>'
+        + '</div>'
+        + '<div class="pr-inline-comment-body">'
+          + PR.renderCommentBody(PR.postedBodyOf(body), { suggestions: !!inline, original: original })
+        + '</div>'
+      + '</div>'
     + '</div>';
   };
 

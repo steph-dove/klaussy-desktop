@@ -20,9 +20,9 @@ const instancesModule = require('../state/instances');
 const {
   instances,
   subscribeTerminalChannel, unsubscribeTerminalChannel,
-  assignDetectedSessionIds, findLatestSessionId,
+  assignDetectedSessionIds, describeInstanceSession,
 } = instancesModule;
-const { getProvider, isAgentMode, allProviders, binFor } = require('../state/ai-providers');
+const { getProvider, allProviders, binFor } = require('../state/ai-providers');
 const { startAutoFetch, startCIPolling, stopCIPolling } = require('../state/ci-poll');
 const { startPrMonitor } = require('../state/pr-monitor');
 const prReviewModule = require('../state/pr-review');
@@ -58,21 +58,6 @@ function checkExternalCLIs() {
   });
 }
 
-// A fresh tab has no id until its agent writes the transcript, so it resolves on
-// a later save; `claimed` stops two tabs on one worktree adopting the same id.
-function resolveSubSessionId(inst, sub, claimed) {
-  if (sub.sessionId) return sub.sessionId;
-  const provider = getProvider(sub.mode);
-  if (!provider || typeof provider.findNewSession !== 'function') return null;
-  let found = null;
-  try {
-    found = provider.findNewSession(inst.worktreePath, sub.preSpawnSessions || new Set());
-  } catch { return null; } // a session store we cannot read is not worth failing the save
-  if (!found || !found.sessionId || claimed.has(found.sessionId)) return null;
-  sub.sessionId = found.sessionId;
-  return sub.sessionId;
-}
-
 function saveSessions() {
   // Only overwrite savedSessions if there are active instances;
   // otherwise keep whatever was previously saved
@@ -102,37 +87,7 @@ function saveSessions() {
   const sessions = [];
   const claimedSubSessions = new Set();
   for (const [, inst] of instances) if (inst.claudeSessionId) claimedSubSessions.add(inst.claudeSessionId);
-  for (const [, inst] of instances) {
-    const saveMode = inst.originalMode || inst.mode;
-    const provider = getProvider(saveMode);
-    const sessionId = provider && provider.supportsExactResume
-      ? (inst.claudeSessionId || findLatestSessionId(inst.worktreePath))
-      : null;
-    sessions.push({
-      sessionId: sessionId,
-      name: inst.name,
-      worktreePath: inst.worktreePath,
-      branch: inst.branch,
-      mode: saveMode,
-      repoPath: inst.repoPath || null,
-      // notifyPrefs also holds the bell, but keyed by tab name — which two
-      // agents on one worktree can share. Recorded per session as well, so a
-      // resumed tab comes back the way it was left.
-      notifyWebhook: inst.notifyWebhookEnabled === true,
-      devLoop: inst.devLoop === true,
-      // A second agent opens as a tab on this task rather than a task of its
-      // own, so it has no entry here to be resumed from — it rides on the one
-      // belonging to the agent that started the session.
-      subAgents: (inst.subTerminals || [])
-        .filter((s) => s && s.alive && isAgentMode(s.mode))
-        .map((s) => {
-          const subSessionId = resolveSubSessionId(inst, s, claimedSubSessions);
-          if (subSessionId) claimedSubSessions.add(subSessionId);
-          return { mode: s.mode, label: s.label || null, sessionId: subSessionId };
-        }),
-      savedAt: new Date().toISOString(),
-    });
-  }
+  for (const [, inst] of instances) sessions.push(describeInstanceSession(inst, claimedSubSessions));
   // saveConfig's write is queued, so passing a whole snapshot would revert
   // anything saved between this function starting and landing.
   saveConfig({ savedSessions: mergeSavedSessions(sessions, loadConfig().savedSessions) });

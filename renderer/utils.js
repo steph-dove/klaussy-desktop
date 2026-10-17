@@ -94,6 +94,7 @@ window.AppUtils = (function () {
     quickOpen: { key: 'p', shift: false },
     slash: { key: 'Slash' },
     diff: { key: 'g' },
+    reopenTab: { key: 't', shift: true },
     voiceDictate: { key: 'Space', shift: true, optIn: true },
     voiceCommand: { key: 'Semicolon', shift: true, optIn: true },
   };

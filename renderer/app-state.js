@@ -2,6 +2,7 @@
 window.AppState = {
   tasks: new Map(),          // id -> { name, terminal, fitAddon, container, cleanup[], alive, ... }
   inactiveWorktrees: [],     // list of inactive worktrees/sessions
+  closedTasks: [],           // resume records of closed tabs, newest last (Cmd+Shift+T)
   activeTaskId: null,
   focusedTaskId: null,
   repoPath: null,

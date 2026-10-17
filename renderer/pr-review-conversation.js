@@ -13,11 +13,38 @@
     return joined.length > 140 ? joined.slice(0, 140) + '\u2026' : joined;
   };
 
-  PR.renderMarkdownBody = function(body) {
+  // GitHub only renders ```suggestion fences as a diff on inline review comments.
+  PR.renderMarkdownBody = function(body, opts) {
     if (window.MarkdownPreview && window.MarkdownPreview.render) {
-      return '<div class="pr-conv-md">' + window.MarkdownPreview.render(body, { breaks: true }) + '</div>';
+      var html = window.MarkdownPreview.render(body, { breaks: true });
+      if (opts && opts.suggestions) html = PR.renderSuggestionBlocks(html, opts.original);
+      return '<div class="pr-conv-md">' + html + '</div>';
     }
     return PR.escHtml(body).replace(/\n/g, '<br>');
+  };
+
+  PR.renderSuggestionBlocks = function(html, original) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    var codes = tpl.content.querySelectorAll('pre > code.language-suggestion');
+    if (!codes.length) return html;
+    function lines(text, kind) {
+      if (text == null) return '';
+      return text.split('\n').map(function (l) {
+        return '<div class="pr-suggestion-line pr-suggestion-' + kind + '">'
+          + '<span class="pr-suggestion-sign" aria-hidden="true">' + (kind === 'add' ? '+' : '-') + '</span>'
+          + '<code>' + PR.escHtml(l) + '</code></div>';
+      }).join('');
+    }
+    codes.forEach(function (code) {
+      var added = code.textContent.replace(/\n$/, '');
+      var box = document.createElement('div');
+      box.className = 'pr-suggestion';
+      box.innerHTML = '<div class="pr-suggestion-head">Suggested change</div>'
+        + lines(original, 'del') + (added ? lines(added, 'add') : '');
+      code.parentNode.replaceWith(box);
+    });
+    return tpl.innerHTML;
   };
 
   // Render comment bodies as full markdown (markdown-it + hljs + DOMPurify via
@@ -25,10 +52,10 @@
   // review finding still carries its [Severity:]/[Location:]/[Category:]
   // metadata — render that with the same severity-dot / category-tag / location
   // treatment as the Review tab instead of dumping the brackets.
-  PR.renderCommentBody = function(body) {
+  PR.renderCommentBody = function(body, opts) {
     if (!body) return '';
     if (/\*{0,2}\[Severity\s*:/i.test(body)) return PR.renderFindingComment(body);
-    return PR.renderMarkdownBody(body);
+    return PR.renderMarkdownBody(body, opts);
   };
 
   PR.renderFindingComment = function(body) {

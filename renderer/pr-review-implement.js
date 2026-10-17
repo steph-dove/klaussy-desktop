@@ -456,7 +456,7 @@
   // Copy the same text Add-to-PR posts, so paste matches send.
   PR.copyFindingAsMarkdown = async function(f) {
     try {
-      await navigator.clipboard.writeText(PR.findingCommentBody(f));
+      await navigator.clipboard.writeText(PR.postedBodyOf(PR.findingCommentBody(f)));
       f.copyStatus = 'copied';
       PR.repaintAiReviewTab();
       A11y.announce('Copied as Markdown');
@@ -1113,10 +1113,10 @@
       el.innerHTML =
         '<div class="pr-pending-head">'
           + '<span class="pr-pending-badge">draft</span>'
-          + '<span class="pr-pending-summary">' + PR.escHtml(PR.firstTwoLines(c.body)) + '</span>'
+          + '<span class="pr-pending-summary">' + PR.escHtml(PR.firstTwoLines(PR.postedBodyOf(c.body))) + '</span>'
           + '<button class="pr-pending-remove" type="button" title="Discard draft" aria-label="Discard draft">&times;</button>'
         + '</div>'
-        + '<div class="pr-pending-body">' + PR.renderCommentBody(c.body) + '</div>';
+        + '<div class="pr-pending-body">' + PR.renderCommentBody(PR.postedBodyOf(c.body), { suggestions: true }) + '</div>';
       after.insertAdjacentElement('afterend', el);
       el.querySelector('.pr-pending-remove').addEventListener('click', function () {
         PR.removePendingComment(c.id);
@@ -1298,7 +1298,7 @@
           + '<span class="pr-inline-author">' + PR.escHtml(author) + '</span>'
           + '<span class="pr-inline-when">' + PR.escHtml(when) + '</span>'
         + '</div>'
-        + '<div class="pr-inline-comment-body">' + PR.renderCommentBody(c.body) + '</div>'
+        + '<div class="pr-inline-comment-body">' + PR.renderCommentBody(c.body, { suggestions: true }) + '</div>'
       + '</div>';
     }).join('');
 

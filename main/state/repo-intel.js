@@ -607,6 +607,13 @@ async function warnIfKlaussyOutdated() {
   } catch { /* best-effort — a version probe hiccup shouldn't crash boot */ }
 }
 
+// Fires even when PyPI is unreachable and warnIfKlaussyOutdated stays quiet.
+function warnKlaussyTooOldForLocal(current) {
+  if (outdatedNotified) return;
+  outdatedNotified = true;
+  notifyWindows({ type: 'tools-outdated', current, min: LOCAL_INIT_MIN_VERSION, reason: 'local-init' });
+}
+
 // Force an immediate upgrade (the "Upgrade now" action), bypassing the daily
 // gate — re-probes and reports whether the machine cleared the floor; never throws
 async function upgradeReviewToolsNow() {
@@ -651,15 +658,12 @@ const BOOTSTRAP_EXCLUDE_MARKER = '# klaussy: agent bootstrap (generated, not com
 // earlier plain init left behind.
 const LOCAL_INIT_MIN_VERSION = '0.44.1';
 
-// --local keeps everything init writes out of git for this clone, which
-// excludeBootstrapArtifacts' fixed list can't: every agent's dirs, the
-// .gitignore entries, and edits to committed files (put back, or moved to
-// settings.local.json). Older klaussy rejects the flag.
+// Null below the floor: older klaussy rejects --local, and a plain init dirties git status.
 function klaussyInitArgs(base, branch, version, enrich) {
+  if (versionBelow(version, LOCAL_INIT_MIN_VERSION)) return null;
   const args = ['init', '--repo', base, '-b', branch];
   if (!enrich) args.push('--skip-enrich');
-  // versionBelow is false for an unparseable version, so check it parses first.
-  if (parseVersionTriple(version) && !versionBelow(version, LOCAL_INIT_MIN_VERSION)) args.push('--local');
+  args.push('--local');
   return args;
 }
 // Generated root conventions docs — Claude reads CLAUDE.md, Gemini GEMINI.md,
@@ -1265,19 +1269,18 @@ function ensureRepoIntel(repoOrWorktreePath) {
 
       let wroteSkills = false;
       let enrichFailed = false;
-      if (currentVersion) {
+      // Enrichment runs the claude CLI (real API spend), so it's opt-in.
+      const enrich = loadConfig().repoIntelEnrich === true;
+      const initArgs = currentVersion ? klaussyInitArgs(base, defaultBranchOf(base), currentVersion, enrich) : null;
+      if (currentVersion && !initArgs) {
+        console.warn('[repo-intel] klaussy', currentVersion, 'predates init --local; skipping init until upgraded');
+        warnKlaussyTooOldForLocal(currentVersion);
+      }
+      if (initArgs) {
         // Pass 2a — klaussy init: CLAUDE.md + rules + conventions-aware
         // skills + settings. No --force, so existing files (handcrafted
         // CLAUDE.md, customized skills) are preserved. -b is mandatory to
         // keep it non-interactive.
-        //
-        // Enrichment (the Claude pass that rewrites CLAUDE.md into richer
-        // prose) invokes the claude CLI = real API spend on the user's
-        // machine. Off by default; --skip-enrich still produces the full
-        // skills/rules/settings + a templated CLAUDE.md, just without the
-        // LLM rewrite.
-        const enrich = loadConfig().repoIntelEnrich === true;
-        const initArgs = klaussyInitArgs(base, defaultBranchOf(base), currentVersion, enrich);
         //
         // Guard: klaussy's exists-check → write window isn't atomic (it
         // even runs a pip upgrade in between). Snapshot a pre-existing

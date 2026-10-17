@@ -11,7 +11,7 @@
 //
 // Returns the humanized string; passes non-strings through unchanged.
 
-const { execFileSync } = require('child_process');
+const { execFile, execFileSync } = require('child_process');
 
 // Sentence-initial filler openers, stripped at the start of the text or a line
 // (so we don't cut mid-sentence), and the following word is re-capitalized.
@@ -165,4 +165,27 @@ function humanizeComment(input) {
   return humanizeCommentJs(input);
 }
 
-module.exports = { humanizeComment, humanizeCommentJs };
+// humanizeComment without blocking the main process.
+function humanizeCommentP(input) {
+  if (typeof input !== 'string' || !input) return Promise.resolve(input);
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = execFile('klaussy', ['humanize'], {
+        encoding: 'utf-8',
+        timeout: 15000,
+        maxBuffer: 8 * 1024 * 1024,
+      }, (err, out) => {
+        if (!err && typeof out === 'string' && out.length) resolve(out.replace(/\n{3,}/g, '\n\n').trim());
+        else resolve(humanizeCommentJs(input));
+      });
+    } catch {
+      resolve(humanizeCommentJs(input));
+      return;
+    }
+    child.stdin.on('error', () => { /* the exit callback reports the failure */ });
+    child.stdin.end(input);
+  });
+}
+
+module.exports = { humanizeComment, humanizeCommentP, humanizeCommentJs };
