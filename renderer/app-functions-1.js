@@ -721,9 +721,17 @@ window.App = window.App || {};
     AppState.closedTasks = AppState.closedTasks.filter(function (r) { return paths.indexOf(r.worktreePath) === -1; });
   };
 
+  // Resuming a session that is already open would put two agents on one transcript.
+  function isOpen(record) {
+    return Array.from(AppState.tasks.values()).some(function (t) {
+      return t.worktreePath === record.worktreePath && (AppUtils.exitedAgent(t) || t.mode) === record.mode;
+    });
+  }
+
   App.reopenClosedTask = async function() {
     if (reopening) return;
     var record = AppState.closedTasks.pop();
+    while (record && isOpen(record)) record = AppState.closedTasks.pop();
     if (!record) {
       window.toast.info('No recently closed tabs to reopen');
       return;
@@ -739,10 +747,8 @@ window.App = window.App || {};
     } finally {
       reopening = false;
     }
-    if (result && result.cancelled) {
-      AppState.closedTasks.push(record);
-      return;
-    }
+    if (!result || result.cancelled || result.error) AppState.closedTasks.push(record);
+    if (result && result.cancelled) return;
     if (!result || result.error) {
       window.toast.error('Could not reopen ' + (record.name || 'tab') + ': ' + ((result && result.error) || 'no response from main process'));
       return;

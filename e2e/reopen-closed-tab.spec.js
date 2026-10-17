@@ -42,6 +42,40 @@ test.describe('reopen closed tab', () => {
     }
   });
 
+  test('a failed reopen keeps the tab so the shortcut can retry it', async ({ mainWindow }) => {
+    const left = await mainWindow.evaluate(async () => {
+      window.AppState.closedTasks = [{ worktreePath: '/nonexistent/klaussy-reopen', mode: 'claude', name: 'gone' }];
+      await window.App.reopenClosedTask();
+      const out = window.AppState.closedTasks.map((r) => r.worktreePath);
+      window.AppState.closedTasks = [];
+      return out;
+    });
+    expect(left).toEqual(['/nonexistent/klaussy-reopen']);
+  });
+
+  test('a tab that is already open again is skipped, not opened twice', async ({ mainWindow }) => {
+    const repo = buildRepo({ 'README.md': '# dup\n' }, 'reopen-dup');
+    try {
+      await openShellTask(mainWindow, repo);
+      const out = await mainWindow.evaluate(async (r) => {
+        window.AppState.closedTasks = [{ worktreePath: r, mode: 'shell', repoPath: r, branch: 'main' }];
+        const before = window.AppState.tasks.size;
+        await window.App.reopenClosedTask();
+        return { added: window.AppState.tasks.size - before, left: window.AppState.closedTasks.length };
+      }, repo);
+      expect(out).toEqual({ added: 0, left: 0 });
+    } finally {
+      await mainWindow.evaluate(async () => {
+        for (const t of Array.from(window.AppState.tasks.values())) {
+          await window.klaus.task.kill(t.id);
+          window.App.removeTaskFromUI(t.id);
+        }
+        window.AppState.closedTasks = [];
+      });
+      rm(repo);
+    }
+  });
+
   test('a deleted session is not offered for reopening', async ({ mainWindow }) => {
     const out = await mainWindow.evaluate(() => {
       window.AppState.closedTasks = [

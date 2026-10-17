@@ -229,3 +229,13 @@ test('a shell tab is described as a shell with no session to resume', () => {
   assert.equal(rec.mode, 'shell');
   assert.equal(rec.sessionId, null);
 });
+
+test('a closing tab’s sub-agent does not adopt the main agent’s transcript', () => {
+  const claude = require('../../main/state/ai-providers').getProvider('claude');
+  const wt = worktree();
+  const sub = { mode: 'claude', label: 'Claude 2', alive: true, sessionId: null, preSpawnSessions: claude.snapshotSessions(wt) };
+  writeTranscript(wt, 'main-convo', 'cli');
+  const rec = describeInstanceSession(agent(3, wt, { subTerminals: [sub] }));
+  assert.equal(rec.sessionId, 'main-convo');
+  assert.deepEqual(rec.subAgents, [{ mode: 'claude', label: 'Claude 2', sessionId: null }]);
+});

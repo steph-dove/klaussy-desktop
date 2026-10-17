@@ -253,6 +253,8 @@ function describeInstanceSession(inst, claimedSubSessions = new Set()) {
   const sessionId = provider && provider.supportsExactResume
     ? (inst.claudeSessionId || findLatestSessionId(inst.worktreePath))
     : null;
+  // A sub-tab still resolving its id must not adopt the main agent's transcript.
+  if (sessionId) claimedSubSessions.add(sessionId);
   return {
     sessionId: sessionId,
     name: inst.name,

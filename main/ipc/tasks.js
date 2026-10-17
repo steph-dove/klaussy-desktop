@@ -1357,7 +1357,13 @@ ipcMain.handle('kill-task', (_event, { id }) => {
 
   // Described before the kill: only live sub-agents are recorded.
   let reopen = null;
-  try { reopen = describeInstanceSession(inst); } catch { /* reopen just won't be offered */ }
+  const claimed = new Set();
+  for (const [otherId, other] of instances) {
+    if (otherId === id) continue;
+    if (other.claudeSessionId) claimed.add(other.claudeSessionId);
+    for (const s of (other.subTerminals || [])) if (s && s.sessionId) claimed.add(s.sessionId);
+  }
+  try { reopen = describeInstanceSession(inst, claimed); } catch { /* reopen just won't be offered */ }
 
   // Mark BEFORE kill(): pty.kill is async, and the onExit handler checks this
   // flag to skip the Claude→shell auto-convert branch. Without it, killing a
