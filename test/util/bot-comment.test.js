@@ -3,7 +3,7 @@ require('../setup');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('child_process');
-const { botCommentBodies, buildReportAndDiff, withoutRepeatedLead } = require('../../main/util/bot-comment');
+const { botCommentBodies, buildReportAndDiff } = require('../../main/util/bot-comment');
 
 function hasKlaussy() {
   try { execFileSync('klaussy', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
@@ -29,19 +29,16 @@ test('without klaussy it returns null so the caller falls back', async () => {
   }
 });
 
-test('klaussy builds the bot’s comment: the why and the change, then the rest collapsed', { skip: !hasKlaussy() && 'klaussy not installed' }, async () => {
+test('klaussy builds the bot’s comment: the why and the change, then the explanation collapsed', { skip: !hasKlaussy() && 'klaussy not installed' }, async () => {
   const [body] = await botCommentBodies([{
     severity: 'Medium', category: 'Correctness',
     text: 'It skips the last item. Only on the final page.\n\n```js\nfor (i = 0; i < n - 1; i++)\n```\n\nSuggested change:\n\n```suggestion\nconst b = a;\n```',
   }]);
   assert.equal(body, 'It skips the last item.\n\n```suggestion\nconst b = a;\n```\n\n<details>\n<summary></summary>\n\n'
-    + 'Only on the final page.\n\n```js\nfor (i = 0; i < n - 1; i++)\n```\n\n</details>');
+    + 'It skips the last item. Only on the final page.\n\n```js\nfor (i = 0; i < n - 1; i++)\n```\n\n</details>');
 });
 
-test('the lead sentence is not repeated inside the dropdown', () => {
-  const dropdown = (t) => `<details>\n<summary></summary>\n\n${t}\n\n</details>`;
-  assert.equal(withoutRepeatedLead(`It leaks.\n\nfix\n\n${dropdown('It\nleaks. On close.')}`), `It leaks.\n\nfix\n\n${dropdown('On close.')}`);
-  assert.equal(withoutRepeatedLead(`It leaks.\n\n${dropdown('It leaks.')}`), 'It leaks.');
-  const other = `It leaks.\n\n${dropdown('Something else.')}`;
-  assert.equal(withoutRepeatedLead(other), other);
+test('a finding reordered so the change comes first leads with that one sentence', { skip: !hasKlaussy() && 'klaussy not installed' }, async () => {
+  const [body] = await botCommentBodies([{ text: 'Take the lock first. Then write.\n\nIt races under load.' }]);
+  assert.equal(body, 'Take the lock first.\n\n<details>\n<summary></summary>\n\nTake the lock first. Then write.\n\nIt races under load.\n\n</details>');
 });
