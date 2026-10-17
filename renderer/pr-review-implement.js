@@ -329,16 +329,16 @@
     return first.replace(/\s+/g, ' ').trim();
   };
 
-  // One line of why, then the change (unlabeled so comments read naturally).
+  // The klaussy-review bot's shape (klaussy/review_post.py Finding.comment): one
+  // line of why and the change, then the whole explanation collapsed.
   PR.findingCommentBody = function(f) {
-    var suggestion = PR.findingSuggestionText(f);
-    // No label in the text at all means findingSuggestionText returned the
-    // whole body, which the why would duplicate.
-    if (!/(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '')) return suggestion;
-    var why = PR.findingWhyText(f);
-    if (!why) return suggestion;
-    if (!suggestion) return why;
-    return why + '\n\n' + suggestion;
+    var labelled = /(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '');
+    var suggestion = labelled ? PR.findingSuggestionText(f) : '';
+    var lead = [PR.findingWhyText(f), suggestion].filter(Boolean).join('\n\n');
+    var explanation = PR.findingExplanationText(f);
+    if (!explanation) return lead;
+    var details = '<details>\n<summary></summary>\n\n' + explanation + '\n\n</details>';
+    return lead ? lead + '\n\n' + details : details;
   };
 
   // Full explanation prose above the "Suggested change:" label (or the whole
@@ -364,6 +364,42 @@
     return prose.trim();
   };
 
+  function stageFinding(f) {
+    var entry = {
+      id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      fromFindingId: f.id,
+      body: PR.findingCommentBody(f),
+    };
+    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
+      entry.path = f.path;
+      entry.line = f.line;
+      entry.side = f.side || 'RIGHT';
+    } else {
+      entry.issueComment = true;
+    }
+    PR.pendingComments.push(entry);
+  }
+
+  PR.stageableFindings = function() {
+    return PR.aiReview.findings.filter(function (f) {
+      return !f.ignored && f.commentStatus !== 'posted' && !PR.pendingCommentDraftExistsForFinding(f.id);
+    });
+  };
+
+  // Stages every open finding, then opens Submit review with the bot's summary
+  // and the event its verdict calls for.
+  PR.addAllFindingsToReview = function() {
+    var staged = PR.stageableFindings();
+    staged.forEach(stageFinding);
+    if (staged.length) {
+      PR.repaintAiReviewTab();
+      PR.saveAiReviewCache();
+      if (PR.lastState) PR.render(PR.lastState);
+      A11y.announce('Added ' + staged.length + ' finding' + (staged.length === 1 ? '' : 's') + ' to the review. ' + pendingSummary());
+    }
+    PR.openSubmitReviewDialog({ body: PR.reviewSummaryBody(), event: PR.reviewSummaryEvent() });
+  };
+
   // Add a finding to the pending review. Both paths STAGE into pendingComments
   // (nothing posts until Submit review): verified findings draft inline,
   // unverified ones as an issueComment draft posted after the review.
@@ -381,22 +417,7 @@
       return;
     }
 
-    // One line of why plus the change, staged as the reviewer's own words (no
-    // bot attribution). Severity/location stay on the card as reference.
-    var attributedBody = PR.findingCommentBody(f);
-    var entry = {
-      id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-      fromFindingId: f.id,
-      body: attributedBody,
-    };
-    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
-      entry.path = f.path;
-      entry.line = f.line;
-      entry.side = f.side || 'RIGHT';
-    } else {
-      entry.issueComment = true;
-    }
-    PR.pendingComments.push(entry);
+    stageFinding(f);
     PR.repaintAiReviewTab();
     PR.saveAiReviewCache();
     if (PR.lastState) PR.render(PR.lastState);
@@ -1135,7 +1156,8 @@
     return !!(author && PR.currentUserLogin && author === PR.currentUserLogin);
   };
 
-  PR.openSubmitReviewDialog = function() {
+  PR.openSubmitReviewDialog = function(prefill) {
+    if (!prefill || typeof prefill !== 'object' || prefill instanceof Event) prefill = {};
     if (PR.pendingComments.length === 0) {
       if (!confirm('No pending comments. Submit review anyway (summary only)?')) return;
     }
@@ -1164,6 +1186,9 @@
         + '<div class="pr-submit-error" id="pr-submit-error" role="alert" style="display:none;"></div>'
       + '</div>';
     document.body.appendChild(overlay);
+    if (prefill.body) overlay.querySelector('.pr-submit-body').value = prefill.body;
+    var prefillEvent = prefill.event && overlay.querySelector('input[name="pr-event"][value="' + prefill.event + '"]:not([disabled])');
+    if (prefillEvent) prefillEvent.checked = true;
 
     function close() { overlay.remove(); }
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });

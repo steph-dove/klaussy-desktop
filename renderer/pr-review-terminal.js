@@ -600,67 +600,10 @@
           + '</div>'
         + '</div>';
     } else {
-      // The de-bracketed location, shown above the code snippet it describes.
-      var loc = PR.parseLocation(f.text);
-      var locText = '';
-      if (f.verifiedSnippet && f.verifiedSnippet.text) {
-        var vs = f.verifiedSnippet;
-        locText = vs.path + ':' + vs.startLine
-          + (vs.endLine && vs.endLine !== vs.startLine ? '-' + vs.endLine : '');
-      } else if (loc) {
-        locText = loc.path + ':' + loc.line + (loc.endLine ? '-' + loc.endLine : '');
-      } else if (f.path && f.line) {
-        locText = f.path + ':' + f.line;
-      }
-      // The descriptive tail ("…, the restart path in handleEnd") is context for
-      // the agent, not the reader — keep it only as a hover title, show just the
-      // clean path:line.
-      var locDesc = (loc && loc.snippet ? loc.snippet : '').replace(/^[\s,;]+/, '').trim();
-      var locTitle = locDesc ? ' title="' + PR.escHtml(locText + ' — ' + locDesc) + '"' : '';
-      var locHeadHtml = locText
-        ? '<div class="pr-ai-finding-loc-label"' + locTitle + '>'
-            + '<span class="pr-ai-finding-loc-path">' + PR.escHtml(locText) + '</span>'
-          + '</div>'
-        : '';
-
-      var originalSnippetHtml = '';
-      if (f.verifiedSnippet && f.verifiedSnippet.text) {
-        // Location label sits above the code box it describes.
-        originalSnippetHtml = '<div class="pr-ai-finding-original-wrap">'
-          + locHeadHtml
-          + '<div class="pr-ai-finding-original">'
-            + '<pre class="pr-ai-finding-original-code"><code>' + PR.escHtml(f.verifiedSnippet.text) + '</code></pre>'
-          + '</div>'
-        + '</div>';
-      } else if (locHeadHtml) {
-        // No verified snippet — still surface the location above the body.
-        originalSnippetHtml = locHeadHtml;
-      }
-
-      // Card body must show the exact comment that "Add to PR" / "Copy" posts.
       var commentBody = PR.findingCommentBody ? PR.findingCommentBody(f) : (f.text || '');
-      var explanationText = PR.findingExplanationText ? PR.findingExplanationText(f) : '';
-      var whyText = PR.findingWhyText ? PR.findingWhyText(f) : '';
-
-      var normExp = explanationText.replace(/\s+/g, ' ').trim();
-      var normWhy = whyText.replace(/\s+/g, ' ').trim();
-      var normComment = (commentBody || '').replace(/\s+/g, ' ').trim();
-      var hasLongerExplanation = !!(explanationText && normExp !== normWhy && normExp !== normComment);
-
-      var explanationHtml = hasLongerExplanation
-        ? '<details class="pr-ai-finding-explanation">'
-            + '<summary class="pr-ai-finding-explanation-summary">Explanation</summary>'
-            + '<div class="pr-ai-finding-explanation-body">'
-              + PR.renderMarkdown(explanationText)
-            + '</div>'
-          + '</details>'
-        : '';
-
       bodyHtml = PR.renderFindingHeader(f)
         + '<div class="pr-ai-finding-body">'
-        + originalSnippetHtml
         + (commentBody ? PR.renderFindingCommentPreview(f, commentBody) : '')
-        + explanationHtml
       + '</div>';
     }
 
@@ -722,23 +665,51 @@
     });
   }
 
+  function avatarHtml(login) {
+    return '<span class="pr-gh-avatar" aria-hidden="true">' + PR.escHtml((login || '?').charAt(0).toUpperCase()) + '</span>';
+  }
+
+  function hunkRowsHtml(rows) {
+    return '<div class="pr-gh-hunk">' + rows.map(function (r) {
+      var sign = r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ' ';
+      return '<div class="pr-gh-hunk-row pr-gh-hunk-' + r.kind + '">'
+        + '<span class="pr-gh-hunk-ln">' + (r.oldLn || '') + '</span>'
+        + '<span class="pr-gh-hunk-ln">' + (r.newLn || '') + '</span>'
+        + '<span class="pr-gh-hunk-sign">' + sign + '</span>'
+        + '<code class="pr-gh-hunk-code">' + PR.escHtml(r.text) + '</code>'
+      + '</div>';
+    }).join('') + '</div>';
+  }
+
+  // The finding as GitHub will show it once posted: a review thread on its diff
+  // lines, or a comment on the PR conversation when it has no line in the diff.
   PR.renderFindingCommentPreview = function(f, body) {
     requestPostedBody(f, body);
     var inline = f.postMode === 'inline' && f.locationVerified && f.path && f.line;
-    var original = null;
+    var diff = PR.lastState && PR.lastState.diff;
+    var rows = inline && diff ? PR.diffRowsEndingAt(diff, f.path, f.line, 4) : [];
     var vs = f.verifiedSnippet;
-    if (inline && vs && vs.text && vs.startLine && f.line >= vs.startLine) {
-      var line = vs.text.split('\n')[f.line - vs.startLine];
-      if (line != null) original = line;
+    if (!rows.length && vs && vs.text) {
+      rows = vs.text.split('\n').map(function (t, k) { return { kind: 'context', newLn: vs.startLine + k, text: t }; });
     }
-    return '<div class="pr-inline-thread pr-ai-finding-gh-comment">'
-      + '<div class="pr-inline-comment">'
-        + '<div class="pr-inline-comment-head">'
-          + '<span class="pr-inline-author">' + PR.escHtml(PR.currentUserLogin || 'You') + '</span>'
-          + '<span class="pr-inline-when">' + PR.escHtml(inline ? 'on ' + f.path + ':' + f.line : 'on the PR conversation') + '</span>'
+    var anchored = rows.filter(function (r) { return r.newLn === f.line; })[0];
+    var login = PR.currentUserLogin || 'You';
+    var path = f.path || (vs && vs.path) || '';
+    var fileBar = path
+      ? '<div class="pr-gh-thread-file"><span class="pr-gh-thread-path">' + PR.escHtml(path) + '</span>'
+          + (inline ? '' : '<span class="pr-gh-badge" title="GitHub only takes inline comments on lines in the diff">Not in diff \u00b7 posts to the conversation</span>')
         + '</div>'
-        + '<div class="pr-inline-comment-body">'
-          + PR.renderCommentBody(PR.postedBodyOf(body), { suggestions: !!inline, original: original })
+      : '';
+    return '<div class="pr-gh-thread pr-ai-finding-gh-comment">'
+      + fileBar
+      + (rows.length ? hunkRowsHtml(rows) : '')
+      + '<div class="pr-gh-comment">'
+        + '<div class="pr-gh-comment-head">' + avatarHtml(login)
+          + '<span class="pr-gh-author">' + PR.escHtml(login) + '</span>'
+          + '<span class="pr-gh-when">' + (inline ? 'pending review comment' : 'pending comment') + '</span>'
+        + '</div>'
+        + '<div class="pr-gh-comment-body">'
+          + PR.renderCommentBody(PR.postedBodyOf(body), { suggestions: !!inline, original: anchored ? anchored.text : null })
         + '</div>'
       + '</div>'
     + '</div>';
@@ -867,6 +838,9 @@
       var promo = PR.hostEl.querySelector('.pr-ai-app-promo');
       if (promo) promo.remove();
     });
+
+    var addAllBtn = PR.hostEl.querySelector('.pr-ai-add-all');
+    if (addAllBtn) addAllBtn.addEventListener('click', PR.addAllFindingsToReview);
 
     var rerunBtn = PR.hostEl.querySelector('.pr-ai-rerun');
     if (rerunBtn) rerunBtn.addEventListener('click', function () {

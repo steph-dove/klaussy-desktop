@@ -14,11 +14,25 @@
   };
 
   // GitHub only renders ```suggestion fences as a diff on inline review comments.
+  // markdown-it runs with html:false, so the <details> GitHub renders (and the
+  // review bot posts) would otherwise show as literal tags.
+  var DETAILS = /<details>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g;
+
+  function renderMarkdown(body, opts) {
+    var blocks = [];
+    var src = String(body).replace(DETAILS, function (_m, summary, inner) {
+      blocks.push('<details class="pr-gh-details"><summary>' + PR.escHtml(summary.trim()) + '</summary>'
+        + renderMarkdown(inner, opts) + '</details>');
+      return '\n\nKLAUSSYDETAILS' + (blocks.length - 1) + '\n\n';
+    });
+    var html = window.MarkdownPreview.render(src, { breaks: true });
+    if (opts && opts.suggestions) html = PR.renderSuggestionBlocks(html, opts.original);
+    return html.replace(/<p>KLAUSSYDETAILS(\d+)<\/p>/g, function (_m, i) { return blocks[+i]; });
+  }
+
   PR.renderMarkdownBody = function(body, opts) {
     if (window.MarkdownPreview && window.MarkdownPreview.render) {
-      var html = window.MarkdownPreview.render(body, { breaks: true });
-      if (opts && opts.suggestions) html = PR.renderSuggestionBlocks(html, opts.original);
-      return '<div class="pr-conv-md">' + html + '</div>';
+      return '<div class="pr-conv-md">' + renderMarkdown(body, opts) + '</div>';
     }
     return PR.escHtml(body).replace(/\n/g, '<br>');
   };

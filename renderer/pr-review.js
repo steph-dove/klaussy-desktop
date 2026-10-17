@@ -1494,6 +1494,29 @@ window.PrReview = window.PrReview || {};
     return !!entry[side === 'LEFT' ? 'LEFT' : 'RIGHT'][line];
   };
 
+  // The diff rows GitHub shows above an inline comment: up to `count` rows of the
+  // comment's hunk, ending at its new-side line. Empty when the line isn't in the diff.
+  PR.diffRowsEndingAt = function(diffText, path, line, count) {
+    var file = PR.parseDiffFiles(diffText).filter(function (f) { return f.path === path; })[0];
+    if (!file || typeof line !== 'number') return [];
+    var hunk = null;
+    var oldLn = 0, newLn = 0;
+    var rows = file.raw.split('\n');
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var hm = row.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hm) { oldLn = +hm[1] - 1; newLn = +hm[2] - 1; hunk = []; continue; }
+      if (!hunk) continue;
+      if (row.startsWith('+')) hunk.push({ kind: 'add', newLn: ++newLn, text: row.slice(1) });
+      else if (row.startsWith('-')) hunk.push({ kind: 'del', oldLn: ++oldLn, text: row.slice(1) });
+      else if (row.startsWith(' ')) hunk.push({ kind: 'context', oldLn: ++oldLn, newLn: ++newLn, text: row.slice(1) });
+      else continue;
+      var last = hunk[hunk.length - 1];
+      if (last.kind !== 'del' && last.newLn === line) return hunk.slice(-(count || 4));
+    }
+    return [];
+  };
+
   // Unified-diff renderer that tags each add/del/context line with (side,
   // line) so G3 can anchor review threads by GitHub's position model
   // (LEFT=old_ln, RIGHT=new_ln). Explain lives in a floating action button
