@@ -123,7 +123,8 @@ window.Sidebar = (function () {
         repoPath: task.repoPath || '',
       };
       stopDirtyWatch(task);
-      await window.klaus.task.kill(task.id);
+      var res = await window.klaus.task.kill(task.id);
+      if (res && res.reopen) window.App.rememberClosedTask(res.reopen);
       TerminalManager.removeTaskFromUI(task.id);
 
       if (wt.branch) window._addWorktreeToSidebar(wt);

@@ -1435,6 +1435,7 @@ window.Dialogs = (function () {
       { keys: AppUtils.appShortcutLabel('quickOpen'), label: 'Quick open a file' },
       { keys: AppUtils.appShortcutLabel('slash'), label: 'Run a slash command in the active terminal' },
       { keys: AppUtils.appShortcutLabel('diff'), label: 'Toggle changes panel for current task' },
+      { keys: AppUtils.appShortcutLabel('reopenTab'), label: 'Reopen the last closed tab' },
       { keys: mac ? '\u2318\u21e7A' : 'Ctrl+Shift+A', label: 'Show active agents' },
       { keys: 'Hold ' + AppUtils.appShortcutLabel('voiceDictate'), label: 'Dictate into the active agent (voice input on)' },
       { keys: 'Hold ' + AppUtils.appShortcutLabel('voiceCommand'), label: 'Speak a command, e.g. "open pr review" (voice input on)' },

@@ -1028,6 +1028,10 @@ window.App = window.App || {};
       e.preventDefault();
       App.btnDiff.click();
     }
+    if (AppUtils.isNamedShortcut(e, 'reopenTab')) {
+      e.preventDefault();
+      App.reopenClosedTask();
+    }
   });
 
   document.addEventListener('keydown', function (e) {

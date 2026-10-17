@@ -232,6 +232,53 @@ function findLatestSessionId(worktreePath, sinceMs) {
   return files.length > 0 ? files[0].sessionId : null;
 }
 
+// A fresh tab has no id until its agent writes the transcript, so it resolves on
+// a later save; `claimed` stops two tabs on one worktree adopting the same id.
+function resolveSubSessionId(inst, sub, claimed) {
+  if (sub.sessionId) return sub.sessionId;
+  const provider = getProvider(sub.mode);
+  if (!provider || typeof provider.findNewSession !== 'function') return null;
+  let found = null;
+  try {
+    found = provider.findNewSession(inst.worktreePath, sub.preSpawnSessions || new Set());
+  } catch { return null; } // a session store we cannot read is not worth failing the save
+  if (!found || !found.sessionId || claimed.has(found.sessionId)) return null;
+  sub.sessionId = found.sessionId;
+  return sub.sessionId;
+}
+
+function describeInstanceSession(inst, claimedSubSessions = new Set()) {
+  const saveMode = inst.originalMode || inst.mode;
+  const provider = getProvider(saveMode);
+  const sessionId = provider && provider.supportsExactResume
+    ? (inst.claudeSessionId || findLatestSessionId(inst.worktreePath))
+    : null;
+  return {
+    sessionId: sessionId,
+    name: inst.name,
+    worktreePath: inst.worktreePath,
+    branch: inst.branch,
+    mode: saveMode,
+    repoPath: inst.repoPath || null,
+    // notifyPrefs also holds the bell, but keyed by tab name — which two
+    // agents on one worktree can share. Recorded per session as well, so a
+    // resumed tab comes back the way it was left.
+    notifyWebhook: inst.notifyWebhookEnabled === true,
+    devLoop: inst.devLoop === true,
+    // A second agent opens as a tab on this task rather than a task of its
+    // own, so it has no entry here to be resumed from — it rides on the one
+    // belonging to the agent that started the session.
+    subAgents: (inst.subTerminals || [])
+      .filter((s) => s && s.alive && isAgentMode(s.mode))
+      .map((s) => {
+        const subSessionId = resolveSubSessionId(inst, s, claimedSubSessions);
+        if (subSessionId) claimedSubSessions.add(subSessionId);
+        return { mode: s.mode, label: s.label || null, sessionId: subSessionId };
+      }),
+    savedAt: new Date().toISOString(),
+  };
+}
+
 // ---- Idle / Prompt Detection (A1) ----
 
 const IDLE_TIMEOUT_MS = 15000;
@@ -1175,6 +1222,7 @@ module.exports = {
   detectClaudeSessionId,
   assignDetectedSessionIds,
   findLatestSessionId,
+  describeInstanceSession,
   processIdleDetection,
   processSubOutput,
   sessionNameFor,

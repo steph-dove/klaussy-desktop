@@ -274,6 +274,7 @@ window.App = window.App || {};
     commands.push({ label: 'Open Folder or File in Shell…', action: function () { App.openFolderAsTask('shell'); } });
     commands.push.apply(commands, [
       { label: 'Toggle Diff Panel', action: function () { App.btnDiff.click(); } },
+      { label: 'Reopen Closed Tab', action: function () { App.reopenClosedTask(); } },
       { label: 'Change Theme', action: function () { App.showThemePicker(); } },
       { label: 'Preferences', action: function () { window.klaus.ui.openPreferences(); } },
       { label: 'New Window', action: function () { window.klaus.ui.newWindow(); } },
@@ -318,7 +319,13 @@ window.App = window.App || {};
           }});
         });
         commands.push({ label: 'Pop Out', action: function () { window.klaus.task.popOut(AppState.activeTaskId); } });
-        commands.push({ label: 'Kill Task', action: function () { window.klaus.task.kill(AppState.activeTaskId).then(function () { App.removeTaskFromUI(AppState.activeTaskId); }); } });
+        commands.push({ label: 'Kill Task', action: function () {
+          var id = AppState.activeTaskId;
+          window.klaus.task.kill(id).then(function (res) {
+            if (res && res.reopen) App.rememberClosedTask(res.reopen);
+            App.removeTaskFromUI(id);
+          });
+        } });
         if (!task.alive) {
           var paletteAgent = (task.mode && task.mode !== 'shell') ? task.mode : App.defaultAgent();
           commands.push({ label: 'Restart ' + AppUtils.modeDisplayName(paletteAgent), action: function () {

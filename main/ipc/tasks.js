@@ -17,7 +17,7 @@ const { baseRepoForWorktree, sessionSiblingWorktrees, defaultBranchRefusal } = r
 const { claudeProjectDir } = require('../util/claude-paths');
 const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platform');
 const {
-  instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds,
+  instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds, describeInstanceSession,
   processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler,
 } = require('../state/instances');
@@ -1355,6 +1355,10 @@ ipcMain.handle('kill-task', (_event, { id }) => {
   const inst = instances.get(id);
   if (!inst) return { error: 'Instance not found' };
 
+  // Described before the kill: only live sub-agents are recorded.
+  let reopen = null;
+  try { reopen = describeInstanceSession(inst); } catch { /* reopen just won't be offered */ }
+
   // Mark BEFORE kill(): pty.kill is async, and the onExit handler checks this
   // flag to skip the Claude→shell auto-convert branch. Without it, killing a
   // Claude task would spawn an orphan shell with no instances entry — nothing
@@ -1384,7 +1388,7 @@ ipcMain.handle('kill-task', (_event, { id }) => {
 
   // Never delete worktrees or branches — only kill the process
   instances.delete(id);
-  return { ok: true };
+  return { ok: true, reopen };
 });
 
 // Restart Claude in an existing worktree (after process exit)
