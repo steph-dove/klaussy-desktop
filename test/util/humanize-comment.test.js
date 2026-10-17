@@ -123,3 +123,10 @@ test('passes non-strings through unchanged', () => {
   assert.equal(humanizeComment(null), null);
   assert.equal(humanizeComment(''), '');
 });
+
+test('the preview humanizes to exactly what posting sends', async () => {
+  const { humanizeComment: posted, humanizeCommentP } = require('../../main/util/humanize-comment');
+  const body = 'Great catch! Leaks a connection — wrap it.\n\n```suggestion\nconst a = b; // — keep\n```';
+  assert.equal(await humanizeCommentP(body), posted(body));
+  assert.equal(await humanizeCommentP(''), '');
+});

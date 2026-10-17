@@ -12,7 +12,7 @@ const { resolveGlabEnv } = require('../util/glab-exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { glabJson, glabText } = require('../util/glab-json');
 const { bitbucketFetch, bitbucketJson } = require('../util/bitbucket-api');
-const { humanizeComment } = require('../util/humanize-comment');
+const { humanizeComment, humanizeCommentP } = require('../util/humanize-comment');
 const { isEmptyReview, ghApiErrorMessage } = require('../util/review-payload');
 const {
   prReview, currentRepoPath, sanitizePrReview, broadcastPrReview, fetchThreadsForActive,
@@ -276,6 +276,11 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
     proc.stdin.write(JSON.stringify({ body }));
     proc.stdin.end();
   });
+});
+
+ipcMain.handle('pr-humanize-preview', async (_event, { body } = {}) => {
+  if (typeof body !== 'string') return { body: '' };
+  return { body: await humanizeCommentP(body) };
 });
 
 let cachedCurrentUser = null;
