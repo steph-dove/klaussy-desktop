@@ -28,68 +28,73 @@ function stubKlaus(spawned) {
   };
 }
 
-// Regression: the extra agents were spawned in the main process but never
-// handed to the renderer, so they ran with no terminal on screen.
-test('resumeAllSavedAgents: hands every agent past the first to onExtra', async () => {
+test('resumeAllSavedAgents: every agent past the first comes back as a tab', async () => {
   const spawned = [];
   stubKlaus(spawned);
-  const extras = [];
   const first = await App.resumeAllSavedAgents({
     savedAgents: [
-      { mode: 'claude', sessionId: 'a', worktreePath: '/wt' },
+      { mode: 'claude', sessionId: 'a', worktreePath: '/wt', subAgents: [{ mode: 'kimi-code', label: 'Kimi', sessionId: 'k' }] },
       { mode: 'codex', sessionId: 'b', worktreePath: '/wt' },
       { mode: 'shell', sessionId: null, worktreePath: '/wt' },
     ],
-  }, (t) => extras.push(t));
+  });
 
-  assert.equal(spawned.length, 3);
+  assert.deepEqual(spawned.map((s) => s.mode), ['claude']);
   assert.equal(first.id, 't1');
-  assert.deepEqual(extras.map((t) => t.id), ['t2', 't3']);
-  assert.equal(spawned[2].kind, 'attach'); // shell entries attach, not resume
+  assert.deepEqual(first.subAgentsToReopen, [
+    { mode: 'kimi-code', label: 'Kimi', sessionId: 'k' },
+    { mode: 'codex', label: null, sessionId: 'b' },
+    { mode: 'shell', label: null, sessionId: null },
+  ]);
+});
+
+test('resumeAllSavedAgents: a shell first entry attaches rather than resumes', async () => {
+  const spawned = [];
+  stubKlaus(spawned);
+  await App.resumeAllSavedAgents({ savedAgents: [{ mode: 'shell', worktreePath: '/wt' }] });
+  assert.deepEqual(spawned, [{ kind: 'attach', mode: 'shell', worktreePath: '/wt' }]);
 });
 
 test('resumeAllSavedAgents: same agent saved twice on one session id is one tab', async () => {
   const spawned = [];
   stubKlaus(spawned);
-  const extras = [];
-  await App.resumeAllSavedAgents({
+  const first = await App.resumeAllSavedAgents({
     savedAgents: [
       { mode: 'claude', sessionId: 'a', worktreePath: '/wt' },
       { mode: 'claude', sessionId: 'a', worktreePath: '/wt' },
     ],
-  }, (t) => extras.push(t));
+  });
 
   assert.equal(spawned.length, 1);
-  assert.equal(extras.length, 0);
+  assert.equal(first.subAgentsToReopen, undefined);
 });
 
-test('resumeSessionWorktree: resumes every saved agent for the worktree', async () => {
+test('resumeSessionWorktree: the worktree\'s other agents come back as tabs', async () => {
   const spawned = [];
   stubKlaus(spawned);
   App.shellUserPicked = false;
-  const extras = [];
   const saved = [
     { mode: 'claude', sessionId: 'a', worktreePath: '/wt' },
     { mode: 'codex', sessionId: 'b', worktreePath: '/wt' },
     { mode: 'claude', sessionId: 'c', worktreePath: '/other' },
   ];
-  const first = await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', saved, 'claude', (t) => extras.push(t));
+  const first = await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', saved, 'claude');
 
-  assert.deepEqual(spawned.map((s) => s.mode), ['claude', 'codex']);
+  assert.deepEqual(spawned.map((s) => s.mode), ['claude']);
   assert.equal(first.id, 't1');
-  assert.deepEqual(extras.map((t) => t.id), ['t2']);
+  assert.deepEqual(first.subAgentsToReopen, [{ mode: 'codex', label: null, sessionId: 'b' }]);
 });
 
 test('resumeSessionWorktree: picking an agent hands the session off to that one only', async () => {
   const spawned = [];
   stubKlaus(spawned);
   App.shellUserPicked = true;
-  const extras = [];
+  let first;
   try {
-    await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', [
+    first = await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', [
       { mode: 'copilot', sessionId: null, worktreePath: '/wt' },
       { mode: 'codex', sessionId: 'b', worktreePath: '/wt' },
-    ], 'claude', (t) => extras.push(t));
+    ], 'claude');
   } finally {
     App.shellUserPicked = false;
   }
@@ -97,7 +102,7 @@ test('resumeSessionWorktree: picking an agent hands the session off to that one 
   assert.equal(spawned.length, 1);
   assert.equal(spawned[0].mode, 'claude');
   assert.equal(spawned[0].originalMode, 'copilot');
-  assert.equal(extras.length, 0);
+  assert.equal(first.subAgentsToReopen, undefined);
 });
 
 test('resumeSessionWorktree: without a pick every agent resumes in its own CLI', async () => {
@@ -106,7 +111,7 @@ test('resumeSessionWorktree: without a pick every agent resumes in its own CLI',
   App.shellUserPicked = false;
   await App.resumeSessionWorktree({ path: '/wt', branch: 'feat' }, 'feat', [
     { mode: 'copilot', sessionId: null, worktreePath: '/wt' },
-  ], 'claude', () => {});
+  ], 'claude');
 
   assert.deepEqual(spawned.map((s) => s.mode), ['copilot']);
 });
@@ -117,7 +122,7 @@ test('resumeAllSavedAgents: leaves sub-agent tabs for addTaskToUI to reopen', as
   const subs = [{ mode: 'copilot', label: 'GitHub Copilot', sessionId: null }];
   const first = await App.resumeAllSavedAgents({
     savedAgents: [{ mode: 'claude', sessionId: 'a', worktreePath: '/wt', subAgents: subs }],
-  }, () => {});
+  });
 
   assert.deepEqual(first.subAgentsToReopen, subs);
 });

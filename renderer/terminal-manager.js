@@ -750,7 +750,10 @@ window.TerminalManager = (function () {
       delete this.dataset.keyboard;
       var neighbor = fromKeyboard && (tab.nextElementSibling && tab.nextElementSibling.matches('.sub-tab')
         ? tab.nextElementSibling : tab.previousElementSibling);
-      await window.klaus.terminal.killSub(id, subId);
+      var killed = await window.klaus.terminal.killSub(id, subId);
+      if (killed && killed.reopen && window.App.rememberClosedTask) {
+        window.App.rememberClosedTask(Object.assign({ subOf: id, worktreePath: taskEntry.worktreePath }, killed.reopen));
+      }
       subCleanup.forEach(function (fn) { fn(); });
       subTerminal.dispose();
       subWrapper.remove();
@@ -870,7 +873,8 @@ window.TerminalManager = (function () {
   // own, so bringing the session back recreates it the same way.
   async function reopenSubAgents(taskId, subAgents) {
     var taskEntry = tasks.get(taskId);
-    if (!taskEntry || !subAgents || !subAgents.length) return { ok: true };
+    var opened = 0;
+    if (!taskEntry || !subAgents || !subAgents.length) return { ok: true, opened: opened };
     for (var i = 0; i < subAgents.length; i++) {
       var agent = subAgents[i];
       if (!agent || !agent.mode) continue;
@@ -879,11 +883,12 @@ window.TerminalManager = (function () {
         var result = await window.klaus.terminal.addSub(taskId, label, agent.mode, null, agent.sessionId || null);
         if (!result || result.error || result.cancelled) continue;
         addSubTerminalTab(taskEntry, result.subId, result.label, agent.mode, true);
+        opened++;
       } catch (err) {
         console.warn('[resume] could not reopen', agent.mode, err);
       }
     }
-    return { ok: true };
+    return { ok: true, opened: opened };
   }
 
   // ---- buildActionsDropdown (worktree header) ----

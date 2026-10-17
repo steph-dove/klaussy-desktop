@@ -1225,6 +1225,7 @@ module.exports = {
   assignDetectedSessionIds,
   findLatestSessionId,
   describeInstanceSession,
+  resolveSubSessionId,
   processIdleDetection,
   processSubOutput,
   sessionNameFor,
