@@ -1,8 +1,13 @@
 /* global window, document */
 const path = require('path');
+const { execFileSync } = require('child_process');
 const { test, expect } = require('./fixtures');
 
 const repoRoot = path.resolve(__dirname, '..');
+
+function hasKlaussy() {
+  try { execFileSync('klaussy', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
+}
 
 const STATE = {
   number: 42,
@@ -126,9 +131,10 @@ test.describe('AI review drawn as the GitHub review', () => {
     await showAiReview(win);
 
     await win.locator('.pr-ai-add-all').click();
-    const pending = await win.evaluate(() => window.PrReview.pendingComments.map((c) => ({ path: c.path, line: c.line, body: c.body })));
+    const pending = await win.evaluate(() => window.PrReview.pendingComments.map((c) => ({ path: c.path, line: c.line, body: c.body, humanized: c.humanized })));
     expect(pending).toHaveLength(1);
-    expect(pending[0]).toMatchObject({ path: 'src/a.js', line: 2 });
+    // klaussy's own body posts as-is; without klaussy the built-in copy is humanized at post.
+    expect(pending[0]).toMatchObject({ path: 'src/a.js', line: 2, humanized: hasKlaussy() });
     expect(pending[0].body).toContain('<details>\n<summary></summary>');
 
     const dialog = win.locator('.pr-submit-dialog');
