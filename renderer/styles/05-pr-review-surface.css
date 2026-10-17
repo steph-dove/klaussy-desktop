@@ -1932,38 +1932,6 @@ button.pr-check-toggle {
   line-height: 1.45;
 }
 
-/* Verbatim file content at the verified [Location] line range. Slotted
-   between the headers and the Comment text in the finding card so users
-   always see "this is the code being reviewed" in the same place,
-   independent of what Claude pasted in its prose. */
-.pr-ai-finding-original {
-  margin: 10px 0;
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  border-radius: 5px;
-  background: rgba(99, 102, 241, 0.05);
-  overflow: hidden;
-}
-.pr-ai-finding-original-head {
-  padding: 5px 10px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-dim);
-  background: var(--surface-hover);
-  border-bottom: 1px solid rgba(99, 102, 241, 0.25);
-  font-family: 'SF Mono', Menlo, monospace;
-}
-.pr-ai-finding-original-code {
-  margin: 0;
-  padding: 8px 12px;
-  font-family: 'SF Mono', Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text);
-  overflow-x: auto;
-  white-space: pre;
-}
-
 
 .pr-review-tabs {
   display: flex;
@@ -7346,8 +7314,7 @@ body.task-branchless .file-viewer-blame-btn {
   min-width: 0;
 }
 
-/* De-bracketed location, shown above the code snippet it describes. */
-.pr-ai-finding-original-wrap { margin: 12px 0; }
+/* De-bracketed location on a posted finding comment. */
 .pr-ai-finding-loc-label {
   display: flex;
   align-items: baseline;
@@ -7355,7 +7322,6 @@ body.task-branchless .file-viewer-blame-btn {
   gap: 8px;
   margin-bottom: 6px;
 }
-.pr-ai-finding-original-wrap .pr-ai-finding-original { margin: 0; }
 .pr-ai-finding-loc-path {
   font-family: 'SF Mono', Menlo, monospace;
   font-size: 11.5px;
@@ -7377,37 +7343,6 @@ body.task-branchless .file-viewer-blame-btn {
    body is just the comment prose (+ original code + suggestion). */
 .pr-ai-finding-body p:first-child { margin-top: 0; }
 .pr-ai-finding-body p:last-child { margin-bottom: 0; }
-
-/* Expandable explanation option on AI review finding cards */
-.pr-ai-finding-explanation {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border);
-}
-.pr-ai-finding-explanation summary,
-.pr-ai-finding-explanation-summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 11.5px;
-  font-weight: 600;
-  user-select: none;
-}
-.pr-ai-finding-explanation summary:hover,
-.pr-ai-finding-explanation-summary:hover {
-  color: var(--accent);
-}
-.pr-ai-finding-explanation-body {
-  margin-top: 8px;
-  padding: 8px 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 12.5px;
-  line-height: 1.5;
-  color: var(--text);
-}
-.pr-ai-finding-explanation-body p:first-child { margin-top: 0; }
-.pr-ai-finding-explanation-body p:last-child { margin-bottom: 0; }
 
 /* "Add to PR" reads as the primary affordance on an open finding. */
 .pr-ai-finding-comment {
@@ -7435,34 +7370,6 @@ body.task-branchless .file-viewer-blame-btn {
 .pr-ai-verdict-approve { border-left-color: var(--success); }
 .pr-ai-verdict-changes { border-left-color: var(--sev-medium); }
 .pr-ai-verdict-block   { border-left-color: var(--sev-blocker); }
-.pr-ai-verdict-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.pr-ai-verdict-badge {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 3px 10px;
-  border-radius: 999px;
-  color: var(--text);
-  background: rgba(128, 128, 128, 0.14);
-}
-.pr-ai-verdict-approve .pr-ai-verdict-badge { color: var(--success); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--success) 50%, transparent); }
-.pr-ai-verdict-changes .pr-ai-verdict-badge { color: var(--sev-medium); background: rgba(210, 153, 34, 0.16); }
-.pr-ai-verdict-block .pr-ai-verdict-badge   { color: var(--sev-blocker); background: rgba(240, 88, 79, 0.16); }
-.pr-ai-verdict-coverage { font-size: 12px; color: var(--text-muted); }
-.pr-ai-verdict-risks {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 12.5px;
-  color: var(--text);
-  line-height: 1.5;
-}
-.pr-ai-verdict-risks li { margin: 2px 0; }
 
 /* ---- Always-on terminal chrome ---- */
 .pr-term-chips {
@@ -7793,18 +7700,6 @@ button.pr-term-view {
   background: color-mix(in srgb, var(--error) 4%, var(--surface));
   border-color: color-mix(in srgb, var(--error) 15%, var(--border));
 }
-.pr-ai-verdict-badge {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  padding: 3px 12px;
-  border-radius: var(--radius-sm);
-  color: #fff !important;
-}
-.pr-ai-verdict-approve .pr-ai-verdict-badge { background: var(--success); color: var(--success-contrast) !important; }
-.pr-ai-verdict-changes .pr-ai-verdict-badge { background: var(--warning); color: var(--warning-contrast) !important; }
-.pr-ai-verdict-block .pr-ai-verdict-badge   { background: var(--error); color: var(--error-contrast) !important; }
 
 .pr-ai-finding {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
@@ -8050,7 +7945,6 @@ button.js-ai-review:hover,
 /* pre-wrap turns markdown-it's newlines between blocks into blank lines. */
 .pr-inline-comment-body .pr-conv-md, .pr-pending-body .pr-conv-md { white-space: normal; }
 
-.pr-ai-finding-body .pr-ai-finding-gh-comment { margin: 8px 0; }
 
 .pr-suggestion {
   margin: 0 0 12px;
@@ -8077,3 +7971,62 @@ button.js-ai-review:hover,
 .pr-suggestion-line code { white-space: pre-wrap; background: none; padding: 0; font-size: inherit; }
 .pr-suggestion-del { background: color-mix(in srgb, var(--error) 14%, transparent); }
 .pr-suggestion-add { background: color-mix(in srgb, var(--success) 14%, transparent); }
+
+/* AI findings and summary drawn the way GitHub shows a posted review. */
+.pr-gh-thread, .pr-gh-review {
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+.pr-gh-thread-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+.pr-gh-badge {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 11px;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+.pr-gh-hunk { border-bottom: 1px solid var(--border); font-family: 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.6; }
+.pr-gh-hunk-row { display: flex; }
+.pr-gh-hunk-ln { flex: none; width: 44px; padding-right: 8px; text-align: right; color: var(--text-muted); user-select: none; }
+.pr-gh-hunk-sign { flex: none; width: 18px; text-align: center; color: var(--text-muted); user-select: none; }
+.pr-gh-hunk-code { white-space: pre; overflow-x: auto; background: none; padding: 0; font: inherit; color: var(--text); }
+.pr-gh-hunk-add { background: color-mix(in srgb, var(--success) 14%, transparent); }
+.pr-gh-hunk-add .pr-gh-hunk-ln { background: color-mix(in srgb, var(--success) 22%, transparent); }
+.pr-gh-hunk-del { background: color-mix(in srgb, var(--error) 14%, transparent); }
+.pr-gh-hunk-del .pr-gh-hunk-ln { background: color-mix(in srgb, var(--error) 22%, transparent); }
+.pr-gh-comment { padding: 12px 14px; }
+.pr-gh-review { padding: 12px 14px; }
+.pr-gh-comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pr-gh-avatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 11px;
+  font-weight: 700;
+}
+.pr-gh-author { font-weight: 600; font-size: 13px; color: var(--text); }
+.pr-gh-when { font-size: 12px; color: var(--text-muted); }
+.pr-gh-comment-body { font-size: 13px; line-height: 1.55; color: var(--text); }
+.pr-gh-details { margin: 0 0 12px; }
+.pr-gh-details > summary { cursor: pointer; color: var(--text-muted); width: fit-content; }
+.pr-gh-details[open] > summary { margin-bottom: 8px; }
