@@ -17,17 +17,27 @@
   // markdown-it runs with html:false, so the <details> GitHub renders (and the
   // review bot posts) would otherwise show as literal tags.
   var DETAILS = /<details>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g;
+  // Fences and inline code are set aside first, so a <details> quoted in code stays code.
+  var CODE = /^[ \t]*(```|~~~)[^\n]*\n[\s\S]*?^[ \t]*\1[ \t]*$|`[^`\n]+`/gm;
 
   function renderMarkdown(body, opts) {
+    var nonce = Math.random().toString(36).slice(2);
+    var codes = [];
     var blocks = [];
-    var src = String(body).replace(DETAILS, function (_m, summary, inner) {
-      blocks.push('<details class="pr-gh-details"><summary>' + PR.escHtml(summary.trim()) + '</summary>'
-        + renderMarkdown(inner, opts) + '</details>');
-      return '\n\nKLAUSSYDETAILS' + (blocks.length - 1) + '\n\n';
+    var restore = function (text) {
+      return text.replace(new RegExp('\u0000' + nonce + '(\\d+)\u0000', 'g'), function (_m, i) { return codes[+i]; });
+    };
+    var src = String(body).replace(CODE, function (m) {
+      codes.push(m);
+      return '\u0000' + nonce + (codes.length - 1) + '\u0000';
+    }).replace(DETAILS, function (_m, summary, inner) {
+      blocks.push('<details class="pr-gh-details"><summary>' + PR.escHtml(restore(summary).trim()) + '</summary>'
+        + renderMarkdown(restore(inner), opts) + '</details>');
+      return '\n\nDETAILS' + nonce + (blocks.length - 1) + '\n\n';
     });
-    var html = window.MarkdownPreview.render(src, { breaks: true });
+    var html = window.MarkdownPreview.render(restore(src), { breaks: true });
     if (opts && opts.suggestions) html = PR.renderSuggestionBlocks(html, opts.original);
-    return html.replace(/<p>KLAUSSYDETAILS(\d+)<\/p>/g, function (_m, i) { return blocks[+i]; });
+    return html.replace(new RegExp('<p>DETAILS' + nonce + '(\\d+)</p>', 'g'), function (_m, i) { return blocks[+i]; });
   }
 
   PR.renderMarkdownBody = function(body, opts) {
