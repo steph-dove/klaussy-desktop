@@ -1,4 +1,4 @@
-/* global window */
+/* global window, document */
 const path = require('path');
 const { test, expect } = require('./fixtures');
 
@@ -94,6 +94,31 @@ test.describe('AI review drawn as the GitHub review', () => {
       { ...FINDING, postMode: 'issue', locationVerified: false });
     expect(general).toContain('Not in diff');
     expect(general).not.toContain('pr-suggestion');
+  });
+
+  test('a <details> quoted in code stays code; only a real one collapses', async ({ electronApp }) => {
+    const win = await openPrWindow(electronApp);
+    const out = await win.evaluate(() => {
+      const body = 'If a comment has a `<details>` snippet, it breaks.\n\n'
+        + '```html\n<details>\n<summary>x</summary>\nin a fence\n</details>\n```\n\n'
+        + '<details>\n<summary></summary>\n\nThe full `<summary>` story.\n\n</details>';
+      const el = document.createElement('div');
+      el.innerHTML = window.PrReview.renderCommentBody(body);
+      return {
+        details: el.querySelectorAll('details').length,
+        inline: el.querySelector('p code').textContent,
+        fence: el.querySelector('pre code').textContent,
+        inside: el.querySelector('details').textContent.trim(),
+        leaked: /DETAILS|\u0000/.test(el.textContent),
+      };
+    });
+    expect(out).toEqual({
+      details: 1,
+      inline: '<details>',
+      fence: '<details>\n<summary>x</summary>\nin a fence\n</details>\n',
+      inside: 'The full <summary> story.',
+      leaked: false,
+    });
   });
 
   test('Add all to review stages every open finding and opens Submit review pre-filled', async ({ electronApp }) => {
