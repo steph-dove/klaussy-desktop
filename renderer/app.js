@@ -624,7 +624,7 @@ window.App = window.App || {};
   App.escHtml = AppUtils.escHtml;
 
   // ---- Sidebar toggle & manual resize ----
-  App.DEFAULT_SIDEBAR_WIDTH = 240;
+  App.DEFAULT_SIDEBAR_WIDTH = 256;
 
   App.MIN_SIDEBAR_WIDTH = 140;
   App.MAX_SIDEBAR_RATIO = 0.4;
