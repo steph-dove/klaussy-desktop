@@ -165,7 +165,8 @@ window.QuickOpen = (function () {
     var result;
     try {
       result = await window.klaus.fs.listFiles(wt);
-    } catch {
+    } catch (err) {
+      console.warn('quick-open: list-files failed', err);
       result = null;
     }
     files = ((result && result.files) || []).map(function (p) {
@@ -173,7 +174,7 @@ window.QuickOpen = (function () {
       return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };
     });
     // A failed load isn't cached, so the next open tries again.
-    if (result) { cachedWorktree = wt; cachedFiles = files; }
+    if (result && !result.error) { cachedWorktree = wt; cachedFiles = files; }
     // Closed or reopened while loading.
     if (overlay !== ownOverlay) return;
     refilter();
