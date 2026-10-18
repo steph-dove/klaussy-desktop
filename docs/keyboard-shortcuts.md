@@ -12,15 +12,15 @@ These work in the main window, whatever has focus, terminals included.
 
 | macOS | Windows / Linux | What it does | Where it works |
 |---|---|---|---|
-| Cmd+K | Ctrl+Shift+K | Open the command palette | Anywhere outside the code editor. In the editor it starts an inline edit instead (see [Code editor](#code-editor)). |
+| Cmd+K | Ctrl+Shift+K | Open the command palette | Anywhere outside the code editor. In the editor, Cmd+K (Ctrl+K on Windows/Linux) starts an inline edit instead (see [Code editor](#code-editor)). |
 | Cmd+P | Ctrl+Shift+P | Quick open a file | Anywhere |
-| Cmd+/ | Ctrl+Shift+/ | Pick a slash command and send it to the active terminal | Anywhere |
-| Cmd+G | Ctrl+Shift+G | Show or hide the Changes panel for the current task | Anywhere |
+| Cmd+/ | Ctrl+Shift+/ | Pick a slash command and send it to the active terminal | Anywhere, except the code editor on macOS, where Cmd+/ toggles a comment |
+| Cmd+G | Ctrl+Shift+G | Show or hide the Changes panel for the current task | Anywhere, except the code editor on macOS, where Cmd+G is Find Next |
 | Cmd+Shift+T | Ctrl+Shift+T | Reopen the last closed tab | Anywhere |
 | Cmd+Shift+A | Ctrl+Shift+A | Show or hide the active agents panel | Anywhere |
 | Cmd+Shift+E | Ctrl+Shift+E | Send the selected text to the active task's terminal and ask the agent to review it. With nothing selected, sends every hunk of the file selected in the Changes panel. | Needs a file selected in the Changes panel |
-| Hold Cmd+Shift+Space | Hold Ctrl+Shift+Space | Dictate into the active agent; let go to stop | Voice input on (Preferences). Takes the key from the editor's AI completion while voice is on. |
-| Hold Cmd+Shift+; | Hold Ctrl+Shift+; | Speak a command, such as "open pr review"; let go to stop | Voice input on (Preferences) |
+| Hold Cmd+Shift+Space | Hold Ctrl+Shift+Space | Dictate into the active agent; let go to stop | Voice input on (Preferences). Takes the key from the editor's AI completion while voice is on. Also works in the PR review window, but not in extra windows opened with New Window. |
+| Hold Cmd+Shift+; | Hold Ctrl+Shift+; | Speak a command, such as "open pr review"; let go to stop | Voice input on (Preferences). Also works in the PR review window, but not in extra windows opened with New Window. |
 | F6 / Shift+F6 | F6 / Shift+F6 | Move focus to the next / previous area: sidebar, terminals, Changes panel, agents panel, notifications, editor. This is also how you leave a terminal. | Anywhere except inside a dialog. Also works in the PR review window, where the areas are the review's own sections. |
 | Shift+F10 | Shift+F10 or the Menu key | Open the context menu for the focused item | Anywhere |
 
@@ -31,7 +31,7 @@ The first three are Klaussy's own. The rest are Electron's standard menu items a
 | macOS | Windows / Linux | What it does | Where it works |
 |---|---|---|---|
 | Cmd+, | Ctrl+, | Preferences | Any window |
-| F1 | F1 | Keyboard shortcuts list (View menu) | Any window; the list opens in the main window |
+| F1 | F1 | Keyboard shortcuts list (View menu) | Any window except the code editor, where F1 opens the editor's own command list. The list opens in the focused app window, or the main window if a PR review, Preferences or pop-out window has focus. |
 | Cmd+N | Ctrl+N | New window | Any window |
 | Cmd+H | None | Hide Klaussy | macOS only |
 | Cmd+Option+H | None | Hide other apps | macOS only |
@@ -130,7 +130,7 @@ The editor is Monaco, so its usual editing keys work as well. These are the ones
 | Shift+Up / Shift+Down | Shift+Up / Shift+Down | Select a range of lines | Diff view |
 | Enter or C | Enter or C | Comment on the line (or the selected lines, in PR review) | Diff line, in the Changes panel and PR review |
 | E | E | Explain the selected lines, or the hunk the line is in | Diff line, in the Changes panel and PR review |
-| P | P | Post the selected lines (or the current line) as a PR review comment | Diff line in the Changes panel, when the worktree has a PR |
+| P | P | Start a PR review comment on the selected lines (or the current line) | Diff line in the Changes panel, when the worktree has a PR |
 | Cmd+Enter / Esc | Ctrl+Enter / Esc | Save / cancel the comment | Comment box |
 | Cmd+Enter | Ctrl+Enter | Commit | Commit message box |
 | Esc | Esc | Close the commit box | Commit message box |
@@ -183,7 +183,7 @@ Diff keys (line moves, comments, E to explain) are in [Changes panel and diffs](
 | Esc or Tab | Esc or Tab | Close the menu | Context menus and dropdown menus |
 | Up / Down, Home / End, Esc | Up / Down, Home / End, Esc | Move through / close the list | Recent folders list in the folder picker and new session dialog |
 | Left / Right, Home / End | Left / Right, Home / End | Move between tabs; Enter or Space opens the focused one | Tab strips: side panel, PR review sections, dev loop views, new session type, history views, plan source |
-| Up / Down, Home / End | Up / Down, Home / End | Move through the list | Skills & Commands lists |
+| Up / Down, Home / End | Up / Down, Home / End | Move through the list | Skills & Commands and Plugins lists |
 | Esc | Esc | Close the dialog; focus goes back where it was | Dialogs |
 | Tab / Shift+Tab | Tab / Shift+Tab | Move through the dialog's controls; focus stays inside it | Dialogs |
 | Enter / Esc | Enter / Esc | OK / cancel | New session name, folder picker, "type delete to confirm", skill create dialogs |
