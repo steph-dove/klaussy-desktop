@@ -2,6 +2,19 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.26.0
+
+### 🦉 AI Reviews That Look Like the Real Thing, and Cmd+Shift+T
+
+- **AI Review Looks Like the GitHub Review**: each finding shows as a review thread, with the file, the diff lines it's about, then the comment. Code suggestions show as GitHub's red and green "Suggested change". Up top is the review summary: the verdict, what drives it, and test coverage.
+- **Comments Match What the Bot Posts**: each comment is built by `klaussy review-post`, so what you see is what the klaussy review bot would post. It opens with one humanized sentence saying what to change, and the full explanation sits in a dropdown under it.
+- **Add All to Review**: one button stages every open finding and opens Submit review with the summary and verdict filled in.
+- **Reopen a Closed Tab**: Cmd+Shift+T (Ctrl+Shift+T on Windows and Linux) brings back the last tab you closed, including shell and agent tabs inside a session. It's also in the command palette.
+- **Saved Sessions Open as Tabs**: opening a session with more than one agent brings the extras back as tabs in that session, not as separate terminals side by side.
+- **Sidebar Fits Its Buttons**: the sidebar starts wide enough for its header buttons to sit centred.
+- **Init Stays Local**: Klaussy never runs `klaussy init` without `--local` now. With klaussy-agents older than 0.44.1 it skips init and asks you to upgrade.
+- **Fixes**: a comment that mentions `<details>` in code no longer breaks how it renders.
+
 ## 0.25.1
 
 ### 🦉 Typing Keeps Up During a Dev Loop
