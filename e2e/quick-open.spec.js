@@ -203,7 +203,9 @@ test('a change in another worktree keeps this worktree\'s file list', async ({ m
       await window.klaus.fs.watchWorktree(paths.other);
       window.__otherChanged = false;
       window.__stopOtherWatch = window.klaus.fs.onWorktreeChanged((data) => {
-        if (data && data.worktreePath === paths.other) window.__otherChanged = true;
+        if (data && data.worktreePath === paths.other && (data.changedFiles || []).includes('src/elsewhere.js')) {
+          window.__otherChanged = true;
+        }
       });
     }, { repo, other });
 
