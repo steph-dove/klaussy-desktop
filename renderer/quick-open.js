@@ -31,18 +31,7 @@ window.QuickOpen = (function () {
     var wt = task ? task.worktreePath : null;
     if (!wt) return;
 
-    // Cache per-worktree so reopening the palette is instant. Invalidated
-    // on worktree switch.
-    if (cachedWorktree !== wt || !cachedFiles) {
-      cachedWorktree = wt;
-      var result = await window.klaus.fs.listFiles(wt);
-      cachedFiles = (result.files || []).map(function (p) {
-        var base = p.split('/').pop();
-        return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };
-      });
-    }
-
-    overlay = document.createElement('div');
+    var ownOverlay = overlay = document.createElement('div');
     // `.palette-overlay` is the shared backdrop styling used by every
     // dialog in the app (Setup-check, About, license, etc.). Add a
     // `.quick-open-overlay` discriminator so e2e tests can target THIS
@@ -66,6 +55,9 @@ window.QuickOpen = (function () {
 
     var results = [];
     var selectedIndex = 0;
+    // Cache per-worktree so reopening the palette is instant. Invalidated
+    // on worktree switch.
+    var files = cachedWorktree === wt ? cachedFiles : null;
 
     function render() {
       list.innerHTML = '';
@@ -103,10 +95,21 @@ window.QuickOpen = (function () {
       updateSelection(false);
     });
 
-    var saidNoMatch = false;
+    // textContent, so a query like "<b>" shows as typed.
+    function showEmpty(text) {
+      var line = document.createElement('div');
+      line.className = 'palette-empty';
+      line.setAttribute('aria-hidden', 'true');
+      line.textContent = text;
+      list.innerHTML = '';
+      list.appendChild(line);
+    }
+
+    var saidEmpty = false;
     function refilter() {
-      var q = input.value.trim().toLowerCase();
-      results = cachedFiles
+      var typed = input.value.trim();
+      var q = typed.toLowerCase();
+      results = (files || [])
         .map(function (f) { return { entry: f, score: rankPath(f.path, f.lowerPath, f.basename, f.lowerBasename, q) }; })
         .filter(function (r) { return r.score !== Infinity; })
         .sort(function (a, b) { return a.score - b.score; })
@@ -114,11 +117,13 @@ window.QuickOpen = (function () {
         .map(function (r) { return r.entry; });
       selectedIndex = 0;
       render();
-      if (results.length || !q) { saidNoMatch = false; return; }
-      list.innerHTML = '<div class="palette-empty" aria-hidden="true">No matching files</div>';
+      if (!files) { showEmpty('Loading files…'); return; }
+      if (results.length) { saidEmpty = false; return; }
+      var text = files.length ? 'No files match "' + typed + '"' : 'No files in this worktree';
+      showEmpty(text);
       // Once per run of empty results, not on every keystroke.
-      if (!saidNoMatch) A11y.announce('No matching files');
-      saidNoMatch = true;
+      if (!saidEmpty) A11y.announce(text);
+      saidEmpty = true;
     }
 
     function openEntry(entry) {
@@ -155,6 +160,23 @@ window.QuickOpen = (function () {
 
     refilter();
     setTimeout(function () { input.focus(); }, 50);
+    if (files) return;
+
+    var result;
+    try {
+      result = await window.klaus.fs.listFiles(wt);
+    } catch {
+      result = null;
+    }
+    files = ((result && result.files) || []).map(function (p) {
+      var base = p.split('/').pop();
+      return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };
+    });
+    // A failed load isn't cached, so the next open tries again.
+    if (result) { cachedWorktree = wt; cachedFiles = files; }
+    // Closed or reopened while loading.
+    if (overlay !== ownOverlay) return;
+    refilter();
   }
 
   function hide() {
