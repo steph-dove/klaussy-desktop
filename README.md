@@ -113,6 +113,8 @@ npm install -g @anthropic-ai/claude-code && claude
 
 *For Bitbucket repositories, connect an App Password or token under **Preferences → Git Accounts**.*
 
+The environment variables klaussy reads (forge tokens, path overrides, debug switches) are listed in [docs/environment-variables.md](./docs/environment-variables.md).
+
 ---
 
 ## 🛠️ Developer Setup (Run from Source)
@@ -141,7 +143,7 @@ npm run dist:linux    # Linux AppImage + DEB (requires Linux host)
 
 *   [`main/`](file:///Users/stephaniedover/projects/klaussy-desktop/main): Electron main process. Manages PTY terminals, file watching, git worktrees, and the pre-commit review server.
 *   [`preload.js`](file:///Users/stephaniedover/projects/klaussy-desktop/preload.js): Context-isolated IPC bridge.
-*   [`docs/`](file:///Users/stephaniedover/projects/klaussy-desktop/docs): User setup guides, notification workflows, and legal policies (EULA, Privacy).
+*   [`docs/`](file:///Users/stephaniedover/projects/klaussy-desktop/docs): User setup guides, notification workflows, the [environment variable reference](./docs/environment-variables.md), and legal policies (EULA, Privacy).
 
 ---
 
