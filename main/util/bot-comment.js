@@ -27,7 +27,7 @@ function buildReportAndDiff(findings) {
   return { report: report.join('\n'), diff: diff.join('\n') + '\n' };
 }
 
-// Comment bodies in input order, or null when klaussy can't build them.
+// Comment bodies in input order (null where one is missing), or null when klaussy fails.
 async function botCommentBodies(findings) {
   if (!Array.isArray(findings) || !findings.length) return [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-bot-comment-'));
@@ -45,8 +45,9 @@ async function botCommentBodies(findings) {
       const m = /^f(\d+)\.txt$/.exec(c.path || '');
       if (m && +m[1] < bodies.length) bodies[+m[1]] = c.body;
     }
-    return bodies.every((b) => typeof b === 'string') ? bodies : null;
-  } catch {
+    return bodies.map((b) => (typeof b === 'string' ? b : null));
+  } catch (err) {
+    console.warn(`[bot-comment] klaussy review-post failed: ${err && err.message}`);
     return null;
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

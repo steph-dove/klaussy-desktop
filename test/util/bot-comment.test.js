@@ -42,3 +42,19 @@ test('a finding reordered so the change comes first leads with that one sentence
   const [body] = await botCommentBodies([{ text: 'Take the lock first. Then write.\n\nIt races under load.' }]);
   assert.equal(body, 'Take the lock first.\n\n<details>\n<summary></summary>\n\nTake the lock first. Then write.\n\nIt races under load.\n\n</details>');
 });
+
+test('a body klaussy left out is null for that finding only', { skip: process.platform === 'win32' && 'shell stub' }, async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-klaussy-'));
+  fs.writeFileSync(path.join(bin, 'klaussy'), '#!/bin/sh\necho \'{"comments":[{"path":"f1.txt","body":"Two."}]}\'\n', { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = bin;
+  try {
+    assert.deepEqual(await botCommentBodies([{ text: 'One.' }, { text: 'Two.' }]), [null, 'Two.']);
+  } finally {
+    process.env.PATH = saved;
+    fs.rmSync(bin, { recursive: true, force: true });
+  }
+});

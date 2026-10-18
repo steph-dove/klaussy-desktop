@@ -649,9 +649,17 @@
     return postedBodies.has(body) ? postedBodies.get(body) : body;
   };
 
-  // klaussy review-post's body per finding text; null means klaussy couldn't build one.
+  // Body per finding text; null = klaussy failed, cleared after BOT_RETRY_MS so it retries.
   var botBodies = new Map();
   var botPending = false;
+  var BOT_RETRY_MS = 30000;
+
+  function botFailed(text) {
+    botBodies.set(text, null);
+    setTimeout(function () {
+      if (botBodies.get(text) === null) botBodies.delete(text);
+    }, BOT_RETRY_MS);
+  }
 
   PR.botCommentBody = function(f) {
     return (f && f.text && botBodies.get(f.text)) || null;
@@ -668,11 +676,12 @@
       var bodies = res && res.bodies;
       missing.forEach(function (f, i) {
         var body = bodies ? bodies[i] : null;
+        if (!body) return botFailed(f.text);
         botBodies.set(f.text, body);
-        if (body) postedBodies.set(body, body);
+        postedBodies.set(body, body);
       });
     }, function () {
-      missing.forEach(function (f) { botBodies.set(f.text, null); });
+      missing.forEach(function (f) { botFailed(f.text); });
     }).then(function () {
       botPending = false;
       PR.repaintAiReviewTab();
