@@ -8,7 +8,7 @@ The tables use the Mac's names for keys: Option is Alt on a PC keyboard, and Del
 
 ## Anywhere in the app window
 
-These work in the main window, whatever has focus, terminals included.
+These work in the main window, whatever has focus, terminals included, except where a row says otherwise.
 
 | macOS | Windows / Linux | What it does | Where it works |
 |---|---|---|---|
@@ -17,8 +17,8 @@ These work in the main window, whatever has focus, terminals included.
 | Cmd+/ | Ctrl+Shift+/ | Pick a slash command and send it to the active terminal | Anywhere, except the code editor on macOS, where Cmd+/ toggles a comment |
 | Cmd+G | Ctrl+Shift+G | Show or hide the Changes panel for the current task | Anywhere, except the code editor on macOS, where Cmd+G is Find Next |
 | Cmd+Shift+T | Ctrl+Shift+T | Reopen the last closed tab | Anywhere |
-| Cmd+Shift+A | Ctrl+Shift+A | Show or hide the active agents panel | Anywhere |
-| Cmd+Shift+E | Ctrl+Shift+E | Send the selected text to the active task's terminal and ask the agent to review it. With nothing selected, sends every hunk of the file selected in the Changes panel. | Needs a file selected in the Changes panel |
+| Cmd+Shift+A | Ctrl+Shift+A | Show or hide the active agents panel | Anywhere. On Windows/Linux, not while a terminal has focus (the shell gets Ctrl+A). |
+| Cmd+Shift+E | Ctrl+Shift+E | Send the selected text to the active task's terminal and ask the agent to review it. With nothing selected, sends every hunk of the file selected in the Changes panel. | Needs a file selected in the Changes panel. On Windows/Linux, not while a terminal has focus (the shell gets Ctrl+E). |
 | Hold Cmd+Shift+Space | Hold Ctrl+Shift+Space | Dictate into the active agent; let go to stop | Voice input on (Preferences). Takes the key from the editor's AI completion while voice is on. Also works in the PR review window, but not in extra windows opened with New Window. |
 | Hold Cmd+Shift+; | Hold Ctrl+Shift+; | Speak a command, such as "open pr review"; let go to stop | Voice input on (Preferences). Also works in the PR review window, but not in extra windows opened with New Window. |
 | F6 / Shift+F6 | F6 / Shift+F6 | Move focus to the next / previous area: sidebar, terminals, Changes panel, agents panel, notifications, editor. This is also how you leave a terminal. | Anywhere except inside a dialog. Also works in the PR review window, where the areas are the review's own sections. |
@@ -45,7 +45,7 @@ The first three are Klaussy's own. The rest are Electron's standard menu items a
 | Cmd+A | Ctrl+A | Select all | Text fields |
 | Cmd+R | Ctrl+R | Reload the window | Any window |
 | Cmd+Option+I | Ctrl+Shift+I | Toggle developer tools | Any window |
-| Cmd+0 | Ctrl+0 | Actual size | Any window. In a terminal it resets the terminal's font size instead (see [Terminals](#terminals)). |
+| Cmd+0 | Ctrl+0 | Actual size | Any window. On macOS, Cmd+0 in a terminal resets the terminal's font size instead; on Windows/Linux that's Ctrl+Shift+0 (see [Terminals](#terminals)). |
 | Cmd+Plus | Ctrl+Plus | Zoom in | Any window. In a terminal, Cmd+= changes the terminal's font size instead. |
 | Cmd+- | Ctrl+- | Zoom out | Any window. In a terminal, Cmd+- changes the terminal's font size instead. |
 | Ctrl+Cmd+F | F11 | Toggle full screen | Any window |
@@ -184,7 +184,7 @@ Diff keys (line moves, comments, E to explain) are in [Changes panel and diffs](
 | Up / Down, Home / End, Esc | Up / Down, Home / End, Esc | Move through / close the list | Recent folders list in the folder picker and new session dialog |
 | Left / Right, Home / End | Left / Right, Home / End | Move between tabs; Enter or Space opens the focused one | Tab strips: side panel, PR review sections, dev loop views, new session type, history views, plan source |
 | Up / Down, Home / End | Up / Down, Home / End | Move through the list | Skills & Commands and Plugins lists |
-| Esc | Esc | Close the dialog; focus goes back where it was | Dialogs |
+| Esc | Esc | Close the dialog; focus goes back where it was | Dialogs, except plan approval, which needs its Reject button |
 | Tab / Shift+Tab | Tab / Shift+Tab | Move through the dialog's controls; focus stays inside it | Dialogs |
 | Enter / Esc | Enter / Esc | OK / cancel | New session name, folder picker, "type delete to confirm", skill create dialogs |
 | Enter | Enter | OK (Cmd+Enter in a multi-line field) | Text prompt dialogs |
