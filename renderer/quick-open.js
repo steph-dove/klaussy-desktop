@@ -8,6 +8,8 @@ window.QuickOpen = (function () {
   var overlay = null;
   var cachedFiles = null;
   var cachedWorktree = null;
+  // Bumped by invalidate() so a load that started before it isn't cached.
+  var cacheGeneration = 0;
 
   // Simple fuzzy ranker. Lower score = better (sorted ascending).
   // Basename match > path match. Keeps the ranking predictable without the
@@ -162,6 +164,7 @@ window.QuickOpen = (function () {
     setTimeout(function () { input.focus(); }, 50);
     if (files) return;
 
+    var generation = cacheGeneration;
     var result;
     try {
       result = await window.klaus.fs.listFiles(wt);
@@ -174,7 +177,10 @@ window.QuickOpen = (function () {
       return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };
     });
     // A failed load isn't cached, so the next open tries again.
-    if (result && !result.error) { cachedWorktree = wt; cachedFiles = files; }
+    if (result && !result.error && generation === cacheGeneration) {
+      cachedWorktree = wt;
+      cachedFiles = files;
+    }
     // Closed or reopened while loading.
     if (overlay !== ownOverlay) return;
     refilter();
@@ -197,6 +203,6 @@ window.QuickOpen = (function () {
     show: show,
     hide: hide,
     // Call when the active worktree changes so the next open re-scans.
-    invalidate: function () { cachedFiles = null; cachedWorktree = null; },
+    invalidate: function () { cachedFiles = null; cachedWorktree = null; cacheGeneration++; },
   };
 })();
