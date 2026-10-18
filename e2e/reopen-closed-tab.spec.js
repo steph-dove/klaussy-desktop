@@ -42,6 +42,50 @@ test.describe('reopen closed tab', () => {
     }
   });
 
+  test('a shell tab closed inside a session comes back as a tab on it', async ({ mainWindow }) => {
+    const repo = buildRepo({ 'README.md': '# sub\n' }, 'reopen-sub');
+    try {
+      const id = await openShellTask(mainWindow, repo);
+      await mainWindow.evaluate((taskId) => window.TerminalManager.reopenSubAgents(taskId, [{ mode: 'shell' }]), id);
+      const subTabs = mainWindow.locator('.sub-tab[data-sub-id]:not([data-sub-id="0"])');
+      await expect(subTabs).toHaveCount(1);
+      await subTabs.first().locator('.sub-tab-close').click();
+      await expect(subTabs).toHaveCount(0);
+
+      await mainWindow.keyboard.press(process.platform === 'darwin' ? 'Meta+Shift+t' : 'Control+Shift+t');
+      await expect(subTabs).toHaveCount(1);
+      expect(await mainWindow.evaluate(() => ({
+        tasks: window.AppState.tasks.size, left: window.AppState.closedTasks.length,
+      }))).toEqual({ tasks: 1, left: 0 });
+    } finally {
+      await mainWindow.evaluate(async () => {
+        for (const t of Array.from(window.AppState.tasks.values())) {
+          await window.klaus.task.kill(t.id);
+          window.App.removeTaskFromUI(t.id);
+        }
+        window.AppState.closedTasks = [];
+      });
+      rm(repo);
+    }
+  });
+
+  test('a worktree saved with two agents resumes as one task with a tab', async ({ mainWindow }) => {
+    const repo = buildRepo({ 'README.md': '# two\n' }, 'resume-two');
+    try {
+      const out = await mainWindow.evaluate(async (r) => {
+        const saved = { worktreePath: r, repoPath: r, branch: 'main', mode: 'shell' };
+        const res = await window.App.resumeAllSavedAgents({ path: r, savedAgents: [saved, { ...saved, mode: 'codex', sessionId: 'c1' }] });
+        return { tabs: res.subAgentsToReopen, tasks: (await window.klaus.task.list()).filter((t) => t.worktreePath === r).length };
+      }, repo);
+      expect(out).toEqual({ tabs: [{ mode: 'codex', label: null, sessionId: 'c1' }], tasks: 1 });
+    } finally {
+      await mainWindow.evaluate(async () => {
+        for (const t of await window.klaus.task.list()) await window.klaus.task.kill(t.id);
+      });
+      rm(repo);
+    }
+  });
+
   test('a failed reopen keeps the tab so the shortcut can retry it', async ({ mainWindow }) => {
     const left = await mainWindow.evaluate(async () => {
       window.AppState.closedTasks = [{ worktreePath: '/nonexistent/klaussy-reopen', mode: 'claude', name: 'gone' }];

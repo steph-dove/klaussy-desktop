@@ -13,6 +13,12 @@ const { ghJson, ghText } = require('../util/gh-json');
 const { glabJson, glabText } = require('../util/glab-json');
 const { bitbucketFetch, bitbucketJson } = require('../util/bitbucket-api');
 const { humanizeComment, humanizeCommentP } = require('../util/humanize-comment');
+const { botCommentBodies } = require('../util/bot-comment');
+
+// A draft built by klaussy's review-post is already in the bot's final form.
+function outboundBody(draft, text) {
+  return draft && draft.humanized ? text : humanizeComment(text);
+}
 const { isEmptyReview, ghApiErrorMessage } = require('../util/review-payload');
 const {
   prReview, currentRepoPath, sanitizePrReview, broadcastPrReview, fetchThreadsForActive,
@@ -278,6 +284,10 @@ ipcMain.handle('pr-edit-review-comment', async (_event, { commentId, body }) => 
   });
 });
 
+ipcMain.handle('pr-bot-comment-bodies', async (_event, { findings } = {}) => ({
+  bodies: await botCommentBodies(findings),
+}));
+
 ipcMain.handle('pr-humanize-preview', async (_event, { body } = {}) => {
   if (typeof body !== 'string') return { body: '' };
   return { body: await humanizeCommentP(body) };
@@ -519,7 +529,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
           method: 'POST',
           account, host, cwd,
           body: {
-            content: { raw: humanizeComment(c.body) },
+            content: { raw: outboundBody(c, c.body) },
             inline: inlineData,
           },
         });
@@ -531,7 +541,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
           await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
             method: 'POST',
             account, host, cwd,
-            body: { content: { raw: humanizeComment(fallbackBody) } },
+            body: { content: { raw: outboundBody(c, fallbackBody) } },
           });
           postedCount += 1;
         } catch (fbErr) {
@@ -559,7 +569,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
         await bitbucketFetch(`/repositories/${target}/pullrequests/${number}/comments`, {
           method: 'POST',
           account, host, cwd,
-          body: { content: { raw: humanizeComment(draft.body) } },
+          body: { content: { raw: outboundBody(draft, draft.body) } },
         });
         postedCount += 1;
       } catch (err) {
@@ -619,7 +629,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
         pos.new_line = c.line;
       }
       const discPayload = {
-        body: humanizeComment(c.body),
+        body: outboundBody(c, c.body),
         position: pos,
       };
       const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/discussions`;
@@ -668,7 +678,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
             }
             resolve({ ok: true });
           });
-          proc.stdin.write(JSON.stringify({ body: humanizeComment(fallbackBody) }));
+          proc.stdin.write(JSON.stringify({ body: outboundBody(c, fallbackBody) }));
           proc.stdin.end();
         });
         if (noteRes.error) errors.push(res.error);
@@ -728,7 +738,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
           }
           resolve({ ok: true });
         });
-        proc.stdin.write(JSON.stringify({ body: humanizeComment(draft.body) }));
+        proc.stdin.write(JSON.stringify({ body: outboundBody(draft, draft.body) }));
         proc.stdin.end();
       });
       if (res.error) errors.push(res.error);
@@ -758,7 +768,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
     comments: inlineComments.map((c) => {
       const out = {
         path: c.path,
-        body: humanizeComment(c.body),
+        body: outboundBody(c, c.body),
         side: c.side || 'RIGHT',
       };
       if (typeof c.line === 'number') out.line = c.line;
@@ -853,7 +863,7 @@ ipcMain.handle('pr-submit-review', async (_event, { event, body, comments }) => 
         }
         resolve({ ok: true });
       });
-      proc.stdin.write(JSON.stringify({ body: humanizeComment(draft.body) }));
+      proc.stdin.write(JSON.stringify({ body: outboundBody(draft, draft.body) }));
       proc.stdin.end();
     });
     if (res.error) issueCommentFailures.push(res.error);

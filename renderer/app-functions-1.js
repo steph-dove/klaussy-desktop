@@ -314,21 +314,25 @@ window.App = window.App || {};
     });
   };
 
-  // One at a time: each spawn rewrites the saved snapshot. Only the first is
-  // returned, so a caller ignoring onExtra leaves the rest with no terminal.
-  App.resumeAllSavedAgents = async function(wt, onExtra) {
+  // Agents saved as separate tasks on one worktree come back as tabs on the first.
+  App.extraAgentsAsTabs = function(extras) {
+    var tabs = [];
+    (extras || []).forEach(function (s) {
+      tabs.push({ mode: s.mode, label: null, sessionId: s.sessionId || null });
+      (s.subAgents || []).forEach(function (a) { tabs.push(a); });
+    });
+    return tabs;
+  };
+
+  App.resumeAllSavedAgents = async function(wt) {
     var agents = App.dedupeSavedAgents(wt.savedAgents);
-    var first = null;
-    for (var i = 0; i < agents.length; i++) {
-      var s = agents[i];
-      var res = s.mode === 'shell'
-        ? await window.klaus.task.attachWorktree(s.worktreePath, 'shell', s.repoPath, s.branch)
-        : await window.klaus.session.resume(s);
-      if (res && res.id && s.subAgents && s.subAgents.length) res.subAgentsToReopen = s.subAgents;
-      if (i === 0) { first = res; continue; }
-      if (res && res.id && onExtra) onExtra(res);
-    }
-    return first;
+    var s = agents[0];
+    var res = s.mode === 'shell'
+      ? await window.klaus.task.attachWorktree(s.worktreePath, 'shell', s.repoPath, s.branch)
+      : await window.klaus.session.resume(s);
+    var tabs = (s.subAgents || []).concat(App.extraAgentsAsTabs(agents.slice(1)));
+    if (res && res.id && tabs.length) res.subAgentsToReopen = tabs;
+    return res;
   };
 
   App.restoreUIState = async function(task) {
@@ -645,7 +649,7 @@ window.App = window.App || {};
   // Resume every agent a worktree had open, not just the first one saved: a
   // session is often a Claude tab plus a second agent, and coming back to only
   // one of them loses the other's place.
-  App.resumeSessionWorktree = async function(wt, sessionName, savedList, mode, onExtra) {
+  App.resumeSessionWorktree = async function(wt, sessionName, savedList, mode) {
     var savedForWt = App.dedupeSavedAgents(
       (savedList || []).filter(function (s) { return s && s.worktreePath === wt.path; })
     );
@@ -653,15 +657,10 @@ window.App = window.App || {};
     if (!all || savedForWt.length <= 1) {
       return App.resumeSavedAgent(wt, sessionName, savedForWt[0] || null, mode, true);
     }
-    var first = null;
-    for (var i = 0; i < savedForWt.length; i++) {
-      // One at a time: each spawn writes the session snapshot, and two landing
-      // together lose one of the tabs they were meant to record.
-      var res = await App.resumeSavedAgent(wt, sessionName, savedForWt[i], null, false);
-      if (i === 0) { first = res; continue; }
-      if (res && res.id && onExtra) onExtra(res);
-    }
-    return first;
+    var res = await App.resumeSavedAgent(wt, sessionName, savedForWt[0], null, false);
+    var tabs = App.extraAgentsAsTabs(savedForWt.slice(1));
+    if (res && res.id) res.subAgentsToReopen = (res.subAgentsToReopen || []).concat(tabs);
+    return res;
   };
 
   // One agent of a session. `lookupLatest` falls back to the worktree's newest
@@ -722,7 +721,9 @@ window.App = window.App || {};
   };
 
   // Resuming a session that is already open would put two agents on one transcript.
-  function isOpen(record) {
+  // A closed tab inside a task can only come back while that task is open.
+  function cannotReopen(record) {
+    if (record.subOf != null) return !AppState.tasks.has(record.subOf);
     return Array.from(AppState.tasks.values()).some(function (t) {
       return t.worktreePath === record.worktreePath && (AppUtils.exitedAgent(t) || t.mode) === record.mode;
     });
@@ -731,12 +732,24 @@ window.App = window.App || {};
   App.reopenClosedTask = async function() {
     if (reopening) return;
     var record = AppState.closedTasks.pop();
-    while (record && isOpen(record)) record = AppState.closedTasks.pop();
+    while (record && cannotReopen(record)) record = AppState.closedTasks.pop();
     if (!record) {
       window.toast.info('No recently closed tabs to reopen');
       return;
     }
     reopening = true;
+    if (record.subOf != null) {
+      var sub = null;
+      try { sub = await TerminalManager.reopenSubAgents(record.subOf, [record]); } catch (e) { sub = null; }
+      reopening = false;
+      if (!sub || !sub.opened) {
+        AppState.closedTasks.push(record);
+        window.toast.error('Could not reopen ' + (record.label || 'tab'));
+        return;
+      }
+      App.switchToTask(record.subOf);
+      return;
+    }
     var result;
     try {
       result = record.mode === 'shell'

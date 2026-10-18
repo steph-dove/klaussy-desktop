@@ -307,16 +307,12 @@
   // comment reading "Use e.g." and nothing more.
   var ABBREV_END = /(?:\b(?:e\.g|i\.e|vs|etc|cf)|(?:^|\s)[A-Za-z])\.$/i;
 
-  // One line saying what's wrong, taken from the prose above the "Suggested
-  // change:" label. First sentence only, with newlines collapsed, so a wrapped
-  // paragraph still posts as a single line.
-  PR.findingWhyText = function(f) {
-    var text = (f && f.text) || '';
-    var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
-    var prose = (m ? text.slice(0, m.index) : text)
-      .replace(/```[\s\S]*?```/g, '')                 // fenced code
-      .replace(/^[ \t]*\*\*[^\n]*\*\*[ \t]*$/gm, '')  // severity/category/location line
-      .trim();
+  var SUGGESTED = /(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i;
+  var FENCED = /```[\s\S]*?```|~~~[\s\S]*?~~~/g;
+
+  // First sentence of the prose outside code, on one line.
+  function firstSentence(text) {
+    var prose = String(text || '').replace(FENCED, '').trim();
     if (!prose) return '';
     var breaks = /(?<=[.!?])\s+(?=[A-Z"'`([])/g;
     var first = prose;
@@ -327,23 +323,40 @@
       break;
     }
     return first.replace(/\s+/g, ' ').trim();
+  }
+
+  // One line saying what's wrong, from the prose above the "Suggested change:" label.
+  PR.findingWhyText = function(f) {
+    return firstSentence(PR.findingExplanationText(f));
   };
 
-  // One line of why, then the change (unlabeled so comments read naturally).
+  // Report text for klaussy review-post, with suggestion prose leading like the bot's findings and code kept under the label so GitHub can apply it.
+  PR.findingReportText = function(f) {
+    var explanation = PR.findingExplanationText(f);
+    var suggestion = SUGGESTED.test((f && f.text) || '') ? PR.findingSuggestionText(f) : '';
+    var prose = suggestion.replace(FENCED, '').trim();
+    var change = prose ? (suggestion.match(FENCED) || []).join('\n\n') : suggestion;
+    var text = [prose, explanation].filter(Boolean).join('\n\n');
+    return change ? (text ? text + '\n\n' : '') + 'Suggested change:\n' + change : text;
+  };
+
+  // The klaussy-review bot's body from klaussy itself, else the same shape built
+  // here (review_post.py Finding.comment): one sentence and any code suggestion,
+  // then the whole explanation collapsed.
   PR.findingCommentBody = function(f) {
-    var suggestion = PR.findingSuggestionText(f);
-    // No label in the text at all means findingSuggestionText returned the
-    // whole body, which the why would duplicate.
-    if (!/(?:^|\n)[ \t]*Suggested change:/i.test((f && f.text) || '')) return suggestion;
-    var why = PR.findingWhyText(f);
-    if (!why) return suggestion;
-    if (!suggestion) return why;
-    return why + '\n\n' + suggestion;
+    var bot = PR.botCommentBody && PR.botCommentBody(f);
+    if (bot) return bot;
+    var text = PR.findingReportText(f);
+    var m = text.match(SUGGESTED);
+    var explanation = (m ? text.slice(0, m.index) : text).trim();
+    var suggestion = m ? text.slice(m.index + m[0].length).trim() : '';
+    var lead = [firstSentence(explanation), suggestion].filter(Boolean).join('\n\n');
+    if (!explanation) return lead;
+    var details = '<details>\n<summary></summary>\n\n' + explanation + '\n\n</details>';
+    return lead ? lead + '\n\n' + details : details;
   };
 
-  // Full explanation prose above the "Suggested change:" label (or the whole
-  // body if no suggestion is present), stripped of metadata headers and quoted
-  // code blocks so it can be viewed in an expandable Explanation section.
+  // The prose above the "Suggested change:" label, without metadata headers; quoted code stays, as the bot keeps it.
   PR.findingExplanationText = function(f) {
     var text = (f && f.text) || (typeof f === 'string' ? f : '');
     var m = text.match(/(?:^|\n)[ \t]*Suggested change:[ \t]*\n*/i);
@@ -354,14 +367,48 @@
     }
     prose = prose
       .replace(/\*{0,2}\[(?:Severity|Location|Category)\s*:[\s\S]*?\]\*{0,2}/gi, '')
-      .replace(/^[^\S\n]*\*{0,2}Comment\*{0,2}\s*:\s*/gim, '')
+      .replace(/^[^\S\n]*\*{0,2}Comment\*{0,2}\s*:\*{0,2}\s*/gim, '')
       .replace(/^[^\S\n]*\*{1,3}[^\S\n]*$/gm, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
-    if (f && f.verifiedSnippet && f.verifiedSnippet.text) {
-      prose = prose.replace(/```[a-zA-Z0-9_-]*\n[\s\S]*?```\n?/g, '').trim();
-    }
     return prose.trim();
+  };
+
+  function stageFinding(f) {
+    var entry = {
+      id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      fromFindingId: f.id,
+      body: PR.findingCommentBody(f),
+      humanized: !!(PR.botCommentBody && PR.botCommentBody(f)),
+    };
+    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
+      entry.path = f.path;
+      entry.line = f.line;
+      entry.side = f.side || 'RIGHT';
+    } else {
+      entry.issueComment = true;
+    }
+    PR.pendingComments.push(entry);
+  }
+
+  PR.stageableFindings = function() {
+    return PR.aiReview.findings.filter(function (f) {
+      return !f.ignored && f.commentStatus !== 'posted' && !PR.pendingCommentDraftExistsForFinding(f.id);
+    });
+  };
+
+  // Stages every open finding, then opens Submit review with the bot's summary
+  // and the event its verdict calls for.
+  PR.addAllFindingsToReview = function() {
+    var staged = PR.stageableFindings();
+    staged.forEach(stageFinding);
+    if (staged.length) {
+      PR.repaintAiReviewTab();
+      PR.saveAiReviewCache();
+      if (PR.lastState) PR.render(PR.lastState);
+      A11y.announce('Added ' + staged.length + ' finding' + (staged.length === 1 ? '' : 's') + ' to the review. ' + pendingSummary());
+    }
+    PR.openSubmitReviewDialog({ body: PR.reviewSummaryBody(), event: PR.reviewSummaryEvent() });
   };
 
   // Add a finding to the pending review. Both paths STAGE into pendingComments
@@ -381,22 +428,7 @@
       return;
     }
 
-    // One line of why plus the change, staged as the reviewer's own words (no
-    // bot attribution). Severity/location stay on the card as reference.
-    var attributedBody = PR.findingCommentBody(f);
-    var entry = {
-      id: 'pending-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
-      fromFindingId: f.id,
-      body: attributedBody,
-    };
-    if (f.postMode === 'inline' && f.locationVerified && f.path && f.line) {
-      entry.path = f.path;
-      entry.line = f.line;
-      entry.side = f.side || 'RIGHT';
-    } else {
-      entry.issueComment = true;
-    }
-    PR.pendingComments.push(entry);
+    stageFinding(f);
     PR.repaintAiReviewTab();
     PR.saveAiReviewCache();
     if (PR.lastState) PR.render(PR.lastState);
@@ -1135,7 +1167,8 @@
     return !!(author && PR.currentUserLogin && author === PR.currentUserLogin);
   };
 
-  PR.openSubmitReviewDialog = function() {
+  PR.openSubmitReviewDialog = function(prefill) {
+    if (!prefill || typeof prefill !== 'object' || prefill instanceof Event) prefill = {};
     if (PR.pendingComments.length === 0) {
       if (!confirm('No pending comments. Submit review anyway (summary only)?')) return;
     }
@@ -1164,6 +1197,9 @@
         + '<div class="pr-submit-error" id="pr-submit-error" role="alert" style="display:none;"></div>'
       + '</div>';
     document.body.appendChild(overlay);
+    if (prefill.body) overlay.querySelector('.pr-submit-body').value = prefill.body;
+    var prefillEvent = prefill.event && overlay.querySelector('input[name="pr-event"][value="' + prefill.event + '"]:not([disabled])');
+    if (prefillEvent) prefillEvent.checked = true;
 
     function close() { overlay.remove(); }
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });

@@ -486,6 +486,7 @@
     var status = PR.aiReview.requestId ? 'streaming' : PR.aiReview.error ? 'error' : PR.aiReview.cancelled ? 'cancelled' : 'done';
     var openFindings = PR.aiReview.findings.filter(function (f) { return !f.ignored; });
     var unimplementedOpen = openFindings.filter(function (f) { return f.status !== 'implemented' && f.status !== 'implementing'; });
+    var stageable = PR.stageableFindings();
 
     var usageStr = PR.aiReview.usage ? PR.formatUsage(PR.aiReview.usage) : '';
     var head = '<div class="pr-ai-head">'
@@ -503,6 +504,11 @@
       + (!PR.aiReview.requestId && unimplementedOpen.length > 1
           ? '<button class="pr-ai-implement-all pr-review-btn" type="button" title="Apply every open finding, run the tests, then commit and push to the PR branch"' + (PR.aiReview.implementAllId ? ' disabled' : '') + '>'
               + (PR.aiReview.implementAllId ? 'Implementing all\u2026' : 'Implement all (' + unimplementedOpen.length + ')')
+            + '</button>'
+          : '')
+      + (!PR.aiReview.requestId && (stageable.length || PR.pendingComments.length)
+          ? '<button class="pr-ai-add-all pr-review-btn" type="button" title="Add every open finding to the review, then open Submit review">'
+              + 'Add all to review' + (stageable.length ? ' (' + stageable.length + ')' : '')
             + '</button>'
           : '')
       + (!PR.aiReview.requestId
@@ -573,29 +579,46 @@
     + '</div>';
   };
 
-  // Verdict banner from the structured summary: Approve / Request Changes /
-  // Block, plus the highest-risk bullets and test-coverage note. Only renders
-  // once the review has finished and the JSON contract gave us a summary.
+  function verdictClass(verdict) {
+    var key = (verdict || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-+|-+$/g, '');
+    return key.indexOf('block') === 0 ? 'block'
+      : key.indexOf('request') === 0 || key.indexOf('changes') !== -1 ? 'changes'
+      : key.indexOf('approve') === 0 ? 'approve'
+      : 'neutral';
+  }
+
+  // The review body the klaussy-review bot posts: verdict, what drives it, test
+  // coverage, then its footer.
+  PR.reviewSummaryBody = function() {
+    var s = PR.aiReview.summary;
+    if (!s) return '';
+    var head = PR.lastState && PR.lastState.meta && PR.lastState.meta.headRefOid;
+    var risks = (s.highestRisk || []).filter(Boolean);
+    return [
+      s.verdict ? '**Verdict:** ' + s.verdict + (head ? ' \u00b7 reviewed at `' + head.slice(0, 7) + '`' : '') : '',
+      risks.length === 1 ? risks[0] : risks.map(function (r, k) { return (k + 1) + '. ' + r; }).join('\n'),
+      s.testCoverage ? 'Test coverage: ' + s.testCoverage : '',
+      'Reviewed by [klaussy](https://klaussy.com).',
+    ].filter(Boolean).join('\n\n');
+  };
+
+  PR.reviewSummaryEvent = function() {
+    var cls = verdictClass(PR.aiReview.summary && PR.aiReview.summary.verdict);
+    return cls === 'block' || cls === 'changes' ? 'REQUEST_CHANGES' : cls === 'approve' ? 'APPROVE' : 'COMMENT';
+  };
+
   PR.renderReviewSummary = function() {
     var s = PR.aiReview.summary;
     if (!s || PR.aiReview.requestId) return '';
     if (!s.verdict && (!s.highestRisk || !s.highestRisk.length) && !s.testCoverage) return '';
-    var verdictKey = (s.verdict || '').toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-+|-+$/g, '');
-    var verdictCls = verdictKey.indexOf('block') === 0 ? 'block'
-      : verdictKey.indexOf('request') === 0 || verdictKey.indexOf('changes') !== -1 ? 'changes'
-      : verdictKey.indexOf('approve') === 0 ? 'approve'
-      : 'neutral';
-    var risks = (s.highestRisk || []).filter(Boolean);
-    return '<div class="pr-ai-verdict pr-ai-verdict-' + verdictCls + '">'
-      + '<div class="pr-ai-verdict-head">'
-        + (s.verdict ? '<span class="pr-ai-verdict-badge">' + PR.escHtml(s.verdict) + '</span>' : '')
-        + (s.testCoverage ? '<span class="pr-ai-verdict-coverage">Tests: ' + PR.escHtml(s.testCoverage) + '</span>' : '')
+    var login = PR.currentUserLogin || 'You';
+    return '<div class="pr-gh-review pr-ai-verdict pr-ai-verdict-' + verdictClass(s.verdict) + '">'
+      + '<div class="pr-gh-comment-head">'
+        + '<span class="pr-gh-avatar" aria-hidden="true">' + PR.escHtml(login.charAt(0).toUpperCase()) + '</span>'
+        + '<span class="pr-gh-author">' + PR.escHtml(login) + '</span>'
+        + '<span class="pr-gh-when">review summary</span>'
       + '</div>'
-      + (risks.length
-          ? '<ol class="pr-ai-verdict-risks">'
-              + risks.map(function (r) { return '<li>' + PR.escHtml(r) + '</li>'; }).join('')
-            + '</ol>'
-          : '')
+      + '<div class="pr-gh-comment-body">' + PR.renderCommentBody(PR.reviewSummaryBody()) + '</div>'
     + '</div>';
   };
 

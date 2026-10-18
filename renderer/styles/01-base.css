@@ -454,8 +454,8 @@ body.custom-titlebar #titlebar-content {
 
 /* Sidebar */
 #sidebar {
-  width: 240px;
-  min-width: 240px;
+  width: 256px;
+  min-width: 256px;
   background: color-mix(in srgb, var(--sidebar-bg) 75%, transparent);
   backdrop-filter: blur(24px) saturate(160%);
   -webkit-backdrop-filter: blur(24px) saturate(160%);
