@@ -143,3 +143,101 @@ test('arrowing with the mouse resting on the list keeps the selection where the 
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('a file created after the first open shows up on the next open', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  const repo = buildRepo();
+  try {
+    // A stubbed task isn't watched by the sidebar, so watch it here.
+    await mainWindow.evaluate(async (wt) => {
+      window.AppState.activeTaskId = 999;
+      window.AppState.tasks.set(999, { id: 999, worktreePath: wt });
+      window.QuickOpen.invalidate();
+      await window.klaus.fs.watchWorktree(wt);
+    }, repo);
+
+    const overlay = mainWindow.locator('.quick-open-overlay');
+    const input = overlay.locator('.palette-input');
+    const items = overlay.locator('.quick-open-item');
+
+    await mainWindow.evaluate(() => window.QuickOpen.show());
+    await expect(items).toHaveCount(4);
+    await input.press('Escape');
+    await expect(overlay).toHaveCount(0);
+
+    fs.writeFileSync(path.join(repo, 'src', 'brand-new.js'), '');
+
+    // The watcher debounces, so retry until the change has landed.
+    await expect(async () => {
+      await mainWindow.evaluate(() => window.QuickOpen.show());
+      try {
+        await input.fill('brand-new');
+        await expect(items).toHaveCount(1, { timeout: 500 });
+        await expect(items.first().locator('.quick-open-basename')).toHaveText('brand-new.js');
+      } finally {
+        await mainWindow.evaluate(() => window.QuickOpen.hide());
+      }
+    }).toPass({ timeout: 10_000 });
+  } finally {
+    await mainWindow.evaluate(async (wt) => {
+      await window.klaus.fs.unwatchWorktree(wt);
+      window.AppState.activeTaskId = null;
+      window.AppState.tasks.delete(999);
+      window.QuickOpen.invalidate();
+    }, repo);
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('a change in another worktree keeps this worktree\'s file list', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  const repo = buildRepo();
+  const other = buildRepo();
+  try {
+    await mainWindow.evaluate(async (paths) => {
+      window.AppState.activeTaskId = 999;
+      window.AppState.tasks.set(999, { id: 999, worktreePath: paths.repo });
+      window.QuickOpen.invalidate();
+      await window.klaus.fs.watchWorktree(paths.other);
+      window.__otherChanged = false;
+      window.__stopOtherWatch = window.klaus.fs.onWorktreeChanged((data) => {
+        if (data && data.worktreePath === paths.other) window.__otherChanged = true;
+      });
+    }, { repo, other });
+
+    const overlay = mainWindow.locator('.quick-open-overlay');
+    const input = overlay.locator('.palette-input');
+    const items = overlay.locator('.quick-open-item');
+
+    await mainWindow.evaluate(() => window.QuickOpen.show());
+    await expect(items).toHaveCount(4);
+    await input.press('Escape');
+    await expect(overlay).toHaveCount(0);
+
+    // `repo` is unwatched, so a file added there only appears if something
+    // else throws the cache away — like the change in `other` below.
+    fs.writeFileSync(path.join(repo, 'src', 'unseen.js'), '');
+    fs.writeFileSync(path.join(other, 'src', 'elsewhere.js'), '');
+    await expect.poll(() => mainWindow.evaluate(() => window.__otherChanged), { timeout: 10_000 }).toBe(true);
+
+    await mainWindow.evaluate(() => window.QuickOpen.show());
+    await expect(items).toHaveCount(4);
+    await input.fill('unseen');
+    await expect(items).toHaveCount(0);
+    await input.press('Escape');
+  } finally {
+    await mainWindow.evaluate(async (paths) => {
+      if (window.__stopOtherWatch) window.__stopOtherWatch();
+      delete window.__stopOtherWatch;
+      delete window.__otherChanged;
+      await window.klaus.fs.unwatchWorktree(paths.other);
+      window.AppState.activeTaskId = null;
+      window.AppState.tasks.delete(999);
+      window.QuickOpen.invalidate();
+    }, { repo, other });
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(other, { recursive: true, force: true });
+  }
+});
