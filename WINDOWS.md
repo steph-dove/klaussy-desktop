@@ -10,7 +10,7 @@ PATH layout.
 
 - **Win11 22H2 or later** (older builds don't have ConPTY, which node-pty
   needs).
-- **Node 20 LTS** (`winget install OpenJS.NodeJS.LTS`).
+- **Node 24+** (`winget install OpenJS.NodeJS.LTS`).
 - **Git for Windows** (`winget install Git.Git`).
 - **Visual Studio Build Tools** with the "Desktop development with C++"
   workload (needed for `electron-rebuild` to compile node-pty).
