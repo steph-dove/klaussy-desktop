@@ -103,6 +103,8 @@ npm install -g @anthropic-ai/claude-code
 claude
 ```
 
+See [WINDOWS.md](WINDOWS.md) for the Windows smoke checklist.
+
 #### Linux
 ```bash
 sudo apt install nodejs npm gh glab
@@ -110,6 +112,8 @@ gh auth login
 glab auth login
 npm install -g @anthropic-ai/claude-code && claude
 ```
+
+See [LINUX.md](LINUX.md) for the Linux smoke checklist.
 
 *For Bitbucket repositories, connect an App Password or token under **Preferences → Git Accounts**.*
 
