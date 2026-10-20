@@ -8,8 +8,18 @@ window.QuickOpen = (function () {
   var overlay = null;
   var cachedFiles = null;
   var cachedWorktree = null;
-  // Bumped by invalidate() so a load that started before it isn't cached.
+  // Bumped on every invalidation so a scan that was in flight when the
+  // worktree changed doesn't cache the list from before the change.
   var cacheGeneration = 0;
+
+  // Files created by the person or an agent show up on the next open.
+  if (window.klaus && window.klaus.fs && window.klaus.fs.onWorktreeChanged) {
+    window.klaus.fs.onWorktreeChanged(function (data) {
+      if (!data || data.worktreePath !== cachedWorktree) return;
+      cachedFiles = null;
+      cacheGeneration++;
+    });
+  }
 
   // Simple fuzzy ranker. Lower score = better (sorted ascending).
   // Basename match > path match. Keeps the ranking predictable without the
@@ -58,7 +68,7 @@ window.QuickOpen = (function () {
     var results = [];
     var selectedIndex = 0;
     // Cache per-worktree so reopening the palette is instant. Invalidated
-    // on worktree switch.
+    // on worktree switch and when the watcher reports a change in it.
     var files = cachedWorktree === wt ? cachedFiles : null;
 
     function render() {
@@ -164,6 +174,9 @@ window.QuickOpen = (function () {
     setTimeout(function () { input.focus(); }, 50);
     if (files) return;
 
+    // Set before the scan so a watcher event for this worktree mid-scan bumps the generation.
+    cachedWorktree = wt;
+    cachedFiles = null;
     var generation = cacheGeneration;
     var result;
     try {
@@ -177,10 +190,7 @@ window.QuickOpen = (function () {
       return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };
     });
     // A failed load isn't cached, so the next open tries again.
-    if (result && !result.error && generation === cacheGeneration) {
-      cachedWorktree = wt;
-      cachedFiles = files;
-    }
+    if (result && !result.error && generation === cacheGeneration) cachedFiles = files;
     // Closed or reopened while loading.
     if (overlay !== ownOverlay) return;
     refilter();
