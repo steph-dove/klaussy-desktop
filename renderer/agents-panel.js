@@ -39,6 +39,12 @@ window.AgentsPanel = (function () {
     btn.classList.toggle('has-running', running > 0);
     btn.classList.toggle('is-empty', current.length === 0);
 
+    var clearable = current.length - running;
+    // A disabled button drops focus to body, which breaks the panel's Escape/focusout handling.
+    if (clearable === 0 && document.activeElement === clearBtn) closeBtn.focus();
+    clearBtn.disabled = clearable === 0;
+    clearBtn.title = clearable === 0 ? 'Nothing to clear' : 'Clear completed';
+
     if (running > 0) {
       label.textContent = running === 1 ? '1 agent running' : running + ' agents running';
     } else if (unread > 0) {
