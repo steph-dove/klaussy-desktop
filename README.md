@@ -107,11 +107,15 @@ See [WINDOWS.md](WINDOWS.md) for the Windows smoke checklist.
 
 #### Linux
 ```bash
-sudo apt install nodejs npm gh glab
+# Node 24+ is required; the distro nodejs package is too old (Ubuntu 24.04 ships 18)
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt install -y nodejs gh glab
 gh auth login
 glab auth login
 npm install -g @anthropic-ai/claude-code && claude
 ```
+
+Prefer [nvm](https://github.com/nvm-sh/nvm)? `nvm install 24` works too; then install `gh` and `glab` with apt.
 
 See [LINUX.md](LINUX.md) for the Linux smoke checklist.
 
