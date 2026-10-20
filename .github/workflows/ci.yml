@@ -1,9 +1,20 @@
 name: CI
 
+# A change that's only docs can't break a test, so it skips both jobs (the macOS one bills at 10x
+# rate). Anything else in the change, even one line, runs everything. No test reads these files,
+# and none of them ship in the app. Secret scanning (gitleaks.yml) still runs on every change.
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
   pull_request:
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+      - 'LICENSE'
 
 # Cancel in-flight runs for the same ref when a new commit lands. Saves
 # macOS minutes (which bill at 10x rate) when someone force-pushes.
