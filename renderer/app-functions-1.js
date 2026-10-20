@@ -881,7 +881,11 @@ window.App = window.App || {};
       }
     }).catch(function (e) {
       console.warn('[manage-sessions]', e);
-      App.sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Could not load sessions</div>';
+      App.sessionsModalList.innerHTML = '<div class="sessions-modal-empty">Could not load sessions</div>'
+        + '<div class="sessions-modal-empty"><button type="button" class="sessions-modal-retry">Try again</button></div>';
+      var retry = App.sessionsModalList.querySelector('.sessions-modal-retry');
+      retry.addEventListener('click', function () { App.renderSessionsModalList(); });
+      retry.focus();
     });
   };
 
