@@ -1164,6 +1164,8 @@ function validateRawJson(basePath) {
 // regenerating when missing, stale, or built by an older klaussy version.
 // Single-flight per repo. Never throws.
 function ensureRepoIntel(repoOrWorktreePath) {
+  // e2e repos are disposable fixtures: a background pipx install + klaussy init races the test's own edits.
+  if (process.env.KLAUSSY_E2E) return Promise.resolve();
   let base;
   try {
     base = baseFor(repoOrWorktreePath);
