@@ -8,6 +8,18 @@ window.QuickOpen = (function () {
   var overlay = null;
   var cachedFiles = null;
   var cachedWorktree = null;
+  // Bumped on every invalidation so a scan that was in flight when the
+  // worktree changed doesn't cache the list from before the change.
+  var cacheGeneration = 0;
+
+  // Files created by the person or an agent show up on the next open.
+  if (window.klaus && window.klaus.fs && window.klaus.fs.onWorktreeChanged) {
+    window.klaus.fs.onWorktreeChanged(function (data) {
+      if (!data || data.worktreePath !== cachedWorktree) return;
+      cachedFiles = null;
+      cacheGeneration++;
+    });
+  }
 
   // Simple fuzzy ranker. Lower score = better (sorted ascending).
   // Basename match > path match. Keeps the ranking predictable without the
@@ -32,14 +44,17 @@ window.QuickOpen = (function () {
     if (!wt) return;
 
     // Cache per-worktree so reopening the palette is instant. Invalidated
-    // on worktree switch.
-    if (cachedWorktree !== wt || !cachedFiles) {
+    // on worktree switch and when the watcher reports a change in it.
+    var files = cachedWorktree === wt ? cachedFiles : null;
+    if (!files) {
       cachedWorktree = wt;
+      var generation = ++cacheGeneration;
       var result = await window.klaus.fs.listFiles(wt);
-      cachedFiles = (result.files || []).map(function (p) {
+      files = (result.files || []).map(function (p) {
         var base = p.split('/').pop();
         return { path: p, basename: base, lowerPath: p.toLowerCase(), lowerBasename: base.toLowerCase() };
       });
+      if (generation === cacheGeneration) cachedFiles = files;
     }
 
     overlay = document.createElement('div');
@@ -106,7 +121,7 @@ window.QuickOpen = (function () {
     var saidNoMatch = false;
     function refilter() {
       var q = input.value.trim().toLowerCase();
-      results = cachedFiles
+      results = files
         .map(function (f) { return { entry: f, score: rankPath(f.path, f.lowerPath, f.basename, f.lowerBasename, q) }; })
         .filter(function (r) { return r.score !== Infinity; })
         .sort(function (a, b) { return a.score - b.score; })
@@ -174,6 +189,6 @@ window.QuickOpen = (function () {
     show: show,
     hide: hide,
     // Call when the active worktree changes so the next open re-scans.
-    invalidate: function () { cachedFiles = null; cachedWorktree = null; },
+    invalidate: function () { cachedFiles = null; cachedWorktree = null; cacheGeneration++; },
   };
 })();

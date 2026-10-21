@@ -112,7 +112,7 @@ test('the renderer cannot add a path-gate root through recent-paths', async ({ m
 test('the viewer renders an image instead of mojibake', async ({ mainWindow }) => {
   const folder = buildPlainFolder();
   try {
-    const out = await mainWindow.evaluate(async (f) => {
+    await mainWindow.evaluate(async (f) => {
       const opened = await window.klaus.task.openFolder(f, 'shell');
       // The viewer reads the active task for its worktree, so make it active.
       if (window.App && window.App.addTaskToUI) {
@@ -120,21 +120,13 @@ test('the viewer renders an image instead of mojibake', async ({ mainWindow }) =
         window.App.switchToTask(opened.id);
       }
       await window.openFileViewer(f + '/shot.png', 'shot.png');
-      // Give the async tab creation a beat to land in the DOM.
-      await new Promise((r) => setTimeout(r, 1500));
-      const body = document.querySelector('.file-viewer-body');
-      const img = document.querySelector('.file-media-preview img');
-      return {
-        mediaMode: !!(body && body.classList.contains('media-mode')),
-        imgSrc: img ? img.getAttribute('src') : null,
-        naturalWidth: img ? img.naturalWidth : null,
-      };
     }, folder);
 
-    expect(out.mediaMode).toBe(true);
-    expect(out.imgSrc).toMatch(/^klaussy-qa:\/\//);
-    // naturalWidth > 0 means the privileged scheme actually served the bytes.
-    expect(out.naturalWidth).toBe(1);
+    const img = mainWindow.locator('.file-media-preview img');
+    await expect(mainWindow.locator('.file-viewer-body')).toHaveClass(/\bmedia-mode\b/);
+    await expect(img).toHaveAttribute('src', /^klaussy-qa:\/\//);
+    // naturalWidth > 0 means the privileged scheme actually served the bytes; polled because a slow load reads 0.
+    await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(1);
   } finally {
     fs.rmSync(folder, { recursive: true, force: true });
   }
