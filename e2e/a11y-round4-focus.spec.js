@@ -1,4 +1,4 @@
-/* global window,document */
+/* global window,document,navigator */
 const path = require('path');
 const { test, expect } = require('./fixtures');
 const { buildRepo, rm, openShellTask } = require('./helpers');
@@ -68,7 +68,8 @@ test.describe('focus and announcements, round 4', () => {
       btn.id = 'copy-probe';
       btn.textContent = 'Copy command';
       document.body.appendChild(btn);
-      window.AppUtils.copyText(btn, 'one', 600);
+      // Long enough that a slow runner still sees the flash before it ends.
+      window.AppUtils.copyText(btn, 'one', 5000);
     });
     const btn = mainWindow.locator('#copy-probe');
     await expect(btn).not.toHaveText('Copy command');
