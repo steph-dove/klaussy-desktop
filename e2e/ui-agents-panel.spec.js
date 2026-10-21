@@ -43,3 +43,31 @@ test('Cmd/Ctrl+Shift+A toggles the agents panel', async ({ mainWindow }) => {
   await mainWindow.keyboard.press('Meta+Shift+A');
   await expect(panel).toBeHidden();
 });
+
+test('Clear is disabled until an agent has finished', async ({ electronApp, mainWindow }) => {
+  const clear = mainWindow.locator('#btn-agents-clear');
+  const push = (list) => electronApp.evaluate(({ BrowserWindow }, l) => {
+    BrowserWindow.getAllWindows().forEach((w) => w.webContents.send('agents-changed', l));
+  }, list);
+  const agent = (status) => ({
+    id: 'a1', kind: 'review', title: 'Review PR', status, read: false,
+    startedAt: Date.now(), finishedAt: status === 'running' ? null : Date.now(),
+  });
+
+  await mainWindow.locator('#btn-agents').click();
+
+  await expect(clear).toBeDisabled();
+  await expect(clear).toHaveAttribute('title', 'Nothing to clear');
+
+  await push([agent('running')]);
+  await expect(mainWindow.locator('#agents-panel-list')).not.toBeEmpty();
+  await expect(clear).toBeDisabled();
+  await expect(clear).toHaveAttribute('title', 'Nothing to clear');
+
+  await push([agent('done')]);
+  await expect(clear).toBeEnabled();
+  await expect(clear).toHaveAttribute('title', 'Clear completed');
+
+  await push([]);
+  await expect(clear).toBeDisabled();
+});
