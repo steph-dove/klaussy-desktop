@@ -11,7 +11,7 @@ on most modern x86_64 Linux. The deb is Debian/Ubuntu-specific.
 ## Prereqs on the test machine
 
 - **Ubuntu 22.04 / 24.04** (or any glibc 2.31+ distro for the AppImage).
-- **Node 20 LTS** — install via NodeSource or `nvm`.
+- **Node 24+** — install via NodeSource or `nvm`.
 - **Git** (`apt install git`).
 - **build-essential + libnss3 + libsecret-1-dev** — needed for both
   electron-rebuild (node-pty native build) and the deb runtime deps.
