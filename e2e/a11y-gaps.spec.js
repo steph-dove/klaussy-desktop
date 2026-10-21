@@ -61,12 +61,17 @@ test.describe('remaining accessibility gaps', () => {
   test('terminal search reports its match count', async ({ mainWindow }) => {
     repo = buildRepo({ 'a.txt': 'a\n' }, 'gaps-search');
     const id = await openShellTask(mainWindow, repo);
-    await mainWindow.evaluate((taskId) => window.AppState.tasks.get(taskId).terminal.write('needle one\r\nneedle two\r\n'), id);
-    await mainWindow.evaluate((taskId) => window.SearchBar.open(taskId), id);
-    await mainWindow.locator('#search-input').fill('needle');
     const count = mainWindow.locator('#search-count');
     await expect(count).toHaveAttribute('role', 'status');
-    await expect(count).toHaveText(/^\d+ of 2$/);
+    // The shell's startup output can overwrite lines written before its prompt, so retry with a fresh word each time.
+    let attempt = 0;
+    await expect(async () => {
+      const word = `needle${++attempt}x`;
+      await mainWindow.evaluate(({ taskId, w }) => window.AppState.tasks.get(taskId).terminal.write(`${w} one\r\n${w} two\r\n`), { taskId: id, w: word });
+      await mainWindow.evaluate((taskId) => window.SearchBar.open(taskId), id);
+      await mainWindow.locator('#search-input').fill(word);
+      await expect(count).toHaveText(/^\d+ of 2$/, { timeout: 2000 });
+    }).toPass({ timeout: 20000 });
     await mainWindow.keyboard.press('Escape');
   });
 
