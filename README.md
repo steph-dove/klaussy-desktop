@@ -55,6 +55,12 @@ Prebuilt, signed, and notarized binaries are available for macOS, Windows, and L
 
 ---
 
+## ⌨️ Usage
+
+See **[Keyboard Shortcuts](./docs/keyboard-shortcuts.md)** for the full list by area, with macOS and Windows/Linux keys. In the app, press **F1** for a quick reference.
+
+---
+
 ## 📸 In Action
 
 **Multi-agent, multi-repo workspace** — run agents side by side, each in its own worktree, with a live file tree and editor.
