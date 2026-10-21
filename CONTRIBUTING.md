@@ -21,7 +21,7 @@ Run the checks the CI runs:
 
 ```bash
 npm run lint     # eslint over main/, renderer/, preload.js, main.js
-npm test         # unit tests (node --test test/util/*.test.js)
+npm test         # unit tests (node --require ./test/setup.js --test test/util/*.test.js)
 npm run test:e2e # Playwright e2e (optional; launches the app)
 ```
 
