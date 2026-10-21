@@ -64,6 +64,27 @@ test('Manage Sessions modal opens and closes', async ({ mainWindow }) => {
   await expect(overlay).toBeHidden();
 });
 
+test('Manage Sessions modal retries after a failed load', async ({ mainWindow }) => {
+  // window.klaus is frozen, so fail the first load by wrapping the App-level loader.
+  await mainWindow.evaluate(() => {
+    const orig = App.getDiscoveredWorktrees;
+    let failed = false;
+    App.getDiscoveredWorktrees = function () {
+      if (!failed) { failed = true; return Promise.reject(new Error('boom')); }
+      return orig.apply(this, arguments);
+    };
+  });
+  await mainWindow.locator('#btn-manage-sessions').click();
+  const list = mainWindow.locator('#sessions-modal-list');
+  await expect(list).toContainText('Could not load sessions');
+  const retry = list.getByRole('button', { name: 'Try again' });
+  await expect(retry).toBeFocused();
+  await retry.click();
+  await expect(list).not.toContainText('Could not load sessions');
+  await expect(retry).toHaveCount(0);
+  await expect(list).not.toContainText('Loading');
+});
+
 test('Sidebar collapse toggle flips state', async ({ mainWindow }) => {
   // toggleSidebar() flips #sidebar.collapsed and swaps the label Hide<->Show.
   const sidebar = mainWindow.locator('#sidebar');

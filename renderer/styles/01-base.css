@@ -1130,6 +1130,18 @@ body.pr-review-popout #voice-float:not([hidden]) {
   opacity: 0.5;
   cursor: default;
 }
+.sessions-modal-retry {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.sessions-modal-retry:hover {
+  border-color: var(--text-muted);
+}
 .sessions-modal-empty {
   padding: 16px;
   text-align: center;
