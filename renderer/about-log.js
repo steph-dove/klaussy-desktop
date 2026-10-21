@@ -1253,8 +1253,11 @@ window.Dialogs = (function () {
       var glabAddBtn = body.querySelector('#glab-add-btn');
       if (glabAddBtn) {
         glabAddBtn.addEventListener('click', async function () {
-          try { await navigator.clipboard.writeText('glab auth login'); } catch (_) {}
-          stickyInfo("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this dialog.");
+          if (await window.CopyCommand.copyCommand('glab auth login')) {
+            stickyInfo("Copied 'glab auth login' to clipboard. Run it in your terminal, then re-open this dialog.");
+          } else {
+            stickyInfo("Couldn't copy. Run `glab auth login` in your terminal, then re-open this dialog.");
+          }
         });
       }
 
@@ -1304,8 +1307,12 @@ window.Dialogs = (function () {
           var hostname = btn.dataset.hostname;
           var action = btn.dataset.action;
           if (action === 'glab-reauth') {
-            try { await navigator.clipboard.writeText('glab auth login --hostname ' + hostname); } catch (_) {}
-            stickyInfo("Copied 'glab auth login --hostname " + hostname + "' to clipboard. Run it in your terminal.");
+            var reauthCmd = 'glab auth login --hostname ' + hostname;
+            if (await window.CopyCommand.copyCommand(reauthCmd)) {
+              stickyInfo("Copied '" + reauthCmd + "' to clipboard. Run it in your terminal.");
+            } else {
+              stickyInfo("Couldn't copy. Run `" + reauthCmd + '` in your terminal.');
+            }
             return;
           }
           btn.setAttribute('aria-disabled', 'true');
@@ -1715,9 +1722,12 @@ window.Dialogs = (function () {
             stickyInfo('Terminal opened — finish signing in there, then Recheck.');
           });
         });
-        box.querySelector('.mcp-auth-copy').addEventListener('click', function () {
-          if (navigator.clipboard) navigator.clipboard.writeText(cmd);
-          if (window.toast) window.toast.success('Copied');
+        box.querySelector('.mcp-auth-copy').addEventListener('click', async function () {
+          if (await window.CopyCommand.copyCommand(cmd)) {
+            if (window.toast) window.toast.success('Copied');
+          } else {
+            stickyInfo("Couldn't copy. Run `" + cmd + '` in your terminal.');
+          }
         });
         box.querySelector('.mcp-auth-recheck').addEventListener('click', function () {
           A11y.announce('Checking ' + name + '…');
