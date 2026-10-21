@@ -852,6 +852,13 @@ body.pr-review-popout #voice-float:not([hidden]) {
   color: var(--text);
 }
 
+#agents-panel-header button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  background: transparent;
+  color: var(--text-muted);
+}
+
 #btn-agents-close {
   font-size: 18px !important;
   line-height: 1;
