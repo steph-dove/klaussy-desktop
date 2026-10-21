@@ -144,6 +144,111 @@ test('arrowing with the mouse resting on the list keeps the selection where the 
   }
 });
 
+async function pointAt(mainWindow, wt) {
+  await mainWindow.evaluate((p) => {
+    window.AppState.activeTaskId = 999;
+    window.AppState.tasks.set(999, { id: 999, worktreePath: p });
+    window.QuickOpen.invalidate();
+  }, wt);
+}
+
+async function unpoint(mainWindow) {
+  await mainWindow.evaluate(() => {
+    window.AppState.activeTaskId = null;
+    window.AppState.tasks.delete(999);
+    window.QuickOpen.invalidate();
+  });
+}
+
+test('a query that matches nothing says so, and Enter does nothing', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  const repo = buildRepo();
+  try {
+    await pointAt(mainWindow, repo);
+    await mainWindow.evaluate(() => window.QuickOpen.show());
+
+    const overlay = mainWindow.locator('.quick-open-overlay');
+    const input = overlay.locator('.palette-input');
+    const items = overlay.locator('.quick-open-item');
+    const empty = overlay.locator('.palette-empty');
+
+    await expect(items).toHaveCount(4);
+    await expect(empty).toHaveCount(0);
+
+    await input.fill('  Zzz<b>  ');
+    await expect(items).toHaveCount(0);
+    await expect(empty).toHaveCount(1);
+    await expect(empty).toHaveText('No files match "Zzz<b>"');
+
+    await input.press('Enter');
+    await expect(overlay).toBeVisible();
+    await expect(empty).toHaveText('No files match "Zzz<b>"');
+
+    await input.fill('');
+    await expect(items).toHaveCount(4);
+    await expect(empty).toHaveCount(0);
+  } finally {
+    await unpoint(mainWindow);
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('a worktree with no files says so', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-qo-empty-'));
+  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, stdio: 'pipe' });
+  try {
+    await pointAt(mainWindow, repo);
+    await mainWindow.evaluate(() => window.QuickOpen.show());
+
+    const overlay = mainWindow.locator('.quick-open-overlay');
+    await expect(overlay.locator('.palette-empty')).toHaveText('No files in this worktree');
+    await overlay.locator('.palette-input').fill('readme');
+    await expect(overlay.locator('.palette-empty')).toHaveText('No files in this worktree');
+    await expect(overlay.locator('.quick-open-item')).toHaveCount(0);
+  } finally {
+    await unpoint(mainWindow);
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('the palette opens straight away and says it is loading until the file list arrives', async ({ electronApp, mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  // Hold the list-files reply until the test releases it. The app is
+  // launched per test, so the real handler needs no restoring.
+  await electronApp.evaluate(({ ipcMain }) => {
+    const held = new Promise((resolve) => { globalThis.__releaseListFiles = resolve; });
+    ipcMain.removeHandler('list-files');
+    ipcMain.handle('list-files', async () => {
+      await held;
+      return { files: ['README.md', 'src/auth.js'] };
+    });
+  });
+
+  try {
+    await pointAt(mainWindow, '/tmp/klaussy-e2e-qo-loading');
+    await mainWindow.evaluate(() => { window.QuickOpen.show(); });
+
+    const overlay = mainWindow.locator('.quick-open-overlay');
+    const input = overlay.locator('.palette-input');
+    await expect(overlay.locator('.palette-empty')).toHaveText('Loading files…');
+    await expect(input).toBeFocused();
+    await input.fill('aut');
+    await input.press('Enter');
+    await expect(overlay).toBeVisible();
+
+    await electronApp.evaluate(() => globalThis.__releaseListFiles());
+    await expect(overlay.locator('.quick-open-item')).toHaveCount(1);
+    await expect(overlay.locator('.quick-open-basename')).toHaveText('auth.js');
+    await expect(overlay.locator('.palette-empty')).toHaveCount(0);
+  } finally {
+    await unpoint(mainWindow);
+  }
+});
+
 test('a file created after the first open shows up on the next open', async ({ mainWindow }) => {
   await mainWindow.waitForLoadState('networkidle');
 
