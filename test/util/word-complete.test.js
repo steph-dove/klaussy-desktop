@@ -33,6 +33,9 @@ test('matching is case-sensitive', () => {
 test('a word equal to or no longer than the prefix is never offered', () => {
   const m = model(['foo fo f', 'foo']);
   assert.equal(findBestMatch(m, 'foo', at(2)), null);
+  // A longer word sharing the prefix is still offered next to the exact match.
+  const m2 = model(['foo foo foo foobar', 'foo']);
+  assert.equal(findBestMatch(m2, 'foo', at(2)), 'foobar');
 });
 
 test('no match returns null', () => {
