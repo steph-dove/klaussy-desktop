@@ -8,7 +8,7 @@
 // suggestions — LSP dropdown for semantic matches; this for "that word
 // I just typed three lines ago."
 
-window.WordComplete = (function () {
+(function (root) {
   var registered = false;
 
   // Ignore completions for very short prefixes (too noisy) or when the
@@ -99,5 +99,12 @@ window.WordComplete = (function () {
   // it being lazy. Instead, file-browser.js calls WordComplete.register(monaco)
   // right after it creates the first Monaco editor.
 
-  return { register: register };
-})();
+  var api = {
+    register: register,
+    findBestMatch: findBestMatch,
+    prefixMatches: prefixMatches,
+    SCAN_RADIUS: SCAN_RADIUS,
+  };
+  if (root) root.WordComplete = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : null);
