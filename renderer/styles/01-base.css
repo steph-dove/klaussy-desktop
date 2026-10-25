@@ -2246,7 +2246,9 @@ body.task-branchless #ahead-behind {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
-.dashboard-card:hover {
+.dashboard-card:hover,
+.dashboard-card:focus-visible,
+.dashboard-card:has(.dashboard-card-action:focus-visible) {
   transform: translateY(-3px);
   border-color: var(--accent);
   background: color-mix(in srgb, var(--surface) 80%, transparent);
@@ -2271,7 +2273,9 @@ body.task-branchless #ahead-behind {
   transition: border-color 0.3s, color 0.3s, background-color 0.3s;
 }
 
-.dashboard-card:hover .card-icon {
+.dashboard-card:hover .card-icon,
+.dashboard-card:focus-visible .card-icon,
+.dashboard-card:has(.dashboard-card-action:focus-visible) .card-icon {
   background: var(--accent-dim);
   border-color: var(--accent);
   color: var(--text);
@@ -2309,6 +2313,18 @@ body.task-branchless #ahead-behind {
 .dashboard-card:has(.dashboard-card-action:focus-visible) .card-arrow {
   transform: translateX(2px);
   color: var(--accent-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-card:hover,
+  .dashboard-card:focus-visible,
+  .dashboard-card:has(.dashboard-card-action:focus-visible),
+  .dashboard-card:active,
+  .dashboard-card:hover .card-arrow,
+  .dashboard-card:focus-visible .card-arrow,
+  .dashboard-card:has(.dashboard-card-action:focus-visible) .card-arrow {
+    transform: none;
+  }
 }
 
 @media (max-width: 580px) {
