@@ -8,7 +8,7 @@
 const { spawn } = require('child_process');
 const { ipcMain } = require('electron');
 const { execFileP, ghExec } = require('../util/exec');
-const { isNoCommitsError, gitErrorReason } = require('../util/git-log-error');
+const { gitErrorReason } = require('../util/git-log-error');
 
 // ---- Phase 1: Git Status & Diff ----
 
@@ -407,18 +407,26 @@ ipcMain.handle('git-stash-list', async (_event, { worktreePath }) => {
 });
 
 // D4: Commit history
-function gitMessagesEnv() {
-  const env = { ...process.env, LC_MESSAGES: 'C', LANGUAGE: '' };
-  delete env.LC_ALL;
-  return env;
+// An unborn branch has a symbolic HEAD that doesn't resolve to a commit yet.
+// Probing it avoids matching git's translated error text.
+async function isUnbornBranch(cwd) {
+  try {
+    await execFileP('git', ['symbolic-ref', '-q', 'HEAD'], { cwd });
+  } catch {
+    return false;
+  }
+  try {
+    await execFileP('git', ['rev-parse', '-q', '--verify', 'HEAD'], { cwd });
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
   try {
     const { stdout } = await execFileP('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '--max-count=' + (Math.max(1, parseInt(count, 10)) || 50)], {
       cwd: worktreePath,
-      // English messages only: the unborn-branch check matches git's text.
-      env: gitMessagesEnv(),
     });
     const commits = stdout.split('\n').filter(Boolean).map(function (line) {
       const p = line.split('\t');
@@ -426,7 +434,7 @@ ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
     });
     return { commits };
   } catch (err) {
-    if (isNoCommitsError(err)) return { commits: [] };
+    if (await isUnbornBranch(worktreePath)) return { commits: [] };
     return { commits: [], error: gitErrorReason(err) };
   }
 });

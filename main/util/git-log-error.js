@@ -1,11 +1,5 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
-// Classifies a failed `git log` so the History tab can tell an unborn branch
-// (no commits yet) from a real failure.
-
-function isNoCommitsError(err) {
-  const text = String((err && (err.stderr || err.message)) || '');
-  return /does not have any commits yet/i.test(text);
-}
+// Turns a failed `git log` into a short reason for the History tab.
 
 // First useful line of git's stderr, without the "Command failed: ..." wrapper.
 function gitErrorReason(err) {
@@ -16,4 +10,4 @@ function gitErrorReason(err) {
   return String((err && err.message) || 'unknown error').split('\n')[0];
 }
 
-module.exports = { isNoCommitsError, gitErrorReason };
+module.exports = { gitErrorReason };

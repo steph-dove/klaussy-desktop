@@ -2,8 +2,6 @@
 // commits yet", which the main process turns into an empty list, so the pane
 // shows "No commits yet" instead of git's raw error.
 
-const fs = require('fs');
-const path = require('path');
 const { execFileSync } = require('child_process');
 const { test, expect } = require('./fixtures');
 const { tmpDir, rm } = require('./helpers');
@@ -31,6 +29,10 @@ test('History tab shows an empty state in a repo with no commits', async ({ main
     await expect(list.locator('.history-item')).toHaveCount(0);
     if (process.env.QA_SHOT) await mainWindow.screenshot({ path: process.env.QA_SHOT });
   } finally {
+    await mainWindow.evaluate(() => {
+      window.AppState.activeTaskId = null;
+      window.AppState.tasks.delete('history-empty');
+    }).catch(() => {});
     rm(repo);
   }
 });
