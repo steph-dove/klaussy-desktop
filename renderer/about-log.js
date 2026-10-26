@@ -677,7 +677,10 @@ window.Dialogs = (function () {
   function clearSkillSelection(pane) {
     var dialog = pane.closest('.skills-dialog');
     if (!dialog) return;
-    dialog.querySelectorAll('.skills-row.selected').forEach(function (r) { r.classList.remove('selected'); });
+    dialog.querySelectorAll('.skills-row.selected, .skills-row[aria-current]').forEach(function (r) {
+      r.classList.remove('selected');
+      r.removeAttribute('aria-current');
+    });
   }
 
   // Inline create-form rendered into the preview pane. Lets the user pick
@@ -721,7 +724,7 @@ window.Dialogs = (function () {
         + '</div>';
       clearSkillSelection(pane);
 
-      var typeBtns =pane.querySelectorAll('.skills-create-toggle button');
+      var typeBtns = pane.querySelectorAll('.skills-create-toggle button');
       A11y.radios(pane.querySelector('.skills-create-toggle'), { itemSelector: 'button', label: 'Type' });
       var nameInput = pane.querySelector('.skills-create-name');
       var scopeSel = pane.querySelector('.skills-create-scope');
