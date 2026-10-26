@@ -1559,8 +1559,7 @@
   background: var(--surface-hover);
 }
 
-.theme-option.active,
-.theme-option.active:hover {
+.theme-option.active {
   border-color: var(--accent);
   background: var(--accent-dim);
 }
