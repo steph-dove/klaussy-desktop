@@ -11,8 +11,8 @@ test('History tab shows an empty state in a repo with no commits', async ({ main
   await expect(mainWindow.locator('#btn-new-task')).toBeVisible();
 
   const repo = tmpDir('history-empty');
-  execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, stdio: 'pipe' });
   try {
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: repo, stdio: 'pipe' });
     // The History loader reads the active task's worktree from AppState.
     await mainWindow.evaluate((wt) => {
       window.AppState.activeTaskId = 'history-empty';
