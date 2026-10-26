@@ -3665,6 +3665,7 @@ button.pr-check-toggle {
   outline: none;
 }
 .skills-search:focus { border-color: var(--accent); }
+.skills-search:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 .skills-new {
   background: var(--accent);
   color: var(--accent-contrast);
