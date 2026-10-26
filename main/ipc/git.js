@@ -407,11 +407,18 @@ ipcMain.handle('git-stash-list', async (_event, { worktreePath }) => {
 });
 
 // D4: Commit history
+function gitMessagesEnv() {
+  const env = { ...process.env, LC_MESSAGES: 'C', LANGUAGE: '' };
+  delete env.LC_ALL;
+  return env;
+}
+
 ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
   try {
-    const { stdout } = await execFileP('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '-' + (count || 50)], {
+    const { stdout } = await execFileP('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '--max-count=' + (Math.max(1, parseInt(count, 10)) || 50)], {
       cwd: worktreePath,
-      env: { ...process.env, LC_ALL: 'C' },
+      // English messages only: the unborn-branch check matches git's text.
+      env: gitMessagesEnv(),
     });
     const commits = stdout.split('\n').filter(Boolean).map(function (line) {
       const p = line.split('\t');

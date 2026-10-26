@@ -23,3 +23,7 @@ test('gitErrorReason: uses the first stderr line without the fatal prefix', () =
 test('gitErrorReason: falls back to the first message line', () => {
   assert.equal(gitErrorReason(new Error('boom\nstack')), 'boom');
 });
+
+test('gitErrorReason: skips leading warnings to find the fatal line', () => {
+  assert.equal(gitErrorReason({ stderr: 'warning: unreadable config\nfatal: not a git repository' }), 'not a git repository');
+});

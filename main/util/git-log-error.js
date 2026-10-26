@@ -10,8 +10,9 @@ function isNoCommitsError(err) {
 // First useful line of git's stderr, without the "Command failed: ..." wrapper.
 function gitErrorReason(err) {
   const stderr = String((err && err.stderr) || '').trim();
-  const line = stderr.split('\n').map(function (l) { return l.trim(); }).filter(Boolean)[0];
-  if (line) return line.replace(/^fatal:\s*/i, '');
+  const lines = stderr.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+  const line = lines.find(function (l) { return /^(fatal|error):/i.test(l); }) || lines[0];
+  if (line) return line.replace(/^(fatal|error):\s*/i, '');
   return String((err && err.message) || 'unknown error').split('\n')[0];
 }
 
