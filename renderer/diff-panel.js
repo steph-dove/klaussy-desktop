@@ -14,6 +14,7 @@ window.DiffPanel = window.DiffPanel || {};
   DP.selectedStaged = false;
 
   // A partly staged file is listed twice; prefer the row in the section the user clicked.
+  // Also rewrites DP.selectedStaged to the section of the row it returns.
   DP.findSelectedEntry = function (files, keyOf) {
     var matches = files.filter(function (f) { return keyOf(f) === DP.selectedFile; });
     var still = matches.find(function (f) { return !!f.staged === DP.selectedStaged; }) || matches[0];
@@ -492,6 +493,7 @@ window.DiffPanel = window.DiffPanel || {};
     DP.currentWorktreePath = worktreePath;
     DP.panelEl.classList.add('visible');
     DP.selectedFile = null;
+    DP.selectedStaged = false;
     DP.branchList = [];
     DP.remoteList = [];
     DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
@@ -536,6 +538,7 @@ window.DiffPanel = window.DiffPanel || {};
     DP.viewScope = 'repo'; // Reset to repo scope!
     if (changed) {
       DP.selectedFile = null;
+      DP.selectedStaged = false;
       DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
       // Detach from any commit-message agent for the previous worktree.
       DP.resetCommitMsgState();
@@ -564,6 +567,7 @@ window.DiffPanel = window.DiffPanel || {};
     DP.currentWorktreePath = null;
     DP.viewScope = 'session'; // Default to session scope!
     DP.selectedFile = null;
+    DP.selectedStaged = false;
     DP.diffMode = 'working';
     DP.baseBranch = null;
     DP.branchList = [];
@@ -641,6 +645,7 @@ window.DiffPanel = window.DiffPanel || {};
         await DP.showFileDiff(still.file, still.staged, still.worktreePath);
       } else {
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
       }
     }
@@ -725,6 +730,7 @@ window.DiffPanel = window.DiffPanel || {};
         await DP.showFileDiff(DP.selectedFile, still.staged, path);
       } else {
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
       }
     }
@@ -749,6 +755,7 @@ window.DiffPanel = window.DiffPanel || {};
         await DP.showFileDiff(DP.selectedFile, false);
       } else {
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">File no longer has changes</div>';
       }
     }
@@ -818,6 +825,7 @@ window.DiffPanel = window.DiffPanel || {};
         if (DP.diffMode === 'working') return;
         DP.diffMode = 'working';
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
         DP.commitAreaEl.style.display = 'none';
         document.getElementById('diff-footer').style.display = '';
@@ -830,6 +838,7 @@ window.DiffPanel = window.DiffPanel || {};
         if (DP.diffMode === 'branch') return;
         DP.diffMode = 'branch';
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
         document.getElementById('diff-footer').style.display = '';
 
@@ -859,6 +868,7 @@ window.DiffPanel = window.DiffPanel || {};
       selectEl.addEventListener('change', function () {
         DP.baseBranch = selectEl.value;
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.diffViewEl.innerHTML = '<div class="diff-empty">Select a file to view diff</div>';
         DP.refresh();
       });
@@ -869,6 +879,7 @@ window.DiffPanel = window.DiffPanel || {};
         if (DP.viewScope === 'repo') return;
         DP.viewScope = 'repo';
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.refresh();
       });
     }
@@ -878,6 +889,7 @@ window.DiffPanel = window.DiffPanel || {};
         if (DP.viewScope === 'session') return;
         DP.viewScope = 'session';
         DP.selectedFile = null;
+        DP.selectedStaged = false;
         DP.refresh();
       });
     }
