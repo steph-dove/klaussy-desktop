@@ -1,7 +1,9 @@
+/* global window */
 // Opening a file via window.openFileViewer (command palette, viewer back/forward)
 // must leave only the Files panel showing, whichever diff-panel tab was active.
 
 const { test, expect } = require('./fixtures');
+const path = require('path');
 const { buildRepo, rm } = require('./helpers');
 
 test.beforeEach(async ({ mainWindow }) => {
@@ -23,19 +25,26 @@ test('openFileViewer leaves only the Files panel visible from any tab', async ({
     }, { wt: repo, id: taskId });
     await mainWindow.evaluate((wt) => window.DiffPanel.show(wt), repo);
 
-    for (const tab of ['history', 'plan', 'devloop', 'notes']) {
+    let exercised = 0;
+    for (const tab of ['changes', 'pr', 'search', 'history', 'plan', 'devloop', 'notes']) {
       const tabBtn = mainWindow.locator(`#diff-tabs .diff-tab[data-tab="${tab}"]`);
       if (!(await tabBtn.isVisible())) continue;
+      exercised++;
       await tabBtn.click();
-      await mainWindow.evaluate((p) => window.openFileViewer(p, 'a.txt'), repo + '/a.txt');
+      await mainWindow.evaluate((p) => window.openFileViewer(p, 'a.txt'), path.join(repo, 'a.txt'));
 
       await expect(mainWindow.locator('#files-tab-content')).toBeVisible();
       for (const p of PANELS.filter((x) => x !== 'files')) {
         const loc = mainWindow.locator(`#${p}-tab-content`);
-        if (await loc.count()) await expect(loc).toBeHidden();
+        await expect(loc).toBeHidden();
       }
     }
+    expect(exercised).toBeGreaterThanOrEqual(4);
   } finally {
+    await mainWindow.evaluate((id) => {
+      window.AppState.tasks.delete(id);
+      window.AppState.activeTaskId = null;
+    }, taskId);
     rm(repo);
   }
 });
