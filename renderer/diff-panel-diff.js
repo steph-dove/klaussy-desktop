@@ -763,12 +763,16 @@
   DP.showFile = async function(file) {
     if (!file || !DP.currentWorktreePath) return;
     DP.selectedFile = file;
-    DP.selectedStaged = false;
+    // Programmatic opens target the unstaged side; a staged-only file has no such row.
+    var rows = (DP.currentFiles || []).filter(function (f) { return f.file === file; });
+    var hasUnstaged = rows.some(function (f) { return !f.staged; });
+    var staged = !hasUnstaged && rows.length > 0;
+    DP.selectedStaged = staged;
     // Highlight the file in the list
     DP.fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
-      el.classList.toggle('selected', el.dataset.file === file && el.dataset.staged !== 'true');
+      el.classList.toggle('selected', el.dataset.file === file && (el.dataset.staged === 'true') === staged);
     });
-    await DP.showFileDiff(file, false);
+    await DP.showFileDiff(file, staged);
   };
 
   DP.getSelectedFile = function() {

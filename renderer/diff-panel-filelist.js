@@ -156,7 +156,7 @@
     var statusClass = DP.getStatusClass(f.status);
     var statusLabel = DP.getStatusLabel(f.status);
     var uniqueKey = f.uniqueKey || f.file;
-    var sel = uniqueKey === DP.selectedFile && !!isStaged === !!DP.selectedStaged ? ' selected' : '';
+    var sel = (uniqueKey === DP.selectedFile && !!isStaged === !!DP.selectedStaged) ? ' selected' : '';
 
     var actions = '';
     var fileAttr = DP.escAttr(f.file);
