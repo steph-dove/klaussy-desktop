@@ -28,24 +28,29 @@ test('openFileViewer leaves only the Files panel visible from any tab', async ({
     const exercised = [];
     for (const tab of ['changes', 'pr', 'search', 'history', 'plan', 'devloop', 'notes']) {
       const tabBtn = mainWindow.locator(`#diff-tabs .diff-tab[data-tab="${tab}"]`);
-      if (!(await tabBtn.isVisible())) continue;
+      // Dev Loop is hidden in some builds; every other tab must be present.
+      if (tab === 'devloop' && !(await tabBtn.isVisible())) continue;
       exercised.push(tab);
       await tabBtn.click();
       await expect(mainWindow.locator(`#${tab}-tab-content`)).toBeVisible();
       await mainWindow.evaluate((p) => window.openFileViewer(p, 'a.txt'), path.join(repo, 'a.txt'));
 
       await expect(mainWindow.locator('#files-tab-content')).toBeVisible();
+      await expect(mainWindow.locator('#diff-tabs .diff-tab[data-tab="files"]')).toHaveClass(/active/);
+      await expect(tabBtn).not.toHaveClass(/active/);
+      await expect(mainWindow.locator('#file-viewer-content')).toBeVisible();
       for (const p of PANELS.filter((x) => x !== 'files')) {
         const loc = mainWindow.locator(`#${p}-tab-content`);
         await expect(loc).toBeHidden();
       }
     }
-    // Dev Loop is hidden in some builds; the tabs this fix targets must run.
-    expect(exercised).toEqual(expect.arrayContaining(['history', 'plan', 'notes']));
+    expect(exercised).toEqual(expect.arrayContaining(['changes', 'pr', 'search', 'history', 'plan', 'notes']));
   } finally {
     await mainWindow.evaluate((id) => {
       window.AppState.tasks.delete(id);
       window.AppState.activeTaskId = null;
+      const closeBtn = document.getElementById('btn-diff');
+      if (document.getElementById('diff-panel').classList.contains('visible') && closeBtn) closeBtn.click();
     }, taskId);
     rm(repo);
   }
