@@ -8,6 +8,7 @@
 const { spawn } = require('child_process');
 const { ipcMain } = require('electron');
 const { execFileP, ghExec } = require('../util/exec');
+const { isNoCommitsError, gitErrorReason } = require('../util/git-log-error');
 
 // ---- Phase 1: Git Status & Diff ----
 
@@ -410,6 +411,7 @@ ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
   try {
     const { stdout } = await execFileP('git', ['log', '--format=%H\t%h\t%an\t%ar\t%s', '-' + (count || 50)], {
       cwd: worktreePath,
+      env: { ...process.env, LC_ALL: 'C' },
     });
     const commits = stdout.split('\n').filter(Boolean).map(function (line) {
       const p = line.split('\t');
@@ -417,7 +419,8 @@ ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
     });
     return { commits };
   } catch (err) {
-    return { commits: [], error: err.message };
+    if (isNoCommitsError(err)) return { commits: [] };
+    return { commits: [], error: gitErrorReason(err) };
   }
 });
 

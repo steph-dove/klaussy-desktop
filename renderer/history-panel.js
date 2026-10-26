@@ -35,7 +35,11 @@ window.HistoryPanel = (function () {
     historyDiffView.innerHTML = '';
     var result = await window.klaus.git.log(wt, 50);
     if (result.error) {
-      historyList.innerHTML = '<div class="file-tree-empty">Error: ' + escHtml(result.error) + '</div>';
+      historyList.innerHTML = '<div class="file-tree-empty">Could not load history: ' + escHtml(result.error) + '</div>';
+      return;
+    }
+    if (!result.commits.length) {
+      historyList.innerHTML = '<div class="file-tree-empty">No commits yet</div>';
       return;
     }
     historyList.innerHTML = '';
