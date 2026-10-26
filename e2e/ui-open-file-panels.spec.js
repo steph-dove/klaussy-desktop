@@ -25,12 +25,13 @@ test('openFileViewer leaves only the Files panel visible from any tab', async ({
     }, { wt: repo, id: taskId });
     await mainWindow.evaluate((wt) => window.DiffPanel.show(wt), repo);
 
-    let exercised = 0;
+    const exercised = [];
     for (const tab of ['changes', 'pr', 'search', 'history', 'plan', 'devloop', 'notes']) {
       const tabBtn = mainWindow.locator(`#diff-tabs .diff-tab[data-tab="${tab}"]`);
       if (!(await tabBtn.isVisible())) continue;
-      exercised++;
+      exercised.push(tab);
       await tabBtn.click();
+      await expect(mainWindow.locator(`#${tab}-tab-content`)).toBeVisible();
       await mainWindow.evaluate((p) => window.openFileViewer(p, 'a.txt'), path.join(repo, 'a.txt'));
 
       await expect(mainWindow.locator('#files-tab-content')).toBeVisible();
@@ -39,7 +40,8 @@ test('openFileViewer leaves only the Files panel visible from any tab', async ({
         await expect(loc).toBeHidden();
       }
     }
-    expect(exercised).toBeGreaterThanOrEqual(4);
+    // Dev Loop is hidden in some builds; the tabs this fix targets must run.
+    expect(exercised).toEqual(expect.arrayContaining(['history', 'plan', 'notes']));
   } finally {
     await mainWindow.evaluate((id) => {
       window.AppState.tasks.delete(id);
