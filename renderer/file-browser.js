@@ -1288,8 +1288,9 @@ window.FileBrowser = (function () {
 
     document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
     document.querySelector('#diff-tabs .diff-tab[data-tab="files"]').classList.add('active');
-    ['changes-tab-content', 'pr-tab-content', 'search-tab-content'].forEach(function (id) {
-      document.getElementById(id).style.display = 'none';
+    ['changes-tab-content', 'pr-tab-content', 'search-tab-content', 'history-tab-content', 'plan-tab-content', 'devloop-tab-content', 'notes-tab-content'].forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.display = 'none';
     });
     document.getElementById('files-tab-content').style.display = '';
 
