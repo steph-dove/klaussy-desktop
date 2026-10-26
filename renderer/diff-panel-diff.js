@@ -763,9 +763,10 @@
   DP.showFile = async function(file) {
     if (!file || !DP.currentWorktreePath) return;
     DP.selectedFile = file;
+    DP.selectedStaged = false;
     // Highlight the file in the list
     DP.fileListEl.querySelectorAll('.diff-file').forEach(function (el) {
-      el.classList.toggle('selected', el.dataset.file === file);
+      el.classList.toggle('selected', el.dataset.file === file && el.dataset.staged !== 'true');
     });
     await DP.showFileDiff(file, false);
   };

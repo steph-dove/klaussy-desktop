@@ -11,6 +11,15 @@ window.DiffPanel = window.DiffPanel || {};
   DP.currentWorktreePath = null;
   DP.currentFiles = [];
   DP.selectedFile = null;
+  DP.selectedStaged = false;
+
+  // A partly staged file is listed twice; prefer the row in the section the user clicked.
+  DP.findSelectedEntry = function (files, keyOf) {
+    var matches = files.filter(function (f) { return keyOf(f) === DP.selectedFile; });
+    var still = matches.find(function (f) { return !!f.staged === DP.selectedStaged; }) || matches[0];
+    if (still) DP.selectedStaged = !!still.staged;
+    return still;
+  };
   DP.commentCallback = null;
   DP.refreshInterval = null;
   DP.watchedWorktreePath = null;
@@ -627,7 +636,7 @@ window.DiffPanel = window.DiffPanel || {};
     DP.renderFileList(mergedFiles, '');
 
     if (DP.selectedFile) {
-      const still = DP.currentFiles.find(function (f) { return f.uniqueKey === DP.selectedFile; });
+      const still = DP.findSelectedEntry(DP.currentFiles, function (f) { return f.uniqueKey; });
       if (still) {
         await DP.showFileDiff(still.file, still.staged, still.worktreePath);
       } else {
@@ -711,7 +720,7 @@ window.DiffPanel = window.DiffPanel || {};
     DP.renderFileList(result.files, result.branch);
 
     if (DP.selectedFile) {
-      const still = DP.currentFiles.find(function (f) { return f.file === DP.selectedFile; });
+      const still = DP.findSelectedEntry(DP.currentFiles, function (f) { return f.file; });
       if (still) {
         await DP.showFileDiff(DP.selectedFile, still.staged, path);
       } else {
