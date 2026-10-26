@@ -633,10 +633,10 @@ window.DiffPanel = window.DiffPanel || {};
     }
 
     DP.currentFiles = mergedFiles;
+    const still = DP.selectedFile ? DP.findSelectedEntry(mergedFiles, function (f) { return f.uniqueKey; }) : null;
     DP.renderFileList(mergedFiles, '');
 
     if (DP.selectedFile) {
-      const still = DP.findSelectedEntry(DP.currentFiles, function (f) { return f.uniqueKey; });
       if (still) {
         await DP.showFileDiff(still.file, still.staged, still.worktreePath);
       } else {
@@ -717,10 +717,10 @@ window.DiffPanel = window.DiffPanel || {};
     DP.statusCache.set(path, { files: result.files, branch: result.branch });
     DP.renderedStatusPath = path;
     DP.currentFiles = result.files;
+    const still = DP.selectedFile ? DP.findSelectedEntry(result.files, function (f) { return f.file; }) : null;
     DP.renderFileList(result.files, result.branch);
 
     if (DP.selectedFile) {
-      const still = DP.findSelectedEntry(DP.currentFiles, function (f) { return f.file; });
       if (still) {
         await DP.showFileDiff(DP.selectedFile, still.staged, path);
       } else {
@@ -911,6 +911,7 @@ window.DiffPanel = window.DiffPanel || {};
       var file = el.dataset.file;
       el.addEventListener('click', function () {
         DP.selectedFile = file;
+        DP.selectedStaged = false;
         DP.markSelectedFile(el);
         DP.showFileDiff(file, false);
       });
