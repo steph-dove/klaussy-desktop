@@ -1288,10 +1288,9 @@ window.FileBrowser = (function () {
 
     document.querySelectorAll('#diff-tabs .diff-tab').forEach(function (t) { t.classList.remove('active'); });
     document.querySelector('#diff-tabs .diff-tab[data-tab="files"]').classList.add('active');
-    ['changes-tab-content', 'pr-tab-content', 'search-tab-content'].forEach(function (id) {
-      document.getElementById(id).style.display = 'none';
+    document.querySelectorAll('#diff-panel [id$="-tab-content"]').forEach(function (el) {
+      el.style.display = el.id === 'files-tab-content' ? '' : 'none';
     });
-    document.getElementById('files-tab-content').style.display = '';
 
     if (!fileTreeData.length) loadFileTree();
 
