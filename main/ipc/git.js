@@ -15,6 +15,8 @@ const { execFileP, ghExec } = require('../util/exec');
 // name (unborn); symbolic-ref reads it. Status already proved this is a repo,
 // so a branch we can't name is blank rather than an error.
 async function resolveBranch(cwd) {
+  // rev-parse prints a literal "HEAD" on an unborn branch but exits non-zero,
+  // which execFileP turns into a rejection; that's what routes us to symbolic-ref.
   try {
     const { stdout } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
     return stdout.trim();
@@ -51,8 +53,11 @@ function parseStatus(status) {
 
 async function readGitStatus(cwd) {
   try {
-    const statusRes = await execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 });
-    const branch = await resolveBranch(cwd);
+    // resolveBranch never rejects, so a status failure is still what surfaces.
+    const [statusRes, branch] = await Promise.all([
+      execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 }),
+      resolveBranch(cwd),
+    ]);
     return { branch, files: parseStatus(statusRes.stdout) };
   } catch (err) {
     return { error: err.message, branch: '', files: [] };
@@ -341,8 +346,7 @@ async function collectWorktreeState(task) {
     const [statusOut, branchOut, ahead] = await Promise.all([
       execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 })
         .then(r => r.stdout).catch(() => ''),
-      execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd })
-        .then(r => r.stdout.trim()).catch(() => ''),
+      resolveBranch(cwd),
       (async () => {
         try {
           const up = (await execFileP('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd })).stdout.trim();
