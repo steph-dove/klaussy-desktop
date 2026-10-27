@@ -12,8 +12,8 @@ const { execFileP, ghExec } = require('../util/exec');
 // ---- Phase 1: Git Status & Diff ----
 
 // A repo with no commits has no HEAD to rev-parse, but the branch still has a
-// name (unborn); symbolic-ref reads it. Status already proved this is a repo,
-// so a branch we can't name is blank rather than an error.
+// name (unborn); symbolic-ref reads it. A branch we can't name comes back
+// blank rather than as an error, so callers must not treat '' as failure.
 async function resolveBranch(cwd) {
   // rev-parse prints a literal "HEAD" on an unborn branch but exits non-zero,
   // which execFileP turns into a rejection; that's what routes us to symbolic-ref.
@@ -172,7 +172,7 @@ ipcMain.handle('git-stage', async (_event, { worktreePath, files }) => {
 
 ipcMain.handle('git-unstage', async (_event, { worktreePath, files }) => {
   try {
-    await execFileP('git', ['reset', 'HEAD', '--'].concat(files), { cwd: worktreePath });
+    await execFileP('git', ['reset', '--'].concat(files), { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -230,12 +230,12 @@ ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
         // (user may want to keep the content; `discard` on a new file means
         // "take it back to untracked"). This avoids the prior data-loss case
         // where the staged content was wiped.
-        await execFileP('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath });
+        await execFileP('git', ['reset', '--', file], { cwd: worktreePath });
       } else {
         // Tracked with unstaged and/or staged changes: reset the index to HEAD
         // for this path, then checkout to restore working tree to HEAD.
         try {
-          await execFileP('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath });
+          await execFileP('git', ['reset', '--', file], { cwd: worktreePath });
         } catch {}
         await execFileP('git', ['checkout', '--', file], { cwd: worktreePath });
       }
