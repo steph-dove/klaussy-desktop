@@ -12,37 +12,60 @@ const { gitErrorReason } = require('../util/git-log-error');
 
 // ---- Phase 1: Git Status & Diff ----
 
-ipcMain.handle('git-status', async (_event, { worktreePath }) => {
+// A repo with no commits has no HEAD to rev-parse, but the branch still has a
+// name (unborn); symbolic-ref reads it. A branch we can't name comes back
+// blank rather than as an error, so callers must not treat '' as failure.
+async function resolveBranch(cwd) {
+  // rev-parse prints a literal "HEAD" on an unborn branch but exits non-zero,
+  // which execFileP turns into a rejection; that's what routes us to symbolic-ref.
   try {
-    const [statusRes, branchRes] = await Promise.all([
-      execFileP('git', ['status', '--porcelain'], { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 }),
-      execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath }),
-    ]);
-    const status = statusRes.stdout;
-    const branch = branchRes.stdout.trim();
-    const files = status.split('\n').filter(Boolean).map(line => {
-      const xy = line.substring(0, 2);
-      const file = line.substring(3);
-      // staged if index column (x) has a status letter
-      const staged = xy[0] !== ' ' && xy[0] !== '?';
-      return { status: xy, staged, file };
-    });
-    // Split files that are both staged and unstaged (e.g., "MM")
-    const expanded = [];
-    for (const f of files) {
-      if (f.status[0] !== ' ' && f.status[0] !== '?' && f.status[1] !== ' ' && f.status[1] !== '?') {
-        // Both staged and unstaged changes
-        expanded.push({ status: f.status[0] + ' ', staged: true, file: f.file });
-        expanded.push({ status: ' ' + f.status[1], staged: false, file: f.file });
-      } else {
-        expanded.push(f);
-      }
+    const { stdout } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
+    return stdout.trim();
+  } catch {
+    try {
+      const { stdout } = await execFileP('git', ['symbolic-ref', '--short', 'HEAD'], { cwd });
+      return stdout.trim();
+    } catch {
+      return '';
     }
-    return { branch, files: expanded };
+  }
+}
+
+function parseStatus(status) {
+  const files = status.split('\n').filter(Boolean).map(line => {
+    const xy = line.substring(0, 2);
+    const file = line.substring(3);
+    // staged if index column (x) has a status letter
+    const staged = xy[0] !== ' ' && xy[0] !== '?';
+    return { status: xy, staged, file };
+  });
+  // Split files that are both staged and unstaged (e.g., "MM")
+  const expanded = [];
+  for (const f of files) {
+    if (f.status[0] !== ' ' && f.status[0] !== '?' && f.status[1] !== ' ' && f.status[1] !== '?') {
+      expanded.push({ status: f.status[0] + ' ', staged: true, file: f.file });
+      expanded.push({ status: ' ' + f.status[1], staged: false, file: f.file });
+    } else {
+      expanded.push(f);
+    }
+  }
+  return expanded;
+}
+
+async function readGitStatus(cwd) {
+  try {
+    // resolveBranch never rejects, so a status failure is still what surfaces.
+    const [statusRes, branch] = await Promise.all([
+      execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 }),
+      resolveBranch(cwd),
+    ]);
+    return { branch, files: parseStatus(statusRes.stdout) };
   } catch (err) {
     return { error: err.message, branch: '', files: [] };
   }
-});
+}
+
+ipcMain.handle('git-status', (_event, { worktreePath }) => readGitStatus(worktreePath));
 
 ipcMain.handle('git-diff', async (_event, { worktreePath, file, staged }) => {
   try {
@@ -150,7 +173,7 @@ ipcMain.handle('git-stage', async (_event, { worktreePath, files }) => {
 
 ipcMain.handle('git-unstage', async (_event, { worktreePath, files }) => {
   try {
-    await execFileP('git', ['reset', 'HEAD', '--'].concat(files), { cwd: worktreePath });
+    await execFileP('git', ['reset', '--'].concat(files), { cwd: worktreePath });
     return { ok: true };
   } catch (err) {
     return { error: err.stderr ? err.stderr.toString() : err.message };
@@ -208,12 +231,12 @@ ipcMain.handle('git-discard', async (_event, { worktreePath, files }) => {
         // (user may want to keep the content; `discard` on a new file means
         // "take it back to untracked"). This avoids the prior data-loss case
         // where the staged content was wiped.
-        await execFileP('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath });
+        await execFileP('git', ['reset', '--', file], { cwd: worktreePath });
       } else {
         // Tracked with unstaged and/or staged changes: reset the index to HEAD
         // for this path, then checkout to restore working tree to HEAD.
         try {
-          await execFileP('git', ['reset', 'HEAD', '--', file], { cwd: worktreePath });
+          await execFileP('git', ['reset', '--', file], { cwd: worktreePath });
         } catch {}
         await execFileP('git', ['checkout', '--', file], { cwd: worktreePath });
       }
@@ -324,8 +347,7 @@ async function collectWorktreeState(task) {
     const [statusOut, branchOut, ahead] = await Promise.all([
       execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 })
         .then(r => r.stdout).catch(() => ''),
-      execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd })
-        .then(r => r.stdout.trim()).catch(() => ''),
+      resolveBranch(cwd),
       (async () => {
         try {
           const up = (await execFileP('git', ['rev-parse', '--abbrev-ref', '@{upstream}'], { cwd })).stdout.trim();
@@ -558,4 +580,4 @@ ipcMain.handle('git-tag-push', async (_event, { worktreePath, name }) => {
   }
 });
 
-module.exports = { collectWorktreeState };
+module.exports = { collectWorktreeState, readGitStatus };
