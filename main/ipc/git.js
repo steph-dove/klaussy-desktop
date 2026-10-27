@@ -11,37 +11,55 @@ const { execFileP, ghExec } = require('../util/exec');
 
 // ---- Phase 1: Git Status & Diff ----
 
-ipcMain.handle('git-status', async (_event, { worktreePath }) => {
+// A repo with no commits has no HEAD to rev-parse, but the branch still has a
+// name (unborn); symbolic-ref reads it. Status already proved this is a repo,
+// so a branch we can't name is blank rather than an error.
+async function resolveBranch(cwd) {
   try {
-    const [statusRes, branchRes] = await Promise.all([
-      execFileP('git', ['status', '--porcelain'], { cwd: worktreePath, maxBuffer: 10 * 1024 * 1024 }),
-      execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: worktreePath }),
-    ]);
-    const status = statusRes.stdout;
-    const branch = branchRes.stdout.trim();
-    const files = status.split('\n').filter(Boolean).map(line => {
-      const xy = line.substring(0, 2);
-      const file = line.substring(3);
-      // staged if index column (x) has a status letter
-      const staged = xy[0] !== ' ' && xy[0] !== '?';
-      return { status: xy, staged, file };
-    });
-    // Split files that are both staged and unstaged (e.g., "MM")
-    const expanded = [];
-    for (const f of files) {
-      if (f.status[0] !== ' ' && f.status[0] !== '?' && f.status[1] !== ' ' && f.status[1] !== '?') {
-        // Both staged and unstaged changes
-        expanded.push({ status: f.status[0] + ' ', staged: true, file: f.file });
-        expanded.push({ status: ' ' + f.status[1], staged: false, file: f.file });
-      } else {
-        expanded.push(f);
-      }
+    const { stdout } = await execFileP('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
+    return stdout.trim();
+  } catch {
+    try {
+      const { stdout } = await execFileP('git', ['symbolic-ref', '--short', 'HEAD'], { cwd });
+      return stdout.trim();
+    } catch {
+      return '';
     }
-    return { branch, files: expanded };
+  }
+}
+
+function parseStatus(status) {
+  const files = status.split('\n').filter(Boolean).map(line => {
+    const xy = line.substring(0, 2);
+    const file = line.substring(3);
+    // staged if index column (x) has a status letter
+    const staged = xy[0] !== ' ' && xy[0] !== '?';
+    return { status: xy, staged, file };
+  });
+  // Split files that are both staged and unstaged (e.g., "MM")
+  const expanded = [];
+  for (const f of files) {
+    if (f.status[0] !== ' ' && f.status[0] !== '?' && f.status[1] !== ' ' && f.status[1] !== '?') {
+      expanded.push({ status: f.status[0] + ' ', staged: true, file: f.file });
+      expanded.push({ status: ' ' + f.status[1], staged: false, file: f.file });
+    } else {
+      expanded.push(f);
+    }
+  }
+  return expanded;
+}
+
+async function readGitStatus(cwd) {
+  try {
+    const statusRes = await execFileP('git', ['status', '--porcelain'], { cwd, maxBuffer: 10 * 1024 * 1024 });
+    const branch = await resolveBranch(cwd);
+    return { branch, files: parseStatus(statusRes.stdout) };
   } catch (err) {
     return { error: err.message, branch: '', files: [] };
   }
-});
+}
+
+ipcMain.handle('git-status', (_event, { worktreePath }) => readGitStatus(worktreePath));
 
 ipcMain.handle('git-diff', async (_event, { worktreePath, file, staged }) => {
   try {
@@ -540,4 +558,4 @@ ipcMain.handle('git-tag-push', async (_event, { worktreePath, name }) => {
   }
 });
 
-module.exports = { collectWorktreeState };
+module.exports = { collectWorktreeState, readGitStatus, resolveBranch };
