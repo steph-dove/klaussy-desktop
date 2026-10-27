@@ -3651,6 +3651,21 @@ button.pr-check-toggle {
 }
 .skills-head h2 { margin: 0; font-size: 15px; color: var(--text); }
 .skills-head-actions { display: flex; align-items: center; gap: 8px; }
+.skills-search-row { padding: 10px 18px; border-bottom: 1px solid var(--border); }
+.skills-search {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--input-bg, var(--bg));
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+.skills-search:focus { border-color: var(--accent); }
+.skills-search:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 .skills-new {
   background: var(--accent);
   color: var(--accent-contrast);

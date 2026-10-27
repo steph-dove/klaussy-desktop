@@ -673,6 +673,16 @@ window.Dialogs = (function () {
     return String(s).replace(/(["\\])/g, '\\$1');
   }
 
+  // Drops the row highlight when the form or empty pane replaces a preview.
+  function clearSkillSelection(pane) {
+    var dialog = pane.closest('.skills-dialog');
+    if (!dialog) return;
+    dialog.querySelectorAll('.skills-row.selected, .skills-row[aria-current]').forEach(function (r) {
+      r.classList.remove('selected');
+      r.removeAttribute('aria-current');
+    });
+  }
+
   // Inline create-form rendered into the preview pane. Lets the user pick
   // type (skill / command), scope (user or any klaussy project), and a
   // name; on success refreshes the list and opens the new file for editing.
@@ -712,6 +722,7 @@ window.Dialogs = (function () {
             + '<button type="button" class="skills-create-go">Create</button>'
           + '</div>'
         + '</div>';
+      clearSkillSelection(pane);
 
       var typeBtns = pane.querySelectorAll('.skills-create-toggle button');
       A11y.radios(pane.querySelector('.skills-create-toggle'), { itemSelector: 'button', label: 'Type' });
@@ -732,6 +743,7 @@ window.Dialogs = (function () {
 
       cancelBtn.addEventListener('click', function () {
         pane.innerHTML = '<div class="skills-preview-empty">Select a skill or command on the left to preview.</div>';
+        clearSkillSelection(pane);
       });
 
       async function submit() {
