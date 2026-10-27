@@ -10,12 +10,12 @@ const { readGitStatus } = require('../../main/ipc/git');
 
 function git(cwd, ...args) {
   return execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
-    cwd, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_GLOBAL: os.devNull, GIT_CONFIG_NOSYSTEM: '1' },
+    cwd, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
   });
 }
 function tmp(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'git-status-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 }));
   return dir;
 }
 
