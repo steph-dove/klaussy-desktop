@@ -1561,7 +1561,7 @@
 
 .theme-option.active {
   border-color: var(--accent);
-  background: var(--surface-hover);
+  background: var(--accent-dim);
 }
 
 .theme-swatch {
