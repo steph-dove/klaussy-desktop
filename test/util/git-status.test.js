@@ -9,7 +9,7 @@ const { execFileSync } = require('child_process');
 const { readGitStatus } = require('../../main/ipc/git');
 
 function git(cwd, ...args) {
-  return execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
+  return execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=' + os.tmpdir(), ...args], {
     cwd, stdio: 'pipe', env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' },
   });
 }

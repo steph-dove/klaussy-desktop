@@ -562,4 +562,4 @@ ipcMain.handle('git-tag-push', async (_event, { worktreePath, name }) => {
   }
 });
 
-module.exports = { collectWorktreeState, readGitStatus, resolveBranch };
+module.exports = { collectWorktreeState, readGitStatus };
