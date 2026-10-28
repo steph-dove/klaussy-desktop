@@ -1468,6 +1468,10 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   }
   inst.mode = restartMode;
   inst.spawnTime = Date.now();
+  // The restarted agent may be in a new session; let the mirror find it again.
+  inst.sessionStore = '';
+  inst.transcriptFile = '';
+  inst.transcriptCursor = 0;
 
   const args = shellRunCmdArgs(userShell, agentCmd);
   const ptyProc = pty.spawn(userShell, args, {

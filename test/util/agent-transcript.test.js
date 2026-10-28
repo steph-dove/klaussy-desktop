@@ -590,3 +590,10 @@ test('cursor: the transcript is found under the slugged workspace path', () => {
     assert.equal(t.findCursorTranscript(worktree, 0, new Set([file])), '');
   } finally { process.env.HOME = prevHome; }
 });
+
+test('ollama (aider): a tool message with blank lines inside is still aider talking', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-aider-'));
+  const file = path.join(dir, '.aider.chat.history.md');
+  fs.writeFileSync(file, 'Fixed the import.\n\n> ## Running: flake8 a.py\n\na.py:1:1: F401 unused\n\nFix lint errors in a.py? (Y)es/(N)o [Yes]: y  \n\n');
+  assert.equal(t.readNewMessages('ollama', { transcriptFile: file, cursor: 0 }).text, 'Fixed the import.');
+});

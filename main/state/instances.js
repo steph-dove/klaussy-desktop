@@ -414,8 +414,14 @@ function transcriptFileFor(inst, providerId) {
     return inst.codexRollout;
   }
   if (SESSION_FINDERS[providerId]) {
-    if (!inst.sessionStore) inst.sessionStore = SESSION_FINDERS[providerId](inst);
-    return inst.sessionStore;
+    // Re-resolved each poll: a new conversation in the same tab starts a new file.
+    const found = SESSION_FINDERS[providerId](inst);
+    if (found && found !== inst.sessionStore) {
+      // Bound fresh rather than switched to, so its first reply isn't skipped as someone else's.
+      if (inst.sessionStore) inst.transcriptFile = '';
+      inst.sessionStore = found;
+    }
+    return inst.sessionStore || '';
   }
   if (providerId === 'antigravity') {
     bindAgyConversation(inst);

@@ -414,10 +414,14 @@ function readAider({ transcriptFile, cursor, fromEnd }) {
   return { text: capFromEnd(text), cursor: read.cursor };
 }
 
-// aider's own output ends on a hard break (two trailing spaces) before any blank line; a quote in the model's reply never does.
+// aider prefixes only the first line of its output and ends it on a hard break, blank lines
+// and all; a quote in the model's reply meets another `> ` or `#### ` line first.
 function aiderQuoteEnd(lines, start) {
-  for (let j = start; j < lines.length && lines[j] !== ''; j++) {
-    if (lines[j].endsWith('  ')) return j;
+  if (lines[start].endsWith('  ')) return start;
+  for (let j = start + 1; j < lines.length; j++) {
+    const line = lines[j];
+    if (line.startsWith('> ') || line.startsWith('#### ') || line.startsWith('# aider chat started at ')) return -1;
+    if (line.endsWith('  ')) return j;
   }
   return -1;
 }
