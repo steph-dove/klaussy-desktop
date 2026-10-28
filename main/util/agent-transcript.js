@@ -151,6 +151,37 @@ function rolloutCwd(file) {
   } catch { return ''; }
 }
 
+// ---- Copilot: ~/.copilot/session-state/<id>/events.jsonl ----
+
+function readCopilot({ transcriptFile, cursor, fromEnd, sinceMs }) {
+  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+  if (fromEnd) return endOf(transcriptFile);
+  const read = readAppendedLines(transcriptFile, cursor);
+  if (!read) return null;
+
+  const parts = [];
+  for (const rec of parseLines(read.lines)) {
+    if (rec.type !== 'assistant.message') continue;
+    // --resume appends to the same file, so what an earlier run said is dropped by age.
+    if (sinceMs && rec.timestamp && Date.parse(rec.timestamp) < sinceMs) continue;
+    const text = rec.data && rec.data.content;
+    if (typeof text === 'string' && text.trim()) parts.push(text.trim());
+  }
+  return { text: capFromEnd(parts.join('\n\n')), cursor: read.cursor };
+}
+
+// Sessions are global, so this worktree's is the newest one whose recorded cwd
+// matches and that has been written to since the tab started.
+function findCopilotEvents(worktreePath, sinceMs) {
+  const { listSessions } = require('./copilot-sessions');
+  for (const s of listSessions(worktreePath)) {
+    let st;
+    try { st = fs.statSync(s.filePath); } catch { continue; }
+    if (!sinceMs || st.mtimeMs >= sinceMs) return s.filePath;
+  }
+  return '';
+}
+
 // ---- Antigravity: ~/.gemini/antigravity-cli/conversations/<id>.db ----
 //
 // Rows are protobuf with no published schema, so this path was read off the
@@ -450,6 +481,7 @@ function readOpencode({ transcriptFile, cursor, fromEnd }) {
 
 const READERS = {
   claude: readClaude, codex: readCodex, antigravity: readAntigravity, opencode: readOpencode,
+  copilot: readCopilot,
 };
 
 function hasReader(providerId) {
@@ -474,6 +506,7 @@ module.exports = {
   hasReader,
   claudeTranscriptPath,
   findCodexRollout,
+  findCopilotEvents,
   findAntigravityConversation,
   findOpencodeSession,
   opencodeSource,

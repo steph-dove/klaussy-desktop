@@ -296,3 +296,50 @@ test('a missing transcript returns null rather than throwing', () => {
   assert.equal(t.readNewMessages('claude', { worktreePath: '', sessionId: '', cursor: 0 }), null);
   assert.equal(t.readNewMessages('antigravity', { transcriptFile: '/nope/missing.jsonl', cursor: 0 }), null);
 });
+
+const copilotSay = (content, timestamp) => ({
+  type: 'assistant.message', timestamp, data: { content, toolRequests: [] },
+});
+
+test('copilot: assistant messages are read, prompts and tool-only turns are not', () => {
+  const file = tmpFile('events.jsonl', [
+    { type: 'session.start', data: { context: { cwd: '/w' } } },
+    { type: 'system.message', data: { role: 'system', content: 'You are the GitHub Copilot CLI' } },
+    { type: 'user.message', data: { content: 'fix the bug' } },
+    { type: 'assistant.message', data: { content: '', toolRequests: [{ name: 'bash' }] } },
+    copilotSay('Fixed it; the suite passes.'),
+  ]);
+  const r = t.readNewMessages('copilot', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'Fixed it; the suite passes.');
+  appendLine(file, copilotSay('Anything else?'));
+  assert.equal(t.readNewMessages('copilot', { transcriptFile: file, cursor: r.cursor }).text, 'Anything else?');
+});
+
+test('copilot: a resumed session skips what the earlier run said', () => {
+  const file = tmpFile('events.jsonl', [
+    copilotSay('From last week.', '2026-01-01T00:00:00.000Z'),
+    copilotSay('From this run.', '2026-06-01T00:00:00.000Z'),
+  ]);
+  const r = t.readNewMessages('copilot', { transcriptFile: file, cursor: 0, sinceMs: Date.parse('2026-05-01') });
+  assert.equal(r.text, 'From this run.');
+});
+
+test('copilot: the session is found by its recorded cwd', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-copilot-home-'));
+  const mk = (id, cwd) => {
+    const dir = path.join(home, '.copilot', 'session-state', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'workspace.yaml'), `id: ${id}\ncwd: ${cwd}\nupdated_at: 2026-06-01T00:00:00.000Z\n`);
+    fs.writeFileSync(path.join(dir, 'events.jsonl'), '');
+    return path.join(dir, 'events.jsonl');
+  };
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-'));
+  mk('other', '/somewhere/else');
+  const mine = mk('mine', worktree);
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    assert.equal(t.findCopilotEvents(worktree, 0), mine);
+    assert.equal(t.findCopilotEvents(worktree, Date.now() + 60_000), '', 'nothing written since the tab began');
+  } finally { process.env.HOME = prevHome; }
+});

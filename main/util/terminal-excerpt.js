@@ -41,26 +41,29 @@ function joinCharacterRuns(lines) {
   return out;
 }
 
-function cleanExcerpt(text) {
-  const lines = String(text || '')
-    // A bare \r rewrites the current line; keep only what ended up there.
-    .replace(/\r(?!\n)/g, '\n')
-    .split('\n')
-    .map((l) => l.replace(/\s+$/, ''));
+// An ASCII bar only counts as a frame when padding sets it apart, so a markdown table row keeps its pipes.
+function stripFrame(line) {
+  return line
+    .replace(/^\s*[\u2500-\u257F]+(?:\s|$)/, '')
+    .replace(/\s+[\u2500-\u257F]+$|\s{2,}\|$/, '')
+    .replace(/^[\u2500-\u257F\s]+$/, '');
+}
 
-  const joined = joinCharacterRuns(lines);
-
-  // Must run before chrome removal: a growing label ("Wo", "Wor", "Work") only
-  // reaches the form chrome recognises at the end of the chain.
+// Must run before chrome removal: a growing label ("Wo", "Wor", "Work") only
+// reaches the form chrome recognises at the end of the chain.
+function collapseGrowingLabels(lines) {
   const grown = [];
-  for (const line of joined) {
+  for (const line of lines) {
     const prev = grown.length ? grown[grown.length - 1] : '';
     if (prev && prev.trim() && line.trim().startsWith(prev.trim())) grown.pop();
     grown.push(line);
   }
+  return grown;
+}
 
+function dropChrome(lines) {
   const out = [];
-  for (const line of grown) {
+  for (const line of lines) {
     if (isChrome(line)) continue;
     // A repaint emits the same line many times over.
     if (out.length && out[out.length - 1] === line) continue;
@@ -68,6 +71,20 @@ function cleanExcerpt(text) {
     out.push(line);
   }
   return out.join('\n').trim();
+}
+
+// `rendered` text comes from a terminal emulator's screen, where a keystroke
+// overwrites a cell instead of arriving as its own line, so the stitching that
+// undoes a raw stream's per-keystroke fragments would only merge real lines.
+function cleanExcerpt(text, { rendered = false } = {}) {
+  const lines = String(text || '')
+    // A bare \r rewrites the current line; keep only what ended up there.
+    .replace(/\r(?!\n)/g, '\n')
+    .split('\n')
+    .map((l) => stripFrame(l.replace(/\s+$/, '')));
+
+  if (rendered) return dropChrome(lines);
+  return dropChrome(collapseGrowingLabels(joinCharacterRuns(lines)));
 }
 
 // An idle agent keeps painting spinner frames and its input box, which must not

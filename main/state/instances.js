@@ -30,7 +30,7 @@ const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-promp
 const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
-const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
+const { takeNewOutput, feedScreen, screenText, forgetTask: forgetTranscript } = require('../util/session-transcript');
 const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
 
@@ -391,6 +391,12 @@ function transcriptFileFor(inst, providerId) {
     }
     return inst.codexRollout;
   }
+  if (providerId === 'copilot') {
+    if (!inst.copilotEvents) {
+      inst.copilotEvents = agentTranscript.findCopilotEvents(inst.worktreePath, inst.spawnTime);
+    }
+    return inst.copilotEvents;
+  }
   if (providerId === 'antigravity') {
     bindAgyConversation(inst);
     return inst.agyConversation;
@@ -461,6 +467,7 @@ function processSubOutput(inst, sub, data) {
   const target = subMirrorTarget(inst, sub);
   target.alive = sub.alive !== false;
   target.recentOutput = (target.recentOutput + stripAnsi(data)).slice(-ROLLING_BUFFER_SIZE);
+  try { feedScreen(target.id, data, sub.pty && sub.pty.cols, sub.pty && sub.pty.rows); } catch { /* mirroring is best-effort */ }
   // The bell belongs to the session, and this tab is part of it.
   if (inst.notifyWebhookEnabled !== true) return;
 
@@ -635,6 +642,7 @@ function processIdleDetection(inst, data) {
   // Update rolling buffer
   const stripped = stripAnsi(data);
   inst.recentOutput = (inst.recentOutput + stripped).slice(-ROLLING_BUFFER_SIZE);
+  try { feedScreen(inst.id, data, inst.pty && inst.pty.cols, inst.pty && inst.pty.rows); } catch { /* mirroring is best-effort */ }
 
   const agentName = displayNameFor(inst.mode);
 
@@ -703,7 +711,7 @@ function processIdleDetection(inst, data) {
         sessionBranch: inst.branch || '',
         agentName,
         quietMs,
-        logsTail: inst.recentOutput,
+        logsTail: screenText(inst.id) || inst.recentOutput,
         ts: Date.now(),
         notify: inst.notifyWebhookEnabled === true,
       });
@@ -1060,7 +1068,7 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
           workspacePath: instance.worktreePath,
           agentName: displayNameFor(instance.originalMode || instance.mode),
           exitCode,
-          logsTail: instance.recentOutput || '',
+          logsTail: screenText(instance.id) || instance.recentOutput || '',
           ts: Date.now(),
           notify: instance.notifyWebhookEnabled === true,
           ...resumeHintFor(instance),

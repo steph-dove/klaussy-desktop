@@ -62,3 +62,61 @@ test('empty and blank screens produce nothing', () => {
   assert.equal(transcript.takeNewOutput(1, ''), '');
   assert.equal(transcript.takeNewOutput(1, '\n\n   \n'), '');
 });
+
+async function screenSays(id, data, cols = 40, rows = 10) {
+  transcript.feedScreen(id, data, cols, rows);
+  await transcript._flush(id);
+  return transcript.takeNewOutput(id, '');
+}
+
+test('a boxed panel drawn with cursor moves reads as its text', async () => {
+  transcript._reset();
+  const out = await screenSays(1,
+    '\x1b[2J\x1b[1;1H╭──────────────╮'
+    + '\x1b[2;1H│ Permission   \x1b[2;16H│'
+    + '\x1b[3;1H│ granted.     \x1b[3;16H│'
+    + '\x1b[4;1H╰──────────────╯');
+  assert.equal(out, 'Permission\ngranted.');
+});
+
+test('an alt-screen repaint of the same frame sends nothing', async () => {
+  transcript._reset();
+  const frame = '\x1b[?1049h\x1b[2J\x1b[HAll permissions are now enabled.\r\nExecution mode: Interactive.';
+  assert.match(await screenSays(1, frame), /All permissions are now enabled\.\nExecution mode: Interactive\./);
+  assert.equal(await screenSays(1, frame), '');
+});
+
+test('a line painted into place is sent on its own', async () => {
+  transcript._reset();
+  await screenSays(1, '\x1b[2J\x1b[HFirst answer.');
+  assert.equal(await screenSays(1, '\x1b[3;1HSecond answer.'), 'Second answer.');
+});
+
+test('a resize reflows the screen without reposting it', async () => {
+  transcript._reset();
+  const long = 'This sentence is long enough to wrap at forty columns wide.';
+  assert.equal(await screenSays(1, long, 40), long);
+  assert.equal(await screenSays(1, '', 80), '');
+});
+
+test('a long scrollback is not reposted on the next turn', async () => {
+  transcript._reset();
+  const lines = Array.from({ length: 300 }, (_, i) => `output line ${i}`).join('\r\n');
+  await screenSays(1, lines);
+  assert.equal(await screenSays(1, '\r\nThe tests pass.'), 'The tests pass.');
+});
+
+test('forgetting a task drops its screen too', async () => {
+  transcript._reset();
+  await screenSays(3, 'On the screen.');
+  transcript.forgetTask(3);
+  assert.equal(transcript.takeNewOutput(3, 'From the stream.'), 'From the stream.');
+});
+
+test('the current screen is available for a notification tail', async () => {
+  transcript._reset();
+  assert.equal(transcript.screenText(4), '', 'no screen yet');
+  transcript.feedScreen(4, '\x1b[2J\x1b[1;1Hcrashed: out of memory', 40, 5);
+  await transcript._flush(4);
+  assert.match(transcript.screenText(4), /^crashed: out of memory/);
+});

@@ -106,3 +106,12 @@ test('gutter marks are never stitched into words', () => {
   assert.doesNotMatch(cleanExcerpt('>\n⋮\n⋮\n⋮'), />⋮/);
   assert.equal(cleanExcerpt('y\ne\ns'), 'yes');
 });
+
+test('box-drawing frames are stripped from around the text they hold', () => {
+  assert.equal(cleanExcerpt('╭─ Plan ─╮\n│ step one │\n╰────────╯'), 'Plan\nstep one');
+});
+
+test('a padded trailing bar is a frame, a table row is not', () => {
+  assert.equal(cleanExcerpt('capabilities             |'), 'capabilities');
+  assert.equal(cleanExcerpt('| a | b |'), '| a | b |');
+});
