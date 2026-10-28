@@ -1513,6 +1513,12 @@ ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
       }
     }
     inst.notifyWebhookEnabled = enabled;
+    // The screen stops being fed while the bell is off; a later read would quote it frozen.
+    if (!enabled) {
+      const transcript = require('../util/session-transcript');
+      transcript.forgetTask(id);
+      for (const sub of (inst.subTerminals || [])) if (sub.mirror) transcript.forgetTask(sub.mirror.id);
+    }
   } else inst.notifyEnabled = enabled;
   const config = loadConfig();
   if (!config.notifyPrefs) config.notifyPrefs = {};
