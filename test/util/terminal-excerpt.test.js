@@ -106,3 +106,25 @@ test('gutter marks are never stitched into words', () => {
   assert.doesNotMatch(cleanExcerpt('>\n⋮\n⋮\n⋮'), />⋮/);
   assert.equal(cleanExcerpt('y\ne\ns'), 'yes');
 });
+
+test('box-drawing frames are stripped from around the text they hold', () => {
+  assert.equal(cleanExcerpt('╭─ Plan ─╮\n│ step one │\n╰────────╯'), 'Plan\nstep one');
+});
+
+test('a padded markdown table keeps every pipe', () => {
+  const table = '| name    | value   |\n|---------|---------|\n| a       | b       |';
+  assert.equal(cleanExcerpt(table), table);
+});
+
+test('a tree listing keeps its guide lines', () => {
+  const tree = 'src\n├── a.js\n│   └── c.js\n└── b.js';
+  assert.equal(cleanExcerpt(tree), tree);
+});
+
+test('nested panels unwrap to the text inside', () => {
+  assert.equal(cleanExcerpt('│ │ Do you trust this folder? │ │'), 'Do you trust this folder?');
+});
+
+test('a line drawn only in box glyphs is dropped', () => {
+  assert.equal(cleanExcerpt('╮╭\nhello'), 'hello');
+});

@@ -62,3 +62,100 @@ test('empty and blank screens produce nothing', () => {
   assert.equal(transcript.takeNewOutput(1, ''), '');
   assert.equal(transcript.takeNewOutput(1, '\n\n   \n'), '');
 });
+
+async function screenSays(id, data, cols = 40, rows = 10) {
+  transcript.feedScreen(id, data, cols, rows);
+  await transcript._flush(id);
+  return transcript.takeNewOutput(id, '');
+}
+
+test('a boxed panel drawn with cursor moves reads as its text', async () => {
+  transcript._reset();
+  const out = await screenSays(1,
+    '\x1b[2J\x1b[1;1H╭──────────────╮'
+    + '\x1b[2;1H│ Permission   \x1b[2;16H│'
+    + '\x1b[3;1H│ granted.     \x1b[3;16H│'
+    + '\x1b[4;1H╰──────────────╯');
+  assert.equal(out, 'Permission\ngranted.');
+});
+
+test('an alt-screen repaint of the same frame sends nothing', async () => {
+  transcript._reset();
+  const frame = '\x1b[?1049h\x1b[2J\x1b[HAll permissions are now enabled.\r\nExecution mode: Interactive.';
+  assert.match(await screenSays(1, frame), /All permissions are now enabled\.\nExecution mode: Interactive\./);
+  assert.equal(await screenSays(1, frame), '');
+});
+
+test('a line painted into place is sent on its own', async () => {
+  transcript._reset();
+  await screenSays(1, '\x1b[2J\x1b[HFirst answer.');
+  assert.equal(await screenSays(1, '\x1b[3;1HSecond answer.'), 'Second answer.');
+});
+
+test('a resize reflows the screen without reposting it', async () => {
+  transcript._reset();
+  const long = 'This sentence is long enough to wrap at forty columns wide.';
+  assert.equal(await screenSays(1, long, 40), long);
+  assert.equal(await screenSays(1, '', 80), '');
+});
+
+test('a long scrollback is not reposted on the next turn', async () => {
+  transcript._reset();
+  const lines = Array.from({ length: 300 }, (_, i) => `output line ${i}`).join('\r\n');
+  await screenSays(1, lines);
+  assert.equal(await screenSays(1, '\r\nThe tests pass.'), 'The tests pass.');
+});
+
+test('forgetting a task drops its screen too', async () => {
+  transcript._reset();
+  await screenSays(3, 'On the screen.');
+  transcript.forgetTask(3);
+  assert.equal(transcript.takeNewOutput(3, 'From the stream.'), 'From the stream.');
+});
+
+test('the current screen is available for a notification tail', async () => {
+  transcript._reset();
+  assert.equal(transcript.screenText(4), '', 'no screen yet');
+  transcript.feedScreen(4, '\x1b[2J\x1b[1;1Hcrashed: out of memory', 40, 5);
+  await transcript._flush(4);
+  assert.match(transcript.screenText(4), /^crashed: out of memory/);
+});
+
+test('a wrap that lands on a word boundary keeps the space', async () => {
+  transcript._reset();
+  assert.equal(await screenSays(1, 'a'.repeat(40) + ' next word here', 40), 'a'.repeat(40) + ' next word here');
+});
+
+test('a resize changes where a column-addressed write lands', async () => {
+  transcript._reset();
+  await screenSays(1, 'start', 40);
+  const out = await screenSays(1, '\x1b[3;1Hleft\x1b[3;61Hright', 80);
+  assert.equal(out, 'left' + ' '.repeat(56) + 'right');
+});
+
+test('a blank screen yields no tail, so the caller falls back', async () => {
+  transcript._reset();
+  transcript.feedScreen(5, 'gone soon\x1b[2J', 40, 5);
+  await transcript._flush(5);
+  assert.equal(transcript.screenText(5), '');
+});
+
+// A full-screen TUI only redraws what changed, so a screen started late sees fragments.
+test('a screen started mid-session takes its first read as a baseline', async () => {
+  transcript._reset();
+  transcript.feedScreen(6, '\x1b[5;1H 12% context', 40, 10, { midSession: true });
+  await transcript._flush(6);
+  assert.equal(transcript.takeNewOutput(6, ''), '', 'the fragment is not posted');
+  transcript.feedScreen(6, '\x1b[2;1HThe build is green.', 40, 10);
+  await transcript._flush(6);
+  assert.equal(transcript.takeNewOutput(6, ''), 'The build is green.');
+});
+
+test('dropping the screen keeps what was already sent', async () => {
+  transcript._reset();
+  assert.equal(await screenSays(7, 'Already said this.'), 'Already said this.');
+  transcript.dropScreen(7);
+  transcript.feedScreen(7, 'Already said this.', 40, 10);
+  await transcript._flush(7);
+  assert.equal(transcript.takeNewOutput(7, ''), '');
+});

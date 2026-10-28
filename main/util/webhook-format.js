@@ -11,8 +11,8 @@ const md = require('./chat-markdown');
 // Slack blocks and Discord embed descriptions both have hard size limits;
 // agent log tails can be huge. Keep the last slice (the tail is where a crash
 // reason or the pending prompt lives) and mark the truncation.
-function truncateLogs(logs, max = 1200) {
-  const s = cleanExcerpt(logs);
+function truncateLogs(logs, { max = 1200, rendered = false } = {}) {
+  const s = cleanExcerpt(logs, { rendered });
   if (s.length <= max) return s;
   // Cut at a line boundary — slicing mid-word left fragments like "ght for 5s)".
   const cut = s.slice(-max);
@@ -58,7 +58,7 @@ function agentLabel(event) {
 // half-typed words tells the reader nothing.
 function screenExcerpt(event) {
   if (ended(event) || event.promptQuestion) return '';
-  const cleaned = truncateLogs(event.logsTail);
+  const cleaned = truncateLogs(event.logsTail, { rendered: event.logsRendered });
   if (!cleaned) return '';
   const lines = cleaned.split('\n').filter((l) => l.trim());
   // Prose, not chrome: a screen of rules and stubs has almost no real words.

@@ -30,7 +30,7 @@ const { stageInitialPrompt, schedulePromptPaste } = require('../util/agent-promp
 const { agentExitAction } = require('../util/agent-exit');
 const nemesisEvents = require('../util/nemesis-events');
 const { isChromeOnly } = require('../util/terminal-excerpt');
-const { takeNewOutput, forgetTask: forgetTranscript } = require('../util/session-transcript');
+const { takeNewOutput, feedScreen, screenText, forgetTask: forgetTranscript } = require('../util/session-transcript');
 const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
 
@@ -371,6 +371,51 @@ function bindAgyConversation(inst) {
   inst.agyConversation = found.file;
 }
 
+// Two tabs of one agent in a worktree would otherwise both bind its newest session.
+function transcriptsTaken(self) {
+  const taken = new Set();
+  for (const other of instances.values()) {
+    if (other !== self && other.transcriptFile) taken.add(other.transcriptFile);
+    for (const sub of (other.subTerminals || [])) {
+      if (sub.mirror && sub.mirror !== self && sub.mirror.transcriptFile) taken.add(sub.mirror.transcriptFile);
+    }
+  }
+  return taken;
+}
+
+const SESSION_RECHECK_MS = 30000;
+
+// The restarted agent may be in a new session; the mirror has to find it again.
+function resetMirrorBinding(inst) {
+  inst.sessionStore = '';
+  inst.sessionCheckedAt = 0;
+  inst.sessionBoundAt = 0;
+  inst.transcriptFile = '';
+  inst.transcriptCursor = 0;
+  // The previous run's screen may be left in the alternate buffer.
+  forgetTranscript(inst.id);
+}
+
+// Agents whose session store is found by worktree, newest first.
+const SESSION_FINDERS = {
+  copilot: (inst, since) => agentTranscript.findCopilotEvents(inst.worktreePath, since, transcriptsTaken(inst)),
+  kimi: (inst, since) => agentTranscript.findKimiWire(inst.worktreePath, since, transcriptsTaken(inst)),
+  gemini: (inst, since) => agentTranscript.findGeminiChat(inst.worktreePath, since, transcriptsTaken(inst)),
+  cline: (inst, since) => agentTranscript.findClineSession(inst.worktreePath, since, transcriptsTaken(inst)),
+  ollama: (inst, since) => agentTranscript.findAiderHistory(inst.worktreePath, since, transcriptsTaken(inst)),
+  cursor: (inst, since) => agentTranscript.findCursorTranscript(inst.worktreePath, since, transcriptsTaken(inst)),
+};
+
+// Readers that drop records older than the tab's start can read a resumed
+// session from the top; skipping to its end would skip the first reply too.
+const AGED_READERS = new Set(['claude', 'copilot', 'kimi', 'gemini', 'cline']);
+
+// Cursor replaces its transcript on every rewrite, so its conversation
+// directory is what says how old the session is.
+function sessionBornMs(file, providerId) {
+  return agentTranscript.bornMs(providerId === 'cursor' ? path.dirname(file) : file);
+}
+
 // Which file this session's speech is read from, resolved fresh each poll: a
 // session id can arrive late, and Antigravity only names its conversation once
 // it settles.
@@ -390,6 +435,25 @@ function transcriptFileFor(inst, providerId) {
       inst.codexRollout = agentTranscript.findCodexRollout(inst.worktreePath, inst.spawnTime);
     }
     return inst.codexRollout;
+  }
+  if (SESSION_FINDERS[providerId]) {
+    // A new conversation in the same tab starts a new file, so a bound session is
+    // re-checked now and then; each check scans that agent's whole session store.
+    if (inst.sessionStore && Date.now() - (inst.sessionCheckedAt || 0) < SESSION_RECHECK_MS) return inst.sessionStore;
+    inst.sessionCheckedAt = Date.now();
+    // Once bound, only a session created after the binding can be this tab's
+    // next one; anything older belongs to another writer, or was read already.
+    const since = inst.sessionStore ? inst.sessionBoundAt : inst.spawnTime;
+    const found = SESSION_FINDERS[providerId](inst, since);
+    if (!found || found === inst.sessionStore) return inst.sessionStore || '';
+    if (inst.sessionStore) {
+      if (sessionBornMs(found, providerId) < inst.sessionBoundAt) return inst.sessionStore;
+      // Bound fresh rather than switched to, so its first reply isn't skipped as someone else's.
+      inst.transcriptFile = '';
+    }
+    inst.sessionStore = found;
+    inst.sessionBoundAt = Date.now();
+    return found;
   }
   if (providerId === 'antigravity') {
     bindAgyConversation(inst);
@@ -414,15 +478,8 @@ function repointTranscript(inst, file, providerId) {
   // Switching away from a file we were reading: what is in the new one was said
   // to whoever was reading it before.
   if (hadOne) return true;
-  // Claude stamps every record, so its reader drops the old ones by age and
-  // still reports the first thing this run says.
-  if (providerId === 'claude') return false;
-  return predatesSession(file, inst.spawnTime);
-}
-
-function predatesSession(file, spawnTime) {
-  if (!spawnTime) return false;
-  try { return fs.statSync(file).birthtimeMs < spawnTime; } catch { return false; }
+  if (AGED_READERS.has(providerId)) return false;
+  return !!inst.spawnTime && sessionBornMs(file, providerId) < inst.spawnTime;
 }
 
 function subDisplayName(sub) {
@@ -460,13 +517,16 @@ function processSubOutput(inst, sub, data) {
   if (!inst || !sub || !isAgentMode(sub.mode)) return;
   const target = subMirrorTarget(inst, sub);
   target.alive = sub.alive !== false;
+  const midSession = target.recentOutput.length > 0;
   target.recentOutput = (target.recentOutput + stripAnsi(data)).slice(-ROLLING_BUFFER_SIZE);
   // The bell belongs to the session, and this tab is part of it.
   if (inst.notifyWebhookEnabled !== true) return;
+  try { feedScreen(target.id, data, sub.pty && sub.pty.cols, sub.pty && sub.pty.rows, { midSession }); } catch { /* mirroring is best-effort */ }
 
   if (sub.turnTimer) clearTimeout(sub.turnTimer);
   sub.turnTimer = setTimeout(() => {
-    if (!sub.alive) return;
+    // The bell can go off while this is pending, and that drops the screen it would read.
+    if (!sub.alive || inst.notifyWebhookEnabled !== true) return;
     try {
       const body = newAgentSpeech(target);
       if (!body) return;
@@ -486,6 +546,13 @@ function processSubOutput(inst, sub, data) {
     } catch { /* never let a publish break the terminal path */ }
   }, TURN_SETTLE_MS);
   sub.turnTimer.unref?.();
+}
+
+// The rendered screen when there is one; the formatter must not run the raw
+// stream's keystroke stitching over it.
+function staleTail(inst) {
+  const screen = screenText(inst.id);
+  return screen ? { logsTail: screen, logsRendered: true } : { logsTail: inst.recentOutput };
 }
 
 function fileSize(file) {
@@ -635,6 +702,11 @@ function processIdleDetection(inst, data) {
   // Update rolling buffer
   const stripped = stripAnsi(data);
   inst.recentOutput = (inst.recentOutput + stripped).slice(-ROLLING_BUFFER_SIZE);
+  // Only a session with the bell on is ever mirrored or quoted in chat.
+  if (inst.notifyWebhookEnabled === true) {
+    const midSession = inst.recentOutput.length > stripped.length;
+    try { feedScreen(inst.id, data, inst.pty && inst.pty.cols, inst.pty && inst.pty.rows, { midSession }); } catch { /* mirroring is best-effort */ }
+  }
 
   const agentName = displayNameFor(inst.mode);
 
@@ -703,7 +775,7 @@ function processIdleDetection(inst, data) {
         sessionBranch: inst.branch || '',
         agentName,
         quietMs,
-        logsTail: inst.recentOutput,
+        ...staleTail(inst),
         ts: Date.now(),
         notify: inst.notifyWebhookEnabled === true,
       });
@@ -1165,7 +1237,9 @@ function reclaimOrphanedTasks(closingWc) {
     try { inst.pty.kill(); } catch {}
     for (const sub of (inst.subTerminals || [])) {
       try { sub.pty.kill(); } catch {}
+      if (sub.mirror) forgetTranscript(sub.mirror.id);
     }
+    forgetTranscript(id);
     inst.alive = false;
     // Never touch the worktree/branch on disk — only stop the process.
     instances.delete(id);
@@ -1207,6 +1281,7 @@ function notifyingAgentInstances() {
 }
 
 module.exports = {
+  resetMirrorBinding,
   instances,
   isAgentInstance,
   notifyingAgentInstances,
