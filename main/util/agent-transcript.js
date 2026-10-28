@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { claudeProjectDir } = require('./claude-paths');
 const { stringsAt, scan } = require('./protobuf-scan');
+const { listSessions } = require('./copilot-sessions');
 
 // Enough for a chat message; the caller trims further for platform limits.
 const MAX_TEXT = 4000;
@@ -172,9 +173,9 @@ function readCopilot({ transcriptFile, cursor, fromEnd, sinceMs }) {
 
 // Sessions are global, so this worktree's is the newest one whose recorded cwd
 // matches and that has been written to since the tab started.
-function findCopilotEvents(worktreePath, sinceMs) {
-  const { listSessions } = require('./copilot-sessions');
+function findCopilotEvents(worktreePath, sinceMs, taken) {
   for (const s of listSessions(worktreePath)) {
+    if (taken && taken.has(s.filePath)) continue;
     let st;
     try { st = fs.statSync(s.filePath); } catch { continue; }
     if (!sinceMs || st.mtimeMs >= sinceMs) return s.filePath;

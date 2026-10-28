@@ -1286,6 +1286,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
     if (sub.mirror) {
       try { require('../util/notification-gateway').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
       try { require('../state/session-activity').forgetInstance(sub.mirror.id); } catch { /* non-fatal */ }
+      try { require('../util/session-transcript').forgetTask(sub.mirror.id); } catch { /* non-fatal */ }
     }
     session.release(); // free the concurrency slot (Codex token-rotation guard)
     if (promptFile) { try { fs.unlinkSync(promptFile); } catch {} }

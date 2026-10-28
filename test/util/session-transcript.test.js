@@ -120,3 +120,21 @@ test('the current screen is available for a notification tail', async () => {
   await transcript._flush(4);
   assert.match(transcript.screenText(4), /^crashed: out of memory/);
 });
+
+test('a wrap that lands on a word boundary keeps the space', async () => {
+  transcript._reset();
+  assert.equal(await screenSays(1, 'a'.repeat(40) + ' next word here', 40), 'a'.repeat(40) + ' next word here');
+});
+
+test('a resize changes where a column-addressed write lands', async () => {
+  transcript._reset();
+  await screenSays(1, 'start', 40);
+  const out = await screenSays(1, '\x1b[3;1Hleft\x1b[3;61Hright', 80);
+  assert.equal(out, 'left' + ' '.repeat(56) + 'right');
+});
+
+test('a blank screen yields no tail, so the caller falls back', () => {
+  transcript._reset();
+  transcript.feedScreen(5, 'not parsed yet', 40, 5);
+  assert.equal(transcript.screenText(5), '');
+});

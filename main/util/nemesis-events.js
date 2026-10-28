@@ -63,6 +63,7 @@ function normalize(event) {
     // Populated for stale: how long the agent had been silent.
     quietMs: typeof event.quietMs === 'number' ? event.quietMs : null,
     logsTail: event.logsTail || '',
+    logsRendered: event.logsRendered === true,
     // Populated for message: what the agent said since the last one.
     body: event.body || '',
     ts: typeof event.ts === 'number' ? event.ts : null,

@@ -371,6 +371,18 @@ function bindAgyConversation(inst) {
   inst.agyConversation = found.file;
 }
 
+// Two Copilot tabs in one worktree would otherwise both bind the newest session.
+function copilotFilesTaken(self) {
+  const taken = new Set();
+  for (const other of instances.values()) {
+    if (other !== self && other.copilotEvents) taken.add(other.copilotEvents);
+    for (const sub of (other.subTerminals || [])) {
+      if (sub.mirror && sub.mirror !== self && sub.mirror.copilotEvents) taken.add(sub.mirror.copilotEvents);
+    }
+  }
+  return taken;
+}
+
 // Which file this session's speech is read from, resolved fresh each poll: a
 // session id can arrive late, and Antigravity only names its conversation once
 // it settles.
@@ -393,7 +405,7 @@ function transcriptFileFor(inst, providerId) {
   }
   if (providerId === 'copilot') {
     if (!inst.copilotEvents) {
-      inst.copilotEvents = agentTranscript.findCopilotEvents(inst.worktreePath, inst.spawnTime);
+      inst.copilotEvents = agentTranscript.findCopilotEvents(inst.worktreePath, inst.spawnTime, copilotFilesTaken(inst));
     }
     return inst.copilotEvents;
   }
@@ -467,9 +479,9 @@ function processSubOutput(inst, sub, data) {
   const target = subMirrorTarget(inst, sub);
   target.alive = sub.alive !== false;
   target.recentOutput = (target.recentOutput + stripAnsi(data)).slice(-ROLLING_BUFFER_SIZE);
-  try { feedScreen(target.id, data, sub.pty && sub.pty.cols, sub.pty && sub.pty.rows); } catch { /* mirroring is best-effort */ }
   // The bell belongs to the session, and this tab is part of it.
   if (inst.notifyWebhookEnabled !== true) return;
+  try { feedScreen(target.id, data, sub.pty && sub.pty.cols, sub.pty && sub.pty.rows); } catch { /* mirroring is best-effort */ }
 
   if (sub.turnTimer) clearTimeout(sub.turnTimer);
   sub.turnTimer = setTimeout(() => {
@@ -493,6 +505,13 @@ function processSubOutput(inst, sub, data) {
     } catch { /* never let a publish break the terminal path */ }
   }, TURN_SETTLE_MS);
   sub.turnTimer.unref?.();
+}
+
+// The rendered screen when there is one; the formatter must not run the raw
+// stream's keystroke stitching over it.
+function staleTail(inst) {
+  const screen = screenText(inst.id);
+  return screen ? { logsTail: screen, logsRendered: true } : { logsTail: inst.recentOutput };
 }
 
 function fileSize(file) {
@@ -642,7 +661,10 @@ function processIdleDetection(inst, data) {
   // Update rolling buffer
   const stripped = stripAnsi(data);
   inst.recentOutput = (inst.recentOutput + stripped).slice(-ROLLING_BUFFER_SIZE);
-  try { feedScreen(inst.id, data, inst.pty && inst.pty.cols, inst.pty && inst.pty.rows); } catch { /* mirroring is best-effort */ }
+  // Only a session with the bell on is ever mirrored or quoted in chat.
+  if (inst.notifyWebhookEnabled === true) {
+    try { feedScreen(inst.id, data, inst.pty && inst.pty.cols, inst.pty && inst.pty.rows); } catch { /* mirroring is best-effort */ }
+  }
 
   const agentName = displayNameFor(inst.mode);
 
@@ -711,7 +733,7 @@ function processIdleDetection(inst, data) {
         sessionBranch: inst.branch || '',
         agentName,
         quietMs,
-        logsTail: screenText(inst.id) || inst.recentOutput,
+        ...staleTail(inst),
         ts: Date.now(),
         notify: inst.notifyWebhookEnabled === true,
       });
@@ -1068,7 +1090,7 @@ function makeAgentExitHandler(instance, ptyProc, { session, promptFile } = {}) {
           workspacePath: instance.worktreePath,
           agentName: displayNameFor(instance.originalMode || instance.mode),
           exitCode,
-          logsTail: screenText(instance.id) || instance.recentOutput || '',
+          logsTail: instance.recentOutput || '',
           ts: Date.now(),
           notify: instance.notifyWebhookEnabled === true,
           ...resumeHintFor(instance),
@@ -1173,7 +1195,9 @@ function reclaimOrphanedTasks(closingWc) {
     try { inst.pty.kill(); } catch {}
     for (const sub of (inst.subTerminals || [])) {
       try { sub.pty.kill(); } catch {}
+      if (sub.mirror) forgetTranscript(sub.mirror.id);
     }
+    forgetTranscript(id);
     inst.alive = false;
     // Never touch the worktree/branch on disk — only stop the process.
     instances.delete(id);

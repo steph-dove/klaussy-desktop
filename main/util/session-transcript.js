@@ -40,7 +40,7 @@ function feedScreen(taskId, data, cols, rows) {
   entry.term.write(data);
 }
 
-// Rejoins soft-wrapped rows: a row short of the edge broke at a space, a full one mid-word.
+// Rejoins soft-wrapped rows: a row short of the edge broke at a space; a full one keeps its own spacing.
 function renderScreen(term) {
   const buf = term.buffer.active;
   const lines = [];
@@ -50,7 +50,7 @@ function renderScreen(term) {
     if (!row) continue;
     const raw = row.translateToString(false);
     const text = raw.replace(/\s+$/, '');
-    if (row.isWrapped && lines.length) lines[lines.length - 1] += (prevFull ? '' : ' ') + text.trimStart();
+    if (row.isWrapped && lines.length) lines[lines.length - 1] += prevFull ? text : ' ' + text.trimStart();
     else lines.push(text);
     prevFull = text.length === raw.length;
   }
@@ -110,7 +110,8 @@ function takeNewOutput(taskId, rawScreen) {
 // '' until feedScreen has started one.
 function screenText(taskId) {
   const entry = state.get(String(taskId));
-  return entry && entry.term ? renderScreen(entry.term) : '';
+  const text = entry && entry.term ? renderScreen(entry.term) : '';
+  return text.trim() ? text : '';
 }
 
 function forgetTask(taskId) {

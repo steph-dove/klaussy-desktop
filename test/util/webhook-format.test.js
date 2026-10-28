@@ -284,3 +284,10 @@ test('a screen with real prose is still worth showing', () => {
     /three issues/,
   );
 });
+
+// A rendered screen has no per-keystroke fragments, so a short heading stays.
+test('truncateLogs leaves a rendered tail unstitched', () => {
+  const screen = 'Summary\nSummary of changes';
+  assert.equal(truncateLogs(screen, 100, true), screen);
+  assert.equal(truncateLogs(screen, 100), 'Summary of changes', 'the raw stream still collapses growing labels');
+});

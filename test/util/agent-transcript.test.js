@@ -343,3 +343,23 @@ test('copilot: the session is found by its recorded cwd', () => {
     assert.equal(t.findCopilotEvents(worktree, Date.now() + 60_000), '', 'nothing written since the tab began');
   } finally { process.env.HOME = prevHome; }
 });
+
+test('copilot: a session another tab already reads is not bound again', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-copilot-home-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-'));
+  const mk = (id, updated) => {
+    const dir = path.join(home, '.copilot', 'session-state', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'workspace.yaml'), `id: ${id}\ncwd: ${worktree}\nupdated_at: ${updated}\n`);
+    fs.writeFileSync(path.join(dir, 'events.jsonl'), '');
+    return path.join(dir, 'events.jsonl');
+  };
+  const older = mk('older', '2026-06-01T00:00:00.000Z');
+  const newer = mk('newer', '2026-06-02T00:00:00.000Z');
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    assert.equal(t.findCopilotEvents(worktree, 0), newer);
+    assert.equal(t.findCopilotEvents(worktree, 0, new Set([newer])), older);
+  } finally { process.env.HOME = prevHome; }
+});

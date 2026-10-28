@@ -41,12 +41,17 @@ function joinCharacterRuns(lines) {
   return out;
 }
 
-// An ASCII bar only counts as a frame when padding sets it apart, so a markdown table row keeps its pipes.
+// Only a line walled on both sides is a panel row, so tree guide lines and markdown tables survive.
+const PANEL_ROW = /^\s*[\u2502\u2503\u2551](?: |$)(.*?)\s*[\u2502\u2503\u2551]\s*$/;
+const PANEL_EDGE = /^\s*[\u256D\u250C\u2554\u2570\u2514\u255A][\u2500\u2501\u2550]*(.*?)[\u2500\u2501\u2550]*[\u256E\u2510\u2557\u256F\u2518\u255D]\s*$/;
+const RULE = /^[\s\u2500-\u257F]+$/;
+
 function stripFrame(line) {
-  return line
-    .replace(/^\s*[\u2500-\u257F]+(?:\s|$)/, '')
-    .replace(/\s+[\u2500-\u257F]+$|\s{2,}\|$/, '')
-    .replace(/^[\u2500-\u257F\s]+$/, '');
+  let s = line;
+  for (let m = s.match(PANEL_ROW); m; m = s.match(PANEL_ROW)) s = m[1];
+  const edge = s.match(PANEL_EDGE);
+  if (edge) s = edge[1].trim();
+  return RULE.test(s) ? '' : s;
 }
 
 // Must run before chrome removal: a growing label ("Wo", "Wor", "Work") only
