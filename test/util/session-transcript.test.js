@@ -133,8 +133,29 @@ test('a resize changes where a column-addressed write lands', async () => {
   assert.equal(out, 'left' + ' '.repeat(56) + 'right');
 });
 
-test('a blank screen yields no tail, so the caller falls back', () => {
+test('a blank screen yields no tail, so the caller falls back', async () => {
   transcript._reset();
-  transcript.feedScreen(5, 'not parsed yet', 40, 5);
+  transcript.feedScreen(5, 'gone soon\x1b[2J', 40, 5);
+  await transcript._flush(5);
   assert.equal(transcript.screenText(5), '');
+});
+
+// A full-screen TUI only redraws what changed, so a screen started late sees fragments.
+test('a screen started mid-session takes its first read as a baseline', async () => {
+  transcript._reset();
+  transcript.feedScreen(6, '\x1b[5;1H 12% context', 40, 10, { midSession: true });
+  await transcript._flush(6);
+  assert.equal(transcript.takeNewOutput(6, ''), '', 'the fragment is not posted');
+  transcript.feedScreen(6, '\x1b[2;1HThe build is green.', 40, 10);
+  await transcript._flush(6);
+  assert.equal(transcript.takeNewOutput(6, ''), 'The build is green.');
+});
+
+test('dropping the screen keeps what was already sent', async () => {
+  transcript._reset();
+  assert.equal(await screenSays(7, 'Already said this.'), 'Already said this.');
+  transcript.dropScreen(7);
+  transcript.feedScreen(7, 'Already said this.', 40, 10);
+  await transcript._flush(7);
+  assert.equal(transcript.takeNewOutput(7, ''), '');
 });

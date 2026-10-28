@@ -579,8 +579,8 @@ test('cursor: the transcript is found under the slugged workspace path', () => {
   assert.equal(t.cursorProjectSlug('/Users/me/Projects/cursor-prep'), 'Users-me-Projects-cursor-prep');
   const prevHome = process.env.HOME;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-cursor-home-'));
-  const worktree = '/work/my repo';
-  const dir = path.join(home, '.cursor', 'projects', 'work-my-repo', 'agent-transcripts', 'abc');
+  const worktree = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-')), 'my repo');
+  const dir = path.join(home, '.cursor', 'projects', t.cursorProjectSlug(path.resolve(worktree)), 'agent-transcripts', 'abc');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'abc.jsonl');
   fs.writeFileSync(file, '');
@@ -596,4 +596,47 @@ test('ollama (aider): a tool message with blank lines inside is still aider talk
   const file = path.join(dir, '.aider.chat.history.md');
   fs.writeFileSync(file, 'Fixed the import.\n\n> ## Running: flake8 a.py\n\na.py:1:1: F401 unused\n\nFix lint errors in a.py? (Y)es/(N)o [Yes]: y  \n\n');
   assert.equal(t.readNewMessages('ollama', { transcriptFile: file, cursor: 0 }).text, 'Fixed the import.');
+});
+
+// A sibling tab started later, or a headless run, writes its file more recently;
+// a tab's own new session is still the first one created after it started.
+test('a tab binds the first session created after it started, not the newest written', () => {
+  const mine = { file: 'mine', bornMs: 1100, mtimeMs: 1500 };
+  const sibling = { file: 'sibling', bornMs: 1300, mtimeMs: 2000 };
+  const resumedElsewhere = { file: 'old', bornMs: 100, mtimeMs: 2500 };
+  assert.equal(t.pickSession([sibling, resumedElsewhere, mine], 1000), 'mine');
+});
+
+test('with no session created since it started, a tab resumed the newest one', () => {
+  const a = { file: 'a', bornMs: 100, mtimeMs: 1500 };
+  const b = { file: 'b', bornMs: 200, mtimeMs: 1200 };
+  assert.equal(t.pickSession([a, b], 1000), 'a');
+  assert.equal(t.pickSession([], 1000), '');
+});
+
+test('cursor: a half-written rewrite is retried, not re-read from the top', () => {
+  const lines = [cursorSay({ type: 'text', text: 'One.' }), cursorSay({ type: 'text', text: 'Two.' })];
+  const file = tmpFile('a.jsonl', lines);
+  const r = t.readNewMessages('cursor', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.cursor, 2);
+  fs.writeFileSync(file, JSON.stringify(lines[0]) + '\n');
+  const short = t.readNewMessages('cursor', { transcriptFile: file, cursor: r.cursor });
+  assert.deepEqual(short, { text: '', cursor: 2 }, 'a truncated file posts nothing and keeps its place');
+  fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n' + '{"role":"assistant","mess');
+  assert.equal(t.readNewMessages('cursor', { transcriptFile: file, cursor: 2 }).cursor, 2, 'a partial last line is not counted as read');
+});
+
+test('cline: a file caught mid-rewrite reads as nothing new, not as no store', () => {
+  const file = tmpFile('s.messages.json', []);
+  fs.writeFileSync(file, '{"version":1,"messages":[{"id":"a1","ro');
+  assert.deepEqual(t.readNewMessages('cline', { transcriptFile: file, cursor: 300 }), { text: '', cursor: 300 });
+});
+
+test('ollama (aider): a history file that is a symlink out of the worktree is never read', { skip: process.platform === 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-aider-'));
+  const outside = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-secret-')), 'history');
+  fs.writeFileSync(outside, 'export GH_TOKEN=abc\n');
+  fs.symlinkSync(outside, path.join(dir, '.aider.chat.history.md'));
+  assert.equal(t.findAiderHistory(dir, 0), '');
+  assert.equal(t.readNewMessages('ollama', { transcriptFile: path.join(dir, '.aider.chat.history.md'), cursor: 0, worktreePath: dir }), null);
 });

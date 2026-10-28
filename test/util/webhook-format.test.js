@@ -70,14 +70,14 @@ test('discord failed embed differs in color from completed', () => {
 
 test('truncateLogs keeps the tail and marks truncation', () => {
   const big = 'x'.repeat(50) + 'TAIL_MARKER';
-  const out = truncateLogs(big, 20);
+  const out = truncateLogs(big, { max: 20 });
   assert.ok(out.length < big.length, 'shortened');
   assert.match(out, /TAIL_MARKER/, 'keeps the end of the log');
   assert.match(out, /truncated/i, 'flags truncation');
 });
 
 test('truncateLogs leaves short logs untouched', () => {
-  assert.equal(truncateLogs('short', 100), 'short');
+  assert.equal(truncateLogs('short', { max: 100 }), 'short');
   assert.equal(truncateLogs('', 100), '');
   assert.equal(truncateLogs(null, 100), '');
 });
@@ -288,6 +288,6 @@ test('a screen with real prose is still worth showing', () => {
 // A rendered screen has no per-keystroke fragments, so a short heading stays.
 test('truncateLogs leaves a rendered tail unstitched', () => {
   const screen = 'Summary\nSummary of changes';
-  assert.equal(truncateLogs(screen, 100, true), screen);
-  assert.equal(truncateLogs(screen, 100), 'Summary of changes', 'the raw stream still collapses growing labels');
+  assert.equal(truncateLogs(screen, { max: 100, rendered: true }), screen);
+  assert.equal(truncateLogs(screen, { max: 100 }), 'Summary of changes', 'the raw stream still collapses growing labels');
 });

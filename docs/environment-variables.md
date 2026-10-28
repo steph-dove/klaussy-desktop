@@ -7,7 +7,7 @@ things, which credentials it falls back to, and how much it logs.
 
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
-| `HOME` | Home directory used to find agent data (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.copilot`, `~/.kimi-code`, `~/.local/share`), Claude settings and MCP config. Also where klaussy looks for `Downloads` (agent QA media) when Electron can't report that folder. | `os.homedir()` | `main/ipc/files.js`, `main/ipc/tasks.js`, `main/state/ai-providers.js`, `main/state/instances.js`, `main/state/token-usage.js`, `main/util/agent-transcript.js`, `main/util/claude-paths.js`, `main/util/copilot-sessions.js`, `main/util/mcp-config.js` |
+| `HOME` | Home directory used to find agent data (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.copilot`, `~/.kimi-code`, `~/.cursor`, `~/.cline`, `~/.local/share`), Claude settings and MCP config. Also where klaussy looks for `Downloads` (agent QA media) when Electron can't report that folder. | `os.homedir()` | `main/ipc/files.js`, `main/ipc/tasks.js`, `main/state/ai-providers.js`, `main/state/instances.js`, `main/state/token-usage.js`, `main/util/agent-transcript.js`, `main/util/claude-paths.js`, `main/util/copilot-sessions.js`, `main/util/mcp-config.js` |
 | `USERPROFILE` | Home directory for locating `Downloads` when Electron can't report the downloads folder and `HOME` is unset. | `os.homedir()` | `main/ipc/files.js` |
 | `SHELL` | Shell for embedded terminals on macOS and Linux, used only if the path exists. Also the shell run as `$SHELL -lic` to read your login `PATH`. | Terminals: first of `/bin/zsh`, `/bin/bash`, `/bin/sh` that exists. Login `PATH` probe: `/bin/bash`. | `main/util/platform.js`, `main/util/spawn-path.js` |
 | `PATH` | Search path for the CLIs klaussy launches. Klaussy prepends known install dirs (pipx, pip `--user`, Homebrew and others), then merges in your login shell's `PATH` (macOS/Linux) or the registry `Path` (Windows), and writes the result back so child processes inherit it. | Inherited from the launching process | `main/util/spawn-path.js` |
@@ -21,7 +21,8 @@ things, which credentials it falls back to, and how much it logs.
 
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
-| `KIMI_CODE_HOME` | Kimi Code's home directory, where klaussy reads its sessions. Blank values are ignored. | `$HOME/.kimi-code` | `main/state/ai-providers.js` |
+| `KIMI_CODE_HOME` | Kimi Code's home directory, where klaussy reads its sessions. Blank values are ignored. | `$HOME/.kimi-code` | `main/state/ai-providers.js`, `main/util/agent-transcript.js` |
+| `GEMINI_CLI_HOME` | The directory Gemini CLI keeps `.gemini` in, where klaussy reads its chats to mirror replies. | `$HOME` | `main/util/agent-transcript.js` |
 
 ## GitHub
 

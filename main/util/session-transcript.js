@@ -28,12 +28,15 @@ function entryFor(taskId) {
 }
 
 // Stripping a TUI's cursor moves leaves redraw fragments; emulating the screen leaves what the user sees.
-function feedScreen(taskId, data, cols, rows) {
+// A screen started after the agent already drew (the bell turned on mid-session)
+// only gets the cells that change from then on; its first read is a baseline.
+function feedScreen(taskId, data, cols, rows, { midSession = false } = {}) {
   const entry = entryFor(taskId);
   const c = cols > 0 ? cols : 120;
   const r = rows > 0 ? rows : 30;
   if (!entry.term) {
     entry.term = new Terminal({ cols: c, rows: r, scrollback: SCROLLBACK_LINES, allowProposedApi: true });
+    entry.baseline = midSession;
   } else if (entry.term.cols !== c || entry.term.rows !== r) {
     entry.term.resize(c, r);
   }
@@ -94,11 +97,15 @@ function takeNewOutput(taskId, rawScreen) {
       continue;
     }
     entry.onScreen.add(key);
-    if (previous.has(key) || entry.seen.has(key)) continue;
+    if (entry.baseline || previous.has(key) || entry.seen.has(key)) continue;
     remember(entry, key);
     fresh.push(line);
   }
 
+  if (entry.baseline && entry.term) {
+    entry.baseline = false;
+    return '';
+  }
   const out = fresh.join('\n').trim();
   if (out.length < MIN_POST_CHARS) return '';
   if (out.length <= MAX_POST_CHARS) return out;
@@ -112,6 +119,14 @@ function screenText(taskId) {
   const entry = state.get(String(taskId));
   const text = entry && entry.term ? renderScreen(entry.term) : '';
   return text.trim() ? text : '';
+}
+
+// The bell went off and the screen stops being fed; what was sent stays known.
+function dropScreen(taskId) {
+  const entry = state.get(String(taskId));
+  if (!entry || !entry.term) return;
+  entry.term.dispose();
+  entry.term = null;
 }
 
 function forgetTask(taskId) {
@@ -131,4 +146,4 @@ function _flush(taskId) {
   return new Promise((resolve) => (entry && entry.term ? entry.term.write('', resolve) : resolve()));
 }
 
-module.exports = { takeNewOutput, feedScreen, screenText, forgetTask, _reset, _flush, MAX_POST_CHARS };
+module.exports = { takeNewOutput, feedScreen, screenText, dropScreen, forgetTask, _reset, _flush, MAX_POST_CHARS };

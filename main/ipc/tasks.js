@@ -19,7 +19,7 @@ const { defaultShell, shellLoginArgs, shellRunCmdArgs } = require('../util/platf
 const {
   instances, spawnInWorktree, findLatestSessionId, snapshotSessionIds, describeInstanceSession, resolveSubSessionId,
   processSubOutput, clearIdleTimer, convertInstanceToShell,
-  sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler,
+  sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler, resetMirrorBinding,
 } = require('../state/instances');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
@@ -1468,10 +1468,7 @@ ipcMain.handle('restart-task', (_event, { id, cols, rows }) => {
   }
   inst.mode = restartMode;
   inst.spawnTime = Date.now();
-  // The restarted agent may be in a new session; let the mirror find it again.
-  inst.sessionStore = '';
-  inst.transcriptFile = '';
-  inst.transcriptCursor = 0;
+  resetMirrorBinding(inst);
 
   const args = shellRunCmdArgs(userShell, agentCmd);
   const ptyProc = pty.spawn(userShell, args, {
@@ -1520,8 +1517,8 @@ ipcMain.handle('set-notify-enabled', (_event, { id, enabled, kind }) => {
     // The screen stops being fed while the bell is off; a later read would quote it frozen.
     if (!enabled) {
       const transcript = require('../util/session-transcript');
-      transcript.forgetTask(id);
-      for (const sub of (inst.subTerminals || [])) if (sub.mirror) transcript.forgetTask(sub.mirror.id);
+      transcript.dropScreen(id);
+      for (const sub of (inst.subTerminals || [])) if (sub.mirror) transcript.dropScreen(sub.mirror.id);
     }
   } else inst.notifyEnabled = enabled;
   const config = loadConfig();

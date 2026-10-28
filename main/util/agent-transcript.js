@@ -153,6 +153,20 @@ function rolloutCwd(file) {
   } catch { return ''; }
 }
 
+// Cursor replaces its transcript on each rewrite, so callers pass its conversation directory instead.
+function bornMs(file) {
+  try { const st = fs.statSync(file); return st.birthtimeMs || st.ctimeMs; } catch { return 0; }
+}
+
+// A tab's new session is the first created after it started, since the newest written can be
+// a sibling's; with none created since, it resumed the newest written.
+function pickSession(candidates, sinceMs) {
+  if (!candidates.length) return '';
+  const fresh = sinceMs ? candidates.filter((c) => c.bornMs >= sinceMs) : [];
+  if (fresh.length) return fresh.reduce((a, b) => (b.bornMs < a.bornMs ? b : a)).file;
+  return candidates.reduce((a, b) => (b.mtimeMs > a.mtimeMs ? b : a)).file;
+}
+
 // ---- Copilot: ~/.copilot/session-state/<id>/events.jsonl ----
 
 function readCopilot({ transcriptFile, cursor, fromEnd, sinceMs }) {
@@ -175,13 +189,15 @@ function readCopilot({ transcriptFile, cursor, fromEnd, sinceMs }) {
 // Sessions are global, so this worktree's is the newest one whose recorded cwd
 // matches and that has been written to since the tab started.
 function findCopilotEvents(worktreePath, sinceMs, taken) {
+  const candidates = [];
   for (const s of listSessions(worktreePath)) {
     if (taken && taken.has(s.filePath)) continue;
     let st;
     try { st = fs.statSync(s.filePath); } catch { continue; }
-    if (!sinceMs || st.mtimeMs >= sinceMs) return s.filePath;
+    if (sinceMs && st.mtimeMs < sinceMs) continue;
+    candidates.push({ file: s.filePath, bornMs: st.birthtimeMs || st.ctimeMs, mtimeMs: st.mtimeMs });
   }
-  return '';
+  return pickSession(candidates, sinceMs);
 }
 
 // ---- Kimi Code: <session>/agents/main/wire.jsonl ----
@@ -215,16 +231,17 @@ function readKimi({ transcriptFile, cursor, fromEnd, sinceMs }) {
 function findKimiWire(worktreePath, sinceMs, taken) {
   let index;
   try { index = fs.readFileSync(path.join(kimiHome(), 'session_index.jsonl'), 'utf8'); } catch { return ''; }
-  const entries = parseLines(index.split('\n').filter(Boolean)).reverse();
-  for (const e of entries) {
+  const candidates = [];
+  for (const e of parseLines(index.split('\n').filter(Boolean))) {
     if (!e || typeof e.sessionDir !== 'string' || !samePath(e.workDir, worktreePath)) continue;
     const file = path.join(e.sessionDir, 'agents', 'main', 'wire.jsonl');
     if (taken && taken.has(file)) continue;
     let st;
     try { st = fs.statSync(file); } catch { continue; }
-    if (!sinceMs || st.mtimeMs >= sinceMs) return file;
+    if (sinceMs && st.mtimeMs < sinceMs) continue;
+    candidates.push({ file, bornMs: st.birthtimeMs || st.ctimeMs, mtimeMs: st.mtimeMs });
   }
-  return '';
+  return pickSession(candidates, sinceMs);
 }
 
 // ---- Gemini CLI: ~/.gemini/tmp/<project id>/chats/session-*.jsonl ----
@@ -241,30 +258,38 @@ function geminiText(content) {
 
 // A message is appended again under the same id when its tokens or tool calls
 // arrive, so a repeat of something already read is not new speech.
-function readGemini({ transcriptFile, cursor, fromEnd, sinceMs }) {
-  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
-  if (fromEnd) return endOf(transcriptFile);
-  const all = readAppendedLines(transcriptFile, 0);
-  if (!all) return null;
-  const from = typeof cursor === 'number' && cursor <= all.cursor ? cursor : 0;
+// file -> { offset, said: id -> text }, so a turn parses only what was appended.
+const geminiIndex = new Map();
 
-  const said = new Map();
+function readGemini({ transcriptFile, cursor, fromEnd, sinceMs }) {
+  let size;
+  try { size = fs.statSync(transcriptFile).size; } catch { return null; }
+  if (fromEnd) return { text: '', cursor: size };
+  const from = typeof cursor === 'number' && cursor <= size ? cursor : 0;
+  let index = geminiIndex.get(transcriptFile);
+  // Starting before what's indexed, or a shorter file, means re-indexing from the top.
+  if (!index || from < index.offset || size < index.offset) index = { offset: 0, said: new Map() };
+  const read = readAppendedLines(transcriptFile, index.offset);
+  if (!read) return null;
+
   const parts = [];
-  let offset = 0;
-  for (const line of all.lines) {
+  let offset = index.offset;
+  for (const line of read.lines) {
     const start = offset;
     offset += Buffer.byteLength(line, 'utf8') + 1;
     let rec;
     try { rec = JSON.parse(line); } catch { continue; }
     if (!rec || rec.type !== 'gemini' || !rec.id) continue;
     const text = geminiText(rec.content).trim();
-    if (!text || said.get(rec.id) === text) continue;
-    said.set(rec.id, text);
+    if (!text || index.said.get(rec.id) === text) continue;
+    index.said.set(rec.id, text);
     if (start < from) continue;
     if (sinceMs && rec.timestamp && Date.parse(rec.timestamp) < sinceMs) continue;
     parts.push(text);
   }
-  return { text: capFromEnd(parts.join('\n\n')), cursor: all.cursor };
+  index.offset = read.cursor;
+  geminiIndex.set(transcriptFile, index);
+  return { text: capFromEnd(parts.join('\n\n')), cursor: read.cursor };
 }
 
 function geminiProjectId(worktreePath) {
@@ -281,9 +306,9 @@ function findGeminiChat(worktreePath, sinceMs, taken) {
   const id = geminiProjectId(worktreePath);
   if (!id) return '';
   const dir = path.join(geminiHome(), 'tmp', id, 'chats');
-  let best = null;
   let names = [];
   try { names = fs.readdirSync(dir); } catch { return ''; }
+  const candidates = [];
   for (const name of names) {
     if (!name.startsWith('session-') || !name.endsWith('.jsonl')) continue;
     const file = path.join(dir, name);
@@ -291,9 +316,9 @@ function findGeminiChat(worktreePath, sinceMs, taken) {
     let st;
     try { st = fs.statSync(file); } catch { continue; }
     if (sinceMs && st.mtimeMs < sinceMs) continue;
-    if (!best || st.mtimeMs > best.mtimeMs) best = { file, mtimeMs: st.mtimeMs };
+    candidates.push({ file, bornMs: st.birthtimeMs || st.ctimeMs, mtimeMs: st.mtimeMs });
   }
-  return best ? best.file : '';
+  return pickSession(candidates, sinceMs);
 }
 
 // ---- Cursor: ~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl ----
@@ -307,9 +332,12 @@ function cursorProjectSlug(dir) {
 function readCursor({ transcriptFile, cursor, fromEnd }) {
   let raw;
   try { raw = fs.readFileSync(transcriptFile, 'utf8'); } catch { return null; }
-  const lines = raw.split('\n').filter(Boolean);
-  // A rewrite only ever extends the transcript; anything shorter is a fresh start.
-  const from = typeof cursor === 'number' && cursor <= lines.length ? cursor : 0;
+  // A rewrite caught halfway is shorter than what was read, or ends mid-line;
+  // either way the next poll gets the finished file.
+  const done = raw.slice(0, raw.lastIndexOf('\n') + 1);
+  const lines = done.split('\n').filter(Boolean);
+  const from = typeof cursor === 'number' ? cursor : 0;
+  if (lines.length < from) return { text: '', cursor: from };
   if (fromEnd) return { text: '', cursor: lines.length };
   const parts = [];
   for (const rec of parseLines(lines.slice(from))) {
@@ -329,16 +357,16 @@ function findCursorTranscript(worktreePath, sinceMs, taken) {
   const dir = path.join(home(), '.cursor', 'projects', cursorProjectSlug(path.resolve(worktreePath)), 'agent-transcripts');
   let ids = [];
   try { ids = fs.readdirSync(dir); } catch { return ''; }
-  let best = null;
+  const candidates = [];
   for (const id of ids) {
     const file = path.join(dir, id, `${id}.jsonl`);
     if (taken && taken.has(file)) continue;
     let st;
     try { st = fs.statSync(file); } catch { continue; }
     if (sinceMs && st.mtimeMs < sinceMs) continue;
-    if (!best || st.mtimeMs > best.mtimeMs) best = { file, mtimeMs: st.mtimeMs };
+    candidates.push({ file, bornMs: bornMs(path.dirname(file)), mtimeMs: st.mtimeMs });
   }
-  return best ? best.file : '';
+  return pickSession(candidates, sinceMs);
 }
 
 // ---- Cline: ~/.cline/data/sessions/<id>/<id>.messages.json ----
@@ -350,11 +378,14 @@ function clineSessionsDir() {
 }
 
 function readCline({ transcriptFile, cursor, fromEnd, sinceMs }) {
-  let doc;
-  try { doc = JSON.parse(fs.readFileSync(transcriptFile, 'utf8')); } catch { return null; }
-  const messages = (doc && Array.isArray(doc.messages)) ? doc.messages : null;
-  if (!messages) return null;
+  let raw;
+  try { raw = fs.readFileSync(transcriptFile, 'utf8'); } catch { return null; }
   const after = typeof cursor === 'number' ? cursor : 0;
+  let doc;
+  // A file caught mid-rewrite is nothing new yet; null would send the turn to the screen scrape.
+  try { doc = JSON.parse(raw); } catch { return { text: '', cursor: after }; }
+  const messages = (doc && Array.isArray(doc.messages)) ? doc.messages : null;
+  if (!messages) return { text: '', cursor: after };
   let last = after;
   const parts = [];
   for (const m of messages) {
@@ -371,20 +402,21 @@ function readCline({ transcriptFile, cursor, fromEnd, sinceMs }) {
 }
 
 function findClineSession(worktreePath, sinceMs, taken) {
-  let best = null;
   let ids = [];
   try { ids = fs.readdirSync(clineSessionsDir()); } catch { return ''; }
+  const candidates = [];
   for (const id of ids) {
     let meta;
     try { meta = JSON.parse(fs.readFileSync(path.join(clineSessionsDir(), id, `${id}.json`), 'utf8')); } catch { continue; }
     if (!meta || !(samePath(meta.workspace_root, worktreePath) || samePath(meta.cwd, worktreePath))) continue;
+    // Cline has no resume, so a session started before the tab is never this tab's.
     const started = Date.parse(meta.started_at || '') || 0;
     if (sinceMs && started < sinceMs) continue;
     const file = meta.messages_path || path.join(clineSessionsDir(), id, `${id}.messages.json`);
     if (taken && taken.has(file)) continue;
-    if (!best || started > best.started) best = { file, started };
+    candidates.push({ file, bornMs: started, mtimeMs: started });
   }
-  return best ? best.file : '';
+  return pickSession(candidates, sinceMs);
 }
 
 // ---- aider (the Ollama provider): <git root>/.aider.chat.history.md ----
@@ -392,8 +424,8 @@ function findClineSession(worktreePath, sinceMs, taken) {
 // Markdown, appended: `#### ` lines are the user, `> ` chunks are aider's own
 // output, and everything else is the model's reply, written once it's done.
 
-function readAider({ transcriptFile, cursor, fromEnd }) {
-  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+function readAider({ transcriptFile, cursor, fromEnd, worktreePath }) {
+  if (!transcriptFile || !aiderHistoryIsSafe(transcriptFile, worktreePath)) return null;
   if (fromEnd) return endOf(transcriptFile);
   // Blank lines are what tell the reply's own quotes from aider's output.
   const read = readAppendedLines(transcriptFile, cursor, { keepBlank: true });
@@ -426,12 +458,21 @@ function aiderQuoteEnd(lines, start) {
   return -1;
 }
 
+// The file lives in the checkout, so a branch can commit it as a symlink to
+// something outside the repo that keeps growing (shell history); that is never
+// read, and it's rechecked on every read in case it was swapped after binding.
+function aiderHistoryIsSafe(file, worktreePath) {
+  try {
+    if (!fs.lstatSync(file).isFile()) return false;
+    return !worktreePath || samePath(path.dirname(fs.realpathSync(file)), worktreePath);
+  } catch { return false; }
+}
+
 function findAiderHistory(worktreePath, sinceMs, taken) {
   const file = path.join(worktreePath || '', '.aider.chat.history.md');
   // Two aider tabs in one worktree write the same file and can't be told apart.
   if (!worktreePath || (taken && taken.has(file))) return '';
-  try { fs.statSync(file); } catch { return ''; }
-  return file;
+  return aiderHistoryIsSafe(file, worktreePath) ? file : '';
 }
 
 // ---- Antigravity: ~/.gemini/antigravity-cli/conversations/<id>.db ----
@@ -764,6 +805,8 @@ module.exports = {
   findClineSession,
   findCursorTranscript,
   cursorProjectSlug,
+  bornMs,
+  pickSession,
   findAiderHistory,
   findAntigravityConversation,
   findOpencodeSession,
