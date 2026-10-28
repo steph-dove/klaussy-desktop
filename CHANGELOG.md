@@ -2,6 +2,17 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.27.0
+
+### 🦉 Readable Agent Mirrors in Slack and Discord
+
+- **Mirrored Messages Read Like the Agent's Screen**: messages mirrored from an agent tab used to arrive as scraps of its redraws, with stray box borders, half lines and the same paragraph twice. Klaussy now renders the terminal the way you see it and posts only what's new each turn. Tables and tree listings keep their shape.
+- **Agents Mirrored From Their Own Transcripts**: Copilot, Kimi, Gemini, Cursor, Cline and Ollama (aider) replies come straight from each CLI's session file, markdown intact, the way Claude's already did. Each tab sticks to its own session, so a second agent in the same worktree doesn't post under its name.
+- **Repos With No Commits**: the Changes list and History tab work in a brand new repo, with an empty state where there's nothing yet.
+- **Quick Open**: shows a line while loading, when empty, or when nothing matches, picks up files created after it first opened, and hovering no longer steals the selection from the arrow keys.
+- **Sessions**: a Try again button when the sessions list fails to load.
+- **Fixes**: opening a file hides the History, Plan, Dev Loop and Notes panels. A partly staged file highlights only the row you clicked. The selected theme looks different from a hovered one. Dashboard cards highlight on keyboard focus. About only says Copied once the copy worked. Agents' Clear is disabled when there's nothing to clear.
+
 ## 0.26.0
 
 ### 🦉 AI Reviews That Look Like the Real Thing, and Cmd+Shift+T
