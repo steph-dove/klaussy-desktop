@@ -24,8 +24,8 @@ const claudeSay = (text) => ({ type: 'assistant', message: { content: [{ type: '
 test('providers without a readable store fall back', () => {
   assert.equal(t.hasReader('claude'), true);
   assert.equal(t.hasReader('codex'), true);
-  assert.equal(t.hasReader('ollama'), false);
-  assert.equal(t.readNewMessages('ollama', {}), null);
+  assert.equal(t.hasReader('nemesis8'), false);
+  assert.equal(t.readNewMessages('nemesis8', {}), null);
 });
 
 test('codex: assistant turns are read, other roles are not', () => {
@@ -456,4 +456,137 @@ test('gemini: the chat is found through the project registry', () => {
   } finally {
     if (prev === undefined) delete process.env.GEMINI_CLI_HOME; else process.env.GEMINI_CLI_HOME = prev;
   }
+});
+
+// Shapes follow the cline CLI's sessions/<id>/<id>.messages.json.
+test('cline: reply text is read, thinking and tool calls are not, and the cursor moves on', () => {
+  const doc = (messages) => ({ version: 1, sessionId: 's', messages });
+  const file = tmpFile('s.messages.json', []);
+  const first = [
+    { id: 'u1', role: 'user', content: [{ type: 'text', text: 'run the tests' }], ts: 100 },
+    { id: 'a1', role: 'assistant', ts: 200, content: [
+      { type: 'thinking', thinking: 'I should run npm test' },
+      { type: 'tool_use', name: 'bash', input: { command: 'npm test' } },
+      { type: 'text', text: 'All 40 tests pass.' },
+    ] },
+  ];
+  fs.writeFileSync(file, JSON.stringify(doc(first)));
+  const r = t.readNewMessages('cline', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'All 40 tests pass.');
+  // The whole file is rewritten on each save.
+  fs.writeFileSync(file, JSON.stringify(doc([...first, { id: 'a2', role: 'assistant', ts: 300, content: [{ type: 'text', text: 'Done.' }] }])));
+  assert.equal(t.readNewMessages('cline', { transcriptFile: file, cursor: r.cursor }).text, 'Done.');
+  assert.equal(t.readNewMessages('cline', { transcriptFile: file, cursor: 0, fromEnd: true }).text, '', 'adopting a session posts nothing');
+});
+
+test('cline: the session is found by its workspace and start time', () => {
+  const prevHome = process.env.HOME;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-cline-home-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-'));
+  const mk = (id, root, started) => {
+    const dir = path.join(home, '.cline', 'data', 'sessions', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({ session_id: id, cwd: root, workspace_root: root, started_at: started }));
+    return path.join(dir, `${id}.messages.json`);
+  };
+  mk('old', worktree, '2026-01-01T00:00:00.000Z');
+  mk('elsewhere', '/somewhere/else', '2026-06-02T00:00:00.000Z');
+  const mine = mk('mine', worktree, '2026-06-01T00:00:00.000Z');
+  process.env.HOME = home;
+  try {
+    assert.equal(t.findClineSession(worktree, Date.parse('2026-05-01')), mine);
+    assert.equal(t.findClineSession(worktree, Date.parse('2026-05-01'), new Set([mine])), '');
+  } finally { process.env.HOME = prevHome; }
+});
+
+// Written by aider 0.86.2's own InputOutput (user_input, tool_output, tool_error, ai_output).
+const AIDER_HISTORY = [
+  '',
+  '# aider chat started at 2026-10-27 20:32:50',
+  '',
+  '> Aider v0.86.2  ',
+  '> Model: ollama/qwen2.5-coder:7b with whole edit format  ',
+  '',
+  '#### what is a git worktree?  ',
+  '#### keep it short  ',
+  '',
+  'A **git worktree** is a second checkout of the same repo.',
+  '',
+  '> It shares history with the main one.',
+  '',
+  'Use `git worktree add`.',
+  '',
+  '> Tokens: 1.2k sent, 40 received.  ',
+  '> Cost: $0.00  ',
+  '',
+  '#### thanks  ',
+  '',
+  'You are welcome.',
+  '',
+  '',
+].join('\n');
+
+test('ollama (aider): the reply is read, prompts and aider output are not', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-aider-'));
+  const file = path.join(dir, '.aider.chat.history.md');
+  fs.writeFileSync(file, AIDER_HISTORY);
+  const r = t.readNewMessages('ollama', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'A **git worktree** is a second checkout of the same repo.\n\n> It shares history with the main one.\n\nUse `git worktree add`.\n\nYou are welcome.');
+  fs.appendFileSync(file, '#### and a branch?  \n\nOne branch per worktree.\n\n');
+  assert.equal(t.readNewMessages('ollama', { transcriptFile: file, cursor: r.cursor }).text, 'One branch per worktree.');
+});
+
+test('ollama (aider): a multi-line tool message is aider talking, not the model', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-aider-'));
+  const file = path.join(dir, '.aider.chat.history.md');
+  fs.writeFileSync(file, '> Applied edit to\nsrc/a.js  \n\nEdited the file.\n\n');
+  assert.equal(t.readNewMessages('ollama', { transcriptFile: file, cursor: 0 }).text, 'Edited the file.');
+});
+
+test('ollama (aider): the history file is found at the worktree root, once', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-aider-'));
+  assert.equal(t.findAiderHistory(dir, 0), '', 'no history yet');
+  const file = path.join(dir, '.aider.chat.history.md');
+  fs.writeFileSync(file, '');
+  assert.equal(t.findAiderHistory(dir, 0), file);
+  assert.equal(t.findAiderHistory(dir, 0, new Set([file])), '', 'a second aider tab writes the same file');
+});
+
+// Shapes follow cursor-agent 2026.06's agent-transcripts JSONL.
+const cursorSay = (...content) => ({ role: 'assistant', message: { content } });
+
+test('cursor: reply text is read, tool calls and redacted reasoning are not', () => {
+  const file = tmpFile('a.jsonl', [
+    { role: 'user', message: { content: [{ type: 'text', text: '<user_query>\nadd a cli\n</user_query>' }] } },
+    cursorSay({ type: 'text', text: '[REDACTED]' }, { type: 'tool_use', name: 'Read', input: {} }),
+    cursorSay({ type: 'text', text: 'Verifying it runs:\n\n[REDACTED]' }, { type: 'tool_use', name: 'Shell', input: {} }),
+    cursorSay({ type: 'text', text: 'The CLI is in place.' }),
+  ]);
+  const r = t.readNewMessages('cursor', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'Verifying it runs:\n\nThe CLI is in place.');
+  assert.equal(r.cursor, 4);
+});
+
+test('cursor: a checkpoint rewrite only posts the lines it added', () => {
+  const first = [cursorSay({ type: 'text', text: 'One.' })];
+  const file = tmpFile('a.jsonl', first);
+  const r = t.readNewMessages('cursor', { transcriptFile: file, cursor: 0 });
+  fs.writeFileSync(file, [...first, cursorSay({ type: 'text', text: 'Two.' })].map((l) => JSON.stringify(l)).join('\n') + '\n');
+  assert.equal(t.readNewMessages('cursor', { transcriptFile: file, cursor: r.cursor }).text, 'Two.');
+});
+
+test('cursor: the transcript is found under the slugged workspace path', () => {
+  assert.equal(t.cursorProjectSlug('/Users/me/Projects/cursor-prep'), 'Users-me-Projects-cursor-prep');
+  const prevHome = process.env.HOME;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-cursor-home-'));
+  const worktree = '/work/my repo';
+  const dir = path.join(home, '.cursor', 'projects', 'work-my-repo', 'agent-transcripts', 'abc');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'abc.jsonl');
+  fs.writeFileSync(file, '');
+  process.env.HOME = home;
+  try {
+    assert.equal(t.findCursorTranscript(worktree, 0), file);
+    assert.equal(t.findCursorTranscript(worktree, 0, new Set([file])), '');
+  } finally { process.env.HOME = prevHome; }
 });

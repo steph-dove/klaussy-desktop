@@ -22,7 +22,7 @@ function home() {
   return process.env.HOME || os.homedir();
 }
 
-function readAppendedLines(file, cursor) {
+function readAppendedLines(file, cursor, { keepBlank = false } = {}) {
   let stat;
   try { stat = fs.statSync(file); } catch { return null; }
   // A rewritten (shorter) file means a different session — start over.
@@ -41,7 +41,7 @@ function readAppendedLines(file, cursor) {
   const lastNl = text.lastIndexOf('\n');
   if (lastNl === -1) return { lines: [], cursor: from };
   return {
-    lines: text.slice(0, lastNl).split('\n').filter(Boolean),
+    lines: keepBlank ? text.slice(0, lastNl).split('\n') : text.slice(0, lastNl).split('\n').filter(Boolean),
     cursor: from + Buffer.byteLength(text.slice(0, lastNl + 1), 'utf8'),
   };
 }
@@ -294,6 +294,140 @@ function findGeminiChat(worktreePath, sinceMs, taken) {
     if (!best || st.mtimeMs > best.mtimeMs) best = { file, mtimeMs: st.mtimeMs };
   }
   return best ? best.file : '';
+}
+
+// ---- Cursor: ~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl ----
+//
+// Rewritten whole on every checkpoint, so the cursor is a line count.
+
+function cursorProjectSlug(dir) {
+  return String(dir).replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function readCursor({ transcriptFile, cursor, fromEnd }) {
+  let raw;
+  try { raw = fs.readFileSync(transcriptFile, 'utf8'); } catch { return null; }
+  const lines = raw.split('\n').filter(Boolean);
+  // A rewrite only ever extends the transcript; anything shorter is a fresh start.
+  const from = typeof cursor === 'number' && cursor <= lines.length ? cursor : 0;
+  if (fromEnd) return { text: '', cursor: lines.length };
+  const parts = [];
+  for (const rec of parseLines(lines.slice(from))) {
+    if (rec.role !== 'assistant' || !rec.message) continue;
+    for (const part of rec.message.content || []) {
+      if (!part || part.type !== 'text' || typeof part.text !== 'string') continue;
+      // Reasoning is stored as a [REDACTED] marker, sometimes after real text.
+      const text = part.text.replace(/\[REDACTED\]/g, '').trim();
+      if (text) parts.push(text);
+    }
+  }
+  return { text: capFromEnd(parts.join('\n\n')), cursor: lines.length };
+}
+
+function findCursorTranscript(worktreePath, sinceMs, taken) {
+  if (!worktreePath) return '';
+  const dir = path.join(home(), '.cursor', 'projects', cursorProjectSlug(path.resolve(worktreePath)), 'agent-transcripts');
+  let ids = [];
+  try { ids = fs.readdirSync(dir); } catch { return ''; }
+  let best = null;
+  for (const id of ids) {
+    const file = path.join(dir, id, `${id}.jsonl`);
+    if (taken && taken.has(file)) continue;
+    let st;
+    try { st = fs.statSync(file); } catch { continue; }
+    if (sinceMs && st.mtimeMs < sinceMs) continue;
+    if (!best || st.mtimeMs > best.mtimeMs) best = { file, mtimeMs: st.mtimeMs };
+  }
+  return best ? best.file : '';
+}
+
+// ---- Cline: ~/.cline/data/sessions/<id>/<id>.messages.json ----
+//
+// The file is rewritten whole, so the cursor is the newest message time read.
+
+function clineSessionsDir() {
+  return path.join(home(), '.cline', 'data', 'sessions');
+}
+
+function readCline({ transcriptFile, cursor, fromEnd, sinceMs }) {
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(transcriptFile, 'utf8')); } catch { return null; }
+  const messages = (doc && Array.isArray(doc.messages)) ? doc.messages : null;
+  if (!messages) return null;
+  const after = typeof cursor === 'number' ? cursor : 0;
+  let last = after;
+  const parts = [];
+  for (const m of messages) {
+    const ts = typeof m.ts === 'number' ? m.ts : 0;
+    if (ts > last) last = ts;
+    if (fromEnd || m.role !== 'assistant' || ts <= after) continue;
+    if (sinceMs && ts < sinceMs) continue;
+    for (const part of m.content || []) {
+      // thinking is the model's scratchpad and tool_use is a call, not speech.
+      if (part && part.type === 'text' && typeof part.text === 'string' && part.text.trim()) parts.push(part.text.trim());
+    }
+  }
+  return { text: capFromEnd(parts.join('\n\n')), cursor: last };
+}
+
+function findClineSession(worktreePath, sinceMs, taken) {
+  let best = null;
+  let ids = [];
+  try { ids = fs.readdirSync(clineSessionsDir()); } catch { return ''; }
+  for (const id of ids) {
+    let meta;
+    try { meta = JSON.parse(fs.readFileSync(path.join(clineSessionsDir(), id, `${id}.json`), 'utf8')); } catch { continue; }
+    if (!meta || !(samePath(meta.workspace_root, worktreePath) || samePath(meta.cwd, worktreePath))) continue;
+    const started = Date.parse(meta.started_at || '') || 0;
+    if (sinceMs && started < sinceMs) continue;
+    const file = meta.messages_path || path.join(clineSessionsDir(), id, `${id}.messages.json`);
+    if (taken && taken.has(file)) continue;
+    if (!best || started > best.started) best = { file, started };
+  }
+  return best ? best.file : '';
+}
+
+// ---- aider (the Ollama provider): <git root>/.aider.chat.history.md ----
+//
+// Markdown, appended: `#### ` lines are the user, `> ` chunks are aider's own
+// output, and everything else is the model's reply, written once it's done.
+
+function readAider({ transcriptFile, cursor, fromEnd }) {
+  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+  if (fromEnd) return endOf(transcriptFile);
+  // Blank lines are what tell the reply's own quotes from aider's output.
+  const read = readAppendedLines(transcriptFile, cursor, { keepBlank: true });
+  if (!read) return null;
+
+  const lines = read.lines;
+  const kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('#### ') || line.startsWith('# aider chat started at ')) { kept.push(''); continue; }
+    if (line.startsWith('> ')) {
+      const end = aiderQuoteEnd(lines, i);
+      if (end !== -1) { i = end; continue; }
+    }
+    kept.push(line);
+  }
+  const text = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: capFromEnd(text), cursor: read.cursor };
+}
+
+// aider's own output ends on a hard break (two trailing spaces) before any blank line; a quote in the model's reply never does.
+function aiderQuoteEnd(lines, start) {
+  for (let j = start; j < lines.length && lines[j] !== ''; j++) {
+    if (lines[j].endsWith('  ')) return j;
+  }
+  return -1;
+}
+
+function findAiderHistory(worktreePath, sinceMs, taken) {
+  const file = path.join(worktreePath || '', '.aider.chat.history.md');
+  // Two aider tabs in one worktree write the same file and can't be told apart.
+  if (!worktreePath || (taken && taken.has(file))) return '';
+  try { fs.statSync(file); } catch { return ''; }
+  return file;
 }
 
 // ---- Antigravity: ~/.gemini/antigravity-cli/conversations/<id>.db ----
@@ -595,7 +729,7 @@ function readOpencode({ transcriptFile, cursor, fromEnd }) {
 
 const READERS = {
   claude: readClaude, codex: readCodex, antigravity: readAntigravity, opencode: readOpencode,
-  copilot: readCopilot, kimi: readKimi, gemini: readGemini,
+  copilot: readCopilot, kimi: readKimi, gemini: readGemini, cline: readCline, ollama: readAider, cursor: readCursor,
 };
 
 function hasReader(providerId) {
@@ -623,6 +757,10 @@ module.exports = {
   findCopilotEvents,
   findKimiWire,
   findGeminiChat,
+  findClineSession,
+  findCursorTranscript,
+  cursorProjectSlug,
+  findAiderHistory,
   findAntigravityConversation,
   findOpencodeSession,
   opencodeSource,

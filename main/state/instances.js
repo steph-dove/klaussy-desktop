@@ -388,6 +388,9 @@ const SESSION_FINDERS = {
   copilot: (inst) => agentTranscript.findCopilotEvents(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
   kimi: (inst) => agentTranscript.findKimiWire(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
   gemini: (inst) => agentTranscript.findGeminiChat(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
+  cline: (inst) => agentTranscript.findClineSession(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
+  ollama: (inst) => agentTranscript.findAiderHistory(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
+  cursor: (inst) => agentTranscript.findCursorTranscript(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
 };
 
 // Which file this session's speech is read from, resolved fresh each poll: a
