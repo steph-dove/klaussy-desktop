@@ -371,17 +371,24 @@ function bindAgyConversation(inst) {
   inst.agyConversation = found.file;
 }
 
-// Two Copilot tabs in one worktree would otherwise both bind the newest session.
-function copilotFilesTaken(self) {
+// Two tabs of one agent in a worktree would otherwise both bind its newest session.
+function transcriptsTaken(self) {
   const taken = new Set();
   for (const other of instances.values()) {
-    if (other !== self && other.copilotEvents) taken.add(other.copilotEvents);
+    if (other !== self && other.transcriptFile) taken.add(other.transcriptFile);
     for (const sub of (other.subTerminals || [])) {
-      if (sub.mirror && sub.mirror !== self && sub.mirror.copilotEvents) taken.add(sub.mirror.copilotEvents);
+      if (sub.mirror && sub.mirror !== self && sub.mirror.transcriptFile) taken.add(sub.mirror.transcriptFile);
     }
   }
   return taken;
 }
+
+// Agents whose session store is found by worktree, newest first.
+const SESSION_FINDERS = {
+  copilot: (inst) => agentTranscript.findCopilotEvents(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
+  kimi: (inst) => agentTranscript.findKimiWire(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
+  gemini: (inst) => agentTranscript.findGeminiChat(inst.worktreePath, inst.spawnTime, transcriptsTaken(inst)),
+};
 
 // Which file this session's speech is read from, resolved fresh each poll: a
 // session id can arrive late, and Antigravity only names its conversation once
@@ -403,11 +410,9 @@ function transcriptFileFor(inst, providerId) {
     }
     return inst.codexRollout;
   }
-  if (providerId === 'copilot') {
-    if (!inst.copilotEvents) {
-      inst.copilotEvents = agentTranscript.findCopilotEvents(inst.worktreePath, inst.spawnTime, copilotFilesTaken(inst));
-    }
-    return inst.copilotEvents;
+  if (SESSION_FINDERS[providerId]) {
+    if (!inst.sessionStore) inst.sessionStore = SESSION_FINDERS[providerId](inst);
+    return inst.sessionStore;
   }
   if (providerId === 'antigravity') {
     bindAgyConversation(inst);
@@ -485,7 +490,8 @@ function processSubOutput(inst, sub, data) {
 
   if (sub.turnTimer) clearTimeout(sub.turnTimer);
   sub.turnTimer = setTimeout(() => {
-    if (!sub.alive) return;
+    // The bell can go off while this is pending, and that drops the screen it would read.
+    if (!sub.alive || inst.notifyWebhookEnabled !== true) return;
     try {
       const body = newAgentSpeech(target);
       if (!body) return;

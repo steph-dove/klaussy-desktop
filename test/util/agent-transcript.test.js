@@ -24,8 +24,8 @@ const claudeSay = (text) => ({ type: 'assistant', message: { content: [{ type: '
 test('providers without a readable store fall back', () => {
   assert.equal(t.hasReader('claude'), true);
   assert.equal(t.hasReader('codex'), true);
-  assert.equal(t.hasReader('gemini'), false);
-  assert.equal(t.readNewMessages('gemini', {}), null);
+  assert.equal(t.hasReader('ollama'), false);
+  assert.equal(t.readNewMessages('ollama', {}), null);
 });
 
 test('codex: assistant turns are read, other roles are not', () => {
@@ -362,4 +362,98 @@ test('copilot: a session another tab already reads is not bound again', () => {
     assert.equal(t.findCopilotEvents(worktree, 0), newer);
     assert.equal(t.findCopilotEvents(worktree, 0, new Set([newer])), older);
   } finally { process.env.HOME = prevHome; }
+});
+
+// Record shapes follow kimi-code 0.29.1's durable wire events.
+const kimiPart = (part, time) => ({
+  type: 'context.append_loop_event', agentId: 'main', time,
+  event: { type: 'content.part', stepUuid: 's1', part },
+});
+
+test('kimi: reply text is read, reasoning and tool traffic are not', () => {
+  const file = tmpFile('wire.jsonl', [
+    { type: 'metadata', protocol_version: '1.5', created_at: 1 },
+    { type: 'context.append_message', agentId: 'main', message: { role: 'user', content: [{ type: 'text', text: 'what is a worktree?' }] } },
+    kimiPart({ type: 'think', think: 'the user wants a definition' }),
+    { type: 'context.append_loop_event', agentId: 'main', event: { type: 'tool.call', toolCallId: 't1', name: 'Bash' } },
+    kimiPart({ type: 'text', text: 'A second checkout of the same repo.' }),
+  ]);
+  const r = t.readNewMessages('kimi', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'A second checkout of the same repo.');
+  appendLine(file, kimiPart({ type: 'text', text: 'Anything else?' }));
+  assert.equal(t.readNewMessages('kimi', { transcriptFile: file, cursor: r.cursor }).text, 'Anything else?');
+});
+
+test('kimi: a resumed session skips what the earlier run said', () => {
+  const file = tmpFile('wire.jsonl', [
+    kimiPart({ type: 'text', text: 'From last week.' }, 1000),
+    kimiPart({ type: 'text', text: 'From this run.' }, 5000),
+  ]);
+  assert.equal(t.readNewMessages('kimi', { transcriptFile: file, cursor: 0, sinceMs: 2000 }).text, 'From this run.');
+});
+
+test('kimi: the session is found through the index by workdir', () => {
+  const kimiHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-kimi-home-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-'));
+  const mk = (id, workDir) => {
+    const sessionDir = path.join(kimiHome, 'sessions', 'wd_x', id);
+    fs.mkdirSync(path.join(sessionDir, 'agents', 'main'), { recursive: true });
+    fs.writeFileSync(path.join(sessionDir, 'agents', 'main', 'wire.jsonl'), '');
+    fs.appendFileSync(path.join(kimiHome, 'session_index.jsonl'), JSON.stringify({ sessionId: id, sessionDir, workDir }) + '\n');
+    return path.join(sessionDir, 'agents', 'main', 'wire.jsonl');
+  };
+  const older = mk('session_a', worktree);
+  mk('session_b', '/somewhere/else');
+  const newer = mk('session_c', worktree);
+  const prev = process.env.KIMI_CODE_HOME;
+  process.env.KIMI_CODE_HOME = kimiHome;
+  try {
+    assert.equal(t.findKimiWire(worktree, 0), newer);
+    assert.equal(t.findKimiWire(worktree, 0, new Set([newer])), older);
+  } finally {
+    if (prev === undefined) delete process.env.KIMI_CODE_HOME; else process.env.KIMI_CODE_HOME = prev;
+  }
+});
+
+// Record shapes follow gemini-cli 0.47's ChatRecordingService.
+const geminiSay = (id, content, timestamp) => ({ id, type: 'gemini', content, timestamp });
+
+test('gemini: replies are read, prompts and empty tool turns are not', () => {
+  const file = tmpFile('session-x.jsonl', [
+    { sessionId: 's', projectHash: 'h', startTime: '2026-06-01T00:00:00.000Z' },
+    { id: 'u1', type: 'user', content: [{ text: 'what is a worktree?' }] },
+    geminiSay('g0', ''),
+    geminiSay('g1', 'A second checkout of the same repo.'),
+    { $set: { lastUpdated: '2026-06-01T00:00:01.000Z' } },
+  ]);
+  const r = t.readNewMessages('gemini', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'A second checkout of the same repo.');
+});
+
+test('gemini: a message re-appended with its token counts is not posted twice', () => {
+  const file = tmpFile('session-x.jsonl', [geminiSay('g1', 'Done.')]);
+  const r = t.readNewMessages('gemini', { transcriptFile: file, cursor: 0 });
+  assert.equal(r.text, 'Done.');
+  appendLine(file, { ...geminiSay('g1', 'Done.'), tokens: { total: 12 } });
+  appendLine(file, geminiSay('g2', 'Next answer.'));
+  assert.equal(t.readNewMessages('gemini', { transcriptFile: file, cursor: r.cursor }).text, 'Next answer.');
+});
+
+test('gemini: the chat is found through the project registry', () => {
+  const gHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-gemini-home-'));
+  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-'));
+  const chats = path.join(gHome, '.gemini', 'tmp', 'my-proj', 'chats');
+  fs.mkdirSync(chats, { recursive: true });
+  fs.writeFileSync(path.join(gHome, '.gemini', 'projects.json'), JSON.stringify({ projects: { [worktree]: 'my-proj' } }));
+  const chat = path.join(chats, 'session-2026-06-01T00-00-abcd1234.jsonl');
+  fs.writeFileSync(chat, '');
+  const prev = process.env.GEMINI_CLI_HOME;
+  process.env.GEMINI_CLI_HOME = gHome;
+  try {
+    assert.equal(t.findGeminiChat(worktree, 0), chat);
+    assert.equal(t.findGeminiChat(worktree, 0, new Set([chat])), '');
+    assert.equal(t.findGeminiChat('/not/a/project', 0), '');
+  } finally {
+    if (prev === undefined) delete process.env.GEMINI_CLI_HOME; else process.env.GEMINI_CLI_HOME = prev;
+  }
 });

@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const { claudeProjectDir } = require('./claude-paths');
 const { stringsAt, scan } = require('./protobuf-scan');
 const { listSessions } = require('./copilot-sessions');
+const { samePath } = require('./platform');
 
 // Enough for a chat message; the caller trims further for platform limits.
 const MAX_TEXT = 4000;
@@ -181,6 +182,118 @@ function findCopilotEvents(worktreePath, sinceMs, taken) {
     if (!sinceMs || st.mtimeMs >= sinceMs) return s.filePath;
   }
   return '';
+}
+
+// ---- Kimi Code: <session>/agents/main/wire.jsonl ----
+
+function kimiHome() {
+  const override = process.env.KIMI_CODE_HOME;
+  return (override && override.trim()) || path.join(home(), '.kimi-code');
+}
+
+// A reply lands as content.part loop events once its step completes; `think`
+// parts are the model's reasoning, not something it said.
+function readKimi({ transcriptFile, cursor, fromEnd, sinceMs }) {
+  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+  if (fromEnd) return endOf(transcriptFile);
+  const read = readAppendedLines(transcriptFile, cursor);
+  if (!read) return null;
+
+  const parts = [];
+  for (const rec of parseLines(read.lines)) {
+    if (rec.type !== 'context.append_loop_event') continue;
+    if (sinceMs && typeof rec.time === 'number' && rec.time < sinceMs) continue;
+    const ev = rec.event || {};
+    if (ev.type !== 'content.part' || !ev.part || ev.part.type !== 'text') continue;
+    const text = ev.part.text;
+    if (typeof text === 'string' && text.trim()) parts.push(text.trim());
+  }
+  return { text: capFromEnd(parts.join('\n\n')), cursor: read.cursor };
+}
+
+// session_index.jsonl is an append log, so the newest session for a workdir is last.
+function findKimiWire(worktreePath, sinceMs, taken) {
+  let index;
+  try { index = fs.readFileSync(path.join(kimiHome(), 'session_index.jsonl'), 'utf8'); } catch { return ''; }
+  const entries = parseLines(index.split('\n').filter(Boolean)).reverse();
+  for (const e of entries) {
+    if (!e || typeof e.sessionDir !== 'string' || !samePath(e.workDir, worktreePath)) continue;
+    const file = path.join(e.sessionDir, 'agents', 'main', 'wire.jsonl');
+    if (taken && taken.has(file)) continue;
+    let st;
+    try { st = fs.statSync(file); } catch { continue; }
+    if (!sinceMs || st.mtimeMs >= sinceMs) return file;
+  }
+  return '';
+}
+
+// ---- Gemini CLI: ~/.gemini/tmp/<project id>/chats/session-*.jsonl ----
+
+function geminiHome() {
+  return path.join(process.env.GEMINI_CLI_HOME || home(), '.gemini');
+}
+
+function geminiText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.filter((p) => p && typeof p.text === 'string' && !p.thought).map((p) => p.text).join('');
+}
+
+// A message is appended again under the same id when its tokens or tool calls
+// arrive, so a repeat of something already read is not new speech.
+function readGemini({ transcriptFile, cursor, fromEnd, sinceMs }) {
+  if (!transcriptFile || !fs.existsSync(transcriptFile)) return null;
+  if (fromEnd) return endOf(transcriptFile);
+  const all = readAppendedLines(transcriptFile, 0);
+  if (!all) return null;
+  const from = typeof cursor === 'number' && cursor <= all.cursor ? cursor : 0;
+
+  const said = new Map();
+  const parts = [];
+  let offset = 0;
+  for (const line of all.lines) {
+    const start = offset;
+    offset += Buffer.byteLength(line, 'utf8') + 1;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    if (!rec || rec.type !== 'gemini' || !rec.id) continue;
+    const text = geminiText(rec.content).trim();
+    if (!text || said.get(rec.id) === text) continue;
+    said.set(rec.id, text);
+    if (start < from) continue;
+    if (sinceMs && rec.timestamp && Date.parse(rec.timestamp) < sinceMs) continue;
+    parts.push(text);
+  }
+  return { text: capFromEnd(parts.join('\n\n')), cursor: all.cursor };
+}
+
+function geminiProjectId(worktreePath) {
+  let registry;
+  try { registry = JSON.parse(fs.readFileSync(path.join(geminiHome(), 'projects.json'), 'utf8')); } catch { return ''; }
+  const projects = (registry && registry.projects) || {};
+  for (const [root, id] of Object.entries(projects)) {
+    if (samePath(root, worktreePath)) return id;
+  }
+  return '';
+}
+
+function findGeminiChat(worktreePath, sinceMs, taken) {
+  const id = geminiProjectId(worktreePath);
+  if (!id) return '';
+  const dir = path.join(geminiHome(), 'tmp', id, 'chats');
+  let best = null;
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch { return ''; }
+  for (const name of names) {
+    if (!name.startsWith('session-') || !name.endsWith('.jsonl')) continue;
+    const file = path.join(dir, name);
+    if (taken && taken.has(file)) continue;
+    let st;
+    try { st = fs.statSync(file); } catch { continue; }
+    if (sinceMs && st.mtimeMs < sinceMs) continue;
+    if (!best || st.mtimeMs > best.mtimeMs) best = { file, mtimeMs: st.mtimeMs };
+  }
+  return best ? best.file : '';
 }
 
 // ---- Antigravity: ~/.gemini/antigravity-cli/conversations/<id>.db ----
@@ -482,7 +595,7 @@ function readOpencode({ transcriptFile, cursor, fromEnd }) {
 
 const READERS = {
   claude: readClaude, codex: readCodex, antigravity: readAntigravity, opencode: readOpencode,
-  copilot: readCopilot,
+  copilot: readCopilot, kimi: readKimi, gemini: readGemini,
 };
 
 function hasReader(providerId) {
@@ -508,6 +621,8 @@ module.exports = {
   claudeTranscriptPath,
   findCodexRollout,
   findCopilotEvents,
+  findKimiWire,
+  findGeminiChat,
   findAntigravityConversation,
   findOpencodeSession,
   opencodeSource,
