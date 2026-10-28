@@ -405,6 +405,10 @@ test('kimi: the session is found through the index by workdir', () => {
   const older = mk('session_a', worktree);
   mk('session_b', '/somewhere/else');
   const newer = mk('session_c', worktree);
+  // Same mtime on both, as on a fast filesystem: index order has to decide.
+  const when = new Date('2026-06-01T00:00:00Z');
+  fs.utimesSync(older, when, when);
+  fs.utimesSync(newer, when, when);
   const prev = process.env.KIMI_CODE_HOME;
   process.env.KIMI_CODE_HOME = kimiHome;
   try {

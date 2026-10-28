@@ -196,7 +196,8 @@ function findCopilotEvents(worktreePath, sinceMs, taken) {
     let st;
     try { st = fs.statSync(s.filePath); } catch { continue; }
     if (sinceMs && st.mtimeMs < sinceMs) continue;
-    candidates.push({ file: s.filePath, bornMs: st.birthtimeMs || st.ctimeMs, mtimeMs: st.mtimeMs });
+    // Copilot's own updated_at, not the file's mtime, which can tie between sessions.
+    candidates.push({ file: s.filePath, bornMs: st.birthtimeMs || st.ctimeMs, mtimeMs: s.updated || st.mtimeMs });
   }
   return pickSession(candidates, sinceMs);
 }
