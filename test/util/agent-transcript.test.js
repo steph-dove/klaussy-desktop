@@ -640,3 +640,7 @@ test('ollama (aider): a history file that is a symlink out of the worktree is ne
   assert.equal(t.findAiderHistory(dir, 0), '');
   assert.equal(t.readNewMessages('ollama', { transcriptFile: path.join(dir, '.aider.chat.history.md'), cursor: 0, worktreePath: dir }), null);
 });
+
+test('sessions written in the same millisecond go to the later one', () => {
+  assert.equal(t.pickSession([{ file: 'first', bornMs: 1, mtimeMs: 5 }, { file: 'second', bornMs: 1, mtimeMs: 5 }], 0), 'second');
+});

@@ -164,7 +164,8 @@ function pickSession(candidates, sinceMs) {
   if (!candidates.length) return '';
   const fresh = sinceMs ? candidates.filter((c) => c.bornMs >= sinceMs) : [];
   if (fresh.length) return fresh.reduce((a, b) => (b.bornMs < a.bornMs ? b : a)).file;
-  return candidates.reduce((a, b) => (b.mtimeMs > a.mtimeMs ? b : a)).file;
+  // Ties go to the later candidate: finders list sessions oldest first where they can.
+  return candidates.reduce((a, b) => (b.mtimeMs >= a.mtimeMs ? b : a)).file;
 }
 
 // ---- Copilot: ~/.copilot/session-state/<id>/events.jsonl ----
