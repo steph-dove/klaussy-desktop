@@ -25,6 +25,7 @@ const {
 const { getProvider, allProviders, binFor } = require('../state/ai-providers');
 const { startAutoFetch, startCIPolling, stopCIPolling } = require('../state/ci-poll');
 const { startPrMonitor } = require('../state/pr-monitor');
+const { runHeadless } = require('../state/session-handoff');
 const prReviewModule = require('../state/pr-review');
 require('../ipc/tasks');
 const { installAppMenu } = require('./menu');
@@ -117,6 +118,8 @@ function install() {
     isQuitting: () => isQuitting,
     startCIPolling,
     stopCIPolling,
+    // Mirrored turns are condensed by the same local-first model handoffs use.
+    summarize: runHeadless,
   });
 
   // Closing a window while others stay open: kill the tasks only that window

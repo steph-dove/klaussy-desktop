@@ -33,6 +33,7 @@ const { isChromeOnly } = require('../util/terminal-excerpt');
 const { takeNewOutput, feedScreen, screenText, forgetTask: forgetTranscript } = require('../util/session-transcript');
 const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const agentTranscript = require('../util/agent-transcript');
+const { condenseTurn } = require('../util/turn-summary');
 
 const instances = new Map(); // id -> { name, worktreePath, pty, branch }
 let nextId = 1;
@@ -40,11 +41,13 @@ let nextId = 1;
 let _isQuitting = () => false;
 let _startCIPolling = () => {};
 let _stopCIPolling = () => {};
+let _summarize = null;
 
-function setDeps({ isQuitting, startCIPolling, stopCIPolling } = {}) {
+function setDeps({ isQuitting, startCIPolling, stopCIPolling, summarize } = {}) {
   if (isQuitting) _isQuitting = isQuitting;
   if (startCIPolling) _startCIPolling = startCIPolling;
   if (stopCIPolling) _stopCIPolling = stopCIPolling;
+  if (summarize) _summarize = summarize;
 }
 
 // Subscription-based PTY broadcast. Previously every onData chunk was sent to
@@ -530,8 +533,7 @@ function processSubOutput(inst, sub, data) {
     try {
       const body = newAgentSpeech(target);
       if (!body) return;
-      nemesisEvents.publish({
-        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+      publishTurn(target, body, {
         // Its own id, not the task's: an answer typed under what this agent
         // said has to reach this agent, not whichever one owns the session.
         containerId: target.id,
@@ -539,10 +541,7 @@ function processSubOutput(inst, sub, data) {
         workspacePath: inst.worktreePath,
         sessionBranch: inst.branch || '',
         agentName: displayNameFor(sub.mode),
-        body,
-        ts: Date.now(),
-        notify: true,
-      });
+      }, { mode: sub.mode, live: () => inst.notifyWebhookEnabled === true });
     } catch { /* never let a publish break the terminal path */ }
   }, TURN_SETTLE_MS);
   sub.turnTimer.unref?.();
@@ -576,6 +575,28 @@ function traceMirror(inst, providerId, source, text) {
     chars: (text || '').length,
     head: (text || '').slice(0, 120),
   }));
+}
+
+// Summaries resolve out of order, so each session's turns queue behind the one
+// before and the thread still reads top to bottom.
+function publishTurn(target, body, fields, { mode, live }) {
+  let summarizing = false;
+  try { summarizing = getNotificationConfig().summarizeMessages; } catch { /* post in full */ }
+  target.mirrorQueue = (target.mirrorQueue || Promise.resolve())
+    .then(() => (summarizing ? condenseTurn(body, { summarize: _summarize, agentName: fields.agentName, mode }) : body))
+    .then((text) => {
+      // The bell can go off while a summary is being written.
+      if (!text || !live()) return;
+      nemesisEvents.publish({
+        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+        ...fields,
+        body: text,
+        ts: Date.now(),
+        notify: true,
+      });
+    })
+    .catch(() => { /* never let a publish break the terminal path */ });
+  return target.mirrorQueue;
 }
 
 // Prefer the agent's own session store; a screen scrape has to guess at redraws.
@@ -736,17 +757,13 @@ function processIdleDetection(inst, data) {
     try {
       const body = newAgentSpeech(inst);
       if (!body) return;
-      nemesisEvents.publish({
-        type: nemesisEvents.EVENT_TYPES.MESSAGE,
+      publishTurn(inst, body, {
         containerId: inst.id,
         sessionName: inst.name,
         workspacePath: inst.worktreePath,
         sessionBranch: inst.branch || '',
         agentName,
-        body,
-        ts: Date.now(),
-        notify: true,
-      });
+      }, { mode: inst.mode, live: () => inst.notifyWebhookEnabled === true });
     } catch { /* never let a publish break the terminal path */ }
   }, TURN_SETTLE_MS);
   inst.turnTimer.unref?.();
@@ -1303,6 +1320,7 @@ module.exports = {
   resolveSubSessionId,
   processIdleDetection,
   processSubOutput,
+  publishTurn,
   sessionNameFor,
   clearIdleTimer,
   spawnInWorktree,

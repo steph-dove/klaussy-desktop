@@ -125,6 +125,7 @@
   document.getElementById('pref-notify-approval').checked = ngEvents.approvalRequired !== false;
   document.getElementById('pref-notify-stale').checked = ngEvents.stale !== false;
   document.getElementById('pref-notify-message').checked = ngEvents.message !== false;
+  document.getElementById('pref-notify-summarize').checked = ng.summarizeMessages !== false;
   document.getElementById('pref-notify-stale-after').value = ng.staleAfterSeconds || 120;
   document.getElementById('pref-notify-new-sessions').checked = ng.notifyNewSessions !== false;
   document.getElementById('pref-slack-app-token').value = ng.slackAppToken || '';
@@ -387,6 +388,7 @@
     'pref-slack-app-token', 'pref-slack-bot-token', 'pref-slack-channel',
     'pref-discord-bot-token', 'pref-discord-channel', 'pref-notify-allowlist',
     'pref-notify-stale', 'pref-notify-stale-after', 'pref-notify-message',
+    'pref-notify-summarize',
   ].forEach(function (id) {
     var el = document.getElementById(id);
     el.addEventListener('change', saveAll);
@@ -545,6 +547,7 @@
       slackWebhookUrl: document.getElementById('pref-slack-webhook').value.trim(),
       discordWebhookUrl: document.getElementById('pref-discord-webhook').value.trim(),
       notifyNewSessions: document.getElementById('pref-notify-new-sessions').checked,
+      summarizeMessages: document.getElementById('pref-notify-summarize').checked,
       slackAppToken: document.getElementById('pref-slack-app-token').value.trim(),
       slackBotToken: document.getElementById('pref-slack-bot-token').value.trim(),
       slackChannel: document.getElementById('pref-slack-channel').value.trim(),

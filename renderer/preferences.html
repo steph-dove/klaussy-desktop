@@ -598,6 +598,11 @@
         <input type="checkbox" id="pref-notify-message" aria-describedby="pref-notify-message-hint" />
       </div>
       <div class="field-hint" id="pref-notify-message-hint">Posts each thing the agent says into that session's thread as it happens, so you can follow along and answer by replying — rather than only hearing about it when Klaussy recognises a prompt. Turning this off falls back to the quiet alert below.</div>
+      <div class="field">
+        <label for="pref-notify-summarize">Summarize long turns</label>
+        <input type="checkbox" id="pref-notify-summarize" aria-describedby="pref-notify-summarize-hint" />
+      </div>
+      <div class="field-hint" id="pref-notify-summarize-hint">A long turn posts as a few lines on what the agent did and what it needs from you, instead of everything it printed. Written by the same model as session notes (see "Summarize session notes on this machine"). Short turns post as they are. On by default.</div>
 
       <div class="field">
         <label for="pref-notify-stale">Agent went quiet</label>
