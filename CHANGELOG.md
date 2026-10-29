@@ -2,6 +2,14 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.28.0
+
+### 🦉 Mirrored Turns Get to the Point
+
+- **Long Turns Post as a Summary**: a long agent turn now shows up in Slack or Discord as a few lines. If the agent is asking something, it starts with "Needs you:" and keeps the agent's numbered options, so replying "2" still picks option 2. Otherwise it says what the agent did, plus any action items. Short turns post as they are, and replying in the thread still goes to the agent.
+- **Same Summarizer as Session Notes**: your local Ollama writes the summary first, then an installed agent. If neither answers, you get the end of the turn with a pointer back to Klaussy. Turn it off with "Summarize long turns" in Preferences.
+- **Fixes**: handoff and note summaries no longer pick up a repo's hooks and instructions, which could add stray text to them.
+
 ## 0.27.0
 
 ### 🦉 Readable Agent Mirrors in Slack and Discord
