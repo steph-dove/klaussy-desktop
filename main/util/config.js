@@ -108,6 +108,8 @@ function getNotificationConfig(config = loadConfig()) {
     discordInteractive: Boolean(discordBotToken && discordChannel),
     // Seeds each new session's per-task bell; the task can then override it.
     notifyNewSessions: ng.notifyNewSessions !== false,
+    // A long mirrored turn posts as a summary of what the agent needs, not in full.
+    summarizeMessages: ng.summarizeMessages !== false,
     events: {
       completed: events.completed !== false,
       failed: events.failed !== false,

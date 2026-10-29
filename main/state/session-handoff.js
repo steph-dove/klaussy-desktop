@@ -15,6 +15,7 @@
 // available or it fails/times out, we fall back to handing over the raw
 // material verbatim — the user chose "summary + git fallback".
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { claudeProjectDir } = require('../util/claude-paths');
@@ -182,7 +183,9 @@ function runViaCli(prompt, preferredMode) {
     try {
       proc = spawnHeadlessAgent(
         bin, run.args,
-        { stdio: [onStdin ? 'pipe' : 'ignore', 'pipe', 'ignore'] },
+        // Outside any repo, so a project's hooks and instructions can't add to
+        // the summary and the run's own transcript can't be mirrored as a turn.
+        { cwd: os.tmpdir(), stdio: [onStdin ? 'pipe' : 'ignore', 'pipe', 'ignore'] },
         run.stdinInput,
       );
     } catch {
