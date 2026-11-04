@@ -35,16 +35,18 @@ test('Copy Path copies the absolute path for a file and a folder', async ({ elec
     const copyPathVia = async (row) => {
       // The Files tab is display:none, so dispatch the event instead of right-clicking.
       await row.dispatchEvent('contextmenu', { clientX: 20, clientY: 20 });
-      await mainWindow.locator('.context-menu-item', { hasText: /^\s*Copy Path$/ }).dispatchEvent('click');
+      await mainWindow.locator('.context-menu .context-menu-item', { hasText: /^\s*Copy Path$/ }).dispatchEvent('click');
     };
 
+    const toasts = mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' });
     await copyPathVia(fileTree.locator('.file-tree-file', { hasText: 'README.md' }));
-    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' }).first()).toBeAttached();
+    await expect(toasts).toHaveCount(1);
+    await expect(toasts.last()).toBeVisible();
     await expect.poll(readClipboard).toBe(path.join(repoDir, 'README.md'));
 
-    await copyPathVia(fileTree.locator('.file-tree-dir .file-tree-label', { hasText: 'src' }));
+    await copyPathVia(fileTree.locator('.file-tree-label[data-path="src"]'));
     await expect.poll(readClipboard).toBe(path.join(repoDir, 'src'));
-    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' }).last()).toBeAttached();
+    await expect(toasts).toHaveCount(2);
   } finally {
     await electronApp.evaluate(({ clipboard }, t) => clipboard.writeText(t), savedClipboard);
     fs.rmSync(repoDir, { recursive: true, force: true });
