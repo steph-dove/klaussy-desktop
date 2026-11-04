@@ -1,3 +1,4 @@
+/* global window */
 // File-tree context menu: "Copy Path" on a file row and a folder row copies
 // the absolute path to the clipboard and shows a "Copied path" toast.
 
@@ -24,7 +25,8 @@ function buildRepo() {
 test('Copy Path copies the absolute path for a file and a folder', async ({ electronApp, mainWindow }) => {
   await mainWindow.waitForLoadState('networkidle');
 
-  const repoDir = buildRepo();
+  const repoDir = fs.realpathSync(buildRepo());
+  const savedClipboard = await electronApp.evaluate(({ clipboard }) => clipboard.readText());
   try {
     await mainWindow.evaluate((p) => window.FileBrowser.loadFileTree(p), repoDir);
     const fileTree = mainWindow.locator('#file-tree');
@@ -38,11 +40,13 @@ test('Copy Path copies the absolute path for a file and a folder', async ({ elec
 
     await copyPathVia(fileTree.locator('.file-tree-file', { hasText: 'README.md' }));
     await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' }).first()).toBeAttached();
-    await expect.poll(readClipboard).toBe(repoDir + '/README.md');
+    await expect.poll(readClipboard).toBe(path.join(repoDir, 'README.md'));
 
     await copyPathVia(fileTree.locator('.file-tree-dir .file-tree-label', { hasText: 'src' }));
-    await expect.poll(readClipboard).toBe(repoDir + '/src');
+    await expect.poll(readClipboard).toBe(path.join(repoDir, 'src'));
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' })).toHaveCount(2);
   } finally {
+    await electronApp.evaluate(({ clipboard }, t) => clipboard.writeText(t), savedClipboard);
     fs.rmSync(repoDir, { recursive: true, force: true });
   }
 });
