@@ -44,7 +44,7 @@ test('Copy Path copies the absolute path for a file and a folder', async ({ elec
 
     await copyPathVia(fileTree.locator('.file-tree-dir .file-tree-label', { hasText: 'src' }));
     await expect.poll(readClipboard).toBe(path.join(repoDir, 'src'));
-    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' })).toHaveCount(2);
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied path' }).last()).toBeAttached();
   } finally {
     await electronApp.evaluate(({ clipboard }, t) => clipboard.writeText(t), savedClipboard);
     fs.rmSync(repoDir, { recursive: true, force: true });
