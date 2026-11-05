@@ -13,6 +13,8 @@ function buildRepo() {
   fs.mkdirSync(path.join(dir, 'src', 'a', 'b'), { recursive: true });
   fs.writeFileSync(path.join(dir, 'src', 'a', 'b', 'deep.js'), '');
   fs.writeFileSync(path.join(dir, 'src', 'a', 'mid.js'), '');
+  fs.mkdirSync(path.join(dir, 'src', 'c'));
+  fs.writeFileSync(path.join(dir, 'src', 'c', 'x.js'), '');
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'e2e@klaussy.test');
@@ -30,7 +32,7 @@ test('Collapse All closes a folder and its open descendants; files lack the item
     const tree = mainWindow.locator('#file-tree');
     const dir = (rel) => tree.locator(`[data-kind="dir"][data-path="${rel}"]`);
 
-    for (const rel of ['src', 'src/a', 'src/a/b']) await dir(rel).dispatchEvent('click');
+    for (const rel of ['src', 'src/a', 'src/a/b', 'src/c']) await dir(rel).dispatchEvent('click');
     for (const rel of ['src', 'src/a', 'src/a/b']) await expect(dir(rel)).toHaveAttribute('aria-expanded', 'true');
 
     // A file's menu has no Collapse All.
@@ -45,6 +47,8 @@ test('Collapse All closes a folder and its open descendants; files lack the item
     await expect(dir('src/a')).toHaveAttribute('aria-expanded', 'false');
     await expect(dir('src/a/b')).toHaveAttribute('aria-expanded', 'false');
     await expect(dir('src')).toHaveAttribute('aria-expanded', 'true');
+    // Sibling folders are untouched.
+    await expect(dir('src/c')).toHaveAttribute('aria-expanded', 'true');
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }

@@ -1588,7 +1588,10 @@ window.FileBrowser = (function () {
     var dirContextRel = kind === 'dir' ? rel : (rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : '');
     var abs = fileTreeWorktree + '/' + rel;
     var rowEl = e.currentTarget;
-    var items = [
+    var items = (kind === 'dir' ? [
+      { label: 'Collapse All', action: function () { collapseAll(rowEl); } },
+      { sep: true },
+    ] : []).concat([
       { label: 'New File', action: function () { inlineCreate(dirContextRel, 'file'); } },
       { label: 'New Folder', action: function () { inlineCreate(dirContextRel, 'dir'); } },
       { sep: true },
@@ -1605,10 +1608,7 @@ window.FileBrowser = (function () {
           window.klaus.fs.copyToClipboard(rel);
           window.toast.info('Copied relative path');
       } },
-    ];
-    if (kind === 'dir') {
-      items.unshift({ label: 'Collapse All', action: function () { collapseAll(rowEl); } }, { sep: true });
-    }
+    ]);
     window.ContextMenu.show(e.clientX, e.clientY, items);
   }
 
