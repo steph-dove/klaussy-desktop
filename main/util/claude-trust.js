@@ -63,4 +63,20 @@ function trustClaudeFolder(dir, { configPath = claudeConfigPath() } = {}) {
   return { trusted: true, already: false };
 }
 
-module.exports = { claudeConfigPath, trustClaudeFolder };
+// Stored consent only, so spawning a terminal never pops the consent dialog.
+function trustIfRepoAllowed(worktreePath, { getStoredConsent = require('./worktree-permissions').getStoredConsent, trust = trustClaudeFolder } = {}) {
+  if (getStoredConsent(worktreePath) !== 'allow') return { trusted: false, reason: 'no stored consent' };
+  const r = trust(worktreePath);
+  if (!r.trusted) console.warn(`[claude-trust] could not pre-trust ${worktreePath}: ${r.reason}`);
+  return r;
+}
+
+// Claude draws the dialog with cursor moves instead of spaces, so the words can arrive run together.
+const TRUST_PROMPT = /I\s*trust\s*this\s*folder/i;
+const ANSI = /\x1b\[[0-9;?<>=]*[A-Za-z~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]/g;
+
+function sawTrustPrompt(ptyOutput) {
+  return TRUST_PROMPT.test(String(ptyOutput || '').slice(-20000).replace(ANSI, ''));
+}
+
+module.exports = { claudeConfigPath, trustClaudeFolder, trustIfRepoAllowed, sawTrustPrompt };

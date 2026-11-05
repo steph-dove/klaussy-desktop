@@ -41,6 +41,7 @@ const {
 const {
   getOrAskRepoConsent, applyWorktreePermissions,
 } = require('../util/worktree-permissions');
+const { trustIfRepoAllowed } = require('../util/claude-trust');
 
 // Stable, bounded ID for dedupeKey suffixes. Inputs (hunks, finding bodies,
 // staged diffs) can be many KB; sha1 keeps keys short and comparable.
@@ -300,6 +301,8 @@ ipcMain.handle('pr-debug-check-open-task', async (event, { analysis, checkName, 
     if (inst.worktreePath === worktreePath && inst.alive && inst.mode === 'claude') { target = inst; break; }
   }
   if (!target) {
+    // The analysis is pasted 1.5s after spawn, which would land in a trust dialog.
+    trustIfRepoAllowed(worktreePath);
     const result = spawnInWorktree(taskName, worktreePath, branch, 'claude', null, null, prNumber);
     if (result && result.error) return { error: result.error };
     target = instances.get(result.id);

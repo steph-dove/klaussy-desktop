@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const { claudeConfigPath, trustClaudeFolder } = require('../../main/util/claude-trust');
+const { claudeConfigPath, trustClaudeFolder, trustIfRepoAllowed, sawTrustPrompt } = require('../../main/util/claude-trust');
 
 function fixture(config) {
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'claude-trust-')));
@@ -119,4 +119,23 @@ test('writes through a symlinked config instead of replacing the link', () => {
 test('claudeConfigPath honors CLAUDE_CONFIG_DIR', () => {
   assert.equal(claudeConfigPath({ CLAUDE_CONFIG_DIR: '/x/cfg' }), path.join('/x/cfg', '.claude.json'));
   assert.equal(claudeConfigPath({}), path.join(os.homedir(), '.claude.json'));
+});
+
+test('trustIfRepoAllowed writes only with stored Allow', () => {
+  const calls = [];
+  const trust = (wt) => { calls.push(wt); return { trusted: true }; };
+  for (const consent of ['skip', null]) {
+    assert.equal(trustIfRepoAllowed('/wt', { getStoredConsent: () => consent, trust }).trusted, false);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(trustIfRepoAllowed('/wt', { getStoredConsent: () => 'allow', trust }).trusted, true);
+  assert.deepEqual(calls, ['/wt']);
+});
+
+test('sawTrustPrompt spots the dialog through ANSI and missing spaces', () => {
+  const drawn = '\x1b[2K\x1b[1G\x1b[36m❯\x1b[39m No,\x1b[1Cexit\r\n  Yes,\x1b[1CI\x1b[1Ctrust\x1b[1Cthis\x1b[1Cfolder';
+  assert.equal(sawTrustPrompt(drawn), true);
+  assert.equal(sawTrustPrompt('Yes,Itrustthisfolder'), true);
+  assert.equal(sawTrustPrompt('\x1b[1m✻ Cooked for 12s\x1b[0m Run claude --continue'), false);
+  assert.equal(sawTrustPrompt(undefined), false);
 });

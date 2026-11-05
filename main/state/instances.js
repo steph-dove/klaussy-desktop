@@ -17,7 +17,7 @@ const { Notification } = require('electron');
 const { loadConfig, saveConfig, getNemesisProfile, getNotificationConfig } = require('../util/config');
 const nemesis = require('../util/nemesis-client');
 const { baseRepoForWorktree, sessionSiblingWorktrees } = require('../util/git-repo');
-const { sanitizeExtraEnv } = require('../util/exec');
+const { sanitizeExtraEnv, withoutInheritedSessionMarkers } = require('../util/exec');
 const { createOutputCoalescer } = require('../util/output-coalescer');
 const { claudeProjectDir } = require('../util/claude-paths');
 const { isInteractiveTranscript } = require('../util/claude-entrypoint');
@@ -342,21 +342,10 @@ function staleAfterMs() {
   return _staleAfterMs;
 }
 
-// A Klaussy launched from inside a Claude Code session inherits that session's
-// markers, and a child that sees them turns transcript saving off — costing the
-// session both its resume id and its readable history.
-const INHERITED_SESSION_MARKERS = [
-  'CLAUDE_CODE_CHILD_SESSION',
-  'CLAUDE_CODE_SESSION_ID',
-  'CLAUDE_CODE_ENTRYPOINT',
-];
-
 // KLAUSSY_SESSION_ID names this terminal so notes can record who wrote them; it
 // deliberately does not scope the notes dir, which is shared session-wide.
 function agentSpawnEnv(worktreePath, terminalId) {
-  const env = { ...process.env };
-  for (const key of INHERITED_SESSION_MARKERS) delete env[key];
-  return { ...env, ...sessionNotesEnv(worktreePath, terminalId) };
+  return { ...withoutInheritedSessionMarkers(), ...sessionNotesEnv(worktreePath, terminalId) };
 }
 
 // A conversation that has not recorded its workspace yet can only be guessed

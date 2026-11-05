@@ -26,13 +26,14 @@ const os = require('os');
 const crypto = require('crypto');
 const pty = require('node-pty');
 const { loadConfig } = require('../util/config');
-const { sanitizeExtraEnv } = require('../util/exec');
+const { sanitizeExtraEnv, withoutInheritedSessionMarkers } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
 const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
 const { sessionNotesEnv, withSessionContext } = require('./session-context');
 const { getProvider, binFor } = require('./ai-providers');
 const { ensureWorktreeConsentSync } = require('../util/agent-consent');
 const { beginSession } = require('../util/agent-concurrency');
+const { sawTrustPrompt } = require('../util/claude-trust');
 
 // requestId -> session record. Keyed by the renderer-supplied requestId so
 // the cancel IPC can look up the right PTY without leaking it across runs.
@@ -279,7 +280,7 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
       rows: 30,
       cwd: worktreePath,
       env: {
-        ...process.env,
+        ...withoutInheritedSessionMarkers(),
         TERM: 'xterm-256color',
         ...sessionNotesEnv(worktreePath, `pr-implement-${requestId}`),
         ...(extraEnv || {}),
@@ -341,7 +342,9 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
     implementPtySessions.delete(requestId);
     // Always emit exit now (even on a "finished" run) so detached/re-attached
     // renderers learn the PTY is gone; the renderer dedupes its own done state.
-    onExit({ exitCode, signal, status: finalStatus });
+    const reason = !session.finished && !session.cancelled && !session.sessionId && sawTrustPrompt(session.outputBuffer)
+      ? 'trust-prompt' : undefined;
+    onExit({ exitCode, signal, status: finalStatus, reason });
   });
 
   // Fallback paste: if the arg-form prompt didn't take after 15s and
