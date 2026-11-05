@@ -87,6 +87,7 @@ test('tree context menu: Copy Name copies just the name and toasts', async ({ el
     await fileTree.locator('[role="treeitem"][data-path="src"]').click({ button: 'right' });
     await mainWindow.locator('.context-menu [role="menuitem"]', { hasText: 'Copy Name' }).click();
     await expect.poll(readClipboard).toBe('src');
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied name' }).last()).toBeVisible();
   } finally {
     await cleanup(mainWindow, repo, taskId);
   }
