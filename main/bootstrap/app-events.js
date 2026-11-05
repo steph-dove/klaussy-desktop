@@ -9,7 +9,7 @@ const path = require('path');
 const { execFileSync, execFile } = require('child_process');
 const { resolveAgentBin } = require('../util/agent-bin');
 const { fixSpawnPath, refreshSpawnPath } = require('../util/spawn-path');
-const { app, ipcMain, dialog, BrowserWindow } = require('electron');
+const { app, ipcMain, dialog, BrowserWindow, powerMonitor } = require('electron');
 const lspManager = require('../../lsp-manager');
 const { loadConfig, saveConfig, flushSaveConfig, runConfigMigrations } = require('../util/config');
 const { mergeSavedSessions } = require('../util/saved-sessions');
@@ -174,6 +174,9 @@ function install() {
 
     installAppMenu();
     createWindow();
+
+    // The chat sockets don't notice a sleep, so clicks right after waking would time out.
+    powerMonitor.on('resume', () => require('../util/notification-gateway').reconnectSockets());
     if (!process.env.KLAUSSY_E2E) checkExternalCLIs();
 
     // First-run: auto-install the repo-analysis CLIs (klaussy-repo-conventions

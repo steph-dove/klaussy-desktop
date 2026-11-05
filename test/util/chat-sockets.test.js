@@ -94,3 +94,74 @@ test('discord: bot messages are ignored, human replies keep their reference', ()
   assert.equal(parsed.text, 'yes go ahead');
   assert.equal(parsed.referencedMessageId, 'm1');
 });
+
+// Records every socket opened and lets a test fire a late close like a dead link's.
+function fakeWebSocket() {
+  const opened = [];
+  class FakeSocket {
+    constructor(url) {
+      this.url = url;
+      this.listeners = {};
+      this.closedWith = null;
+      opened.push(this);
+    }
+    addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+    emit(type, ev) { for (const fn of this.listeners[type] || []) fn(ev); }
+    send() {}
+    close(code) { this.closedWith = code ?? 1000; }
+  }
+  return { FakeSocket, opened };
+}
+
+test('discord: reconnect opens a fresh socket and the old one closing later is ignored', () => {
+  const { createDiscordGateway } = require('../../main/util/discord-gateway');
+  const realWs = global.WebSocket;
+  const { FakeSocket, opened } = fakeWebSocket();
+  global.WebSocket = FakeSocket;
+  const gw = createDiscordGateway({ botToken: 't', onEvent() {}, onStatus() {} });
+  try {
+    assert.equal(opened.length, 1);
+    gw.reconnect();
+    assert.equal(opened.length, 2, 'a new socket opens without waiting for the old close');
+    assert.equal(opened[0].closedWith, 4000, 'a non-1000 close keeps the session resumable');
+    opened[0].emit('close', { code: 1006 });
+    assert.equal(opened.length, 2, 'the replaced socket closing does not schedule another');
+  } finally {
+    gw.close();
+    global.WebSocket = realWs;
+  }
+});
+
+test('slack: reconnect opens a fresh socket and the old one closing later is ignored', async () => {
+  const { createSlackSocket } = require('../../main/util/slack-socket');
+  const realWs = global.WebSocket;
+  const realFetch = global.fetch;
+  const { FakeSocket, opened } = fakeWebSocket();
+  global.WebSocket = FakeSocket;
+  global.fetch = async () => ({ json: async () => ({ ok: true, url: 'wss://example.test/' }) });
+  const sock = createSlackSocket({ appToken: 'xapp', onEvent() {}, onStatus() {} });
+  const settle = () => new Promise((r) => setImmediate(r));
+  try {
+    await settle();
+    assert.equal(opened.length, 1);
+    sock.reconnect();
+    await settle();
+    assert.equal(opened.length, 2);
+    assert.ok(opened[0].closedWith, 'the stale socket is closed');
+    opened[0].emit('close', {});
+    await settle();
+    assert.equal(opened.length, 2, 'the replaced socket closing does not schedule another');
+  } finally {
+    sock.close();
+    global.WebSocket = realWs;
+    global.fetch = realFetch;
+  }
+});
+
+test('discord: a button interaction carries the id of the message it sits on', () => {
+  const parsed = parseDispatch({
+    t: 'INTERACTION_CREATE',
+    d: { type: 3, id: 'i1', token: 'tok', data: { custom_id: 'x' }, user: { id: '1' }, channel_id: 'c1', message: { id: 'm7' } },
+  });
+  assert.equal(parsed.messageId, 'm7');
+});

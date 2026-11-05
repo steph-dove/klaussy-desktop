@@ -393,3 +393,29 @@ test('with two sessions running it asks rather than guessing', () => {
     instances.delete(8803);
   }
 });
+
+// A click replayed past Discord's 3s callback window gets a 404, so the bot edits its alert instead.
+test('a discord click too late for its callback edits the alert instead', async () => {
+  const realFetch = global.fetch;
+  const calls = [];
+  global.fetch = async (url, opts) => {
+    calls.push({ url: String(url), method: opts.method, body: JSON.parse(opts.body) });
+    return { ok: !String(url).includes('/callback'), status: String(url).includes('/callback') ? 404 : 200 };
+  };
+  try {
+    saveConfig({ notificationGateway: { allowList: ['U1'], discordBotToken: 'bt', discordChannel: 'DCHAN' } });
+    await flushSaveConfig();
+    gateway.handleDiscordFrame({
+      kind: 'action', customId: 'klaussy_approve:no-such-token', userId: 'U1',
+      interactionId: 'i1', interactionToken: 'tok', channel: 'c1', messageId: 'm7',
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    const edit = calls.find((c) => c.method === 'PATCH');
+    assert.ok(edit, 'the alert was edited after the callback was refused');
+    assert.match(edit.url, /\/channels\/c1\/messages\/m7$/);
+    assert.deepEqual(edit.body.components, [], 'its buttons are cleared');
+    assert.match(edit.body.content, /already answered/);
+  } finally {
+    global.fetch = realFetch;
+  }
+});

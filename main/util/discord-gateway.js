@@ -61,8 +61,8 @@ function createDiscordGateway({ botToken, onEvent, onStatus, wantMessages = true
     acked = true;
     heartbeatTimer = setInterval(() => {
       // A missed ACK means the connection is a zombie: the socket looks open but
-      // Discord isn't hearing us. Tear it down so the resume path runs.
-      if (!acked) { try { ws.close(4000); } catch {} return; }
+      // Discord isn't hearing us. Its close handshake can hang, so don't wait on it.
+      if (!acked) { freshConnection(); return; }
       acked = false;
       send({ op: OP.HEARTBEAT, d: lastSeq });
     }, intervalMs);
@@ -82,17 +82,31 @@ function createDiscordGateway({ botToken, onEvent, onStatus, wantMessages = true
     retryTimer.unref?.();
   }
 
+  function freshConnection() {
+    if (closed) return;
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+    stopHeartbeat();
+    const old = ws;
+    ws = null;
+    if (old) { try { old.close(4000); } catch {} }
+    attempt = 0;
+    connect();
+  }
+
   function connect() {
     if (closed) return;
+    let sock;
     try {
-      ws = new WebSocket(resumeUrl ? resumeUrl + '/?v=10&encoding=json' : GATEWAY_URL);
+      sock = new WebSocket(resumeUrl ? resumeUrl + '/?v=10&encoding=json' : GATEWAY_URL);
     } catch (err) {
       emitStatus({ ok: false, error: err.message });
       scheduleReconnect();
       return;
     }
+    ws = sock;
 
-    ws.addEventListener('message', (ev) => {
+    sock.addEventListener('message', (ev) => {
+      if (ws !== sock) return;
       let frame;
       try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
       if (frame.s != null) lastSeq = frame.s;
@@ -147,7 +161,9 @@ function createDiscordGateway({ botToken, onEvent, onStatus, wantMessages = true
       }
     });
 
-    ws.addEventListener('close', (ev) => {
+    // A socket replaced by reconnect() still closes later; only the current one reconnects.
+    sock.addEventListener('close', (ev) => {
+      if (ws !== sock) return;
       ws = null;
       // 4014 = we asked for a privileged intent the bot isn't approved for.
       // Buttons need no intent, so drop back to interactions-only rather than
@@ -172,12 +188,14 @@ function createDiscordGateway({ botToken, onEvent, onStatus, wantMessages = true
       scheduleReconnect();
     });
 
-    ws.addEventListener('error', () => emitStatus({ ok: false, error: 'socket error' }));
+    sock.addEventListener('error', () => { if (ws === sock) emitStatus({ ok: false, error: 'socket error' }); });
   }
 
   connect();
 
   return {
+    // After sleep the frozen heartbeat can't spot a dead socket; resuming on a fresh one replays missed clicks.
+    reconnect: freshConnection,
     close() {
       closed = true;
       stopHeartbeat();
@@ -204,6 +222,7 @@ function parseDispatch(frame) {
       interactionId: d.id,
       interactionToken: d.token,
       channel: d.channel_id || '',
+      messageId: (d.message && d.message.id) || '',
     };
   }
 
@@ -237,4 +256,14 @@ async function respondToInteraction(interactionId, interactionToken, content) {
   return { ok: res.ok, status: res.status };
 }
 
-module.exports = { createDiscordGateway, parseDispatch, respondToInteraction, API_BASE, OP };
+// Fallback for clicks replayed past Discord's 3s callback window, so answered alerts don't keep their buttons.
+async function editBotMessage(botToken, channelId, messageId, content) {
+  const res = await fetch(`${API_BASE}/channels/${channelId}/messages/${messageId}`, {
+    method: 'PATCH',
+    headers: { authorization: 'Bot ' + botToken, 'content-type': 'application/json' },
+    body: JSON.stringify({ content, components: [] }),
+  });
+  return { ok: res.ok, status: res.status };
+}
+
+module.exports = { createDiscordGateway, parseDispatch, respondToInteraction, editBotMessage, API_BASE, OP };
