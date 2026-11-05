@@ -1585,7 +1585,7 @@ window.FileBrowser = (function () {
 
   async function openFolderInTerminal(rel) {
     var taskId = AppState.activeTaskId;
-    if (!taskId) { window.toast.error('Open a task first'); return; }
+    if (taskId == null) { window.toast.error('Open a task first'); return; }
     var label = rel.slice(rel.lastIndexOf('/') + 1) || 'Shell';
     try {
       var res = await window.TerminalManager.openShellAt(taskId, rel, label);

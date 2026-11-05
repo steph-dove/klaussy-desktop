@@ -817,7 +817,7 @@ window.TerminalManager = (function () {
     var result = await window.klaus.terminal.addSub(taskId, label, 'shell', null, null, relDir);
     if (!result || result.cancelled) return { cancelled: true };
     if (result.error) return { error: result.error };
-    addSubTerminalTab(taskEntry, result.subId, result.label);
+    addSubTerminalTab(taskEntry, result.subId, result.label, 'shell');
     switchSubTerminal(taskEntry, result.subId);
     return { subId: result.subId };
   }

@@ -21,7 +21,7 @@ const {
   processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler, resetMirrorBinding,
 } = require('../state/instances');
-const { dirUnder } = require('../util/path-gate');
+const { dirUnder, pathUnder } = require('../util/path-gate');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
@@ -1197,8 +1197,9 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   // Optional start directory, relative to the worktree.
   let startDir = inst.worktreePath;
   if (cwd) {
+    if (!pathUnder(inst.worktreePath, cwd)) return { error: 'Folder is not inside this worktree' };
     startDir = dirUnder(inst.worktreePath, cwd);
-    if (!startDir) return { error: 'Folder is not inside this worktree' };
+    if (!startDir) return { error: 'Folder no longer exists' };
   }
 
   const subId = inst.nextSubId++;

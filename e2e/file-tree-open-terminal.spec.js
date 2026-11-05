@@ -1,7 +1,7 @@
 // "Open in Terminal" on a folder's right-click menu: folders get the item,
+// files don't, and the new tab's shell starts in that folder.
 
 /* global window */
-// files don't, and the new tab's shell starts in that folder.
 
 const fs = require('fs');
 const path = require('path');
@@ -39,5 +39,7 @@ test('folder menu opens a terminal tab in that folder; files have no such item',
 
     const bad = await mainWindow.evaluate(({ tid }) => window.klaus.terminal.addSub(tid, 'x', 'shell', null, null, '../..'), { tid: id });
     expect(bad.error).toMatch(/not inside/);
+    const gone = await mainWindow.evaluate(({ tid }) => window.klaus.terminal.addSub(tid, 'x', 'shell', null, null, 'missing'), { tid: id });
+    expect(gone.error).toMatch(/no longer exists/);
   } finally { rm(repo); }
 });

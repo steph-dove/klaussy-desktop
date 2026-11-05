@@ -90,3 +90,10 @@ test('dirUnder: accepts a subdirectory, rejects files, escapes and missing paths
   assert.equal(dirUnder(root, '../' + path.basename(outside)), null);
   assert.equal(dirUnder(root, 'nope'), null);
 });
+
+test('dirUnder: rejects a symlink to a directory outside the root; empty rel is the root', () => {
+  const { dirUnder } = pathGate;
+  fs.symlinkSync(outside, path.join(root, 'link-out'));
+  assert.equal(dirUnder(root, 'link-out'), null);
+  assert.equal(dirUnder(root, ''), fs.realpathSync(root));
+});
