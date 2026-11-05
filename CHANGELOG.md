@@ -2,6 +2,15 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.29.0
+
+### 🦉 Implement All Gets Past Claude's Trust Prompt
+
+- **Implement All Starts Working Again**: after an AI review, Implement all opened Claude on its "Is this a project you trust?" prompt, whose default answer quits, so the run died before it began. If you've allowed Klaussy to manage Claude permissions for the repo, it now marks the PR checkout trusted first. Earlier "Allow" answers count too. The Terminal tab chat, Resolve conflicts, the failing-check "open task" terminal and Checkout locally do the same.
+- **A Clear Message on Skip**: if you chose Skip and Claude quits at that prompt, the run now tells you to pick "Yes, I trust this folder" instead of saying the agent exited.
+- **File Tree Menu**: right-click a file for Copy Name and Duplicate, or a folder for Collapse All and Open in Terminal. Open in Terminal opens in the folder's own task.
+- **Fixes**: sub-terminal tabs line up with the primary terminal, duplicate errors are clearer, and the duplicated file ends up selected. PR terminals no longer inherit a parent Claude session's markers, which turned transcript saving off when Klaussy itself was started from Claude.
+
 ## 0.28.0
 
 ### 🦉 Mirrored Turns Get to the Point
