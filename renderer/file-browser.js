@@ -1619,6 +1619,7 @@ window.FileBrowser = (function () {
     await refreshFileTree();
     focusTreePath(result.relPath);
     var added = fileTree.querySelector('[role="treeitem"][data-path="' + cssEscape(result.relPath) + '"]');
+    fileTree.querySelectorAll('[aria-selected="true"]').forEach(function (el) { el.removeAttribute('aria-selected'); });
     if (added) added.setAttribute('aria-selected', 'true');
     A11y.announce('Duplicated ' + rel.split('/').pop() + ' as ' + result.relPath.split('/').pop());
   }
@@ -1875,7 +1876,11 @@ window.FileBrowser = (function () {
   }
 
   fileTree.addEventListener('focusin', function (e) {
-    if (e.target.getAttribute('role') === 'treeitem') setTreeTabStop(e.target);
+    if (e.target.getAttribute('role') !== 'treeitem') return;
+    setTreeTabStop(e.target);
+    fileTree.querySelectorAll('[aria-selected="true"]').forEach(function (el) {
+      if (el !== e.target) el.removeAttribute('aria-selected');
+    });
   });
 
   fileTree.addEventListener('keydown', function (e) {

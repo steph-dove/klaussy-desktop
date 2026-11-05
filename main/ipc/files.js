@@ -1024,8 +1024,9 @@ ipcMain.handle('duplicate-path', async (_event, { worktreePath, relPath }) => {
   if (!worktreePath || !relPath) return { error: 'missing args' };
   // Resolve the parent dir only, so the file's own name stays lexical and a
   // symlink is judged as a symlink rather than as whatever it points at.
-  const parentRel = path.posix.dirname(relPath.replace(/\\/g, '/'));
-  const base = path.basename(relPath);
+  const normRel = relPath.replace(/\\/g, '/');
+  const parentRel = path.posix.dirname(normRel);
+  const base = path.posix.basename(normRel);
   const dir = pathUnder(worktreePath, parentRel);
   if (!dir || !base || base === '.' || base === '..') return { error: 'path escapes worktree' };
   const src = path.join(dir, base);
@@ -1041,6 +1042,8 @@ ipcMain.handle('duplicate-path', async (_event, { worktreePath, relPath }) => {
         await fs.promises.copyFile(src, path.join(dir, name), fs.constants.COPYFILE_EXCL);
       } catch (err) {
         if (err.code === 'EEXIST') continue;
+        // COPYFILE_EXCL creates the target first; don't leave a truncated copy.
+        try { fs.unlinkSync(path.join(dir, name)); } catch {}
         throw err;
       }
       return { ok: true, path: path.join(dir, name), relPath: parentRel === '.' ? name : parentRel + '/' + name };
