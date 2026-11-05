@@ -74,7 +74,6 @@ test('tree context menu: Copy Name copies just the name and toasts', async ({ el
 
     await electronApp.evaluate(({ clipboard }) => clipboard.writeText(''));
 
-    // Nested file: expand src, then right-click alpha.js.
     await fileTree.locator('[data-kind="dir"][data-path="src"]').first().click();
     const file = fileTree.locator('[role="treeitem"][data-path="src/alpha.js"]');
     await file.click({ button: 'right' });
