@@ -1584,7 +1584,11 @@ window.FileBrowser = (function () {
   }
 
   async function openFolderInTerminal(rel) {
-    var taskId = AppState.activeTaskId;
+    // The tree may show another worktree than the active task's; open the
+    // shell in the task that owns the tree.
+    var taskId = null;
+    AppState.tasks.forEach(function (t, id) { if (taskId == null && t.worktreePath === fileTreeWorktree) taskId = id; });
+    if (taskId == null) taskId = AppState.activeTaskId;
     if (taskId == null) { window.toast.error('Open a task first'); return; }
     var label = rel.slice(rel.lastIndexOf('/') + 1) || 'Shell';
     try {
