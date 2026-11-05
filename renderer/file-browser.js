@@ -1606,7 +1606,18 @@ window.FileBrowser = (function () {
           window.toast.info('Copied relative path');
       } },
     ];
+    if (kind === 'dir') {
+      items.unshift({ label: 'Collapse All', action: function () { collapseAll(rowEl); } }, { sep: true });
+    }
     window.ContextMenu.show(e.clientX, e.clientY, items);
+  }
+
+  // Closes the folder and every open folder under it via the row's own click
+  // toggle, so arrow, aria-expanded and visibility stay in sync.
+  function collapseAll(rowEl) {
+    var open = rowEl.parentElement.querySelectorAll('[data-kind="dir"][aria-expanded="true"]');
+    for (var i = 0; i < open.length; i++) open[i].click();
+    focusTreeItem(rowEl);
   }
 
   function wireDragSource(el, rel, _kind) {
