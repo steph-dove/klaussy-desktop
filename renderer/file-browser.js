@@ -1618,6 +1618,8 @@ window.FileBrowser = (function () {
     }
     await refreshFileTree();
     focusTreePath(result.relPath);
+    var added = fileTree.querySelector('[role="treeitem"][data-path="' + cssEscape(result.relPath) + '"]');
+    if (added) added.setAttribute('aria-selected', 'true');
     A11y.announce('Duplicated ' + rel.split('/').pop() + ' as ' + result.relPath.split('/').pop());
   }
 
