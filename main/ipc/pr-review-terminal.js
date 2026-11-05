@@ -13,6 +13,7 @@ const { buildImplementPrompt } = require('../state/review-prompts');
 const { execFileP } = require('../util/exec');
 const { createCommitPusher } = require('../util/commit-pusher');
 const { getOrAskRepoConsent, applyWorktreePermissions } = require('../util/worktree-permissions');
+const { trustIfRepoAllowed } = require('../util/claude-trust');
 const {
   startImplementPty, writeImplementPty, resizeImplementPty, cancelImplementPty,
   getImplementSnapshot, getActiveImplementByWorktree, implementPtySessions,
@@ -114,6 +115,8 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
       if (!applyResult.applied) {
         return { error: `Failed to apply permissions: ${applyResult.reason}` };
       }
+      // The headless review never trusts the worktree, and the trust dialog's default answer exits Claude.
+      trustIfRepoAllowed(ensured.worktreePath);
     }
   }
 
@@ -160,8 +163,8 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
         try { cancelImplementPty(requestId); } catch {}
       }
     },
-    onExit: ({ exitCode, signal, status }) => {
-      broadcastToImplementSubs(requestId, exitChannel, { exitCode, signal, status });
+    onExit: ({ exitCode, signal, status, reason }) => {
+      broadcastToImplementSubs(requestId, exitChannel, { exitCode, signal, status, reason });
       if (pusher) pusher.check('exit');
       // If the run ended while backgrounded, surface it everywhere.
       if (implementSubs(requestId).size === 0) {
@@ -293,6 +296,7 @@ ipcMain.handle('pr-review-tchat-start', async (event, { provider } = {}) => {
   if (prReview.active) prReview.active.worktreePath = ensured.worktreePath;
 
   const chatProvider = pickProvider(provider, agentForWorktree(ensured.worktreePath));
+  if (chatProvider === 'claude') trustIfRepoAllowed(ensured.worktreePath);
   const sender = event.sender;
 
   // chatKey is deterministic from the worktree, so we can compute the channel

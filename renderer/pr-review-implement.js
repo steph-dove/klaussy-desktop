@@ -131,6 +131,8 @@
       unsubData: null,
       unsubEvent: null,
       unsubDone: null,
+      // Holds the Terminal tab's chat agent back until consent has run, or it opens on the trust dialog.
+      awaitingStart: true,
     };
 
     // Wire output streams BEFORE the spawn so we don't miss the first
@@ -163,11 +165,14 @@
       var signal = data && data.signal;
       if (PR.implRun.status === 'cancelled' || signal === 'SIGTERM' || signal === 'SIGKILL') {
         PR.finalizeImplementRun('cancelled');
+      } else if (data && data.reason === 'trust-prompt') {
+        PR.finalizeImplementRun('error', 'Claude quit at its folder-trust prompt. Run it again and pick “Yes, I trust this folder”, or allow Klaussy to manage Claude permissions for this repo.');
       } else {
         PR.finalizeImplementRun('error', 'The agent exited without finishing the turn');
       }
     });
 
+    PR.switchToTerminalTab();
     opts.repaint();
 
     // Implement with the current global default agent (the one shown on the
@@ -175,6 +180,8 @@
     var implProvider = opts.provider || (window.AgentSplit && AgentSplit.getAgent());
     window.klaus.pr.reviewImplementStart(requestId, opts.mode, opts.body, implProvider).then(function (r) {
       if (!PR.implRun || PR.implRun.requestId !== requestId) return;
+      PR.implRun.awaitingStart = false;
+      if (PR.activeTab === 'terminal') PR.mountImplementTerminalIfActive();
       if (r && r.cancelled) {
         PR.finalizeImplementRun('cancelled'); // user declined the trust prompt
       } else if (r && r.error) {
@@ -183,6 +190,10 @@
         PR.aiReview.worktreePath = r.worktreePath;
       }
       PR.syncPtySizes();
+    }).catch(function (err) {
+      if (!PR.implRun || PR.implRun.requestId !== requestId) return;
+      PR.implRun.awaitingStart = false;
+      PR.finalizeImplementRun('error', (err && err.message) || 'Could not start the implement run');
     });
   };
 
@@ -253,7 +264,6 @@
     f.implementDraftComment = '';
     f.implementDraftStatus = null;
     f.status = 'implementing';
-    PR.switchToTerminalTab();
     PR.startImplementRun({
       mode: 'one',
       body: f.text,
@@ -738,7 +748,6 @@
     // switch tabs freely and see consistent state.
     var repaintAll = function () { PR.repaintAiReviewTab(); PR.repaintConversationTab(); PR.repaintTerminalTab(); };
 
-    PR.switchToTerminalTab();
     PR.startImplementRun({
       mode: 'one',
       body: PR.buildConvPromptBody(s),
@@ -887,7 +896,6 @@
       return '### Finding ' + (i + 1) + '\n' + f.text;
     }).join('\n\n');
 
-    PR.switchToTerminalTab();
     PR.startImplementRun({
       mode: 'all',
       body: combined,

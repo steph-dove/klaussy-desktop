@@ -22,7 +22,7 @@ const os = require('os');
 const crypto = require('crypto');
 const pty = require('node-pty');
 const { loadConfig } = require('../util/config');
-const { sanitizeExtraEnv } = require('../util/exec');
+const { sanitizeExtraEnv, withoutInheritedSessionMarkers } = require('../util/exec');
 const { defaultShell, shellRunCmdArgs } = require('../util/platform');
 const { promptFileArg, schedulePromptPaste } = require('../util/agent-prompt');
 const { sessionNotesEnv, withSessionContext } = require('./session-context');
@@ -129,7 +129,7 @@ function startOrAttachChat({ worktreePath, provider = 'claude', seedPrompt, onDa
       rows: 30,
       cwd: worktreePath,
       env: {
-        ...process.env,
+        ...withoutInheritedSessionMarkers(),
         TERM: 'xterm-256color',
         ...sessionNotesEnv(worktreePath, `pr-chat-${chatKeyFor(worktreePath)}`),
         ...(extraEnv || {}),

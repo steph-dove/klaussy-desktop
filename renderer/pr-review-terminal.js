@@ -1407,7 +1407,9 @@
     // Tab is visible: make sure the persistent chat session is running. This is
     // what makes the terminal "always open with the default agent". Idempotent
     // after the first start.
-    if (PR.chatThemeStale && PR.chatRun && PR.chatRun.status === 'running') {
+    if (PR.implRun && PR.implRun.awaitingStart) {
+      // Started again once the implement run is through consent and has trusted the worktree.
+    } else if (PR.chatThemeStale && PR.chatRun && PR.chatRun.status === 'running') {
       PR.chatThemeStale = false;
       PR.ensureChatSession(true);
     } else {

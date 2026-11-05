@@ -174,7 +174,8 @@ async function askRepoConsent(worktreePath) {
       `Klaussy will write ${path.join(worktreePath, '.claude', 'settings.local.json')} with rules that:\n\n` +
       `  • Allow Read / Edit / Write inside this repo\n` +
       `  • Deny .env, .envrc, credentials, .npmrc, *.pem, *.key, etc.\n` +
-      `  • Add .claude/settings.local.json to .gitignore\n\n` +
+      `  • Add .claude/settings.local.json to .gitignore\n` +
+      `  • Mark this repo's PR checkouts as trusted in Claude Code, so its folder-trust prompt doesn't stop the run\n\n` +
       `Without this, Claude will prompt Y/N for every file change in the embedded terminal.\n\n` +
       `Rules are scoped to this repo only — never to your full filesystem.`,
     buttons: ['Allow for this repo', 'Skip', 'Allow for all repos'],

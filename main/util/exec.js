@@ -257,6 +257,21 @@ function sanitizeExtraEnv(extraEnv) {
   return out;
 }
 
+// A Klaussy launched from inside a Claude Code session inherits that session's
+// markers, and a child that sees them turns transcript saving off — costing the
+// session both its resume id and its readable history.
+const INHERITED_SESSION_MARKERS = [
+  'CLAUDE_CODE_CHILD_SESSION',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_ENTRYPOINT',
+];
+
+function withoutInheritedSessionMarkers(env = process.env) {
+  const out = { ...env };
+  for (const key of INHERITED_SESSION_MARKERS) delete out[key];
+  return out;
+}
+
 // Not osascript: macOS silently refuses AppleEvents from apps without the automation entitlement.
 function openInMacTerminal(scriptPath) {
   return execFileP('open', ['-a', 'Terminal', scriptPath], { timeout: 15000 });
@@ -280,4 +295,5 @@ module.exports = {
   clearGhTokenCache,
   runWithConcurrency,
   sanitizeExtraEnv,
+  withoutInheritedSessionMarkers,
 };
