@@ -1,3 +1,4 @@
+/* global window, document */
 // File tree right-click menu: "Copy Name" copies only the last path segment
 // to the clipboard and confirms with a toast.
 
@@ -31,9 +32,8 @@ function buildRepo() {
 // loadFileTree resolves.
 async function openFilesTab(mainWindow, wt, taskId) {
   await mainWindow.evaluate(async ({ wt, taskId }) => {
-    // Creating a file opens the viewer → Monaco init → InlineComplete.attach,
-    // which pops the async Ollama-consent modal. That overlay intercepts later
-    // header clicks. Stub the consent gate (read dynamically by inline-complete)
+    // Opening the viewer can pop the async Ollama-consent modal, which would
+    // intercept clicks. Stub the consent gate (read dynamically by inline-complete)
     // to a no-op and hide any overlay that already showed.
     window.OllamaConsent = { openIfNeeded: function () { return Promise.resolve({ ok: false, declined: true }); } };
     var ov = document.getElementById('ollama-consent-overlay');
@@ -72,6 +72,8 @@ test('tree context menu: Copy Name copies just the name and toasts', async ({ el
     const fileTree = mainWindow.locator('#file-tree');
     const readClipboard = () => electronApp.evaluate(({ clipboard }) => clipboard.readText());
 
+    await electronApp.evaluate(({ clipboard }) => clipboard.writeText(''));
+
     // Nested file: expand src, then right-click alpha.js.
     await fileTree.locator('[data-kind="dir"][data-path="src"]').first().click();
     const file = fileTree.locator('[role="treeitem"][data-path="src/alpha.js"]');
@@ -81,6 +83,7 @@ test('tree context menu: Copy Name copies just the name and toasts', async ({ el
     await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Copied name' })).toBeVisible();
 
     // Folder: name only, no parent path.
+    await electronApp.evaluate(({ clipboard }) => clipboard.writeText(''));
     await fileTree.locator('[role="treeitem"][data-path="src"]').click({ button: 'right' });
     await mainWindow.locator('.context-menu [role="menuitem"]', { hasText: 'Copy Name' }).click();
     await expect.poll(readClipboard).toBe('src');
