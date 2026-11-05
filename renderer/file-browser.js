@@ -1588,10 +1588,7 @@ window.FileBrowser = (function () {
     var dirContextRel = kind === 'dir' ? rel : (rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : '');
     var abs = fileTreeWorktree + '/' + rel;
     var rowEl = e.currentTarget;
-    var items = (kind === 'dir' ? [
-      { label: 'Collapse All', action: function () { collapseAll(rowEl); } },
-      { sep: true },
-    ] : []).concat([
+    var items = [
       { label: 'New File', action: function () { inlineCreate(dirContextRel, 'file'); } },
       { label: 'New Folder', action: function () { inlineCreate(dirContextRel, 'dir'); } },
       { sep: true },
@@ -1608,15 +1605,21 @@ window.FileBrowser = (function () {
           window.klaus.fs.copyToClipboard(rel);
           window.toast.info('Copied relative path');
       } },
-    ]);
+    ];
+    if (kind === 'dir') {
+      items.unshift({ label: 'Collapse All', action: function () { collapseAll(rowEl); } }, { sep: true });
+    }
     window.ContextMenu.show(e.clientX, e.clientY, items);
   }
 
   // Closes the folder and every open folder under it via the row's own click
   // toggle, so arrow, aria-expanded and visibility stay in sync.
   function collapseAll(rowEl) {
-    var open = rowEl.parentElement.querySelectorAll('[data-kind="dir"][aria-expanded="true"]');
-    for (var i = 0; i < open.length; i++) open[i].click();
+    // renderDir wraps the row and its children in one .file-tree-dir element.
+    var scope = rowEl.closest('.file-tree-dir') || rowEl.parentElement;
+    var open = scope.querySelectorAll('[data-kind="dir"][aria-expanded="true"]');
+    // Document order lists the folder first; walk backwards so descendants close before it.
+    for (var i = open.length - 1; i >= 0; i--) open[i].click();
     focusTreeItem(rowEl);
   }
 

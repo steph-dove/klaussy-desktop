@@ -46,6 +46,11 @@ test('Collapse All closes a folder and its open descendants; files lack the item
     await mainWindow.locator('.context-menu [role^="menuitem"]', { hasText: 'Collapse All' }).dispatchEvent('click');
     await expect(dir('src/a')).toHaveAttribute('aria-expanded', 'false');
     await expect(dir('src/a/b')).toHaveAttribute('aria-expanded', 'false');
+    // Rows under the closed folder are hidden, and the folder row is the tree's tab stop (the pane isn't visible in
+    // this harness, so real DOM focus can't be asserted).
+    await expect(tree.locator('[data-path="src/a/mid.js"]')).toBeHidden();
+    await expect(tree.locator('[data-path="src/a/b/deep.js"]')).toBeHidden();
+    await expect(dir('src/a')).toHaveAttribute('tabindex', '0');
     await expect(dir('src')).toHaveAttribute('aria-expanded', 'true');
     // Sibling folders are untouched.
     await expect(dir('src/c')).toHaveAttribute('aria-expanded', 'true');
