@@ -1197,9 +1197,14 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   // Optional start directory, relative to the worktree.
   let startDir = inst.worktreePath;
   if (cwd) {
-    if (!pathUnder(inst.worktreePath, cwd)) return { error: 'Folder is not inside this worktree' };
+    const lexical = path.resolve(inst.worktreePath, cwd);
+    if (lexical !== inst.worktreePath && !lexical.startsWith(inst.worktreePath + path.sep)) {
+      return { error: 'Folder is not inside this worktree' };
+    }
     startDir = dirUnder(inst.worktreePath, cwd);
-    if (!startDir) return { error: 'Folder no longer exists' };
+    if (!startDir) {
+      return { error: fs.existsSync(lexical) ? 'Not a folder inside this worktree' : 'Folder no longer exists' };
+    }
   }
 
   const subId = inst.nextSubId++;
