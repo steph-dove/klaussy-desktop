@@ -4935,6 +4935,12 @@ button.pr-check-toggle {
   color: var(--text);
 }
 
+.file-tree-file[aria-selected="true"] {
+  background: var(--accent-dim);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
 /* ---- Project Search (C3) ---- */
 
 .search-result-file {
