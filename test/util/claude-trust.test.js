@@ -139,3 +139,10 @@ test('sawTrustPrompt spots the dialog through ANSI and missing spaces', () => {
   assert.equal(sawTrustPrompt('\x1b[1m✻ Cooked for 12s\x1b[0m Run claude --continue'), false);
   assert.equal(sawTrustPrompt(undefined), false);
 });
+
+test('sawTrustPrompt ignores the phrase once later output follows it', () => {
+  const quoted = 'finding: pick "Yes, I trust this folder"\r\n' + 'x'.repeat(5000);
+  assert.equal(sawTrustPrompt(quoted), false);
+  const answered = 'Yes, I trust this folder' + '\x1b[2K working '.repeat(500);
+  assert.equal(sawTrustPrompt(answered), false);
+});

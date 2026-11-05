@@ -10,6 +10,7 @@ const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow, webContents, nativeTheme } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
+const { trustIfRepoAllowed } = require('../util/claude-trust');
 const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount, resolveGhEnv } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
@@ -580,6 +581,7 @@ ipcMain.handle('pr-checkout-locally', async () => {
       worktreePath: existingTask.worktreePath, branch: existingTask.branch, mode: existingTask.mode,
     };
   } else {
+    trustIfRepoAllowed(worktreePath);
     const task = spawnInWorktree(branch, worktreePath, branch, 'claude', null, null, number);
     const inst = instances.get(task.id);
     if (inst) {
@@ -1264,6 +1266,8 @@ ipcMain.handle('pr-review-resolve-conflicts', async (_event, args) => {
   if (target) {
     payload = { id: target.id, name: target.name, worktreePath: target.worktreePath, branch: target.branch, mode: target.mode };
   } else {
+    // The prompt is pasted 1.5s after spawn, which would land in a trust dialog.
+    trustIfRepoAllowed(wt.worktreePath);
     const result = spawnInWorktree(wt.branch, wt.worktreePath, wt.branch, 'claude', null, null, number);
     if (result && result.error) return { error: result.error };
     target = instances.get(result.id);

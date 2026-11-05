@@ -75,8 +75,9 @@ function trustIfRepoAllowed(worktreePath, { getStoredConsent = require('./worktr
 const TRUST_PROMPT = /I\s*trust\s*this\s*folder/i;
 const ANSI = /\x1b\[[0-9;?<>=]*[A-Za-z~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]/g;
 
+// Only the tail counts: the dialog must be the last thing drawn, not an echoed prompt quoting it.
 function sawTrustPrompt(ptyOutput) {
-  return TRUST_PROMPT.test(String(ptyOutput || '').slice(-20000).replace(ANSI, ''));
+  return TRUST_PROMPT.test(String(ptyOutput || '').slice(-4000).replace(ANSI, ''));
 }
 
 module.exports = { claudeConfigPath, trustClaudeFolder, trustIfRepoAllowed, sawTrustPrompt };
