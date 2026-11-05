@@ -1597,6 +1597,10 @@ window.FileBrowser = (function () {
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
+      { label: 'Copy Name', action: function () {
+          window.klaus.fs.copyToClipboard(rel.split('/').pop());
+          window.toast.info('Copied name');
+      } },
       { label: 'Copy Path', action: function () {
           window.klaus.fs.copyToClipboard(abs);
           window.toast.info('Copied path');
