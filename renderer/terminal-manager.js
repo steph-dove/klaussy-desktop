@@ -810,6 +810,18 @@ window.TerminalManager = (function () {
     }, 50);
   }
 
+  // New plain-shell tab started in `relDir` (relative to the worktree).
+  async function openShellAt(taskId, relDir, label) {
+    var taskEntry = tasks.get(taskId);
+    if (!taskEntry) return { error: 'No active task' };
+    var result = await window.klaus.terminal.addSub(taskId, label, 'shell', null, null, relDir);
+    if (!result || result.cancelled) return { cancelled: true };
+    if (result.error) return { error: result.error };
+    addSubTerminalTab(taskEntry, result.subId, result.label, 'shell');
+    switchSubTerminal(taskEntry, result.subId);
+    return { subId: result.subId };
+  }
+
   // ---- runInSubTerminal (Run buttons) ----
 
   // Find-or-create a sub-terminal named `label`, clear it, focus it, and type
@@ -1258,6 +1270,7 @@ window.TerminalManager = (function () {
     zoomOut: zoomOut,
     zoomReset: zoomReset,
     runInSubTerminal: runInSubTerminal,
+    openShellAt: openShellAt,
     focusActive: function () {
       var t = tasks.get(AppState.activeTaskId);
       if (!t) return false;

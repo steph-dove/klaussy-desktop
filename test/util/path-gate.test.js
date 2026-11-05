@@ -81,3 +81,28 @@ test('pathUnderAnyRoot refuses a path outside every root', () => {
   });
   assert.equal(pathUnderAnyRoot(path.join(outside, 'secret.txt')), null);
 });
+
+test('dirUnder: accepts a subdirectory, rejects files, escapes and missing paths', () => {
+  const { dirUnder } = pathGate;
+  fs.writeFileSync(path.join(root, 'subdir', 'f.txt'), 'x');
+  assert.equal(dirUnder(root, 'subdir'), fs.realpathSync(path.join(root, 'subdir')));
+  assert.equal(dirUnder(root, 'subdir/f.txt'), null);
+  assert.equal(dirUnder(root, '../' + path.basename(outside)), null);
+  assert.equal(dirUnder(root, 'nope'), null);
+});
+
+test('dirUnder: rejects a symlink to a directory outside the root; empty rel is the root', () => {
+  const { dirUnder } = pathGate;
+  fs.symlinkSync(outside, path.join(root, 'link-out'));
+  try {
+    assert.equal(dirUnder(root, 'link-out'), null);
+    assert.equal(dirUnder(root, ''), fs.realpathSync(root));
+  } finally {
+    fs.rmSync(path.join(root, 'link-out'), { force: true });
+  }
+});
+
+test.after(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.rmSync(outside, { recursive: true, force: true });
+});

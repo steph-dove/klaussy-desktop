@@ -1583,6 +1583,22 @@ window.FileBrowser = (function () {
     return !!item;
   }
 
+  async function openFolderInTerminal(rel) {
+    // The tree may show another worktree than the active task's; open the
+    // shell in the task that owns the tree.
+    var taskId = null;
+    AppState.tasks.forEach(function (t, id) { if (taskId == null && t.worktreePath === fileTreeWorktree) taskId = id; });
+    if (taskId == null) taskId = AppState.activeTaskId;
+    if (taskId == null) { window.toast.error('Open a task first'); return; }
+    var label = rel.slice(rel.lastIndexOf('/') + 1) || 'Shell';
+    try {
+      var res = await window.TerminalManager.openShellAt(taskId, rel, label);
+      if (res && res.error) window.toast.error('Open in Terminal failed: ' + res.error);
+    } catch (err) {
+      window.toast.error('Open in Terminal failed: ' + (err && err.message || err));
+    }
+  }
+
   function showTreeContextMenu(e, rel, kind) {
     // For file targets, "New File" creates a sibling — its parent dir.
     var dirContextRel = kind === 'dir' ? rel : (rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : '');
@@ -1597,6 +1613,7 @@ window.FileBrowser = (function () {
       kind === 'file' && { label: 'Duplicate', action: function () { duplicateFile(rel); } },
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
+      kind === 'dir' ? { label: 'Open in Terminal', action: function () { openFolderInTerminal(rel); } } : null,
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
       { label: 'Copy Name', action: function () { copyWithToast(rel.split('/').pop(), 'Copied name'); } },
       { label: 'Copy Path', action: function () { copyWithToast(abs, 'Copied path'); } },

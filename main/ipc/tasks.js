@@ -21,6 +21,7 @@ const {
   processSubOutput, clearIdleTimer, convertInstanceToShell,
   sendToTerminalSubscribers, flushTerminalOutput, makeAgentExitHandler, resetMirrorBinding,
 } = require('../state/instances');
+const { dirUnder, pathUnder } = require('../util/path-gate');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
@@ -1189,9 +1190,22 @@ ipcMain.on('resize-terminal', (_event, { id, cols, rows, subId }) => {
   }
 });
 
-ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt, resumeSessionId }) => {
+ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt, resumeSessionId, cwd }) => {
   const inst = instances.get(taskId);
   if (!inst) return { error: 'Instance not found' };
+
+  // Optional start directory, relative to the worktree.
+  let startDir = inst.worktreePath;
+  if (cwd) {
+    const lexical = path.resolve(inst.worktreePath, cwd);
+    if (lexical !== inst.worktreePath && !lexical.startsWith(inst.worktreePath + path.sep)) {
+      return { error: 'Folder is not inside this worktree' };
+    }
+    startDir = dirUnder(inst.worktreePath, cwd);
+    if (!startDir) {
+      return { error: fs.existsSync(lexical) ? 'Not a folder inside this worktree' : 'Folder no longer exists' };
+    }
+  }
 
   const subId = inst.nextSubId++;
   const userShell = defaultShell();
@@ -1244,7 +1258,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
-      cwd: inst.worktreePath,
+      cwd: startDir,
       env: {
         ...process.env,
         TERM: 'xterm-256color',

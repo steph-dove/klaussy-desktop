@@ -84,4 +84,16 @@ function pathUnder(root, candidate) {
   }
 }
 
-module.exports = { pathUnder, pathUnderAnyRoot, getRendererAllowedRoots, setDeps };
+// A directory under `root` to start a shell in, or null when `rel` escapes the
+// root, doesn't exist, or isn't a directory.
+function dirUnder(root, rel) {
+  const resolved = pathUnder(root, rel);
+  if (!resolved) return null;
+  try {
+    return fs.statSync(resolved).isDirectory() ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { dirUnder, pathUnder, pathUnderAnyRoot, getRendererAllowedRoots, setDeps };
