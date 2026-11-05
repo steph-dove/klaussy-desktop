@@ -81,3 +81,12 @@ test('pathUnderAnyRoot refuses a path outside every root', () => {
   });
   assert.equal(pathUnderAnyRoot(path.join(outside, 'secret.txt')), null);
 });
+
+test('dirUnder: accepts a subdirectory, rejects files, escapes and missing paths', () => {
+  const { dirUnder } = pathGate;
+  fs.writeFileSync(path.join(root, 'subdir', 'f.txt'), 'x');
+  assert.equal(dirUnder(root, 'subdir'), fs.realpathSync(path.join(root, 'subdir')));
+  assert.equal(dirUnder(root, 'subdir/f.txt'), null);
+  assert.equal(dirUnder(root, '../' + path.basename(outside)), null);
+  assert.equal(dirUnder(root, 'nope'), null);
+});

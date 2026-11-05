@@ -1583,6 +1583,18 @@ window.FileBrowser = (function () {
     return !!item;
   }
 
+  async function openFolderInTerminal(rel) {
+    var taskId = AppState.activeTaskId;
+    if (!taskId) { window.toast.error('Open a task first'); return; }
+    var label = rel.slice(rel.lastIndexOf('/') + 1) || 'Shell';
+    try {
+      var res = await window.TerminalManager.openShellAt(taskId, rel, label);
+      if (res && res.error) window.toast.error('Open in Terminal failed: ' + res.error);
+    } catch (err) {
+      window.toast.error('Open in Terminal failed: ' + (err && err.message || err));
+    }
+  }
+
   function showTreeContextMenu(e, rel, kind) {
     // For file targets, "New File" creates a sibling — its parent dir.
     var dirContextRel = kind === 'dir' ? rel : (rel.indexOf('/') >= 0 ? rel.slice(0, rel.lastIndexOf('/')) : '');
@@ -1596,6 +1608,7 @@ window.FileBrowser = (function () {
       { label: 'Move to…', action: function () { promptMove(rel); } },
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
+      kind === 'dir' ? { label: 'Open in Terminal', action: function () { openFolderInTerminal(rel); } } : null,
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
       { label: 'Copy Path', action: function () {
           window.klaus.fs.copyToClipboard(abs);
@@ -1605,7 +1618,7 @@ window.FileBrowser = (function () {
           window.klaus.fs.copyToClipboard(rel);
           window.toast.info('Copied relative path');
       } },
-    ];
+    ].filter(Boolean);
     window.ContextMenu.show(e.clientX, e.clientY, items);
   }
 
