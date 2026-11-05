@@ -6656,6 +6656,9 @@ body.task-branchless .file-viewer-blame-btn {
 
 .sub-terminal-wrapper .xterm {
   height: 100%;
+  /* Same inset as .terminal-body > .xterm; pad the .xterm, never the wrapper
+     FitAddon measures. */
+  padding: 6px 14px 6px 16px;
 }
 
 /* ---- Merge Conflict Resolution (Feature 1) ---- */
