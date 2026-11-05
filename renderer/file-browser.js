@@ -1598,15 +1598,13 @@ window.FileBrowser = (function () {
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
-      { label: 'Copy Path', action: function () {
-          window.klaus.fs.copyToClipboard(abs);
-          window.toast.info('Copied path');
-      } },
-      { label: 'Copy Relative Path', action: function () {
-          window.klaus.fs.copyToClipboard(rel);
-          window.toast.info('Copied relative path');
-      } },
+      { label: 'Copy Name', action: function () { copyWithToast(rel.split('/').pop(), 'Copied name'); } },
+      { label: 'Copy Path', action: function () { copyWithToast(abs, 'Copied path'); } },
+      { label: 'Copy Relative Path', action: function () { copyWithToast(rel, 'Copied relative path'); } },
     ];
+    if (kind === 'dir') {
+      items.unshift({ label: 'Collapse All', action: function () { collapseAll(rowEl); } }, { sep: true });
+    }
     window.ContextMenu.show(e.clientX, e.clientY, items.filter(Boolean));
   }
 
@@ -1622,6 +1620,31 @@ window.FileBrowser = (function () {
     fileTree.querySelectorAll('[aria-selected="true"]').forEach(function (el) { el.removeAttribute('aria-selected'); });
     if (added) added.setAttribute('aria-selected', 'true');
     A11y.announce('Duplicated ' + rel.split('/').pop() + ' as ' + result.relPath.split('/').pop());
+  }
+
+  async function copyWithToast(text, message) {
+    var result;
+    try {
+      result = await window.klaus.fs.copyToClipboard(text);
+    } catch (err) {
+      result = { error: err.message };
+    }
+    if (result && result.error) {
+      window.toast.error('Copy failed: ' + result.error);
+      return;
+    }
+    window.toast.info(message);
+  }
+
+  // Closes the folder and every open folder under it via the row's own click
+  // toggle, so arrow, aria-expanded and visibility stay in sync.
+  function collapseAll(rowEl) {
+    // renderDir wraps the row and its children in one .file-tree-dir element.
+    var scope = rowEl.closest('.file-tree-dir') || rowEl.parentElement;
+    var open = scope.querySelectorAll('[data-kind="dir"][aria-expanded="true"]');
+    // Document order lists the folder first; walk backwards so descendants close before it.
+    for (var i = open.length - 1; i >= 0; i--) open[i].click();
+    focusTreeItem(rowEl);
   }
 
   function wireDragSource(el, rel, _kind) {

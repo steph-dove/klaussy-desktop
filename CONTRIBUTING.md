@@ -25,6 +25,20 @@ npm test         # unit tests (node --require ./test/setup.js --test test/util/*
 npm run test:e2e # Playwright e2e (optional; launches the app)
 ```
 
+To screenshot the app as it is (for a plan or a PR), `npm run screenshot` boots it
+the way the e2e tests do, skips the first-run Setup check, opens a repo in the
+Files tab and saves a PNG. Without `--repo` it uses a small sample repo, and
+`--right-click PATH` opens the menu of a top-level tree row (`src`, `README.md`)
+first. With no display, run it under `xvfb-run -a`. For other screens,
+`require('./scripts/screenshot').launch()` gives you the app with that setup done.
+Run on your own machine, the sidebar still lists your real sessions and usage, so
+crop the shot before you share it.
+
+```bash
+npm run screenshot -- --out shots/tree.png
+npm run screenshot -- --out shots/menu.png --repo ~/code/app --right-click src
+```
+
 The repo also installs a **commit-time review gate** (the same one the product
 ships) that flags silent failures, secrets, debug leftovers, and verbose
 comments before a commit lands. If it blocks you on something intentional, you
