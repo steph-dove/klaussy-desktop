@@ -12,6 +12,7 @@ const os = require('os');
 const { ipcMain, shell, clipboard } = require('electron');
 const { execFileP, ghExecP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
+const { nextCopyName } = require('../util/copy-name');
 const { saveAttachment } = require('../util/attachments');
 const { worktreeWatchers, startWorktreeWatcher, stopWorktreeWatcher } = require('../state/watcher');
 const { allowQaPaths, qaMediaUrl, protocolError } = require('../bootstrap/qa-media-protocol');
@@ -1012,6 +1013,43 @@ ipcMain.handle('rename-path', async (_event, { worktreePath, fromRel, toRel }) =
     fs.mkdirSync(path.dirname(toSafe), { recursive: true });
     fs.renameSync(fromSafe, toSafe);
     return { ok: true, path: toSafe };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Copy a file next to itself as "name copy.ext" (then "copy 2"…). COPYFILE_EXCL
+// means a name taken between the check and the copy fails instead of clobbering.
+ipcMain.handle('duplicate-path', async (_event, { worktreePath, relPath }) => {
+  if (!worktreePath || !relPath) return { error: 'missing args' };
+  // Resolve the parent dir only, so the file's own name stays lexical and a
+  // symlink is judged as a symlink rather than as whatever it points at.
+  const normRel = relPath.replace(/\\/g, '/');
+  const parentRel = path.posix.dirname(normRel);
+  const base = path.posix.basename(normRel);
+  const dir = pathUnder(worktreePath, parentRel);
+  if (!dir) return { error: 'folder is missing or outside the worktree' };
+  if (!base || base === '.' || base === '..') return { error: 'invalid file name' };
+  const src = path.join(dir, base);
+  try {
+    let st;
+    try { st = fs.lstatSync(src); } catch { return { error: 'source does not exist' }; }
+    if (!st.isFile()) return { error: 'only regular files can be duplicated' };
+    const taken = (n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } };
+    // Retry if another process takes the chosen name before the copy lands.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const name = nextCopyName(base, taken);
+      try {
+        await fs.promises.copyFile(src, path.join(dir, name), fs.constants.COPYFILE_EXCL);
+      } catch (err) {
+        if (err.code === 'EEXIST') continue;
+        // COPYFILE_EXCL creates the target first; don't leave a truncated copy.
+        try { fs.unlinkSync(path.join(dir, name)); } catch {}
+        throw err;
+      }
+      return { ok: true, path: path.join(dir, name), relPath: parentRel === '.' ? name : parentRel + '/' + name };
+    }
+    return { error: 'could not find a free name' };
   } catch (err) {
     return { error: err.message };
   }

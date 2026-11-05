@@ -106,3 +106,43 @@ test('create-file, create-dir, rename-path, delete-path round-trip', async ({ ma
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test('duplicate-path copies a file beside itself without clobbering', async ({ mainWindow }) => {
+  await mainWindow.waitForLoadState('networkidle');
+
+  const repo = buildRepo();
+  try {
+    fs.writeFileSync(path.join(repo, 'src', 'notes.md'), 'hello\n');
+    const dup = (rel) => mainWindow.evaluate(
+      ({ wt, rel }) => window.klaus.fs.duplicatePath(wt, rel),
+      { wt: repo, rel },
+    );
+
+    const first = await dup('src/notes.md');
+    expect(first.error).toBeFalsy();
+    expect(first.relPath).toBe('src/notes copy.md');
+    expect(fs.readFileSync(path.join(repo, 'src', 'notes copy.md'), 'utf8')).toBe('hello\n');
+
+    const second = await dup('src/notes.md');
+    expect(second.relPath).toBe('src/notes copy 2.md');
+
+    const dir = await dup('src');
+    expect(dir.error).toMatch(/only regular files/);
+
+    const missing = await dup('src/nope.md');
+    expect(missing.error).toMatch(/does not exist/);
+
+    const root = await dup('seed.txt');
+    expect(root.relPath).toBe('seed copy.txt');
+    expect(fs.readFileSync(path.join(repo, 'seed copy.txt'), 'utf8')).toBe('seed\n');
+
+    fs.symlinkSync('notes.md', path.join(repo, 'src', 'link.md'));
+    const link = await dup('src/link.md');
+    expect(link.error).toMatch(/only regular files/);
+
+    const escape = await dup('../escaped.md');
+    expect(escape.error).toMatch(/outside the worktree/);
+  } finally {
+    fs.rmSync(repo, { recursive: true, force: true });
+  }
+});

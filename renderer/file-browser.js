@@ -1594,6 +1594,7 @@ window.FileBrowser = (function () {
       { sep: true },
       { label: 'Rename', action: function () { inlineRename(rowEl, rel, kind); } },
       { label: 'Move to…', action: function () { promptMove(rel); } },
+      kind === 'file' && { label: 'Duplicate', action: function () { duplicateFile(rel); } },
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
@@ -1604,11 +1605,34 @@ window.FileBrowser = (function () {
     if (kind === 'dir') {
       items.unshift({ label: 'Collapse All', action: function () { collapseAll(rowEl); } }, { sep: true });
     }
-    window.ContextMenu.show(e.clientX, e.clientY, items);
+    window.ContextMenu.show(e.clientX, e.clientY, items.filter(Boolean));
   }
 
-  function copyWithToast(text, message) {
-    window.klaus.fs.copyToClipboard(text);
+  async function duplicateFile(rel) {
+    var result = await window.klaus.fs.duplicatePath(fileTreeWorktree, rel);
+    if (result.error) {
+      window.toast.error('Duplicate failed: ' + result.error);
+      return;
+    }
+    await refreshFileTree();
+    focusTreePath(result.relPath);
+    var added = fileTree.querySelector('[role="treeitem"][data-path="' + cssEscape(result.relPath) + '"]');
+    fileTree.querySelectorAll('[aria-selected="true"]').forEach(function (el) { el.removeAttribute('aria-selected'); });
+    if (added) added.setAttribute('aria-selected', 'true');
+    A11y.announce('Duplicated ' + rel.split('/').pop() + ' as ' + result.relPath.split('/').pop());
+  }
+
+  async function copyWithToast(text, message) {
+    var result;
+    try {
+      result = await window.klaus.fs.copyToClipboard(text);
+    } catch (err) {
+      result = { error: err.message };
+    }
+    if (result && result.error) {
+      window.toast.error('Copy failed: ' + result.error);
+      return;
+    }
     window.toast.info(message);
   }
 
@@ -1875,7 +1899,11 @@ window.FileBrowser = (function () {
   }
 
   fileTree.addEventListener('focusin', function (e) {
-    if (e.target.getAttribute('role') === 'treeitem') setTreeTabStop(e.target);
+    if (e.target.getAttribute('role') !== 'treeitem') return;
+    setTreeTabStop(e.target);
+    fileTree.querySelectorAll('[aria-selected="true"]').forEach(function (el) {
+      if (el !== e.target) el.removeAttribute('aria-selected');
+    });
   });
 
   fileTree.addEventListener('keydown', function (e) {
