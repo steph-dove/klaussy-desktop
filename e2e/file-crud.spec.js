@@ -141,7 +141,7 @@ test('duplicate-path copies a file beside itself without clobbering', async ({ m
     expect(link.error).toMatch(/only regular files/);
 
     const escape = await dup('../escaped.md');
-    expect(escape.error).toMatch(/escapes worktree/);
+    expect(escape.error).toMatch(/outside the worktree/);
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
