@@ -1597,19 +1597,19 @@ window.FileBrowser = (function () {
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
-      { label: 'Copy Path', action: function () {
-          window.klaus.fs.copyToClipboard(abs);
-          window.toast.info('Copied path');
-      } },
-      { label: 'Copy Relative Path', action: function () {
-          window.klaus.fs.copyToClipboard(rel);
-          window.toast.info('Copied relative path');
-      } },
+      { label: 'Copy Name', action: function () { copyWithToast(rel.split('/').pop(), 'Copied name'); } },
+      { label: 'Copy Path', action: function () { copyWithToast(abs, 'Copied path'); } },
+      { label: 'Copy Relative Path', action: function () { copyWithToast(rel, 'Copied relative path'); } },
     ];
     if (kind === 'dir') {
       items.unshift({ label: 'Collapse All', action: function () { collapseAll(rowEl); } }, { sep: true });
     }
     window.ContextMenu.show(e.clientX, e.clientY, items);
+  }
+
+  function copyWithToast(text, message) {
+    window.klaus.fs.copyToClipboard(text);
+    window.toast.info(message);
   }
 
   // Closes the folder and every open folder under it via the row's own click
