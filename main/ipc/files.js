@@ -1028,7 +1028,8 @@ ipcMain.handle('duplicate-path', async (_event, { worktreePath, relPath }) => {
   const parentRel = path.posix.dirname(normRel);
   const base = path.posix.basename(normRel);
   const dir = pathUnder(worktreePath, parentRel);
-  if (!dir || !base || base === '.' || base === '..') return { error: 'path escapes worktree' };
+  if (!dir) return { error: 'folder is missing or outside the worktree' };
+  if (!base || base === '.' || base === '..') return { error: 'invalid file name' };
   const src = path.join(dir, base);
   try {
     let st;

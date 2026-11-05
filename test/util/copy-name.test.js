@@ -29,3 +29,11 @@ test('dotfile with an extension and a taken dotfile copy', () => {
   assert.equal(nextCopyName('.config.json', taken()), '.config copy.json');
   assert.equal(nextCopyName('.env', taken('.env copy')), '.env copy 2');
 });
+
+test('trailing dot keeps the dot in the name', () => {
+  assert.equal(nextCopyName('file.', taken()), 'file copy.');
+});
+
+test('duplicating a copy appends another suffix', () => {
+  assert.equal(nextCopyName('notes copy.md', taken()), 'notes copy copy.md');
+});
