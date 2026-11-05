@@ -65,7 +65,8 @@ test('leaves an unparseable config untouched', () => {
 test('keeps the file mode and leaves no temp file behind', () => {
   const f = fixture({ projects: {} });
   trustClaudeFolder(f.wt, { configPath: f.configPath });
-  assert.equal(fs.statSync(f.configPath).mode & 0o777, 0o600);
+  // Windows has no POSIX modes to keep.
+  if (process.platform !== 'win32') assert.equal(fs.statSync(f.configPath).mode & 0o777, 0o600);
   assert.deepEqual(fs.readdirSync(f.root).sort(), ['.claude.json', 'wt']);
 });
 
