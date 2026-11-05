@@ -1594,6 +1594,7 @@ window.FileBrowser = (function () {
       { sep: true },
       { label: 'Rename', action: function () { inlineRename(rowEl, rel, kind); } },
       { label: 'Move to…', action: function () { promptMove(rel); } },
+      kind === 'file' && { label: 'Duplicate', action: function () { duplicateFile(rel); } },
       { label: 'Delete', action: function () { deleteWithConfirm(rel, kind); } },
       { sep: true },
       { label: 'Reveal in Finder', action: function () { window.klaus.fs.revealInFolder(abs); } },
@@ -1606,7 +1607,18 @@ window.FileBrowser = (function () {
           window.toast.info('Copied relative path');
       } },
     ];
-    window.ContextMenu.show(e.clientX, e.clientY, items);
+    window.ContextMenu.show(e.clientX, e.clientY, items.filter(Boolean));
+  }
+
+  async function duplicateFile(rel) {
+    var result = await window.klaus.fs.duplicatePath(fileTreeWorktree, rel);
+    if (result.error) {
+      window.toast.error('Duplicate failed: ' + result.error);
+      return;
+    }
+    await refreshFileTree();
+    focusTreePath(result.relPath);
+    A11y.announce('Duplicated ' + rel.split('/').pop() + ' as ' + result.relPath.split('/').pop());
   }
 
   function wireDragSource(el, rel, _kind) {

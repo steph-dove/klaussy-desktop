@@ -12,6 +12,7 @@ const os = require('os');
 const { ipcMain, shell, clipboard } = require('electron');
 const { execFileP, ghExecP } = require('../util/exec');
 const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
+const { nextCopyName } = require('../util/copy-name');
 const { saveAttachment } = require('../util/attachments');
 const { worktreeWatchers, startWorktreeWatcher, stopWorktreeWatcher } = require('../state/watcher');
 const { allowQaPaths, qaMediaUrl, protocolError } = require('../bootstrap/qa-media-protocol');
@@ -1012,6 +1013,25 @@ ipcMain.handle('rename-path', async (_event, { worktreePath, fromRel, toRel }) =
     fs.mkdirSync(path.dirname(toSafe), { recursive: true });
     fs.renameSync(fromSafe, toSafe);
     return { ok: true, path: toSafe };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Copy a file next to itself as "name copy.ext" (then "copy 2"…). COPYFILE_EXCL
+// means a name taken between the check and the copy fails instead of clobbering.
+ipcMain.handle('duplicate-path', async (_event, { worktreePath, relPath }) => {
+  if (!worktreePath || !relPath) return { error: 'missing args' };
+  const safe = pathUnder(worktreePath, relPath);
+  if (!safe) return { error: 'path escapes worktree' };
+  try {
+    if (!fs.lstatSync(safe).isFile()) return { error: 'only files can be duplicated' };
+    const dir = path.dirname(safe);
+    const name = nextCopyName(path.basename(safe), (n) => fs.existsSync(path.join(dir, n)));
+    const dest = path.join(dir, name);
+    fs.copyFileSync(safe, dest, fs.constants.COPYFILE_EXCL);
+    const slash = relPath.lastIndexOf('/');
+    return { ok: true, path: dest, relPath: slash >= 0 ? relPath.slice(0, slash + 1) + name : name };
   } catch (err) {
     return { error: err.message };
   }

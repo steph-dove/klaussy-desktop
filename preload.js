@@ -678,6 +678,7 @@ contextBridge.exposeInMainWorld('klaus', {
     createFile: (worktreePath, relPath) => ipcRenderer.invoke('create-file', { worktreePath, relPath }),
     createDir: (worktreePath, relPath) => ipcRenderer.invoke('create-dir', { worktreePath, relPath }),
     renamePath: (worktreePath, fromRel, toRel) => ipcRenderer.invoke('rename-path', { worktreePath, fromRel, toRel }),
+    duplicatePath: (worktreePath, relPath) => ipcRenderer.invoke('duplicate-path', { worktreePath, relPath }),
     deletePath: (worktreePath, relPath, permanent) => ipcRenderer.invoke('delete-path', { worktreePath, relPath, permanent }),
     revealInFolder: (filePath) => ipcRenderer.invoke('reveal-in-folder', { filePath }),
     copyToClipboard: (text) => ipcRenderer.invoke('clipboard-write-text', { text }),
