@@ -1022,16 +1022,30 @@ ipcMain.handle('rename-path', async (_event, { worktreePath, fromRel, toRel }) =
 // means a name taken between the check and the copy fails instead of clobbering.
 ipcMain.handle('duplicate-path', async (_event, { worktreePath, relPath }) => {
   if (!worktreePath || !relPath) return { error: 'missing args' };
-  const safe = pathUnder(worktreePath, relPath);
-  if (!safe) return { error: 'path escapes worktree' };
+  // Resolve the parent dir only, so the file's own name stays lexical and a
+  // symlink is judged as a symlink rather than as whatever it points at.
+  const parentRel = path.posix.dirname(relPath.replace(/\\/g, '/'));
+  const base = path.basename(relPath);
+  const dir = pathUnder(worktreePath, parentRel);
+  if (!dir || !base || base === '.' || base === '..') return { error: 'path escapes worktree' };
+  const src = path.join(dir, base);
   try {
-    if (!fs.lstatSync(safe).isFile()) return { error: 'only files can be duplicated' };
-    const dir = path.dirname(safe);
-    const name = nextCopyName(path.basename(safe), (n) => fs.existsSync(path.join(dir, n)));
-    const dest = path.join(dir, name);
-    fs.copyFileSync(safe, dest, fs.constants.COPYFILE_EXCL);
-    const slash = relPath.lastIndexOf('/');
-    return { ok: true, path: dest, relPath: slash >= 0 ? relPath.slice(0, slash + 1) + name : name };
+    let st;
+    try { st = fs.lstatSync(src); } catch { return { error: 'source does not exist' }; }
+    if (!st.isFile()) return { error: 'only regular files can be duplicated' };
+    const taken = (n) => { try { fs.lstatSync(path.join(dir, n)); return true; } catch { return false; } };
+    // Retry if another process takes the chosen name before the copy lands.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const name = nextCopyName(base, taken);
+      try {
+        await fs.promises.copyFile(src, path.join(dir, name), fs.constants.COPYFILE_EXCL);
+      } catch (err) {
+        if (err.code === 'EEXIST') continue;
+        throw err;
+      }
+      return { ok: true, path: path.join(dir, name), relPath: parentRel === '.' ? name : parentRel + '/' + name };
+    }
+    return { error: 'could not find a free name' };
   } catch (err) {
     return { error: err.message };
   }

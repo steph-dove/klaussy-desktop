@@ -24,3 +24,8 @@ test('extensionless files', () => {
 test('only the last extension is split off', () => {
   assert.equal(nextCopyName('a.test.js', taken()), 'a.test copy.js');
 });
+
+test('dotfile with an extension and a taken dotfile copy', () => {
+  assert.equal(nextCopyName('.config.json', taken()), '.config copy.json');
+  assert.equal(nextCopyName('.env', taken('.env copy')), '.env copy 2');
+});

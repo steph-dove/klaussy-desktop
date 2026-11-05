@@ -127,7 +127,18 @@ test('duplicate-path copies a file beside itself without clobbering', async ({ m
     expect(second.relPath).toBe('src/notes copy 2.md');
 
     const dir = await dup('src');
-    expect(dir.error).toMatch(/only files/);
+    expect(dir.error).toMatch(/only regular files/);
+
+    const missing = await dup('src/nope.md');
+    expect(missing.error).toMatch(/does not exist/);
+
+    const root = await dup('seed.txt');
+    expect(root.relPath).toBe('seed copy.txt');
+    expect(fs.readFileSync(path.join(repo, 'seed copy.txt'), 'utf8')).toBe('seed\n');
+
+    fs.symlinkSync('notes.md', path.join(repo, 'src', 'link.md'));
+    const link = await dup('src/link.md');
+    expect(link.error).toMatch(/only regular files/);
 
     const escape = await dup('../escaped.md');
     expect(escape.error).toMatch(/escapes worktree/);
