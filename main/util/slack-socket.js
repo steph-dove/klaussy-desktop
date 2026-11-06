@@ -22,6 +22,7 @@ function createSlackSocket({ appToken, onEvent, onStatus }) {
   let closed = false;
   let attempt = 0;
   let retryTimer = null;
+  let connecting = false;
 
   async function openUrl() {
     const res = await fetch(CONNECTIONS_OPEN, {
@@ -44,11 +45,13 @@ function createSlackSocket({ appToken, onEvent, onStatus }) {
   }
 
   async function connect() {
-    if (closed) return;
+    if (closed || connecting) return;
+    connecting = true;
     let url;
     try {
       url = await openUrl();
     } catch (err) {
+      connecting = false;
       // A rejected token never becomes valid by retrying — stop, the way the
       // Discord gateway does on 4004, instead of polling this endpoint forever.
       if (FATAL_AUTH_ERRORS.has(err.message)) {
@@ -60,17 +63,21 @@ function createSlackSocket({ appToken, onEvent, onStatus }) {
       scheduleReconnect();
       return;
     }
+    connecting = false;
+    if (closed) return;
+    let sock;
     try {
-      ws = new WebSocket(url);
+      sock = new WebSocket(url);
     } catch (err) {
       emitStatus({ ok: false, error: err.message });
       scheduleReconnect();
       return;
     }
+    ws = sock;
 
-    ws.addEventListener('open', () => { attempt = 0; emitStatus({ ok: true }); });
+    sock.addEventListener('open', () => { attempt = 0; emitStatus({ ok: true }); });
 
-    ws.addEventListener('message', (ev) => {
+    sock.addEventListener('message', (ev) => {
       let frame;
       try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : ''); } catch { return; }
       if (!frame || !frame.type) return;
@@ -78,10 +85,10 @@ function createSlackSocket({ appToken, onEvent, onStatus }) {
       // Slack expects the envelope acknowledged within 3s or it redelivers.
       // Ack before doing the work so a slow PTY write can't cause a duplicate.
       if (frame.envelope_id) {
-        try { ws.send(JSON.stringify({ envelope_id: frame.envelope_id })); } catch {}
+        try { sock.send(JSON.stringify({ envelope_id: frame.envelope_id })); } catch {}
       }
       if (frame.type === 'disconnect') {
-        try { ws.close(); } catch {}
+        try { sock.close(); } catch {}
         return;
       }
       if (frame.type === 'hello') return;
@@ -93,14 +100,29 @@ function createSlackSocket({ appToken, onEvent, onStatus }) {
       }
     });
 
-    ws.addEventListener('close', () => { ws = null; scheduleReconnect(); });
-    ws.addEventListener('error', () => { emitStatus({ ok: false, error: 'socket error' }); });
+    // A socket replaced by reconnect() still closes later; only the current one reconnects.
+    sock.addEventListener('close', () => {
+      if (ws !== sock) return;
+      ws = null;
+      scheduleReconnect();
+    });
+    sock.addEventListener('error', () => { if (ws === sock) emitStatus({ ok: false, error: 'socket error' }); });
   }
 
   connect();
 
   return {
     bus,
+    // After sleep the socket can look open but be dead, and its close handshake never completes, so don't wait on it.
+    reconnect() {
+      if (closed) return;
+      if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
+      const old = ws;
+      ws = null;
+      if (old) { try { old.close(); } catch {} }
+      attempt = 0;
+      connect();
+    },
     close() {
       closed = true;
       if (retryTimer) clearTimeout(retryTimer);

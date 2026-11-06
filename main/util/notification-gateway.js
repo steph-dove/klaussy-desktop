@@ -417,22 +417,36 @@ function handleDiscordFrame(parsed) {
   if (!parsed) return;
   const cfg = getNotificationConfig();
   const { applyDecision, applyText } = require('./chat-reply');
-  const { respondToInteraction } = require('./discord-gateway');
+  const { respondToInteraction, editBotMessage } = require('./discord-gateway');
 
   if (parsed.kind === 'action') {
     const [action, token, key] = String(parsed.customId).split(':');
-    const res = action === 'klaussy_choice'
-      ? require('./chat-reply').applyChoice({ token, key, userId: parsed.userId, allowList: cfg.allowList })
-      : applyDecision({
-        token,
-        decision: action === 'klaussy_approve' ? 'approve' : 'reject',
-        userId: parsed.userId,
-        allowList: cfg.allowList,
-      });
+    // Discord fails an unanswered click, so a throw must still produce a reply.
+    let res;
+    try {
+      res = action === 'klaussy_choice'
+        ? require('./chat-reply').applyChoice({ token, key, userId: parsed.userId, allowList: cfg.allowList })
+        : applyDecision({
+          token,
+          decision: action === 'klaussy_approve' ? 'approve' : 'reject',
+          userId: parsed.userId,
+          allowList: cfg.allowList,
+        });
+    } catch (err) {
+      res = { ok: false, message: err.message };
+    }
     const text = res.ok
       ? `${res.message} by <@${parsed.userId}>`
       : `Not applied: ${res.message}`;
     respondToInteraction(parsed.interactionId, parsed.interactionToken, text)
+      .then((r) => {
+        if (!r || r.ok) return null;
+        // 404 is a click replayed after a reconnect, too late for a callback.
+        if (r.status === 404 && cfg.discordBotToken && parsed.channel && parsed.messageId) {
+          return editBotMessage(cfg.discordBotToken, parsed.channel, parsed.messageId, text);
+        }
+        return r;
+      })
       .then((r) => { if (r && !r.ok) logAckFailure('discord button ack', 'HTTP ' + r.status); })
       .catch((err) => logAckFailure('discord button ack', err.message));
     return;
@@ -504,12 +518,23 @@ function restart() {
   ensureStarted();
 }
 
+// After sleep or a network change the sockets can look connected while the other end has dropped them.
+function reconnectSockets() {
+  for (const [name, sock] of [['slack', _slack], ['discord', _discord]]) {
+    if (!sock) continue;
+    try { sock.reconnect(); } catch (e) {
+      console.warn(`[notification-gateway] ${name} reconnect failed:`, e.message);
+    }
+  }
+}
+
 module.exports = {
   postWebhook,
   dispatchEvent,
   eventTypeEnabled,
   ensureStarted,
   restart,
+  reconnectSockets,
   handleSlackFrame,
   handleDiscordFrame,
   forgetTask,
