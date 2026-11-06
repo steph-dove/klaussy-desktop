@@ -9,6 +9,12 @@ function readConfig(userDataDir) {
   try { return JSON.parse(fs.readFileSync(path.join(userDataDir, 'config.json'), 'utf-8')); } catch { return {}; }
 }
 
+// The bar slides in on show; measuring the grip mid-animation makes the mouse-down miss it.
+async function settledGripBox(mainWindow) {
+  await mainWindow.locator('#broadcast-bar').evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+  return mainWindow.locator('#btn-broadcast-grip').boundingBox();
+}
+
 async function addFakeTerminals(mainWindow) {
   await mainWindow.evaluate(() => {
     const fake = (id, branch, alive, subs) => ({
@@ -93,7 +99,7 @@ test.describe('broadcast bar', () => {
     await expect(bar).not.toHaveClass(/dragged/);
 
     const area = await mainWindow.locator('#terminal-area').boundingBox();
-    const grip = await mainWindow.locator('#btn-broadcast-grip').boundingBox();
+    const grip = await settledGripBox(mainWindow);
     await mainWindow.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
     await mainWindow.mouse.down();
     await mainWindow.mouse.move(area.x + 60, area.y + 80, { steps: 8 });
@@ -127,7 +133,7 @@ test.describe('broadcast bar', () => {
     await expect(bar).toBeVisible();
 
     const area = await mainWindow.locator('#terminal-area').boundingBox();
-    const grip = await mainWindow.locator('#btn-broadcast-grip').boundingBox();
+    const grip = await settledGripBox(mainWindow);
     await mainWindow.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
     await mainWindow.mouse.down();
     await mainWindow.mouse.move(area.x + area.width - 5, area.y + 80, { steps: 8 });
