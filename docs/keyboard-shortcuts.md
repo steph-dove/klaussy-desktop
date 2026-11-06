@@ -116,7 +116,8 @@ The editor is Monaco, so its usual editing keys work as well. These are the ones
 | Enter / Esc | Enter / Esc | Save / cancel the new name | Task rename box |
 | Option+Up / Option+Down | Alt+Up / Alt+Down | Move the task up or down the list | Focused task |
 | Cmd+Enter, Esc or Tab | Ctrl+Enter, Esc or Tab | Leave the task's note and go back to its Notes button | Task note editor |
-| Enter / Esc | Enter / Esc | Send / collapse the broadcast command | Broadcast box |
+| Enter / Esc | Enter / Esc | Send the broadcast command to every open terminal / collapse the floating bar (docked, Esc just leaves the box) | Broadcast box |
+| Arrow keys, Home | Arrow keys, Home | Move the floating broadcast bar (Shift for bigger steps) / re-center it | Broadcast bar grip |
 
 ## Changes panel and diffs
 

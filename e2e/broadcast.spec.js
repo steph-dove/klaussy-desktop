@@ -89,6 +89,9 @@ test.describe('broadcast bar', () => {
     const bar = mainWindow.locator('#broadcast-bar');
     await expect(bar).toBeVisible();
 
+    await mainWindow.click('#btn-broadcast-grip');
+    await expect(bar).not.toHaveClass(/dragged/);
+
     const area = await mainWindow.locator('#terminal-area').boundingBox();
     const grip = await mainWindow.locator('#btn-broadcast-grip').boundingBox();
     await mainWindow.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
@@ -112,6 +115,33 @@ test.describe('broadcast bar', () => {
 
     await mainWindow.dblclick('#btn-broadcast-grip');
     await expect(bar).not.toHaveClass(/dragged/);
+  });
+
+  test('a bar dragged to the right edge stays inside when the terminal area narrows', async ({ electronApp, mainWindow }) => {
+    // Wide enough that the bar sits at its 650px cap instead of shrinking with the area.
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1700, 900));
+    await expect.poll(() => mainWindow.evaluate(() => document.getElementById('terminal-area').clientWidth)).toBeGreaterThan(1100);
+    await addFakeTerminals(mainWindow);
+    await mainWindow.click('#btn-broadcast-placement');
+    const bar = mainWindow.locator('#broadcast-bar');
+    await expect(bar).toBeVisible();
+
+    const area = await mainWindow.locator('#terminal-area').boundingBox();
+    const grip = await mainWindow.locator('#btn-broadcast-grip').boundingBox();
+    await mainWindow.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await mainWindow.mouse.down();
+    await mainWindow.mouse.move(area.x + area.width - 5, area.y + 80, { steps: 8 });
+    await mainWindow.mouse.up();
+    await expect(bar).toHaveClass(/dragged/);
+
+    // Widening the sidebar narrows #terminal-area with no window resize event.
+    await mainWindow.evaluate(() => window.App.setSidebarWidth(1000));
+    await expect.poll(() => mainWindow.evaluate(() => document.getElementById('terminal-area').clientWidth)).toBeLessThan(800);
+    await expect.poll(async () => {
+      const a = await mainWindow.locator('#terminal-area').boundingBox();
+      const b = await bar.boundingBox();
+      return b.x + b.width <= a.x + a.width + 1;
+    }).toBe(true);
   });
 
   // No fake terminals here: the main window's font listener walks App.tasks and needs real xterm entries.

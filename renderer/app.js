@@ -1178,10 +1178,10 @@ window.App = window.App || {};
     else if (!expanded && hadFocus && broadcastToggle && !broadcastToggle.classList.contains('hidden')) broadcastToggle.focus();
   }
 
-  function setBroadcastPlacement(placement) {
+  // reveal is for a user switching to floating; the boot load replays the pref and keeps the saved collapse state.
+  function setBroadcastPlacement(placement, reveal) {
     broadcastPlacement = normalizePlacement(placement);
-    // A float request should show the bar, not a pill the user then has to click.
-    if (broadcastPlacement === 'floating') {
+    if (reveal && broadcastPlacement === 'floating') {
       broadcastExpanded = true;
       try { localStorage.setItem('broadcastExpanded', '1'); } catch (e) {}
     }
@@ -1238,7 +1238,7 @@ window.App = window.App || {};
     broadcastPlacementBtn.addEventListener('click', function (e) {
       e.stopPropagation();
       var next = broadcastPlacement === 'sidebar' ? 'floating' : 'sidebar';
-      setBroadcastPlacement(next);
+      setBroadcastPlacement(next, true);
       // Reparenting drops focus; keep it on the button that just moved.
       broadcastPlacementBtn.focus();
       window.klaus.ui.setPreferences({ broadcastPlacement: next }).catch(function (err) {
@@ -1262,18 +1262,22 @@ window.App = window.App || {};
       if (e.button !== 0 || broadcastPlacement !== 'floating') return;
       e.preventDefault();
       var barRect = broadcastBar.getBoundingClientRect();
-      drag = { dx: e.clientX - barRect.left, dy: e.clientY - barRect.top };
+      drag = { dx: e.clientX - barRect.left, dy: e.clientY - barRect.top, moved: false };
       broadcastGrip.setPointerCapture(e.pointerId);
     });
     broadcastGrip.addEventListener('pointermove', function (e) {
       if (!drag) return;
+      drag.moved = true;
       var homeRect = broadcastFloatHome.getBoundingClientRect();
       broadcastPos = posFromRect(e.clientX - homeRect.left - drag.dx, e.clientY - homeRect.top - drag.dy);
       applyBroadcastPos();
     });
     var endDrag = function () {
       if (!drag) return;
+      var moved = drag.moved;
       drag = null;
+      // A click with no movement must not pin a centered bar.
+      if (!moved) return;
       // Save the clamped spot, not the raw pointer one, so a drag past the edge doesn't persist off-screen.
       var o = barOffset();
       saveBroadcastPos(posFromRect(o.left, o.top));
@@ -1294,7 +1298,8 @@ window.App = window.App || {};
         saveBroadcastPos(posFromRect(o.left + m[0], o.top + m[1]));
       }
     });
-    window.addEventListener('resize', applyBroadcastPos);
+    // The terminal area also narrows without a window resize (sidebar drag, diff panel), so watch it directly.
+    new ResizeObserver(applyBroadcastPos).observe(broadcastFloatHome);
   }
 
   window.klaus.ui.getPreferences().then(function (prefs) {
@@ -1304,7 +1309,7 @@ window.App = window.App || {};
   });
   window.klaus.ui.onPreferencesChanged(function (prefs) {
     if (prefs.broadcastPlacement !== undefined && normalizePlacement(prefs.broadcastPlacement) !== broadcastPlacement) {
-      setBroadcastPlacement(prefs.broadcastPlacement);
+      setBroadcastPlacement(prefs.broadcastPlacement, true);
     }
   });
 
