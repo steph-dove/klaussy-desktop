@@ -3327,10 +3327,6 @@ body.task-branchless #ahead-behind {
   --focus-ring: var(--accent);
 }
 
-#broadcast-bar.docked:focus-within {
-  border-color: var(--accent);
-}
-
 #broadcast-bar.docked .broadcast-icon {
   font-size: 12px;
 }
