@@ -1092,7 +1092,7 @@ window.App = window.App || {};
   var broadcastExpanded = false;
   try { broadcastExpanded = localStorage.getItem('broadcastExpanded') === '1'; } catch (e) {}
   var broadcastPlacement = 'sidebar';
-  // Fractions of the floating home's size, so a dragged bar keeps its spot across window resizes.
+  // Fractions of the floating home's size, so a dragged bar keeps its spot when the terminal area resizes.
   var broadcastPos = null;
   try { broadcastPos = JSON.parse(localStorage.getItem('broadcastPos') || 'null'); } catch (e) {}
 
@@ -1141,7 +1141,6 @@ window.App = window.App || {};
     applyBroadcastPos();
   }
 
-  // Called whenever terminals open or close.
   function updateBroadcastUI() {
     if (!broadcastBar) return;
     var docked = broadcastPlacement === 'sidebar';
