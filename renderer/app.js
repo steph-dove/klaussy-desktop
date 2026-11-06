@@ -1238,8 +1238,14 @@ window.App = window.App || {};
       e.stopPropagation();
       var next = broadcastPlacement === 'sidebar' ? 'floating' : 'sidebar';
       setBroadcastPlacement(next, true);
-      // Reparenting drops focus; keep it on the button that just moved.
-      broadcastPlacementBtn.focus();
+      // Reparenting drops focus; keep it on the button that just moved, unless it moved into a collapsed sidebar.
+      if (broadcastPlacementBtn.offsetParent) {
+        broadcastPlacementBtn.focus();
+      } else {
+        var sidebarToggle = document.getElementById('btn-sidebar-toggle');
+        if (sidebarToggle) sidebarToggle.focus();
+        window.toast.info('Broadcast docked in the sidebar. Show the sidebar to use it.');
+      }
       window.klaus.ui.setPreferences({ broadcastPlacement: next }).catch(function (err) {
         window.toast.error('Could not save broadcast bar position: ' + ((err && err.message) || err));
       });
@@ -1294,7 +1300,11 @@ window.App = window.App || {};
         e.preventDefault();
         var m = moves[e.key];
         var o = barOffset();
-        saveBroadcastPos(posFromRect(o.left + m[0], o.top + m[1]));
+        broadcastPos = posFromRect(o.left + m[0], o.top + m[1]);
+        applyBroadcastPos();
+        // Re-read after the clamp so a nudge past the edge isn't saved off-screen.
+        o = barOffset();
+        saveBroadcastPos(posFromRect(o.left, o.top));
       }
     });
     // The terminal area also narrows without a window resize (sidebar drag, diff panel), so watch it directly.

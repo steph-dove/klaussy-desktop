@@ -162,4 +162,39 @@ test.describe('broadcast bar', () => {
     await expect(mainWindow.locator('#broadcast-bar')).not.toHaveClass(/docked/);
     await prefsWin.close();
   });
+
+  test('docking while the sidebar is collapsed hands focus to the sidebar toggle', async ({ mainWindow }) => {
+    await addFakeTerminals(mainWindow);
+    await mainWindow.click('#btn-broadcast-placement');
+    await expect(mainWindow.locator('#terminal-area > #broadcast-bar')).toBeVisible();
+    await mainWindow.evaluate(() => window.App.toggleSidebar());
+    await expect(mainWindow.locator('#sidebar')).toHaveClass(/collapsed/);
+
+    await mainWindow.focus('#btn-broadcast-placement');
+    await mainWindow.keyboard.press('Enter');
+    await expect(mainWindow.locator('#broadcast-dock > #broadcast-bar')).toBeAttached();
+    await expect(mainWindow.locator('#btn-sidebar-toggle')).toBeFocused();
+    await expect(mainWindow.locator('.klaussy-toast', { hasText: 'Broadcast docked in the sidebar' })).toBeVisible();
+  });
+
+  test('arrow-key nudges past the right edge are saved clamped', async ({ electronApp, mainWindow }) => {
+    await electronApp.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1700, 900));
+    await expect.poll(() => mainWindow.evaluate(() => document.getElementById('terminal-area').clientWidth)).toBeGreaterThan(1100);
+    await addFakeTerminals(mainWindow);
+    await mainWindow.click('#btn-broadcast-placement');
+    await mainWindow.evaluate(() => window.App.setSidebarWidth(700));
+    await expect.poll(() => mainWindow.evaluate(() => document.getElementById('terminal-area').clientWidth)).toBeLessThan(1100);
+
+    await mainWindow.focus('#btn-broadcast-grip');
+    for (let i = 0; i < 30; i++) await mainWindow.keyboard.press('Shift+ArrowRight');
+
+    // Widening the area must keep the bar flush right, not jump by the saved overshoot.
+    await mainWindow.evaluate(() => window.App.setSidebarWidth(260));
+    await expect.poll(() => mainWindow.evaluate(() => document.getElementById('terminal-area').clientWidth)).toBeGreaterThan(1300);
+    await expect.poll(async () => {
+      const a = await mainWindow.locator('#terminal-area').boundingBox();
+      const b = await mainWindow.locator('#broadcast-bar').boundingBox();
+      return Math.round(a.x + a.width - (b.x + b.width));
+    }).toBeGreaterThan(250);
+  });
 });
