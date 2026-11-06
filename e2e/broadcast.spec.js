@@ -34,12 +34,6 @@ test.describe('broadcast bar', () => {
     await mainWindow.addStyleTag({ content: '#ollama-consent-overlay { display: none !important; }' });
   });
 
-  test.afterEach(async ({ mainWindow }) => {
-    await mainWindow.evaluate(() => {
-      ['bc-a', 'bc-b', 'bc-c'].forEach((id) => window.AppState.tasks.delete(id));
-    }).catch(() => {});
-  });
-
   test('stays hidden until a terminal is open', async ({ mainWindow }) => {
     await expect(mainWindow.locator('#broadcast-bar')).toBeHidden();
     await expect(mainWindow.locator('#broadcast-toggle')).toBeHidden();
@@ -62,6 +56,7 @@ test.describe('broadcast bar', () => {
       return agents.nextElementSibling && agents.nextElementSibling.id;
     });
     expect(order).toBe('broadcast-dock');
+    await expect(mainWindow.locator('#broadcast-input')).toHaveAttribute('placeholder', 'Send to 3 terminals');
 
     await mainWindow.fill('#broadcast-input', 'echo hi');
     await mainWindow.press('#broadcast-input', 'Enter');
@@ -202,5 +197,50 @@ test.describe('broadcast bar', () => {
       const b = await mainWindow.locator('#broadcast-bar').boundingBox();
       return Math.round(a.x + a.width - (b.x + b.width));
     }).toBeGreaterThan(250);
+  });
+
+  test('Esc in the docked box hands focus on instead of dropping it', async ({ mainWindow }) => {
+    await addFakeTerminals(mainWindow);
+    await mainWindow.focus('#broadcast-input');
+    await mainWindow.keyboard.press('Escape');
+    // The fake tasks have no xterm, so the fallback target is the placement button.
+    await expect(mainWindow.locator('#btn-broadcast-placement')).toBeFocused();
+    await expect(mainWindow.locator('#broadcast-dock > #broadcast-bar')).toBeVisible();
+  });
+
+  test('Esc collapses the floating bar to its pill, and Home on the grip re-centers it', async ({ mainWindow }) => {
+    await addFakeTerminals(mainWindow);
+    await mainWindow.click('#btn-broadcast-placement');
+    const bar = mainWindow.locator('#broadcast-bar');
+    await expect(bar).toBeVisible();
+
+    await mainWindow.focus('#btn-broadcast-grip');
+    await mainWindow.keyboard.press('ArrowUp');
+    await expect(bar).toHaveClass(/dragged/);
+    await mainWindow.keyboard.press('Home');
+    await expect(bar).not.toHaveClass(/dragged/);
+
+    await mainWindow.focus('#broadcast-input');
+    await mainWindow.keyboard.press('Escape');
+    await expect(bar).toBeHidden();
+    await expect(mainWindow.locator('#broadcast-toggle')).toBeFocused();
+  });
+
+  test('the docked row hides with the collapsed sidebar', async ({ mainWindow }) => {
+    await addFakeTerminals(mainWindow);
+    await expect(mainWindow.locator('#broadcast-dock')).toBeVisible();
+    await mainWindow.evaluate(() => window.App.toggleSidebar());
+    await expect(mainWindow.locator('#broadcast-dock')).toBeHidden();
+  });
+});
+
+test.describe('broadcast bar with an invalid saved placement', () => {
+  test.use({ configSeed: { broadcastPlacement: 'sideways' } });
+
+  test('falls back to the sidebar', async ({ mainWindow }) => {
+    await mainWindow.waitForLoadState('networkidle');
+    await addFakeTerminals(mainWindow);
+    await expect(mainWindow.locator('#broadcast-dock > #broadcast-bar')).toBeVisible();
+    await expect(mainWindow.locator('#broadcast-bar')).toHaveClass(/docked/);
   });
 });

@@ -82,6 +82,8 @@ A task's main terminal gets all of these. Sub-tab terminals and pop-out terminal
 | Option+Arrow keys | Alt+Arrow keys | Move the pane left/up or right/down | Focus on a pane's name, in the columns or grid layout |
 | Left / Right, Home / End | Left / Right, Home / End | Move between sub-tabs | Sub-tab strip |
 | Delete | Delete | Close the focused sub-tab | Sub-tab strip |
+| Enter / Esc | Enter / Esc | Send the broadcast command to every open terminal / collapse the bar to its pill | Floating broadcast bar over the terminals |
+| Arrow keys, Home | Arrow keys, Home | Move the floating broadcast bar (Shift for bigger steps) / re-center it | Floating broadcast bar grip |
 
 ## Code editor
 
@@ -116,8 +118,7 @@ The editor is Monaco, so its usual editing keys work as well. These are the ones
 | Enter / Esc | Enter / Esc | Save / cancel the new name | Task rename box |
 | Option+Up / Option+Down | Alt+Up / Alt+Down | Move the task up or down the list | Focused task |
 | Cmd+Enter, Esc or Tab | Ctrl+Enter, Esc or Tab | Leave the task's note and go back to its Notes button | Task note editor |
-| Enter / Esc | Enter / Esc | Send the broadcast command to every open terminal / collapse the floating bar (docked, Esc just leaves the box) | Broadcast box |
-| Arrow keys, Home | Arrow keys, Home | Move the floating broadcast bar (Shift for bigger steps) / re-center it | Broadcast bar grip |
+| Enter / Esc | Enter / Esc | Send the broadcast command to every open terminal / go back to the active terminal | Broadcast box, docked under Active agents |
 
 ## Changes panel and diffs
 

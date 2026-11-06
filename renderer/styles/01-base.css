@@ -3115,13 +3115,15 @@ body.task-branchless #ahead-behind {
   width: 90%;
   max-width: 650px;
   z-index: 1000;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  /* visibility flips at once on show so focus() lands; .hidden delays it so the fade-out still plays. */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s;
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   /* The glass is dark in every theme, so the focus ring is a fixed light blue (6.7:1) rather than the accent. */
   --focus-ring: #9cc9ff;
 }
 
 #broadcast-bar.hidden {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.3s;
   opacity: 0;
   visibility: hidden;
   transform: translate(-50%, 15px);
@@ -3231,7 +3233,7 @@ body.task-branchless #ahead-behind {
   font-family: inherit;
   cursor: pointer;
   z-index: 1000;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0s;
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3242,6 +3244,7 @@ body.task-branchless #ahead-behind {
 }
 
 #broadcast-toggle.hidden {
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0s linear 0.2s;
   opacity: 0;
   visibility: hidden;
   transform: translate(-50%, 15px);
@@ -3287,12 +3290,13 @@ body.task-branchless #ahead-behind {
   transform: none;
   animation: none;
   /* Transitioning left/top would make the bar trail the pointer. */
-  transition: opacity 0.2s, visibility 0.2s;
+  transition: opacity 0.2s, visibility 0s;
 }
 
 #broadcast-bar.dragged.hidden,
 #broadcast-toggle.dragged.hidden {
   transform: translateY(15px);
+  transition: opacity 0.2s, visibility 0s linear 0.2s;
 }
 
 #broadcast-toggle.dragged:hover {

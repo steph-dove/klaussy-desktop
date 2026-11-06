@@ -1161,10 +1161,18 @@ window.App = window.App || {};
       if (broadcastToggle) broadcastToggle.classList.add('hidden');
       return;
     }
+    refreshBroadcastCount();
     var showBar = docked || broadcastExpanded;
     broadcastBar.classList.toggle('hidden', !showBar);
     if (broadcastToggle) broadcastToggle.classList.toggle('hidden', docked || broadcastExpanded);
     applyBroadcastPos();
+  }
+
+  // The placeholder doubles as a preview of how many terminals one Enter reaches.
+  function refreshBroadcastCount() {
+    if (!broadcastInput) return;
+    var n = openBroadcastTargets().length;
+    broadcastInput.placeholder = 'Send to ' + n + ' ' + (n === 1 ? 'terminal' : 'terminals');
   }
 
   function setBroadcastExpanded(expanded) {
@@ -1212,10 +1220,17 @@ window.App = window.App || {};
         sendBroadcast();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        if (broadcastPlacement === 'floating') setBroadcastExpanded(false);
-        else broadcastInput.blur();
+        if (broadcastPlacement === 'floating') {
+          setBroadcastExpanded(false);
+        } else {
+          var active = AppState.activeTaskId != null ? AppState.tasks.get(AppState.activeTaskId) : null;
+          if (active && active.terminal) active.terminal.focus();
+          else if (broadcastPlacementBtn) broadcastPlacementBtn.focus();
+        }
       }
     });
+    // Ptys can exit between tab changes, so recount when the user comes back to the box.
+    broadcastInput.addEventListener('focus', refreshBroadcastCount);
     broadcastSend.addEventListener('click', function (e) {
       e.stopPropagation();
       sendBroadcast();
@@ -1246,7 +1261,9 @@ window.App = window.App || {};
         if (sidebarToggle) sidebarToggle.focus();
         window.toast.info('Broadcast docked in the sidebar. Show the sidebar to use it.');
       }
-      window.klaus.ui.setPreferences({ broadcastPlacement: next }).catch(function (err) {
+      window.klaus.ui.setPreferences({ broadcastPlacement: next }).then(function (res) {
+        if (res && res.error) window.toast.error('Could not save broadcast bar position: ' + res.error);
+      }).catch(function (err) {
         window.toast.error('Could not save broadcast bar position: ' + ((err && err.message) || err));
       });
     });
@@ -1266,6 +1283,8 @@ window.App = window.App || {};
     broadcastGrip.addEventListener('pointerdown', function (e) {
       if (e.button !== 0 || broadcastPlacement !== 'floating') return;
       e.preventDefault();
+      // preventDefault blocks the default focus, and the arrow keys need the grip focused after a drag.
+      broadcastGrip.focus();
       var barRect = broadcastBar.getBoundingClientRect();
       drag = { dx: e.clientX - barRect.left, dy: e.clientY - barRect.top, moved: false };
       broadcastGrip.setPointerCapture(e.pointerId);
@@ -1289,6 +1308,7 @@ window.App = window.App || {};
     };
     broadcastGrip.addEventListener('pointerup', endDrag);
     broadcastGrip.addEventListener('pointercancel', endDrag);
+    broadcastGrip.addEventListener('lostpointercapture', endDrag);
     broadcastGrip.addEventListener('dblclick', function () { saveBroadcastPos(null); });
     broadcastGrip.addEventListener('keydown', function (e) {
       var step = e.shiftKey ? 60 : 20;
@@ -1296,6 +1316,7 @@ window.App = window.App || {};
       if (e.key === 'Home') {
         e.preventDefault();
         saveBroadcastPos(null);
+        if (window.A11y) window.A11y.announce('Broadcast bar re-centered');
       } else if (moves[e.key]) {
         e.preventDefault();
         var m = moves[e.key];
@@ -1305,6 +1326,7 @@ window.App = window.App || {};
         // Re-read after the clamp so a nudge past the edge isn't saved off-screen.
         o = barOffset();
         saveBroadcastPos(posFromRect(o.left, o.top));
+        if (window.A11y) window.A11y.announce('Broadcast bar moved');
       }
     });
     // The terminal area also narrows without a window resize (sidebar drag, diff panel), so watch it directly.
