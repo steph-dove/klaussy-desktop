@@ -3248,6 +3248,121 @@ body.task-branchless #ahead-behind {
   pointer-events: none;
 }
 
+#btn-broadcast-grip,
+#btn-broadcast-placement {
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(232, 232, 238, 0.7);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+#btn-broadcast-grip {
+  cursor: grab;
+  touch-action: none;
+  letter-spacing: -3px;
+}
+
+#btn-broadcast-grip:active {
+  cursor: grabbing;
+}
+
+#btn-broadcast-grip:hover,
+#btn-broadcast-placement:hover {
+  color: #e8e8ee;
+}
+
+/* Dragged: the inline left/top from app.js replace the bottom-center anchor. */
+#broadcast-bar.dragged,
+#broadcast-toggle.dragged {
+  bottom: auto;
+  transform: none;
+  animation: none;
+  /* Transitioning left/top would make the bar trail the pointer. */
+  transition: opacity 0.2s, visibility 0.2s;
+}
+
+#broadcast-bar.dragged.hidden,
+#broadcast-toggle.dragged.hidden {
+  transform: translateY(15px);
+}
+
+#broadcast-toggle.dragged:hover {
+  transform: translateY(-2px);
+}
+
+/* Docked under the Active agents bar: a sidebar row in theme colours rather than the floating dark glass. */
+#broadcast-dock {
+  padding: 6px 12px 0;
+}
+
+#broadcast-dock[hidden],
+#sidebar.collapsed #broadcast-dock {
+  display: none;
+}
+
+#broadcast-bar.docked {
+  position: static;
+  transform: none;
+  animation: none;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  height: 28px;
+  background: var(--surface-hover);
+  backdrop-filter: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+  --focus-ring: var(--accent);
+}
+
+#broadcast-bar.docked:focus-within {
+  border-color: var(--accent);
+}
+
+#broadcast-bar.docked .broadcast-icon {
+  font-size: 12px;
+}
+
+#broadcast-bar.docked #broadcast-input {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+#broadcast-bar.docked #broadcast-input::placeholder {
+  color: var(--text-muted);
+}
+
+#broadcast-bar.docked #btn-broadcast-send {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+#broadcast-bar.docked #btn-broadcast-placement {
+  color: var(--text-muted);
+}
+
+#broadcast-bar.docked #btn-broadcast-placement:hover {
+  color: var(--text);
+}
+
+#broadcast-bar.docked #btn-broadcast-grip,
+#broadcast-bar.docked #btn-broadcast-close {
+  display: none;
+}
+
 /* WCAG 2.5.8: small icon buttons get at least a 24×24 hit area. */
 .task-close,
 .worktree-remove,

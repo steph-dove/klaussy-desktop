@@ -108,6 +108,7 @@
   document.getElementById('pref-session-activity').checked = prefs.sessionActivityNotes !== false;
   document.getElementById('pref-summarize-locally').checked = prefs.summarizeLocally !== false;
   document.getElementById('pref-voice-input').checked = prefs.voiceInput !== false;
+  document.getElementById('pref-broadcast-placement').value = prefs.broadcastPlacement === 'floating' ? 'floating' : 'sidebar';
   // null = config.toml unreadable; disable rather than untick, so a Save can't
   // revoke a grant that may still be live.
   var kimiBash = document.getElementById('pref-kimi-autonomous-bash');
@@ -317,6 +318,7 @@
       sessionActivityNotes: document.getElementById('pref-session-activity').checked,
       summarizeLocally: document.getElementById('pref-summarize-locally').checked,
       voiceInput: document.getElementById('pref-voice-input').checked,
+      broadcastPlacement: document.getElementById('pref-broadcast-placement').value,
       repoIntelEnrich: document.getElementById('pref-repo-intel-enrich').checked,
       nemesisProfiles: collectNemesisProfiles(),
       notificationGateway: collectNotificationGateway(),
@@ -378,9 +380,12 @@
   screenReader.addEventListener('change', saveAll);
   var voiceInput = document.getElementById('pref-voice-input');
   voiceInput.addEventListener('change', saveAll);
-  // The mic button in the main window toggles this too; without the sync the next autosave would undo it.
+  var broadcastPlacement = document.getElementById('pref-broadcast-placement');
+  broadcastPlacement.addEventListener('change', saveAll);
+  // The mic button and the broadcast bar's dock button change these from the main window; without the sync the next autosave would undo them.
   window.klaus.ui.onPreferencesChanged(function (changed) {
     if (changed.voiceInput !== undefined) voiceInput.checked = !!changed.voiceInput;
+    if (changed.broadcastPlacement !== undefined) broadcastPlacement.value = changed.broadcastPlacement === 'floating' ? 'floating' : 'sidebar';
   });
 
   ['pref-slack-webhook', 'pref-discord-webhook', 'pref-notify-completed',

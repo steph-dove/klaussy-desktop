@@ -279,6 +279,7 @@ ipcMain.handle('get-preferences', () => {
     repoIntelEnrich: config.repoIntelEnrich === true,
     voiceInput: config.voiceInput !== false,
     voiceMicId: config.voiceMicId || '',
+    broadcastPlacement: config.broadcastPlacement === 'floating' ? 'floating' : 'sidebar',
     // Nemesis8 named gateway profiles (migrates the legacy single-gateway keys
     // into one profile when none exist yet).
     nemesisProfiles: getNemesisProfiles(),
@@ -416,6 +417,7 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   }
   if (prefs.voiceInput !== undefined) config.voiceInput = !!prefs.voiceInput;
   if (prefs.voiceMicId !== undefined) config.voiceMicId = String(prefs.voiceMicId || '');
+  if (prefs.broadcastPlacement !== undefined) config.broadcastPlacement = prefs.broadcastPlacement === 'floating' ? 'floating' : 'sidebar';
   if (prefs.stripComments !== undefined) {
     config.stripComments = !!prefs.stripComments;
     if (config.stripComments) {

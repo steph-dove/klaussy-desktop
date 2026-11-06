@@ -1084,31 +1084,88 @@ window.App = window.App || {};
   var broadcastClose = document.getElementById('btn-broadcast-close');
   var broadcastToggle = document.getElementById('broadcast-toggle');
   var broadcastBar = document.getElementById('broadcast-bar');
-
-  // The session a broadcast targets: an explicitly selected group, or the one
-  // owning the focused terminal. Returns null outside a recognized session
-  // (e.g. a standalone local-folder task), the cue to hide the broadcast UI.
-  function broadcastTargetSession() {
-    if (AppState.activeSessionName) return AppState.activeSessionName;
-    var t = AppState.activeTaskId != null ? AppState.tasks.get(AppState.activeTaskId) : null;
-    return (t && window.Sidebar) ? window.Sidebar.getSessionName(t) : null;
-  }
+  var broadcastGrip = document.getElementById('btn-broadcast-grip');
+  var broadcastPlacementBtn = document.getElementById('btn-broadcast-placement');
+  var broadcastDock = document.getElementById('broadcast-dock');
+  var broadcastFloatHome = broadcastBar ? broadcastBar.parentNode : null;
 
   var broadcastExpanded = false;
   try { broadcastExpanded = localStorage.getItem('broadcastExpanded') === '1'; } catch (e) {}
+  var broadcastPlacement = 'sidebar';
+  // Fractions of the floating home's size, so a dragged bar keeps its spot across window resizes.
+  var broadcastPos = null;
+  try { broadcastPos = JSON.parse(localStorage.getItem('broadcastPos') || 'null'); } catch (e) {}
 
-  // Reconcile the collapsed pill / expanded bar against the current context
-  // and the user's persisted preference. Called whenever the active session or
-  // task changes.
+  function normalizePlacement(v) { return v === 'floating' ? 'floating' : 'sidebar'; }
+
+  function openBroadcastTargets() {
+    var targets = [];
+    AppState.tasks.forEach(function (task) {
+      if (task.alive !== false) targets.push({ id: task.id, subId: undefined });
+      window.TerminalManager.getLiveSubIds(task.id).forEach(function (subId) {
+        targets.push({ id: task.id, subId: subId });
+      });
+    });
+    return targets;
+  }
+
+  function applyBroadcastPos() {
+    var els = [broadcastBar, broadcastToggle];
+    var home = broadcastFloatHome;
+    if (!broadcastPos || broadcastPlacement !== 'floating' || !home) {
+      els.forEach(function (el) {
+        if (!el) return;
+        el.classList.remove('dragged');
+        el.style.left = '';
+        el.style.top = '';
+      });
+      return;
+    }
+    var w = home.clientWidth, h = home.clientHeight;
+    els.forEach(function (el) {
+      if (!el) return;
+      el.classList.add('dragged');
+      var left = Math.max(0, Math.min(broadcastPos.x * w, w - el.offsetWidth));
+      var top = Math.max(0, Math.min(broadcastPos.y * h, h - el.offsetHeight));
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+    });
+  }
+
+  function saveBroadcastPos(pos) {
+    broadcastPos = pos;
+    try {
+      if (pos) localStorage.setItem('broadcastPos', JSON.stringify(pos));
+      else localStorage.removeItem('broadcastPos');
+    } catch (e) {}
+    applyBroadcastPos();
+  }
+
+  // Called whenever terminals open or close.
   function updateBroadcastUI() {
-    var inSession = !!broadcastTargetSession();
-    if (!inSession) {
-      if (broadcastBar) broadcastBar.classList.add('hidden');
+    if (!broadcastBar) return;
+    var docked = broadcastPlacement === 'sidebar';
+    var home = docked ? broadcastDock : broadcastFloatHome;
+    if (home && broadcastBar.parentNode !== home) home.appendChild(broadcastBar);
+    broadcastBar.classList.toggle('docked', docked);
+    if (broadcastPlacementBtn) {
+      var label = docked ? 'Float broadcast bar over the terminals' : 'Dock broadcast bar in the sidebar';
+      broadcastPlacementBtn.title = docked ? 'Float over the terminals' : 'Dock in the sidebar';
+      broadcastPlacementBtn.setAttribute('aria-label', label);
+      broadcastPlacementBtn.firstElementChild.innerHTML = docked ? '&#8599;' : '&#8676;';
+    }
+
+    var hasTerminals = AppState.tasks.size > 0;
+    if (broadcastDock) broadcastDock.hidden = !(docked && hasTerminals);
+    if (!hasTerminals) {
+      broadcastBar.classList.add('hidden');
       if (broadcastToggle) broadcastToggle.classList.add('hidden');
       return;
     }
-    if (broadcastBar) broadcastBar.classList.toggle('hidden', !broadcastExpanded);
-    if (broadcastToggle) broadcastToggle.classList.toggle('hidden', broadcastExpanded);
+    var showBar = docked || broadcastExpanded;
+    broadcastBar.classList.toggle('hidden', !showBar);
+    if (broadcastToggle) broadcastToggle.classList.toggle('hidden', docked || broadcastExpanded);
+    applyBroadcastPos();
   }
 
   function setBroadcastExpanded(expanded) {
@@ -1121,44 +1178,32 @@ window.App = window.App || {};
     else if (!expanded && hadFocus && broadcastToggle && !broadcastToggle.classList.contains('hidden')) broadcastToggle.focus();
   }
 
+  function setBroadcastPlacement(placement) {
+    broadcastPlacement = normalizePlacement(placement);
+    // A float request should show the bar, not a pill the user then has to click.
+    if (broadcastPlacement === 'floating') {
+      broadcastExpanded = true;
+      try { localStorage.setItem('broadcastExpanded', '1'); } catch (e) {}
+    }
+    updateBroadcastUI();
+  }
+
   async function sendBroadcast() {
     var val = broadcastInput.value.trim();
     if (!val) return;
 
-    var target = broadcastTargetSession();
-    if (!target) {
-      window.toast.error('Select a session to broadcast to');
-      return;
-    }
-
-    var activeTasks = [];
-    AppState.tasks.forEach(function(t) {
-      if (window.Sidebar && window.Sidebar.getSessionName(t) === target) {
-        activeTasks.push(t);
-      }
-    });
-
-    if (activeTasks.length === 0) {
-      window.toast.error('No active terminal sessions to broadcast to');
+    var targets = openBroadcastTargets();
+    if (targets.length === 0) {
+      window.toast.error('No open terminals to broadcast to');
       return;
     }
 
     broadcastInput.value = '';
-    var termCount = 0;
-    activeTasks.forEach(function(task) {
-      // Primary pty (addressed with no subId)...
-      window.klaus.terminal.write(task.id, val + '\r');
-      termCount++;
-      // ...plus every live split/sub-terminal in the same worktree, so the
-      // broadcast lands in all open terminals, not only the primary.
-      var subIds = window.TerminalManager.getLiveSubIds(task.id);
-      subIds.forEach(function(subId) {
-        window.klaus.terminal.write(task.id, val + '\r', subId);
-        termCount++;
-      });
+    targets.forEach(function (t) {
+      if (t.subId === undefined) window.klaus.terminal.write(t.id, val + '\r');
+      else window.klaus.terminal.write(t.id, val + '\r', t.subId);
     });
-
-    window.toast.success('Broadcasted command to ' + termCount + ' ' + (termCount === 1 ? 'terminal' : 'terminals'));
+    window.toast.success('Broadcasted command to ' + targets.length + ' ' + (targets.length === 1 ? 'terminal' : 'terminals'));
   }
 
   if (broadcastInput && broadcastSend) {
@@ -1168,7 +1213,8 @@ window.App = window.App || {};
         sendBroadcast();
       } else if (e.key === 'Escape') {
         e.preventDefault();
-        setBroadcastExpanded(false);
+        if (broadcastPlacement === 'floating') setBroadcastExpanded(false);
+        else broadcastInput.blur();
       }
     });
     broadcastSend.addEventListener('click', function (e) {
@@ -1188,6 +1234,79 @@ window.App = window.App || {};
       setBroadcastExpanded(false);
     });
   }
+  if (broadcastPlacementBtn) {
+    broadcastPlacementBtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var next = broadcastPlacement === 'sidebar' ? 'floating' : 'sidebar';
+      setBroadcastPlacement(next);
+      // Reparenting drops focus; keep it on the button that just moved.
+      broadcastPlacementBtn.focus();
+      window.klaus.ui.setPreferences({ broadcastPlacement: next }).catch(function (err) {
+        window.toast.error('Could not save broadcast bar position: ' + ((err && err.message) || err));
+      });
+    });
+  }
+
+  if (broadcastGrip && broadcastFloatHome) {
+    var drag = null;
+    var posFromRect = function (left, top) {
+      var w = broadcastFloatHome.clientWidth || 1, h = broadcastFloatHome.clientHeight || 1;
+      return { x: left / w, y: top / h };
+    };
+    // Measured from rects because offsetLeft ignores the centering transform on an undragged bar.
+    var barOffset = function () {
+      var bar = broadcastBar.getBoundingClientRect(), home = broadcastFloatHome.getBoundingClientRect();
+      return { left: bar.left - home.left, top: bar.top - home.top };
+    };
+    broadcastGrip.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0 || broadcastPlacement !== 'floating') return;
+      e.preventDefault();
+      var barRect = broadcastBar.getBoundingClientRect();
+      drag = { dx: e.clientX - barRect.left, dy: e.clientY - barRect.top };
+      broadcastGrip.setPointerCapture(e.pointerId);
+    });
+    broadcastGrip.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var homeRect = broadcastFloatHome.getBoundingClientRect();
+      broadcastPos = posFromRect(e.clientX - homeRect.left - drag.dx, e.clientY - homeRect.top - drag.dy);
+      applyBroadcastPos();
+    });
+    var endDrag = function () {
+      if (!drag) return;
+      drag = null;
+      // Save the clamped spot, not the raw pointer one, so a drag past the edge doesn't persist off-screen.
+      var o = barOffset();
+      saveBroadcastPos(posFromRect(o.left, o.top));
+    };
+    broadcastGrip.addEventListener('pointerup', endDrag);
+    broadcastGrip.addEventListener('pointercancel', endDrag);
+    broadcastGrip.addEventListener('dblclick', function () { saveBroadcastPos(null); });
+    broadcastGrip.addEventListener('keydown', function (e) {
+      var step = e.shiftKey ? 60 : 20;
+      var moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      if (e.key === 'Home') {
+        e.preventDefault();
+        saveBroadcastPos(null);
+      } else if (moves[e.key]) {
+        e.preventDefault();
+        var m = moves[e.key];
+        var o = barOffset();
+        saveBroadcastPos(posFromRect(o.left + m[0], o.top + m[1]));
+      }
+    });
+    window.addEventListener('resize', applyBroadcastPos);
+  }
+
+  window.klaus.ui.getPreferences().then(function (prefs) {
+    setBroadcastPlacement(prefs && prefs.broadcastPlacement);
+  }).catch(function (err) {
+    console.warn('[broadcast] could not load placement pref, staying docked:', err);
+  });
+  window.klaus.ui.onPreferencesChanged(function (prefs) {
+    if (prefs.broadcastPlacement !== undefined && normalizePlacement(prefs.broadcastPlacement) !== broadcastPlacement) {
+      setBroadcastPlacement(prefs.broadcastPlacement);
+    }
+  });
 
   window.BroadcastBar = {
     update: updateBroadcastUI,

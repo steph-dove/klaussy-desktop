@@ -121,6 +121,9 @@
         </button>
       </div>
 
+      <!-- Docked home for #broadcast-bar; app.js moves the bar here or back over the terminals per the broadcastPlacement pref. -->
+      <div id="broadcast-dock" hidden></div>
+
       <!-- Repo + session filters — narrow the sidebar to one base repo and/or
            one session (the branch name shared by repos created together) -->
       <div id="project-switcher">
@@ -264,14 +267,16 @@
         </div>
         <div id="terminals"></div>
         <span id="pane-move-hint" class="sr-only">Alt+Arrow keys move this pane</span>
-        <button id="broadcast-toggle" class="hidden" title="Broadcast a command to every agent in this session">
+        <button id="broadcast-toggle" class="hidden" title="Broadcast a command to every open terminal">
           <span class="broadcast-icon" aria-hidden="true">&#128362;</span>
           <span>Broadcast</span>
         </button>
         <div id="broadcast-bar" class="hidden">
+          <button id="btn-broadcast-grip" type="button" title="Drag to move. Double-click to re-center." aria-label="Move broadcast bar. Arrow keys move it, Home re-centers it."><span aria-hidden="true">&#8942;&#8942;</span></button>
           <span class="broadcast-icon" aria-hidden="true">&#128362;</span>
-          <input aria-label="Broadcast command to all agents in this session" type="text" id="broadcast-input" placeholder="Broadcast command to all active agents in session... (Enter to send)" autocomplete="off" spellcheck="false" />
+          <input aria-label="Broadcast command to every open terminal" type="text" id="broadcast-input" placeholder="Broadcast to all open terminals (Enter to send)" autocomplete="off" spellcheck="false" />
           <button id="btn-broadcast-send">Send</button>
+          <button id="btn-broadcast-placement" type="button" title="Dock in the sidebar" aria-label="Dock broadcast bar in the sidebar"><span aria-hidden="true">&#8676;</span></button>
           <button id="btn-broadcast-close" title="Dismiss" aria-label="Close broadcast bar">&times;</button>
         </div>
       </div>

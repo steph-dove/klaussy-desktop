@@ -205,7 +205,7 @@ for (const name of Object.keys(presets)) {
 // Text colours must come from theme tokens. These are the deliberate exceptions: white on a fixed-colour fill and light text on a theme-independent dark glass.
 const RAW_TEXT_COLOUR_ALLOWED = {
   '02-toolbar-diff.css': ['#comment-selection-btn'],
-  '01-base.css': ['#sidebar.collapsed .task-item .collapsed-icon','.terminal-warning', '.terminal-warning-link', '#broadcast-input', '#broadcast-input::placeholder', '#btn-broadcast-close', '#btn-broadcast-close:hover', '#broadcast-toggle'],
+  '01-base.css': ['#sidebar.collapsed .task-item .collapsed-icon','.terminal-warning', '.terminal-warning-link', '#broadcast-input', '#broadcast-input::placeholder', '#btn-broadcast-close', '#btn-broadcast-close:hover', '#broadcast-toggle', '#btn-broadcast-grip, #btn-broadcast-placement', '#btn-broadcast-grip:hover, #btn-broadcast-placement:hover'],
   '05-pr-review-surface.css': ['.pr-conv-avatar', '.pr-ai-verdict-badge'],
 };
 
