@@ -357,6 +357,7 @@ window.TerminalManager = (function () {
       subTerminals: [], activeSubId: null,
     };
     tasks.set(id, taskEntry);
+    if (window.BroadcastBar) window.BroadcastBar.update();
 
     // Auto-fit the primary terminal on body resize, emitting an IPC resize only
     // when the grid changed. Stored on the task (not `cleanup`) so it survives
@@ -1060,11 +1061,11 @@ window.TerminalManager = (function () {
       } else {
         document.title = 'Klaussy';
         emptyState.style.display = 'flex';
-        if (window.BroadcastBar) window.BroadcastBar.update();
         if (window.BranchlessUI) window.BranchlessUI.apply(null);
         if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(null);
       }
     }
+    if (window.BroadcastBar) window.BroadcastBar.update();
   }
 
   // ---- switchToTask ----

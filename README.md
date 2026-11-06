@@ -33,7 +33,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 *   **🔄 Cross-Agent Session Resuming**
     Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
-    Type one prompt and send it to every agent in a session at once — kick off the same task across each worktree without retyping.
+    Type one prompt and send it to every open terminal at once, across all sessions and split panes. The bar sits under Active agents in the sidebar, or floats over the terminals where you can drag it.
 *   **🔔 Answer Agents from Slack & Discord**
     Get a message when an agent finishes, fails, or stops to ask permission — then hit **Approve**/**Reject** or reply with text right there, and it goes straight to the agent's terminal. Klaussy dials out over Socket Mode / the Discord Gateway, so there's no public URL, tunnel, or open port. Approvals are limited to an allow-list you name, single-use, and expire. Set it up under **Preferences → Slack & Discord Notifications** ([step-by-step guide](./docs/notifications-setup.md)).
 *   **🔌 Multi-Agent MCP Manager**

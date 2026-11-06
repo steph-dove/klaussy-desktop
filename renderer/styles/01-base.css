@@ -3115,13 +3115,15 @@ body.task-branchless #ahead-behind {
   width: 90%;
   max-width: 650px;
   z-index: 1000;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  /* visibility flips at once on show so focus() lands; .hidden delays it so the fade-out still plays. */
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s;
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   /* The glass is dark in every theme, so the focus ring is a fixed light blue (6.7:1) rather than the accent. */
   --focus-ring: #9cc9ff;
 }
 
 #broadcast-bar.hidden {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1), visibility 0s linear 0.3s;
   opacity: 0;
   visibility: hidden;
   transform: translate(-50%, 15px);
@@ -3208,7 +3210,7 @@ body.task-branchless #ahead-behind {
   transform: scale(0.9);
 }
 
-/* Collapsed launcher — always visible inside a session, click to expand */
+/* Collapsed launcher for the floating bar; shown while any terminal is open */
 #broadcast-toggle {
   position: absolute;
   bottom: 6px;
@@ -3231,7 +3233,7 @@ body.task-branchless #ahead-behind {
   font-family: inherit;
   cursor: pointer;
   z-index: 1000;
-  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0s;
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3242,10 +3244,123 @@ body.task-branchless #ahead-behind {
 }
 
 #broadcast-toggle.hidden {
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s, visibility 0s linear 0.2s;
   opacity: 0;
   visibility: hidden;
   transform: translate(-50%, 15px);
   pointer-events: none;
+}
+
+#btn-broadcast-grip,
+#btn-broadcast-placement {
+  min-width: 24px;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: rgba(232, 232, 238, 0.7);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+#btn-broadcast-grip {
+  cursor: grab;
+  touch-action: none;
+  letter-spacing: -3px;
+}
+
+#btn-broadcast-grip:active {
+  cursor: grabbing;
+}
+
+#btn-broadcast-grip:hover,
+#btn-broadcast-placement:hover {
+  color: #e8e8ee;
+}
+
+/* Dragged: the inline left/top from app.js replace the bottom-center anchor. */
+#broadcast-bar.dragged,
+#broadcast-toggle.dragged {
+  bottom: auto;
+  transform: none;
+  animation: none;
+  /* Transitioning left/top would make the bar trail the pointer. */
+  transition: opacity 0.2s, visibility 0s;
+}
+
+#broadcast-bar.dragged.hidden,
+#broadcast-toggle.dragged.hidden {
+  transform: translateY(15px);
+  transition: opacity 0.2s, visibility 0s linear 0.2s;
+}
+
+#broadcast-toggle.dragged:hover {
+  transform: translateY(-2px);
+}
+
+/* Docked under the Active agents bar: a sidebar row in theme colours rather than the floating dark glass. */
+#broadcast-dock {
+  padding: 6px 12px 0;
+}
+
+#broadcast-dock[hidden],
+#sidebar.collapsed #broadcast-dock {
+  display: none;
+}
+
+#broadcast-bar.docked {
+  position: static;
+  transform: none;
+  animation: none;
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  gap: 6px;
+  padding: 0 4px 0 8px;
+  height: 28px;
+  background: var(--surface-hover);
+  backdrop-filter: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: none;
+  --focus-ring: var(--accent);
+}
+
+#broadcast-bar.docked .broadcast-icon {
+  font-size: 12px;
+}
+
+#broadcast-bar.docked #broadcast-input {
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+#broadcast-bar.docked #broadcast-input::placeholder {
+  color: var(--text-muted);
+}
+
+#broadcast-bar.docked #btn-broadcast-send {
+  padding: 3px 10px;
+  font-size: 11px;
+}
+
+#broadcast-bar.docked #btn-broadcast-placement {
+  color: var(--text-muted);
+}
+
+#broadcast-bar.docked #btn-broadcast-placement:hover {
+  color: var(--text);
+}
+
+#broadcast-bar.docked #btn-broadcast-grip,
+#broadcast-bar.docked #btn-broadcast-close {
+  display: none;
 }
 
 /* WCAG 2.5.8: small icon buttons get at least a 24×24 hit area. */
