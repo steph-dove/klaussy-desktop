@@ -2,6 +2,15 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.30.0
+
+### 🦉 Broadcast Reaches Every Terminal
+
+- **Every Open Terminal**: Broadcast now sends to every live terminal across all sessions, splits included, not just the current one. The box shows how many it'll hit ("Send to 3 terminals") before you press Enter.
+- **Docked in the Sidebar**: by default the bar sits under Active agents instead of over your terminals. Switch it back to floating from the bar itself or in Preferences > Appearance.
+- **Drag It Out of the Way**: the floating bar has a grip. Drag it anywhere over the terminals, or nudge it with the arrow keys. Double-click or Home puts it back in the middle, and the spot sticks across restarts.
+- **Approve Buttons Work After Sleep**: Slack and Discord reconnect when the Mac wakes, so Approve/Reject clicks stop timing out. A click that lands too late updates the alert instead of leaving stale buttons up.
+
 ## 0.29.0
 
 ### 🦉 Implement All Gets Past Claude's Trust Prompt
