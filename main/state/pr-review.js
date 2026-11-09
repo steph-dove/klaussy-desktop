@@ -503,7 +503,7 @@ async function ensureWorktreeForActivePr() {
   };
 }
 
-// pr is { meta, forge, host, account }, so a caller can push a PR that is no longer the active one.
+// pr is a snapshot of the review ({ meta, forge, host, account, baseOwner, ... }), so a caller can push a PR that is no longer the active one.
 async function pushPrHead({ pr, worktreePath, stash }) {
   const meta = pr && pr.meta;
 

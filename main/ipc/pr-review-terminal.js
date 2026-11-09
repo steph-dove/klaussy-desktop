@@ -134,7 +134,11 @@ ipcMain.handle('pr-review-implement-start', async (event, { requestId, mode, bod
 
   // Snapshot the push target: a backgrounded run can finish after the reviewer moved to another PR.
   const a = prReview.active;
-  const pushPr = mode === 'all' && a ? { meta: a.meta, forge: a.forge, host: a.host, account: a.account } : null;
+  // gitAuth builds the push URL from these, so they're captured too.
+  const pushPr = mode === 'all' && a ? {
+    meta: a.meta, forge: a.forge, host: a.host, account: a.account,
+    baseOwner: a.baseOwner, baseRepo: a.baseRepo, projectPath: a.projectPath, number: a.number,
+  } : null;
   // The commit, not the agent's closing text, decides the push: a run that commits but garbles the marker still lands.
   const pusher = pushPr && createCommitPusher({
     getHead: () => headSha(ensured.worktreePath),
