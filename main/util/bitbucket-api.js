@@ -7,6 +7,7 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const { loadConfig, saveConfig } = require('./config');
 const { detectForgeFromRemote } = require('./forge-url');
+const { ForgeHttpError, httpFetch } = require('./forge-http');
 
 const BITBUCKET_AUTH_CACHE_TTL_MS = 5 * 60 * 1000;
 const bitbucketAuthCache = new Map(); // key -> { auth, at: ms }
@@ -227,7 +228,18 @@ function buildBitbucketUrl(endpoint, host = 'bitbucket.org') {
   return `https://${host}/2.0/${cleanPath}`;
 }
 
-async function bitbucketFetch(endpoint, opts = {}) {
+// Bitbucket's JSON errors nest the reason under error.message. A body that
+// isn't JSON yields '' so the message falls back to the status text.
+function jsonErrorBody(text) {
+  try {
+    const json = JSON.parse(text);
+    return (json && (json.error && json.error.message)) || json.message || JSON.stringify(json);
+  } catch (_) {
+    return '';
+  }
+}
+
+async function sendBitbucket(endpoint, opts, errorBodyOf) {
   const host = opts.host || 'bitbucket.org';
   const url = buildBitbucketUrl(endpoint, host);
   const auth = getBitbucketAuth({ account: opts.account, host, cwd: opts.cwd });
@@ -261,28 +273,23 @@ async function bitbucketFetch(endpoint, opts = {}) {
     }
   }
 
-  const res = await fetch(url, fetchOpts);
-  return res;
+  try {
+    return await httpFetch(url, fetchOpts);
+  } catch (err) {
+    if (!(err instanceof ForgeHttpError)) throw err;
+    const errBody = errorBodyOf(err.responseBody);
+    throw new ForgeHttpError(`Bitbucket API error (HTTP ${err.status}): ${errBody || err.statusText}`, {
+      status: err.status, statusText: err.statusText, responseBody: errBody,
+    });
+  }
+}
+
+async function bitbucketFetch(endpoint, opts = {}) {
+  return sendBitbucket(endpoint, opts, jsonErrorBody);
 }
 
 async function bitbucketJson(endpoint, opts = {}) {
   const res = await bitbucketFetch(endpoint, opts);
-  if (!res.ok) {
-    let errBody = '';
-    try {
-      const json = await res.json();
-      errBody = (json && (json.error && json.error.message)) || json.message || JSON.stringify(json);
-    } catch (_) {
-      try {
-        errBody = await res.text();
-      } catch (_) {}
-    }
-    const err = new Error(`Bitbucket API error (HTTP ${res.status}): ${errBody || res.statusText}`);
-    err.status = res.status;
-    err.statusCode = res.status;
-    err.responseBody = errBody;
-    throw err;
-  }
   return res.json();
 }
 
@@ -291,16 +298,7 @@ async function bitbucketText(endpoint, opts = {}) {
   mergedOpts.headers = Object.assign({
     Accept: 'text/plain, text/x-diff, application/x-diff, */*',
   }, opts.headers || {});
-  const res = await bitbucketFetch(endpoint, mergedOpts);
-  if (!res.ok) {
-    let errBody = '';
-    try { errBody = await res.text(); } catch (_) {}
-    const err = new Error(`Bitbucket API error (HTTP ${res.status}): ${errBody || res.statusText}`);
-    err.status = res.status;
-    err.statusCode = res.status;
-    err.responseBody = errBody;
-    throw err;
-  }
+  const res = await sendBitbucket(endpoint, mergedOpts, (text) => text);
   return res.text();
 }
 
