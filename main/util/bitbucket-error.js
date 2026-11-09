@@ -25,7 +25,10 @@ function classifyBitbucketError(raw, ctx = {}) {
     return {
       kind: 'auth',
       summary: `Bitbucket isn't authenticated with ${host} (or the token/app password is invalid).${acct}`,
-      fix: `Add a Bitbucket App Password in Git Accounts, or set $BITBUCKET_TOKEN / $BITBUCKET_APP_PASSWORD in your environment.`,
+      // The callers don't know the token type, so the API-token case is always mentioned.
+      fix: 'Add a Bitbucket App Password in Git Accounts, or set $BITBUCKET_TOKEN / $BITBUCKET_APP_PASSWORD in your environment. '
+        + 'If you use an Atlassian API token (it starts with ATATT), the username must be your Atlassian account email: '
+        + 'enter it as the username in Git Accounts or set $BITBUCKET_EMAIL.',
       retryable: false,
     };
   }

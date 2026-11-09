@@ -65,7 +65,7 @@ Within the environment it tries a token first:
 |---|---|---|---|
 | `BITBUCKET_TOKEN` | Bitbucket access token or Atlassian API token. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_BEARER_TOKEN` | Same as `BITBUCKET_TOKEN`; used when it's unset. | Unset | `main/util/bitbucket-api.js` |
-| `BITBUCKET_EMAIL` | Username sent with a token. With an `ATATT` token and no username containing `@`, this is used as the account email if it contains `@`. Otherwise klaussy tries `git config user.email`, and if that has no `@` either it sends a hardcoded address that isn't yours, so set this when you use an API token. | Unset | `main/util/bitbucket-api.js` |
+| `BITBUCKET_EMAIL` | Username sent with a token. With an `ATATT` token and no username containing `@`, this is used as the account email if it contains `@`. Otherwise klaussy tries `git config user.email`. If neither has an `@`, the username is sent as given (or `x-token-auth` when there is none) and Bitbucket rejects the login, so set this when you use an API token. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_USERNAME` | Username sent with a token (if `BITBUCKET_EMAIL` is unset) or with an app password. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_USER` | Same as `BITBUCKET_USERNAME`; used when it's unset. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_APP_PASSWORD` | App password, used with `BITBUCKET_USERNAME` or `BITBUCKET_USER`. | Unset | `main/util/bitbucket-api.js` |
