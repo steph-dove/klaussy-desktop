@@ -249,7 +249,24 @@ function transformBitbucketComments(comments) {
   return { threads, issueComments };
 }
 
+// The picker's row shape, the same fields `gh pr list --json` returns.
+function prListItem(norm) {
+  return {
+    number: norm.number,
+    title: norm.title,
+    author: norm.author,
+    state: norm.state,
+    updatedAt: norm.updatedAt,
+    headRefName: norm.headRefName,
+    baseRefName: norm.baseRefName,
+    isDraft: norm.isDraft,
+    reviewDecision: norm.reviewDecision,
+    url: norm.url,
+  };
+}
+
 module.exports = {
+  prListItem,
   bucketFromGitLabStatus,
   normalizeGitLabMr,
   transformGitLabDiscussions,
