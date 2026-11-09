@@ -2,9 +2,10 @@
 // Picks the forge adapter for a forge id, PR URL, git remote or picker account id.
 
 const { parseForgeUrl, detectForgeFromRemote } = require('../forge-url');
+const gitlab = require('./gitlab');
 const bitbucket = require('./bitbucket');
 
-const FORGES = { bitbucket };
+const FORGES = { gitlab, bitbucket };
 
 function getForge(id) {
   return FORGES[id] || null;
