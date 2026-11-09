@@ -58,19 +58,24 @@ test.afterEach(() => {
 });
 
 for (const [channel, args, expected] of cases) {
-  test(`${channel} returns early on a Bitbucket PR without running gh`, async () => {
-    activate('bitbucket');
-    const res = await handlers[channel](fakeEvent, args);
-    assert.deepEqual(res, expected);
-    assert.equal(ghCalls.length, 0);
-  });
+  for (const forge of ['bitbucket', 'gitlab']) {
+    test(`${channel} returns early on a ${forge} PR without running gh`, async () => {
+      activate(forge);
+      const res = await handlers[channel](fakeEvent, args);
+      assert.deepEqual(res, expected);
+      assert.equal(ghCalls.length, 0);
+    });
+  }
 
-  test(`${channel} still runs gh on a GitHub PR`, async () => {
-    activate('github');
-    await handlers[channel](fakeEvent, args);
-    if (channel === 'pr-review-run-log-watch-start') {
-      await handlers['pr-review-run-log-watch-stop'](fakeEvent, { requestId: 'r1' });
-    }
-    assert.ok(ghCalls.length > 0, 'expected a gh call');
-  });
+  // No forge recorded means GitHub, as in the rest of the checks handlers.
+  for (const forge of ['github', undefined]) {
+    test(`${channel} still runs gh on a PR with forge ${forge}`, async () => {
+      activate(forge);
+      await handlers[channel](fakeEvent, args);
+      if (channel === 'pr-review-run-log-watch-start') {
+        await handlers['pr-review-run-log-watch-stop'](fakeEvent, { requestId: 'r1' });
+      }
+      assert.ok(ghCalls.length > 0, 'expected a gh call');
+    });
+  }
 }

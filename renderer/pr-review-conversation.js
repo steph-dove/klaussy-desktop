@@ -558,7 +558,7 @@
     // Required-checks list is independent of the per-commit checks data; fetch
     // in parallel-ish (after main checks so the user sees something fast).
     // It reads GitHub branch protection, so other forges skip it.
-    if (PR.forgeName() !== 'GitHub') {
+    if (!PR.isGitHub()) {
       PR.currentRequiredChecks = [];
       PR.currentRequiredChecksError = '';
     } else {
@@ -619,7 +619,7 @@
     var forgeName = PR.forgeName ? PR.forgeName() : 'GitHub';
     // Dispatch, rerun, cancel, log watch and annotations go through gh, so
     // they only show on GitHub. Debug and Fix work on every forge.
-    var onGitHub = forgeName === 'GitHub';
+    var onGitHub = PR.isGitHub();
     var header = '<div class="pr-checks-tab-head">'
       + '<span>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + '</span>'
       + '<div class="pr-checks-tab-actions">'

@@ -18,8 +18,10 @@ const { bitbucketJson } = require('../util/bitbucket-api');
 // shell out to gh, which only speaks GitHub. On a GitLab or Bitbucket PR they
 // return early instead of running gh against a repo it can't see.
 const NOT_GITHUB = 'Only available on GitHub pull requests';
+// A PR with no forge recorded is GitHub, as everywhere else in this file.
 function activeOnGitHub() {
-  return prReview.active.forge === 'github';
+  const forge = prReview.active.forge || 'github';
+  return forge === 'github';
 }
 
 // G6: CI checks scoped to the PR review surface.

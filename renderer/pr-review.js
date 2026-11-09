@@ -52,6 +52,10 @@ window.PrReview = window.PrReview || {};
     return 'GitHub';
   };
 
+  PR.isGitHub = function (state) {
+    return PR.forgeName(state) === 'GitHub';
+  };
+
   // Per-render IPC subscriptions for rehydrated explain agents. render() blows
   // away hostEl.innerHTML, which orphans these listeners — we clear them each
   // time so chunks don't pile up onto detached DOM.
