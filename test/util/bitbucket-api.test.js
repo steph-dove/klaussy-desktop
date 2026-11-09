@@ -169,3 +169,15 @@ test('resolveEmailIfApiToken leaves non-API-token usernames alone', () => {
     () => resolveEmailIfApiToken('someuser', 'app-password'));
   assert.equal(got, 'someuser');
 });
+
+test('resolveEmailIfApiToken keeps an email username for an API token', () => {
+  const got = withEmailSources({ envEmail: 'env@example.com' },
+    () => resolveEmailIfApiToken('me@example.com', 'ATATT-test'));
+  assert.equal(got, 'me@example.com');
+});
+
+test('resolveEmailIfApiToken skips env and git values that are not emails', () => {
+  const got = withEmailSources({ envEmail: 'not-an-email', gitEmail: 'also-not-one' },
+    () => resolveEmailIfApiToken('someuser', 'ATATT-test'));
+  assert.equal(got, 'someuser');
+});
