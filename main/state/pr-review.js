@@ -19,9 +19,9 @@ const { loadConfig, saveConfig } = require('../util/config');
 const { classifyGhError } = require('../util/gh-error');
 const { classifyGlabError } = require('../util/glab-error');
 const { classifyBitbucketError } = require('../util/bitbucket-error');
-const { clearGhTokenCache, execFileP } = require('../util/exec');
-const { clearGlabTokenCache, getGlabToken, resolveGlabEnv } = require('../util/glab-exec');
-const { getBitbucketAuth, bitbucketJson, switchBitbucketAccount } = require('../util/bitbucket-api');
+const { execFileP } = require('../util/exec');
+const { getGlabToken, resolveGlabEnv } = require('../util/glab-exec');
+const { getBitbucketAuth, bitbucketJson } = require('../util/bitbucket-api');
 const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
 const {
   transformGitLabDiscussions,
@@ -29,52 +29,31 @@ const {
   normalizeBitbucketPr,
   normalizeGitLabMr,
 } = require('../util/forge-adapter');
+const { getForge } = require('../util/forges');
 const { instances } = require('./instances');
 
-// Reviewing a PR for a repo only the non-active gh account can see requires
-// that account to be globally active — the embedded agent terminals and git
-// run gh themselves with the ambient account. So we switch on review-open and
-// restore the prior account on review-close, instead of leaving it flipped.
-let _savedGhAccount = null;
+// Opening a review can switch the forge CLI's (or Bitbucket's) active account
+// to the one the reviewer picked; closing it puts the earlier one back. One
+// slot per forge, filled by the first switch, so a chain of reviews restores
+// the account that was active before any of them.
+const _savedAccounts = new Map();
 
-function activeGhAccountNow() {
-  try {
-    const out = execFileSync('gh', ['auth', 'status'], { stdio: 'pipe', timeout: 5000 }).toString();
-    const lines = out.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/Logged in to \S+ (?:account|as) ([A-Za-z0-9-]+)/);
-      if (!m) continue;
-      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
-        if (/Active account:\s*true/i.test(lines[j])) return m[1];
-        if (/Logged in to/.test(lines[j])) break;
-      }
-    }
-  } catch (_) {}
-  return null;
+function useAccountForReview(forgeId, account, host) {
+  const adapter = getForge(forgeId);
+  const prior = adapter.useAccountForReview(account, host);
+  if (prior != null && _savedAccounts.get(adapter.id) == null) _savedAccounts.set(adapter.id, prior);
 }
 
-// Make `account` the active gh account for the review session, remembering the
-// account that was active before (once) so restoreGhAfterReview can put it back.
-function switchGhForReview(account) {
-  if (!account) return;
-  const current = activeGhAccountNow();
-  if (current === account) return;
-  if (_savedGhAccount === null) _savedGhAccount = current;
-  try {
-    execFileSync('gh', ['auth', 'switch', '-u', account], { stdio: 'pipe', timeout: 5000 });
-    clearGhTokenCache();
-  } catch (_) {}
+function restoreAccountAfterReview(forgeId) {
+  const adapter = getForge(forgeId);
+  const saved = _savedAccounts.get(adapter.id);
+  if (saved == null) return;
+  _savedAccounts.delete(adapter.id);
+  adapter.restoreAccountAfterReview(saved);
 }
 
-// Restore the pre-review active account when the review session ends.
 function restoreGhAfterReview() {
-  if (_savedGhAccount === null) return;
-  const restoreTo = _savedGhAccount;
-  _savedGhAccount = null;
-  try {
-    execFileSync('gh', ['auth', 'switch', '-u', restoreTo], { stdio: 'pipe', timeout: 5000 });
-    clearGhTokenCache();
-  } catch (_) {}
+  restoreAccountAfterReview('github');
 }
 
 const prReview = {
@@ -123,46 +102,6 @@ function sanitizePrReview(s) {
 function currentRepoPath() {
   const config = loadConfig();
   return config.repoPath || null;
-}
-
-let _savedGlabAccount = null;
-
-function switchGlabForReview(account, host = 'gitlab.com') {
-  if (!account) return;
-  try {
-    execFileSync('glab', ['auth', 'switch', '--hostname', host, '--user', account], { stdio: 'pipe', timeout: 5000 });
-    clearGlabTokenCache();
-  } catch (_) {}
-}
-
-function restoreGlabAfterReview() {
-  if (_savedGlabAccount === null) return;
-  const restoreTo = _savedGlabAccount;
-  _savedGlabAccount = null;
-  try {
-    execFileSync('glab', ['auth', 'switch', '--hostname', restoreTo.host, '--user', restoreTo.account], { stdio: 'pipe', timeout: 5000 });
-    clearGlabTokenCache();
-  } catch (_) {}
-}
-
-let _savedBitbucketAccount = null;
-
-function switchBitbucketForReview(account, host = 'bitbucket.org') {
-  if (!account) return;
-  const config = loadConfig();
-  const accounts = config.bitbucketAccounts || [];
-  const currentActive = accounts.find((a) => a.active && (!a.hostname || a.hostname === host));
-  if (_savedBitbucketAccount === null && currentActive) {
-    _savedBitbucketAccount = { account: currentActive.username, host: currentActive.hostname || host };
-  }
-  switchBitbucketAccount(account, host);
-}
-
-function restoreBitbucketAfterReview() {
-  if (_savedBitbucketAccount === null) return;
-  const restoreTo = _savedBitbucketAccount;
-  _savedBitbucketAccount = null;
-  switchBitbucketAccount(restoreTo.account, restoreTo.host);
 }
 
 // PR/MR URLs already encode the base repo, so the picker and paste-URL paths
@@ -884,10 +823,7 @@ module.exports = {
   findWorktreeForBranchAcrossClones,
   resolveFallbackBaseBranch,
   ensureWorktreeForActivePr,
-  switchGhForReview,
+  useAccountForReview,
+  restoreAccountAfterReview,
   restoreGhAfterReview,
-  switchGlabForReview,
-  restoreGlabAfterReview,
-  switchBitbucketForReview,
-  restoreBitbucketAfterReview,
 };

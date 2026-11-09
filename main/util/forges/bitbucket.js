@@ -33,8 +33,11 @@ module.exports = {
   defaultHost: DEFAULT_HOST,
   branchPrefix: 'bb',
 
+  // loadPr re-reads the repo and host from a pasted URL, so a load error names those.
   classifyError(raw, ctx = {}) {
-    return classifyBitbucketError(raw, ctx);
+    const { url, ...rest } = ctx;
+    const p = url ? parseForgeUrl(url) : null;
+    return classifyBitbucketError(raw, p ? { ...rest, target: p.projectPath, host: p.host } : rest);
   },
 
   async listOpen({ info }) {
