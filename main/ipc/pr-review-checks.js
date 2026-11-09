@@ -14,6 +14,16 @@ const { bucketFromGitLabStatus, bucketFromBitbucketStatus } = require('../util/f
 const { resolveGlabEnv } = require('../util/glab-exec');
 const { bitbucketJson } = require('../util/bitbucket-api');
 
+// Required checks, rerun, cancel, log watch, workflows and annotations all
+// shell out to gh, which only speaks GitHub. On a GitLab or Bitbucket PR they
+// return early instead of running gh against a repo it can't see.
+const NOT_GITHUB = 'Only available on GitHub pull requests';
+// A PR with no forge recorded is GitHub, as everywhere else in this file.
+function activeOnGitHub() {
+  const forge = prReview.active.forge || 'github';
+  return forge === 'github';
+}
+
 // G6: CI checks scoped to the PR review surface.
 ipcMain.handle('pr-review-checks', async () => {
   if (!prReview.active) return { error: 'No active PR review' };
@@ -183,7 +193,7 @@ async function fetchRequiredContexts(cwd, baseOwner, baseRepo, baseBranch) {
 }
 
 ipcMain.handle('pr-review-required-checks', async () => {
-  if (!prReview.active) return { required: [] };
+  if (!prReview.active || !activeOnGitHub()) return { required: [] };
   const { meta, baseOwner, baseRepo } = prReview.active;
   const baseBranch = meta && meta.baseRefName;
   const cwd = currentRepoPath() || require('os').homedir();
@@ -210,6 +220,7 @@ ipcMain.handle('pr-required-checks', async (_event, { worktreePath, prNumber }) 
 // Rerun all failed jobs in a workflow run. Maps to `gh run rerun --failed`.
 ipcMain.handle('pr-review-run-rerun-failed', async (_event, { runId }) => {
   if (!prReview.active) return { error: 'No active PR review' };
+  if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo } = prReview.active;
   if (!runId) return { error: 'Missing runId' };
   const cwd = currentRepoPath() || require('os').homedir();
@@ -226,7 +237,7 @@ ipcMain.handle('pr-review-run-rerun-failed', async (_event, { runId }) => {
 // List active workflows on the base repo for manual dispatch. Filters to
 // state=active so disabled workflows don't show up in the picker.
 ipcMain.handle('pr-review-workflows-list', async () => {
-  if (!prReview.active) return { workflows: [] };
+  if (!prReview.active || !activeOnGitHub()) return { workflows: [] };
   const { baseOwner, baseRepo } = prReview.active;
   if (!baseOwner || !baseRepo) return { workflows: [], error: 'Could not determine base repo' };
   const cwd = currentRepoPath() || require('os').homedir();
@@ -257,6 +268,7 @@ ipcMain.handle('pr-review-workflows-list', async () => {
 // or if required inputs are missing.
 ipcMain.handle('pr-review-workflow-dispatch', async (_event, { workflowId, ref, inputs }) => {
   if (!prReview.active) return { error: 'No active PR review' };
+  if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo, meta } = prReview.active;
   if (!workflowId) return { error: 'Missing workflowId' };
   const useRef = (ref && ref.trim()) || (meta && meta.headRefName) || '';
@@ -293,6 +305,7 @@ ipcMain.handle('pr-review-run-log-watch-start', async (event, { requestId, runId
   if (!requestId || !runId) return { error: 'Missing requestId or runId' };
   if (watchedRunLogs.has(requestId)) return { error: 'Already watching this requestId' };
   if (!prReview.active) return { error: 'No active PR review' };
+  if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo } = prReview.active;
   const cwd = currentRepoPath() || require('os').homedir();
   const sender = event.sender;
@@ -411,6 +424,7 @@ ipcMain.handle('pr-review-run-log-watch-stop', (_event, { requestId }) => {
 // Cancel an in-progress workflow run. Maps to `gh run cancel`.
 ipcMain.handle('pr-review-run-cancel', async (_event, { runId }) => {
   if (!prReview.active) return { error: 'No active PR review' };
+  if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo } = prReview.active;
   if (!runId) return { error: 'Missing runId' };
   const cwd = currentRepoPath() || require('os').homedir();
@@ -428,7 +442,7 @@ ipcMain.handle('pr-review-run-cancel', async (_event, { runId }) => {
 // calls this when the user expands a failing row, so we don't pay N round-trips
 // on every Checks-tab open.
 ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => {
-  if (!prReview.active) return { annotations: [] };
+  if (!prReview.active || !activeOnGitHub()) return { annotations: [] };
   const { baseOwner, baseRepo } = prReview.active;
   if (!baseOwner || !baseRepo || !checkRunId) {
     return { annotations: [], error: 'Missing repo or check id' };
