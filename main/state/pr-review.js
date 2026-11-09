@@ -7,28 +7,16 @@
 // exported `prReview` holder because a naked `let activePrReview` couldn't
 // be shared mutably across module boundaries via CommonJS destructuring.
 //
-// One dep lives in main.js and hasn't been factored yet:
-//   - ghJson (moves to ipc/pr-review.js in Phase 3)
-// Injected via setDeps.
+// Everything forge-specific (API calls, auth, refspecs) goes through the
+// adapter for the review's forge, from util/forges.
 
 const path = require('path');
 const fs = require('fs');
-const { execFile, execFileSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
-const { classifyGhError } = require('../util/gh-error');
-const { classifyGlabError } = require('../util/glab-error');
-const { classifyBitbucketError } = require('../util/bitbucket-error');
 const { execFileP } = require('../util/exec');
-const { getGlabToken, resolveGlabEnv } = require('../util/glab-exec');
-const { getBitbucketAuth, bitbucketJson } = require('../util/bitbucket-api');
 const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
-const {
-  transformGitLabDiscussions,
-  transformBitbucketComments,
-  normalizeBitbucketPr,
-  normalizeGitLabMr,
-} = require('../util/forge-adapter');
 const { getForge } = require('../util/forges');
 const { instances } = require('./instances');
 
@@ -59,12 +47,6 @@ function restoreGhAfterReview() {
 const prReview = {
   active: null, // { repo, number, meta, diff, popout: BrowserWindow|null, ... }
 };
-
-let _ghJson = async () => { throw new Error('ghJson not injected'); };
-
-function setDeps({ ghJson } = {}) {
-  if (ghJson) _ghJson = ghJson;
-}
 
 function broadcastPrReview() {
   // Review closed: tell every window so the one showing it exits. Harmless for
@@ -140,8 +122,8 @@ function pushReviewHistory(meta) {
   saveConfig(config);
 }
 
-// GraphQL-backed thread fetch. Scoped to the *base* repo (target), not the
-// head repo (fork), because threads live on the target.
+// Threads are fetched from the *base* repo (target), not the head repo
+// (fork), because that's where they live.
 //
 // Epoch guard: overlapping refreshes (user hits refresh twice; merge-handler
 // piggybacks a refresh during the user's manual refresh) can return out of
@@ -152,11 +134,11 @@ async function fetchThreadsForActive() {
   if (!prReview.active) return;
   const epoch = ++_threadsFetchEpoch;
   const cwd = currentRepoPath() || require('os').homedir();
-  const forge = prReview.active.forge || 'github';
-  const number = prReview.active.number;
-  const owner = prReview.active.baseOwner;
-  const repo = prReview.active.baseRepo;
-  const projectPath = prReview.active.projectPath || (owner && repo ? `${owner}/${repo}` : null);
+  const pr = prReview.active;
+  const number = pr.number;
+  const owner = pr.baseOwner;
+  const repo = pr.baseRepo;
+  const projectPath = pr.projectPath || (owner && repo ? `${owner}/${repo}` : null);
 
   if (!owner && !projectPath) {
     prReview.active.threadsError = 'Could not parse base repo from PR/MR url';
@@ -168,153 +150,19 @@ async function fetchThreadsForActive() {
     || !prReview.active
     || prReview.active.number !== number;
 
-  if (forge === 'bitbucket') {
-    const host = prReview.active.host || 'bitbucket.org';
-    const account = prReview.active.account;
-    const target = projectPath || `${owner}/${repo}`;
+  const res = await getForge(pr.forge).fetchThreads(pr, { cwd, stale });
+  if (!res || stale()) return;
 
-    try {
-      const res = await bitbucketJson(`/repositories/${target}/pullrequests/${number}/comments?pagelen=100`, {
-        account, host, cwd,
-      });
-      if (stale()) return;
-      const { threads, issueComments } = transformBitbucketComments(res.values || res);
-      prReview.active.threads = threads;
-      prReview.active.issueComments = issueComments;
-      prReview.active.reviews = [];
-      prReview.active.threadsError = null;
-      prReview.active.threadsErrorFix = null;
-      prReview.active.threadsErrorRaw = null;
-      broadcastPrReview();
-      return;
-    } catch (err) {
-      if (stale()) return;
-      const raw = (err.responseBody || err.message || '').trim();
-      const cls = classifyBitbucketError(raw, { target, host, account });
-      prReview.active.threadsError = cls.summary;
-      prReview.active.threadsErrorFix = cls.fix;
-      prReview.active.threadsErrorRaw = raw;
-      broadcastPrReview();
-      return;
-    }
-  }
-
-  if (forge === 'gitlab') {
-    const host = prReview.active.host || 'gitlab.com';
-    const account = prReview.active.account;
-    const target = projectPath || `${owner}/${repo}`;
-    const endpoint = `projects/${encodeURIComponent(target)}/merge_requests/${number}/discussions`;
-    const glabEnv = { ...process.env, ...resolveGlabEnv({ account, host, cwd }) };
-    delete glabEnv.GITLAB_TOKEN;
-
-    const runGitLabOnce = () => new Promise((resolve) => {
-      execFile('glab', ['api', endpoint, '--paginate'], { cwd, env: glabEnv, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
-        if (err) {
-          return resolve({ errorRaw: (stderr || '').toString().trim() || err.message });
-        }
-        try {
-          const raw = JSON.parse(stdout);
-          return resolve({ data: raw });
-        } catch (_) {
-          return resolve({ errorRaw: 'glab returned non-JSON: ' + String(stdout).slice(0, 200) });
-        }
-      });
-    });
-
-    let res = await runGitLabOnce();
-    if (res.errorRaw && classifyGlabError(res.errorRaw, { target, host }).retryable) {
-      await new Promise((r) => setTimeout(r, 900));
-      if (stale()) return;
-      res = await runGitLabOnce();
-    }
-    if (stale()) return;
-
-    if (res.errorRaw) {
-      const cls = classifyGlabError(res.errorRaw, { target, host });
-      prReview.active.threadsError = cls.summary;
-      prReview.active.threadsErrorFix = cls.fix;
-      prReview.active.threadsErrorRaw = res.errorRaw;
-      broadcastPrReview();
-      return;
-    }
-
-    const { threads, issueComments } = transformGitLabDiscussions(res.data);
-    prReview.active.threads = threads;
-    prReview.active.issueComments = issueComments;
-    prReview.active.reviews = [];
-    prReview.active.threadsError = null;
-    prReview.active.threadsErrorFix = null;
-    prReview.active.threadsErrorRaw = null;
+  if (res.error) {
+    prReview.active.threadsError = res.error.summary;
+    prReview.active.threadsErrorFix = res.error.fix;
+    prReview.active.threadsErrorRaw = res.error.raw;
     broadcastPrReview();
     return;
   }
-
-  const query = 'query($owner: String!, $repo: String!, $number: Int!) {'
-    + '  repository(owner: $owner, name: $repo) {'
-    + '    pullRequest(number: $number) {'
-    + '      reviewThreads(first: 100) {'
-    + '        nodes {'
-    + '          id isResolved isOutdated path line originalLine startLine originalStartLine diffSide'
-    + '          comments(first: 100) { nodes { databaseId author { login } createdAt body diffHunk } }'
-    + '        }'
-    + '      }'
-    + '      comments(first: 100) {'
-    + '        nodes { databaseId author { login } createdAt body url }'
-    + '      }'
-    + '      reviews(first: 100) {'
-    + '        nodes {'
-    + '          databaseId state body submittedAt author { login }'
-    + '          comments(first: 100) { nodes { databaseId body path line diffHunk } }'
-    + '        }'
-    + '      }'
-    + '    }'
-    + '  }'
-    + '}';
-
-  const ghArgs = [
-    'api', 'graphql',
-    '-f', 'query=' + query,
-    '-f', 'owner=' + owner,
-    '-f', 'repo=' + repo,
-    '-F', 'number=' + number,
-  ];
-  const runOnce = () => new Promise((resolve) => {
-    execFile('gh', ghArgs, { cwd, maxBuffer: 50 * 1024 * 1024, timeout: 15000 }, (err, stdout, stderr) => {
-      const fromBody = (s) => {
-        try { const p = JSON.parse(String(s)); if (p && p.errors && p.errors.length) return p.errors.map(e => e.message).join('; '); } catch (_) {}
-        return null;
-      };
-      if (err) {
-        return resolve({ errorRaw: fromBody(stdout) || (stderr || '').toString().trim() || err.message });
-      }
-      const bodyErr = fromBody(stdout);
-      if (bodyErr) return resolve({ errorRaw: bodyErr });
-      try { return resolve({ data: JSON.parse(stdout).data }); }
-      catch (_) { return resolve({ errorRaw: 'gh returned non-JSON: ' + String(stdout).slice(0, 200) }); }
-    });
-  });
-
-  const target = owner + '/' + repo;
-  let res = await runOnce();
-  if (res.errorRaw && classifyGhError(res.errorRaw, { target }).retryable) {
-    await new Promise((r) => setTimeout(r, 900));
-    if (stale()) return;
-    res = await runOnce();
-  }
-  if (stale()) return;
-
-  if (res.errorRaw) {
-    const cls = classifyGhError(res.errorRaw, { target });
-    prReview.active.threadsError = cls.summary;
-    prReview.active.threadsErrorFix = cls.fix;
-    prReview.active.threadsErrorRaw = res.errorRaw;
-    broadcastPrReview();
-    return;
-  }
-  const pr = res.data && res.data.repository && res.data.repository.pullRequest;
-  prReview.active.threads = (pr && pr.reviewThreads && pr.reviewThreads.nodes) || [];
-  prReview.active.issueComments = (pr && pr.comments && pr.comments.nodes) || [];
-  prReview.active.reviews = (pr && pr.reviews && pr.reviews.nodes) || [];
+  prReview.active.threads = res.threads;
+  prReview.active.issueComments = res.issueComments;
+  prReview.active.reviews = res.reviews;
   prReview.active.threadsError = null;
   prReview.active.threadsErrorFix = null;
   prReview.active.threadsErrorRaw = null;
@@ -323,28 +171,11 @@ async function fetchThreadsForActive() {
 
 async function reloadActivePrReviewMeta() {
   if (!prReview.active) return;
-  const { meta: existingMeta, forge, host } = prReview.active;
+  const { meta: existingMeta } = prReview.active;
   if (!existingMeta || !existingMeta.url) return;
   const cwd = currentRepoPath() || require('os').homedir();
   try {
-    if (forge === 'bitbucket') {
-      const parsed = parseForgeUrl(existingMeta.url);
-      const proj = (parsed && parsed.projectPath) || prReview.active.projectPath;
-      const num = (parsed && parsed.number) || prReview.active.number;
-      const raw = await bitbucketJson(`/repositories/${proj}/pullrequests/${num}`, {
-        account: prReview.active.account,
-        host: host || 'bitbucket.org',
-      });
-      const meta = normalizeBitbucketPr(raw, host || 'bitbucket.org');
-      if (!prReview.active || prReview.active.number !== meta.number) return;
-      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
-      broadcastPrReview();
-      return;
-    }
-    const meta = await _ghJson([
-      'pr', 'view', existingMeta.url,
-      '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-    ], cwd);
+    const meta = await getForge(prReview.active.forge).reloadMeta(prReview.active, { cwd });
     if (!prReview.active || prReview.active.number !== meta.number) return;
     prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
     broadcastPrReview();
@@ -467,16 +298,29 @@ function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
 // name (degrading to today's behavior rather than erroring).
 const gitEnv = Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' });
 
-function resolveBaseShaForWorktree(worktreePath, authedUrl, baseRefName) {
+// Strips credentials from git's error output, which echoes the authed URL.
+function scrubCredentials(s) {
+  return (s || '')
+    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
+    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
+    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
+}
+
+function splitProjectPath(projectPath) {
+  const i = projectPath.lastIndexOf('/');
+  return i < 0 ? { owner: '', repo: projectPath } : { owner: projectPath.slice(0, i), repo: projectPath.slice(i + 1) };
+}
+
+function resolveBaseShaForWorktree(worktreePath, authedUrl, baseRefName, env = gitEnv) {
   if (!worktreePath || !baseRefName) return '';
   try {
     // Fetch the base tip into FETCH_HEAD without touching any local branch ref
     // (safe even though that branch may be checked out elsewhere).
     execFileSync('git', ['fetch', authedUrl, baseRefName], {
-      cwd: worktreePath, stdio: 'pipe', env: gitEnv,
+      cwd: worktreePath, stdio: 'pipe', env,
     });
     return execFileSync('git', ['merge-base', 'FETCH_HEAD', 'HEAD'], {
-      cwd: worktreePath, stdio: 'pipe', env: gitEnv,
+      cwd: worktreePath, stdio: 'pipe', env,
     }).toString().trim();
   } catch (_) {
     return '';
@@ -505,6 +349,48 @@ function resolveFallbackBaseBranch(worktreePath) {
   return '';
 }
 
+// Clones in progress, by path, so two callers that both miss an existing
+// clone share one `git clone` instead of racing into the same directory.
+const _clonesInFlight = new Map();
+
+async function cloneInto(clonePath, auth) {
+  const env = { ...gitEnv, ...auth.env };
+  try { fs.mkdirSync(path.dirname(clonePath), { recursive: true }); } catch (_) { /* clone reports a missing parent */ }
+  try {
+    await execFileP('git', ['clone', '--filter=blob:none', auth.url, clonePath], { env });
+  } catch (err) {
+    const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
+    return { error: 'Clone failed: ' + scrubCredentials(raw) };
+  }
+  try {
+    await execFileP('git', ['remote', 'set-url', 'origin', auth.cleanUrl], { cwd: clonePath, env });
+  } catch (_) { /* origin keeps the authed URL; later fetches pass their own URL anyway */ }
+  return { cwd: clonePath };
+}
+
+// A clone to create the PR's worktree in: the active project if its origin is
+// the PR's base repo, else a configured project that is, else an auto-clone
+// under userData/pr-checkouts. Async so a first-time clone doesn't block the
+// main process.
+async function resolveBaseClone(pr, adapter, auth) {
+  const { baseOwner, baseRepo } = pr;
+  const active = currentRepoPath();
+  if (active && originMatchesRepo(active, baseOwner, baseRepo)) return { cwd: active };
+  const project = findProjectForRepo(baseOwner, baseRepo);
+  if (project) return { cwd: project };
+
+  const host = pr.host || adapter.defaultHost;
+  const projectPath = pr.projectPath || `${baseOwner}/${baseRepo}`;
+  const sanitizedForClone = projectPath.replace(/[^a-zA-Z0-9_.-]/g, '_');
+  const clonePath = path.join(app.getPath('userData'), 'pr-checkouts', `${host}-${sanitizedForClone}`);
+  const pending = _clonesInFlight.get(clonePath);
+  if (pending) return pending;
+  if (fs.existsSync(clonePath)) return { cwd: clonePath };
+  const cloning = cloneInto(clonePath, auth).finally(() => _clonesInFlight.delete(clonePath));
+  _clonesInFlight.set(clonePath, cloning);
+  return cloning;
+}
+
 // Shared helper: ensure a worktree exists for prReview.active's PR head and
 // return its path. Used by G5 (which then spawns a task) and G7 (which runs
 // the AI review there).
@@ -516,57 +402,20 @@ function resolveFallbackBaseBranch(worktreePath) {
 // create one.
 async function ensureWorktreeForActivePr() {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { number, meta, baseOwner, baseRepo, forge: activeForge, host: activeHost, projectPath: activeProjectPath } = prReview.active;
+  const pr = prReview.active;
+  const { number, meta, baseOwner, baseRepo, projectPath: activeProjectPath } = pr;
   if (!baseOwner && !activeProjectPath) return { error: 'Could not determine base repo from PR/MR metadata' };
 
-  const forge = activeForge || 'github';
-  const host = activeHost || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
+  const adapter = getForge(pr.forge);
   const projectPath = activeProjectPath || `${baseOwner}/${baseRepo}`;
-  const localBranch = (meta && meta.headRefName) || (forge === 'gitlab' ? `mr-${number}` : forge === 'bitbucket' ? `bb-${number}` : `pr-${number}`);
+  const localBranch = (meta && meta.headRefName) || `${adapter.branchPrefix}-${number}`;
   const sanitizedForPath = localBranch.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 80);
-  const sanitizedForClone = projectPath.replace(/[^a-zA-Z0-9_.-]/g, '_');
 
-  let token = '';
-  let authedUrl = '';
-  if (forge === 'gitlab') {
-    token = getGlabToken(host);
-    if (!token) {
-      return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
-    }
-    authedUrl = `https://oauth2:${token}@${host}/${projectPath}.git`;
-  } else if (forge === 'bitbucket') {
-    const auth = getBitbucketAuth({ host, account: prReview.active.account });
-    if (auth && auth.username && (auth.password || auth.token)) {
-      authedUrl = `https://${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password || auth.token)}@${host}/${projectPath}.git`;
-    } else if (auth && auth.token) {
-      authedUrl = `https://x-token-auth:${auth.token}@${host}/${projectPath}.git`;
-    } else {
-      authedUrl = `https://${host}/${projectPath}.git`;
-    }
-  } else {
-    try {
-      token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
-    } catch (_) {
-      return { error: 'Could not read gh auth token — run `gh auth login` first.' };
-    }
-    authedUrl = `https://oauth2:${token}@${host}/${projectPath}.git`;
-  }
-
-  const scrub = (s) => (s || '')
-    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
-    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
-    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
-  const cleanUrl = `https://${host}/${projectPath}.git`;
-  const fetchRef = forge === 'gitlab'
-    ? `+refs/merge-requests/${number}/head:refs/heads/${localBranch}`
-    : forge === 'bitbucket'
-      ? `+refs/heads/${(meta && meta.headRefName) || localBranch}:refs/heads/${localBranch}`
-      : `+refs/pull/${number}/head:refs/heads/${localBranch}`;
-  const fetchHeadTarget = forge === 'gitlab'
-    ? `merge-requests/${number}/head`
-    : forge === 'bitbucket'
-      ? ((meta && meta.headRefName) || localBranch)
-      : `pull/${number}/head`;
+  const auth = adapter.gitAuth(pr, splitProjectPath(projectPath));
+  if (auth.error) return { error: auth.error };
+  const authedUrl = auth.url;
+  const env = { ...gitEnv, ...auth.env };
+  const { refspec: fetchRef, fetchTarget: fetchHeadTarget } = adapter.headFetch(pr, localBranch);
 
   // Step 1: reuse any existing worktree on this branch across every clone
   const existingMatch = findWorktreeForBranchAcrossClones(baseOwner, baseRepo, localBranch);
@@ -576,22 +425,22 @@ async function ensureWorktreeForActivePr() {
     let beforeSha = '';
     try {
       beforeSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-        cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
+        cwd: existingWorktreePath, stdio: 'pipe', env,
       }).toString().trim();
     } catch (_) {}
     let refreshed = 'none';
     try {
       execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], {
-        cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
+        cwd: existingWorktreePath, stdio: 'pipe', env,
       });
       try {
         execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], {
-          cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
+          cwd: existingWorktreePath, stdio: 'pipe', env,
         });
         let afterSha = '';
         try {
           afterSha = execFileSync('git', ['rev-parse', 'HEAD'], {
-            cwd: existingWorktreePath, stdio: 'pipe', env: gitEnv,
+            cwd: existingWorktreePath, stdio: 'pipe', env,
           }).toString().trim();
         } catch (_) {}
         refreshed = (beforeSha && afterSha && beforeSha !== afterSha) ? 'updated' : 'up-to-date';
@@ -607,33 +456,14 @@ async function ensureWorktreeForActivePr() {
       baseRepoCwd: cwd,
       existed: true,
       refreshed,
-      baseSha: resolveBaseShaForWorktree(existingWorktreePath, authedUrl, meta && meta.baseRefName),
+      baseSha: resolveBaseShaForWorktree(existingWorktreePath, authedUrl, meta && meta.baseRefName, env),
     };
   }
 
   // Step 2: resolve a base clone to create one in.
-  let cwd = null;
-  const active = currentRepoPath();
-  if (active && originMatchesRepo(active, baseOwner, baseRepo)) cwd = active;
-  if (!cwd) cwd = findProjectForRepo(baseOwner, baseRepo);
-
-  if (!cwd) {
-    const cloneBase = path.join(app.getPath('userData'), 'pr-checkouts');
-    const clonePath = path.join(cloneBase, `${host}-${sanitizedForClone}`);
-    if (!fs.existsSync(clonePath)) {
-      try { fs.mkdirSync(cloneBase, { recursive: true }); } catch (_) {}
-      try {
-        execFileSync('git', ['clone', '--filter=blob:none', authedUrl, clonePath], { stdio: 'pipe', env: gitEnv });
-      } catch (err) {
-        const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-        return { error: 'Clone failed: ' + scrub(raw) };
-      }
-      try {
-        execFileSync('git', ['remote', 'set-url', 'origin', cleanUrl], { cwd: clonePath, stdio: 'pipe', env: gitEnv });
-      } catch {}
-    }
-    cwd = clonePath;
-  }
+  const base = await resolveBaseClone(pr, adapter, auth);
+  if (base.error) return { error: base.error };
+  const cwd = base.cwd;
 
   const repoBasename = path.basename(cwd);
   const worktreeDir = path.dirname(cwd);
@@ -641,35 +471,35 @@ async function ensureWorktreeForActivePr() {
 
   if (fs.existsSync(worktreePath)) {
     try {
-      execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], { cwd: worktreePath, stdio: 'pipe', env: gitEnv });
+      execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], { cwd: worktreePath, stdio: 'pipe', env });
       try {
-        execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: worktreePath, stdio: 'pipe', env: gitEnv });
+        execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: worktreePath, stdio: 'pipe', env });
       } catch (_) {}
     } catch (_) {}
     return {
       worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: true,
-      baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName),
+      baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName, env),
     };
   }
 
   try {
     execFileSync('git', ['fetch', authedUrl, fetchRef], {
-      cwd, stdio: 'pipe', env: gitEnv,
+      cwd, stdio: 'pipe', env,
     });
   } catch (err) {
     const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-    return { error: 'Fetch failed: ' + scrub(raw) };
+    return { error: 'Fetch failed: ' + scrubCredentials(raw) };
   }
 
   try {
-    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], { cwd, stdio: 'pipe', env: gitEnv });
+    execFileSync('git', ['worktree', 'add', worktreePath, localBranch], { cwd, stdio: 'pipe', env });
   } catch (err) {
     return { error: 'Worktree create failed: ' + (err.stderr ? err.stderr.toString() : err.message) };
   }
 
   return {
     worktreePath, branch: localBranch, baseRepoCwd: cwd, existed: false,
-    baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName),
+    baseSha: resolveBaseShaForWorktree(worktreePath, authedUrl, meta && meta.baseRefName, env),
   };
 }
 
@@ -685,37 +515,10 @@ async function pushPrHead({ pr, worktreePath, stash }) {
     return { error: 'PR head repository/branch missing from metadata — cannot determine push target.' };
   }
 
-  const forge = pr.forge || 'github';
-  const host = pr.host || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
-  let token = '';
-  let authedUrl = '';
-  if (forge === 'gitlab') {
-    token = getGlabToken(host);
-    if (!token) {
-      return { error: `Could not read glab auth token — run \`glab auth login --hostname ${host}\` first.` };
-    }
-    authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
-  } else if (forge === 'bitbucket') {
-    const auth = getBitbucketAuth({ host, account: pr.account });
-    if (auth && auth.username && (auth.password || auth.token)) {
-      authedUrl = `https://${encodeURIComponent(auth.username)}:${encodeURIComponent(auth.password || auth.token)}@${host}/${headOwner}/${headRepoName}.git`;
-    } else if (auth && auth.token) {
-      authedUrl = `https://x-token-auth:${auth.token}@${host}/${headOwner}/${headRepoName}.git`;
-    } else {
-      authedUrl = `https://${host}/${headOwner}/${headRepoName}.git`;
-    }
-  } else {
-    try {
-      token = execFileSync('gh', ['auth', 'token'], { stdio: 'pipe' }).toString().trim();
-    } catch (_) {
-      return { error: 'Could not read gh auth token — run `gh auth login` first.' };
-    }
-    authedUrl = `https://oauth2:${token}@${host}/${headOwner}/${headRepoName}.git`;
-  }
-  const scrub = (s) => (s || '')
-    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
-    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
-    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
+  const auth = getForge(pr.forge).gitAuth(pr, { owner: headOwner, repo: headRepoName });
+  if (auth.error) return { error: auth.error };
+  const authedUrl = auth.url;
+  const env = { ...process.env, ...auth.env };
   const target = `${headOwner}/${headRepoName}:${headBranch}`;
 
   const wtCwd = worktreePath;
@@ -724,7 +527,7 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   // Non-force, so an upstream-advanced branch is rejected and handled by the recovery below.
   const doPush = () => execFileP(
     'git', ['push', authedUrl, `HEAD:refs/heads/${headBranch}`],
-    { cwd: wtCwd, timeout: 60000 },
+    { cwd: wtCwd, timeout: 60000, env },
   );
   const isNonFastForward = (s) => /non-fast-forward|\[rejected\]|fetch first|behind its remote/i.test(s || '');
   // git's "tree is dirty" phrasings — distinguishes an uncommitted-changes block
@@ -737,10 +540,10 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   if (!stashRequested) {
     try {
       const { stderr } = await doPush();
-      return { ok: true, target, output: scrub((stderr || '').trim()) };
+      return { ok: true, target, output: scrubCredentials((stderr || '').trim()) };
     } catch (err) {
       const raw = err.stderr ? err.stderr.toString() : err.message;
-      if (!isNonFastForward(raw)) return { error: scrub(raw) };
+      if (!isNonFastForward(raw)) return { error: scrubCredentials(raw) };
       // fall through to recovery
     }
   }
@@ -751,10 +554,10 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   let stashed = false;
   if (stashRequested) {
     try {
-      const { stdout } = await execFileP('git', ['stash', 'push', '-m', 'klaussy: auto-stash before integrating remote'], { cwd: wtCwd, timeout: 30000 });
+      const { stdout } = await execFileP('git', ['stash', 'push', '-m', 'klaussy: auto-stash before integrating remote'], { cwd: wtCwd, timeout: 30000, env });
       stashed = !/No local changes to save/i.test(stdout || '');
     } catch (se) {
-      return { error: 'Could not stash local changes: ' + scrub(se.stderr ? se.stderr.toString() : se.message) };
+      return { error: 'Could not stash local changes: ' + scrubCredentials(se.stderr ? se.stderr.toString() : se.message) };
     }
   }
   // Restore our stash (if any). The push has already happened by the time this
@@ -762,7 +565,7 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   const popStash = async () => {
     if (!stashed) return '';
     try {
-      await execFileP('git', ['stash', 'pop'], { cwd: wtCwd, timeout: 30000 });
+      await execFileP('git', ['stash', 'pop'], { cwd: wtCwd, timeout: 30000, env });
       return '';
     } catch (_) {
       return ' (Your stashed changes were restored but produced conflicts — resolve them in the worktree.)';
@@ -770,20 +573,20 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   };
 
   try {
-    await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wtCwd, timeout: 60000 });
+    await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wtCwd, timeout: 60000, env });
   } catch (fe) {
     await popStash();
-    return { error: 'Could not fetch the latest remote branch:\n\n' + scrub(fe.stderr ? fe.stderr.toString() : fe.message) };
+    return { error: 'Could not fetch the latest remote branch:\n\n' + scrubCredentials(fe.stderr ? fe.stderr.toString() : fe.message) };
   }
 
   try {
-    await execFileP('git', ['rebase', 'FETCH_HEAD'], { cwd: wtCwd, timeout: 60000 });
+    await execFileP('git', ['rebase', 'FETCH_HEAD'], { cwd: wtCwd, timeout: 60000, env });
   } catch (re) {
     // Abort the failed rebase to restore the pre-rebase state, then restore the
     // stash. Ignore the abort's own error (e.g. the rebase never started).
-    try { await execFileP('git', ['rebase', '--abort'], { cwd: wtCwd, timeout: 30000 }); } catch (_) {}
+    try { await execFileP('git', ['rebase', '--abort'], { cwd: wtCwd, timeout: 30000, env }); } catch (_) {}
     const popWarn = await popStash();
-    const rmsg = scrub(re.stderr ? re.stderr.toString() : re.message);
+    const rmsg = scrubCredentials(re.stderr ? re.stderr.toString() : re.message);
     const dirty = looksLikeDirtyTree(rmsg);
     return {
       kind: dirty ? 'dirty-tree' : 'conflict',
@@ -800,17 +603,16 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   try {
     const { stderr } = await doPush();
     const popWarn = await popStash();
-    return { ok: true, rebased: true, stashed, target, output: scrub((stderr || '').trim()) + popWarn };
+    return { ok: true, rebased: true, stashed, target, output: scrubCredentials((stderr || '').trim()) + popWarn };
   } catch (e2) {
     await popStash();
-    return { error: 'Integrated the latest remote commit, but the retry push still failed:\n\n' + scrub(e2.stderr ? e2.stderr.toString() : e2.message) };
+    return { error: 'Integrated the latest remote commit, but the retry push still failed:\n\n' + scrubCredentials(e2.stderr ? e2.stderr.toString() : e2.message) };
   }
 }
 
 module.exports = {
   prReview,
   pushPrHead,
-  setDeps,
   broadcastPrReview,
   sanitizePrReview,
   currentRepoPath,

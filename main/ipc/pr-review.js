@@ -35,11 +35,6 @@ const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../ut
 const { execFileSync } = require('child_process');
 
 
-// reloadActivePrReviewMeta (in state/pr-review.js) needs ghJson. Wire it
-// up now that this module defines it — breaks the earlier chicken-and-egg
-// without forcing main.js to inject it on our behalf.
-require('../state/pr-review').setDeps({ ghJson });
-
 
 ipcMain.handle('pr-list', async () => {
   const cwd = currentRepoPath();

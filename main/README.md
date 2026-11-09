@@ -13,6 +13,8 @@ entry point — it requires everything here and hands off to
   - `output-coalescer.js` — batches PTY output per channel into one IPC send per tick.
   - `pr-for-branch.js` — async PR lookup for a worktree; never rejects.
   - `config.js` — `loadConfig` / `saveConfig` (atomic + queued) + pr-review-cache migration.
+  - `forge-http.js` — `fetch` wrappers that throw `ForgeHttpError` on any non-2xx.
+  - `forges/` — one adapter per forge (`github`, `gitlab`, `bitbucket`) behind `getForge(id)`; PR review calls these instead of branching on the forge.
   - `voice-model.json` — pinned speech model and runtime files with their SHA-256s (read by `scripts/fetch-voice-model.js` and `bootstrap/voice-protocol.js`).
 
 - **state/** — owns long-lived mutable state. Import `util/` only; never each other (except `pr-review → instances`).
@@ -38,5 +40,4 @@ entry point — it requires everything here and hands off to
 
 A few dependencies cross layers without a direct require (to avoid cycles):
 path-gate gets `loadConfig + instances` from `main.js`;
-`instances.js` gets `isQuitting + startCIPolling` from `bootstrap/app-events.js`;
-`state/pr-review.js` gets `ghJson` from `ipc/pr-review.js` on that module's load.
+`instances.js` gets `isQuitting + startCIPolling` from `bootstrap/app-events.js`.
