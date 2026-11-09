@@ -16,13 +16,25 @@ const origConsoleError = console.error;
 const origConsoleWarn = console.warn;
 
 // Scrub obviously-sensitive tokens out of log messages so the View Logs
-// viewer + the persisted log file don't expose them.
+// viewer + the persisted log file don't expose them. Also used on git's error
+// output before it reaches the UI, since git echoes the authed remote URL.
 // gh error output occasionally echoes URLs of the form
 // `https://oauth2:ghp_xxx@github.com/...` before the app's own scrub runs.
 const LOG_TOKEN_SCRUB_RE = /(oauth2:[^@\s]+@)|(\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9_]{20,})|(\bBearer\s+[A-Za-z0-9._\-]+)/g;
+// Bitbucket's token-only clone URL.
+const X_TOKEN_AUTH_RE = /x-token-auth:[^@\s]+@/g;
+// Any `scheme://user:secret@host`; the user is redacted too since Bitbucket's is
+// often an email. Secrets already reduced to *** above are left alone.
+const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]*:\/\/)[^:@\s/]+:(?!\*\*\*@)[^@\s]+@/gi;
+const BASIC_AUTH_RE = /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}/g;
 function scrubLogMsg(s) {
-  try { return String(s).replace(LOG_TOKEN_SCRUB_RE, (m, a) => a ? 'oauth2:***@' : '***'); }
-  catch { return '[unserializable]'; }
+  try {
+    return String(s == null ? '' : s)
+      .replace(LOG_TOKEN_SCRUB_RE, (m, a) => a ? 'oauth2:***@' : '***')
+      .replace(X_TOKEN_AUTH_RE, 'x-token-auth:***@')
+      .replace(URL_USERINFO_RE, '$1***:***@')
+      .replace(BASIC_AUTH_RE, '***');
+  } catch { return '[unserializable]'; }
 }
 
 // Persistent log file — ring buffer is in-memory only, which loses context

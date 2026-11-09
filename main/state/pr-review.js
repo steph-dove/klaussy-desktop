@@ -16,6 +16,7 @@ const { execFileSync } = require('child_process');
 const { app, BrowserWindow, webContents } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { execFileP } = require('../util/exec');
+const { scrubLogMsg } = require('../util/logging');
 const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
 const { getForge } = require('../util/forges');
 const { instances } = require('./instances');
@@ -298,14 +299,6 @@ function findWorktreeForBranchAcrossClones(baseOwner, baseRepo, branch) {
 // name (degrading to today's behavior rather than erroring).
 const gitEnv = Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '' });
 
-// Strips credentials from git's error output, which echoes the authed URL.
-function scrubCredentials(s) {
-  return (s || '')
-    .replace(/oauth2:[^@]+@/g, 'oauth2:***@')
-    .replace(/x-token-auth:[^@]+@/g, 'x-token-auth:***@')
-    .replace(/https:\/\/[^:@]+:[^@]+@/g, 'https://***:***@');
-}
-
 function splitProjectPath(projectPath) {
   const i = projectPath.lastIndexOf('/');
   return i < 0 ? { owner: '', repo: projectPath } : { owner: projectPath.slice(0, i), repo: projectPath.slice(i + 1) };
@@ -360,7 +353,7 @@ async function cloneInto(clonePath, auth) {
     await execFileP('git', ['clone', '--filter=blob:none', auth.url, clonePath], { env });
   } catch (err) {
     const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-    return { error: 'Clone failed: ' + scrubCredentials(raw) };
+    return { error: 'Clone failed: ' + scrubLogMsg(raw) };
   }
   try {
     await execFileP('git', ['remote', 'set-url', 'origin', auth.cleanUrl], { cwd: clonePath, env });
@@ -488,7 +481,7 @@ async function ensureWorktreeForActivePr() {
     });
   } catch (err) {
     const raw = (err.stderr ? err.stderr.toString() : err.message) || '';
-    return { error: 'Fetch failed: ' + scrubCredentials(raw) };
+    return { error: 'Fetch failed: ' + scrubLogMsg(raw) };
   }
 
   try {
@@ -540,10 +533,10 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   if (!stashRequested) {
     try {
       const { stderr } = await doPush();
-      return { ok: true, target, output: scrubCredentials((stderr || '').trim()) };
+      return { ok: true, target, output: scrubLogMsg((stderr || '').trim()) };
     } catch (err) {
       const raw = err.stderr ? err.stderr.toString() : err.message;
-      if (!isNonFastForward(raw)) return { error: scrubCredentials(raw) };
+      if (!isNonFastForward(raw)) return { error: scrubLogMsg(raw) };
       // fall through to recovery
     }
   }
@@ -557,7 +550,7 @@ async function pushPrHead({ pr, worktreePath, stash }) {
       const { stdout } = await execFileP('git', ['stash', 'push', '-m', 'klaussy: auto-stash before integrating remote'], { cwd: wtCwd, timeout: 30000, env });
       stashed = !/No local changes to save/i.test(stdout || '');
     } catch (se) {
-      return { error: 'Could not stash local changes: ' + scrubCredentials(se.stderr ? se.stderr.toString() : se.message) };
+      return { error: 'Could not stash local changes: ' + scrubLogMsg(se.stderr ? se.stderr.toString() : se.message) };
     }
   }
   // Restore our stash (if any). The push has already happened by the time this
@@ -576,7 +569,7 @@ async function pushPrHead({ pr, worktreePath, stash }) {
     await execFileP('git', ['fetch', authedUrl, headBranch], { cwd: wtCwd, timeout: 60000, env });
   } catch (fe) {
     await popStash();
-    return { error: 'Could not fetch the latest remote branch:\n\n' + scrubCredentials(fe.stderr ? fe.stderr.toString() : fe.message) };
+    return { error: 'Could not fetch the latest remote branch:\n\n' + scrubLogMsg(fe.stderr ? fe.stderr.toString() : fe.message) };
   }
 
   try {
@@ -586,7 +579,7 @@ async function pushPrHead({ pr, worktreePath, stash }) {
     // stash. Ignore the abort's own error (e.g. the rebase never started).
     try { await execFileP('git', ['rebase', '--abort'], { cwd: wtCwd, timeout: 30000, env }); } catch (_) {}
     const popWarn = await popStash();
-    const rmsg = scrubCredentials(re.stderr ? re.stderr.toString() : re.message);
+    const rmsg = scrubLogMsg(re.stderr ? re.stderr.toString() : re.message);
     const dirty = looksLikeDirtyTree(rmsg);
     return {
       kind: dirty ? 'dirty-tree' : 'conflict',
@@ -603,10 +596,10 @@ async function pushPrHead({ pr, worktreePath, stash }) {
   try {
     const { stderr } = await doPush();
     const popWarn = await popStash();
-    return { ok: true, rebased: true, stashed, target, output: scrubCredentials((stderr || '').trim()) + popWarn };
+    return { ok: true, rebased: true, stashed, target, output: scrubLogMsg((stderr || '').trim()) + popWarn };
   } catch (e2) {
     await popStash();
-    return { error: 'Integrated the latest remote commit, but the retry push still failed:\n\n' + scrubCredentials(e2.stderr ? e2.stderr.toString() : e2.message) };
+    return { error: 'Integrated the latest remote commit, but the retry push still failed:\n\n' + scrubLogMsg(e2.stderr ? e2.stderr.toString() : e2.message) };
   }
 }
 

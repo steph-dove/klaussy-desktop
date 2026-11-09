@@ -79,3 +79,33 @@ test('log ring is bounded at LOG_MAX (500)', async () => {
   const firstIdx = parseInt(buf[0].msg.match(/flood-(\d+)/)[1], 10);
   assert.ok(firstIdx >= 50, 'oldest entries should have been dropped');
 });
+
+// state/pr-review.js used two local scrubbers on git's error output before it
+// switched to scrubLogMsg. Every secret they removed must still be removed.
+test('scrubLogMsg redacts everything the old git-output scrubbers did', () => {
+  const cases = [
+    ['https://oauth2:glpat-AbC123xyz@gitlab.com/group/sub/repo.git', 'glpat-AbC123xyz'],
+    ['https://oauth2:gho_abcdefghij1234567890abcd@github.com/o/r.git', 'gho_abcdefghij1234567890abcd'],
+    ['https://x-token-auth:bbtoken987@bitbucket.org/ws/repo.git', 'bbtoken987'],
+    ['https://me%40example.com:ATATT3xFfGF0secret@bitbucket.org/ws/repo.git', 'ATATT3xFfGF0secret'],
+    ['https://builduser:app%2Fpass%3D@bitbucket.example.com/proj/repo.git', 'app%2Fpass%3D'],
+    ["fatal: unable to access 'https://oauth2:tok42@gitlab.example.com/a/b.git/': 403", 'tok42'],
+    ['remote: x-token-auth:zzz111@ rejected', 'zzz111'],
+  ];
+  for (const [input, secret] of cases) {
+    const out = scrubLogMsg(input);
+    assert.ok(!out.includes(secret), `${secret} leaked: ${out}`);
+  }
+  assert.ok(!scrubLogMsg(cases[3][0]).includes('me%40example.com'), 'Bitbucket email user leaked');
+});
+
+test('scrubLogMsg redacts other scheme://user:secret@ URLs and Basic auth', () => {
+  assert.equal(scrubLogMsg('ssh://git:hunter2@host/x'), 'ssh://***:***@host/x');
+  assert.equal(scrubLogMsg('Authorization: Basic dXNlcjpwYXNzd29yZA=='), 'Authorization: ***');
+  assert.equal(scrubLogMsg('see https://github.com/a/b by user@example.com'), 'see https://github.com/a/b by user@example.com');
+});
+
+test('scrubLogMsg treats a missing message as empty', () => {
+  assert.equal(scrubLogMsg(undefined), '');
+  assert.equal(scrubLogMsg(null), '');
+});
