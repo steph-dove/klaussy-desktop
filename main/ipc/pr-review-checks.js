@@ -9,10 +9,8 @@ const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
 const { prReview, currentRepoPath, ensureWorktreeForActivePr } = require('../state/pr-review');
-const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
-const { bucketFromGitLabStatus, bucketFromBitbucketStatus } = require('../util/forge-adapter');
-const { resolveGlabEnv } = require('../util/glab-exec');
-const { bitbucketJson } = require('../util/bitbucket-api');
+const { bucketFromState } = require('../util/check-normalize');
+const { getForge } = require('../util/forges');
 
 // Required checks, rerun, cancel, log watch, workflows and annotations all
 // shell out to gh, which only speaks GitHub. On a GitLab or Bitbucket PR they
@@ -27,133 +25,10 @@ function activeOnGitHub() {
 // G6: CI checks scoped to the PR review surface.
 ipcMain.handle('pr-review-checks', async () => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo, forge, projectPath, number, account, host } = prReview.active;
+  const { baseOwner, projectPath } = prReview.active;
   if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
   const cwd = currentRepoPath() || require('os').homedir();
-
-  if (forge === 'bitbucket') {
-    const target = projectPath || `${baseOwner}/${baseRepo}`;
-    const sha = meta && (meta.headRefOid || (meta.diff_refs && meta.diff_refs.head_sha) || '');
-    if (!sha) return { checks: [], error: 'Missing head commit sha' };
-    try {
-      const res = await bitbucketJson(`/repositories/${target}/commit/${sha}/statuses`, {
-        host: host || 'bitbucket.org',
-        account,
-        cwd,
-      });
-      const values = (res && Array.isArray(res.values)) ? res.values : (Array.isArray(res) ? res : []);
-      const checks = values.map((st) => ({
-        name: st.name || st.key || 'Bitbucket Check',
-        state: st.state,
-        bucket: bucketFromBitbucketStatus(st.state),
-        link: (st.links && st.links.html && st.links.html.href) || st.url || '',
-        workflow: st.key || '',
-        description: st.description || (st.state ? String(st.state) : ''),
-        runId: st.uuid || st.key || '',
-        jobId: st.uuid || st.key || '',
-      }));
-      return { checks };
-    } catch (err) {
-      return { checks: [], error: (err.responseBody || err.message || '').trim() };
-    }
-  }
-
-  if (forge === 'gitlab') {
-    const target = projectPath || `${baseOwner}/${baseRepo}`;
-    const glabEnv = { ...process.env, ...resolveGlabEnv({ account, host, cwd }) };
-    delete glabEnv.GITLAB_TOKEN;
-    try {
-      const pipelines = await new Promise((resolve) => {
-        execFile('glab', ['api', `projects/${encodeURIComponent(target)}/merge_requests/${number}/pipelines`], { cwd, env: glabEnv, maxBuffer: 10 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
-          if (err) return resolve([]);
-          try { resolve(JSON.parse(stdout)); } catch (_) { resolve([]); }
-        });
-      });
-
-      if (!Array.isArray(pipelines) || pipelines.length === 0) {
-        return { checks: [] };
-      }
-
-      const latestPipeline = pipelines[0];
-      const jobs = await new Promise((resolve) => {
-        execFile('glab', ['api', `projects/${encodeURIComponent(target)}/pipelines/${latestPipeline.id}/jobs`], { cwd, env: glabEnv, maxBuffer: 10 * 1024 * 1024, timeout: 15000 }, (err, stdout) => {
-          if (err) return resolve([]);
-          try { resolve(JSON.parse(stdout)); } catch (_) { resolve([]); }
-        });
-      });
-
-      const checks = (Array.isArray(jobs) ? jobs : []).map((job) => ({
-        name: job.name,
-        state: job.status,
-        bucket: bucketFromGitLabStatus(job.status),
-        link: job.web_url,
-        workflow: job.stage,
-        description: job.stage + (job.duration ? ` (${Math.round(job.duration)}s)` : ''),
-        runId: job.id,
-        jobId: job.id,
-      }));
-
-      return { checks };
-    } catch (err) {
-      return { checks: [], error: err.message };
-    }
-  }
-
-  const sha = meta && meta.headRefOid;
-  if (!sha) return { checks: [], error: 'Missing head commit sha' };
-
-  // REST endpoint is more forgiving than gh's GraphQL path for this repo
-  async function run(args) {
-    return new Promise((resolve) => {
-      execFile('gh', ['api'].concat(args), { cwd, maxBuffer: 10 * 1024 * 1024, timeout: 15000 },
-        (err, stdout, stderr) => resolve({ err, stdout, stderr }));
-    });
-  }
-  const [runsRes, statusRes] = await Promise.all([
-    run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/check-runs`, '--paginate', '--jq', '.check_runs[]']),
-    run([`repos/${baseOwner}/${baseRepo}/commits/${sha}/status`]),
-  ]);
-
-  const checks = [];
-  const parseErrors = [];
-  if (!runsRes.err) {
-    const { checks: runChecks, errors } = parseCheckRunsJsonl(runsRes.stdout);
-    runChecks.forEach((c) => checks.push(c));
-    if (errors.length) {
-      parseErrors.push(...errors);
-      console.error('[pr-review-checks] check-runs parse errors:', errors.join('; '),
-        '— first 200 chars of stdout:', String(runsRes.stdout || '').slice(0, 200));
-    }
-  }
-  if (!statusRes.err) {
-    try {
-      const parsed = JSON.parse(statusRes.stdout);
-      const statuses = parsed.statuses || [];
-      statuses.forEach((s) => checks.push(normalizeStatus(s)));
-    } catch (e) {
-      parseErrors.push('status parse: ' + (e.message || String(e)));
-      console.error('[pr-review-checks] status parse error:', e.message,
-        '— first 200 chars of stdout:', String(statusRes.stdout || '').slice(0, 200));
-    }
-  }
-
-  // Only surface an error if BOTH APIs failed — previously `||` meant that
-  // a legitimate "no checks" response from one endpoint plus a transient
-  // failure on the other was reported as an error, swallowing real data.
-  // Also surface JSON parse failures: an HTML auth-redirect coming back as
-  // 200 would otherwise look identical to "no checks reported" and silently
-  // green-light the required-checks gate.
-  if (checks.length === 0) {
-    if (runsRes.err && statusRes.err) {
-      const first = runsRes.err || statusRes.err;
-      const raw = (first.stderr ? first.stderr.toString() : first.message) || '';
-      return { checks: [], error: raw.trim() };
-    }
-    if (parseErrors.length > 0) {
-      return { checks: [], error: 'Could not parse GitHub check responses: ' + parseErrors.join('; ') };
-    }
-  }
-  return { checks };
+  return getForge(prReview.active.forge).listChecks(prReview.active, { cwd });
 });
 
 // Returns the list of required status-check contexts on the PR's base branch,

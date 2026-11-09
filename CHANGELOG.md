@@ -2,6 +2,10 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## Unreleased
+
+- **Fixes**: when Bitbucket refuses a comment, reply, resolve, approval or merge (a 403, say), the PR review now shows the error instead of acting as if it worked. An inline comment Bitbucket won't place on its line is posted as a general comment naming the file and line, as it was meant to be. After merging a GitLab MR from the review, the MR now refreshes to show it merged. The first checkout of a PR from a repo you haven't cloned no longer freezes the app while it clones; if you switch PRs meanwhile, the action asks you to try again.
+
 ## 0.30.0
 
 ### 🦉 Broadcast Reaches Every Terminal

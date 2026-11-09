@@ -14,6 +14,9 @@ const {
   saveBitbucketAccount,
   removeBitbucketAccount,
   clearBitbucketAuthCache,
+  bitbucketFetch,
+  bitbucketJson,
+  bitbucketText,
   resolveEmailIfApiToken,
 } = require('../../main/util/bitbucket-api');
 const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
@@ -115,6 +118,82 @@ test('resolveBitbucketEnv returns env vars from active auth', async () => {
     await flushSaveConfig();
     clearBitbucketAuthCache();
   }
+});
+
+// Runs a request against a stubbed fetch with a configured account, so auth
+// resolution never reaches git's credential helper.
+async function withStubbedFetch(status, body, fn) {
+  const initialConfig = loadConfig();
+  const realFetch = global.fetch;
+  const calls = [];
+  try {
+    saveConfig({ bitbucketAccounts: [{ username: 'bbuser', appPassword: 'pw', active: true }] });
+    await flushSaveConfig();
+    clearBitbucketAuthCache();
+    global.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      return new Response(body, { status, headers: { 'content-type': 'application/json' } });
+    };
+    await fn(calls);
+  } finally {
+    global.fetch = realFetch;
+    saveConfig(initialConfig);
+    await flushSaveConfig();
+    clearBitbucketAuthCache();
+  }
+}
+
+test('bitbucketFetch rejects a 403 on POST instead of reporting success', async () => {
+  await withStubbedFetch(403, '{"type":"error","error":{"message":"You do not have access"}}', async (calls) => {
+    await assert.rejects(
+      bitbucketFetch('/repositories/ws/repo/pullrequests/1/comments', {
+        method: 'POST', body: { content: { raw: 'hi' } },
+      }),
+      (err) => {
+        assert.equal(err.status, 403);
+        assert.equal(err.statusCode, 403);
+        assert.equal(err.responseBody, 'You do not have access');
+        assert.equal(err.message, 'Bitbucket API error (HTTP 403): You do not have access');
+        return true;
+      },
+    );
+    assert.equal(calls[0].opts.method, 'POST');
+    assert.equal(calls[0].url, 'https://api.bitbucket.org/2.0/repositories/ws/repo/pullrequests/1/comments');
+  });
+});
+
+test('bitbucketFetch resolves a 2xx write', async () => {
+  await withStubbedFetch(201, '{"id":1}', async () => {
+    const res = await bitbucketFetch('/repositories/ws/repo/pullrequests/1/comments', { method: 'POST', body: { content: { raw: 'hi' } } });
+    assert.equal(res.status, 201);
+  });
+});
+
+test('bitbucketJson keeps its error shape, and drops a non-JSON error body', async () => {
+  await withStubbedFetch(404, '{"error":{"message":"Repository not found"}}', async () => {
+    await assert.rejects(bitbucketJson('/repositories/ws/repo'), (err) => {
+      assert.equal(err.message, 'Bitbucket API error (HTTP 404): Repository not found');
+      assert.equal(err.responseBody, 'Repository not found');
+      return true;
+    });
+  });
+  await withStubbedFetch(502, '<html>bad gateway</html>', async () => {
+    await assert.rejects(bitbucketJson('/repositories/ws/repo'), (err) => {
+      assert.equal(err.status, 502);
+      assert.equal(err.responseBody, '');
+      return true;
+    });
+  });
+});
+
+test('bitbucketText keeps the raw error body', async () => {
+  await withStubbedFetch(500, 'diff unavailable', async () => {
+    await assert.rejects(bitbucketText('/repositories/ws/repo/pullrequests/1/diff'), (err) => {
+      assert.equal(err.message, 'Bitbucket API error (HTTP 500): diff unavailable');
+      assert.equal(err.responseBody, 'diff unavailable');
+      return true;
+    });
+  });
 });
 
 // Runs fn with BITBUCKET_EMAIL set (or unset) and git reading only a temp global

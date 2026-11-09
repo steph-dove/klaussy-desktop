@@ -11,39 +11,29 @@ const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow, webContents, nativeTheme } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { trustIfRepoAllowed } = require('../util/claude-trust');
-const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount, resolveGhEnv } = require('../util/exec');
+const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
 const {
   prReview,
-  broadcastPrReview, sanitizePrReview, currentRepoPath, parseBaseFromUrl,
+  broadcastPrReview, sanitizePrReview, currentRepoPath,
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
-  ensureWorktreeForActivePr, switchGhForReview, restoreGhAfterReview,
-  switchGlabForReview, restoreGlabAfterReview,
-  switchBitbucketForReview, restoreBitbucketAfterReview, pushPrHead,
+  ensureWorktreeForActivePr, useAccountForReview, restoreAccountAfterReview,
+  restoreGhAfterReview, pushPrHead,
 } = require('../state/pr-review');
-const { ghJson, ghText } = require('../util/gh-json');
-const { glabJson, glabText } = require('../util/glab-json');
-const { bitbucketJson, bitbucketText, bitbucketFetch, getBitbucketAuth } = require('../util/bitbucket-api');
+const { ghJson } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
 const { prForBranch } = require('../util/pr-for-branch');
-const { classifyGlabError } = require('../util/glab-error');
-const { classifyBitbucketError } = require('../util/bitbucket-error');
-const { parseForgeUrl, detectForgeFromRemote } = require('../util/forge-url');
-const { normalizeGitLabMr, normalizeBitbucketPr } = require('../util/forge-adapter');
-const { glabEnvForAccount, getGlabToken } = require('../util/glab-exec');
+const {
+  getForge, forgeForUrl, forgeForRemote, parseAccountId, errorText, toIpcError,
+} = require('../util/forges');
 const { humanizeComment } = require('../util/humanize-comment');
 const { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls } = require('../util/review-history');
 const { readGhAccountsChecked } = require('./gh');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
 const { execFileSync } = require('child_process');
 
-
-// reloadActivePrReviewMeta (in state/pr-review.js) needs ghJson. Wire it
-// up now that this module defines it — breaks the earlier chicken-and-egg
-// without forcing main.js to inject it on our behalf.
-require('../state/pr-review').setDeps({ ghJson });
 
 
 ipcMain.handle('pr-list', async () => {
@@ -54,72 +44,14 @@ ipcMain.handle('pr-list', async () => {
   try {
     remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString().trim();
   } catch (_) {}
-  const info = detectForgeFromRemote(remoteUrl);
-
-  if (info && info.forge === 'bitbucket') {
-    try {
-      const raw = await bitbucketJson(`/repositories/${encodeURIComponent(info.projectPath)}/pullrequests?state=OPEN&pagelen=50`, { host: info.host });
-      const values = (raw && Array.isArray(raw.values)) ? raw.values : (Array.isArray(raw) ? raw : []);
-      const prs = values.map((pr) => {
-        const norm = normalizeBitbucketPr(pr, info.host);
-        return {
-          number: norm.number,
-          title: norm.title,
-          author: norm.author,
-          state: norm.state,
-          updatedAt: norm.updatedAt,
-          headRefName: norm.headRefName,
-          baseRefName: norm.baseRefName,
-          isDraft: norm.isDraft,
-          reviewDecision: norm.reviewDecision,
-          url: norm.url,
-        };
-      });
-      return { prs };
-    } catch (err) {
-      const raw = (err.responseBody || err.message || '').trim();
-      const cls = classifyBitbucketError(raw, { target: info.projectPath, host: info.host });
-      return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
-    }
-  }
-
-  if (info && info.forge === 'gitlab') {
-    try {
-      const raw = await glabJson(['mr', 'list', '--output', 'json'], cwd);
-      const prs = (Array.isArray(raw) ? raw : []).map((mr) => {
-        const norm = normalizeGitLabMr(mr, info.host);
-        return {
-          number: norm.number,
-          title: norm.title,
-          author: norm.author,
-          state: norm.state,
-          updatedAt: norm.updatedAt,
-          headRefName: norm.headRefName,
-          baseRefName: norm.baseRefName,
-          isDraft: norm.isDraft,
-          reviewDecision: norm.reviewDecision,
-          url: norm.url,
-        };
-      });
-      return { prs };
-    } catch (err) {
-      const raw = (err.stderr || err.message || '').trim();
-      const cls = classifyGlabError(raw, { target: info.projectPath, host: info.host });
-      return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
-    }
-  }
+  const remote = forgeForRemote(remoteUrl);
+  const adapter = remote ? remote.adapter : getForge('github');
 
   try {
-    const prs = await ghJson([
-      'pr', 'list',
-      '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url',
-      '--limit', '50',
-    ], cwd);
+    const prs = await adapter.listOpen({ info: remote && remote.info, cwd });
     return { prs };
   } catch (err) {
-    const raw = (err.stderr || err.message || '').trim();
-    const cls = classifyGhError(raw, {});
-    return { error: raw, errorKind: cls.kind, errorSummary: cls.summary, errorFix: cls.fix };
+    return toIpcError(adapter, err, remote ? { target: remote.info.projectPath, host: remote.info.host } : {});
   }
 });
 
@@ -180,36 +112,13 @@ ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
 
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   const cwd = currentRepoPath() || require('os').homedir();
-  const parsed = parseForgeUrl(url);
-  if (parsed && parsed.forge === 'bitbucket') {
-    try {
-      const raw = await bitbucketJson(`/repositories/${parsed.projectPath}/pullrequests/${parsed.number}`, { host: parsed.host });
-      const meta = normalizeBitbucketPr(raw, parsed.host);
-      return { meta };
-    } catch (err) {
-      return { error: (err.responseBody || err.message || '').trim() };
-    }
-  }
-
-  if (parsed && parsed.forge === 'gitlab') {
-    try {
-      const raw = await glabJson(['mr', 'view', url, '--output', 'json'], cwd);
-      const meta = normalizeGitLabMr(raw, parsed.host);
-      return { meta };
-    } catch (err) {
-      return { error: (err.stderr || err.message || '').trim() };
-    }
-  }
-
+  const found = forgeForUrl(url);
+  const adapter = found ? found.adapter : getForge('github');
   try {
-    const extraEnv = resolveGhEnv({ cwd });
-    const meta = await ghJson([
-      'pr', 'view', url,
-      '--json', 'number,title,author,state,updatedAt,headRefName,baseRefName,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner',
-    ], cwd, extraEnv);
+    const meta = await adapter.lookupPr(url, { parsed: found && found.parsed, cwd });
     return { meta };
   } catch (err) {
-    return { error: (err.stderr || err.message || '').trim() };
+    return { error: errorText(err) };
   }
 });
 
@@ -225,155 +134,35 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   const target = url || String(number);
 
   if (url) {
-    const parsed = parseForgeUrl(url);
-    if (parsed) {
-      forge = parsed.forge;
-      host = parsed.host;
-      projectPath = parsed.projectPath;
+    const found = forgeForUrl(url);
+    if (found) {
+      forge = found.parsed.forge;
+      host = found.parsed.host;
+      projectPath = found.parsed.projectPath;
     }
   } else if (cwd) {
     try {
       const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd, stdio: 'pipe' }).toString().trim();
-      const info = detectForgeFromRemote(remoteUrl);
-      if (info && info.forge === 'gitlab') {
-        forge = 'gitlab';
-        host = info.host;
-        projectPath = info.projectPath;
-      } else if (info && info.forge === 'bitbucket') {
-        forge = 'bitbucket';
-        host = info.host;
-        projectPath = info.projectPath;
+      const remote = forgeForRemote(remoteUrl);
+      // A GitHub (or unrecognised) remote keeps the github.com defaults.
+      if (remote && remote.adapter.id !== 'github') {
+        forge = remote.adapter.id;
+        host = remote.info.host;
+        projectPath = remote.info.projectPath;
       }
     } catch (_) {}
   }
 
-  let acctUser = typeof account === 'string' ? account : (account && account.username);
-  if (typeof account === 'string' && account.startsWith('gitlab:')) {
-    const parts = account.split(':');
-    host = parts[1] || host;
-    acctUser = parts[2] || parts[1];
-    forge = 'gitlab';
-  } else if (typeof account === 'string' && account.startsWith('bitbucket:')) {
-    const parts = account.split(':');
-    host = parts[1] || host;
-    acctUser = parts[2] || parts[1];
-    forge = 'bitbucket';
-  } else if (typeof account === 'string' && account.startsWith('github:')) {
-    acctUser = account.slice('github:'.length);
-    forge = 'github';
-  }
+  const acct = parseAccountId(account);
+  const acctUser = acct.user;
+  if (acct.forge) forge = acct.forge;
+  if (acct.host) host = acct.host;
 
-  if (forge === 'bitbucket') {
-    if (acctUser) switchBitbucketForReview(acctUser, host);
-    try {
-      let targetNumber = target;
-      if (typeof targetNumber === 'string' && targetNumber.includes('/')) {
-        const p = parseForgeUrl(targetNumber);
-        if (p) {
-          targetNumber = String(p.number);
-          projectPath = p.projectPath;
-          host = p.host;
-        }
-      }
-      const [rawPr, diff] = await Promise.all([
-        bitbucketJson(`/repositories/${projectPath}/pullrequests/${targetNumber}`, { account: acctUser, host }),
-        bitbucketText(`/repositories/${projectPath}/pullrequests/${targetNumber}/diff`, { account: acctUser, host }),
-      ]);
-      const meta = normalizeBitbucketPr(rawPr, host);
-      const base = parseBaseFromUrl(meta.url);
-      const repo = base ? base.projectPath : (projectPath || null);
-
-      const prev = prReview.active;
-      if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
-        const prevWc = webContents.fromId(prev.ownerWcId);
-        if (prevWc && !prevWc.isDestroyed()) { try { prevWc.send('pr-review-state', null); } catch (_) {} }
-        if (prev.popout && !prev.popout.isDestroyed()) { try { prev.popout.webContents.send('pr-review-state', null); } catch (_) {} }
-      }
-
-      prReview.active = {
-        repo,
-        number: meta.number,
-        meta,
-        diff,
-        forge: 'bitbucket',
-        host,
-        projectPath: repo,
-        account: acctUser || null,
-        baseOwner: base ? base.owner : (repo ? repo.split('/')[0] : null),
-        baseRepo: base ? base.name : (repo ? repo.split('/')[1] : null),
-        threads: null,
-        threadsError: null,
-        popout: null,
-        ownerWcId: event.sender.id,
-      };
-      broadcastPrReview();
-      try { pushReviewHistory(meta); } catch (_) {}
-      fetchThreadsForActive();
-      return { ok: true };
-    } catch (err) {
-      const raw = (err.responseBody || err.message || '').trim();
-      const cls = classifyBitbucketError(raw, { target: projectPath, host });
-      return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
-    }
-  }
-
-  if (forge === 'gitlab') {
-    if (acctUser) switchGlabForReview(acctUser, host);
-    try {
-      const [rawMr, diff] = await Promise.all([
-        glabJson(['mr', 'view', target, '--output', 'json'], cwd),
-        glabText(['mr', 'diff', target], cwd),
-      ]);
-      const meta = normalizeGitLabMr(rawMr, host);
-      const base = parseBaseFromUrl(meta.url);
-      const repo = base ? base.projectPath : (projectPath || null);
-
-      const prev = prReview.active;
-      if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
-        const prevWc = webContents.fromId(prev.ownerWcId);
-        if (prevWc && !prevWc.isDestroyed()) { try { prevWc.send('pr-review-state', null); } catch (_) {} }
-        if (prev.popout && !prev.popout.isDestroyed()) { try { prev.popout.webContents.send('pr-review-state', null); } catch (_) {} }
-      }
-
-      prReview.active = {
-        repo,
-        number: meta.number,
-        meta,
-        diff,
-        forge: 'gitlab',
-        host,
-        projectPath: repo,
-        account: acctUser || null,
-        baseOwner: base ? base.owner : null,
-        baseRepo: base ? base.name : null,
-        threads: null,
-        threadsError: null,
-        popout: null,
-        ownerWcId: event.sender.id,
-      };
-      broadcastPrReview();
-      try { pushReviewHistory(meta); } catch (_) {}
-      fetchThreadsForActive();
-      return { ok: true };
-    } catch (err) {
-      const raw = (err.stderr || err.message || '').trim();
-      const cls = classifyGlabError(raw, { target: projectPath, host });
-      return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
-    }
-  }
-
-  if (acctUser) switchGhForReview(acctUser);
-  const extraEnv = resolveGhEnv({ account: acctUser, cwd });
+  const adapter = getForge(forge);
+  if (acctUser) useAccountForReview(adapter.id, acctUser, host);
   try {
-    const [meta, diff] = await Promise.all([
-      ghJson([
-        'pr', 'view', target,
-        '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-      ], cwd, extraEnv),
-      ghText(['pr', 'diff', target], cwd, extraEnv),
-    ]);
-    const base = parseBaseFromUrl(meta.url);
-    const repo = base ? `${base.owner}/${base.name}` : null;
+    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd });
+    const { meta, diff } = loaded;
 
     const prev = prReview.active;
     if (prev && prev.ownerWcId != null && prev.ownerWcId !== event.sender.id) {
@@ -381,14 +170,18 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
       if (prevWc && !prevWc.isDestroyed()) { try { prevWc.send('pr-review-state', null); } catch (_) {} }
       if (prev.popout && !prev.popout.isDestroyed()) { try { prev.popout.webContents.send('pr-review-state', null); } catch (_) {} }
     }
+
     prReview.active = {
-      repo, number: meta.number, meta, diff,
-      forge: 'github',
-      host: 'github.com',
-      projectPath: repo,
+      repo: loaded.repo,
+      number: meta.number,
+      meta,
+      diff,
+      forge: adapter.id,
+      host: loaded.host,
+      projectPath: loaded.repo,
       account: acctUser || null,
-      baseOwner: base ? base.owner : null,
-      baseRepo: base ? base.name : null,
+      baseOwner: loaded.baseOwner,
+      baseRepo: loaded.baseRepo,
       threads: null,
       threadsError: null,
       popout: null,
@@ -397,13 +190,9 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     broadcastPrReview();
     try { pushReviewHistory(meta); } catch (_) {}
     fetchThreadsForActive();
-
     return { ok: true };
   } catch (err) {
-    const raw = (err.stderr || err.message || '').trim();
-    const m = (url || '').match(/[/:]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/pull\/\d+/);
-    const cls = classifyGhError(raw, { target: m ? m[1] + '/' + m[2] : null });
-    return { error: raw, errorSummary: cls.summary, errorFix: cls.fix, errorKind: cls.kind };
+    return toIpcError(adapter, err, { target: projectPath, host, url });
   }
 });
 
@@ -443,56 +232,19 @@ ipcMain.handle('pr-pull-updates', async () => {
   const url = prReview.active.meta && prReview.active.meta.url;
   if (!url) return { error: 'Active PR has no URL' };
   const cwd = currentRepoPath() || require('os').homedir();
-  const forge = prReview.active.forge || 'github';
-  const host = prReview.active.host || (forge === 'gitlab' ? 'gitlab.com' : forge === 'bitbucket' ? 'bitbucket.org' : 'github.com');
+  const adapter = getForge(prReview.active.forge);
 
   let metaError = null;
   try {
-    if (forge === 'bitbucket') {
-      const parsed = parseForgeUrl(url);
-      const proj = (parsed && parsed.projectPath) || prReview.active.projectPath;
-      const num = (parsed && parsed.number) || prReview.active.number;
-      const [rawPr, diff] = await Promise.all([
-        bitbucketJson(`/repositories/${proj}/pullrequests/${num}`, { account: prReview.active.account, host }),
-        bitbucketText(`/repositories/${proj}/pullrequests/${num}/diff`, { account: prReview.active.account, host }),
-      ]);
-      if (!prReview.active || prReview.active.meta.url !== url) {
-        return { error: 'Active PR changed during refresh' };
-      }
-      const meta = normalizeBitbucketPr(rawPr, host);
-      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
-      prReview.active.diff = diff;
-      broadcastPrReview();
-    } else if (forge === 'gitlab') {
-      const [rawMr, diff] = await Promise.all([
-        glabJson(['mr', 'view', url, '--output', 'json'], cwd),
-        glabText(['mr', 'diff', url], cwd),
-      ]);
-      if (!prReview.active || prReview.active.meta.url !== url) {
-        return { error: 'Active PR changed during refresh' };
-      }
-      const meta = normalizeGitLabMr(rawMr, host);
-      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
-      prReview.active.diff = diff;
-      broadcastPrReview();
-    } else {
-      const extraEnv = resolveGhEnv({ account: prReview.active.account, cwd });
-      const [meta, diff] = await Promise.all([
-        ghJson([
-          'pr', 'view', url,
-          '--json', 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus',
-        ], cwd, extraEnv),
-        ghText(['pr', 'diff', url], cwd, extraEnv),
-      ]);
-      if (!prReview.active || prReview.active.meta.url !== url) {
-        return { error: 'Active PR changed during refresh' };
-      }
-      prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
-      prReview.active.diff = diff;
-      broadcastPrReview();
+    const { meta, diff } = await adapter.refreshPr(prReview.active, { cwd });
+    if (!prReview.active || prReview.active.meta.url !== url) {
+      return { error: 'Active PR changed during refresh' };
     }
+    prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
+    prReview.active.diff = diff;
+    broadcastPrReview();
   } catch (err) {
-    metaError = (err.stderr || err.responseBody || err.message || '').trim();
+    metaError = errorText(err);
   }
 
   try { await fetchThreadsForActive(); } catch (_) {}
@@ -511,55 +263,16 @@ ipcMain.handle('pr-pull-updates', async () => {
 
 ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (!prReview.active) return { error: 'No active PR review' };
-  const forge = prReview.active.forge || 'github';
-  const { meta, number } = prReview.active;
+  const adapter = getForge(prReview.active.forge);
+  const { meta } = prReview.active;
   if (!meta || !meta.url) return { error: 'Could not determine PR URL' };
   const cwd = currentRepoPath() || require('os').homedir();
 
-  if (forge === 'bitbucket') {
-    const proj = prReview.active.projectPath || `${prReview.active.baseOwner}/${prReview.active.baseRepo}`;
-    const strat = strategy === 'squash' ? 'squash' : strategy === 'rebase' ? 'fast_forward' : 'merge_commit';
-    try {
-      await bitbucketFetch(`/repositories/${proj}/pullrequests/${number}/merge`, {
-        method: 'POST',
-        account: prReview.active.account,
-        host: prReview.active.host,
-        body: { merge_strategy: strat, close_source_branch: false },
-      });
-      await reloadActivePrReviewMeta();
-      fetchThreadsForActive();
-      return { ok: true };
-    } catch (err) {
-      return { error: err.message };
-    }
-  }
-
-  if (forge === 'gitlab') {
-    const flag = { merge: '', squash: '--squash', rebase: '--rebase' }[strategy];
-    const args = ['mr', 'merge', String(number)];
-    if (flag) args.push(flag);
-    try {
-      execFileSync('glab', args, { cwd, stdio: 'pipe', timeout: 30000 });
-      await reloadActivePrReviewMeta();
-      fetchThreadsForActive();
-      return { ok: true };
-    } catch (err) {
-      return { error: (err.stderr ? err.stderr.toString() : err.message).trim() };
-    }
-  }
-
-  const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
-  if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
-  try {
-    ghExec(['pr', 'merge', meta.url, flag], {
-      cwd, stdio: 'pipe', timeout: 30000,
-    });
-    await reloadActivePrReviewMeta();
-    fetchThreadsForActive();
-    return { ok: true };
-  } catch (err) {
-    return { error: err.stderr ? err.stderr.toString() : err.message };
-  }
+  const merged = await adapter.merge(prReview.active, { strategy, cwd });
+  if (merged.error) return merged;
+  await reloadActivePrReviewMeta();
+  fetchThreadsForActive();
+  return { ok: true };
 });
 
 // G5: materialize the PR as a worktree + spawn a task in it.
@@ -597,16 +310,9 @@ ipcMain.handle('pr-checkout-locally', async () => {
   if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
     prReview.active.popout.close();
   }
-  const isGitLab = prReview.active && prReview.active.forge === 'gitlab';
-  const isBitbucket = prReview.active && prReview.active.forge === 'bitbucket';
+  const closedForge = prReview.active && prReview.active.forge;
   prReview.active = null;
-  if (isGitLab) {
-    restoreGlabAfterReview();
-  } else if (isBitbucket) {
-    restoreBitbucketAfterReview();
-  } else {
-    restoreGhAfterReview();
-  }
+  restoreAccountAfterReview(closedForge);
   broadcastPrReview();
 
   for (const win of BrowserWindow.getAllWindows()) {
@@ -690,16 +396,9 @@ ipcMain.handle('pr-review-close', () => {
   if (prReview.active && prReview.active.popout && !prReview.active.popout.isDestroyed()) {
     prReview.active.popout.close();
   }
-  const isGitLab = prReview.active && prReview.active.forge === 'gitlab';
-  const isBitbucket = prReview.active && prReview.active.forge === 'bitbucket';
+  const closedForge = prReview.active && prReview.active.forge;
   prReview.active = null;
-  if (isGitLab) {
-    restoreGlabAfterReview();
-  } else if (isBitbucket) {
-    restoreBitbucketAfterReview();
-  } else {
-    restoreGhAfterReview();
-  }
+  restoreAccountAfterReview(closedForge);
   broadcastPrReview();
   return { ok: true };
 });

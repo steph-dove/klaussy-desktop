@@ -7,11 +7,11 @@
 
 const { ipcMain, BrowserWindow } = require('electron');
 const crypto = require('crypto');
-const { execFileSync } = require('child_process');
 const { execHeadlessAgent, promptGoesOnStdin } = require('../util/agent-spawn');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { isAgentMode } = require('../state/ai-providers');
 const { prReview, ensureWorktreeForActivePr, currentRepoPath, resolveFallbackBaseBranch } = require('../state/pr-review');
+const { getForge } = require('../util/forges');
 const { execFileP } = require('../util/exec');
 const { loadConfig } = require('../util/config');
 const { getRepoIntelBlock, ensureRepoIntel, syncSkillsIntoWorktree } = require('../state/repo-intel');
@@ -53,90 +53,23 @@ function shortHash(s) {
 // Build the shared "failing CI check" context block — log tail, annotations,
 // matching workflow YAML, truncated PR diff. Used by both pr-debug-check-start
 // (read-only analysis) and pr-fix-check-start (autonomous edit run). Returns
-// either the assembled blocks or { error } for the caller to surface.
-function buildFailingCheckContext({ checkLink, checkName, checkRunId, cwd, baseOwner, baseRepo, diff }) {
+// either the assembled blocks or { error } for the caller to surface. The
+// logs, annotations and YAML come from the review's forge adapter.
+async function buildFailingCheckContext({ pr, checkLink, checkName, checkRunId, cwd, diff }) {
   if (!checkLink) return { error: 'Check has no run link to fetch logs from' };
-  const m = checkLink.match(/\/actions\/runs\/(\d+)\/job\/(\d+)/);
-  const runId = m ? m[1] : null;
-  const jobId = m ? m[2] : null;
-  if (!runId || !jobId) return { error: 'Could not parse run/job id from link: ' + checkLink };
-
-  let logs = '';
-  try {
-    logs = execFileSync('gh', [
-      'api', `/repos/${baseOwner}/${baseRepo}/actions/jobs/${jobId}/logs`,
-    ], { cwd, stdio: 'pipe', timeout: 20000, maxBuffer: 50 * 1024 * 1024 }).toString();
-  } catch (errA) {
-    try {
-      logs = execFileSync('gh', [
-        'run', 'view', String(runId),
-        '-R', `${baseOwner}/${baseRepo}`,
-        '--log-failed',
-      ], { cwd, stdio: 'pipe', timeout: 30000, maxBuffer: 50 * 1024 * 1024 }).toString();
-    } catch (errB) {
-      const msg = (errA.stderr ? errA.stderr.toString().trim() : errA.message)
-        || (errB.stderr ? errB.stderr.toString().trim() : errB.message);
-      return { error: 'Could not fetch logs: ' + msg };
-    }
-  }
-  const logTail = logs.split('\n').slice(-400).join('\n');
+  const logs = await getForge(pr.forge).failedCheckLogs(pr, { checkLink, checkName, checkRunId, cwd });
+  if (logs.error) return { error: logs.error };
 
   const diffLines = (diff || '').split('\n');
   const diffSnippet = diffLines.slice(0, 600).join('\n')
     + (diffLines.length > 600 ? '\n\n[... diff truncated ...]\n' : '');
 
-  let annotationsBlock = '';
-  if (checkRunId) {
-    try {
-      const annoRaw = execFileSync('gh', [
-        'api', `/repos/${baseOwner}/${baseRepo}/check-runs/${checkRunId}/annotations`,
-        '--paginate',
-      ], { cwd, stdio: 'pipe', timeout: 10000, maxBuffer: 4 * 1024 * 1024 }).toString();
-      const annos = JSON.parse(annoRaw);
-      if (Array.isArray(annos) && annos.length > 0) {
-        const top = annos.slice(0, 10).map((a) => {
-          const loc = (a.path ? a.path : '?')
-            + (a.start_line ? `:${a.start_line}` : '')
-            + (a.end_line && a.end_line !== a.start_line ? `-${a.end_line}` : '');
-          return `- [${a.annotation_level || 'notice'}] ${loc} — ${(a.title ? `**${a.title}** ` : '') + (a.message || '')}`.replace(/\n+/g, ' ');
-        }).join('\n');
-        annotationsBlock = `\n## Annotations (file:line hints from the check run)\n${top}\n`
-          + (annos.length > 10 ? `\n[... ${annos.length - 10} more not shown ...]\n` : '');
-      }
-    } catch (err) {
-      console.error('[failing-check-context] annotations fetch failed:',
-        ((err && (err.stderr || err.message)) || String(err)).toString().trim());
-    }
-  }
-
-  let workflowBlock = '';
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const wfDir = path.join(cwd, '.github', 'workflows');
-    if (fs.existsSync(wfDir)) {
-      const files = fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/i.test(f));
-      const targetTokens = (checkName || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-      let best = null;
-      for (const f of files) {
-        const full = path.join(wfDir, f);
-        const text = fs.readFileSync(full, 'utf8');
-        const nameMatch = text.match(/^name\s*:\s*(.+)$/m);
-        const wfName = nameMatch ? nameMatch[1].replace(/['"]/g, '').trim().toLowerCase() : f.toLowerCase();
-        const score = targetTokens.reduce((acc, t) => acc + (wfName.includes(t) ? 1 : 0), 0);
-        if (!best || score > best.score) best = { score, file: f, text };
-      }
-      if (best && best.score > 0) {
-        const truncated = best.text.split('\n').slice(0, 200).join('\n');
-        workflowBlock = `\n## Workflow definition (\`.github/workflows/${best.file}\`)\n\`\`\`yaml\n${truncated}\n${best.text.split('\n').length > 200 ? '\n[... truncated ...]\n' : ''}\`\`\`\n`;
-      }
-    }
-  } catch (err) {
-    console.error('[failing-check-context] workflow YAML lookup failed:',
-      ((err && err.message) || String(err)).toString().trim());
-  }
-
-  return { logTail, diffSnippet, annotationsBlock, workflowBlock };
+  return {
+    logTail: logs.logTail,
+    diffSnippet,
+    annotationsBlock: logs.annotationsBlock,
+    workflowBlock: logs.workflowBlock,
+  };
 }
 
 // Debug a single failing CI check. Pulls the failing job's logs, builds a
@@ -147,7 +80,8 @@ ipcMain.handle('pr-debug-check-start', async (event, { requestId, checkLink, che
   if (!requestId) return { error: 'Missing requestId' };
   if (debugCheckProcs.has(requestId)) return { error: 'Already debugging' };
   if (!prReview.active) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo, diff } = prReview.active;
+  const pr = prReview.active;
+  const { meta, baseOwner, baseRepo, diff } = pr;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
 
   // Diagnose in the PR's own worktree — NOT currentRepoPath(), which is
@@ -160,7 +94,7 @@ ipcMain.handle('pr-debug-check-start', async (event, { requestId, checkLink, che
   const ensured = await ensureWorktreeForActivePr();
   if (ensured.error) return { error: ensured.error };
   const cwd = ensured.worktreePath;
-  const ctx = buildFailingCheckContext({ checkLink, checkName, checkRunId, cwd, baseOwner, baseRepo, diff });
+  const ctx = await buildFailingCheckContext({ pr, checkLink, checkName, checkRunId, cwd, diff });
   if (ctx.error) return { error: ctx.error };
 
   const prompt =
@@ -216,7 +150,8 @@ ipcMain.handle('pr-fix-check-start', async (event, { requestId, checkLink, check
   if (!requestId) return { error: 'Missing requestId' };
   if (fixCheckProcs.has(requestId)) return { error: 'Already fixing' };
   if (!prReview.active) return { error: 'No active PR review' };
-  const { meta, baseOwner, baseRepo, diff } = prReview.active;
+  const pr = prReview.active;
+  const { meta, baseOwner, baseRepo, diff } = pr;
   if (!baseOwner || !baseRepo) return { error: 'Could not determine base repo' };
 
   // Materialize the worktree first — the prompt instructs Claude to edit
@@ -228,9 +163,9 @@ ipcMain.handle('pr-fix-check-start', async (event, { requestId, checkLink, check
   // Context-gathering uses the worktree cwd so .github/workflows lookup hits
   // the PR's copy of the YAML, not main's. (Logs/annotations come from gh
   // and are repo-scoped, so cwd doesn't affect them.)
-  const ctx = buildFailingCheckContext({
-    checkLink, checkName, checkRunId,
-    cwd: ensured.worktreePath, baseOwner, baseRepo, diff,
+  const ctx = await buildFailingCheckContext({
+    pr, checkLink, checkName, checkRunId,
+    cwd: ensured.worktreePath, diff,
   });
   if (ctx.error) return { error: ctx.error };
 
