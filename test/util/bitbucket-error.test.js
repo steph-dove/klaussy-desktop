@@ -15,6 +15,8 @@ test('classifies a 401 error as auth', () => {
   assert.equal(cls.kind, 'auth');
   assert.equal(cls.retryable, false);
   assert.match(cls.fix, /App Password|BITBUCKET_TOKEN/);
+  assert.match(cls.fix, /account email/);
+  assert.match(cls.fix, /BITBUCKET_EMAIL/);
 });
 
 test('classifies a 403 error as scope/permission', () => {
