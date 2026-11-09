@@ -73,6 +73,8 @@ function getGitCredential(host) {
   return null;
 }
 
+// An Atlassian API token (ATATT...) only authenticates with the account email as the username.
+// With no email found, send the username as given and let Bitbucket's auth error say so.
 function resolveEmailIfApiToken(username, secret) {
   if (secret && typeof secret === 'string' && secret.startsWith('ATATT') && (!username || !username.includes('@'))) {
     if (process.env.BITBUCKET_EMAIL && process.env.BITBUCKET_EMAIL.includes('@')) {
@@ -82,7 +84,6 @@ function resolveEmailIfApiToken(username, secret) {
       const gitEmail = execFileSync('git', ['config', '--get', 'user.email'], { timeout: 1000 }).toString().trim();
       if (gitEmail && gitEmail.includes('@')) return gitEmail;
     } catch (_) {}
-    return 'doverstephaniem@gmail.com';
   }
   return username || 'x-token-auth';
 }
@@ -436,4 +437,5 @@ module.exports = {
   saveBitbucketAccount,
   removeBitbucketAccount,
   clearBitbucketAuthCache,
+  resolveEmailIfApiToken,
 };

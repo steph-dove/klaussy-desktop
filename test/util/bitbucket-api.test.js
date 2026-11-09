@@ -17,6 +17,7 @@ const {
   bitbucketFetch,
   bitbucketJson,
   bitbucketText,
+  resolveEmailIfApiToken,
 } = require('../../main/util/bitbucket-api');
 const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
 
@@ -193,4 +194,69 @@ test('bitbucketText keeps the raw error body', async () => {
       return true;
     });
   });
+});
+
+// Runs fn with BITBUCKET_EMAIL set (or unset) and git reading only a temp global
+// config, from a cwd outside any repo, so the host's git identity can't leak in.
+function withEmailSources({ envEmail, gitEmail }, fn) {
+  const keys = ['BITBUCKET_EMAIL', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM', 'GIT_CEILING_DIRECTORIES'];
+  const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const prevCwd = process.cwd();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-email-'));
+  const gitConfig = path.join(dir, 'gitconfig');
+  fs.writeFileSync(gitConfig, gitEmail ? `[user]\n\temail = ${gitEmail}\n` : '');
+  try {
+    if (envEmail === undefined) delete process.env.BITBUCKET_EMAIL;
+    else process.env.BITBUCKET_EMAIL = envEmail;
+    process.env.GIT_CONFIG_GLOBAL = gitConfig;
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+    process.env.GIT_CEILING_DIRECTORIES = path.dirname(dir);
+    process.chdir(dir);
+    return fn();
+  } finally {
+    process.chdir(prevCwd);
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('resolveEmailIfApiToken prefers BITBUCKET_EMAIL for an API token', () => {
+  const got = withEmailSources({ envEmail: 'env@example.com', gitEmail: 'git@example.com' },
+    () => resolveEmailIfApiToken('someuser', 'ATATT-test'));
+  assert.equal(got, 'env@example.com');
+});
+
+test('resolveEmailIfApiToken falls back to git user.email', () => {
+  const got = withEmailSources({ gitEmail: 'git@example.com' },
+    () => resolveEmailIfApiToken('someuser', 'ATATT-test'));
+  assert.equal(got, 'git@example.com');
+});
+
+test('resolveEmailIfApiToken returns no email when none is configured', () => {
+  const withUser = withEmailSources({}, () => resolveEmailIfApiToken('someuser', 'ATATT-test'));
+  assert.equal(withUser, 'someuser');
+  const noUser = withEmailSources({}, () => resolveEmailIfApiToken(null, 'ATATT-test'));
+  assert.equal(noUser, 'x-token-auth');
+  assert.ok(!noUser.includes('@'));
+});
+
+test('resolveEmailIfApiToken leaves non-API-token usernames alone', () => {
+  const got = withEmailSources({ envEmail: 'env@example.com' },
+    () => resolveEmailIfApiToken('someuser', 'app-password'));
+  assert.equal(got, 'someuser');
+});
+
+test('resolveEmailIfApiToken keeps an email username for an API token', () => {
+  const got = withEmailSources({ envEmail: 'env@example.com' },
+    () => resolveEmailIfApiToken('me@example.com', 'ATATT-test'));
+  assert.equal(got, 'me@example.com');
+});
+
+test('resolveEmailIfApiToken skips env and git values that are not emails', () => {
+  const got = withEmailSources({ envEmail: 'not-an-email', gitEmail: 'also-not-one' },
+    () => resolveEmailIfApiToken('someuser', 'ATATT-test'));
+  assert.equal(got, 'someuser');
 });
