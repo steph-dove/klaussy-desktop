@@ -24,7 +24,8 @@ const { instances } = require('./instances');
 // Opening a review can switch the forge CLI's (or Bitbucket's) active account
 // to the one the reviewer picked; closing it puts the earlier one back. One
 // slot per forge, filled by the first switch, so a chain of reviews restores
-// the account that was active before any of them.
+// the account that was active before any of them. GitLab's adapter returns no
+// prior account, so its switch is never undone.
 const _savedAccounts = new Map();
 
 function useAccountForReview(forgeId, account, host) {
@@ -456,6 +457,10 @@ async function ensureWorktreeForActivePr() {
   // Step 2: resolve a base clone to create one in.
   const base = await resolveBaseClone(pr, adapter, auth);
   if (base.error) return { error: base.error };
+  // A first clone can take a while. If the reviewer opened another PR or
+  // closed this one meanwhile, callers would read the new prReview.active and
+  // pair it with this PR's worktree, so stop here.
+  if (prReview.active !== pr) return { error: 'The review changed while the repository was cloning. Try again.' };
   const cwd = base.cwd;
 
   const repoBasename = path.basename(cwd);
