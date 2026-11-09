@@ -9,12 +9,14 @@ const childProcess = require('child_process');
 
 const calls = [];
 let onClone = () => {};
+let cloneError = null;
 // Stubbed before the modules under test load, since they destructure execFile.
 childProcess.execFile = (cmd, args, opts, cb) => {
   if (typeof opts === 'function') { cb = opts; opts = {}; }
   calls.push([cmd, ...args]);
-  if (cmd === 'git' && args[0] === 'clone') onClone();
-  setImmediate(() => cb(null, '', ''));
+  const isClone = cmd === 'git' && args[0] === 'clone';
+  if (isClone) onClone();
+  setImmediate(() => cb(isClone ? cloneError : null, '', ''));
   return { on() {} };
 };
 const realExecFileSync = childProcess.execFileSync;
@@ -26,21 +28,48 @@ childProcess.execFileSync = (cmd, args, opts) => {
 
 const { prReview, ensureWorktreeForActivePr } = require('../../main/state/pr-review');
 
-function review(number) {
+function review(number, repo = `clone-switch-${process.pid}`) {
   return {
     forge: 'github',
     host: 'github.com',
     number,
     baseOwner: 'acme',
-    baseRepo: `clone-switch-${process.pid}`,
+    baseRepo: repo,
     meta: { headRefName: `feat-${number}`, baseRefName: 'main' },
   };
 }
 
+const clones = () => calls.filter(([cmd, sub]) => cmd === 'git' && sub === 'clone');
+
 test.afterEach(() => {
   prReview.active = null;
   onClone = () => {};
+  cloneError = null;
   calls.length = 0;
+});
+
+test('reopening the same PR during the first clone carries on', async () => {
+  prReview.active = review(4);
+  onClone = () => { prReview.active = review(4); };
+  const res = await ensureWorktreeForActivePr();
+  // It gets past the guard and fails later, at the stubbed-out git steps.
+  assert.doesNotMatch(res.error || '', /review changed/);
+});
+
+test('two callers that both need the first clone share one git clone', async () => {
+  prReview.active = review(5, `clone-share-${process.pid}`);
+  await Promise.all([ensureWorktreeForActivePr(), ensureWorktreeForActivePr()]);
+  assert.equal(clones().length, 1);
+});
+
+test('a failed clone reports git\'s error without the token', async () => {
+  prReview.active = review(6, `clone-fail-${process.pid}`);
+  cloneError = Object.assign(new Error('clone failed'), {
+    stderr: 'fatal: unable to access \'https://oauth2:gho_test@github.com/acme/x.git/\': 403',
+  });
+  const res = await ensureWorktreeForActivePr();
+  assert.match(res.error, /^Clone failed: fatal: unable to access/);
+  assert.doesNotMatch(res.error, /gho_test/);
 });
 
 test('opening another PR during the first clone stops before the worktree', async () => {

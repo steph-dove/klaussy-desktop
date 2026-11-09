@@ -103,6 +103,18 @@ test('scrubLogMsg redacts other scheme://user:secret@ URLs and Basic auth', () =
   assert.equal(scrubLogMsg('ssh://git:hunter2@host/x'), 'ssh://***:***@host/x');
   assert.equal(scrubLogMsg('Authorization: Basic dXNlcjpwYXNzd29yZA=='), 'Authorization: ***');
   assert.equal(scrubLogMsg('see https://github.com/a/b by user@example.com'), 'see https://github.com/a/b by user@example.com');
+  assert.equal(scrubLogMsg('Basic dXNlcjpwYXNz'), '***');
+});
+
+test('scrubLogMsg leaves prose about Basic auth and URLs with ports alone', () => {
+  for (const s of [
+    'remote: Basic authentication is deprecated',
+    'Basic Authentication required',
+    'remote: HTTP Basic: Access denied',
+    'see https://host:8080/a/@scope/pkg',
+  ]) {
+    assert.equal(scrubLogMsg(s), s);
+  }
 });
 
 test('scrubLogMsg treats a missing message as empty', () => {

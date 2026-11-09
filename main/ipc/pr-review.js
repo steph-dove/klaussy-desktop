@@ -11,18 +11,18 @@ const { execFile, spawn } = require('child_process');
 const { app, ipcMain, BrowserWindow, webContents, nativeTheme } = require('electron');
 const { loadConfig, saveConfig } = require('../util/config');
 const { trustIfRepoAllowed } = require('../util/claude-trust');
-const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount, resolveGhEnv } = require('../util/exec');
+const { ghExec, ghExecP, appendStderr, execFileP, ghEnvForAccount } = require('../util/exec');
 const { instances, spawnInWorktree } = require('../state/instances');
 const { hardenWindow } = require('../state/windows');
 const {
   prReview,
-  broadcastPrReview, sanitizePrReview, currentRepoPath, parseBaseFromUrl,
+  broadcastPrReview, sanitizePrReview, currentRepoPath,
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr, useAccountForReview, restoreAccountAfterReview,
   restoreGhAfterReview, pushPrHead,
 } = require('../state/pr-review');
-const { ghJson, ghText } = require('../util/gh-json');
+const { ghJson } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
 const { prForBranch } = require('../util/pr-for-branch');
 const {

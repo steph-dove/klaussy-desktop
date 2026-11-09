@@ -343,6 +343,14 @@ function resolveFallbackBaseBranch(worktreePath) {
   return '';
 }
 
+function prKey(pr) {
+  return [pr.forge || 'github', pr.host || '', pr.projectPath || `${pr.baseOwner}/${pr.baseRepo}`, pr.number].join('|');
+}
+
+function samePr(a, b) {
+  return !!(a && b) && prKey(a) === prKey(b);
+}
+
 // Clones in progress, by path, so two callers that both miss an existing
 // clone share one `git clone` instead of racing into the same directory.
 const _clonesInFlight = new Map();
@@ -459,8 +467,9 @@ async function ensureWorktreeForActivePr() {
   if (base.error) return { error: base.error };
   // A first clone can take a while. If the reviewer opened another PR or
   // closed this one meanwhile, callers would read the new prReview.active and
-  // pair it with this PR's worktree, so stop here.
-  if (prReview.active !== pr) return { error: 'The review changed while the repository was cloning. Try again.' };
+  // pair it with this PR's worktree, so stop here (reopening the same PR is
+  // fine; the synchronous steps after this can't be interleaved).
+  if (!samePr(prReview.active, pr)) return { error: 'The review changed while the repository was cloning. Try again.' };
   const cwd = base.cwd;
 
   const repoBasename = path.basename(cwd);

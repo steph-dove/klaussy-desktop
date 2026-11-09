@@ -25,8 +25,12 @@ const LOG_TOKEN_SCRUB_RE = /(oauth2:[^@\s]+@)|(\b(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z
 const X_TOKEN_AUTH_RE = /x-token-auth:[^@\s]+@/g;
 // Any `scheme://user:secret@host`; the user is redacted too since Bitbucket's is
 // often an email. Secrets already reduced to *** above are left alone.
-const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]*:\/\/)[^:@\s/]+:(?!\*\*\*@)[^@\s]+@/gi;
-const BASIC_AUTH_RE = /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}/g;
+// The secret stops at `/`, so a port followed by a path with an `@` in it
+// (`https://host:8080/a/@scope`) isn't read as userinfo.
+const URL_USERINFO_RE = /\b([a-z][a-z0-9+.-]*:\/\/)[^:@\s/]+:(?!\*\*\*@)[^@\s/]+@/gi;
+// A credential has an uppercase letter, digit, `+`, `/` or `=` after its first
+// character, which keeps prose like "Basic authentication" intact.
+const BASIC_AUTH_RE = /\bBasic\s+(?=[A-Za-z0-9+/][A-Za-z0-9+/]*[A-Z0-9+/=])[A-Za-z0-9+/]{8,}={0,2}/g;
 function scrubLogMsg(s) {
   try {
     return String(s == null ? '' : s)
