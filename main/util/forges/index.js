@@ -2,13 +2,16 @@
 // Picks the forge adapter for a forge id, PR URL, git remote or picker account id.
 
 const { parseForgeUrl, detectForgeFromRemote } = require('../forge-url');
+const github = require('./github');
 const gitlab = require('./gitlab');
 const bitbucket = require('./bitbucket');
 
-const FORGES = { gitlab, bitbucket };
+const FORGES = { github, gitlab, bitbucket };
 
+// Anything unrecognised (no forge recorded, or a remote on an unknown host)
+// is treated as GitHub, as the handlers always have.
 function getForge(id) {
-  return FORGES[id] || null;
+  return FORGES[id] || github;
 }
 
 function forgeForUrl(url) {
