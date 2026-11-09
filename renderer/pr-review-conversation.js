@@ -557,19 +557,25 @@
     PR.currentChecks = result;
     // Required-checks list is independent of the per-commit checks data; fetch
     // in parallel-ish (after main checks so the user sees something fast).
-    try {
-      var req = await window.klaus.pr.reviewRequiredChecks();
-      if (PR.lastState && PR.lastState.number === forNumber) {
-        PR.currentRequiredChecks = (req && req.required) || [];
-        PR.currentRequiredChecksError = (req && req.error) || '';
-      }
-    } catch (err) {
-      // The gate must not silently green-light merges if the fetch itself
-      // crashes (the IPC handler is supposed to catch and return an error,
-      // but renderer crashes happen too). Surface as "unknown" in the gate.
-      if (PR.lastState && PR.lastState.number === forNumber) {
-        PR.currentRequiredChecks = [];
-        PR.currentRequiredChecksError = (err && err.message) || 'unknown error';
+    // It reads GitHub branch protection, so other forges skip it.
+    if (PR.forgeName() !== 'GitHub') {
+      PR.currentRequiredChecks = [];
+      PR.currentRequiredChecksError = '';
+    } else {
+      try {
+        var req = await window.klaus.pr.reviewRequiredChecks();
+        if (PR.lastState && PR.lastState.number === forNumber) {
+          PR.currentRequiredChecks = (req && req.required) || [];
+          PR.currentRequiredChecksError = (req && req.error) || '';
+        }
+      } catch (err) {
+        // The gate must not silently green-light merges if the fetch itself
+        // crashes (the IPC handler is supposed to catch and return an error,
+        // but renderer crashes happen too). Surface as "unknown" in the gate.
+        if (PR.lastState && PR.lastState.number === forNumber) {
+          PR.currentRequiredChecks = [];
+          PR.currentRequiredChecksError = (err && err.message) || 'unknown error';
+        }
       }
     }
     PR.renderChecksIntoSlot();
@@ -610,10 +616,14 @@
     var sorted = checks.slice().sort(function (a, b) {
       return order.indexOf(bucketOf(a)) - order.indexOf(bucketOf(b));
     });
+    var forgeName = PR.forgeName ? PR.forgeName() : 'GitHub';
+    // Dispatch, rerun, cancel, log watch and annotations go through gh, so
+    // they only show on GitHub. Debug and Fix work on every forge.
+    var onGitHub = forgeName === 'GitHub';
     var header = '<div class="pr-checks-tab-head">'
       + '<span>' + checks.length + ' check' + (checks.length === 1 ? '' : 's') + '</span>'
       + '<div class="pr-checks-tab-actions">'
-        + '<button type="button" class="pr-review-btn pr-checks-dispatch">Dispatch workflow…</button>'
+        + (onGitHub ? '<button type="button" class="pr-review-btn pr-checks-dispatch">Dispatch workflow…</button>' : '')
         + '<button type="button" class="pr-review-btn pr-checks-refresh">Refresh</button>'
       + '</div>'
     + '</div>';
@@ -625,7 +635,6 @@
     // render an "unknown" gate explicitly. Silently rendering as "no required
     // checks" would falsely green-light merges.
     var requiredGate = '';
-    var forgeName = PR.forgeName ? PR.forgeName() : 'GitHub';
     if (PR.currentRequiredChecksError) {
       requiredGate = '<div class="pr-required-gate pr-required-unknown" title="' + PR.escHtml(PR.currentRequiredChecksError) + '">'
         + '<div class="pr-required-summary">'
@@ -662,7 +671,7 @@
       var icon = b === 'pass' ? '\u2713' : b === 'fail' ? '\u2717' : b === 'pending' ? '\u25CB' : b === 'cancel' ? '\u2296' : '\u2298';
       // Failing checks with an id can expand their file:line annotations inline
       // — the whole row is the toggle (chevron rotates), so no separate button.
-      var expandable = b === 'fail' && c.id != null && c.id !== '';
+      var expandable = onGitHub && b === 'fail' && c.id != null && c.id !== '';
       var nameAttr = PR.escHtml(c.name || 'check');
       var debugBtn = (b === 'fail' && c.link)
         ? '<button class="pr-check-debug-btn" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(c.id ? String(c.id) : '') + '" title="Use the agent to diagnose this failure" aria-label="Debug ' + nameAttr + '">Debug</button>'
@@ -673,13 +682,13 @@
       var fixBtn = (b === 'fail' && c.link && c.id)
         ? '<button class="pr-check-fix-btn pr-check-action-primary" type="button" data-link="' + PR.escHtml(c.link) + '" data-name="' + PR.escHtml(c.name || '') + '" data-check-id="' + PR.escHtml(String(c.id)) + '" title="Have the agent edit, commit, and push a fix" aria-label="Fix ' + nameAttr + '">Fix</button>'
         : '';
-      var rerunBtn = (b === 'fail' && c.runId)
+      var rerunBtn = (onGitHub && b === 'fail' && c.runId)
         ? '<button class="pr-check-action-btn pr-check-action-rerun" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Rerun failed jobs in this workflow run" aria-label="Rerun ' + nameAttr + '">Rerun</button>'
         : '';
-      var cancelBtn = (b === 'pending' && c.runId)
+      var cancelBtn = (onGitHub && b === 'pending' && c.runId)
         ? '<button class="pr-check-action-btn pr-check-action-cancel" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Cancel this workflow run" aria-label="Cancel ' + nameAttr + '">Cancel</button>'
         : '';
-      var watchBtn = (b === 'pending' && c.runId)
+      var watchBtn = (onGitHub && b === 'pending' && c.runId)
         ? '<button class="pr-check-action-btn pr-check-action-watch" type="button" data-run-id="' + PR.escHtml(String(c.runId)) + '" data-name="' + PR.escHtml(c.name || '') + '" title="Stream the workflow log live" aria-label="Watch log for ' + nameAttr + '" aria-expanded="false">Watch log</button>'
         : '';
       var openBtn = c.link
