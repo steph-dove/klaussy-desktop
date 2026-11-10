@@ -29,6 +29,7 @@ const {
   getForge, forgeForUrl, forgeForRemote, parseAccountId, accountForUrlForge, errorText, toIpcError,
 } = require('../util/forges');
 const { humanizeComment } = require('../util/humanize-comment');
+const { scrubLogMsg } = require('../util/logging');
 const { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls } = require('../util/review-history');
 const { readGhAccountsChecked } = require('./gh');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
@@ -162,7 +163,9 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   const adapter = getForge(forge);
   if (acctUser) useAccountForReview(adapter.id, acctUser, host);
   try {
-    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd, resolveBaseClone });
+    // A forge whose diff is built from a local clone opens the review first and fills the diff in after.
+    const deferDiff = typeof adapter.diffFor === 'function';
+    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd, resolveBaseClone, deferDiff });
     const { meta, diff } = loaded;
 
     const prev = prReview.active;
@@ -185,16 +188,47 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
       baseRepo: loaded.baseRepo,
       threads: null,
       threadsError: null,
+      diffPending: deferDiff,
+      diffError: null,
       popout: null,
       ownerWcId: event.sender.id,
     };
     broadcastPrReview();
     try { pushReviewHistory(meta); } catch (_) {}
     fetchThreadsForActive();
+    if (deferDiff) buildDeferredDiff(adapter, prReview.active);
     return { ok: true };
   } catch (err) {
     return toIpcError(adapter, err, { target: projectPath, host, url });
   }
+});
+
+// Fills in a deferred diff. A review closed or replaced meanwhile is a
+// different object, so the result is dropped.
+async function buildDeferredDiff(adapter, pr) {
+  try {
+    const diff = await adapter.diffFor({ meta: pr.meta, account: pr.account, host: pr.host, resolveBaseClone });
+    if (prReview.active !== pr) return;
+    pr.diff = diff;
+    pr.diffError = null;
+  } catch (err) {
+    if (prReview.active !== pr) return;
+    pr.diffError = scrubLogMsg(errorText(err)) || 'Could not build the diff.';
+  }
+  pr.diffPending = false;
+  broadcastPrReview();
+}
+
+ipcMain.handle('pr-retry-diff', async () => {
+  const pr = prReview.active;
+  if (!pr) return { error: 'No active PR review' };
+  const adapter = getForge(pr.forge);
+  if (typeof adapter.diffFor !== 'function') return { error: 'Nothing to retry' };
+  pr.diffPending = true;
+  pr.diffError = null;
+  broadcastPrReview();
+  await buildDeferredDiff(adapter, pr);
+  return pr.diffError ? { error: pr.diffError } : { ok: true };
 });
 
 const probeRepoCached = cachedProbe(probeRepoAccess, 60 * 60 * 1000);
@@ -243,6 +277,8 @@ ipcMain.handle('pr-pull-updates', async () => {
     }
     prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
     prReview.active.diff = diff;
+    prReview.active.diffPending = false;
+    prReview.active.diffError = null;
     broadcastPrReview();
   } catch (err) {
     metaError = errorText(err);

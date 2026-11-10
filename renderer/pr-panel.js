@@ -415,9 +415,10 @@ window.PRPanel = (function () {
     }
     html += '</div>';
     if (pr.url) {
-      var isGitLab = pr.forge === 'gitlab' || (pr.url && /gitlab/i.test(pr.url));
-      var isBitbucket = pr.forge === 'bitbucket' || (pr.url && (/bitbucket/i.test(pr.url) || /pull-requests/i.test(pr.url)));
-      var forgeLabel = isBitbucket ? 'Bitbucket' : isGitLab ? 'GitLab' : 'GitHub';
+      var isAzure = pr.forge === 'azure' || (pr.url && /\/_git\/[^/]+\/pullrequest\/\d+/i.test(pr.url));
+      var isGitLab = !isAzure && (pr.forge === 'gitlab' || (pr.url && /gitlab/i.test(pr.url)));
+      var isBitbucket = !isAzure && (pr.forge === 'bitbucket' || (pr.url && (/bitbucket/i.test(pr.url) || /pull-requests/i.test(pr.url))));
+      var forgeLabel = isAzure ? 'Azure DevOps' : isBitbucket ? 'Bitbucket' : isGitLab ? 'GitLab' : 'GitHub';
       var itemLabel = isGitLab ? 'MR' : 'PR';
       html += '<div class="pr-url">';
       html += '<a href="#" class="pr-link" data-url="' + escAttr(pr.url) + '">Open on ' + escHtml(forgeLabel) + '</a>';

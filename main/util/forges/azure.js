@@ -164,15 +164,17 @@ module.exports = {
     return normalizeAzurePr(raw, parsed);
   },
 
-  // resolveBaseClone comes from state/, which util/ can't require.
-  async loadPr({ target, account, resolveBaseClone }) {
+  // resolveBaseClone comes from state/, which util/ can't require. With
+  // deferDiff the diff is left empty so the review can open while diffFor
+  // builds it (the first one clones the repo).
+  async loadPr({ target, account, resolveBaseClone, deferDiff }) {
     const parsed = typeof target === 'string' ? parseForgeUrl(target) : null;
     if (!parsed || parsed.forge !== 'azure') {
       throw new Error('Paste the full Azure DevOps pull request URL to open it.');
     }
     const raw = await azureJson(ctxFor(parsed, account), prApi(parsed, parsed.number));
     const meta = normalizeAzurePr(raw, parsed);
-    const diff = await this.diffFor({ meta, account, host: parsed.host, resolveBaseClone });
+    const diff = deferDiff ? '' : await this.diffFor({ meta, account, host: parsed.host, resolveBaseClone });
     return {
       meta,
       diff,
