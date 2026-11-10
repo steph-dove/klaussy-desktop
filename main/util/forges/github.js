@@ -13,6 +13,7 @@ const { normalizeStatus, parseCheckRunsJsonl } = require('../check-normalize');
 const { isEmptyReview, ghApiErrorMessage } = require('../review-payload');
 const { humanizeComment } = require('../humanize-comment');
 const { outboundBody } = require('./review-sequence');
+const { pathUnder } = require('../path-gate');
 
 const DEFAULT_HOST = 'github.com';
 const PR_META_FIELDS = 'number,title,author,state,createdAt,updatedAt,headRefName,baseRefName,headRefOid,isDraft,reviewDecision,url,body,headRepository,headRepositoryOwner,mergeable,mergeStateStatus';
@@ -58,6 +59,29 @@ function ghApiInput(endpoint, method, payload, { cwd, env, withErrors = false })
     proc.stdin.write(JSON.stringify(payload));
     proc.stdin.end();
   });
+}
+
+// The workflow whose name best matches the check, as a prompt block. Paths are
+// checked with pathUnder: a PR can commit a workflow, or .github itself, as a
+// symlink to a file outside the worktree.
+function workflowBlockFor(cwd, checkName) {
+  const wfDir = pathUnder(cwd, path.join('.github', 'workflows'));
+  if (!wfDir || !fs.existsSync(wfDir)) return '';
+  const files = fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/i.test(f));
+  const targetTokens = (checkName || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  let best = null;
+  for (const f of files) {
+    const full = pathUnder(cwd, path.join(wfDir, f));
+    if (!full || !fs.statSync(full).isFile()) continue;
+    const text = fs.readFileSync(full, 'utf8');
+    const nameMatch = text.match(/^name\s*:\s*(.+)$/m);
+    const wfName = nameMatch ? nameMatch[1].replace(/['"]/g, '').trim().toLowerCase() : f.toLowerCase();
+    const score = targetTokens.reduce((acc, t) => acc + (wfName.includes(t) ? 1 : 0), 0);
+    if (!best || score > best.score) best = { score, file: f, text };
+  }
+  if (!best || best.score <= 0) return '';
+  const truncated = best.text.split('\n').slice(0, 200).join('\n');
+  return `\n## Workflow definition (\`.github/workflows/${best.file}\`)\n\`\`\`yaml\n${truncated}\n${best.text.split('\n').length > 200 ? '\n[... truncated ...]\n' : ''}\`\`\`\n`;
 }
 
 function activeGhAccountNow() {
@@ -314,24 +338,7 @@ module.exports = {
 
     let workflowBlock = '';
     try {
-      const wfDir = path.join(cwd, '.github', 'workflows');
-      if (fs.existsSync(wfDir)) {
-        const files = fs.readdirSync(wfDir).filter((f) => /\.ya?ml$/i.test(f));
-        const targetTokens = (checkName || '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-        let best = null;
-        for (const f of files) {
-          const full = path.join(wfDir, f);
-          const text = fs.readFileSync(full, 'utf8');
-          const nameMatch = text.match(/^name\s*:\s*(.+)$/m);
-          const wfName = nameMatch ? nameMatch[1].replace(/['"]/g, '').trim().toLowerCase() : f.toLowerCase();
-          const score = targetTokens.reduce((acc, t) => acc + (wfName.includes(t) ? 1 : 0), 0);
-          if (!best || score > best.score) best = { score, file: f, text };
-        }
-        if (best && best.score > 0) {
-          const truncated = best.text.split('\n').slice(0, 200).join('\n');
-          workflowBlock = `\n## Workflow definition (\`.github/workflows/${best.file}\`)\n\`\`\`yaml\n${truncated}\n${best.text.split('\n').length > 200 ? '\n[... truncated ...]\n' : ''}\`\`\`\n`;
-        }
-      }
+      workflowBlock = workflowBlockFor(cwd, checkName);
     } catch (err) {
       console.error('[failing-check-context] workflow YAML lookup failed:',
         ((err && err.message) || String(err)).toString().trim());
@@ -546,4 +553,6 @@ module.exports = {
       clearGhTokenCache();
     } catch (_) { /* best-effort, like the switch */ }
   },
+
+  workflowBlockFor,
 };
