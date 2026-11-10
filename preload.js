@@ -297,6 +297,8 @@ contextBridge.exposeInMainWorld('klaus', {
     reviewClose: () => ipcRenderer.invoke('pr-review-close'),
     refreshThreads: () => ipcRenderer.invoke('pr-refresh-threads'),
     pullUpdates: () => ipcRenderer.invoke('pr-pull-updates'),
+    retryDiff: () => ipcRenderer.invoke('pr-retry-diff'),
+    parseUrl: (url) => ipcRenderer.invoke('pr-parse-url', { url }),
     submitReview: ({ event, body, comments }) =>
       ipcRenderer.invoke('pr-submit-review', { event, body, comments }),
     addIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),
@@ -852,6 +854,14 @@ contextBridge.exposeInMainWorld('klaus', {
     switchAccount: (username, hostname) => ipcRenderer.invoke('bitbucket-switch-account', { username, hostname }),
     saveAccount: (account) => ipcRenderer.invoke('bitbucket-save-account', account),
     removeAccount: (username, hostname) => ipcRenderer.invoke('bitbucket-remove-account', { username, hostname }),
+  },
+
+  // ---- azure: Azure DevOps accounts (PATs stay in the main process) ----
+  azure: {
+    listAccounts: () => ipcRenderer.invoke('azure-list-accounts'),
+    saveAccount: (collection, pat) => ipcRenderer.invoke('azure-save-account', { collection, pat }),
+    switchAccount: (id) => ipcRenderer.invoke('azure-switch-account', { id }),
+    removeAccount: (id) => ipcRenderer.invoke('azure-remove-account', { id }),
   },
 
   // ---- skills: Claude skills / commands / memory / MCP / plugins inventory ----

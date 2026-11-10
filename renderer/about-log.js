@@ -348,6 +348,20 @@ window.Dialogs = (function () {
       } : null,
     }) : '';
 
+    var azureActive = deps.azure ? (deps.azure.accounts || []).filter(function (a) { return a.active && !a.needsReentry; })[0] : null;
+    var azureRow = deps.azure ? depRow({
+      name: 'Azure DevOps (personal access token)',
+      ok: deps.azure.authed,
+      missing: false,
+      version: azureActive ? azureActive.user + ' \u00b7 ' + azureCollectionName(azureActive) : (deps.azure.envPat ? 'AZURE_DEVOPS_EXT_PAT' : null),
+      problem: !deps.azure.authed ? 'Optional — no account connected. Connect a token here, or set AZURE_DEVOPS_EXT_PAT.' : null,
+      fixes: [],
+      action: !deps.azure.authed ? {
+        label: 'Connect Azure DevOps',
+        kind: 'az-connect',
+      } : null,
+    }) : '';
+
     // One row per agent. The required Claude CLI is covered by the bundled
     // "Install requirements" button; optional agents get a copyable
     // `npm install -g …` command inline.
@@ -419,7 +433,7 @@ window.Dialogs = (function () {
       + '</div>'
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
-      + '<div class="deps-rows">' + ghRow + glabRow + bitbucketRow + agentRows + '</div>'
+      + '<div class="deps-rows">' + ghRow + glabRow + bitbucketRow + azureRow + agentRows + '</div>'
       + installSection
       + '<div class="deps-actions">'
         + '<button class="deps-recheck" type="button">Re-check</button>'
@@ -466,6 +480,17 @@ window.Dialogs = (function () {
     if (bbConnectBtn) {
       bbConnectBtn.addEventListener('click', function () {
         showBitbucketLogin({
+          onSuccess: function () {
+            overlay.remove();
+            checkAndPromptDeps({ force: true });
+          },
+        });
+      });
+    }
+    var azConnectBtn = dialog.querySelector('[data-action="az-connect"]');
+    if (azConnectBtn) {
+      azConnectBtn.addEventListener('click', function () {
+        showAzureLogin({
           onSuccess: function () {
             overlay.remove();
             checkAndPromptDeps({ force: true });
@@ -1113,7 +1138,169 @@ window.Dialogs = (function () {
     });
   }
 
-  // ---- Git accounts (GitHub, GitLab & Bitbucket) ----
+  // ---- Azure DevOps personal access token dialog ----
+  var AZURE_PAT_DOCS = 'https://learn.microsoft.com/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate';
+
+  // "contoso" for an org on dev.azure.com, the host for a Server collection.
+  function azureCollectionName(a) {
+    if (!a) return '';
+    if (a.host === 'dev.azure.com') return a.collectionUrl ? a.collectionUrl.replace(/\/+$/, '').split('/').pop() : a.collectionPath;
+    return a.host;
+  }
+
+  // Where the account lives, as shown under its name: dev.azure.com/contoso, tfs.example.com/DefaultCollection.
+  function azureCollectionLabel(a) {
+    return String(a.collectionUrl || (a.host + '/' + a.collectionPath)).replace(/^https?:\/\//, '').replace(/\/+$/, '');
+  }
+
+  // Catches a GitHub/GitLab/Bitbucket URL before a round trip; the main
+  // process does the full parse.
+  function azureUrlLooksValid(raw) {
+    var s = String(raw || '').trim().replace(/\/+$/, '');
+    if (!s) return false;
+    if (/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(s)) return true;
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    var u;
+    try { u = new URL(s); } catch (_) { return false; }
+    var host = u.hostname.toLowerCase();
+    if (/(^|\.)(github\.com|gitlab\.com|bitbucket\.org)$/.test(host)) return false;
+    if (/\.visualstudio\.com$/.test(host)) return true;
+    return u.pathname.split('/').filter(Boolean).length > 0;
+  }
+
+  // opts.collectionUrl prefills the URL (re-entering a token for a saved account).
+  function showAzureLogin(opts) {
+    opts = opts || {};
+    var onSuccess = opts.onSuccess || function () {};
+    var overlay = document.createElement('div');
+    overlay.className = 'palette-overlay';
+    var dialog = document.createElement('div');
+    dialog.className = 'deps-dialog gh-login-dialog';
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-labelledby', 'az-title');
+    dialog.innerHTML =
+      '<div class="deps-head">'
+        + '<h2 id="az-title">Connect Azure DevOps</h2>'
+        + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
+      + '</div>'
+      + '<div class="deps-body" style="padding: 16px;">'
+        + '<p style="margin: 0 0 12px 0; color: var(--text-dim); font-size: 13px;">'
+          + 'Enter your organization URL and a personal access token. Klaussy checks the token with Azure DevOps, then stores it encrypted on this computer.'
+        + '</p>'
+        + '<div style="display: flex; flex-direction: column; gap: 10px;">'
+          + '<label class="az-field">Organization or server URL'
+            + '<input type="text" id="az-url-input" placeholder="https://dev.azure.com/your-org" value="' + escAttr(opts.collectionUrl || '') + '" />'
+            + '<span class="az-help">Azure DevOps Server: https://server/collection</span>'
+          + '</label>'
+          + '<label class="az-field">Personal access token'
+            + '<input type="password" id="az-pat-input" placeholder="Paste your token" />'
+          + '</label>'
+          + '<p class="az-scopes">The token needs <strong>Code (Read &amp; write)</strong> and <strong>Build (Read)</strong>. <button type="button" class="az-link">How to create a PAT</button></p>'
+          + '<div id="az-login-error" class="az-login-error" role="alert" style="display: none;"></div>'
+        + '</div>'
+      + '</div>'
+      + '<div class="deps-actions">'
+        + '<button class="deps-skip" id="az-cancel-btn" type="button">Cancel</button>'
+        + '<button class="deps-action az-primary" id="az-save-btn" type="button">Connect</button>'
+      + '</div>';
+
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+
+    var busy = false;
+    function cleanup() { overlay.remove(); }
+    overlay.addEventListener('click', function (e) { if (e.target === overlay && !busy) cleanup(); });
+    dialog.querySelector('.deps-close').addEventListener('click', cleanup);
+    dialog.querySelector('#az-cancel-btn').addEventListener('click', cleanup);
+    dialog.querySelector('.az-link').addEventListener('click', function () {
+      Promise.resolve(window.klaus.gh.openExternal(AZURE_PAT_DOCS)).catch(function (err) {
+        window.toast.error('Could not open the docs: ' + ((err && err.message) || err));
+      });
+    });
+
+    var saveBtn = dialog.querySelector('#az-save-btn');
+    var urlInput = dialog.querySelector('#az-url-input');
+    var patInput = dialog.querySelector('#az-pat-input');
+    var errEl = dialog.querySelector('#az-login-error');
+    var WRONG_URL = "That isn't an Azure DevOps URL. Use https://dev.azure.com/your-org, or https://server/collection for Azure DevOps Server.";
+
+    function setBusy(on) {
+      busy = on;
+      urlInput.readOnly = on;
+      patInput.readOnly = on;
+      if (on) {
+        saveBtn.setAttribute('aria-disabled', 'true');
+        saveBtn.setAttribute('aria-busy', 'true');
+        saveBtn.textContent = 'Checking token…';
+      } else {
+        saveBtn.removeAttribute('aria-disabled');
+        saveBtn.removeAttribute('aria-busy');
+        saveBtn.textContent = 'Connect';
+      }
+    }
+
+    // Shown before the text is set so the alert region announces it.
+    function showError(msg, focusEl) {
+      setBusy(false);
+      errEl.style.display = 'block';
+      errEl.textContent = msg;
+      (focusEl || patInput).focus();
+    }
+
+    function errorMessage(res) {
+      if (res.errorKind === 'unavailable') return "Klaussy can't store the token securely on this system, so it wasn't saved. Set AZURE_DEVOPS_EXT_PAT instead.";
+      if (res.errorKind === 'auth') return "Azure DevOps didn't accept that token. Check it hasn't expired and has Code (Read & write) and Build (Read).";
+      return res.errorSummary || res.error || 'Could not connect Azure DevOps.';
+    }
+
+    (opts.collectionUrl ? patInput : urlInput).focus();
+
+    saveBtn.addEventListener('click', async function () {
+      if (busy) return;
+      var collection = urlInput.value.trim();
+      var pat = patInput.value.trim();
+      errEl.style.display = 'none';
+      errEl.textContent = '';
+      if (!collection) {
+        A11y.fieldError(urlInput, 'Enter your organization or server URL.', urlInput.closest('label'));
+        return;
+      }
+      if (!azureUrlLooksValid(collection)) {
+        A11y.fieldError(urlInput, WRONG_URL, urlInput.closest('label'));
+        return;
+      }
+      if (!pat) {
+        A11y.fieldError(patInput, 'Paste a personal access token.', patInput.closest('label'));
+        return;
+      }
+      setBusy(true);
+      try {
+        var res = await window.klaus.azure.saveAccount(collection, pat);
+        // Only a returned account is success; an error can come back with an empty message.
+        if (!res || !res.account) {
+          res = res || {};
+          if (res.errorKind === 'input') {
+            setBusy(false);
+            A11y.fieldError(urlInput, WRONG_URL, urlInput.closest('label'));
+            return;
+          }
+          showError(errorMessage(res));
+          return;
+        }
+        if (window.toast && window.toast.success) window.toast.success('Azure DevOps account connected');
+      } catch (err) {
+        showError((err && err.message) || 'Could not connect Azure DevOps.');
+        return;
+      }
+      cleanup();
+      // The account is saved; a failure refreshing the caller's view is logged, not shown as a connect error.
+      Promise.resolve().then(function () { return onSuccess(res && res.account); }).catch(function (err) {
+        console.error('[azure] after connect:', err);
+      });
+    });
+  }
+
+  // ---- Git accounts (GitHub, GitLab, Bitbucket & Azure DevOps) ----
   // opts.onChange (optional) fires after a switch/re-auth so a caller showing
   // stale data can reload without waiting for the dialog to close.
   function showGhAccounts(opts) {
@@ -1154,16 +1341,19 @@ window.Dialogs = (function () {
         body.focus({ preventScroll: true });
       }
       body.innerHTML = '<div class="skills-loading">Reading accounts…</div>';
-      var ghRes = null, glabRes = null, bbRes = null;
+      var ghRes = null, glabRes = null, bbRes = null, azRes = null;
       try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
       try { if (window.klaus.glab) glabRes = await window.klaus.glab.listAccounts(); } catch (_) {}
       try { if (window.klaus.bitbucket) bbRes = await window.klaus.bitbucket.listAccounts(); } catch (_) {}
+      var azErr = null;
+      try { if (window.klaus.azure) azRes = await window.klaus.azure.listAccounts(); } catch (err) { azErr = (err && err.message) || String(err); }
 
       var ghAccounts = (ghRes && ghRes.accounts) || [];
       var glabAccounts = (glabRes && glabRes.accounts) || [];
       var bbAccounts = (bbRes && bbRes.accounts) || [];
+      var azAccounts = (azRes && azRes.accounts) || [];
 
-      var html = '<p class="gh-accounts-intro">Klaussy uses whichever account is active for GitHub, GitLab, and Bitbucket operations.</p>';
+      var html = '<p class="gh-accounts-intro">Klaussy uses whichever account is active for GitHub, GitLab, Bitbucket, and Azure DevOps operations.</p>';
 
       // Section: GitHub
       html += '<h3 class="git-accounts-section-title">GitHub</h3>';
@@ -1253,7 +1443,59 @@ window.Dialogs = (function () {
         + '</div>';
       }
 
+      // Section: Azure DevOps. Rows are buttons, so Remove sits beside each row.
+      html += '<h3 class="git-accounts-section-title">Azure DevOps</h3>';
+      if (azErr) {
+        // Not the empty state: offering Connect here would have people re-enter tokens that are still saved.
+        html += '<div class="git-accounts-empty-hint" role="alert"><p style="margin: 0;">Couldn\u2019t read Azure DevOps accounts: ' + escHtml(azErr) + '</p></div>';
+      } else if (azAccounts.length === 0) {
+        html += '<div class="git-accounts-empty-hint">'
+          + '<p style="margin: 0 0 6px 0;">No Azure DevOps accounts connected.</p>'
+          + '<button class="gh-account-add" id="az-add-btn" type="button">+ Connect Azure DevOps (personal access token)</button>'
+        + '</div>';
+      } else {
+        var reentry = azAccounts.filter(function (a) { return a.needsReentry; });
+        html += azAccounts.map(function (a) {
+          var where = azureCollectionLabel(a);
+          var classes = 'gh-account-row';
+          if (a.active) classes += ' active';
+          if (a.needsReentry) classes += ' invalid';
+          var status;
+          if (a.needsReentry) status = '<span class="gh-account-action">Re-enter PAT</span>';
+          else if (a.active) status = '<span class="gh-account-badge">active</span>';
+          else status = '<span class="gh-account-action">Switch</span>';
+          var disabledAttr = (a.active && !a.needsReentry) ? ' aria-disabled="true" aria-current="true"' : '';
+          return '<div class="gh-account-row-wrap">'
+            + '<button class="' + classes + '" type="button"'
+              + ' data-forge="azure" data-username="' + escHtml(a.id) + '" data-collection-url="' + escHtml(a.collectionUrl || '') + '"'
+              + ' data-action="' + (a.needsReentry ? 'az-reenter' : 'az-switch') + '"' + disabledAttr + '>'
+              + '<span class="gh-account-name">' + escHtml(a.user)
+                + '<span class="gh-account-sub">' + escHtml(where) + '</span>'
+                + (a.needsReentry ? '<span class="gh-account-sub gh-account-sub-invalid">Can\u2019t read the saved token</span>' : '')
+              + '</span>'
+              + status
+            + '</button>'
+            + '<button class="gh-account-remove" type="button" data-id="' + escHtml(a.id) + '"'
+              + ' aria-label="' + escHtml('Remove ' + a.user + ' (' + where + ')') + '">Remove</button>'
+          + '</div>';
+        }).join('')
+        + reentry.map(function (a) {
+          return '<p class="gh-accounts-intro" style="margin: 2px 0 0;">Klaussy couldn\u2019t read the saved token for ' + escHtml(azureCollectionLabel(a))
+            + '. This happens after the system keychain is reset. Enter the token again to keep using this account.</p>';
+        }).join('')
+        + '<div class="gh-accounts-foot">'
+          + '<button class="gh-account-add" id="az-add-btn" type="button">+ Add Azure DevOps account</button>'
+        + '</div>';
+      }
+
       body.innerHTML = html;
+
+      var azAddBtn = body.querySelector('#az-add-btn');
+      if (azAddBtn) {
+        azAddBtn.addEventListener('click', function () {
+          showAzureLogin({ onSuccess: function () { refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} } });
+        });
+      }
 
       var ghAddBtn = body.querySelector('#gh-signin-btn');
       if (ghAddBtn) {
@@ -1345,6 +1587,50 @@ window.Dialogs = (function () {
           if (orig) orig.textContent = 'Switching…';
           var result = await window.klaus.bitbucket.switchAccount(username, hostname);
           afterSwitch(btn, 'Bitbucket', result);
+        });
+      });
+
+      body.querySelectorAll('.gh-account-row[data-forge="azure"]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (btn.getAttribute('aria-disabled') === 'true') return;
+          if (btn.dataset.action === 'az-reenter') {
+            var row = { forge: 'azure', username: btn.dataset.username };
+            showAzureLogin({
+              collectionUrl: btn.dataset.collectionUrl,
+              onSuccess: function () { focusAfter = row; refresh(); if (opts.onChange) try { opts.onChange(); } catch (_) {} },
+            });
+            return;
+          }
+          btn.setAttribute('aria-disabled', 'true');
+          var orig = btn.querySelector('.gh-account-action');
+          if (orig) orig.textContent = 'Switching\u2026';
+          var result;
+          try {
+            result = await window.klaus.azure.switchAccount(btn.dataset.username);
+            if (result && result.ok === false) result = { error: result.error || 'account not found' };
+          } catch (err) {
+            result = { error: (err && err.message) || String(err) };
+          }
+          afterSwitch(btn, 'Azure DevOps', result);
+        });
+      });
+
+      body.querySelectorAll('.gh-account-remove').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          if (!window.confirm(btn.getAttribute('aria-label') + '? Its saved token is deleted from this computer.')) return;
+          try {
+            var result = await window.klaus.azure.removeAccount(btn.dataset.id);
+            if (!result || !result.ok) {
+              window.toast.error('Could not remove the account' + (result && result.error ? ': ' + result.error : '.'));
+            } else {
+              A11y.announce('Azure DevOps account removed');
+              if (opts.onChange) try { opts.onChange(); } catch (_) {}
+            }
+          } catch (err) {
+            window.toast.error('Could not remove the account: ' + ((err && err.message) || err));
+          } finally {
+            refresh();
+          }
         });
       });
     }
@@ -2248,5 +2534,6 @@ window.Dialogs = (function () {
     showGhAccounts: showGhAccounts,
     showGhLogin: showGhLogin,
     showBitbucketLogin: showBitbucketLogin,
+    showAzureLogin: showAzureLogin,
   };
 })();

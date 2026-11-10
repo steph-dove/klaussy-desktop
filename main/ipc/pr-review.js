@@ -20,15 +20,16 @@ const {
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr, useAccountForReview, restoreAccountAfterReview,
-  restoreGhAfterReview, pushPrHead,
+  restoreGhAfterReview, pushPrHead, resolveBaseClone,
 } = require('../state/pr-review');
 const { ghJson } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
 const { prForBranch } = require('../util/pr-for-branch');
 const {
-  getForge, forgeForUrl, forgeForRemote, parseAccountId, errorText, toIpcError,
+  getForge, forgeForUrl, forgeForRemote, parseAccountId, accountForUrlForge, errorText, toIpcError,
 } = require('../util/forges');
 const { humanizeComment } = require('../util/humanize-comment');
+const { scrubLogMsg } = require('../util/logging');
 const { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls } = require('../util/review-history');
 const { readGhAccountsChecked } = require('./gh');
 const { bucketFromState, normalizeStatus, parseCheckRunsJsonl } = require('../util/check-normalize');
@@ -110,6 +111,12 @@ ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
   }
 });
 
+// Pure parse, no network: lets the picker match a pasted URL to a saved account with main's rules.
+ipcMain.handle('pr-parse-url', (_event, { url } = {}) => {
+  const found = forgeForUrl(url);
+  return found ? found.parsed : null;
+});
+
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   const cwd = currentRepoPath() || require('os').homedir();
   const found = forgeForUrl(url);
@@ -153,7 +160,8 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     } catch (_) {}
   }
 
-  const acct = parseAccountId(account);
+  let acct = parseAccountId(account);
+  if (url) acct = accountForUrlForge(acct, forge);
   const acctUser = acct.user;
   if (acct.forge) forge = acct.forge;
   if (acct.host) host = acct.host;
@@ -161,7 +169,9 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   const adapter = getForge(forge);
   if (acctUser) useAccountForReview(adapter.id, acctUser, host);
   try {
-    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd });
+    // A forge whose diff is built from a local clone opens the review first and fills the diff in after.
+    const deferDiff = typeof adapter.diffFor === 'function';
+    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd, resolveBaseClone, deferDiff });
     const { meta, diff } = loaded;
 
     const prev = prReview.active;
@@ -184,16 +194,47 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
       baseRepo: loaded.baseRepo,
       threads: null,
       threadsError: null,
+      diffPending: deferDiff,
+      diffError: null,
       popout: null,
       ownerWcId: event.sender.id,
     };
     broadcastPrReview();
     try { pushReviewHistory(meta); } catch (_) {}
     fetchThreadsForActive();
+    if (deferDiff) buildDeferredDiff(adapter, prReview.active);
     return { ok: true };
   } catch (err) {
     return toIpcError(adapter, err, { target: projectPath, host, url });
   }
+});
+
+// Fills in a deferred diff. A review closed or replaced meanwhile is a
+// different object, so the result is dropped.
+async function buildDeferredDiff(adapter, pr) {
+  try {
+    const diff = await adapter.diffFor({ meta: pr.meta, account: pr.account, host: pr.host, resolveBaseClone });
+    if (prReview.active !== pr) return;
+    pr.diff = diff;
+    pr.diffError = null;
+  } catch (err) {
+    if (prReview.active !== pr) return;
+    pr.diffError = scrubLogMsg(errorText(err)) || 'Could not build the diff.';
+  }
+  pr.diffPending = false;
+  broadcastPrReview();
+}
+
+ipcMain.handle('pr-retry-diff', async () => {
+  const pr = prReview.active;
+  if (!pr) return { error: 'No active PR review' };
+  const adapter = getForge(pr.forge);
+  if (typeof adapter.diffFor !== 'function') return { error: 'Nothing to retry' };
+  pr.diffPending = true;
+  pr.diffError = null;
+  broadcastPrReview();
+  await buildDeferredDiff(adapter, pr);
+  return pr.diffError ? { error: pr.diffError } : { ok: true };
 });
 
 const probeRepoCached = cachedProbe(probeRepoAccess, 60 * 60 * 1000);
@@ -236,12 +277,14 @@ ipcMain.handle('pr-pull-updates', async () => {
 
   let metaError = null;
   try {
-    const { meta, diff } = await adapter.refreshPr(prReview.active, { cwd });
+    const { meta, diff } = await adapter.refreshPr(prReview.active, { cwd, resolveBaseClone });
     if (!prReview.active || prReview.active.meta.url !== url) {
       return { error: 'Active PR changed during refresh' };
     }
     prReview.active.meta = Object.assign({}, prReview.active.meta, meta);
     prReview.active.diff = diff;
+    prReview.active.diffPending = false;
+    prReview.active.diffError = null;
     broadcastPrReview();
   } catch (err) {
     metaError = errorText(err);
@@ -272,7 +315,7 @@ ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (merged.error) return merged;
   await reloadActivePrReviewMeta();
   fetchThreadsForActive();
-  return { ok: true };
+  return merged.warning ? { ok: true, warning: merged.warning } : { ok: true };
 });
 
 // G5: materialize the PR as a worktree + spawn a task in it.
@@ -974,14 +1017,24 @@ ipcMain.handle('pr-review-resolve-conflicts', async (_event, args) => {
   }
   if (!target || !target.pty) return { error: 'Failed to spawn a task on the worktree.' };
 
-  const pushHint = headRepoSlug
-    ? `\`git push https://github.com/${headRepoSlug}.git HEAD:${headBranch}\` (or \`gh\`)`
-    : `the PR's head fork`;
+  // Azure: give the agent the clean repo URL, never an authed one; its git uses the user's credential helper.
+  let headUrl = '';
+  if (prReview.active.forge === 'azure') {
+    if (!headOwner || !headRepoName) return { error: 'PR head repository missing from metadata.' };
+    const auth = getForge('azure').gitAuth(prReview.active, { owner: headOwner, repo: headRepoName });
+    if (auth.error) return { error: auth.error };
+    headUrl = auth.cleanUrl;
+  }
+  const fetchFrom = headUrl ? `"${headUrl}"` : 'origin';
+  let pushHint;
+  if (headUrl) pushHint = `\`git push "${headUrl}" HEAD:${headBranch}\` (it uses your git credentials for Azure DevOps)`;
+  else if (headRepoSlug) pushHint = `\`git push https://github.com/${headRepoSlug}.git HEAD:${headBranch}\` (or \`gh\`)`;
+  else pushHint = `the PR's head fork`;
   const BP_START = '\x1b[200~';
   const BP_END = '\x1b[201~';
   const text =
     `The push to the PR branch \`${headBranch}\`${headRepoSlug ? ` on \`${headRepoSlug}\`` : ''} was rejected because the remote has advanced past this worktree. Please get my commits integrated and pushed:\n\n`
-    + `1. Fetch the latest PR branch and rebase this worktree's commits onto it (\`git fetch origin ${headBranch}\` then \`git rebase FETCH_HEAD\`; a merge is fine if you prefer).\n`
+    + `1. Fetch the latest PR branch and rebase this worktree's commits onto it (\`git fetch ${fetchFrom} ${headBranch}\` then \`git rebase FETCH_HEAD\`; a merge is fine if you prefer).\n`
     + `2. Resolve any merge conflicts — keep both my local changes and the incoming remote changes where they don't truly conflict.\n`
     + `3. Commit the resolution.\n`
     + `4. Push the result to ${pushHint}.\n\n`

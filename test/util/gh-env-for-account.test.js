@@ -21,9 +21,10 @@ test('ghEnvForAccount still accepts a bare username', () => {
   assert.deepEqual(ghEnvForAccount('other-user'), { GH_TOKEN: 'tok-other-user' });
 });
 
-test('ghEnvForAccount ignores GitLab and Bitbucket account ids', () => {
+test('ghEnvForAccount ignores GitLab, Bitbucket and Azure DevOps account ids', () => {
   const before = calls.length;
   assert.deepEqual(ghEnvForAccount('gitlab:gitlab.com:me'), {});
   assert.deepEqual(ghEnvForAccount('bitbucket:bitbucket.org:me'), {});
+  assert.deepEqual(ghEnvForAccount('azure:dev.azure.com:contoso:me%40contoso.com'), {});
   assert.equal(calls.length, before);
 });

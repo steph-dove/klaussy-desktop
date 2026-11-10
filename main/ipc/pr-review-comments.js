@@ -27,7 +27,8 @@ async function editComment(kind, { commentId, body }) {
   if (!prReview.active) return { error: 'No active PR review' };
   const { baseOwner, projectPath } = prReview.active;
   if (!baseOwner && !projectPath) return { error: 'Could not determine base repo' };
-  const id = parseInt(commentId, 10);
+  // Azure DevOps ids are "{threadId}:{commentId}"; the adapter checks them.
+  const id = prReview.active.forge === 'azure' ? String(commentId || '') : parseInt(commentId, 10);
   if (!id) return { error: 'Missing or invalid comment id' };
   if (!body || !body.trim()) return { error: 'Comment body is empty' };
 
@@ -50,12 +51,14 @@ ipcMain.handle('pr-humanize-preview', async (_event, { body } = {}) => {
 });
 
 // Keyed by forge, host and account: one module-wide value made a review on
-// another forge or account show the previous review's user as "you".
+// another forge or account show the previous review's user as "you". Azure
+// DevOps picks the account per organization, so its key adds the repo's owner.
 const cachedCurrentUser = new Map();
 ipcMain.handle('pr-current-user', async () => {
   const pr = prReview.active;
   const adapter = getForge(pr && pr.forge);
-  const key = `${adapter.id}:${(pr && pr.host) || ''}:${(pr && pr.account) || ''}`;
+  const scope = adapter.id === 'azure' ? `:${(pr && pr.baseOwner) || ''}` : '';
+  const key = `${adapter.id}:${(pr && pr.host) || ''}:${(pr && pr.account) || ''}${scope}`;
   if (cachedCurrentUser.has(key)) return { login: cachedCurrentUser.get(key) };
   const cwd = currentRepoPath() || require('os').homedir();
 

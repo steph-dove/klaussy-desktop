@@ -14,9 +14,10 @@ policies govern what they collect:
   / Review actions, "Explain diff", inline AI edit, or AI commit-message
   generation, your selected agent reads the prompt and repository context you provide.
   See the provider's privacy policy.
-- **Git Forges (GitHub, GitLab, Bitbucket).** When you view / comment on / merge
+- **Git Forges (GitHub, GitLab, Bitbucket, Azure DevOps).** When you view / comment on / merge
   PRs/MRs or run CI checks through Klaussy, those requests go through your local
-  CLIs (`gh`, `glab`) or direct forge authentication to GitHub, GitLab, or Bitbucket.
+  CLIs (`gh`, `glab`) or direct forge authentication to GitHub, GitLab, Bitbucket,
+  or Microsoft (Azure DevOps Services, or your own Azure DevOps Server).
   See their respective privacy policies.
 - **Ollama (optional).** If you enable inline AI completion, Klaussy runs
   `qwen2.5-coder:1.5b` locally via Ollama. No data leaves your machine.
@@ -31,6 +32,10 @@ policies govern what they collect:
   `~/Library/Logs/Klaussy/main.log`. No prompt contents are logged.
 - If you activate a license, the license key, associated email, and a
   derived device fingerprint, stored in the same `config.json`.
+- If you connect Azure DevOps, your personal access token, encrypted with
+  your operating system's keychain (Keychain on macOS, DPAPI on Windows,
+  libsecret on Linux) before it's written to `config.json`. If your system
+  has no keychain, Klaussy doesn't save the token.
 
 None of this leaves your machine unless you explicitly sync your home
 directory to iCloud, Dropbox, etc.
@@ -60,6 +65,7 @@ Klaussy orchestrates several tools you choose to use. Their policies apply:
 - GitHub: https://docs.github.com/en/site-policy/privacy-policies
 - GitLab: https://about.gitlab.com/privacy/
 - Atlassian (Bitbucket): https://www.atlassian.com/legal/privacy-policy
+- Microsoft (Azure DevOps): https://privacy.microsoft.com/privacystatement
 - Paddle: https://www.paddle.com/legal/privacy
 - Ollama (local, no data sent off-device)
 

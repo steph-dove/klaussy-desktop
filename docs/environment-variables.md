@@ -71,6 +71,18 @@ Within the environment it tries a token first:
 | `BITBUCKET_APP_PASSWORD` | App password, used with `BITBUCKET_USERNAME` or `BITBUCKET_USER`. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_PASSWORD` | Same as `BITBUCKET_APP_PASSWORD`; used when it's unset. | Unset | `main/util/bitbucket-api.js` |
 
+## Azure DevOps
+
+Klaussy uses the account saved under **Preferences → Git Accounts** for the PR's
+organization or collection, and falls back to this variable when there's none.
+Saved tokens are encrypted with the system keychain. On a system without one
+(Linux with no keyring, for example), Klaussy won't save a token, so set this
+variable instead.
+
+| Variable | What it does | Default | Read in |
+|---|---|---|---|
+| `AZURE_DEVOPS_EXT_PAT` | Personal access token for Azure DevOps Services or Server, the same variable the Azure CLI's DevOps extension reads. It needs Code (Read & write) and Build (Read). | Unset | `main/util/azure-api.js` |
+
 ## Pre-commit review hook
 
 | Variable | What it changes | Default | Read in |

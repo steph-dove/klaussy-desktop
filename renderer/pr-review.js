@@ -47,6 +47,7 @@ window.PrReview = window.PrReview || {};
 
   PR.forgeName = function (state) {
     var s = state || PR.lastState || {};
+    if (s.forge === 'azure' || (s.meta && s.meta.url && /\/_git\/[^/]+\/pullrequest\/\d+/i.test(s.meta.url))) return 'Azure DevOps';
     if (s.forge === 'gitlab' || (s.meta && s.meta.url && /gitlab/i.test(s.meta.url))) return 'GitLab';
     if (s.forge === 'bitbucket' || (s.meta && s.meta.url && (/bitbucket/i.test(s.meta.url) || /pull-requests/i.test(s.meta.url)))) return 'Bitbucket';
     return 'GitHub';
@@ -313,10 +314,57 @@ window.PrReview = window.PrReview || {};
     }
     PR.lastState = null;
     PR.selectedFile = null;
+    PR.diffErrorShown = null;
   };
 
   PR.renderLoading = function() {
     PR.hostEl.innerHTML = '<div class="pr-review-loading">Loading PR\u2026</div>';
+  };
+
+  // "Web App/front-end" from an Azure DevOps PR URL, for the diff-preparing messages.
+  function azureRepoLabel(state) {
+    var m = String((state.meta && state.meta.url) || '').match(/\/([^/]+)\/_git\/([^/?#]+)\/pullrequest\//i);
+    if (!m) return state.projectPath || 'the repository';
+    var dec = function (x) { try { return decodeURIComponent(x); } catch (_) { return x; } };
+    return dec(m[1]) + '/' + dec(m[2]);
+  }
+
+  // Shown while a deferred diff is built (the first load clones the repo), and if that fails.
+  PR.renderDiffPreparing = function(state) {
+    var repo = PR.escHtml(azureRepoLabel(state));
+    var forge = PR.escHtml(PR.forgeName(state));
+    if (state.diffPending) {
+      PR.diffErrorShown = null;
+      PR.hostEl.innerHTML = '<div class="pr-review-preparing" role="status">'
+        + '<div class="pr-review-preparing-line"><span class="pr-review-spinner" aria-hidden="true"></span>'
+          + '<span>Preparing the diff\u2026 fetching ' + repo + ' from ' + forge + '</span></div>'
+        + '<p class="pr-review-preparing-sub">The first load clones the repo, so it can take a minute. Later loads reuse it.</p>'
+      + '</div>';
+      return;
+    }
+    PR.hostEl.innerHTML = '<div class="pr-review-preparing">'
+      + '<div class="pr-review-load-error" role="alert">'
+        + '<h2>Couldn\u2019t fetch ' + repo + ' from ' + forge + '</h2>'
+        + '<p>The pull request loaded, but Klaussy couldn\u2019t download its commits to build the diff. Check your network or VPN, then try again.</p>'
+        + '<code>' + PR.escHtml(state.diffError) + '</code>'
+        + '<div class="pr-review-load-error-actions">'
+          + '<button class="pr-review-btn pr-review-retry-diff" type="button">Retry</button>'
+          + '<a href="#" class="pr-review-external" data-url="' + PR.escHtml((state.meta && state.meta.url) || '') + '">Open on ' + forge + '</a>'
+        + '</div>'
+      + '</div>'
+    + '</div>';
+    PR.bindHeader(state);
+    var retry = PR.hostEl.querySelector('.pr-review-retry-diff');
+    retry.addEventListener('click', function () {
+      retry.setAttribute('aria-disabled', 'true');
+      window.klaus.pr.retryDiff();
+    });
+    // Later broadcasts (threads arriving, a pop-out toggle) repaint this view; only a new error takes focus.
+    var errorKey = state.number + '\n' + state.diffError;
+    if (PR.diffErrorShown !== errorKey) {
+      PR.diffErrorShown = errorKey;
+      retry.focus();
+    }
   };
 
   PR.renderEmpty = function() {
@@ -397,6 +445,11 @@ window.PrReview = window.PrReview || {};
     // onReviewState(popped:true) (the broadcast races app.js's unmount) could
     // repaint the panel back in, leaving the review visible in BOTH windows.
     if (state && state.popped && !PR.isPopout) return;
+    // lastState stays unset so the full first render (checks fetch and all) runs once the diff lands.
+    if (state && (state.diffPending || state.diffError)) {
+      PR.renderDiffPreparing(state);
+      return;
+    }
     // Preserve selection across updates unless the PR number changed, and
     // fire a one-shot checks fetch when a new PR comes into view (also
     // covers first-load since lastState is null then).

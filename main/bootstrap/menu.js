@@ -117,7 +117,7 @@ function installAppMenu() {
           },
         },
         {
-          label: 'Git Accounts (GitHub, GitLab & Bitbucket)',
+          label: 'Git Accounts (GitHub, GitLab, Bitbucket & Azure DevOps)',
           click: (_item, focusedWindow) => {
             const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-gh-accounts');

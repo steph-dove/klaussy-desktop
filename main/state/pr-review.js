@@ -417,7 +417,11 @@ async function ensureWorktreeForActivePr() {
   if (auth.error) return { error: auth.error };
   const authedUrl = auth.url;
   const env = { ...gitEnv, ...auth.env };
-  const { refspec: fetchRef, fetchTarget: fetchHeadTarget } = adapter.headFetch(pr, localBranch);
+  // headFetch may name another repo to fetch the head from (an Azure DevOps fork).
+  const headSpec = adapter.headFetch(pr, localBranch);
+  if (headSpec.error) return { error: headSpec.error };
+  const { refspec: fetchRef, fetchTarget: fetchHeadTarget, url: headUrl } = headSpec;
+  const headFetchUrl = headUrl || authedUrl;
 
   // Step 1: reuse any existing worktree on this branch across every clone
   const existingMatch = findWorktreeForBranchAcrossClones(baseOwner, baseRepo, localBranch);
@@ -432,7 +436,7 @@ async function ensureWorktreeForActivePr() {
     } catch (_) {}
     let refreshed = 'none';
     try {
-      execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], {
+      execFileSync('git', ['fetch', headFetchUrl, fetchHeadTarget], {
         cwd: existingWorktreePath, stdio: 'pipe', env,
       });
       try {
@@ -478,7 +482,7 @@ async function ensureWorktreeForActivePr() {
 
   if (fs.existsSync(worktreePath)) {
     try {
-      execFileSync('git', ['fetch', authedUrl, fetchHeadTarget], { cwd: worktreePath, stdio: 'pipe', env });
+      execFileSync('git', ['fetch', headFetchUrl, fetchHeadTarget], { cwd: worktreePath, stdio: 'pipe', env });
       try {
         execFileSync('git', ['merge', '--ff-only', 'FETCH_HEAD'], { cwd: worktreePath, stdio: 'pipe', env });
       } catch (_) {}
@@ -490,7 +494,7 @@ async function ensureWorktreeForActivePr() {
   }
 
   try {
-    execFileSync('git', ['fetch', authedUrl, fetchRef], {
+    execFileSync('git', ['fetch', headFetchUrl, fetchRef], {
       cwd, stdio: 'pipe', env,
     });
   } catch (err) {
@@ -635,4 +639,5 @@ module.exports = {
   useAccountForReview,
   restoreAccountAfterReview,
   restoreGhAfterReview,
+  resolveBaseClone,
 };

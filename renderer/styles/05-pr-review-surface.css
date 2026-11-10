@@ -8055,3 +8055,75 @@ button.js-ai-review:hover,
 .pr-gh-details { margin: 0 0 12px; }
 .pr-gh-details > summary { cursor: pointer; color: var(--text-muted); width: fit-content; }
 .pr-gh-details[open] > summary { margin-bottom: 8px; }
+
+/* ---- Azure DevOps ---- */
+
+/* Account rows are <button>s, so Remove sits beside the row, not inside it. */
+.gh-account-row-wrap { display: flex; gap: 6px; align-items: stretch; }
+.gh-account-row-wrap .gh-account-row { flex: 1; min-width: 0; }
+.gh-account-row .gh-account-name { min-width: 0; }
+.gh-account-name .gh-account-sub {
+  display: block; font-weight: normal; color: var(--text-dim); font-size: 11px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-account-name .gh-account-sub-invalid { color: var(--diff-del-fg, #e27c7c); font-weight: 600; }
+.gh-account-row-wrap .gh-account-action,
+.gh-account-row-wrap .gh-account-badge { white-space: nowrap; flex-shrink: 0; }
+.gh-account-remove {
+  background: transparent; color: var(--text-dim); border: 1px solid var(--border);
+  border-radius: 6px; padding: 0 10px; font-size: 11px; font-family: inherit; cursor: pointer;
+}
+.gh-account-remove:hover { color: var(--error); border-color: var(--error); }
+
+/* #0078d4 is Azure blue, drawn as a ring so the text keeps theme contrast. */
+.pr-picker-forge.pr-forge-azure {
+  background: transparent;
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px #0078d4;
+}
+
+/* Wrap so the hint and Connect buttons stay inside narrow dialogs. */
+.pr-picker-account-row { flex-wrap: wrap; }
+.pr-picker-account { max-width: 100%; min-width: 0; }
+.pr-picker-account-hint { flex: 1 1 220px; min-width: 0; text-align: right; line-height: 1.35; }
+
+/* Connect Azure DevOps dialog (same values as the Bitbucket dialog's inline styles). */
+.az-field { font-size: 12px; font-weight: 500; }
+.az-field input {
+  display: block; width: 100%; margin-top: 4px; padding: 6px 8px; border-radius: 4px;
+  border: 1px solid var(--border); background: var(--bg-input); color: inherit; font: inherit; font-weight: normal;
+}
+.az-help { display: block; margin-top: 4px; font-weight: normal; color: var(--text-dim); font-size: 11px; }
+.az-scopes { margin: 0; color: var(--text-dim); font-size: 12px; line-height: 1.45; }
+.az-scopes strong { color: var(--text); font-weight: 600; }
+.az-link {
+  background: none; border: 0; padding: 0; font: inherit; color: var(--accent);
+  text-decoration: underline; cursor: pointer;
+}
+.az-login-error { color: var(--danger, #ff5555); font-size: 12px; line-height: 1.4; }
+.az-primary[aria-busy="true"] { cursor: progress; }
+
+/* PR review while a deferred diff is built, and if building it fails. */
+.pr-review-preparing { padding: 24px; display: flex; flex-direction: column; gap: 10px; max-width: 560px; }
+.pr-review-preparing-line { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 13px; }
+.pr-review-spinner {
+  width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: pr-ai-spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pr-review-spinner { animation: none; }
+}
+.pr-review-preparing-sub { color: var(--text-dim); font-size: 12px; margin: 0; }
+.pr-review-load-error {
+  border: 1px solid var(--border); border-left: 3px solid var(--error); border-radius: 6px;
+  background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+}
+.pr-review-load-error h2 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.pr-review-load-error p { margin: 0; font-size: 12px; color: var(--text-dim); line-height: 1.45; }
+.pr-review-load-error code {
+  font-family: var(--font-mono); font-size: 11px; color: var(--text);
+  background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; display: block;
+  white-space: pre-wrap; word-break: break-word;
+}
+.pr-review-load-error-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }

@@ -201,7 +201,7 @@ async function ghExecP(args, opts = {}) {
 function ghAccountUser(username) {
   // The PR picker passes its account ids ('github:<user>', 'gitlab:...').
   if (typeof username === 'string' && username.startsWith('github:')) username = username.slice('github:'.length);
-  if (!username || /^(gitlab|bitbucket):/.test(username)) return null;
+  if (!username || /^(gitlab|bitbucket|azure):/.test(username)) return null;
   return username;
 }
 

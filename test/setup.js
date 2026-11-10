@@ -46,6 +46,21 @@ const fakeApp = {
 // Records each registerSchemesAsPrivileged call; Electron honours only one.
 const privilegedSchemeCalls = [];
 
+// A reversible stand-in for safeStorage. Tests flip `available` or `backend`
+// to exercise the refusal paths.
+const fakeSafeStorage = {
+  available: true,
+  backend: 'gnome_libsecret',
+  isEncryptionAvailable() { return this.available; },
+  getSelectedStorageBackend() { return this.backend; },
+  encryptString(s) { return Buffer.from('enc:' + Buffer.from(s, 'utf8').toString('base64'), 'utf8'); },
+  decryptString(buf) {
+    const text = buf.toString('utf8');
+    if (!text.startsWith('enc:')) throw new Error('Error while decrypting the ciphertext provided to safeStorage.decryptString.');
+    return Buffer.from(text.slice(4), 'base64').toString('utf8');
+  },
+};
+
 const electronStub = {
   app: fakeApp,
   ipcMain: { handle: () => {}, on: () => {} },
@@ -65,6 +80,7 @@ const electronStub = {
   contextBridge: { exposeInMainWorld: () => {} },
   ipcRenderer: { invoke: () => Promise.resolve(), on: () => {}, send: () => {} },
   webUtils: { getPathForFile: () => '' },
+  safeStorage: fakeSafeStorage,
 };
 
 const origLoad = Module._load;
@@ -73,4 +89,4 @@ Module._load = function (request, parent, ...rest) {
   return origLoad.call(this, request, parent, ...rest);
 };
 
-module.exports = { testUserData, fakeApp, electronStub, privilegedSchemeCalls };
+module.exports = { testUserData, fakeApp, electronStub, privilegedSchemeCalls, fakeSafeStorage };

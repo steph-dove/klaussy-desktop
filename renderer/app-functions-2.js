@@ -368,7 +368,7 @@ window.App = window.App || {};
     commands.push({ label: 'Memory (CLAUDE.md)', action: function () { Dialogs.showMemory(); } });
     commands.push({ label: 'MCP Servers', action: function () { Dialogs.showMcpServers(); } });
     commands.push({ label: 'Plugins', action: function () { Dialogs.showPlugins(); } });
-    commands.push({ label: 'Git accounts (GitHub & GitLab)', action: function () { Dialogs.showGhAccounts(); } });
+    commands.push({ label: 'Git accounts (GitHub, GitLab, Bitbucket & Azure DevOps)', action: function () { Dialogs.showGhAccounts(); } });
     commands.push({ label: 'Check dependencies…', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: App.showLogViewer });
     commands.push({ label: 'Add klaussy review to GitHub\u2026', action: function () { window.klaus.gh.openExternal('https://github.com/apps/klaussy-review'); } });
@@ -441,7 +441,7 @@ window.App = window.App || {};
           + '<span class="pr-picker-account-hint" aria-live="polite"></span>'
         + '</div>'
         + '<div class="pr-picker-url-row">'
-          + '<input type="text" class="pr-picker-url" aria-label="Pull request or merge request URL" placeholder="Paste a GitHub PR or GitLab MR URL" />'
+          + '<input type="text" class="pr-picker-url" aria-label="Pull request or merge request URL" placeholder="Paste a GitHub, GitLab, Bitbucket or Azure DevOps PR URL" />'
           + '<button class="pr-picker-start" type="button" disabled>Start review</button>'
         + '</div>'
         + '<div class="pr-picker-search-row">'
@@ -543,14 +543,56 @@ window.App = window.App || {};
       } else if (parsed && parsed.forge === 'bitbucket' && (!accountSelect || !accountSelect.querySelector('option[value^="bitbucket:"]'))) {
         accountHint.textContent = 'Bitbucket PR detected. Connect a Bitbucket App Password in Git Accounts or set $BITBUCKET_TOKEN.';
         accountHint.classList.remove('pr-picker-account-hint-error');
+      } else if (parsed && parsed.forge === 'azure') {
+        accountHint.classList.remove('pr-picker-account-hint-error');
+        accountHint.textContent = '';
+        window.klaus.pr.parseUrl(url).then(function (full) {
+          if (urlInput.value.trim() !== url) return;
+          if (!full || full.forge !== 'azure') {
+            accountHint.textContent = 'That doesn\u2019t look like a full Azure DevOps pull request URL.';
+            return;
+          }
+          var az = azureAccountForUrl(full);
+          if (az) {
+            selectedAccount = az.id;
+            if (accountSelect) accountSelect.value = az.id;
+            accountHint.textContent = 'Azure DevOps PR detected. Will use ' + az.user + ' (' + azureCollectionName(az) + ').';
+          } else {
+            accountHint.textContent = 'Azure DevOps PR detected. Connect an Azure DevOps account, or set AZURE_DEVOPS_EXT_PAT.';
+          }
+        }, function (err) {
+          console.error('[pr-picker] parsing the Azure DevOps URL failed:', err);
+          if (urlInput.value.trim() === url) accountHint.textContent = 'Azure DevOps PR detected.';
+        });
       } else {
         accountHint.textContent = '';
       }
     });
 
+    // Azure DevOps accounts from the last populateAccountSelect, for matching a pasted URL.
+    var azureAccounts = [];
+
+    // "contoso" for an org on dev.azure.com, the host for a Server collection.
+    function azureCollectionName(a) {
+      if (a.host === 'dev.azure.com') return a.collectionUrl ? a.collectionUrl.replace(/\/+$/, '').split('/').pop() : a.collectionPath;
+      return a.host;
+    }
+
+    // The saved account for the URL's organization or collection (as main parsed it): the active one, else any.
+    function azureAccountForUrl(parsed) {
+      var hits = azureAccounts.filter(function (a) {
+        return !a.needsReentry && a.collectionPath === parsed.collectionPath && a.host === parsed.host;
+      });
+      return hits.filter(function (a) { return a.active; })[0] || hits[0] || null;
+    }
+
     // Parse {owner, repo, number, forge} from a PR or MR URL for autodetect.
     function parsePrUrl(s) {
       if (!s) return null;
+      // Azure DevOps first: its "/_git/{repo}/pullrequest/{id}" path fits no other forge's pattern.
+      // The collection comes from main (pr.parseUrl), so the two never disagree about it.
+      var az = s.match(/\/_git\/[^/?#]+\/pullrequest\/(\d+)/i);
+      if (az) return { forge: 'azure', number: parseInt(az[1], 10) };
       var gh = s.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
       if (gh) return { forge: 'github', owner: gh[1], repo: gh[2].replace(/\.git$/, ''), number: parseInt(gh[3], 10) };
       var gl = s.match(/https?:\/\/[^/]+\/(.+?)(?:\/-)?\/merge_requests\/(\d+)/);
@@ -601,6 +643,10 @@ window.App = window.App || {};
       startBtn.textContent = 'Loading…';
       try { await ensureAccountCanSeeUrl(url); } catch (_) {}
       var parsedUrl = parsePrUrl(url);
+      if (parsedUrl && parsedUrl.forge === 'azure') {
+        startBtn.textContent = 'Preparing diff…';
+        A11y.announce('Preparing the diff. The first load clones the repo, so it can take a minute.');
+      }
       var result = await loadPr(url, parsedUrl ? (parsedUrl.forge === 'gitlab' ? 'MR !' : 'PR #') + parsedUrl.number : 'pull request');
       if (result.error) {
         urlInput.readOnly = false;
@@ -626,14 +672,22 @@ window.App = window.App || {};
     startBtn.addEventListener('click', startFromUrl);
 
     async function populateAccountSelect() {
-      var ghRes = null, glabRes = null, bbRes = null;
+      var ghRes = null, glabRes = null, bbRes = null, azRes = null;
       try { ghRes = await window.klaus.gh.listAccounts(); } catch (_) {}
       try { if (window.klaus.glab) glabRes = await window.klaus.glab.listAccounts(); } catch (_) {}
       try { if (window.klaus.bitbucket) bbRes = await window.klaus.bitbucket.listAccounts(); } catch (_) {}
+      try {
+        if (window.klaus.azure) azRes = await window.klaus.azure.listAccounts();
+      } catch (err) {
+        console.error('[pr-picker] reading Azure DevOps accounts failed:', err);
+        accountHint.textContent = 'Couldn\u2019t read Azure DevOps accounts: ' + ((err && err.message) || err);
+        accountHint.classList.add('pr-picker-account-hint-error');
+      }
 
       var ghAccounts = (ghRes && ghRes.accounts) || [];
       var glabAccounts = (glabRes && glabRes.accounts) || [];
       var bbAccounts = (bbRes && bbRes.accounts) || [];
+      azureAccounts = (azRes && azRes.accounts) || [];
 
       var allAccounts = [];
       ghAccounts.forEach(function (a) {
@@ -645,7 +699,7 @@ window.App = window.App || {};
           active: a.active,
           valid: a.valid,
           outage: a.outage,
-          label: (glabAccounts.length > 0 || bbAccounts.length > 0 ? 'GitHub: ' : '') + a.username,
+          label: (glabAccounts.length > 0 || bbAccounts.length > 0 || azureAccounts.length > 0 ? 'GitHub: ' : '') + a.username,
         });
       });
       glabAccounts.forEach(function (a) {
@@ -673,7 +727,19 @@ window.App = window.App || {};
         });
       });
 
-      renderConnectButtons(ghAccounts.length === 0, glabAccounts.length === 0, bbAccounts.length === 0);
+      azureAccounts.forEach(function (a) {
+        allAccounts.push({
+          id: a.id,
+          username: a.user,
+          forge: 'azure',
+          host: a.host,
+          active: a.active,
+          valid: !a.needsReentry,
+          label: 'Azure DevOps (' + azureCollectionName(a) + '): ' + a.user,
+        });
+      });
+
+      renderConnectButtons(ghAccounts.length === 0, glabAccounts.length === 0, bbAccounts.length === 0, azureAccounts.length === 0);
       var accountLabel = overlay.querySelector('.pr-picker-account-label');
       if (allAccounts.length === 0) {
         var row = overlay.querySelector('.pr-picker-account-row');
@@ -712,7 +778,11 @@ window.App = window.App || {};
       }
 
       if (url) {
-        if (/gitlab/i.test(url) || /merge_requests/i.test(url)) {
+        var azM = url.match(/\/_git\/([^/?#]+)\/pullrequest\/\d+/i);
+        if (azM) {
+          forge = 'Azure DevOps';
+          if (!repo) repo = decodeURIComponent(azM[1]);
+        } else if (/gitlab/i.test(url) || /merge_requests/i.test(url)) {
           forge = 'GitLab';
           var glM = url.match(/https?:\/\/[^/]+\/(.+?)\/(?:-\/)?merge_requests\/\d+/i);
           if (glM && !repo) repo = glM[1];
@@ -733,7 +803,7 @@ window.App = window.App || {};
 
       var repoName = repo.includes('/') ? repo.split('/').pop() : repo;
       var stateLabel = it.isDraft ? 'draft' : (it.state || 'open').toLowerCase();
-      var forgeClass = 'pr-forge-' + forge.toLowerCase();
+      var forgeClass = 'pr-forge-' + (forge === 'Azure DevOps' ? 'azure' : forge.toLowerCase());
 
       return '<div class="pr-picker-item" role="button" tabindex="0" data-url="' + AppUtils.escAttr(url) + '">'
         + '<span class="pr-picker-num">#' + AppUtils.escHtml(it.number) + '</span>'
@@ -868,13 +938,25 @@ window.App = window.App || {};
         }
       } },
       github: { label: 'Connect GitHub…', run: signInToGitHub },
+      azure: { label: 'Connect Azure DevOps…', run: function () {
+        Dialogs.showAzureLogin({
+          onSuccess: async function (account) {
+            accountHint.textContent = 'Azure DevOps account connected';
+            await populateAccountSelect();
+            if (account && account.id && accountSelect) {
+              selectedAccount = account.id;
+              accountSelect.value = account.id;
+            }
+          },
+        });
+      } },
     };
 
     // Connecting opens a login or writes the clipboard, so it lives on buttons; in the select, arrowing past it would fire it.
-    function renderConnectButtons(github, gitlab, bitbucket) {
+    function renderConnectButtons(github, gitlab, bitbucket, azure) {
       var hadFocus = connectRow.contains(document.activeElement);
       connectRow.innerHTML = '';
-      [['bitbucket', bitbucket], ['gitlab', gitlab], ['github', github]].forEach(function (pair) {
+      [['bitbucket', bitbucket], ['gitlab', gitlab], ['azure', azure], ['github', github]].forEach(function (pair) {
         if (!pair[1]) return;
         var b = document.createElement('button');
         b.type = 'button';

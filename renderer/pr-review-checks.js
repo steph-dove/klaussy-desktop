@@ -1156,6 +1156,13 @@
         PR.updateMergeGate(wrap, PR.lastState);
         return;
       }
+      // Azure DevOps can queue a completion behind branch policies; that isn't merged yet.
+      if (result && result.warning) {
+        window.toast.warn(result.warning);
+        btn.innerHTML = 'Merge <span aria-hidden="true">\u25BE</span>';
+        btn.disabled = false;
+        return;
+      }
       A11y.announce('PR merged');
       // State reload is triggered on the main side; the resulting broadcast
       // re-renders the header with the updated state pill.
