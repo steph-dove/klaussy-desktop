@@ -6,7 +6,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  FORGES, getForge, forgeForUrl, forgeForRemote, parseAccountId, toIpcError,
+  FORGES, getForge, forgeForUrl, forgeForRemote, parseAccountId, accountForUrlForge, toIpcError,
 } = require('../../main/util/forges');
 
 const METHODS = [
@@ -17,7 +17,7 @@ const METHODS = [
 ];
 
 test('getForge returns each registered adapter by id', () => {
-  for (const id of ['github', 'gitlab', 'bitbucket']) {
+  for (const id of ['github', 'gitlab', 'bitbucket', 'azure']) {
     assert.equal(getForge(id).id, id);
   }
 });
@@ -95,4 +95,28 @@ test('headFetch gives each forge its refspec', () => {
   assert.deepEqual(getForge('github').headFetch(pr, 'feat/x'), { refspec: '+refs/pull/7/head:refs/heads/feat/x', fetchTarget: 'pull/7/head' });
   assert.deepEqual(getForge('gitlab').headFetch(pr, 'feat/x'), { refspec: '+refs/merge-requests/7/head:refs/heads/feat/x', fetchTarget: 'merge-requests/7/head' });
   assert.deepEqual(getForge('bitbucket').headFetch(pr, 'feat/x'), { refspec: '+refs/heads/feat/x:refs/heads/feat/x', fetchTarget: 'feat/x' });
+});
+
+test('parseAccountId reads an Azure account id', () => {
+  assert.deepEqual(parseAccountId('azure:tfs.corp%3A8443:tfs%2Fcoll:dev%40corp.com'), {
+    forge: 'azure', host: 'tfs.corp:8443', collectionPath: 'tfs/coll', user: 'dev@corp.com',
+  });
+});
+
+test('forgeForUrl and forgeForRemote pick the Azure adapter', () => {
+  assert.equal(forgeForUrl('https://dev.azure.com/o/p/_git/r/pullrequest/1').adapter.id, 'azure');
+  assert.equal(forgeForRemote('git@ssh.dev.azure.com:v3/o/p/r').adapter.id, 'azure');
+});
+
+test('a pasted URL wins over an account from another forge when Azure is on either side', () => {
+  const gh = parseAccountId('github:octo');
+  const az = parseAccountId('azure:dev.azure.com:contoso:me%40contoso.com');
+  const gl = parseAccountId('gitlab:gitlab.com:me');
+  assert.equal(accountForUrlForge(gh, 'azure').user, null);
+  assert.equal(accountForUrlForge(parseAccountId('octo'), 'azure').user, null);
+  assert.equal(accountForUrlForge(az, 'github').user, null);
+  assert.equal(accountForUrlForge(az, 'azure').user, 'me@contoso.com');
+  // Pairs without Azure behave as before.
+  assert.deepEqual(accountForUrlForge(gl, 'github'), gl);
+  assert.deepEqual(accountForUrlForge(gh, 'github'), gh);
 });

@@ -635,4 +635,5 @@ module.exports = {
   useAccountForReview,
   restoreAccountAfterReview,
   restoreGhAfterReview,
+  resolveBaseClone,
 };

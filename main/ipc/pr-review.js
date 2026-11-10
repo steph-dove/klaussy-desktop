@@ -20,13 +20,13 @@ const {
   pushReviewHistory, fetchThreadsForActive, reloadActivePrReviewMeta,
   findProjectForRepo, findWorktreeForBranch, findWorktreeForBranchAcrossClones,
   ensureWorktreeForActivePr, useAccountForReview, restoreAccountAfterReview,
-  restoreGhAfterReview, pushPrHead,
+  restoreGhAfterReview, pushPrHead, resolveBaseClone,
 } = require('../state/pr-review');
 const { ghJson } = require('../util/gh-json');
 const { classifyGhError } = require('../util/gh-error');
 const { prForBranch } = require('../util/pr-for-branch');
 const {
-  getForge, forgeForUrl, forgeForRemote, parseAccountId, errorText, toIpcError,
+  getForge, forgeForUrl, forgeForRemote, parseAccountId, accountForUrlForge, errorText, toIpcError,
 } = require('../util/forges');
 const { humanizeComment } = require('../util/humanize-comment');
 const { probeRepoAccess, pruneUnreachableHistory, cachedProbe, withoutUrls } = require('../util/review-history');
@@ -153,7 +153,8 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
     } catch (_) {}
   }
 
-  const acct = parseAccountId(account);
+  let acct = parseAccountId(account);
+  if (url) acct = accountForUrlForge(acct, forge);
   const acctUser = acct.user;
   if (acct.forge) forge = acct.forge;
   if (acct.host) host = acct.host;
@@ -161,7 +162,7 @@ ipcMain.handle('pr-load', async (event, { number, url, account } = {}) => {
   const adapter = getForge(forge);
   if (acctUser) useAccountForReview(adapter.id, acctUser, host);
   try {
-    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd });
+    const loaded = await adapter.loadPr({ target, projectPath, host, account: acctUser, cwd, resolveBaseClone });
     const { meta, diff } = loaded;
 
     const prev = prReview.active;
@@ -236,7 +237,7 @@ ipcMain.handle('pr-pull-updates', async () => {
 
   let metaError = null;
   try {
-    const { meta, diff } = await adapter.refreshPr(prReview.active, { cwd });
+    const { meta, diff } = await adapter.refreshPr(prReview.active, { cwd, resolveBaseClone });
     if (!prReview.active || prReview.active.meta.url !== url) {
       return { error: 'Active PR changed during refresh' };
     }
@@ -272,7 +273,7 @@ ipcMain.handle('pr-review-merge', async (_event, { strategy }) => {
   if (merged.error) return merged;
   await reloadActivePrReviewMeta();
   fetchThreadsForActive();
-  return { ok: true };
+  return merged.warning ? { ok: true, warning: merged.warning } : { ok: true };
 });
 
 // G5: materialize the PR as a worktree + spawn a task in it.

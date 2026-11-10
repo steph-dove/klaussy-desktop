@@ -5,8 +5,10 @@ const { parseForgeUrl, detectForgeFromRemote } = require('../forge-url');
 const github = require('./github');
 const gitlab = require('./gitlab');
 const bitbucket = require('./bitbucket');
+const azure = require('./azure');
+const { parseAzureAccountId } = require('../azure-api');
 
-const FORGES = { github, gitlab, bitbucket };
+const FORGES = { github, gitlab, bitbucket, azure };
 
 // Anything unrecognised (no forge recorded, or a remote on an unknown host)
 // is treated as GitHub, as the handlers always have.
@@ -25,12 +27,15 @@ function forgeForRemote(remoteUrl) {
 }
 
 // Picker account ids: "gitlab:<host>:<user>", "bitbucket:<host>:<user>",
-// "github:<user>", or a bare gh username. forge and host are null when the id
-// doesn't name them, so the caller keeps what the URL or remote said.
+// "azure:<host>:<collection>:<user>" (each part URI-encoded), "github:<user>",
+// or a bare gh username. forge and host are null when the id doesn't name
+// them, so the caller keeps what the URL or remote said.
 function parseAccountId(account) {
   if (typeof account !== 'string') {
     return { forge: null, host: null, user: account && account.username };
   }
+  const az = parseAzureAccountId(account);
+  if (az) return { forge: 'azure', host: az.host, collectionPath: az.collectionPath, user: az.user };
   for (const forge of ['gitlab', 'bitbucket']) {
     if (account.startsWith(forge + ':')) {
       const parts = account.split(':');
@@ -41,6 +46,15 @@ function parseAccountId(account) {
     return { forge: 'github', host: null, user: account.slice('github:'.length) };
   }
   return { forge: null, host: null, user: account };
+}
+
+// With Azure DevOps on either side, the forge of a pasted URL wins over the
+// picker's account: an Azure URL uses its collection's own account, and an
+// Azure account never turns another forge's URL into Azure. Other pairs keep
+// the account as before.
+function accountForUrlForge(acct, urlForge) {
+  if ((urlForge === 'azure') !== (acct.forge === 'azure')) return { forge: null, host: null, user: null };
+  return acct;
 }
 
 // CLI failures carry stderr; REST failures carry the response body.
@@ -55,5 +69,5 @@ function toIpcError(adapter, err, ctx) {
 }
 
 module.exports = {
-  FORGES, getForge, forgeForUrl, forgeForRemote, parseAccountId, errorText, toIpcError,
+  FORGES, getForge, forgeForUrl, forgeForRemote, parseAccountId, accountForUrlForge, errorText, toIpcError,
 };
