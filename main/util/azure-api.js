@@ -31,8 +31,12 @@ function parseAzureAccountId(id) {
   if (typeof id !== 'string' || !id.startsWith('azure:')) return null;
   const parts = id.split(':');
   if (parts.length !== 4) return null;
-  const [host, collectionPath, user] = parts.slice(1).map((p) => decodeURIComponent(p));
-  return { host, collectionPath, user };
+  try {
+    const [host, collectionPath, user] = parts.slice(1).map((p) => decodeURIComponent(p));
+    return { host, collectionPath, user };
+  } catch (_) {
+    return null; // a malformed escape, e.g. "azure:%:a:b" from the renderer
+  }
 }
 
 function accountsFromConfig() {
@@ -202,7 +206,9 @@ async function saveAzureAccount({ collection, pat }) {
     sameCollection(a, coll.host, coll.collectionPath) ? { ...a, active: false } : a
   ));
   const entry = { ...coll, user, userId, patEnc, active: true };
-  const i = accounts.findIndex((a) => sameCollection(a, coll.host, coll.collectionPath) && a.user === user);
+  // Saving the same user again replaces the entry; emails differ only by case at times.
+  const i = accounts.findIndex((a) => sameCollection(a, coll.host, coll.collectionPath)
+    && String(a.user).toLowerCase() === String(user).toLowerCase());
   if (i >= 0) accounts[i] = entry; else accounts.push(entry);
   config.azureAccounts = accounts;
   saveConfig(config);

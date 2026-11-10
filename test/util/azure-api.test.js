@@ -175,3 +175,19 @@ test('resolveSavedCollection recovers the web host and scheme for an SSH remote 
     await flushSaveConfig();
   }
 });
+
+test('a malformed account id is rejected, not thrown', async () => {
+  assert.equal(azure.parseAzureAccountId('azure:%:a:b'), null);
+  assert.equal(await azure.removeAzureAccount('azure:%:a:b'), false);
+  assert.equal(await azure.switchAzureAccount('azure:%:a:b'), false);
+});
+
+test('saving the same user with different email case replaces the account', async () => {
+  let email = 'Dev@Contoso.com';
+  await withFetch(() => ({ body: connectionData(undefined, email) }), async () => {
+    await azure.saveAzureAccount({ collection: 'contoso', pat: PAT });
+    email = 'dev@contoso.com';
+    await azure.saveAzureAccount({ collection: 'contoso', pat: PAT });
+    assert.equal(azure.listAzureAccounts().length, 1);
+  });
+});

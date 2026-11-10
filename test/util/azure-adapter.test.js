@@ -315,6 +315,9 @@ test('listChecks reports an error instead of a partial list', async () => {
   });
 });
 
+const JOB_A = '2d3f1c0e-8a4b-5c6d-9e7f-0a1b2c3d4e5f';
+const JOB_B = '7e6d5c4b-3a29-1807-f6e5-d4c3b2a19087';
+
 test('failedCheckLogs returns the failed tasks\' log tail and the pipeline YAML', async () => {
   const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'ado-wt-'));
   fs.mkdirSync(path.join(wt, 'ci'));
@@ -322,25 +325,27 @@ test('failedCheckLogs returns the failed tasks\' log tail and the pipeline YAML'
   const longLog = Array.from({ length: 600 }, (_, i) => `line ${i}`).join('\n');
   try {
     await withApi({
+      // Real job ids are GUIDs; a second failed job checks only the linked job's logs are read.
       [`GET ${BUILDS}/501/timeline`]: { records: [
-        { id: 'job-a', type: 'Job', name: 'Unit', result: 'failed', log: { id: 1 } },
-        { id: 't1', type: 'Task', name: 'npm test', result: 'failed', parentId: 'job-a', log: { id: 7 } },
-        { id: 't2', type: 'Task', name: 'checkout', result: 'succeeded', parentId: 'job-a', log: { id: 6 } },
-        { id: 't3', type: 'Task', name: 'other job', result: 'failed', parentId: 'job-b', log: { id: 8 } },
+        { id: JOB_A, type: 'Job', name: 'Unit', result: 'failed', log: { id: 1 } },
+        { id: JOB_B, type: 'Job', name: 'Integration', result: 'failed', log: { id: 2 } },
+        { id: 't1', type: 'Task', name: 'npm test', result: 'failed', parentId: JOB_A, log: { id: 7 } },
+        { id: 't2', type: 'Task', name: 'checkout', result: 'succeeded', parentId: JOB_A, log: { id: 6 } },
+        { id: 't3', type: 'Task', name: 'other job', result: 'failed', parentId: JOB_B, log: { id: 8 } },
       ] },
       [`GET ${BUILDS}/501/logs/7`]: longLog,
       [`GET ${BUILDS}/501?`]: { id: 501, definition: { id: 9 } },
       'GET https://dev.azure.com/contoso/Web%20App/_apis/build/definitions/9': { process: { yamlFilename: '/ci/build.yml' } },
     }, async (calls) => {
       const res = await azure.failedCheckLogs(PR, {
-        checkLink: 'https://dev.azure.com/contoso/Web%20App/_build/results?buildId=501&view=logs&j=job-a', cwd: wt,
+        checkLink: `https://dev.azure.com/contoso/Web%20App/_build/results?buildId=501&view=logs&j=${JOB_A}`, cwd: wt,
       });
       assert.equal(res.error, undefined);
       assert.equal(res.logTail.split('\n').length, 400);
       assert.match(res.logTail, /line 599$/);
       assert.match(res.workflowBlock, /ci\/build\.yml/);
       assert.match(res.workflowBlock, /npm test/);
-      assert.ok(!calls.some((c) => /logs\/(6|8)/.test(c.url)));
+      assert.deepEqual(calls.filter((c) => /\/logs\//.test(c.url)).map((c) => c.url.match(/logs\/(\d+)/)[1]), ['7']);
     });
   } finally {
     fs.rmSync(wt, { recursive: true, force: true });

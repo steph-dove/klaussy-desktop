@@ -545,14 +545,25 @@ window.App = window.App || {};
         accountHint.classList.remove('pr-picker-account-hint-error');
       } else if (parsed && parsed.forge === 'azure') {
         accountHint.classList.remove('pr-picker-account-hint-error');
-        var az = azureAccountForUrl(parsed);
-        if (az) {
-          selectedAccount = az.id;
-          if (accountSelect) accountSelect.value = az.id;
-          accountHint.textContent = 'Azure DevOps PR detected. Will use ' + az.user + ' (' + azureCollectionName(az) + ').';
-        } else {
-          accountHint.textContent = 'Azure DevOps PR detected. Connect an Azure DevOps account, or set AZURE_DEVOPS_EXT_PAT.';
-        }
+        accountHint.textContent = '';
+        window.klaus.pr.parseUrl(url).then(function (full) {
+          if (urlInput.value.trim() !== url) return;
+          if (!full || full.forge !== 'azure') {
+            accountHint.textContent = 'That doesn\u2019t look like a full Azure DevOps pull request URL.';
+            return;
+          }
+          var az = azureAccountForUrl(full);
+          if (az) {
+            selectedAccount = az.id;
+            if (accountSelect) accountSelect.value = az.id;
+            accountHint.textContent = 'Azure DevOps PR detected. Will use ' + az.user + ' (' + azureCollectionName(az) + ').';
+          } else {
+            accountHint.textContent = 'Azure DevOps PR detected. Connect an Azure DevOps account, or set AZURE_DEVOPS_EXT_PAT.';
+          }
+        }, function (err) {
+          console.error('[pr-picker] parsing the Azure DevOps URL failed:', err);
+          if (urlInput.value.trim() === url) accountHint.textContent = 'Azure DevOps PR detected.';
+        });
       } else {
         accountHint.textContent = '';
       }
@@ -567,11 +578,10 @@ window.App = window.App || {};
       return a.host;
     }
 
-    // The saved account for the URL's organization or collection: the active one, else any.
+    // The saved account for the URL's organization or collection (as main parsed it): the active one, else any.
     function azureAccountForUrl(parsed) {
       var hits = azureAccounts.filter(function (a) {
-        return !a.needsReentry && a.collectionPath === parsed.collectionPath
-          && (a.host === parsed.host || (a.host === 'dev.azure.com' && parsed.host === 'dev.azure.com'));
+        return !a.needsReentry && a.collectionPath === parsed.collectionPath && a.host === parsed.host;
       });
       return hits.filter(function (a) { return a.active; })[0] || hits[0] || null;
     }
@@ -580,20 +590,9 @@ window.App = window.App || {};
     function parsePrUrl(s) {
       if (!s) return null;
       // Azure DevOps first: its "/_git/{repo}/pullrequest/{id}" path fits no other forge's pattern.
-      var az = s.match(/^https?:\/\/([^/]+)\/((?:[^/?#]+\/)*?)_git\/([^/?#]+)\/pullrequest\/(\d+)/i);
-      if (az) {
-        var host = az[1].toLowerCase();
-        var segs = az[2].split('/').filter(Boolean).map(function (x) { try { return decodeURIComponent(x); } catch (_) { return x; } });
-        var vs = host.match(/^([^.]+)\.visualstudio\.com$/);
-        var collectionPath = vs ? vs[1] : (host === 'dev.azure.com' ? (segs[0] || '') : segs.slice(0, segs.length > 1 ? -1 : undefined).join('/'));
-        return {
-          forge: 'azure',
-          host: vs ? 'dev.azure.com' : host,
-          collectionPath: collectionPath.toLowerCase(),
-          repo: (function () { try { return decodeURIComponent(az[3]); } catch (_) { return az[3]; } })(),
-          number: parseInt(az[4], 10),
-        };
-      }
+      // The collection comes from main (pr.parseUrl), so the two never disagree about it.
+      var az = s.match(/\/_git\/[^/?#]+\/pullrequest\/(\d+)/i);
+      if (az) return { forge: 'azure', number: parseInt(az[1], 10) };
       var gh = s.match(/https?:\/\/[^/]+\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
       if (gh) return { forge: 'github', owner: gh[1], repo: gh[2].replace(/\.git$/, ''), number: parseInt(gh[3], 10) };
       var gl = s.match(/https?:\/\/[^/]+\/(.+?)(?:\/-)?\/merge_requests\/(\d+)/);

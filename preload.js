@@ -298,6 +298,7 @@ contextBridge.exposeInMainWorld('klaus', {
     refreshThreads: () => ipcRenderer.invoke('pr-refresh-threads'),
     pullUpdates: () => ipcRenderer.invoke('pr-pull-updates'),
     retryDiff: () => ipcRenderer.invoke('pr-retry-diff'),
+    parseUrl: (url) => ipcRenderer.invoke('pr-parse-url', { url }),
     submitReview: ({ event, body, comments }) =>
       ipcRenderer.invoke('pr-submit-review', { event, body, comments }),
     addIssueComment: (body) => ipcRenderer.invoke('pr-add-issue-comment', { body }),

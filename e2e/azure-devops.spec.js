@@ -141,6 +141,11 @@ test.describe('Azure DevOps', () => {
     await overlay.locator('.pr-picker-url').fill('https://dev.azure.com/Contoso/Web/_git/web/pullrequest/482');
     await expect(overlay.locator('.pr-picker-account-hint')).toHaveText('Azure DevOps PR detected. Will use ada@contoso.com (Contoso).');
     await expect(overlay.locator('.pr-picker-account')).toHaveValue(CONTOSO.id);
+
+    // A project-less Server URL under /tfs/DefaultCollection still finds its saved account.
+    await overlay.locator('.pr-picker-url').fill('https://tfs.contoso.local/tfs/DefaultCollection/_git/web/pullrequest/3');
+    await expect(overlay.locator('.pr-picker-account-hint')).toHaveText('Azure DevOps PR detected. Will use ada (tfs.contoso.local).');
+    await expect(overlay.locator('.pr-picker-account')).toHaveValue(SERVER.id);
   });
 
   test('PR picker: with no Azure account, a pasted Azure URL offers Connect', async ({ electronApp, mainWindow }) => {
@@ -190,6 +195,12 @@ test.describe('Azure DevOps', () => {
     await expect(alert.getByRole('link', { name: 'Open on Azure DevOps' })).toBeVisible();
     const retry = alert.getByRole('button', { name: 'Retry' });
     await expect(retry).toBeFocused();
+
+    // A later broadcast with the same error repaints without pulling focus back to Retry.
+    await win.evaluate(() => document.activeElement.blur());
+    await win.evaluate((s) => window.PrReview.render(s), { ...base, diffPending: false, diffError: 'Could not resolve host: dev.azure.com', threads: [] });
+    await expect(retry).not.toBeFocused();
+
     await retry.click();
     await expect.poll(() => callsTo(electronApp, 'pr-retry-diff').then((c) => c.length)).toBe(1);
   });

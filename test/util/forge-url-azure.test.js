@@ -119,3 +119,10 @@ test('a project-less remote under /tfs/DefaultCollection matches its PR URL', ()
   assert.equal(remote.collectionUrl, 'https://tfs.corp/tfs/DefaultCollection');
   assert.equal(remote.projectPath, pr.projectPath);
 });
+
+test('parseAzureCollection drops a project after a visualstudio.com host', () => {
+  const { parseAzureCollection } = require('../../main/util/forge-url');
+  assert.deepEqual(parseAzureCollection('https://contoso.visualstudio.com/Web%20App'), {
+    host: 'dev.azure.com', collectionPath: 'contoso', collectionUrl: 'https://dev.azure.com/contoso',
+  });
+});

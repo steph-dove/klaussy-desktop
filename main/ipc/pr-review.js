@@ -111,6 +111,12 @@ ipcMain.handle('pr-authored', async (_event, { account } = {}) => {
   }
 });
 
+// Pure parse, no network: lets the picker match a pasted URL to a saved account with main's rules.
+ipcMain.handle('pr-parse-url', (_event, { url } = {}) => {
+  const found = forgeForUrl(url);
+  return found ? found.parsed : null;
+});
+
 ipcMain.handle('pr-lookup-url', async (_event, { url }) => {
   const cwd = currentRepoPath() || require('os').homedir();
   const found = forgeForUrl(url);
@@ -1011,14 +1017,24 @@ ipcMain.handle('pr-review-resolve-conflicts', async (_event, args) => {
   }
   if (!target || !target.pty) return { error: 'Failed to spawn a task on the worktree.' };
 
-  const pushHint = headRepoSlug
-    ? `\`git push https://github.com/${headRepoSlug}.git HEAD:${headBranch}\` (or \`gh\`)`
-    : `the PR's head fork`;
+  // Azure: give the agent the clean repo URL, never an authed one; its git uses the user's credential helper.
+  let headUrl = '';
+  if (prReview.active.forge === 'azure') {
+    if (!headOwner || !headRepoName) return { error: 'PR head repository missing from metadata.' };
+    const auth = getForge('azure').gitAuth(prReview.active, { owner: headOwner, repo: headRepoName });
+    if (auth.error) return { error: auth.error };
+    headUrl = auth.cleanUrl;
+  }
+  const fetchFrom = headUrl ? `"${headUrl}"` : 'origin';
+  let pushHint;
+  if (headUrl) pushHint = `\`git push "${headUrl}" HEAD:${headBranch}\` (it uses your git credentials for Azure DevOps)`;
+  else if (headRepoSlug) pushHint = `\`git push https://github.com/${headRepoSlug}.git HEAD:${headBranch}\` (or \`gh\`)`;
+  else pushHint = `the PR's head fork`;
   const BP_START = '\x1b[200~';
   const BP_END = '\x1b[201~';
   const text =
     `The push to the PR branch \`${headBranch}\`${headRepoSlug ? ` on \`${headRepoSlug}\`` : ''} was rejected because the remote has advanced past this worktree. Please get my commits integrated and pushed:\n\n`
-    + `1. Fetch the latest PR branch and rebase this worktree's commits onto it (\`git fetch origin ${headBranch}\` then \`git rebase FETCH_HEAD\`; a merge is fine if you prefer).\n`
+    + `1. Fetch the latest PR branch and rebase this worktree's commits onto it (\`git fetch ${fetchFrom} ${headBranch}\` then \`git rebase FETCH_HEAD\`; a merge is fine if you prefer).\n`
     + `2. Resolve any merge conflicts — keep both my local changes and the incoming remote changes where they don't truly conflict.\n`
     + `3. Commit the resolution.\n`
     + `4. Push the result to ${pushHint}.\n\n`

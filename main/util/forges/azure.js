@@ -312,8 +312,11 @@ module.exports = {
       const def = defId ? await azureJson(ctx, `/${encodeURIComponent(loc.project)}/_apis/build/definitions/${defId}`) : null;
       const yamlPath = def && def.process && def.process.yamlFilename;
       const full = yamlPath && cwd ? path.join(cwd, yamlPath.replace(/^[/\\]+/, '')) : null;
-      if (full && full.startsWith(path.resolve(cwd) + path.sep) && fs.existsSync(full)) {
-        const lines = fs.readFileSync(full, 'utf8').split('\n');
+      // Checked on real paths: a PR can commit the YAML as a symlink to a file outside the repo.
+      const rootReal = full && fs.existsSync(full) ? fs.realpathSync(cwd) : null;
+      const fullReal = rootReal ? fs.realpathSync(full) : null;
+      if (fullReal && fullReal.startsWith(rootReal + path.sep) && fs.statSync(fullReal).isFile()) {
+        const lines = fs.readFileSync(fullReal, 'utf8').split('\n');
         workflowBlock = `\n## Pipeline definition (\`${yamlPath.replace(/^[/\\]+/, '')}\`)\n\`\`\`yaml\n${lines.slice(0, 200).join('\n')}\n${lines.length > 200 ? '\n[... truncated ...]\n' : ''}\`\`\`\n`;
       }
     } catch (err) {

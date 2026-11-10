@@ -314,6 +314,7 @@ window.PrReview = window.PrReview || {};
     }
     PR.lastState = null;
     PR.selectedFile = null;
+    PR.diffErrorShown = null;
   };
 
   PR.renderLoading = function() {
@@ -333,6 +334,7 @@ window.PrReview = window.PrReview || {};
     var repo = PR.escHtml(azureRepoLabel(state));
     var forge = PR.escHtml(PR.forgeName(state));
     if (state.diffPending) {
+      PR.diffErrorShown = null;
       PR.hostEl.innerHTML = '<div class="pr-review-preparing" role="status">'
         + '<div class="pr-review-preparing-line"><span class="pr-review-spinner" aria-hidden="true"></span>'
           + '<span>Preparing the diff\u2026 fetching ' + repo + ' from ' + forge + '</span></div>'
@@ -357,7 +359,12 @@ window.PrReview = window.PrReview || {};
       retry.setAttribute('aria-disabled', 'true');
       window.klaus.pr.retryDiff();
     });
-    retry.focus();
+    // Later broadcasts (threads arriving, a pop-out toggle) repaint this view; only a new error takes focus.
+    var errorKey = state.number + '\n' + state.diffError;
+    if (PR.diffErrorShown !== errorKey) {
+      PR.diffErrorShown = errorKey;
+      retry.focus();
+    }
   };
 
   PR.renderEmpty = function() {
