@@ -92,3 +92,22 @@ test('non-Azure URLs still parse as before', () => {
 test('a dev.azure.com URL without an org is not treated as Azure', () => {
   assert.equal(parseForgeUrl('https://dev.azure.com/_git/repo/pullrequest/1'), null);
 });
+
+test('parseAzureCollection accepts what people type into the Connect dialog', () => {
+  const { parseAzureCollection } = require('../../main/util/forge-url');
+  const services = { host: 'dev.azure.com', collectionPath: 'contoso', collectionUrl: 'https://dev.azure.com/contoso' };
+  assert.deepEqual(parseAzureCollection('contoso'), services);
+  assert.deepEqual(parseAzureCollection('https://dev.azure.com/contoso/'), services);
+  assert.deepEqual(parseAzureCollection('dev.azure.com/contoso/Web%20App'), services);
+  assert.deepEqual(parseAzureCollection('https://contoso.visualstudio.com'), services);
+  assert.deepEqual(parseAzureCollection('https://contoso.visualstudio.com/DefaultCollection'), services);
+  assert.deepEqual(parseAzureCollection('https://dev.azure.com/contoso/proj/_git/repo/pullrequest/3'), services);
+  assert.deepEqual(parseAzureCollection('https://tfs.corp.example.com/tfs/DefaultCollection'), {
+    host: 'tfs.corp.example.com',
+    collectionPath: 'tfs/defaultcollection',
+    collectionUrl: 'https://tfs.corp.example.com/tfs/DefaultCollection',
+  });
+  assert.equal(parseAzureCollection(''), null);
+  assert.equal(parseAzureCollection('https://dev.azure.com/'), null);
+  assert.equal(parseAzureCollection('https://tfs.corp.example.com/'), null);
+});

@@ -93,6 +93,31 @@ function parseAzureRemote(trimmed) {
   return azureInfo({ scheme, host, collection, project, repo });
 }
 
+// Accepts Connect-dialog input: an org name, an org or Server collection URL, or a repo or PR URL.
+// Returns { host, collectionPath, collectionUrl } or null.
+function parseAzureCollection(input) {
+  let s = String(input || '').trim().replace(/\/+$/, '');
+  if (!s) return null;
+  if (/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(s)) s = `https://${AZURE_SERVICES_HOST}/${s}`;
+  else if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  const fromRepo = parseAzurePrUrl(s) || parseAzureRemote(s);
+  if (fromRepo) {
+    const { host, collectionPath, collectionUrl } = fromRepo;
+    return { host, collectionPath, collectionUrl };
+  }
+  let u;
+  try { u = new URL(s); } catch (_) { return null; }
+  const segs = u.pathname.split('/').filter(Boolean).map(decodeSegment);
+  // A project segment after the org is dropped on Services; on Server every segment is the collection.
+  const lowerHost = u.host.toLowerCase();
+  let collection = segs;
+  if (lowerHost === AZURE_SERVICES_HOST) collection = segs.slice(0, 1);
+  else if (/\.visualstudio\.com$/.test(lowerHost)) collection = segs.length && /^defaultcollection$/i.test(segs[0]) ? segs.slice(0, 1) : [];
+  const info = azureInfo({ scheme: u.protocol.replace(':', ''), host: u.host, collection, project: '_', repo: '_' });
+  if (!info) return null;
+  return { host: info.host, collectionPath: info.collectionPath, collectionUrl: info.collectionUrl };
+}
+
 // Parse a pull request / merge request URL across GitHub, GitLab, Bitbucket and Azure DevOps.
 // Returns { forge, host, projectPath, owner, repo, number, type } or null; Azure
 // DevOps adds collectionUrl, collectionPath, project and repoName.
@@ -215,4 +240,5 @@ module.exports = {
   parseForgeUrl,
   detectForgeFromRemote,
   stripGitSuffix,
+  parseAzureCollection,
 };
