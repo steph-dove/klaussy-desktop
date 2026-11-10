@@ -854,6 +854,14 @@ contextBridge.exposeInMainWorld('klaus', {
     removeAccount: (username, hostname) => ipcRenderer.invoke('bitbucket-remove-account', { username, hostname }),
   },
 
+  // ---- azure: Azure DevOps accounts (PATs stay in the main process) ----
+  azure: {
+    listAccounts: () => ipcRenderer.invoke('azure-list-accounts'),
+    saveAccount: (collection, pat) => ipcRenderer.invoke('azure-save-account', { collection, pat }),
+    switchAccount: (id) => ipcRenderer.invoke('azure-switch-account', { id }),
+    removeAccount: (id) => ipcRenderer.invoke('azure-remove-account', { id }),
+  },
+
   // ---- skills: Claude skills / commands / memory / MCP / plugins inventory ----
   skills: {
     listSkills: () => ipcRenderer.invoke('list-skills'),

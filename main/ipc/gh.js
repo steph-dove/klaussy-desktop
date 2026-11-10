@@ -622,6 +622,17 @@ ipcMain.handle('check-dependencies', async () => {
         } catch (_) { return []; }
       })(),
     },
+    // No CLI to install: a saved PAT or $AZURE_DEVOPS_EXT_PAT is all it needs.
+    azure: (() => {
+      const { listAzureAccounts, ENV_PAT } = require('../util/azure-api');
+      const accounts = listAzureAccounts();
+      return {
+        installed: true,
+        authed: accounts.some((a) => !a.needsReentry) || !!process.env[ENV_PAT],
+        envPat: !!process.env[ENV_PAT],
+        accounts,
+      };
+    })(),
     claude: {
       installed: claudeVersion.ok,
       version: claudeVersion.ok ? claudeVersion.output : null,
