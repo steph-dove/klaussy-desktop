@@ -6,7 +6,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const {
-  azureJson, azureText, getAzureAuth, basicHeader, fetchConnectionData,
+  azureJson, azureText, getAzureAuth, basicHeader, fetchConnectionData, apiVersion, resolveSavedCollection,
 } = require('../azure-api');
 const { classifyAzureError } = require('../azure-error');
 const { parseForgeUrl } = require('../forge-url');
@@ -57,12 +57,15 @@ function newThread(content, extra = {}) {
 }
 
 // The PAT goes in an http.extraHeader passed through the environment, so it
-// never lands in a URL, argv or .git/config.
-function gitEnvFor(auth) {
+// never lands in a URL, argv or .git/config. The key is scoped to the
+// collection URL so submodule and LFS requests to other hosts don't get it,
+// and it's appended after any GIT_CONFIG_* entries the user's env already has.
+function gitEnvFor(auth, collectionUrl) {
+  const n = parseInt(process.env.GIT_CONFIG_COUNT, 10) || 0;
   return {
-    GIT_CONFIG_COUNT: '1',
-    GIT_CONFIG_KEY_0: 'http.extraHeader',
-    GIT_CONFIG_VALUE_0: `Authorization: ${basicHeader(auth.pat)}`,
+    GIT_CONFIG_COUNT: String(n + 1),
+    [`GIT_CONFIG_KEY_${n}`]: `http.${collectionUrl.replace(/\/+$/, '')}/.extraHeader`,
+    [`GIT_CONFIG_VALUE_${n}`]: `Authorization: ${basicHeader(auth.pat)}`,
     GCM_INTERACTIVE: 'never',
     GIT_TERMINAL_PROMPT: '0',
   };
@@ -88,7 +91,7 @@ async function localDiff({ cwd, auth, number, meta, sourceUrl }) {
   const env = auth.env;
   const mergeRef = `refs/klaussy/ado/${number}`;
   try {
-    await git(['fetch', '--no-tags', auth.url, `+refs/pull/${number}/merge:${mergeRef}`], cwd, env);
+    await git(['fetch', '--no-tags', '--no-recurse-submodules', auth.url, `+refs/pull/${number}/merge:${mergeRef}`], cwd, env);
     const source = (await git(['rev-parse', `${mergeRef}^2`], cwd, env)).trim();
     if (!meta.headRefOid || source === meta.headRefOid) {
       return await git([...DIFF_ARGS, `${mergeRef}^1...${mergeRef}^2`], cwd, env);
@@ -97,8 +100,8 @@ async function localDiff({ cwd, auth, number, meta, sourceUrl }) {
 
   const targetRef = `${mergeRef}-target`;
   const sourceRef = `${mergeRef}-source`;
-  await git(['fetch', '--no-tags', auth.url, `+refs/heads/${meta.baseRefName}:${targetRef}`], cwd, env);
-  await git(['fetch', '--no-tags', sourceUrl || auth.url, `+refs/heads/${meta.headRefName}:${sourceRef}`], cwd, env);
+  await git(['fetch', '--no-tags', '--no-recurse-submodules', auth.url, `+refs/heads/${meta.baseRefName}:${targetRef}`], cwd, env);
+  await git(['fetch', '--no-tags', '--no-recurse-submodules', sourceUrl || auth.url, `+refs/heads/${meta.headRefName}:${sourceRef}`], cwd, env);
   return git([...DIFF_ARGS, `${targetRef}...${sourceRef}`], cwd, env);
 }
 
@@ -149,6 +152,8 @@ module.exports = {
   },
 
   async listOpen({ info }) {
+    // An SSH remote to Server doesn't carry the web scheme or port; a saved account for the collection does.
+    info = { ...info, ...resolveSavedCollection(info) };
     const ctx = ctxFor(info);
     const raw = await azureJson(ctx, `${repoApi(info)}/pullrequests?searchCriteria.status=active&$top=50`);
     return ((raw && raw.value) || []).map((pr) => prListItem(normalizeAzurePr(pr, info)));
@@ -228,7 +233,8 @@ module.exports = {
       const loc = locate(pr);
       const ctx = ctxFor(loc, pr.account);
       const [statuses, builds] = await Promise.all([
-        azureJson(ctx, `${prApi(loc, loc.number)}/statuses`),
+        // PR statuses are still a preview API on both Services and Server.
+        azureJson(ctx, `${prApi(loc, loc.number)}/statuses?api-version=${apiVersion(loc.host)}-preview.1`),
         azureJson(ctx, `/${encodeURIComponent(loc.project)}/_apis/build/builds?branchName=${encodeURIComponent(`refs/pull/${loc.number}/merge`)}&queryOrder=queueTimeDescending&$top=50`),
       ]);
 
@@ -462,12 +468,24 @@ module.exports = {
     const prefix = `${loc.collectionPath}/`;
     const project = owner && owner.startsWith(prefix) ? owner.slice(prefix.length) : loc.project;
     const url = repoGitUrl(loc, project, repo || loc.repoName);
-    return { url, cleanUrl: url, env: gitEnvFor(auth) };
+    return { url, cleanUrl: url, env: gitEnvFor(auth, loc.collectionUrl) };
   },
 
+  // A fork PR's branch lives in the fork, so its fetch goes to the fork's URL.
   headFetch(pr, localBranch) {
-    const head = (pr.meta && pr.meta.headRefName) || localBranch;
-    return { refspec: `+refs/heads/${head}:refs/heads/${localBranch}`, fetchTarget: head };
+    const meta = pr.meta || {};
+    const head = meta.headRefName || localBranch;
+    const out = { refspec: `+refs/heads/${head}:refs/heads/${localBranch}`, fetchTarget: head };
+    const owner = meta.headRepositoryOwner && meta.headRepositoryOwner.login;
+    const repo = meta.headRepository && meta.headRepository.name;
+    const loc = parseForgeUrl(meta.url);
+    if (owner && repo && loc && loc.forge === 'azure' && `${owner}/${repo}` !== loc.projectPath) {
+      // Falling back to the base repo would check out its same-named branch instead.
+      const auth = this.gitAuth(pr, { owner, repo });
+      if (auth.error) return { error: auth.error };
+      out.url = auth.url;
+    }
+    return out;
   },
 
   // Accounts are picked per collection on every call, so there's nothing to switch.

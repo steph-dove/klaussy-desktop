@@ -55,7 +55,9 @@ function splitAzurePath(beforeGit, repo, host) {
   if (/\.visualstudio\.com$/i.test(host)) {
     collectionOnly = segs.length === 0 || (segs.length === 1 && /^defaultcollection$/i.test(segs[0]));
   } else {
-    collectionOnly = segs.length === 1;
+    // Server's default collection under the /tfs virtual directory reads as a
+    // project otherwise: /tfs/DefaultCollection/_git/{repo} has no project.
+    collectionOnly = segs.length === 1 || /^defaultcollection$/i.test(segs[segs.length - 1] || '');
   }
   return collectionOnly
     ? { collection: segs, project: repo }

@@ -156,3 +156,22 @@ test('account ids round-trip, including a Server host with a port', () => {
   assert.deepEqual(azure.parseAzureAccountId(id), a);
   assert.equal(azure.parseAzureAccountId('gitlab:gitlab.com:me'), null);
 });
+
+test('resolveSavedCollection recovers the web host and scheme for an SSH remote to Server', async () => {
+  const initial = loadConfig();
+  try {
+    saveConfig({ ...initial, azureAccounts: [{
+      host: 'tfs.corp:8080', collectionPath: 'tfs/defaultcollection', collectionUrl: 'http://tfs.corp:8080/tfs/DefaultCollection', user: 'me', patEnc: '',
+    }] });
+    await flushSaveConfig();
+    const fromSsh = { host: 'tfs.corp', collectionPath: 'tfs/defaultcollection', collectionUrl: 'https://tfs.corp/tfs/DefaultCollection' };
+    assert.deepEqual(azure.resolveSavedCollection(fromSsh), {
+      host: 'tfs.corp:8080', collectionUrl: 'http://tfs.corp:8080/tfs/DefaultCollection',
+    });
+    const other = { host: 'other.corp', collectionPath: 'tfs/defaultcollection', collectionUrl: 'https://other.corp/tfs/DefaultCollection' };
+    assert.deepEqual(azure.resolveSavedCollection(other), { host: other.host, collectionUrl: other.collectionUrl });
+  } finally {
+    saveConfig(initial);
+    await flushSaveConfig();
+  }
+});

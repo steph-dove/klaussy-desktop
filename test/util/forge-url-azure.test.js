@@ -111,3 +111,11 @@ test('parseAzureCollection accepts what people type into the Connect dialog', ()
   assert.equal(parseAzureCollection('https://dev.azure.com/'), null);
   assert.equal(parseAzureCollection('https://tfs.corp.example.com/'), null);
 });
+
+test('a project-less remote under /tfs/DefaultCollection matches its PR URL', () => {
+  const remote = detectForgeFromRemote('https://tfs.corp/tfs/DefaultCollection/_git/Fab');
+  const pr = parseForgeUrl('https://tfs.corp/tfs/DefaultCollection/Fab/_git/Fab/pullrequest/1');
+  assert.equal(remote.collectionPath, 'tfs/defaultcollection');
+  assert.equal(remote.collectionUrl, 'https://tfs.corp/tfs/DefaultCollection');
+  assert.equal(remote.projectPath, pr.projectPath);
+});

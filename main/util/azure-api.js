@@ -92,19 +92,44 @@ function requestOpts(ctx, opts = {}) {
   return out;
 }
 
+// Error text leads with the HTTP status, which is what the classifier reads,
+// then Azure's own message. An expired PAT gets a sign-in or "Access Denied"
+// HTML page, which would only be noise in the UI, so HTML bodies are dropped.
+function withStatus(err) {
+  if (!(err instanceof ForgeHttpError)) return err;
+  let detail = err.responseBody || '';
+  try {
+    const j = JSON.parse(detail);
+    if (j && j.message) detail = j.message;
+  } catch (_) { /* not JSON: keep the raw text */ }
+  if (/^\s*</.test(detail)) detail = '';
+  const text = `HTTP ${err.status}: ${detail || err.statusText || ''}`.trim();
+  err.message = text;
+  err.responseBody = text;
+  return err;
+}
+
+async function rethrowWithStatus(promise) {
+  try {
+    return await promise;
+  } catch (err) {
+    throw withStatus(err);
+  }
+}
+
 // ctx: { collectionUrl, host, collectionPath, account } — or { auth } to skip the lookup.
 async function azureFetch(ctx, path, opts = {}) {
-  return httpFetch(buildUrl(ctx.collectionUrl, path, ctx.host), requestOpts(ctx, opts));
+  return rethrowWithStatus(httpFetch(buildUrl(ctx.collectionUrl, path, ctx.host), requestOpts(ctx, opts)));
 }
 
 async function azureJson(ctx, path, opts = {}) {
-  return httpJson(buildUrl(ctx.collectionUrl, path, ctx.host), requestOpts(ctx, opts));
+  return rethrowWithStatus(httpJson(buildUrl(ctx.collectionUrl, path, ctx.host), requestOpts(ctx, opts)));
 }
 
 async function azureText(ctx, path, opts = {}) {
   const o = requestOpts(ctx, opts);
   o.headers.Accept = 'text/plain';
-  return httpText(buildUrl(ctx.collectionUrl, path, ctx.host), o);
+  return rethrowWithStatus(httpText(buildUrl(ctx.collectionUrl, path, ctx.host), o));
 }
 
 const ANONYMOUS_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
@@ -113,7 +138,7 @@ const ANONYMOUS_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 // a 200 with the anonymous id instead of a 401.
 async function fetchConnectionData(collectionUrl, pat) {
   const url = collectionUrl.replace(/\/+$/, '') + '/_apis/connectionData';
-  const data = await httpJson(url, { headers: { Authorization: basicHeader(pat) } });
+  const data = await rethrowWithStatus(httpJson(url, { headers: { Authorization: basicHeader(pat) } }));
   const u = data && data.authenticatedUser;
   if (!u || !u.id || u.id === ANONYMOUS_ID) {
     throw new ForgeHttpError('HTTP 401: Azure DevOps did not accept the PAT', { status: 401 });
@@ -121,6 +146,19 @@ async function fetchConnectionData(collectionUrl, pat) {
   const props = u.properties || {};
   const email = props.Account && (props.Account.$value || props.Account);
   return { userId: u.id, user: (typeof email === 'string' && email) || u.providerDisplayName || u.id };
+}
+
+// A Server remote over SSH gives the host without the web port or scheme. If
+// no saved account matches it exactly but one for the same collection on the
+// same hostname does, that account's host and collection URL are the real ones.
+function resolveSavedCollection({ host, collectionPath, collectionUrl }) {
+  const accounts = accountsFromConfig();
+  if (accounts.some((a) => sameCollection(a, host, collectionPath))) return { host, collectionUrl };
+  const bare = (h) => String(h || '').replace(/:\d+$/, '');
+  const hits = accounts.filter((a) => a.collectionPath === collectionPath && bare(a.host) === bare(host));
+  const hosts = new Set(hits.map((a) => a.host));
+  if (hosts.size !== 1) return { host, collectionUrl };
+  return { host: hits[0].host, collectionUrl: hits[0].collectionUrl };
 }
 
 function publicAccount(a) {
@@ -211,6 +249,7 @@ module.exports = {
   accountId,
   parseAzureAccountId,
   getAzureAuth,
+  resolveSavedCollection,
   basicHeader,
   azureFetch,
   azureJson,

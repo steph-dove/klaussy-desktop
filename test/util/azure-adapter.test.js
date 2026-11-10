@@ -58,12 +58,17 @@ function makeOrigin({ mergeRef = true } = {}) {
     git(work, 'update-ref', 'refs/pull/42/merge', 'HEAD');
     git(work, 'checkout', '-q', 'main');
   }
+  // The source branch moves on after Azure computed the merge ref, so the
+  // merge ref and a branch diff disagree: only the branch diff has later.txt.
+  git(work, 'checkout', '-q', 'feature');
+  const later = commitFile(work, 'later.txt', 'pushed after the merge ref\n', 'later push');
+  git(work, 'checkout', '-q', 'main');
   git(root, 'clone', '-q', '--bare', work, bare);
   if (mergeRef) git(work, 'push', '-q', bare, 'refs/pull/42/merge:refs/pull/42/merge');
   git(bare, 'config', 'uploadpack.allowFilter', 'true');
   const clone = path.join(root, 'clone');
   git(root, 'clone', '-q', '--filter=blob:none', fileUrl(bare), clone);
-  return { root, bare, clone, head };
+  return { root, bare, clone, head, later };
 }
 
 const META = { number: 42, baseRefName: 'main', headRefName: 'feature' };
@@ -72,12 +77,13 @@ function filesIn(diff) {
   return [...diff.matchAll(/^diff --git a\/(\S+)/gm)].map((m) => m[1]);
 }
 
-test('localDiff uses the merge ref, so target-only changes stay out of the diff', async () => {
+test('localDiff uses a current merge ref, and target-only changes stay out of the diff', async () => {
   const o = makeOrigin();
   try {
     const diff = await azure.localDiff({
       cwd: o.clone, auth: { url: fileUrl(o.bare), env: {} }, number: 42, meta: { ...META, headRefOid: o.head },
     });
+    // The branch diff would also list later.txt; the merge ref stops at o.head.
     assert.deepEqual(filesIn(diff), ['app.txt']);
     assert.match(diff, /^\+two$/m);
   } finally {
@@ -90,13 +96,14 @@ test('localDiff falls back to the branches when the merge ref is missing or stal
   const stale = makeOrigin();
   try {
     const a = await azure.localDiff({
-      cwd: missing.clone, auth: { url: fileUrl(missing.bare), env: {} }, number: 42, meta: { ...META, headRefOid: missing.head },
+      cwd: missing.clone, auth: { url: fileUrl(missing.bare), env: {} }, number: 42, meta: { ...META, headRefOid: missing.later },
     });
-    assert.deepEqual(filesIn(a), ['app.txt']);
+    assert.deepEqual(filesIn(a), ['app.txt', 'later.txt']);
+    // The merge ref's source is o.head, but the PR is now at o.later.
     const b = await azure.localDiff({
-      cwd: stale.clone, auth: { url: fileUrl(stale.bare), env: {} }, number: 42, meta: { ...META, headRefOid: 'f'.repeat(40) },
+      cwd: stale.clone, auth: { url: fileUrl(stale.bare), env: {} }, number: 42, meta: { ...META, headRefOid: stale.later },
     });
-    assert.deepEqual(filesIn(b), ['app.txt']);
+    assert.deepEqual(filesIn(b), ['app.txt', 'later.txt']);
   } finally {
     fs.rmSync(missing.root, { recursive: true, force: true });
     fs.rmSync(stale.root, { recursive: true, force: true });
@@ -110,10 +117,42 @@ test('gitAuth keeps the PAT out of the URL and passes it as an extra header', ()
     const auth = azure.gitAuth(pr, { owner: 'contoso/web app', repo: 'front' });
     assert.equal(auth.url, 'https://dev.azure.com/contoso/web%20app/_git/front');
     assert.ok(!auth.url.includes(PAT));
-    assert.equal(auth.env.GIT_CONFIG_KEY_0, 'http.extraHeader');
+    // Scoped to the collection, so submodule or LFS hosts never see the PAT.
+    assert.equal(auth.env.GIT_CONFIG_KEY_0, 'http.https://dev.azure.com/contoso/.extraHeader');
     assert.equal(auth.env.GIT_CONFIG_VALUE_0, `Authorization: ${basicHeader(PAT)}`);
     assert.equal(auth.env.GCM_INTERACTIVE, 'never');
     const fork = azure.gitAuth(pr, { owner: 'contoso/sandbox', repo: 'front-fork' });
+    assert.equal(fork.url, 'https://dev.azure.com/contoso/sandbox/_git/front-fork');
+  } finally {
+    delete process.env.AZURE_DEVOPS_EXT_PAT;
+  }
+});
+
+test('gitAuth appends to GIT_CONFIG_* entries the environment already has', () => {
+  process.env.AZURE_DEVOPS_EXT_PAT = PAT;
+  process.env.GIT_CONFIG_COUNT = '2';
+  try {
+    const { env } = azure.gitAuth({ meta: { url: PR_URL } }, { owner: 'contoso/web app', repo: 'front' });
+    assert.equal(env.GIT_CONFIG_COUNT, '3');
+    assert.equal(env.GIT_CONFIG_KEY_2, 'http.https://dev.azure.com/contoso/.extraHeader');
+    assert.equal(env.GIT_CONFIG_KEY_0, undefined);
+  } finally {
+    delete process.env.AZURE_DEVOPS_EXT_PAT;
+    delete process.env.GIT_CONFIG_COUNT;
+  }
+});
+
+test('headFetch points a fork PR at the fork, and a same-repo PR at nothing extra', () => {
+  process.env.AZURE_DEVOPS_EXT_PAT = PAT;
+  try {
+    const same = azure.headFetch({ meta: {
+      url: PR_URL, headRefName: 'feature', headRepositoryOwner: { login: 'contoso/web app' }, headRepository: { name: 'front' },
+    } }, 'feature');
+    assert.equal(same.url, undefined);
+    assert.equal(same.refspec, '+refs/heads/feature:refs/heads/feature');
+    const fork = azure.headFetch({ meta: {
+      url: PR_URL, headRefName: 'main', headRepositoryOwner: { login: 'contoso/sandbox' }, headRepository: { name: 'front-fork' },
+    } }, 'main');
     assert.equal(fork.url, 'https://dev.azure.com/contoso/sandbox/_git/front-fork');
   } finally {
     delete process.env.AZURE_DEVOPS_EXT_PAT;
@@ -264,6 +303,7 @@ test('listChecks lists the latest statuses and one row per failed pipeline job, 
     assert.equal(checks[1].link, 'https://dev.azure.com/contoso/Web%20App/_build/results?buildId=501&view=logs&j=job-a');
     for (const c of checks) assert.equal(c.runId, undefined);
     assert.ok(calls.some((c) => c.url.includes('branchName=refs%2Fpull%2F42%2Fmerge')));
+    assert.ok(calls.some((c) => c.url.includes('/statuses?api-version=7.1-preview.1')));
   });
 });
 
@@ -308,10 +348,16 @@ test('failedCheckLogs returns the failed tasks\' log tail and the pipeline YAML'
   assert.match((await azure.failedCheckLogs(PR, { checkLink: 'https://example.com/nope' })).error, /build id/);
 });
 
-test('fetchThreads turns a failed call into a classified error', async () => {
-  await withApi({ [`GET ${API}/threads`]: { status: 401, body: '' } }, async () => {
-    const res = await azure.fetchThreads(PR);
-    assert.match(res.error.summary, /didn't accept the credentials/);
-    assert.match(res.error.fix, /Code \(Read & write\)/);
+test('fetchThreads classifies an expired PAT, even behind an HTML sign-in page', async () => {
+  for (const status of [401, 203]) {
+    await withApi({ [`GET ${API}/threads`]: { status, body: '<html><body>Sign in to your account</body></html>' } }, async () => {
+      const res = await azure.fetchThreads(PR);
+      assert.match(res.error.summary, /didn't accept the credentials/, String(status));
+      assert.match(res.error.fix, /Code \(Read & write\)/);
+      assert.ok(!res.error.raw.includes('<html'), 'HTML is not shown to the user');
+    });
+  }
+  await withApi({ [`GET ${API}/threads`]: { status: 503, body: '<html>down</html>' } }, async () => {
+    assert.match((await azure.fetchThreads(PR)).error.summary, /outage/);
   });
 });
