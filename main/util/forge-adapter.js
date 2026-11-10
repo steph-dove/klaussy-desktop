@@ -249,6 +249,123 @@ function transformBitbucketComments(comments) {
   return { threads, issueComments };
 }
 
+// Azure build results and PR status states to Klaussy check buckets.
+function bucketFromAzureStatus(state) {
+  const s = String(state || '').toLowerCase();
+  if (s === 'succeeded' || s === 'partiallysucceeded') return 'pass';
+  if (s === 'failed' || s === 'error') return 'fail';
+  if (s === 'canceled' || s === 'cancelled' || s === 'notapplicable') return 'cancel';
+  return 'pending';
+}
+
+function stripHeads(ref) {
+  return String(ref || '').replace(/^refs\/heads\//, '');
+}
+
+// pr is GET .../pullrequests/{id}. The web URL is built here because the API
+// doesn't return one, and parseForgeUrl reads every later call's repo from it.
+function normalizeAzurePr(pr, { collectionUrl } = {}) {
+  const repo = pr.repository || {};
+  const project = (repo.project && repo.project.name) || '';
+  const repoWeb = repo.webUrl
+    || `${String(collectionUrl || '').replace(/\/+$/, '')}/${encodeURIComponent(project)}/_git/${encodeURIComponent(repo.name || '')}`;
+  const url = `${repoWeb}/pullrequest/${pr.pullRequestId}`;
+  const base = parseForgeUrl(url);
+  if (!base || base.forge !== 'azure') throw new Error(`Could not work out the Azure DevOps repository for PR ${pr.pullRequestId}`);
+
+  // A PR from a fork pushes to the fork, which lives in the same collection.
+  const fork = pr.forkSource && pr.forkSource.repository;
+  const headRepo = fork || repo;
+  const headProject = (headRepo.project && headRepo.project.name) || project;
+  const headOwner = `${base.collectionPath}/${headProject}`.toLowerCase();
+
+  const status = String(pr.status || '').toLowerCase();
+  const state = status === 'active' ? 'OPEN' : status === 'completed' ? 'MERGED' : status === 'abandoned' ? 'CLOSED' : status.toUpperCase();
+  const votes = (pr.reviewers || []).map((r) => r.vote || 0);
+  let reviewDecision = 'REVIEW_REQUIRED';
+  if (state === 'MERGED') reviewDecision = 'MERGED';
+  else if (votes.some((v) => v < 0)) reviewDecision = 'CHANGES_REQUESTED';
+  else if (votes.some((v) => v >= 5)) reviewDecision = 'APPROVED';
+
+  const author = pr.createdBy || {};
+  const [mergeable, mergeStateStatus] = AZURE_MERGE[String(pr.mergeStatus || '').toLowerCase()] || ['UNKNOWN', ''];
+  return {
+    forge: 'azure',
+    host: base.host,
+    number: pr.pullRequestId,
+    title: pr.title || '',
+    author: { login: author.uniqueName || author.displayName || 'unknown', name: author.displayName || author.uniqueName || '' },
+    state,
+    createdAt: pr.creationDate || '',
+    updatedAt: pr.closedDate || pr.creationDate || '',
+    headRefName: stripHeads(pr.sourceRefName),
+    baseRefName: stripHeads(pr.targetRefName),
+    headRefOid: (pr.lastMergeSourceCommit && pr.lastMergeSourceCommit.commitId) || '',
+    baseRefOid: (pr.lastMergeTargetCommit && pr.lastMergeTargetCommit.commitId) || '',
+    isDraft: !!pr.isDraft,
+    reviewDecision,
+    url,
+    body: pr.description || '',
+    mergeable,
+    mergeStateStatus,
+    headRepositoryOwner: headOwner ? { login: headOwner } : null,
+    headRepository: headRepo.name ? { name: headRepo.name.toLowerCase() } : null,
+  };
+}
+
+// Azure mergeStatus to GitHub's mergeable/mergeStateStatus pair the merge gate reads.
+// queued and notSet mean Azure hasn't tried the merge yet.
+const AZURE_MERGE = {
+  succeeded: ['MERGEABLE', 'CLEAN'],
+  conflicts: ['CONFLICTING', 'DIRTY'],
+  rejectedbypolicy: ['MERGEABLE', 'BLOCKED'],
+  failure: ['UNKNOWN', 'BLOCKED'],
+};
+
+const AZURE_RESOLVED = new Set(['fixed', 'closed', 'wontfix', 'bydesign']);
+
+// A thread with a file context is a review thread; one without is a PR comment.
+// databaseId is "{threadId}:{commentId}" because Azure comment ids restart at 1 in every thread.
+function transformAzureThreads(raw) {
+  const list = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.value) ? raw.value : []);
+  const threads = [];
+  const issueComments = [];
+  for (const t of list) {
+    if (!t || t.isDeleted) continue;
+    const comments = (t.comments || [])
+      .filter((c) => c && !c.isDeleted && c.commentType !== 'system' && c.commentType !== 'codeChange')
+      .map((c) => ({
+        databaseId: `${t.id}:${c.id}`,
+        author: { login: (c.author && (c.author.uniqueName || c.author.displayName)) || 'unknown' },
+        createdAt: c.publishedDate || '',
+        body: c.content || '',
+        diffHunk: '',
+      }));
+    if (!comments.length) continue;
+    const ctx = t.threadContext;
+    if (ctx && ctx.filePath) {
+      const right = ctx.rightFileStart && ctx.rightFileStart.line;
+      const left = ctx.leftFileStart && ctx.leftFileStart.line;
+      const line = right || left || 1;
+      threads.push({
+        id: String(t.id),
+        isResolved: AZURE_RESOLVED.has(String(t.status || '').toLowerCase()),
+        isOutdated: false,
+        path: ctx.filePath.replace(/^\//, ''),
+        line,
+        originalLine: line,
+        startLine: null,
+        originalStartLine: null,
+        diffSide: right ? 'RIGHT' : 'LEFT',
+        comments,
+      });
+    } else {
+      for (const c of comments) issueComments.push({ ...c, url: '' });
+    }
+  }
+  return { threads, issueComments };
+}
+
 // The picker's row shape, the same fields `gh pr list --json` returns.
 function prListItem(norm) {
   return {
@@ -273,4 +390,7 @@ module.exports = {
   bucketFromBitbucketStatus,
   normalizeBitbucketPr,
   transformBitbucketComments,
+  bucketFromAzureStatus,
+  normalizeAzurePr,
+  transformAzureThreads,
 };
