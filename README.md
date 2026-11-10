@@ -29,7 +29,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 *   **🛡️ Commit-Time Review Gate**
     A built-in pre-commit and pre-push hook runs an agent-powered audit looking for silent failures, leaked credentials, debug leftovers, correctness bugs, and overly verbose comments. Auto-tidies code before committing.
 *   **🔍 PR & MR Reviews Without Local Checkout**
-    Paste a GitHub Pull Request, GitLab Merge Request, or Bitbucket Pull Request URL to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
+    Paste a GitHub, Bitbucket or Azure DevOps pull request URL, or a GitLab merge request URL, to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
 *   **🔄 Cross-Agent Session Resuming**
     Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
@@ -67,11 +67,11 @@ See **[Keyboard Shortcuts](./docs/keyboard-shortcuts.md)** for the full list by 
 
 ![Multi-agent, multi-repo workspace](./docs/klaussy_multi_agent_workspace.png)
 
-**Conventions-aware PR & MR review** — paste a pull request or merge request (GitHub, GitLab, Bitbucket) and get a structured AI review: findings ranked by severity, suggested changes, and one-click Implement / Add to PR.
+**Conventions-aware PR & MR review** — paste a pull request or merge request (GitHub, GitLab, Bitbucket, Azure DevOps) and get a structured AI review: findings ranked by severity, suggested changes, and one-click Implement / Add to PR.
 
 ![AI-powered PR review with structured findings](./docs/klaussy_pr_ai_review.png)
 
-**CI debugging built in** — when a check fails on GitHub Actions, GitLab CI/CD, or Bitbucket Pipelines, Klaussy pulls the logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
+**CI debugging built in** — when a GitHub Actions or Azure Pipelines check fails, Klaussy pulls the job's logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
 
 ![Agent-assisted CI failure debugging](./docs/klaussy_ci_debug.png)
 
@@ -85,7 +85,7 @@ See **[Keyboard Shortcuts](./docs/keyboard-shortcuts.md)** for the full list by 
 
 Klaussy Desktop automatically detects and configures your local environment. It requires:
 1.  **Node.js 24+** (the agent stores are read through `node:sqlite`)
-2.  **Git Forge Tools / Credentials** (GitHub CLI `gh`, GitLab CLI `glab`, or Bitbucket credentials)
+2.  **Git Forge Tools / Credentials** (GitHub CLI `gh`, GitLab CLI `glab`, Bitbucket credentials, or an Azure DevOps personal access token)
 3.  **An Agent CLI or IDE extension** (Claude Code is the default; also supports Codex, Gemini, Antigravity, Copilot, Cursor, Cline, opencode, Kimi Code, and local models via Ollama + Aider)
 
 Optional: **Docker + a [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) gateway** if you want to run agents sandboxed rather than directly on your machine, and **Ollama** for local inline autocomplete.
@@ -125,7 +125,7 @@ Prefer [nvm](https://github.com/nvm-sh/nvm)? `nvm install 24` works too; then in
 
 See [LINUX.md](LINUX.md) for the Linux smoke checklist.
 
-*For Bitbucket repositories, connect an App Password or token under **Preferences → Git Accounts**.*
+*For Bitbucket repositories, connect an App Password or token under **Preferences → Git Accounts**. For Azure DevOps, connect a personal access token there, or set `AZURE_DEVOPS_EXT_PAT`.*
 
 The environment variables klaussy reads (forge tokens, path overrides, debug switches) are listed in [docs/environment-variables.md](./docs/environment-variables.md).
 
