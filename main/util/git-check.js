@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
+const path = require('path').posix;
 
 // On macOS /usr/bin/git is an xcode-select stub: without the Command Line Tools,
 // running it fails and pops Apple's install dialog, so only probe a real git.
