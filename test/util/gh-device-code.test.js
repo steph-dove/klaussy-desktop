@@ -14,7 +14,12 @@ test('parses the gh 2.10x "One-time code (XXXX-XXXX) copied" form', () => {
   assert.equal(ghWantsUserToOpenBrowser(out), true);
 });
 
+test('accepts codes of other lengths', () => {
+  assert.equal(parseGhDeviceCode('! One-time code (ABCDE-12345) copied to clipboard'), 'ABCDE-12345');
+});
+
 test('returns null until the code has arrived', () => {
+  assert.equal(parseGhDeviceCode('! One-time code (8105-E9'), null);
   assert.equal(parseGhDeviceCode(''), null);
   assert.equal(parseGhDeviceCode('! One-time code (81'), null);
   assert.equal(parseGhDeviceCode(undefined), null);

@@ -4250,7 +4250,7 @@ button.pr-check-toggle {
   color: var(--diff-add-fg, #7ce27c);
   font-weight: 600;
 }
-.deps-action-row { margin-top: 8px; }
+.deps-action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .deps-action {
   background: var(--accent);
   color: var(--accent-contrast);
@@ -4262,7 +4262,6 @@ button.pr-check-toggle {
   cursor: pointer;
 }
 .deps-action:hover { filter: brightness(1.08); }
-.deps-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .deps-action-secondary {
   background: transparent;
   color: var(--text);

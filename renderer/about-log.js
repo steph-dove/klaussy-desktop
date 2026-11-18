@@ -417,13 +417,15 @@ window.Dialogs = (function () {
       { name: 'Node.js + npm',     why: 'Runtime for the agent CLIs and other npm-installed tools.' },
       { name: 'GitHub CLI (gh)',   why: 'GitHub PR review, CI status, and auth.' },
       { name: 'GitLab CLI (glab)', why: 'GitLab MR review, CI status, and auth.' },
-      { name: 'The agents you tick below', why: 'Only those are installed. You can add more later from the rows above.' },
       { name: 'Ollama',              why: 'Local model server for inline tab-autocomplete. Runs on your machine — no code leaves your laptop. ~2 GB.' },
     ];
     var installableAgents = agentList.filter(function (a) { return !a.installed && a.installCommand; });
+    if (installableAgents.length) {
+      requirements.push({ name: 'The agents you tick below', why: 'Only those are installed. You can add more later from the rows above.' });
+    }
     var agentPicker = installableAgents.length
       ? '<fieldset class="deps-agent-picker">'
-        + '<legend>Agents to install</legend>'
+        + '<legend>' + (noAgent ? 'Agents to install' : 'More agents to install (optional)') + '</legend>'
         + installableAgents.map(function (a) {
           var checked = noAgent && a.id === defaultAgent.id;
           return '<label class="deps-agent-option">'
@@ -997,7 +999,7 @@ window.Dialogs = (function () {
       + '<div class="deps-fix">'
         + '<code>' + escHtml(cmd) + '</code>'
         + '<button class="deps-copy gh-login-fallback-copy" type="button" data-copy="' + escHtml(cmd) + '" aria-label="Copy ' + escHtml(cmd) + '">Copy</button>'
-        + '<button class="deps-copy gh-login-fallback-terminal" type="button">Open Terminal</button>'
+        + '<button class="deps-action deps-action-secondary gh-login-fallback-terminal" type="button">Open Terminal</button>'
       + '</div>'
     + '</div>';
   }

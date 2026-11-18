@@ -145,6 +145,7 @@ ipcMain.handle('gh-switch-account', async (_event, { username }) => {
 // the right scopes and host metadata, which is what every other code path
 // in this app expects.
 let activeLoginChild = null;
+const GH_HOSTNAME_RE = /^[A-Za-z0-9.-]+(:\d+)?$/;
 
 function killActiveLogin() {
   if (!activeLoginChild) return;
@@ -155,6 +156,7 @@ function killActiveLogin() {
 ipcMain.handle('gh-login-start', async (event, opts) => {
   killActiveLogin();
   const hostname = (opts && opts.hostname) || 'github.com';
+  if (!GH_HOSTNAME_RE.test(hostname)) return { error: 'Invalid hostname.' };
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return { error: 'no window' };
   const send = (type, payload) => {
@@ -206,7 +208,9 @@ ipcMain.handle('gh-login-start', async (event, opts) => {
     }
     if (codeSeen && !browserOpened && ghWantsUserToOpenBrowser(combined)) {
       browserOpened = true;
-      shell.openExternal(verificationUrl).catch(() => { /* modal has an Open browser button */ });
+      Promise.resolve()
+        .then(() => shell.openExternal(verificationUrl))
+        .catch(() => { /* modal has an Open browser button */ });
     }
     // Older gh versions wait for Enter before opening the browser. Newer
     // versions skip it. Either is fine — we only feed \n if asked.
@@ -685,16 +689,18 @@ if ! xcode-select -p >/dev/null 2>&1; then
   echo "→ Xcode Command Line Tools (git, compilers) — finish the macOS dialog that opens."
   # Exits non-zero when the dialog is already open; the wait below is the real check.
   xcode-select --install || true
-  waited=0
+  sleep 10
+  # The installer window stays open until the install finishes or is cancelled.
   until xcode-select -p >/dev/null 2>&1; do
-    if [ "$waited" -ge 1800 ]; then
-      echo "✗ Command Line Tools still not installed after 30 minutes (dialog cancelled?)."
+    if ! pgrep -f "Install Command Line Developer Tools" >/dev/null 2>&1; then
+      sleep 5
+      xcode-select -p >/dev/null 2>&1 && break
+      echo "✗ The Command Line Tools installer closed before finishing."
       echo "  Run 'xcode-select --install', finish it, then run Install requirements again."
       read -p "Press Enter to close this window…"
       exit 1
     fi
     sleep 5
-    waited=$((waited + 5))
   done
   echo "✓ Command Line Tools installed."
 fi
@@ -913,7 +919,6 @@ ipcMain.handle('install-requirements', async (_event, opts) => {
   }
 });
 
-const GH_HOSTNAME_RE = /^[A-Za-z0-9.-]+(:\d+)?$/;
 // Opens Apple's GUI installer; it exits non-zero if the tools are already installed.
 ipcMain.handle('install-dev-tools', async () => {
   if (process.platform !== 'darwin') return { error: 'Command Line Tools are macOS-only.' };
@@ -927,16 +932,21 @@ ipcMain.handle('install-dev-tools', async () => {
   }
 });
 
+function ghLoginScripts(hostname) {
+  const cmd = `gh auth login --hostname '${hostname}'`;
+  const posix = `#!/bin/bash\n${cmd}\necho\nread -p "Done. Return to Klaussy and click Re-check. Press Enter to close…"\n`;
+  return {
+    mac: posix,
+    linux: posix,
+    win: `${cmd}\nWrite-Host ''\nRead-Host 'Done. Return to Klaussy and click Re-check. Press Enter to close'\n`,
+  };
+}
+
 ipcMain.handle('gh-login-terminal', async (_event, opts) => {
   const hostname = (opts && opts.hostname) || 'github.com';
   if (!GH_HOSTNAME_RE.test(hostname)) return { error: 'Invalid hostname.' };
-  const cmd = `gh auth login --hostname ${hostname}`;
   try {
-    return await openScriptInTerminal('klaussy-gh-login', {
-      mac: `#!/bin/bash\n${cmd}\necho\nread -p "Done. Return to Klaussy and click Re-check. Press Enter to close…"\n`,
-      win: `${cmd}\nWrite-Host ''\nRead-Host 'Done. Return to Klaussy and click Re-check. Press Enter to close'\n`,
-      linux: `#!/bin/bash\n${cmd}\necho\nread -p "Done. Return to Klaussy and click Re-check. Press Enter to close…"\n`,
-    });
+    return await openScriptInTerminal('klaussy-gh-login', ghLoginScripts(hostname));
   } catch (err) {
     return { error: err.message };
   }
@@ -967,4 +977,12 @@ ipcMain.handle('ci-run-logs', async (_event, { worktreePath, runId }) => {
   }
 });
 
-module.exports = { readGhAccountsChecked };
+module.exports = {
+  readGhAccountsChecked,
+  installerAgentsInfo,
+  installScriptMac,
+  installScriptWin,
+  installScriptLinux,
+  ghLoginScripts,
+  GH_HOSTNAME_RE,
+};

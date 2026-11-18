@@ -2,7 +2,8 @@
 
 // Older gh prints "one-time code: ABCD-1234"; 2.102 prints "One-time code (ABCD-1234) copied to clipboard".
 function parseGhDeviceCode(text) {
-  const m = /one-time code\W+([A-Z0-9]{4}-[A-Z0-9]{4})\b/i.exec(String(text || ''));
+  // The lookahead needs a character after the code, so a half-printed chunk never matches.
+  const m = /one-time code\W+([A-Z0-9]+(?:-[A-Z0-9]+)*)(?=[^A-Z0-9-])/i.exec(String(text || ''));
   return m ? m[1].toUpperCase() : null;
 }
 
