@@ -292,7 +292,9 @@ window.Dialogs = (function () {
     // installed, so a Codex-only user is never nagged about a missing Claude.
     var anyAgentInstalled = agentList.some(function (a) { return a.installed; });
     var noAgent = !anyAgentInstalled;
-    if (!ghBad && !noAgent && !force) return; // all good, stay quiet
+    var git = deps.git;
+    var gitBad = !git.installed;
+    if (!ghBad && !noAgent && !gitBad && !force) return; // all good, stay quiet
 
     var existing = document.getElementById('deps-overlay');
     if (existing) existing.remove();
@@ -304,6 +306,18 @@ window.Dialogs = (function () {
     var dialog = document.createElement('div');
     dialog.className = 'deps-dialog';
 
+    var gitRow = depRow({
+      name: deps.platform === 'darwin' ? 'Git (Xcode Command Line Tools)' : 'Git',
+      ok: git.installed,
+      missing: !git.installed,
+      version: git.version,
+      problem: git.devToolsMissing
+        ? 'Not installed. This Mac needs Apple’s Command Line Tools, which include git. The install takes about 5–15 minutes.'
+        : (!git.installed ? 'Not installed. Klaussy needs git for worktrees, diffs and commits.' : null),
+      fixes: (!git.installed && git.installCommand) ? [git.installCommand] : [],
+      action: git.devToolsMissing ? { label: 'Install Command Line Tools', kind: 'dev-tools-install' } : null,
+    });
+
     var ghRow = depRow({
       name: 'GitHub CLI (gh)',
       ok: deps.gh.installed && deps.gh.authed,
@@ -312,14 +326,12 @@ window.Dialogs = (function () {
       problem: !deps.gh.installed ? 'Not installed.'
               : !deps.gh.authed ? 'Installed, but not authenticated.'
               : null,
-      fixes: [],
-      // Per-row Sign-in button (handled by the in-app login modal). Missing-
-      // binary installs use the global "Install requirements" button below, so
-      // the user doesn't click two install buttons in sequence.
-      action: (deps.gh.installed && !deps.gh.authed) ? {
-        label: 'Sign in to GitHub',
-        kind: 'gh-signin',
-      } : null,
+      fixes: (deps.gh.installed && !deps.gh.authed) ? ['gh auth login'] : [],
+      // Missing gh is handled by the global Install requirements button, not a per-row one.
+      actions: (deps.gh.installed && !deps.gh.authed) ? [
+        { label: 'Sign in to GitHub', kind: 'gh-signin' },
+        { label: 'Sign in from Terminal', kind: 'gh-signin-terminal', secondary: true },
+      ] : null,
     });
 
     var glabRow = deps.glab ? depRow({
@@ -391,7 +403,7 @@ window.Dialogs = (function () {
 
     // A missing REQUIRED CLI → offer one-click install of the essentials
     // bundle. Optional agents are installed via their own copyable command.
-    var anyMissing = !deps.gh.installed || noAgent;
+    var anyMissing = !deps.gh.installed || noAgent || gitBad;
     var platformLabel = deps.platform === 'darwin' ? 'macOS'
       : deps.platform === 'win32' ? 'Windows'
       : deps.platform === 'linux' ? 'Linux'
@@ -400,14 +412,29 @@ window.Dialogs = (function () {
     // main-process script is idempotent (installed pieces skipped); this is the
     // full set so the user can audit it once.
     var defaultAgent = agentList.filter(function (a) { return a.isDefault; })[0] || agentList[0] || {};
-    var defaultAgentName = defaultAgent.name || 'your AI agent';
     var requirements = [
+      { name: deps.platform === 'darwin' ? 'Xcode Command Line Tools' : 'Git', why: deps.platform === 'darwin' ? 'Apple’s developer tools, including git. Only installed if missing.' : 'Worktrees, diffs and commits.' },
       { name: 'Node.js + npm',     why: 'Runtime for the agent CLIs and other npm-installed tools.' },
       { name: 'GitHub CLI (gh)',   why: 'GitHub PR review, CI status, and auth.' },
       { name: 'GitLab CLI (glab)', why: 'GitLab MR review, CI status, and auth.' },
-      { name: defaultAgentName,    why: 'Your current default AI agent. You can install another any time from the rows above.' },
       { name: 'Ollama',              why: 'Local model server for inline tab-autocomplete. Runs on your machine — no code leaves your laptop. ~2 GB.' },
     ];
+    var installableAgents = agentList.filter(function (a) { return !a.installed && a.installCommand; });
+    if (installableAgents.length) {
+      requirements.push({ name: 'The agents you tick below', why: 'Only those are installed. You can add more later from the rows above.' });
+    }
+    var agentPicker = installableAgents.length
+      ? '<fieldset class="deps-agent-picker">'
+        + '<legend>' + (noAgent ? 'Agents to install' : 'More agents to install (optional)') + '</legend>'
+        + installableAgents.map(function (a) {
+          var checked = noAgent && a.id === defaultAgent.id;
+          return '<label class="deps-agent-option">'
+            + '<input type="checkbox" class="deps-agent-check" value="' + escHtml(a.id) + '"' + (checked ? ' checked' : '') + ' />'
+            + '<span>' + escHtml(a.name) + '</span>'
+          + '</label>';
+        }).join('')
+      + '</fieldset>'
+      : '';
     var requirementList = requirements.map(function (r) {
       return '<li><strong>' + escHtml(r.name) + '</strong> — ' + escHtml(r.why) + '</li>';
     }).join('');
@@ -417,12 +444,13 @@ window.Dialogs = (function () {
           + '<summary>What gets installed?</summary>'
           + '<ul class="deps-install-list">' + requirementList + '</ul>'
         + '</details>'
+        + agentPicker
         + '<button class="deps-install-btn" type="button">Install requirements</button>'
-        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and installs the bundle (~2 GB total — Ollama is the bulk of it). You’ll still complete <code>gh auth login</code> and <code>' + escHtml(defaultAgent.loginCommand || 'agent') + '</code> sign-in once it finishes.</p>'
+        + '<p class="deps-install-hint">Opens your ' + escHtml(platformLabel) + ' terminal and installs the bundle (~2 GB total — Ollama is the bulk of it). You’ll still complete <code>gh auth login</code> and sign in to the agents you picked once it finishes.</p>'
       + '</div>'
       : '';
 
-    var allOkBanner = (!ghBad && !noAgent)
+    var allOkBanner = (!ghBad && !noAgent && !gitBad)
       ? '<div class="deps-all-ok">All dependencies look good.</div>'
       : '';
 
@@ -433,7 +461,7 @@ window.Dialogs = (function () {
       + '</div>'
       + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
-      + '<div class="deps-rows">' + ghRow + glabRow + bitbucketRow + azureRow + agentRows + '</div>'
+      + '<div class="deps-rows">' + gitRow + ghRow + glabRow + bitbucketRow + azureRow + agentRows + '</div>'
       + installSection
       + '<div class="deps-actions">'
         + '<button class="deps-recheck" type="button">Re-check</button>'
@@ -476,6 +504,26 @@ window.Dialogs = (function () {
         });
       });
     }
+    var devToolsBtn = dialog.querySelector('[data-action="dev-tools-install"]');
+    if (devToolsBtn) {
+      devToolsBtn.addEventListener('click', async function () {
+        devToolsBtn.disabled = true;
+        var r = await window.klaus.gh.installDevTools();
+        if (r && r.error) {
+          devToolsBtn.disabled = false;
+          if (window.toast && window.toast.error) window.toast.error('Could not start the installer: ' + r.error);
+          return;
+        }
+        devToolsBtn.textContent = 'Installer opened';
+        stickyInfo(r && r.alreadyInstalled
+          ? 'Command Line Tools are already installed. Click Re-check.'
+          : 'Finish the macOS Command Line Tools dialog, then click Re-check.');
+      });
+    }
+    var ghTerminalBtn = dialog.querySelector('[data-action="gh-signin-terminal"]');
+    if (ghTerminalBtn) {
+      ghTerminalBtn.addEventListener('click', function () { openGhLoginTerminal(); });
+    }
     var bbConnectBtn = dialog.querySelector('[data-action="bb-connect"]');
     if (bbConnectBtn) {
       bbConnectBtn.addEventListener('click', function () {
@@ -501,10 +549,19 @@ window.Dialogs = (function () {
     var installBtn = dialog.querySelector('.deps-install-btn');
     if (installBtn) {
       installBtn.addEventListener('click', async function () {
+        var agentIds = Array.prototype.map.call(
+          dialog.querySelectorAll('.deps-agent-check:checked'),
+          function (el) { return el.value; }
+        );
+        if (noAgent && !agentIds.length) {
+          A11y.announce('Pick at least one agent to install.', 'assertive');
+          if (window.toast && window.toast.error) window.toast.error('Pick at least one agent to install.');
+          return;
+        }
         var orig = installBtn.textContent;
         installBtn.disabled = true;
         installBtn.textContent = 'Opening terminal…';
-        var result = await window.klaus.gh.installRequirements();
+        var result = await window.klaus.gh.installRequirements(agentIds);
         installBtn.disabled = false;
         if (result && result.error) {
           installBtn.textContent = orig;
@@ -522,6 +579,7 @@ window.Dialogs = (function () {
     if (opts && opts.fromRecheck) {
       recheckBtn.focus();
       var missing = [];
+      if (gitBad) missing.push(git.devToolsMissing ? 'Xcode Command Line Tools (git)' : 'git');
       if (ghBad) missing.push(deps.gh.installed ? 'GitHub CLI sign-in' : 'GitHub CLI (gh)');
       if (noAgent) missing.push('an AI agent CLI');
       A11y.announce(missing.length
@@ -539,9 +597,10 @@ window.Dialogs = (function () {
         + '<button class="deps-copy" type="button" data-copy="' + escHtml(cmd) + '" aria-label="Copy ' + escHtml(cmd) + '">Copy</button>'
       + '</div>';
     }).join('');
-    var actionBtn = d.action
-      ? '<button class="deps-action" type="button" data-action="' + escHtml(d.action.kind) + '">' + escHtml(d.action.label) + '</button>'
-      : '';
+    var actions = d.actions || (d.action ? [d.action] : []);
+    var actionBtn = actions.map(function (a) {
+      return '<button class="deps-action' + (a.secondary ? ' deps-action-secondary' : '') + '" type="button" data-action="' + escHtml(a.kind) + '">' + escHtml(a.label) + '</button>';
+    }).join('');
     return '<div class="deps-row deps-row-' + iconCls + '">'
       + '<div class="deps-row-head">'
         + '<span class="deps-icon ' + iconCls + '" aria-hidden="true">' + icon + '</span>'
@@ -917,6 +976,34 @@ window.Dialogs = (function () {
   // ---- GitHub login (device flow via gh CLI) ----
   // Spawns `gh auth login --web`, surfaces the one-time code, resolves on exit 0.
   // gh does the keyring write so other `gh` code paths agree on where the token lives.
+  function ghLoginCommand(hostname) {
+    return (!hostname || hostname === 'github.com') ? 'gh auth login' : 'gh auth login --hostname ' + hostname;
+  }
+
+  function openGhLoginTerminal(hostname) {
+    return window.klaus.gh.loginInTerminal(hostname || 'github.com').then(function (r) {
+      if (r && r.error) {
+        if (window.toast && window.toast.error) window.toast.error('Could not open a terminal: ' + r.error);
+        return;
+      }
+      stickyInfo('Finish signing in to GitHub in your terminal, then click Re-check.');
+    }, function (err) {
+      if (window.toast && window.toast.error) window.toast.error('Could not open a terminal: ' + ((err && err.message) || err));
+    });
+  }
+
+  function ghTerminalFallbackHtml(hostname) {
+    var cmd = ghLoginCommand(hostname);
+    return '<div class="gh-login-fallback">'
+      + '<p>Prefer the terminal? Run this, then click Re-check in Setup:</p>'
+      + '<div class="deps-fix">'
+        + '<code>' + escHtml(cmd) + '</code>'
+        + '<button class="deps-copy gh-login-fallback-copy" type="button" data-copy="' + escHtml(cmd) + '" aria-label="Copy ' + escHtml(cmd) + '">Copy</button>'
+        + '<button class="deps-action deps-action-secondary gh-login-fallback-terminal" type="button">Open Terminal</button>'
+      + '</div>'
+    + '</div>';
+  }
+
   function showGhLogin(opts) {
     var hostname = (opts && opts.hostname) || 'github.com';
     var onSuccess = (opts && opts.onSuccess) || function () {};
@@ -931,10 +1018,23 @@ window.Dialogs = (function () {
         + '<h2>Sign in to GitHub</h2>'
         + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
-      + '<div class="gh-login-body"><div class="skills-loading">Starting sign-in…</div></div>';
+      + '<div class="gh-login-body"><div class="skills-loading">Starting sign-in…</div>' + ghTerminalFallbackHtml(hostname) + '</div>';
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     var body = dialog.querySelector('.gh-login-body');
+
+    function bindFallback() {
+      var copy = body.querySelector('.gh-login-fallback-copy');
+      if (copy) copy.addEventListener('click', function () { AppUtils.copyText(copy, copy.dataset.copy || '', 900); });
+      var term = body.querySelector('.gh-login-fallback-terminal');
+      if (term) {
+        term.addEventListener('click', function () {
+          openGhLoginTerminal(hostname);
+          cleanup();
+        });
+      }
+    }
+    bindFallback();
 
     var unsubscribe = null;
     var closed = false;
@@ -970,7 +1070,9 @@ window.Dialogs = (function () {
           + '<button class="gh-login-open" type="button">Open browser</button>'
           + '<button class="deps-skip gh-login-cancel" type="button">Cancel</button>'
         + '</div>'
-        + '<p class="gh-login-wait">Waiting for you to authorize…</p>';
+        + '<p class="gh-login-wait">Waiting for you to authorize…</p>'
+        + ghTerminalFallbackHtml(hostname);
+      bindFallback();
       body.querySelector('.gh-login-copy').addEventListener('click', function (e) {
         AppUtils.copyText(e.currentTarget, e.currentTarget.dataset.copy || '', 900);
       });
@@ -994,7 +1096,9 @@ window.Dialogs = (function () {
         + '<div class="deps-actions">'
           + '<button class="gh-login-retry" type="button">Retry</button>'
           + '<button class="deps-skip gh-login-close" type="button">Close</button>'
-        + '</div>';
+        + '</div>'
+        + ghTerminalFallbackHtml(hostname);
+      bindFallback();
       body.querySelector('.gh-login-retry').addEventListener('click', function () {
         cleanup();
         showGhLogin({ hostname: hostname, onSuccess: onSuccess });

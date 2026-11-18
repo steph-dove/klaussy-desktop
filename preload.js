@@ -832,8 +832,10 @@ contextBridge.exposeInMainWorld('klaus', {
     ciStatus: (worktreePath, branch) => ipcRenderer.invoke('ci-status', { worktreePath, branch }),
     ciRunLogs: (worktreePath, runId) => ipcRenderer.invoke('ci-run-logs', { worktreePath, runId }),
     checkDependencies: () => ipcRenderer.invoke('check-dependencies'),
-    installRequirements: () => ipcRenderer.invoke('install-requirements'),
+    installRequirements: (agentIds) => ipcRenderer.invoke('install-requirements', { agentIds }),
     loginStart: (hostname) => ipcRenderer.invoke('gh-login-start', { hostname }),
+    loginInTerminal: (hostname) => ipcRenderer.invoke('gh-login-terminal', { hostname }),
+    installDevTools: () => ipcRenderer.invoke('install-dev-tools'),
     loginCancel: () => ipcRenderer.invoke('gh-login-cancel'),
     onLoginEvent: (callback) => {
       const listener = (_event, data) => callback(data);

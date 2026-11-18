@@ -13,6 +13,8 @@ const { reconcileOutage, clearOutageProbeCache } = require('../util/gh-outage');
 const { allProviders, getProvider, binFor, installCommandFor, authMetaFor } = require('../state/ai-providers');
 const { discoverReposOnDisk } = require('./repo');
 const { resolveAgentBin } = require('../util/agent-bin');
+const { parseGhDeviceCode, ghWantsUserToOpenBrowser } = require('../util/gh-device-code');
+const { gitBinToProbe, gitInstallCommand } = require('../util/git-check');
 
 // Parse `gh auth status` output into structured account records.
 //
@@ -143,6 +145,7 @@ ipcMain.handle('gh-switch-account', async (_event, { username }) => {
 // the right scopes and host metadata, which is what every other code path
 // in this app expects.
 let activeLoginChild = null;
+const GH_HOSTNAME_RE = /^[A-Za-z0-9.-]+(:\d+)?$/;
 
 function killActiveLogin() {
   if (!activeLoginChild) return;
@@ -153,6 +156,7 @@ function killActiveLogin() {
 ipcMain.handle('gh-login-start', async (event, opts) => {
   killActiveLogin();
   const hostname = (opts && opts.hostname) || 'github.com';
+  if (!GH_HOSTNAME_RE.test(hostname)) return { error: 'Invalid hostname.' };
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return { error: 'no window' };
   const send = (type, payload) => {
@@ -172,6 +176,8 @@ ipcMain.handle('gh-login-start', async (event, opts) => {
   let combined = '';
   let codeSeen = false;
   let enterSent = false;
+  let browserOpened = false;
+  const verificationUrl = `https://${hostname}/login/device`;
 
   // Watchdogs. gh can hang in two distinct places: before printing the
   // one-time code (network/version issue) and after, while polling for
@@ -193,13 +199,18 @@ ipcMain.handle('gh-login-start', async (event, opts) => {
     const piece = chunk.toString();
     combined += piece;
     if (!codeSeen) {
-      // gh prints "First copy your one-time code: XXXX-XXXX" on stderr.
-      const m = combined.match(/one-time code:\s*([A-Z0-9-]+)/i);
-      if (m) {
+      const code = parseGhDeviceCode(combined);
+      if (code) {
         codeSeen = true;
         clearTimeout(codeTimer);
-        send('code', { code: m[1], verificationUrl: `https://${hostname}/login/device` });
+        send('code', { code, verificationUrl });
       }
+    }
+    if (codeSeen && !browserOpened && ghWantsUserToOpenBrowser(combined)) {
+      browserOpened = true;
+      Promise.resolve()
+        .then(() => shell.openExternal(verificationUrl))
+        .catch(() => { /* modal has an Open browser button */ });
     }
     // Older gh versions wait for Enter before opening the browser. Newer
     // versions skip it. Either is fine — we only feed \n if asked.
@@ -520,6 +531,10 @@ ipcMain.handle('check-dependencies', async () => {
     }
   }
 
+  const devToolsInstalled = process.platform === 'darwin' ? probe('xcode-select', ['-p']).ok : null;
+  const gitBin = gitBinToProbe({ platform: process.platform, devToolsInstalled, envPath: process.env.PATH });
+  const gitVersion = gitBin ? probe(gitBin, ['--version']) : { ok: false };
+
   const ghVersion = probe('gh', ['--version']);
   const glabVersion = probe('glab', ['--version']);
   // Don't trust gh's exit code — it returns 1 if any account has a bad
@@ -592,6 +607,12 @@ ipcMain.handle('check-dependencies', async () => {
     // renderer sniff navigator.platform — cleaner and matches what the rest
     // of the app uses for cross-platform branching.
     platform: process.platform,
+    git: {
+      installed: gitVersion.ok,
+      version: gitVersion.ok ? gitVersion.output.split('\n')[0] : null,
+      devToolsMissing: devToolsInstalled === false && !gitVersion.ok,
+      installCommand: gitInstallCommand(process.platform),
+    },
     gh: {
       installed: ghVersion.ok,
       authed,
@@ -650,11 +671,7 @@ ipcMain.handle('check-dependencies', async () => {
 // Each script is idempotent — guarded with `command -v` (or `Get-Command`)
 // so re-running it after a partial install just fills in the missing pieces.
 
-// The bundle installs Node, gh, glab, Ollama, and EVERY agent CLI (`agents`: array of
-// { displayName, bin, installCommand, loginCommand }) — so whichever agent the
-// user picks later already works, with no extra setup. Each agent install is
-// guarded (skip if already present) and non-fatal (a single failure doesn't
-// abort the rest under `set -e`).
+// Agent installs are guarded and non-fatal so one failure can't abort the rest under `set -e`.
 function installScriptMac(agents) {
   const names = agents.map((a) => a.displayName).join(', ');
   const installs = agents.map((a) => `if ! command -v ${a.bin} >/dev/null 2>&1; then
@@ -665,8 +682,28 @@ fi`).join('\n\n');
   return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, GitLab CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, GitLab CLI, Ollama + agent CLIs: ${names || 'none selected'} — ~2 GB total, mostly Ollama)"
 echo
+
+if ! xcode-select -p >/dev/null 2>&1; then
+  echo "→ Xcode Command Line Tools (git, compilers) — finish the macOS dialog that opens."
+  # Exits non-zero when the dialog is already open; the wait below is the real check.
+  xcode-select --install || true
+  sleep 10
+  # The installer window stays open until the install finishes or is cancelled.
+  until xcode-select -p >/dev/null 2>&1; do
+    if ! pgrep -f "Install Command Line Developer Tools" >/dev/null 2>&1; then
+      sleep 5
+      xcode-select -p >/dev/null 2>&1 && break
+      echo "✗ The Command Line Tools installer closed before finishing."
+      echo "  Run 'xcode-select --install', finish it, then run Install requirements again."
+      read -p "Press Enter to close this window…"
+      exit 1
+    fi
+    sleep 5
+  done
+  echo "✓ Command Line Tools installed."
+fi
 
 if ! command -v brew >/dev/null 2>&1; then
   echo "Homebrew not found. Installing…"
@@ -714,7 +751,7 @@ function installScriptWin(agents) {
   const logins = agents.map((a) => `Write-Host '       • ${a.displayName}: ${a.loginCommand}'`).join('\n');
   return `$ErrorActionPreference = 'Stop'
 Write-Host 'Installing Klaussy requirements…'
-Write-Host '(Node, GitHub CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)'
+Write-Host '(Node, GitHub CLI, Ollama + agent CLIs: ${names || 'none selected'} — ~2 GB total, mostly Ollama)'
 Write-Host ''
 
 function Test-Cmd($name) { return [bool](Get-Command $name -ErrorAction SilentlyContinue) }
@@ -728,7 +765,8 @@ function Sync-Path {
 }
 Sync-Path
 
-Write-Host '→ winget install Node, GitHub CLI, GitLab CLI, Ollama'
+Write-Host '→ winget install Git, Node, GitHub CLI, GitLab CLI, Ollama'
+winget install --id Git.Git         -e --accept-source-agreements --accept-package-agreements
 winget install --id OpenJS.NodeJS   -e --accept-source-agreements --accept-package-agreements
 winget install --id GitHub.cli      -e --accept-source-agreements --accept-package-agreements
 try { winget install --id GitLab.glab -e --accept-source-agreements --accept-package-agreements } catch {}
@@ -768,13 +806,13 @@ fi`;
   return `#!/bin/bash
 set -e
 echo "Installing Klaussy requirements…"
-echo "(Node, GitHub CLI, GitLab CLI, Ollama + all agent CLIs: ${names} — ~2 GB total, mostly Ollama)"
+echo "(Node, GitHub CLI, GitLab CLI, Ollama + agent CLIs: ${names || 'none selected'} — ~2 GB total, mostly Ollama)"
 echo "(sudo password may be required)"
 echo
 
-echo "→ apt install nodejs, npm, gh, glab"
+echo "→ apt install git, nodejs, npm, gh, glab"
 sudo apt update
-sudo apt install -y nodejs npm gh || sudo apt install -y nodejs npm
+sudo apt install -y git nodejs npm gh || sudo apt install -y git nodejs npm
 if ! command -v glab >/dev/null 2>&1; then
   sudo apt install -y glab || echo "⚠ glab not found in apt repo — install from gitlab.com/gitlab-org/cli"
 fi
@@ -801,11 +839,10 @@ read -p "Press Enter to close this window…"
 `;
 }
 
-// Resolve EVERY agent CLI the installer should set up. We install them all on
-// first run — regardless of the user's current default — so switching agents
-// later needs no extra setup. Agents with no known install command are skipped.
-function installerAgentsInfo() {
+function installerAgentsInfo(agentIds) {
+  const wanted = new Set(Array.isArray(agentIds) ? agentIds : []);
   return allProviders()
+    .filter((p) => wanted.has(p.id))
     .map((p) => {
       const auth = authMetaFor(p.id) || {};
       return {
@@ -835,45 +872,81 @@ function findLinuxTerminal() {
   return null;
 }
 
-ipcMain.handle('install-requirements', async () => {
+async function openScriptInTerminal(stem, scripts) {
   const platform = process.platform;
-  const tmpDir = os.tmpdir();
-  const stamp = Date.now();
-  const agents = installerAgentsInfo(); // installs every agent CLI, not just the default
+  const base = path.join(os.tmpdir(), `${stem}-${Date.now()}`);
 
-  try {
-    if (platform === 'darwin') {
-      const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.command`);
-      fs.writeFileSync(scriptPath, installScriptMac(agents), { mode: 0o755 });
-      await openInMacTerminal(scriptPath);
-      return { ok: true };
-    }
-
-    if (platform === 'win32') {
-      const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.ps1`);
-      fs.writeFileSync(scriptPath, installScriptWin(agents));
-      // -NoExit so the window stays open after the script finishes; the
-      // empty title argument is required by `start` when the next arg is
-      // quoted-looking.
-      spawn('cmd', [
-        '/c', 'start', '""',
-        'powershell', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
-      ], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
-      return { ok: true };
-    }
-
-    // Linux
-    const term = findLinuxTerminal();
-    if (!term) {
-      return { error: 'No terminal emulator found. Install one of: gnome-terminal, konsole, xterm.' };
-    }
-    const scriptPath = path.join(tmpDir, `klaussy-install-${stamp}.sh`);
-    fs.writeFileSync(scriptPath, installScriptLinux(agents), { mode: 0o755 });
-    // gnome-terminal uses `--`, the rest use `-e`. xterm/konsole/xfce4 all
-    // accept `-e <command>`; gnome-terminal needs `-- bash <script>`.
-    const args = term === 'gnome-terminal' ? ['--', 'bash', scriptPath] : ['-e', `bash ${scriptPath}`];
-    spawn(term, args, { detached: true, stdio: 'ignore' }).unref();
+  if (platform === 'darwin') {
+    const scriptPath = `${base}.command`;
+    fs.writeFileSync(scriptPath, scripts.mac, { mode: 0o755 });
+    await openInMacTerminal(scriptPath);
     return { ok: true };
+  }
+
+  if (platform === 'win32') {
+    const scriptPath = `${base}.ps1`;
+    fs.writeFileSync(scriptPath, scripts.win);
+    // -NoExit keeps the window open; `start` needs the empty title argument.
+    spawn('cmd', [
+      '/c', 'start', '""',
+      'powershell', '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
+    ], { detached: true, stdio: 'ignore', windowsVerbatimArguments: true }).unref();
+    return { ok: true };
+  }
+
+  const term = findLinuxTerminal();
+  if (!term) {
+    return { error: 'No terminal emulator found. Install one of: gnome-terminal, konsole, xterm.' };
+  }
+  const scriptPath = `${base}.sh`;
+  fs.writeFileSync(scriptPath, scripts.linux, { mode: 0o755 });
+  // gnome-terminal takes `-- cmd`; xterm/konsole/xfce4 take `-e cmd`.
+  const args = term === 'gnome-terminal' ? ['--', 'bash', scriptPath] : ['-e', `bash ${scriptPath}`];
+  spawn(term, args, { detached: true, stdio: 'ignore' }).unref();
+  return { ok: true };
+}
+
+ipcMain.handle('install-requirements', async (_event, opts) => {
+  const agents = installerAgentsInfo(opts && opts.agentIds);
+  try {
+    return await openScriptInTerminal('klaussy-install', {
+      mac: installScriptMac(agents),
+      win: installScriptWin(agents),
+      linux: installScriptLinux(agents),
+    });
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+// Opens Apple's GUI installer; it exits non-zero if the tools are already installed.
+ipcMain.handle('install-dev-tools', async () => {
+  if (process.platform !== 'darwin') return { error: 'Command Line Tools are macOS-only.' };
+  try {
+    await execFileP('xcode-select', ['--install'], { timeout: 15000 });
+    return { ok: true };
+  } catch (err) {
+    const msg = `${(err && err.stderr) || ''}${(err && err.message) || ''}`;
+    if (/already installed/i.test(msg)) return { ok: true, alreadyInstalled: true };
+    return { error: msg.trim() || 'xcode-select --install failed' };
+  }
+});
+
+function ghLoginScripts(hostname) {
+  const cmd = `gh auth login --hostname '${hostname}'`;
+  const posix = `#!/bin/bash\n${cmd}\necho\nread -p "Done. Return to Klaussy and click Re-check. Press Enter to close…"\n`;
+  return {
+    mac: posix,
+    linux: posix,
+    win: `${cmd}\nWrite-Host ''\nRead-Host 'Done. Return to Klaussy and click Re-check. Press Enter to close'\n`,
+  };
+}
+
+ipcMain.handle('gh-login-terminal', async (_event, opts) => {
+  const hostname = (opts && opts.hostname) || 'github.com';
+  if (!GH_HOSTNAME_RE.test(hostname)) return { error: 'Invalid hostname.' };
+  try {
+    return await openScriptInTerminal('klaussy-gh-login', ghLoginScripts(hostname));
   } catch (err) {
     return { error: err.message };
   }
@@ -904,4 +977,12 @@ ipcMain.handle('ci-run-logs', async (_event, { worktreePath, runId }) => {
   }
 });
 
-module.exports = { readGhAccountsChecked };
+module.exports = {
+  readGhAccountsChecked,
+  installerAgentsInfo,
+  installScriptMac,
+  installScriptWin,
+  installScriptLinux,
+  ghLoginScripts,
+  GH_HOSTNAME_RE,
+};
