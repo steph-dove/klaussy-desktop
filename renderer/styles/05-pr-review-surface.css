@@ -4262,6 +4262,42 @@ button.pr-check-toggle {
   cursor: pointer;
 }
 .deps-action:hover { filter: brightness(1.08); }
+.deps-action-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.deps-action-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.gh-login-fallback {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.gh-login-fallback p {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.deps-agent-picker {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-align: left;
+}
+.deps-agent-picker legend {
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.deps-agent-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
 .deps-install-section {
   margin-top: 14px;
   padding: 14px;
