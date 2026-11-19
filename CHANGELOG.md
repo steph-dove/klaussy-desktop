@@ -2,6 +2,14 @@
 
 All notable changes to Klaussy Desktop are documented here.
 
+## 0.31.1
+
+### 🦉 Smoother First Run
+
+- **Pick Your Agents**: the setup screen lets you tick which agent CLIs to install instead of installing all of them.
+- **GitHub Sign-In Works**: Sign in to GitHub shows the one-time code and opens the device page in your browser. If that doesn't work for you, Sign in from Terminal runs `gh auth login` in your terminal, and the command is there to copy.
+- **Mac Developer Tools**: on a new Mac without the Command Line Tools, setup says git is missing and offers to install them. The install script installs them first and stops if you close Apple's installer.
+
 ## 0.31.0
 
 ### 🦉 Azure DevOps Pull Requests
