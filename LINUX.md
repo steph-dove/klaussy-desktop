@@ -48,7 +48,7 @@ Run in dev mode (`npm start`) for everything except §6 (build).
 - [ ] **fixSpawnPath**: launch the AppImage from a desktop launcher (not
       a terminal). Open a terminal and run `which claude` / `which gh`.
       They resolve. (If they don't, the install put them outside the
-      user's session-PATH; not a Klaussy regression.)
+      user's session-PATH; not a Maussian regression.)
 - [ ] Open a `.py` file when pyright is missing. Hint dialog points at
       `pipx install pyright` or `npm install -g pyright`. *Not* brew.
 - [ ] Open a `.cpp` file when clangd is missing. Hint suggests apt /
@@ -70,15 +70,16 @@ Run in dev mode (`npm start`) for everything except §6 (build).
 ### Build
 
 - [ ] `npm run dist:linux` produces:
-      - [ ] `dist/Klaussy-<version>-x64.AppImage` (universal)
-      - [ ] `dist/Klaussy-<version>-x64.deb` (Debian/Ubuntu)
+      - [ ] `dist/Maussian-<version>-x64.AppImage` (universal)
+      - [ ] `dist/Maussian-<version>-x64.deb` (Debian/Ubuntu)
 - [ ] Make the AppImage executable (`chmod +x`) and double-click. App
       launches without writing to the system.
-- [ ] `sudo dpkg -i Klaussy-<version>-x64.deb`. App appears in the
+- [ ] `sudo dpkg -i Maussian-<version>-x64.deb`. App appears in the
       Activities/applications menu.
 - [ ] Launch from Activities menu. App opens normally.
-- [ ] `sudo apt remove klaussy`. App is gone; `~/.config/Klaussy/`
-      (config.json, sessions) is preserved.
+- [ ] `sudo apt remove klaussy`. App is gone; `~/.config/Maussian/`
+      (`~/.config/Klaussy/` on an install upgraded from Klaussy; config.json,
+      sessions) is preserved.
 
 ## Known gaps (deferred from this slice)
 

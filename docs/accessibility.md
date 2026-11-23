@@ -1,6 +1,6 @@
 # Accessibility
 
-Klaussy aims to meet WCAG 2.2 AA and to be usable with the keyboard alone and with a screen reader (VoiceOver, NVDA, JAWS).
+Maussian aims to meet WCAG 2.2 AA and to be usable with the keyboard alone and with a screen reader (VoiceOver, NVDA, JAWS).
 
 ## Keyboard
 

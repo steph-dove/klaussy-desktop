@@ -1,6 +1,15 @@
 # Changelog
 
-All notable changes to Klaussy Desktop are documented here.
+All notable changes to Maussian Desktop (formerly Klaussy Desktop) are documented here.
+
+## 0.32.0
+
+### 🐭 Klaussy Is Now Maussian
+
+- **New Name, Same App**: Klaussy Desktop is now Maussian, with the mouse as its icon. It updates in place like any other release. Your settings, sessions and PR checkouts carry over, and on a Mac the app stays where it is in Applications.
+- **New Package Names**: the CLIs behind skills and repo conventions moved to `mauss` and `maussian-repo-conventions` on PyPI. The app swaps out `klaussy-agents` and `klaussy-repo-conventions` for you, with whichever of pipx, uv or pip installed them. The `klaussy` command keeps working.
+- **Re-enter Saved Secrets on macOS**: secrets saved in the Keychain, like an Azure DevOps token, are tied to the app's name, so a Mac asks for them once more. Windows and Linux keep them.
+- **Voice Commands**: "hey Maussian" works as well as "hey Klaussy".
 
 ## 0.31.1
 

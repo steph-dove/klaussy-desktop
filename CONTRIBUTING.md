@@ -1,6 +1,6 @@
-# Contributing to Klaussy Desktop
+# Contributing to Maussian Desktop
 
-Thanks for your interest in improving Klaussy Desktop! This guide covers how to
+Thanks for your interest in improving Maussian Desktop! This guide covers how to
 get set up, the quality bar, and how contributions are licensed.
 
 ## Getting started
@@ -58,7 +58,7 @@ can bypass with `git commit --no-verify`, but prefer fixing the finding.
 
 ## License of contributions
 
-Klaussy Desktop is source-available under the **Sustainable Use License
+Maussian Desktop is source-available under the **Sustainable Use License
 (SUL 1.0)** — see [`LICENSE`](LICENSE). By submitting a contribution, you agree
 that:
 
@@ -71,4 +71,4 @@ You also confirm you have the right to make the contribution (it's your own
 work, or you have permission to submit it). If you're contributing on behalf of
 an employer, make sure you're authorized to do so.
 
-Thanks for helping make Klaussy better. 🐙
+Thanks for helping make Maussian better. 🐙

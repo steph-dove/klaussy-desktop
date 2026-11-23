@@ -15,7 +15,7 @@ Please include:
 
 - A description of the issue and its impact.
 - Steps to reproduce (a proof of concept is ideal).
-- The Klaussy version (Cmd+K → About Klaussy) and your OS.
+- The Maussian version (Cmd+K → About Maussian) and your OS.
 - Any relevant logs (Cmd+K → View Logs), with secrets redacted.
 
 We'll acknowledge your report as soon as we can, keep you updated on progress,
@@ -30,7 +30,7 @@ to the newest release: <https://github.com/steph-dove/klaussy-desktop/releases/l
 
 ## Scope notes
 
-Klaussy is a local-first desktop app: it runs coding-agent CLIs in git
+Maussian is a local-first desktop app: it runs coding-agent CLIs in git
 worktrees on your own machine, and installs git hooks into repos you point it
 at. Reports about credential handling, the IPC/preload boundary, the
 prompt-injection read guard, the pre-commit review server's local socket, code
