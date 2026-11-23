@@ -203,13 +203,13 @@ window.App = window.App || {};
         return;
       }
       if (ev.type === 'tools-failed') {
-        window.toast.warn('Repo-analysis tools (' + (ev.missing || []).join(', ') + ') couldn’t be installed automatically (' + (ev.reason || 'unknown') + '). Klaussy will retry in the background.');
+        window.toast.warn('Repo-analysis tools (' + (ev.missing || []).join(', ') + ') couldn’t be installed automatically (' + (ev.reason || 'unknown') + '). Maussian will retry in the background.');
         return;
       }
       if (ev.type === 'tools-outdated') {
         var msg = 'klaussy-agents is out of date (' + (ev.current || '?') + ' → needs ' + (ev.min || '?') + '). '
           + (ev.reason === 'local-init'
-            ? 'Agent skills aren’t set up in your repos until you upgrade, so klaussy’s files stay out of git.'
+            ? 'Agent skills aren’t set up in your repos until you upgrade, so Maussian’s files stay out of git.'
             : 'New agent skills won’t appear in your repos until you upgrade.');
         if (window.klaus.task.upgradeReviewTools) {
           window.toast.action('warn', msg, 'Upgrade now', function () {
@@ -235,7 +235,7 @@ window.App = window.App || {};
       var repoName = ev.repoPath.split('/').filter(Boolean).pop();
       if (ev.type === 'started') {
         window.toast.info(repoName + (ev.enriching
-          ? ': graphing the repo and building conventions-aware skills (klaussy init + Claude enrichment — may take a few minutes)…'
+          ? ': graphing the repo and building conventions-aware skills (Maussian init + Claude enrichment — may take a few minutes)…'
           : ': graphing the repo and extracting conventions…'));
       } else if (ev.type === 'generated') {
         if (ev.enrichFailed) {
@@ -1456,7 +1456,7 @@ window.App = window.App || {};
 
   App.showLogViewer = Dialogs.showLog;
 
-  // View → How to use Klaussy menu item routes here.
+  // View → How to use Maussian menu item routes here.
   if (window.klaus.ui.onShowHowToUse) {
     window.klaus.ui.onShowHowToUse(function () { Dialogs.showHowToUse(); });
   }

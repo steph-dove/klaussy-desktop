@@ -1,7 +1,7 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
-// Builds the gateway bring-up script Klaussy runs in an in-app terminal (a real
+// Builds the gateway bring-up script Maussian runs in an in-app terminal (a real
 // node-pty TTY, which the interactive `nemesis8 login` requires). It reuses the
-// token Klaussy stores so the app and gateway can't drift.
+// token Maussian stores so the app and gateway can't drift.
 
 function shScript(provider, token) {
   const flag = provider ? ` --provider ${provider}` : '';
@@ -9,7 +9,7 @@ function shScript(provider, token) {
   return `#!/bin/bash
 set -e
 ${pathLine}
-echo "== Klaussy: setting up your local Nemesis8 gateway =="
+echo "== Maussian: setting up your local Nemesis8 gateway =="
 if ! command -v nemesis8 >/dev/null 2>&1; then
   echo "Installing nemesis8 (needs Docker running)..."
   curl -fsSL https://nemesis8.nuts.services/install.sh | sh
@@ -32,7 +32,7 @@ echo "Done. Gateway is running — go back to Preferences and Test connection. Y
 
 function ps1Script(provider, token) {
   const flag = provider ? ` --provider ${provider}` : '';
-  return `Write-Host "== Klaussy: setting up your local Nemesis8 gateway =="
+  return `Write-Host "== Maussian: setting up your local Nemesis8 gateway =="
 if (-not (Get-Command nemesis8 -ErrorAction SilentlyContinue)) {
   Write-Host "Installing nemesis8 (needs Docker running)..."
   irm https://nemesis8.nuts.services/install.ps1 | iex

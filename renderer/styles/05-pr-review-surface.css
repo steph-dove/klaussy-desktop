@@ -2073,7 +2073,7 @@ button.pr-check-toggle {
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
   box-shadow: 0 0 0 3px var(--bg);
 }
-/* Klaussy marker for AI findings: accent dot, rounded square to stand apart. */
+/* Maussian marker for AI findings: accent dot, rounded square to stand apart. */
 .pr-conv-avatar-ai {
   background: var(--accent);
   border-radius: 8px;

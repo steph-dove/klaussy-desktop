@@ -8,7 +8,7 @@
 // mirroring the workflow's create-if-missing behavior.
 //
 // Usage:
-//   npm run dist          # signs + notarizes, writes dist/Klaussy-<v>-macOS-*
+//   npm run dist          # signs + notarizes, writes dist/Maussian-<v>-macOS-*
 //   npm run release:mac   # uploads those to both repos for tag v<version>
 //
 // Auth: uses the gh CLI. Two accounts are logged in on the release machine and
@@ -40,7 +40,7 @@ const distDir = path.join(__dirname, '..', 'dist');
 let files;
 try {
   files = fs.readdirSync(distDir)
-    .filter((f) => f === 'latest-mac.yml' || f.startsWith(`Klaussy-${version}-macOS-`))
+    .filter((f) => f === 'latest-mac.yml' || f.startsWith(`Maussian-${version}-macOS-`))
     .map((f) => path.join(distDir, f));
 } catch {
   files = [];
@@ -50,7 +50,7 @@ const hasFeed = files.some((f) => path.basename(f) === 'latest-mac.yml');
 if (files.length === 0 || !hasFeed) {
   console.error(
     `[release:mac] No macOS artifacts for ${tag} in dist/ ` +
-    `(need Klaussy-${version}-macOS-*.{dmg,zip} + latest-mac.yml).\n` +
+    `(need Maussian-${version}-macOS-*.{dmg,zip} + latest-mac.yml).\n` +
     `Run \`npm run dist\` first.`
   );
   process.exit(1);

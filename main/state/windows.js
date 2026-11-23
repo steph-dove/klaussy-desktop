@@ -54,7 +54,7 @@ function createWindow(opts) {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'Klaussy',
+    title: 'Maussian',
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
     backgroundColor: '#1a1a2e',
     ...(isMac ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 19, y: 12 } } : {}),

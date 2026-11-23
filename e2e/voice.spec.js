@@ -55,7 +55,7 @@ test.describe('voice input defaults', () => {
 
   test('a blocked microphone points at the OS microphone settings', async ({ electronApp, mainWindow }) => {
     await ready(mainWindow);
-    await stubPrepare(electronApp, { ok: false, code: 'mic-denied', error: 'Klaussy can’t use the microphone (stubbed).' });
+    await stubPrepare(electronApp, { ok: false, code: 'mic-denied', error: 'Maussian can’t use the microphone (stubbed).' });
     await mainWindow.locator('#btn-voice').click();
     const toastEl = mainWindow.locator('.klaussy-toast', { hasText: 'can’t use the microphone' });
     await expect(toastEl).toBeVisible();

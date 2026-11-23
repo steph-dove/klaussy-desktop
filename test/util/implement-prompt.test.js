@@ -19,7 +19,7 @@ test('implement all commits what was tested, including earlier uncommitted edits
   assert.match(p, /earlier\s+Implement runs/);
 });
 
-test('implement all leaves the push to Klaussy and signals a commit with the marker', () => {
+test('implement all leaves the push to Maussian and signals a commit with the marker', () => {
   const p = buildImplementPrompt({ mode: 'all', body: 'x' });
   assert.doesNotMatch(p, /git push/);
   assert.match(p, /Do not push/);
@@ -49,9 +49,9 @@ test('repo intel is appended when present', () => {
   assert.ok(p.endsWith('\nINTEL BLOCK'));
 });
 
-test('implement all tells the agent Klaussy pushes, so it neither pushes nor offers to', () => {
+test('implement all tells the agent Maussian pushes, so it neither pushes nor offers to', () => {
   const p = buildImplementPrompt({ mode: 'all', body: 'x' });
-  assert.match(p, /running inside Klaussy/);
+  assert.match(p, /running inside Maussian/);
   assert.match(p, /Do not push and do not offer to/);
-  assert.match(p, /pushed by Klaussy/);
+  assert.match(p, /pushed by Maussian/);
 });

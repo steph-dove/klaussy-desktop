@@ -418,7 +418,7 @@ body.custom-titlebar #titlebar-content {
 }
 #titlebar-branch[hidden] { display: none; }
 
-/* Klaussy brand block at the top of the sidebar, above the token graph. Its
+/* Maussian brand block at the top of the sidebar, above the token graph. Its
    name is the window's <h1>. */
 .sidebar-brand-name { margin: 0; font: inherit; letter-spacing: inherit; }
 #sidebar-brand {
@@ -978,7 +978,7 @@ body.pr-review-popout #voice-float:not([hidden]) {
 }
 
 /* Commit review gate prompt — shown under the filters when the selected repo
-   has no Klaussy pre-commit hook yet. Hidden via the [hidden] attribute. */
+   has no Maussian pre-commit hook yet. Hidden via the [hidden] attribute. */
 #commit-gate-banner {
   display: flex;
   align-items: center;

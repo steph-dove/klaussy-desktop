@@ -98,7 +98,7 @@ const LAUNCHERS = {
       '  gem install ruby-lsp ruby-lsp-rails\n\n' +
       'For Rails-specific intel, also add to your Gemfile:\n' +
       "  gem 'ruby-lsp-rails', require: false, group: :development\n\n" +
-      'If `gem install` puts binaries in a non-PATH bin dir, add it to your shell and relaunch Klaussy.',
+      'If `gem install` puts binaries in a non-PATH bin dir, add it to your shell and relaunch Maussian.',
   },
   java: {
     candidates: ['jdtls'],
@@ -573,7 +573,7 @@ function installServer({ languageId, webContents }) {
       if (!resolveExecutable(launcher.candidates)) {
         send({ type: 'done', ok: false });
         resolve({
-          error: `${launcher.friendly} installed but the binary is still not on PATH. Restart your shell or Klaussy.`,
+          error: `${launcher.friendly} installed but the binary is still not on PATH. Restart your shell or Maussian.`,
           installHint: resolveInstallHint(launcher.installHint),
         });
         return;

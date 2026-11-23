@@ -127,7 +127,7 @@ async function triggerAutoFix(inst, pr, event) {
     }
   };
 
-  broadcastStatus('started', `Klaussy: Auto-fix triggered for ${event.type === 'ci' ? 'CI failure' : 'new comment'}`);
+  broadcastStatus('started', `Maussian: Auto-fix triggered for ${event.type === 'ci' ? 'CI failure' : 'new comment'}`);
 
   const tempWorktreePath = path.join(os.tmpdir(), `klaussy-autofix-${taskId}-${Date.now()}`);
   const tempBranch = `autofix-${taskId}-${Date.now()}`;
@@ -188,7 +188,7 @@ async function triggerAutoFix(inst, pr, event) {
       await execFileP('git', ['push', 'origin', `HEAD:${inst.branch}`], { cwd: tempWorktreePath, timeout: 30000 });
 
       // Add a comment on the PR explaining what was fixed
-      const commentBody = `🤖 **Klaussy Auto-Fixer**: Applied a fix to address the ${event.type === 'ci' ? 'CI failure' : 'PR comment'}.\n\n*Fix Prompt*: _"${promptText}"_\n*Status*: Pushed successfully.`;
+      const commentBody = `🤖 **Maussian Auto-Fixer**: Applied a fix to address the ${event.type === 'ci' ? 'CI failure' : 'PR comment'}.\n\n*Fix Prompt*: _"${promptText}"_\n*Status*: Pushed successfully.`;
       await ghExecP(['pr', 'comment', pr.url, '--body', commentBody], { cwd: inst.worktreePath, timeout: 15000 });
 
       broadcastStatus('success', 'Fix applied and pushed successfully!');

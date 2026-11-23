@@ -657,7 +657,7 @@ function sendIdleNotification(inst, reason) {
   if (isAnyWindowFocused()) return;
 
   const notification = new Notification({
-    title: `Klaussy — ${inst.name}`,
+    title: `Maussian — ${inst.name}`,
     body: reason,
     silent: false,
   });
@@ -686,7 +686,7 @@ function sendCIFlipNotification(inst, run, bucket) {
 
   const verb = bucket === 'pass' ? 'passed' : bucket === 'fail' ? 'failed' : bucket;
   const notification = new Notification({
-    title: `Klaussy — CI ${verb}`,
+    title: `Maussian — CI ${verb}`,
     body: `${inst.name}${run && run.name ? ' · ' + run.name : ''}`,
     silent: false,
   });

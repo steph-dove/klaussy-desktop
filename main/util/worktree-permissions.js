@@ -14,7 +14,7 @@
 // All rules are scoped to the worktree path — never to `**`. A repo
 // permission set never grants access to anything outside that repo.
 //
-// Consent: the first time Klaussy would write settings.local.json into a
+// Consent: the first time Maussian would write settings.local.json into a
 // worktree, the user sees a native dialog with three buttons:
 //   * Allow for this repo  — write the file, remember 'allow' for this path
 //   * Skip                 — don't write, remember 'skip' for this path
@@ -57,7 +57,7 @@ const SECRET_GLOBS = [
 // rule now logs "matches no known tool" on every session AND silently no-ops
 // (its secret-file deny guard stops protecting anything). Edit + Write cover
 // what MultiEdit used to. STALE_TOOLS lists names to scrub from existing
-// settings files written by older Klaussy versions.
+// settings files written by older Maussian versions.
 const TOUCH_TOOLS = ['Read', 'Edit', 'Write'];
 const STALE_TOOLS = ['MultiEdit'];
 
@@ -169,9 +169,9 @@ async function askRepoConsent(worktreePath) {
   const opts = {
     type: 'question',
     title: 'Set up Claude file permissions for this repo',
-    message: 'Allow Klaussy to manage Claude permissions for this repo?',
+    message: 'Allow Maussian to manage Claude permissions for this repo?',
     detail:
-      `Klaussy will write ${path.join(worktreePath, '.claude', 'settings.local.json')} with rules that:\n\n` +
+      `Maussian will write ${path.join(worktreePath, '.claude', 'settings.local.json')} with rules that:\n\n` +
       `  • Allow Read / Edit / Write inside this repo\n` +
       `  • Deny .env, .envrc, credentials, .npmrc, *.pem, *.key, etc.\n` +
       `  • Add .claude/settings.local.json to .gitignore\n` +
@@ -238,7 +238,7 @@ function ensureGitignoreExcludesSettings(worktreePath) {
   const needsSep = hasFile && !/\n$/.test(existing);
   const block = (hasFile ? '' : '')
     + (needsSep ? '\n' : '')
-    + (hasFile ? '\n# Added by Klaussy — Claude per-repo permission overrides\n' : '# Added by Klaussy — Claude per-repo permission overrides\n')
+    + (hasFile ? '\n# Added by Maussian — Claude per-repo permission overrides\n' : '# Added by Maussian — Claude per-repo permission overrides\n')
     + wanted + '\n';
   try {
     fs.writeFileSync(gitignorePath, existing + block);
@@ -248,8 +248,8 @@ function ensureGitignoreExcludesSettings(worktreePath) {
 }
 
 // Before modifying an existing settings.local.json, drop a .bak copy
-// next to it (only if no Klaussy backup is already there — we want the
-// pristine pre-Klaussy state, not the most recent intermediate state).
+// next to it (only if no Maussian backup is already there — we want the
+// pristine pre-Maussian state, not the most recent intermediate state).
 // Best-effort; a backup failure does not block the main write.
 function backupSettingsOnce(settingsPath) {
   const bakPath = settingsPath + '.klaussy-bak';
@@ -298,7 +298,7 @@ function applyWorktreePermissionsToSettings(worktreePath) {
 
   let changed = false;
   // Migration: scrub rules referencing tools Claude Code no longer knows
-  // (e.g. MultiEdit). Older Klaussy versions wrote them; left in place they
+  // (e.g. MultiEdit). Older Maussian versions wrote them; left in place they
   // warn on every session and no-op the secret guards. Removing them lets the
   // valid Edit/Write rules below take over.
   const isStale = (rule) => STALE_TOOLS.some((t) => String(rule).startsWith(t + '('));

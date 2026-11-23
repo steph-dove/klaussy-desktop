@@ -125,14 +125,14 @@ window.App = window.App || {};
     
     var noProject = !AppState.repoPath;
     if (noProject) {
-      titleEl.textContent = 'Welcome to Klaussy';
-      subEl.textContent = 'Pick a repo, name a branch, and Klaussy spawns an agent session.';
+      titleEl.textContent = 'Welcome to Maussian';
+      subEl.textContent = 'Pick a repo, name a branch, and Maussian spawns an agent session.';
       if (cardTitleEl && cardDescEl) {
         cardTitleEl.textContent = 'Add a Worktree';
         cardDescEl.textContent = 'Attach a local git repository to start managing worktrees.';
       }
     } else {
-      titleEl.textContent = 'Klaussy Desktop';
+      titleEl.textContent = 'Maussian Desktop';
       subEl.textContent = 'Choose an action to start building or reviewing code.';
       if (cardTitleEl && cardDescEl) {
         cardTitleEl.textContent = 'New Git Session';
@@ -189,7 +189,7 @@ window.App = window.App || {};
     } else {
       App.loadExistingTasks();
     }
-    // Klaussy is free — no access-key gate.
+    // Maussian is free — no access-key gate.
   };
 
   App.loadExistingTasks = async function() {

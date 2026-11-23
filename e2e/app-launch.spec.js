@@ -13,10 +13,10 @@ test('app launches with main window and no console errors', async ({ electronApp
   });
   mainWindow.on('pageerror', (err) => errors.push(err.message));
 
-  await expect(mainWindow).toHaveTitle(/Klaussy|Klaus/i);
+  await expect(mainWindow).toHaveTitle(/Maussian/i);
 
   const title = await electronApp.evaluate(({ app }) => app.getName());
-  expect(title).toBe('Klaussy');
+  expect(title).toBe('Maussian');
 
   await mainWindow.waitForLoadState('networkidle');
 

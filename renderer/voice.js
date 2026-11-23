@@ -285,7 +285,7 @@
   // Opens the PR the user named, from the picker's loaded list; with several matches it filters the list instead.
   function reviewPr(query) {
     if (!window.App) {
-      window.toast.info('Open the PR picker from the main Klaussy window.');
+      window.toast.info('Open the PR picker from the main Maussian window.');
       return false;
     }
     if (!document.querySelector('.pr-picker-overlay')) window.App.showPrPicker();
@@ -745,7 +745,7 @@
         window.toast.error(msg, { sticky: true });
       }
     }, function () {
-      window.toast.error(message || 'Klaussy can’t use the microphone.');
+      window.toast.error(message || 'Maussian can’t use the microphone.');
     });
   }
 
@@ -792,7 +792,7 @@
       if (!micId) return navigator.mediaDevices.getUserMedia({ audio: audio });
       return navigator.mediaDevices.getUserMedia({ audio: Object.assign({ deviceId: { exact: micId } }, audio) }).catch(function (err) {
         if (!err || !/Overconstrained|NotFound|NotReadable/.test(err.name)) throw err;
-        window.toast.info('The chosen microphone isn’t available, so Klaussy is using the default.');
+        window.toast.info('The chosen microphone isn’t available, so Maussian is using the default.');
         return navigator.mediaDevices.getUserMedia({ audio: audio });
       });
     }).then(function (stream) {
@@ -974,7 +974,7 @@
     navigator.mediaDevices.enumerateDevices().then(function (devices) {
       var mics = devices.filter(function (d) { return d.kind === 'audioinput' && d.deviceId !== 'default'; });
       if (!mics.length || !mics.some(function (d) { return d.label; })) {
-        window.toast.info('Use voice once so Klaussy can list your microphones, then try again.');
+        window.toast.info('Use voice once so Maussian can list your microphones, then try again.');
         return;
       }
       var save = function (id, name) {

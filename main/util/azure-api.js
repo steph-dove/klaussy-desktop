@@ -194,7 +194,7 @@ async function saveAzureAccount({ collection, pat }) {
   if (!token) throw new AzureAuthError('Enter a personal access token.', 'input');
   if (!secretStore.available()) {
     throw new AzureAuthError(
-      `This system has no secure storage for the PAT, so Klaussy won't save it. Set $${ENV_PAT} in your environment instead.`,
+      `This system has no secure storage for the PAT, so Maussian won't save it. Set $${ENV_PAT} in your environment instead.`,
       'unavailable',
     );
   }

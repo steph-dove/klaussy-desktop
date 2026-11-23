@@ -23,8 +23,8 @@ function classifyAzureError(raw, ctx = {}) {
   if (has(/VssVersionOutOfRangeException|api-version.*(?:out of range|not supported)|version .* of the api is not supported/i)) {
     return {
       kind: 'server-version',
-      summary: `This Azure DevOps Server (${host}) is older than Klaussy supports.`,
-      fix: 'Klaussy needs Azure DevOps Server 2020 or later, or Azure DevOps Services.',
+      summary: `This Azure DevOps Server (${host}) is older than Maussian supports.`,
+      fix: 'Maussian needs Azure DevOps Server 2020 or later, or Azure DevOps Services.',
       retryable: false,
     };
   }

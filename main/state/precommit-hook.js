@@ -23,7 +23,7 @@
 // hooks no-op in milliseconds; any client-side failure exits 0. Commits and
 // pushes must never break because of us.
 //
-// An existing non-Klaussy hook of the same name is preserved as
+// An existing non-Maussian hook of the same name is preserved as
 // <hook>.klaussy-prev and chained first. Installed repos are tracked in
 // config so opting out (Preferences) uninstalls everywhere.
 
@@ -37,7 +37,7 @@ const { loadConfig, saveConfig } = require('../util/config');
 
 const KLAUSSY_DIR = path.join(os.homedir(), '.klaussy');
 const META_PATH = path.join(KLAUSSY_DIR, 'precommit.json'); // legacy single-pointer fallback
-// One <pid>.json per running instance, so multiple Klaussy instances each run
+// One <pid>.json per running instance, so multiple Maussian instances each run
 // their own review server and the hook client can find whichever is live.
 const SOCKETS_DIR = path.join(KLAUSSY_DIR, 'sockets');
 const REGISTRY_FILE = path.join(SOCKETS_DIR, process.pid + '.json');
@@ -51,8 +51,8 @@ let server = null;
 
 const HOOKS = {
   'pre-commit': `#!/bin/sh
-# klaussy-precommit v1 — staged-diff review before commits (installed by Klaussy).
-# Opt out: Klaussy Preferences, or KLAUSSY_SKIP_REVIEW=1, or \`git commit --no-verify\`.
+# klaussy-precommit v1 — staged-diff review before commits (installed by Maussian).
+# Opt out: Maussian Preferences, or KLAUSSY_SKIP_REVIEW=1, or \`git commit --no-verify\`.
 [ -n "$KLAUSSY_SKIP_REVIEW" ] && exit 0
 HOOK_DIR=$(dirname "$0")
 if [ -x "$HOOK_DIR/pre-commit.klaussy-prev" ]; then
@@ -63,8 +63,8 @@ exec node "$HOME/.klaussy/precommit-client.js" "$PWD" pre-commit
 `,
 
   'pre-push': `#!/bin/sh
-# klaussy-prepush v1 — push-range review before pushes (installed by Klaussy).
-# Opt out: Klaussy Preferences, or KLAUSSY_SKIP_REVIEW=1, or \`git push --no-verify\`.
+# klaussy-prepush v1 — push-range review before pushes (installed by Maussian).
+# Opt out: Maussian Preferences, or KLAUSSY_SKIP_REVIEW=1, or \`git push --no-verify\`.
 [ -n "$KLAUSSY_SKIP_REVIEW" ] && exit 0
 HOOK_DIR=$(dirname "$0")
 STDIN_DATA=$(cat)
@@ -80,7 +80,7 @@ exec node "$HOME/.klaussy/precommit-client.js" "$PWD" pre-push "$LOCAL_SHA" "$RE
 `,
 
   'commit-msg': `#!/bin/sh
-# klaussy-commitmsg v1 — free local commit-message check (installed by Klaussy).
+# klaussy-commitmsg v1 — free local commit-message check (installed by Maussian).
 HOOK_DIR=$(dirname "$0")
 if [ -x "$HOOK_DIR/commit-msg.klaussy-prev" ]; then
   "$HOOK_DIR/commit-msg.klaussy-prev" "$@" || exit $?
@@ -91,7 +91,7 @@ exec node "$HOME/.klaussy/commitmsg-client.js" "$1" "$PWD"
 
   'post-commit': `#!/bin/sh
 # klaussy-postcommit v1 — records review-passed commits for the pre-push skip
-# (installed by Klaussy). Bookkeeping only; never blocks anything.
+# (installed by Maussian). Bookkeeping only; never blocks anything.
 HOOK_DIR=$(dirname "$0")
 if [ -x "$HOOK_DIR/post-commit.klaussy-prev" ]; then
   "$HOOK_DIR/post-commit.klaussy-prev" "$@" || true
@@ -117,7 +117,7 @@ const HOOK_MARKERS = {
 
 // ---- Standalone clients (run OUTSIDE the app, written by the server) --------
 
-const CLIENT_SCRIPT = `// Klaussy review hook client — written by Klaussy; edits will be overwritten.
+const CLIENT_SCRIPT = `// Maussian review hook client — written by Maussian; edits will be overwritten.
 // Invariant: this script may only block when the review RAN and found
 // issues. Any client-side failure whatsoever must exit 0.
 process.on('uncaughtException', () => process.exit(0));
@@ -126,7 +126,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-// Discover every running Klaussy review server. Multiple instances can run at
+// Discover every running Maussian review server. Multiple instances can run at
 // once (dev + packaged, or separate launches), each with its own socket.
 const KDIR = path.join(os.homedir(), '.klaussy');
 const candidates = [];
@@ -214,7 +214,7 @@ function tryNext() {
 tryNext();
 `;
 
-const COMMITMSG_CLIENT_SCRIPT = `// Klaussy commit-msg client — written by Klaussy; edits will be overwritten.
+const COMMITMSG_CLIENT_SCRIPT = `// Maussian commit-msg client — written by Maussian; edits will be overwritten.
 // Deterministic, local, free. Blocks only on egregious problems; otherwise
 // warns and lets the commit through. Any failure here exits 0.
 process.on('uncaughtException', () => process.exit(0));
@@ -292,7 +292,7 @@ process.exit(0);
 // ---- Socket server -----------------------------------------------------------
 
 function socketPath() {
-  // Per-PROCESS socket so multiple Klaussy instances (dev + packaged, or two
+  // Per-PROCESS socket so multiple Maussian instances (dev + packaged, or two
   // separate launches) each run their own review server instead of one stealing
   // the socket from the other. The hook client discovers all live sockets.
   if (process.platform === 'win32') {
@@ -442,7 +442,7 @@ function writeExitPlanModeBin() {
   
   const scriptPath = path.join(binDir, 'ExitPlanMode');
   const scriptContent = `#!/usr/bin/env node
-// Klaussy ExitPlanMode CLI — written by Klaussy; edits will be overwritten.
+// Maussian ExitPlanMode CLI — written by Maussian; edits will be overwritten.
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
@@ -505,7 +505,7 @@ try {
 } catch (e) {}
 
 if (!candidates.length) {
-  console.error('[klaussy] Klaussy Desktop app is not running. Plan approval is skipped.');
+  console.error('[klaussy] Maussian Desktop app is not running. Plan approval is skipped.');
   process.exit(0);
 }
 
@@ -527,7 +527,7 @@ try {
 let idx = 0;
 function tryNext() {
   if (idx >= candidates.length) {
-    console.error('[klaussy] Klaussy Desktop app is not responding. Plan approval skipped.');
+    console.error('[klaussy] Maussian Desktop app is not responding. Plan approval skipped.');
     process.exit(0);
   }
   const target = candidates[idx++];
@@ -536,7 +536,7 @@ function tryNext() {
   sock.setEncoding('utf8');
   let buf = '';
   sock.on('connect', () => {
-    console.error('[klaussy] Requesting plan approval from Klaussy Desktop...');
+    console.error('[klaussy] Requesting plan approval from Maussian Desktop...');
     sock.write(JSON.stringify({
       kind: 'plan-approval',
       cwd: process.cwd(),
@@ -700,7 +700,7 @@ function installOneHook(hooksDir, hookName, repoPath) {
   fs.writeFileSync(hookPath, HOOKS[hookName], { mode: 0o755 });
 }
 
-// Install all Klaussy hooks for a repo's common git dir. Idempotent; chains
+// Install all Maussian hooks for a repo's common git dir. Idempotent; chains
 // any pre-existing foreign hooks. No-op when the preference is off.
 function installHookForRepo(repoPath) {
   try {

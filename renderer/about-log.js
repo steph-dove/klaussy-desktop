@@ -35,7 +35,7 @@ window.Dialogs = (function () {
 
     var dialog = document.createElement('div');
     dialog.className = 'about-dialog';
-    dialog.innerHTML = '<h2>Klaussy</h2><div class="about-loading">Loading...</div>';
+    dialog.innerHTML = '<h2>Maussian</h2><div class="about-loading">Loading...</div>';
 
     overlay.addEventListener('click', function (e) {
       if (e.target === overlay) overlay.remove();
@@ -54,7 +54,7 @@ window.Dialogs = (function () {
         return '<div class="about-row"><span>' + escHtml(a.displayName) + '</span><span>' + escHtml(a.version) + '</span></div>';
       }).join('');
       dialog.innerHTML =
-        '<h2>Klaussy</h2>' +
+        '<h2>Maussian</h2>' +
         '<p class="about-tagline">Multi-terminal AI coding-agent worktree manager + PR reviewer.</p>' +
         '<div class="about-rows">' +
           '<div class="about-row"><span>Version</span><span>' + escHtml(info.appVersion) + '</span></div>' +
@@ -121,7 +121,7 @@ window.Dialogs = (function () {
         + '<h2>Open Source Licenses</h2>'
         + '<button class="licenses-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
-      + '<p class="licenses-preamble">Klaussy is built on the following open-source software. Full license texts are available at the linked sources.</p>'
+      + '<p class="licenses-preamble">Maussian is built on the following open-source software. Full license texts are available at the linked sources.</p>'
       + '<div class="licenses-list">'
         + entries.map(function (e) {
           return '<div class="license-row">'
@@ -180,11 +180,11 @@ window.Dialogs = (function () {
       },
       {
         title: 'Resuming & cross-agent handoff',
-        body: 'Reopen past work from the New Worktree modal’s Existing Session tab — pick a saved session and hit Resume to reattach its worktree(s) and agent. By default it resumes under the agent that started the session; choose a different one (Claude, Codex, Gemini, Copilot, Cursor, Cline…) and Klaussy summarizes the previous transcript into a handoff brief and seeds the new agent with it, so context carries across CLIs. A toast shows while the summary is being compiled — the resume isn’t instant.',
+        body: 'Reopen past work from the New Worktree modal’s Existing Session tab — pick a saved session and hit Resume to reattach its worktree(s) and agent. By default it resumes under the agent that started the session; choose a different one (Claude, Codex, Gemini, Copilot, Cursor, Cline…) and Maussian summarizes the previous transcript into a handoff brief and seeds the new agent with it, so context carries across CLIs. A toast shows while the summary is being compiled — the resume isn’t instant.',
       },
       {
         title: 'MCP servers',
-        body: 'Open MCP Servers (View menu or Cmd+K) to connect Model Context Protocol servers — GitHub, Slack, Linear, Notion, Datadog and more — across every agent Klaussy drives, not just one. Pick from the built-in catalog or add a custom stdio / HTTP / SSE server, name any env vars it needs (Klaussy references the variable, never stores the secret), and tick which agents to add it to (defaults to your default agent; check more to fan out in one add). Each row shows a live connection pill; servers that need sign-in get a Connect button that walks you through the OAuth flow in a terminal. Remove pulls a server from all of its agents at once.',
+        body: 'Open MCP Servers (View menu or Cmd+K) to connect Model Context Protocol servers — GitHub, Slack, Linear, Notion, Datadog and more — across every agent Maussian drives, not just one. Pick from the built-in catalog or add a custom stdio / HTTP / SSE server, name any env vars it needs (Maussian references the variable, never stores the secret), and tick which agents to add it to (defaults to your default agent; check more to fan out in one add). Each row shows a live connection pill; servers that need sign-in get a Connect button that walks you through the OAuth flow in a terminal. Remove pulls a server from all of its agents at once.',
       },
       {
         title: 'Pop-out & detach',
@@ -192,7 +192,7 @@ window.Dialogs = (function () {
       },
       {
         title: 'Command palette (Cmd+K)',
-        body: 'Fuzzy-search every action: New Task, Toggle Diff Panel, Switch to: <task>, Review Pull Request…, Run Slash Command…, Skills & Commands, Memory (CLAUDE.md), MCP Servers, Plugins, GitHub accounts, Keyboard shortcuts, Theme, Preferences, View Logs, About Klaussy. Faster than hunting through menus.',
+        body: 'Fuzzy-search every action: New Task, Toggle Diff Panel, Switch to: <task>, Review Pull Request…, Run Slash Command…, Skills & Commands, Memory (CLAUDE.md), MCP Servers, Plugins, GitHub accounts, Keyboard shortcuts, Theme, Preferences, View Logs, About Maussian. Faster than hunting through menus.',
       },
       {
         title: 'Multi-project',
@@ -200,7 +200,7 @@ window.Dialogs = (function () {
       },
       {
         title: 'Notifications & idle',
-        body: 'Klaussy raises a desktop notification when an agent finishes responding in a backgrounded task, so you can run several in parallel and get pinged as each one lands. Toggle per-task from the task notes / context menu.',
+        body: 'Maussian raises a desktop notification when an agent finishes responding in a backgrounded task, so you can run several in parallel and get pinged as each one lands. Toggle per-task from the task notes / context menu.',
       },
     ];
 
@@ -213,7 +213,7 @@ window.Dialogs = (function () {
 
     dialog.innerHTML =
       '<div class="howto-head">'
-        + '<h2>How to use Klaussy</h2>'
+        + '<h2>How to use Maussian</h2>'
         + '<button class="howto-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
       + '<div class="howto-body">' + sectionsHtml + '</div>';
@@ -313,7 +313,7 @@ window.Dialogs = (function () {
       version: git.version,
       problem: git.devToolsMissing
         ? 'Not installed. This Mac needs Apple’s Command Line Tools, which include git. The install takes about 5–15 minutes.'
-        : (!git.installed ? 'Not installed. Klaussy needs git for worktrees, diffs and commits.' : null),
+        : (!git.installed ? 'Not installed. Maussian needs git for worktrees, diffs and commits.' : null),
       fixes: (!git.installed && git.installCommand) ? [git.installCommand] : [],
       action: git.devToolsMissing ? { label: 'Install Command Line Tools', kind: 'dev-tools-install' } : null,
     });
@@ -459,7 +459,7 @@ window.Dialogs = (function () {
         + '<h2>Setup check</h2>'
         + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
       + '</div>'
-      + '<p class="deps-intro">Klaussy uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
+      + '<p class="deps-intro">Maussian uses these CLIs under the hood. Missing ones cause downstream errors that look cryptic — fix them here first.</p>'
       + allOkBanner
       + '<div class="deps-rows">' + gitRow + ghRow + glabRow + bitbucketRow + azureRow + agentRows + '</div>'
       + installSection
@@ -620,8 +620,8 @@ window.Dialogs = (function () {
   function openFeedback() {
     window.klaus.ui.getAboutInfo().then(function (info) {
       var lines = [
-        '**Product**: Klaussy Desktop',
-        '**Klaussy**: ' + (info.appVersion || ''),
+        '**Product**: Maussian Desktop',
+        '**Maussian**: ' + (info.appVersion || ''),
         '**OS**: ' + (info.os || ''),
         '**Electron**: ' + (info.electronVersion || ''),
         '**Node**: ' + (info.nodeVersion || ''),
@@ -1289,7 +1289,7 @@ window.Dialogs = (function () {
       + '</div>'
       + '<div class="deps-body" style="padding: 16px;">'
         + '<p style="margin: 0 0 12px 0; color: var(--text-dim); font-size: 13px;">'
-          + 'Enter your organization URL and a personal access token. Klaussy checks the token with Azure DevOps, then stores it encrypted on this computer.'
+          + 'Enter your organization URL and a personal access token. Maussian checks the token with Azure DevOps, then stores it encrypted on this computer.'
         + '</p>'
         + '<div style="display: flex; flex-direction: column; gap: 10px;">'
           + '<label class="az-field">Organization or server URL'
@@ -1352,7 +1352,7 @@ window.Dialogs = (function () {
     }
 
     function errorMessage(res) {
-      if (res.errorKind === 'unavailable') return "Klaussy can't store the token securely on this system, so it wasn't saved. Set AZURE_DEVOPS_EXT_PAT instead.";
+      if (res.errorKind === 'unavailable') return "Maussian can't store the token securely on this system, so it wasn't saved. Set AZURE_DEVOPS_EXT_PAT instead.";
       if (res.errorKind === 'auth') return "Azure DevOps didn't accept that token. Check it hasn't expired and has Code (Read & write) and Build (Read).";
       return res.errorSummary || res.error || 'Could not connect Azure DevOps.';
     }
@@ -1457,7 +1457,7 @@ window.Dialogs = (function () {
       var bbAccounts = (bbRes && bbRes.accounts) || [];
       var azAccounts = (azRes && azRes.accounts) || [];
 
-      var html = '<p class="gh-accounts-intro">Klaussy uses whichever account is active for GitHub, GitLab, Bitbucket, and Azure DevOps operations.</p>';
+      var html = '<p class="gh-accounts-intro">Maussian uses whichever account is active for GitHub, GitLab, Bitbucket, and Azure DevOps operations.</p>';
 
       // Section: GitHub
       html += '<h3 class="git-accounts-section-title">GitHub</h3>';
@@ -1584,7 +1584,7 @@ window.Dialogs = (function () {
           + '</div>';
         }).join('')
         + reentry.map(function (a) {
-          return '<p class="gh-accounts-intro" style="margin: 2px 0 0;">Klaussy couldn\u2019t read the saved token for ' + escHtml(azureCollectionLabel(a))
+          return '<p class="gh-accounts-intro" style="margin: 2px 0 0;">Maussian couldn\u2019t read the saved token for ' + escHtml(azureCollectionLabel(a))
             + '. This happens after the system keychain is reset. Enter the token again to keep using this account.</p>';
         }).join('')
         + '<div class="gh-accounts-foot">'
@@ -1967,7 +1967,7 @@ window.Dialogs = (function () {
       if (!groups.length) {
         return '<div class="skills-empty">'
           + '<p>No MCP servers configured yet.</p>'
-          + '<p class="skills-empty-hint">Click \u201cAdd server\u201d to connect GitHub, Slack, Linear, Jira, Datadog and more \u2014 across Claude, Codex, Cursor, Gemini and the other agents Klaussy drives.</p>'
+          + '<p class="skills-empty-hint">Click \u201cAdd server\u201d to connect GitHub, Slack, Linear, Jira, Datadog and more \u2014 across Claude, Codex, Cursor, Gemini and the other agents Maussian drives.</p>'
         + '</div>';
       }
       return '<div class="skills-section-head">Configured <span class="skills-section-count">' + groups.length + '</span></div>'

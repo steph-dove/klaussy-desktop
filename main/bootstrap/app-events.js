@@ -53,7 +53,7 @@ function checkExternalCLIs() {
   dialog.showMessageBox({
     type: 'info',
     title: 'Optional CLIs not found',
-    message: 'Klaussy will run, but some features need these on your PATH:',
+    message: 'Maussian will run, but some features need these on your PATH:',
     detail: problems.join('\n') + '\n\nOpen Setup Check in the app to install them.',
     buttons: ['OK'],
   });

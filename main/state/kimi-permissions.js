@@ -19,7 +19,7 @@ const RULE_LINES = [
   `decision = ${tomlString('allow')}`,
   `scope = ${tomlString('user')}`,
   `pattern = ${tomlString('Bash')}`,
-  `reason = ${tomlString('Klaussy autonomous runs (CI fix-check)')}`,
+  `reason = ${tomlString('Maussian autonomous runs (CI fix-check)')}`,
 ];
 
 function configPath(home) {

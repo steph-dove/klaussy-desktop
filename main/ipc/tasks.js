@@ -414,7 +414,7 @@ function seedSessionMemory({ worktreePath, memoryFile, sessionName, branch, this
   if (!memoryFile || !siblings || !siblings.length) return;
   const block = [
     SESSION_CTX_START,
-    `# Klaussy session: ${sessionName}`,
+    `# Maussian session: ${sessionName}`,
     '',
     `This worktree is one repo in a multi-repo session. Every repo in the session is checked out on the **same branch** (\`${branch}\`), each in its own worktree:`,
     '',
@@ -1310,7 +1310,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   return { subId, label: sub.label };
 });
 
-// One-click gateway setup in a Klaussy terminal tab — a real TTY, which the
+// One-click gateway setup in a Maussian terminal tab — a real TTY, which the
 // interactive `nemesis8 login` needs: spawn a shell, focus it, type the script.
 ipcMain.handle('nemesis-setup-local', (_event, opts = {}) => {
   const { nemesisSetupScript, nemesisRunCmd } = require('../util/nemesis-setup');
@@ -1652,7 +1652,7 @@ ipcMain.handle('pop-out-task', (_event, { id }) => {
   const popout = new BrowserWindow({
     width: 800,
     height: 600,
-    title: `Klaussy \u2014 ${inst.name}`,
+    title: `Maussian \u2014 ${inst.name}`,
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
     backgroundColor: '#1a1a2e',
     webPreferences: {

@@ -42,7 +42,7 @@ window.Sidebar = (function () {
     }
     AppState.activeSessionName = sessionName;
     AppState.activeTaskId = null;
-    document.title = 'Klaussy \u2014 ' + sessionName;
+    document.title = 'Maussian \u2014 ' + sessionName;
     taskList.querySelectorAll('.task-item').forEach(function(item) {
       item.classList.remove('active');
     });

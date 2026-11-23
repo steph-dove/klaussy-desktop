@@ -8,7 +8,7 @@ const { classifyGhError } = require('./gh-error');
 const { classifyGlabError } = require('./glab-error');
 const { humanizeComment } = require('./humanize-comment');
 
-// Map GitLab pipeline/job status to Klaussy check bucket ('pass' | 'fail' | 'pending' | 'cancel')
+// Map GitLab pipeline/job status to Maussian check bucket ('pass' | 'fail' | 'pending' | 'cancel')
 function bucketFromGitLabStatus(status) {
   const s = String(status || '').toLowerCase();
   if (s === 'success') return 'pass';
@@ -106,7 +106,7 @@ function transformGitLabDiscussions(discussions) {
   return { threads, issueComments };
 }
 
-// Map Bitbucket commit/pipeline status to Klaussy check bucket ('pass' | 'fail' | 'pending' | 'cancel')
+// Map Bitbucket commit/pipeline status to Maussian check bucket ('pass' | 'fail' | 'pending' | 'cancel')
 function bucketFromBitbucketStatus(status) {
   const s = String(status || '').toUpperCase();
   if (s === 'SUCCESSFUL' || s === 'SUCCESS' || s === 'PASSED') return 'pass';
@@ -249,7 +249,7 @@ function transformBitbucketComments(comments) {
   return { threads, issueComments };
 }
 
-// Azure build results and PR status states to Klaussy check buckets.
+// Azure build results and PR status states to Maussian check buckets.
 function bucketFromAzureStatus(state) {
   const s = String(state || '').toLowerCase();
   if (s === 'succeeded' || s === 'partiallysucceeded') return 'pass';

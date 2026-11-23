@@ -1059,7 +1059,7 @@ window.TerminalManager = (function () {
       if (remaining.length > 0) {
         switchToTask(remaining[0]);
       } else {
-        document.title = 'Klaussy';
+        document.title = 'Maussian';
         emptyState.style.display = 'flex';
         if (window.BranchlessUI) window.BranchlessUI.apply(null);
         if (window.closeFileViewerOnTaskSwitch) window.closeFileViewerOnTaskSwitch(null);
@@ -1080,7 +1080,7 @@ window.TerminalManager = (function () {
     AppState.activeSessionName = null;
     Sidebar.hideUnreadBadge(id);
     var switched = tasks.get(id);
-    document.title = switched ? 'Klaussy \u2014 ' + switched.name : 'Klaussy';
+    document.title = switched ? 'Maussian \u2014 ' + switched.name : 'Maussian';
 
     if (window.BroadcastBar) window.BroadcastBar.update();
 

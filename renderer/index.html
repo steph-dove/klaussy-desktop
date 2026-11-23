@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' klaussy-voice:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https: klaussy-qa:; media-src 'self' klaussy-qa:; connect-src 'self' klaussy-voice:; worker-src 'self' blob:; font-src 'self' data: https://fonts.gstatic.com; object-src 'none'; base-uri 'none'; frame-ancestors 'none';">
-  <title>Klaussy</title>
+  <title>Maussian</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -26,11 +26,11 @@
          shows in each terminal's header, not here. -->
     <div id="window-color-bar"></div>
     <div id="sidebar" role="navigation" aria-label="Sidebar">
-      <!-- Klaussy brand, pinned at the very top of the sidebar above the
+      <!-- Maussian brand, pinned at the very top of the sidebar above the
            token graph. -->
       <div id="sidebar-brand">
         <img class="sidebar-brand-logo" src="../icon.png" alt="" aria-hidden="true">
-        <h1 class="sidebar-brand-name">Klaussy</h1>
+        <h1 class="sidebar-brand-name">Maussian</h1>
       </div>
       <!-- Token-spend leaderboard: today's running total + a daily chart
            with selectable range. Lives at the top of the sidebar above the
@@ -132,7 +132,7 @@
         <button id="btn-manage-sessions" type="button" title="Manage sessions — review and delete sessions and their worktrees">Manage sessions</button>
       </div>
 
-      <!-- Shown when the repo selected above has no Klaussy commit review gate
+      <!-- Shown when the repo selected above has no Maussian commit review gate
            installed; one click writes the hooks via the same installer the
            app uses automatically. Hidden otherwise. -->
       <div id="commit-gate-banner" hidden>
@@ -190,7 +190,7 @@
           <div class="empty-dashboard">
             <div class="empty-dashboard-header">
               <img class="empty-dashboard-logo" src="../icon.png" alt="" aria-hidden="true">
-              <h2 id="empty-dashboard-title">Welcome to Klaussy</h2>
+              <h2 id="empty-dashboard-title">Welcome to Maussian</h2>
               <p id="empty-dashboard-subtitle" class="sub">Choose an action to start building or reviewing code.</p>
             </div>
             
@@ -679,7 +679,7 @@
       <!-- Consent pane (initial state) -->
       <div id="ollama-consent-pane">
         <h3>Enable inline AI completion</h3>
-        <p class="ollama-consent-lead">Klaussy can suggest code as you type, with Tab to accept. This runs locally via <strong>Ollama</strong> — nothing leaves your machine.</p>
+        <p class="ollama-consent-lead">Maussian can suggest code as you type, with Tab to accept. This runs locally via <strong>Ollama</strong> — nothing leaves your machine.</p>
         <ul class="ollama-consent-facts">
           <li><strong>~2 GB one-time download</strong> (Ollama runtime + <code>qwen2.5-coder:1.5b</code>)</li>
           <li><strong>~2–5 min</strong> on typical broadband</li>

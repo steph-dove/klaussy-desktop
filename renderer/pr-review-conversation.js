@@ -109,7 +109,7 @@
 
   // The timeline gutter dot: a colored initial avatar (reusing the sidebar's
   // iconColor palette) so every item has a visual anchor. opts lets AI findings
-  // override the color/letter/class to read as the distinct Klaussy marker.
+  // override the color/letter/class to read as the distinct Maussian marker.
   PR.avatarHtml = function(login, opts) {
     opts = opts || {};
     var name = login || '?';
@@ -132,11 +132,11 @@
   };
 
   // Agent-posted review findings are issue comments whose body carries the
-  // Klaussy signature — detect heuristically so they get the accent marker.
+  // Maussian signature — detect heuristically so they get the accent marker.
   PR.isAiFinding = function(body) {
     // Match the unambiguous parts so any hyphen variant in "AI-generated" or
     // markdown emphasis around it doesn't break detection.
-    return /via\s*Klaussy|generated\s+review\s+finding/i.test(body || '');
+    return /via\s*Maussian|generated\s+review\s+finding/i.test(body || '');
   };
 
   PR.bindThreadControls = function() {
@@ -370,16 +370,16 @@
     var isEditing = PR.editingCommentId === dbid && PR.editingCommentKind === 'issue';
     var aiFinding = PR.isAiFinding(displayBody);
     var claudeBlock = (dbid != null && !isEditing)
-      ? PR.renderConvClaudeBlock({ dbid: dbid, kind: 'issue', body: displayBody || '', author: aiFinding ? 'Klaussy' : author })
+      ? PR.renderConvClaudeBlock({ dbid: dbid, kind: 'issue', body: displayBody || '', author: aiFinding ? 'Maussian' : author })
       : '';
     var avatar = aiFinding
-      ? PR.avatarHtml('Klaussy', { color: 'var(--accent)', letter: 'K', cls: 'pr-conv-avatar-ai' })
+      ? PR.avatarHtml('Maussian', { color: 'var(--accent)', letter: 'K', cls: 'pr-conv-avatar-ai' })
       : PR.avatarHtml(author);
     return '<div class="pr-conv-item pr-conv-comment' + (aiFinding ? ' pr-conv-ai-finding' : '') + '">'
       + avatar
       + '<div class="pr-conv-main">'
         + '<div class="pr-conv-head">'
-          + '<span class="pr-conv-author">' + PR.escHtml(aiFinding ? 'Klaussy' : author) + '</span>'
+          + '<span class="pr-conv-author">' + PR.escHtml(aiFinding ? 'Maussian' : author) + '</span>'
           + '<span class="pr-conv-kind">' + (aiFinding ? 'review finding' : 'commented') + '</span>'
           + '<span class="pr-conv-when">' + PR.escHtml(when) + '</span>'
           + (mine && !isEditing && dbid != null && !aiFinding

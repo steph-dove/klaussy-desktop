@@ -26,8 +26,8 @@ window.ActionModal = (function () {
   // no longer uses Claude Code's built-in `/debug` slash (meaningless to other
   // agents); its fallback is the agent-neutral DEBUG_PROMPT.
   //
-  // The prompt itself is intentionally project-agnostic: Klaussy users invoke
-  // it from their own repos, not from this one, so anything Klaussy-specific
+  // The prompt itself is intentionally project-agnostic: Maussian users invoke
+  // it from their own repos, not from this one, so anything Maussian-specific
   // would be wrong advice in the spawned tab.
   //
   // Self-contained and agent-neutral — no plugin install required, and no
@@ -122,9 +122,9 @@ window.ActionModal = (function () {
     'Still making no edits. Save two documents, then output the complete plan in your response so the user can see it immediately.',
     '',
     '1. **The plan**: the build checklist. Write it to `plan.md` at the repo root and/or an uncommitted OKF session note at `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-plan.md` (YAML frontmatter `type: session-note`, `tags: [plan]`).',
-    '2. **The design doc**: the chosen blueprint without the checklist: the goal, the approach and why it beat the alternatives, components and interfaces, data flow, and risks. Save it as an uncommitted OKF session note at `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-design.md` (frontmatter `type: session-note`, `tags: [design]`, `title: "Design: <task>"`). Keep the word "plan" out of its file name, tags and title: Klaussy files anything named plan under the Plan tab and shows this note in the Design tab.',
+    '2. **The design doc**: the chosen blueprint without the checklist: the goal, the approach and why it beat the alternatives, components and interfaces, data flow, and risks. Save it as an uncommitted OKF session note at `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-design.md` (frontmatter `type: session-note`, `tags: [design]`, `title: "Design: <task>"`). Keep the word "plan" out of its file name, tags and title: Maussian files anything named plan under the Plan tab and shows this note in the Design tab.',
     '',
-    'Stop here and wait — do NOT run the `ExitPlanMode` command or make any edits yet. Ask the user to confirm the plan. Once the user replies to approve, run the terminal command `ExitPlanMode` (a Klaussy CLI on your PATH — works from any agent) to register the plan with the desktop app, and then proceed to Phase 6.',
+    'Stop here and wait — do NOT run the `ExitPlanMode` command or make any edits yet. Ask the user to confirm the plan. Once the user replies to approve, run the terminal command `ExitPlanMode` (a Maussian CLI on your PATH — works from any agent) to register the plan with the desktop app, and then proceed to Phase 6.',
     '',
     '## Phase 6 — Implementation',
     '',
@@ -212,7 +212,7 @@ window.ActionModal = (function () {
     '## Phase 1 — Plan',
     'Restate the ask, check ambiguities, and clarify requirements with the user before implementing. Produce a concrete build checklist.',
     'Save the implementation plan as an uncommitted OKF session note in `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-plan.md` (or `%KLAUSSY_SESSION_NOTES_DIR%\\<agent-name>-plan.md` on Windows, or `plan.md` in worktree root) following the Open Knowledge Format protocol (YAML frontmatter with `type: session-note`, `tags: [plan, devloop]`, `generated: { by: <provider-id>/<agent-name>, at: <ISO-8601 timestamp> }`).',
-    'Also save a design doc beside it as `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-design.md` (`%KLAUSSY_SESSION_NOTES_DIR%\\<agent-name>-design.md` on Windows): the goal, the approach and why, components and interfaces, data flow, and risks, without the checklist. Frontmatter `type: session-note`, `tags: [design, devloop]`, `title: "Design: <task>"`. Keep the word "plan" out of its file name, tags and title, or Klaussy files it under the Plan tab instead of the Design tab.',
+    'Also save a design doc beside it as `$KLAUSSY_SESSION_NOTES_DIR/<agent-name>-design.md` (`%KLAUSSY_SESSION_NOTES_DIR%\\<agent-name>-design.md` on Windows): the goal, the approach and why, components and interfaces, data flow, and risks, without the checklist. Frontmatter `type: session-note`, `tags: [design, devloop]`, `title: "Design: <task>"`. Keep the word "plan" out of its file name, tags and title, or Maussian files it under the Plan tab instead of the Design tab.',
     '',
     '## Phase 2 — Implement',
     'Implement the solution in small batches using test-driven development where appropriate, keeping tests and linter green. Record any breaking changes or shared context notes in `$KLAUSSY_SESSION_NOTES_DIR/` (or `%KLAUSSY_SESSION_NOTES_DIR%` on Windows).',
@@ -231,7 +231,7 @@ window.ActionModal = (function () {
     '  - Run the relevant test suites, linters, and capture execution output.',
     '',
     '## Phase 5 — Open the PR (humanized)',
-    'Commit on the branch this session is already on — Klaussy created it for this task, so do not cut another one; branch only if you find yourself on `main`/`master`. Then write a clear humanized PR description summarizing changes with visual proof, and open the PR with `gh pr create` / `glab mr create`:',
+    'Commit on the branch this session is already on — Maussian created it for this task, so do not cut another one; branch only if you find yourself on `main`/`master`. Then write a clear humanized PR description summarizing changes with visual proof, and open the PR with `gh pr create` / `glab mr create`:',
     '- **For Frontend / UI PRs**:',
     '  - Include a **Before vs. After** Markdown table in the PR description:',
     '    ```markdown',

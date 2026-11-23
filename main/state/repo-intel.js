@@ -2,10 +2,10 @@
 // Repo intelligence: conventions + import-graph context for agent prompts.
 //
 // On session create we analyze the BASE repo:
-//   1. `conventions discover --format json` (steph-dove/klaussy-repo-conventions) →
+//   1. `conventions discover --format json` (PyPI maussian-repo-conventions) →
 //      .conventions/conventions.raw.json with the import graph (fan-in/out,
 //      cycles, clusters, endpoint chains). Pure static analysis.
-//   2. `klaussy init --repo <base> -b <default>` (steph-dove/klaussy-agents) →
+//   2. `klaussy init --repo <base> -b <default>` (PyPI mauss) →
 //      CLAUDE.md, .claude/rules/, conventions-aware skills
 //      (.claude/skills/<repo>-review etc.), settings. Includes the Claude
 //      CLI enrichment pass (no --skip-enrich) per product decision — the
@@ -1506,7 +1506,7 @@ function getRepoIntelBlock(repoOrWorktreePath, agentMode, touchedPaths = []) {
   return block;
 }
 
-// Ensure a worktree that Klaussy didn't create through the normal session path
+// Ensure a worktree that Maussian didn't create through the normal session path
 // (e.g. a PR-review worktree, which is cloned/fetched separately and never
 // enters the `instances` map that syncIntelIntoActiveWorktrees iterates) still
 // gets the agent bootstrap that lives only in the base repo: skills, slash

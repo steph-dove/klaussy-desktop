@@ -54,7 +54,7 @@ function fallbackExcerpt(text) {
   const tail = t.slice(-FALLBACK_CHARS);
   const cut = tail.indexOf('\n');
   const start = cut >= 0 && cut < FALLBACK_CHARS / 2 ? tail.slice(cut + 1) : tail;
-  return `…${start.trimStart()}\n\n_Full output in Klaussy._`;
+  return `…${start.trimStart()}\n\n_Full output in Maussian._`;
 }
 
 // Never rejects: a failed or empty summary falls back to the turn's tail.

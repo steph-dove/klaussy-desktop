@@ -664,7 +664,7 @@ ipcMain.handle('check-dependencies', async () => {
 
 // One-click "install missing requirements" — writes a per-OS script to a
 // temp file and opens the user's system terminal to run it. We deliberately
-// run *outside* Klaussy: brew/winget/apt all expect TTY-attached prompts
+// run *outside* Maussian: brew/winget/apt all expect TTY-attached prompts
 // (sudo password, OAuth callbacks, license confirms) and the user is used
 // to seeing those in their normal terminal.
 //
@@ -681,7 +681,7 @@ fi`).join('\n\n');
   const logins = agents.map((a) => `echo "       • ${a.displayName}: ${a.loginCommand}"`).join('\n');
   return `#!/bin/bash
 set -e
-echo "Installing Klaussy requirements…"
+echo "Installing Maussian requirements…"
 echo "(Node, GitHub CLI, GitLab CLI, Ollama + agent CLIs: ${names || 'none selected'} — ~2 GB total, mostly Ollama)"
 echo
 
@@ -730,7 +730,7 @@ echo
 echo "✓ All requirements installed."
 echo
 echo "Next steps:"
-echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
+echo "  1. Run 'gh auth login' to authenticate GitHub (or use Maussian's Sign in button)"
 echo "  2. Run 'glab auth login' to authenticate GitLab (if you use GitLab)"
 echo "  3. Sign in to the agent(s) you'll use — run each once:"
 ${logins}
@@ -750,7 +750,7 @@ function installScriptWin(agents) {
 }`).join('\n\n');
   const logins = agents.map((a) => `Write-Host '       • ${a.displayName}: ${a.loginCommand}'`).join('\n');
   return `$ErrorActionPreference = 'Stop'
-Write-Host 'Installing Klaussy requirements…'
+Write-Host 'Installing Maussian requirements…'
 Write-Host '(Node, GitHub CLI, Ollama + agent CLIs: ${names || 'none selected'} — ~2 GB total, mostly Ollama)'
 Write-Host ''
 
@@ -780,7 +780,7 @@ Write-Host ''
 Write-Host '✓ All requirements installed.' -ForegroundColor Green
 Write-Host ''
 Write-Host 'Next steps:'
-Write-Host '  1. Run ''gh auth login'' to authenticate GitHub (or use Klaussy''s Sign in button)'
+Write-Host '  1. Run ''gh auth login'' to authenticate GitHub (or use Maussian''s Sign in button)'
 Write-Host '  2. Run ''glab auth login'' to authenticate GitLab (if you use GitLab)'
 Write-Host '  3. Sign in to the agent(s) you''ll use — run each once:'
 ${logins}
@@ -805,7 +805,7 @@ fi`;
   const logins = agents.map((a) => `echo "       • ${a.displayName}: ${a.loginCommand}"`).join('\n');
   return `#!/bin/bash
 set -e
-echo "Installing Klaussy requirements…"
+echo "Installing Maussian requirements…"
 echo "(Node, GitHub CLI, GitLab CLI, Ollama + agent CLIs: ${names || 'none selected'} — ~2 GB total, mostly Ollama)"
 echo "(sudo password may be required)"
 echo
@@ -830,7 +830,7 @@ echo
 echo "✓ All requirements installed."
 echo
 echo "Next steps:"
-echo "  1. Run 'gh auth login' to authenticate GitHub (or use Klaussy's Sign in button)"
+echo "  1. Run 'gh auth login' to authenticate GitHub (or use Maussian's Sign in button)"
 echo "  2. Run 'glab auth login' to authenticate GitLab (if you use GitLab)"
 echo "  3. Sign in to the agent(s) you'll use — run each once:"
 ${logins}
@@ -934,11 +934,11 @@ ipcMain.handle('install-dev-tools', async () => {
 
 function ghLoginScripts(hostname) {
   const cmd = `gh auth login --hostname '${hostname}'`;
-  const posix = `#!/bin/bash\n${cmd}\necho\nread -p "Done. Return to Klaussy and click Re-check. Press Enter to close…"\n`;
+  const posix = `#!/bin/bash\n${cmd}\necho\nread -p "Done. Return to Maussian and click Re-check. Press Enter to close…"\n`;
   return {
     mac: posix,
     linux: posix,
-    win: `${cmd}\nWrite-Host ''\nRead-Host 'Done. Return to Klaussy and click Re-check. Press Enter to close'\n`,
+    win: `${cmd}\nWrite-Host ''\nRead-Host 'Done. Return to Maussian and click Re-check. Press Enter to close'\n`,
   };
 }
 

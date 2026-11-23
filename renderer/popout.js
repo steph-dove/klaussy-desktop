@@ -10,7 +10,7 @@
 
     document.getElementById('popout-name').textContent = name;
     document.getElementById('popout-branch').textContent = branch ? '(' + branch + ')' : '';
-    document.title = 'Klaussy \u2014 ' + name;
+    document.title = 'Maussian \u2014 ' + name;
 
     var Terminal = window.Terminal;
     var FitAddon = window.FitAddon;

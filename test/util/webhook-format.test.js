@@ -138,11 +138,11 @@ test('an approval token turns the alert into real Approve/Reject buttons', () =>
 test('without a token the alert stays read-only and says so', () => {
   const slack = formatSlack(APPROVAL);
   assert.equal(slack.blocks.find((b) => b.type === 'actions'), undefined, 'no dead buttons');
-  assert.match(JSON.stringify(slack), /Respond in Klaussy/);
+  assert.match(JSON.stringify(slack), /Respond in Maussian/);
 
   const discord = formatDiscord(APPROVAL);
   assert.equal(discord.components, undefined);
-  assert.match(JSON.stringify(discord), /Respond in Klaussy/);
+  assert.match(JSON.stringify(discord), /Respond in Maussian/);
 });
 
 test('completed/failed alerts never get approval buttons', () => {
@@ -161,7 +161,7 @@ const ENDED = {
 
 test('an ended session says how to pick it back up', () => {
   const flat = JSON.stringify(formatSlack(ENDED));
-  assert.match(flat, /auth-refactor/, 'names the Klaussy session');
+  assert.match(flat, /auth-refactor/, 'names the Maussian session');
   assert.match(flat, /abc-123/, 'shows the agent session id');
   assert.match(flat, /cd \/work\/feature-x/, 'cd to the worktree first');
   assert.match(flat, /claude --resume abc-123/, 'the provider resume command');

@@ -51,7 +51,7 @@ function install() {
       defaultId: 0,
       cancelId: 1,
       title: 'Update ready',
-      message: `Klaussy ${info && info.version ? info.version : ''} is ready to install.`,
+      message: `Maussian ${info && info.version ? info.version : ''} is ready to install.`,
       detail: 'Restart the app to apply the update, or choose Later and it will install next time you quit.',
     });
     if (response === 0) {
@@ -92,7 +92,7 @@ async function checkNow() {
         type: 'info',
         buttons: ['OK'],
         title: 'Updates',
-        message: 'Klaussy is up to date.',
+        message: 'Maussian is up to date.',
       });
     }
     // If an update is found, the existing event handlers take over.

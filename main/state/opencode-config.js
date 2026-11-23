@@ -2,7 +2,7 @@
 // Automated OpenCode provider configuration helper for local Ollama models.
 // Ensures ~/.config/opencode/opencode.jsonc includes the provider.ollama mapping
 // (pointing to http://127.0.0.1:11434/v1) and model entry whenever an ollama model
-// is selected in Klaussy.
+// is selected in Maussian.
 
 const path = require('path');
 const os = require('os');
@@ -178,7 +178,7 @@ function ensureOpenCodeOllamaConfig(modelSlug, worktreePath) {
 }
 
 // Reads the model opencode itself would use, so it covers someone who never
-// opens Klaussy's picker. Resolves rather than throws: runs on every launch.
+// opens Maussian's picker. Resolves rather than throws: runs on every launch.
 async function ensureStartupContextFloor({ worktreePath } = {}) {
   let cfg = {};
   try { cfg = require('../util/config').loadConfig() || {}; } catch { /* first run */ }

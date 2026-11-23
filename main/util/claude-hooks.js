@@ -13,7 +13,7 @@ const CLIENT_PATH = path.join(KLAUSSY_DIR, 'agent-hook-client.js');
 
 // Exits 0 no matter what: a hook that fails must never wedge the agent it is
 // reporting on.
-const CLIENT_SCRIPT = `// Klaussy agent-hook client — written by Klaussy; edits will be overwritten.
+const CLIENT_SCRIPT = `// Maussian agent-hook client — written by Maussian; edits will be overwritten.
 process.on('uncaughtException', () => process.exit(0));
 const net = require('net');
 const fs = require('fs');
