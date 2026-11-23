@@ -1,6 +1,6 @@
 {
   "name": "klaussy-desktop",
-  "productName": "Klaussy",
+  "productName": "Maussian",
   "version": "0.31.1",
   "description": "Multi-terminal Claude Code worktree manager + GitHub PR reviewer for macOS, Windows, and Linux",
   "main": "main.js",
@@ -62,7 +62,7 @@
   },
   "build": {
     "appId": "com.steph-dove.klaussy",
-    "productName": "Klaussy",
+    "productName": "Maussian",
     "directories": {
       "output": "dist",
       "buildResources": "."
@@ -121,18 +121,18 @@
       "entitlementsInherit": "build/entitlements.mac.plist",
       "artifactName": "${productName}-${version}-macOS-${arch}.${ext}",
       "extendInfo": {
-        "NSDesktopFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSDocumentsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSDownloadsFolderUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSRemovableVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSNetworkVolumesUsageDescription": "Klaussy opens the git repositories you choose here so its agents and diff views can work in them.",
-        "NSMicrophoneUsageDescription": "Klaussy uses the microphone only for voice input you start, and transcribes speech on this machine."
+        "NSDesktopFolderUsageDescription": "Maussian opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSDocumentsFolderUsageDescription": "Maussian opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSDownloadsFolderUsageDescription": "Maussian opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSRemovableVolumesUsageDescription": "Maussian opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSNetworkVolumesUsageDescription": "Maussian opens the git repositories you choose here so its agents and diff views can work in them.",
+        "NSMicrophoneUsageDescription": "Maussian uses the microphone only for voice input you start, and transcribes speech on this machine."
       }
     },
     "beforePack": "scripts/fetch-voice-model.js",
     "afterSign": "build/notarize.js",
     "dmg": {
-      "title": "Klaussy ${version} ${arch}",
+      "title": "Maussian ${version} ${arch}",
       "icon": "icon.icns",
       "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
     },
@@ -164,7 +164,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "Klaussy",
+      "shortcutName": "Maussian",
       "installerIcon": "icon.ico",
       "uninstallerIcon": "icon.ico",
       "artifactName": "${productName}-${version}-Windows-Setup.${ext}"

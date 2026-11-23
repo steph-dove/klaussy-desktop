@@ -177,7 +177,7 @@ function mergeMissingHooksIntoWorktree(srcPath, dstPath) {
   }
 }
 
-// klaussy CLI — command `klaussy` (PyPI `klaussy-agents`). We memoize BOTH
+// klaussy CLI — command `klaussy` (PyPI `mauss`, formerly `klaussy-agents`). We memoize BOTH
 // which binary is on PATH and its version: the version doubles as the
 // regeneration stamp ("redo when there is a new version"), and the resolved
 // binary keeps the version probe and the `init` spawn in sync. A null result
@@ -213,7 +213,7 @@ function getKlaussyCli() {
 
 // "Current" comes from PyPI, not a pinned constant — a constant only moves when
 // the desktop ships, so it sat eight releases behind without telling anyone.
-const PYPI_LATEST_URL = 'https://pypi.org/pypi/klaussy-agents/json';
+const PYPI_LATEST_URL = 'https://pypi.org/pypi/mauss/json';
 const LATEST_TTL_MS = 6 * 60 * 60 * 1000;
 const LATEST_TIMEOUT_MS = 8000;
 let latestCache = { version: '', at: 0 };
@@ -293,10 +293,14 @@ let toolsPromise = null;
 // same 1.4.x), so an existing `conventions` already satisfies it; we only
 // install the new dist on machines that lack the command, since reinstalling
 // over it would just collide on the pipx symlink for no behavior change.
-const CONVENTIONS_PKG = 'klaussy-repo-conventions';
+//
+// Both tools moved to new PyPI names with the Maussian rename. `legacy` is the old
+// name: moveOffLegacyTools swaps it out before anything here installs or upgrades,
+// since both names ship the same files and installing over the old one breaks it.
+const CONVENTIONS_PKG = 'maussian-repo-conventions';
 const TOOLS = [
-  { cmd: 'conventions', pkg: CONVENTIONS_PKG },
-  { cmd: 'klaussy', pkg: 'klaussy-agents' },
+  { cmd: 'conventions', pkg: CONVENTIONS_PKG, legacy: 'klaussy-repo-conventions' },
+  { cmd: 'klaussy', pkg: 'mauss', legacy: 'klaussy-agents' },
 ];
 
 async function toolPresent(cmd) {
@@ -306,6 +310,12 @@ async function toolPresent(cmd) {
   } catch {
     return false;
   }
+}
+
+function pythonCandidates() {
+  return process.platform === 'win32'
+    ? [{ py: 'py', pyArgs: ['-3'] }, { py: 'python', pyArgs: [] }, { py: 'python3', pyArgs: [] }]
+    : [{ py: 'python3', pyArgs: [] }, { py: 'python', pyArgs: [] }];
 }
 
 async function pickInstaller() {
@@ -325,10 +335,7 @@ async function pickInstaller() {
   // is often the Microsoft Store alias stub — so `py -3` goes first on Windows.
   // macOS/Linux reliably have `python3`. Each candidate carries its own prefix
   // args (`pyArgs`) so callers can rebuild the exact interpreter invocation.
-  const candidates = process.platform === 'win32'
-    ? [{ py: 'py', pyArgs: ['-3'] }, { py: 'python', pyArgs: [] }, { py: 'python3', pyArgs: [] }]
-    : [{ py: 'python3', pyArgs: [] }, { py: 'python', pyArgs: [] }];
-  for (const c of candidates) {
+  for (const c of pythonCandidates()) {
     try {
       await execFileP(c.py, [...c.pyArgs, '-m', 'pip', '--version'], { timeout: 10000 });
       return { kind: 'pip', py: c.py, pyArgs: c.pyArgs };
@@ -440,6 +447,71 @@ async function bootstrapPipx(py, pyArgs = []) {
   catch { return false; }
 }
 
+// Moves a machine off the pre-rename package names (klaussy-agents,
+// klaussy-repo-conventions) onto the new ones, with whichever installer owns the
+// old one. The old package goes first: both ship the same files, so installing the
+// new one alongside and then removing the old one deletes what they share. If the
+// install fails after the uninstall, the command is simply missing, and
+// ensureReviewTools installs the new package on its next pass. Returns the list of
+// packages it moved; never throws.
+const PEP668 = /externally-managed-environment|PEP ?668|break-system-packages/i;
+function refreshPathQuietly() {
+  try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+}
+
+async function moveOffLegacyTools({ exec = execFileP, candidates = pythonCandidates(), refreshPath = refreshPathQuietly } = {}) {
+  const BIG = { timeout: 5 * 60 * 1000, maxBuffer: 16 * 1024 * 1024 };
+  const listed = async (cmd, args) => {
+    try { return String((await exec(cmd, args, { timeout: 15000 })).stdout || ''); } catch { return ''; }
+  };
+  const pipxList = await listed('pipx', ['list', '--short']);
+  const uvList = await listed('uv', ['tool', 'list']);
+  const pipUser = async (pkg) => {
+    for (const c of candidates) {
+      try {
+        await exec(c.py, [...c.pyArgs, '-m', 'pip', 'show', pkg], { timeout: 15000 });
+        return c;
+      } catch { /* not this interpreter, or not installed there */ }
+    }
+    return null;
+  };
+  const moved = [];
+  for (const t of TOOLS) {
+    try {
+      if (listHasPkg(pipxList, t.legacy)) {
+        await exec('pipx', ['uninstall', t.legacy], BIG);
+        await exec('pipx', ['install', t.pkg], BIG);
+      } else if (listHasPkg(uvList, t.legacy)) {
+        await exec('uv', ['tool', 'uninstall', t.legacy], BIG);
+        await exec('uv', ['tool', 'install', t.pkg], BIG);
+      } else {
+        const c = await pipUser(t.legacy);
+        if (!c) continue;
+        const pip = (...args) => exec(c.py, [...c.pyArgs, '-m', 'pip', ...args], BIG);
+        const withEscape = async (...args) => {
+          try { return await pip(...args); } catch (err) {
+            const msg = (err && err.stderr ? String(err.stderr) : '') + '\n' + ((err && err.message) || '');
+            if (PEP668.test(msg)) return pip(...args, '--break-system-packages');
+            throw err;
+          }
+        };
+        await withEscape('uninstall', '-y', t.legacy);
+        await withEscape('install', '--user', t.pkg);
+      }
+      moved.push(t.pkg);
+    } catch (err) {
+      console.warn('[repo-intel] moving', t.legacy, 'to', t.pkg, 'failed:', (err && err.message) || err);
+    }
+  }
+  if (moved.length) {
+    klaussyCli = { bin: null, version: null, at: 0, promise: null };
+    conventionsCli = { version: '', at: 0, promise: null };
+    refreshPath();
+    console.log('[repo-intel] moved to', moved.join(', '));
+  }
+  return moved;
+}
+
 function ensureReviewTools() {
   if (toolsPromise) return toolsPromise;
   toolsPromise = (async () => {
@@ -447,6 +519,7 @@ function ensureReviewTools() {
     // even though they're installed. Refresh PATH from the user's shell first so
     // both tool detection and installer selection can see them.
     try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
+    await moveOffLegacyTools();
 
     const missing = [];
     for (const t of TOOLS) if (!(await toolPresent(t.cmd))) missing.push(t);
@@ -623,6 +696,7 @@ async function upgradeReviewToolsNow() {
     saveConfig(cfg);
   } catch { /* fall through — the upgrade may still be due */ }
   outdatedNotified = false; // let a fresh nag fire if the upgrade doesn't take
+  await moveOffLegacyTools();
   await upgradeReviewToolsIfDue();
   let version = null;
   try { version = (await getKlaussyCli()).version; } catch { /* probe failed */ }
@@ -1461,4 +1535,6 @@ module.exports = { ensureRepoIntel, getRepoIntelBlock, syncIntelIntoWorktree, sy
   versionBelow, latestKlaussyVersion, _resetLatestCache,
   // Exported for unit testing of the regeneration stamp.
   stampFor, listPkgVersion,
+  // Exported for unit testing of the move off the pre-rename package names.
+  moveOffLegacyTools,
   klaussyInitArgs };
