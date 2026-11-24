@@ -16,10 +16,14 @@ on:
         type: boolean
         default: true
       release_tag:
-        description: 'If set (e.g. v0.2.7), upload the built artifacts to that release on klaussy-desktop-feedback. Requires the FEEDBACK_REPO_TOKEN secret. Leave blank to only upload to GitHub Actions artifacts.'
+        description: 'If set (e.g. v0.2.7), upload the built artifacts to that release on klaussy-desktop and klaussy-desktop-feedback. Requires the FEEDBACK_REPO_TOKEN secret. Leave blank to only upload to GitHub Actions artifacts.'
         type: string
         default: ''
 
+# The repos (klaussy-desktop, klaussy-desktop-feedback) and klaussy.com keep their
+# old names on purpose: installed apps poll them for updates. Only the product and
+# its files are called Maussian.
+#
 # contents:write lets the default GITHUB_TOKEN attach artifacts to a release on
 # THIS repo (klaussy-desktop) — the canonical release home. The feedback-repo
 # upload still needs the cross-repo FEEDBACK_REPO_TOKEN PAT.
@@ -35,8 +39,8 @@ jobs:
           - os: ubuntu-latest
             script: dist:linux
             artifact_glob: |
-              dist/Klaussy-*.AppImage
-              dist/Klaussy-*.deb
+              dist/Maussian-*.AppImage
+              dist/Maussian-*.deb
               dist/latest-linux.yml
           # Pinned to windows-2022: `windows-latest` rotated to a newer image
           # whose Visual Studio the bundled node-gyp doesn't detect ("Could
@@ -45,9 +49,12 @@ jobs:
           - os: windows-2022
             script: dist:win
             artifact_glob: |
-              dist/Klaussy-*.exe
+              dist/Maussian-*.exe
               dist/latest.yml
     runs-on: ${{ matrix.os }}
+    env:
+      # Every file the release uploads below look for. Left unquoted where used so bash globs it.
+      RELEASE_FILES: dist/Maussian-*.exe dist/Maussian-*.AppImage dist/Maussian-*.deb dist/latest.yml dist/latest-linux.yml
     timeout-minutes: 30
 
     steps:
@@ -138,10 +145,11 @@ jobs:
         run: |
           # `gh release upload --clobber` so re-running the workflow on the same
           # tag overwrites prior artifacts instead of failing.
-          mapfile -t files < <(ls dist/Klaussy-*.exe dist/Klaussy-*.AppImage dist/Klaussy-*.deb dist/latest.yml dist/latest-linux.yml 2>/dev/null || true)
+          # shellcheck disable=SC2086
+          mapfile -t files < <(ls $RELEASE_FILES 2>/dev/null || true)
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::warning::No platform artifacts found in dist/; nothing to upload."
-            exit 0
+            echo "::error::None of $RELEASE_FILES were built, so there's nothing to upload to ${{ inputs.release_tag }}."
+            exit 1
           fi
           # Create-if-missing: a freshly-tagged release often has no GitHub
           # release object yet, and `gh release upload` fails with "release not
@@ -175,10 +183,11 @@ jobs:
             echo "::warning::release_tag was provided but FEEDBACK_REPO_TOKEN is not set; skipping feedback-repo mirror."
             exit 0
           fi
-          mapfile -t files < <(ls dist/Klaussy-*.exe dist/Klaussy-*.AppImage dist/Klaussy-*.deb dist/latest.yml dist/latest-linux.yml 2>/dev/null || true)
+          # shellcheck disable=SC2086
+          mapfile -t files < <(ls $RELEASE_FILES 2>/dev/null || true)
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::warning::No platform artifacts found in dist/; nothing to mirror."
-            exit 0
+            echo "::error::None of $RELEASE_FILES were built, so there's nothing to mirror to ${{ inputs.release_tag }}."
+            exit 1
           fi
           # Create-if-missing on the feedback repo too — the mirror release won't
           # exist until we make it, so creating it here is what makes the
