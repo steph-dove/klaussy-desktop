@@ -15,57 +15,63 @@
 const { acquirePrimaryOrExit } = require('./main/bootstrap/single-instance');
 if (!acquirePrimaryOrExit()) {
   process.exit(0);
+} else if (!require('./main/bootstrap/browser-handoff').deferToBrowserHelper()) {
+  // The browser version shares this userData; while it runs, the desktop app
+  // asks what to do instead of booting against the same config and sessions.
+  boot();
 }
 
-require('./main/util/logging');
-// Before app ready — it registers the privileged schemes.
-require('./main/bootstrap/privileged-schemes');
-const pathGate = require('./main/util/path-gate');
-const { loadConfig } = require('./main/util/config');
-const { instances } = require('./main/state/instances');
+function boot() {
+  require('./main/util/logging');
+  // Before app ready — it registers the privileged schemes.
+  require('./main/bootstrap/privileged-schemes');
+  const pathGate = require('./main/util/path-gate');
+  const { loadConfig } = require('./main/util/config');
+  const { instances } = require('./main/state/instances');
 
-// State-module side effects (require these before the IPC modules so any
-// handler that reaches into state finds it fully initialized).
-require('./main/state/windows');
-require('./main/state/claude-streaming');
-require('./main/state/watcher');
-require('./main/state/ci-poll');
-require('./main/state/pr-review');
+  // State-module side effects (require these before the IPC modules so any
+  // handler that reaches into state finds it fully initialized).
+  require('./main/state/windows');
+  require('./main/state/claude-streaming');
+  require('./main/state/watcher');
+  require('./main/state/ci-poll');
+  require('./main/state/pr-review');
 
-// path-gate needs loadConfig + the live instances Map for the allowed-roots
-// check. Both are stable imports; we set them once here and forget.
-pathGate.setDeps({ loadConfig, getInstances: () => instances });
+  // path-gate needs loadConfig + the live instances Map for the allowed-roots
+  // check. Both are stable imports; we set them once here and forget.
+  pathGate.setDeps({ loadConfig, getInstances: () => instances });
 
-// IPC handler registrations (side-effectful requires).
-require('./main/ipc/windows-ipc');
-require('./main/ipc/lsp');
-require('./main/ipc/skills');
-require('./main/ipc/mcp');
-require('./main/ipc/files');
-require('./main/ipc/gh');
-require('./main/ipc/glab');
-require('./main/ipc/bitbucket');
-require('./main/ipc/azure');
-require('./main/ipc/rename-notice');
-require('./main/ipc/git');
-require('./main/ipc/tasks');
-require('./main/ipc/repo');
-require('./main/ipc/claude-stream-ipc');
-require('./main/ipc/pr-review-terminal');
-require('./main/ipc/agents');
-require('./main/ipc/pr-review');
-require('./main/ipc/pr-review-checks');
-require('./main/ipc/pr-review-comments');
-require('./main/ipc/ollama');
-require('./main/ipc/token-usage');
-require('./main/ipc/session-context');
-require('./main/ipc/voice');
+  // IPC handler registrations (side-effectful requires).
+  require('./main/ipc/windows-ipc');
+  require('./main/ipc/lsp');
+  require('./main/ipc/skills');
+  require('./main/ipc/mcp');
+  require('./main/ipc/files');
+  require('./main/ipc/gh');
+  require('./main/ipc/glab');
+  require('./main/ipc/bitbucket');
+  require('./main/ipc/azure');
+  require('./main/ipc/rename-notice');
+  require('./main/ipc/git');
+  require('./main/ipc/tasks');
+  require('./main/ipc/repo');
+  require('./main/ipc/claude-stream-ipc');
+  require('./main/ipc/pr-review-terminal');
+  require('./main/ipc/agents');
+  require('./main/ipc/pr-review');
+  require('./main/ipc/pr-review-checks');
+  require('./main/ipc/pr-review-comments');
+  require('./main/ipc/ollama');
+  require('./main/ipc/token-usage');
+  require('./main/ipc/session-context');
+  require('./main/ipc/voice');
 
-// Wired here so session-activity never imports the instances map back and closes a cycle.
-require('./main/state/session-activity').start(
-  () => require('./main/state/instances').liveAgentInstances(),
-);
+  // Wired here so session-activity never imports the instances map back and closes a cycle.
+  require('./main/state/session-activity').start(
+    () => require('./main/state/instances').liveAgentInstances(),
+  );
 
-require('./main/bootstrap/error-reporter').install();
-require('./main/bootstrap/app-events').install();
-require('./main/bootstrap/auto-updater').install();
+  require('./main/bootstrap/error-reporter').install();
+  require('./main/bootstrap/app-events').install();
+  require('./main/bootstrap/auto-updater').install();
+}

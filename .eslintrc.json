@@ -23,6 +23,19 @@
       "rules": { "no-undef": "error" }
     },
     {
+      "files": ["web/**/*.js"],
+      "excludedFiles": ["web/bridge.js"],
+      "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
+      "env": { "node": true, "es2022": true },
+      "rules": { "no-undef": "error" }
+    },
+    {
+      "files": ["web/bridge.js"],
+      "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
+      "env": { "browser": true, "es2022": true },
+      "rules": { "no-undef": "error" }
+    },
+    {
       "files": ["test/**/*.js", "scripts/**/*.js"],
       "parserOptions": { "ecmaVersion": 2022, "sourceType": "script" },
       "env": { "node": true, "es2022": true },
