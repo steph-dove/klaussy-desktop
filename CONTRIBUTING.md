@@ -17,11 +17,12 @@ supported agent CLI (Claude Code by default). See the README for per-OS setup.
 
 ## Before you open a PR
 
-Run the checks the CI runs:
+Nothing runs in GitHub Actions, so run the checks yourself:
 
 ```bash
 npm run lint     # eslint over main/, renderer/, preload.js, main.js
 npm test         # unit tests (node --require ./test/setup.js --test test/util/*.test.js)
+npm run secrets  # gitleaks over the full history (brew install gitleaks)
 npm run test:e2e # Playwright e2e (optional; launches the app)
 ```
 
@@ -50,7 +51,7 @@ can bypass with `git commit --no-verify`, but prefer fixing the finding.
   why.
 - **Match the surrounding code** — comment density, naming, and idioms. Comments
   should explain *why*, not *what*.
-- **No secrets, ever.** A `gitleaks` scan runs in CI over the full history; keep
+- **No secrets, ever.** `npm run secrets` scans the full history with `gitleaks`; keep
   credentials out of the tree (use env vars / `.env`, which is gitignored).
 - **Update docs** when you change behavior a user would notice.
 - For bugs and feature requests, use the
