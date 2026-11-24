@@ -1198,7 +1198,7 @@
       ? ThemeManager.getTerminalTheme() : undefined;
     var fontSize = (window.AppState && AppState.currentFontSize) || 13;
     var fontFamily = (window.AppState && AppState.savedPrefs && AppState.savedPrefs.fontFamily)
-      || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
+      || "'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace";
     var terminal = new window.Terminal({
       cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: fontSize,

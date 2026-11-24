@@ -184,9 +184,9 @@
   user-select: none;
 }
 .inline-edit-accept {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
   font-weight: 600;
 }
 .inline-edit-accept:disabled { opacity: 0.4; cursor: not-allowed; }

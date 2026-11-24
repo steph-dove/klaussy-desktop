@@ -105,6 +105,8 @@ window.Dialogs = (function () {
       { name: 'highlight.js', license: 'BSD 3-Clause License', copyright: '© 2006, Ivan Sagalaev', url: 'https://github.com/highlightjs/highlight.js/blob/main/LICENSE' },
       { name: 'vscode-languageserver-protocol, vscode-jsonrpc', license: 'MIT License', copyright: '© Microsoft Corporation', url: 'https://github.com/microsoft/vscode-languageserver-node/blob/main/License.txt' },
       { name: 'Ollama (invoked locally for inline AI)', license: 'MIT License', copyright: '© Ollama Inc.', url: 'https://github.com/ollama/ollama/blob/main/LICENSE' },
+      { name: 'Instrument Sans (font)', license: 'SIL Open Font License 1.1', copyright: '© 2022 The Instrument Sans Project Authors', url: 'https://github.com/Instrument/instrument-sans/blob/main/OFL.txt' },
+      { name: 'IBM Plex Mono (font)', license: 'SIL Open Font License 1.1', copyright: '© 2017 IBM Corp.', url: 'https://github.com/IBM/plex/blob/master/LICENSE.txt' },
       { name: 'Qwen2.5-Coder-1.5B (model run via Ollama)', license: 'Apache License 2.0', copyright: '© Alibaba Cloud', url: 'https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B/blob/main/LICENSE' },
     ];
 
@@ -313,7 +315,7 @@ window.Dialogs = (function () {
             + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
           + '</div>'
           + '<div class="rename-body">'
-            + '<img class="rename-logo" src="mouse.png" alt="" aria-hidden="true">'
+            + '<span class="mouse-glow mouse-glow-soft rename-logo-wrap" aria-hidden="true"><img class="rename-logo" src="mouse.png" alt="" aria-hidden="true"></span>'
             + '<div>'
               + '<p>Same app, new name. Your settings, sessions and PR checkouts came with you.</p>'
               + '<ul>'

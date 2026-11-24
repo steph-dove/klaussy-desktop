@@ -34,6 +34,7 @@ window.AppUtils = (function () {
   ];
   function iconColor(name) {
     var hash = 0;
+    name = name || '';
     for (var i = 0; i < name.length; i++) hash = ((hash << 5) - hash + name.charCodeAt(i)) | 0;
     return _iconColors[Math.abs(hash) % _iconColors.length];
   }

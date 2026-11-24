@@ -1654,7 +1654,7 @@ ipcMain.handle('pop-out-task', (_event, { id }) => {
     height: 600,
     title: `Maussian \u2014 ${inst.name}`,
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#0b0f19',
     webPreferences: {
       preload: path.join(__dirname, '..', '..', 'preload.js'),
       contextIsolation: true,

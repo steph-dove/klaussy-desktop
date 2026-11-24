@@ -1,29 +1,35 @@
 /* CSS Custom Properties for theming (Phase 5) */
 :root {
-  /* Default dark — soft cool near-black. Mirrors the `dark` preset in
-     theme.js; keep the two in sync. Elevation ladder: bg 0e0e13 → sidebar
-     16161d → surface 1c1c24 → hover 26262f, with a 272730 border so panels
-     read as distinct without hard lines. Inputs recessed at 0a0a0e. */
-  --bg: #0e0e13;
-  --sidebar-bg: #16161d;
-  --border: #272730;
-  --border-strong: #67677f;
-  --accent: #4a9eff;
-  --accent-hover: #6cb2ff;
-  --accent-dim: rgba(74, 158, 255, 0.16);
-  --text: #e8e8ee;
-  --text-muted: #9a9aa6;
-  --text-dim: #8d8d98;
-  --surface: #1c1c24;
-  --surface-hover: #26262f;
-  --input-bg: #0a0a0e;
-  --success: #46c463;
-  --error: #f05d54;
-  --accent-contrast: #0b0b0f;
-  --success-contrast: #0b0b0f;
-  --error-contrast: #0b0b0f;
+  /* Default dark: the Maussian navy. Mirrors the `dark` preset in theme.js;
+     keep the two in sync. Elevation ladder: bg 0b0f19 -> sidebar 101524 ->
+     surface 161c2e -> hover 1f2740, with a 252d44 border so panels read as
+     distinct without hard lines. Inputs recessed at 070a12.
+     Two brand colours: --primary (lime) fills action buttons; --accent
+     (violet) is focus, links, selection and active states. */
+  --bg: #0b0f19;
+  --sidebar-bg: #101524;
+  --border: #252d44;
+  --border-strong: #66708f;
+  --primary: #c6f432;
+  --primary-hover: #d4f85e;
+  --primary-contrast: #0b0f19;
+  --primary-dim: rgba(198, 244, 50, 0.16);
+  --accent: #a794ff;
+  --accent-hover: #bcadff;
+  --accent-dim: rgba(167, 148, 255, 0.16);
+  --text: #e9ebf3;
+  --text-muted: #9ca3b8;
+  --text-dim: #8f97ad;
+  --surface: #161c2e;
+  --surface-hover: #1f2740;
+  --input-bg: #070a12;
+  --success: #2dd4bf;
+  --error: #f26a61;
+  --accent-contrast: #0b0f19;
+  --success-contrast: #0b0f19;
+  --error-contrast: #0b0f19;
   --warning: #c8951b;
-  --warning-contrast: #0b0b0f;
+  --warning-contrast: #0b0f19;
   /* Older rules use these names; undefined, they fell back to fixed dark colours in every theme. */
   --danger: var(--error);
   --bg-card: var(--surface);
@@ -40,10 +46,10 @@
   --bg-deep: var(--bg);
   --mono: var(--font-mono);
   --accent-glow: var(--accent-dim);
-  --term-bg: #0d0d12;
-  --term-fg: #d2d2da;
-  --term-cursor: #4a9eff;
-  --term-selection: rgba(74, 158, 255, 0.26);
+  --term-bg: #090d16;
+  --term-fg: #d4d8e4;
+  --term-cursor: #c6f432;
+  --term-selection: rgba(109, 74, 255, 0.35);
 
   /* Design tokens — use these in new code so modals and dialogs stop
      drifting from each other. Spacing scale is 2/4/8/12/16/24. Radius
@@ -54,8 +60,12 @@
   --radius-lg: 12px;
   --shadow-modal: 0 24px 56px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border);
   --modal-overlay-bg: rgba(0, 0, 0, 0.6);
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Menlo, monospace;
+  /* The violet backlight behind the mouse, as on maussian.ai. */
+  --brand-violet-rgb: 109, 74, 255;
+  --mouse-glow-alpha: 0.6;
+  --topbar-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  --font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SF Mono', 'Fira Code', Menlo, monospace;
 }
 
 /* ---- Unified primitives ---- */
@@ -145,14 +155,14 @@
 }
 
 .klaus-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-contrast);
 }
 
 .klaus-btn-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
   filter: brightness(1.03);
 }
 
@@ -325,8 +335,8 @@ button:not(.klaus-btn):not(:disabled):active,
 }
 
 .overlay-content button {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   padding: 12px 24px;
   border-radius: 8px;
@@ -335,7 +345,7 @@ button:not(.klaus-btn):not(:disabled):active,
 }
 
 .overlay-content button:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 /* Main layout */
@@ -351,7 +361,7 @@ button:not(.klaus-btn):not(:disabled):active,
      shown only when a color is set.
    - macOS custom-titlebar (hidden-inset frame): the bar IS the window's top —
      always present, draggable, houses the inset traffic lights, and fills with
-     the window color (Chrome-profile style) or the sidebar bg by default. */
+     the window color (Chrome-profile style) or the page bg by default. */
 #window-color-bar {
   position: absolute;
   top: 0;
@@ -379,8 +389,9 @@ body.has-window-color:not(.custom-titlebar) #sidebar-header {
 /* --- macOS custom title bar --- */
 body.custom-titlebar #window-color-bar {
   height: 38px;
-  background: var(--window-color, var(--sidebar-bg));
-  border-bottom: 1px solid var(--border);
+  background: var(--window-color, var(--bg));
+  /* A soft shadow, not a line, separates the bar from the page. */
+  box-shadow: var(--topbar-shadow);
   pointer-events: auto;
   -webkit-app-region: drag;
   transition: background 0.15s ease;
@@ -550,17 +561,17 @@ body.custom-titlebar #titlebar-content {
 }
 
 #btn-new-task {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
   font-size: 18px;
-  border: 1px solid var(--accent) !important;
-  box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
+  border: 1px solid var(--primary) !important;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 25%, transparent);
 }
 
 #btn-new-task:hover {
-  background: var(--accent-hover) !important;
-  border-color: var(--accent-hover) !important;
-  box-shadow: 0 4px 12px rgba(74, 158, 255, 0.35);
+  background: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 35%, transparent);
   transform: translateY(-1px);
 }
 
@@ -568,7 +579,7 @@ body.custom-titlebar #titlebar-content {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
   color: var(--accent-contrast) !important;
-  box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 .voice-btn[hidden] {
@@ -672,8 +683,8 @@ body.pr-review-popout #voice-float:not([hidden]) {
   z-index: 10000;
   display: none;
   padding: 4px 10px;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border-radius: 6px;
   font-size: 11px;
   font-weight: 500;
@@ -1002,10 +1013,10 @@ body.pr-review-popout #voice-float:not([hidden]) {
   font-size: 11px;
 }
 #btn-enable-commit-gate {
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  border: 1px solid var(--primary);
   border-radius: 6px;
-  color: var(--accent-contrast);
+  color: var(--primary-contrast);
   font-size: 11px;
   font-weight: 500;
   padding: 5px 10px;
@@ -1015,8 +1026,8 @@ body.pr-review-popout #voice-float:not([hidden]) {
               transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 #btn-enable-commit-gate:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
   transform: translateY(-1px);
 }
 #btn-enable-commit-gate:active {
@@ -1394,8 +1405,8 @@ body.pr-review-popout #voice-float:not([hidden]) {
 }
 
 .saved-session-resume {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
 }
 
 .saved-session-resume:hover {
@@ -1531,8 +1542,8 @@ body.pr-review-popout #voice-float:not([hidden]) {
 }
 
 .worktree-open-claude {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
 }
 
 .worktree-open-claude:hover {
@@ -2046,12 +2057,12 @@ button.collapsed-icon {
 }
 
 #modal-create {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
 }
 
 #modal-create:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 /* Main panel — horizontal split */
@@ -2160,7 +2171,7 @@ body.task-branchless #ahead-behind {
   position: absolute;
   width: 500px;
   height: 500px;
-  background: radial-gradient(circle, rgba(74, 158, 255, 0.12) 0%, rgba(108, 92, 231, 0.04) 50%, transparent 80%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 12%, transparent) 0%, rgba(108, 92, 231, 0.04) 50%, transparent 80%);
   filter: blur(60px);
   z-index: 0;
   pointer-events: none;
@@ -2194,8 +2205,57 @@ body.task-branchless #ahead-behind {
 .empty-dashboard-logo {
   width: auto;
   height: 64px;
-  margin-bottom: 16px;
   animation: logoPulse 4s ease-in-out 3;
+}
+.empty-dashboard-header .mouse-glow { margin-bottom: 16px; }
+
+/* Violet backlight behind the mouse, the same light as the maussian.ai hero.
+   Decorative only: the wrapper is aria-hidden and the light never takes
+   pointer events. isolation keeps the light above the panel but behind the
+   mouse. */
+.mouse-glow {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  isolation: isolate;
+}
+.mouse-glow > img { position: relative; }
+.mouse-glow::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+}
+/* The welcome screen's tall beam, scaled from the site's (24% wide, 70px blur). */
+.mouse-glow-beam::before {
+  left: 5%;
+  width: 90%;
+  top: -75%;
+  height: 190%;
+  background: linear-gradient(180deg, transparent, rgba(var(--brand-violet-rgb), var(--mouse-glow-alpha)) 45%, transparent);
+  filter: blur(22px);
+  animation: mouseBeamSway 17s ease-in-out infinite;
+}
+@keyframes mouseBeamSway {
+  0%, 100% { transform: rotate(-12deg) translateX(0); opacity: 0.7; }
+  50% { transform: rotate(-18deg) translateX(-14px); opacity: 1; }
+}
+/* A soft halo for the small marks (sidebar, rename card); it stays inside a
+   few pixels of the mouse so it never reaches nearby text. */
+.mouse-glow-soft::before {
+  inset: 4% 8%;
+  background: radial-gradient(ellipse at center, rgba(var(--brand-violet-rgb), var(--mouse-glow-alpha)) 0%, transparent 70%);
+  filter: blur(6px);
+}
+.rename-logo-wrap { align-self: flex-start; }
+.rename-logo-wrap::before { filter: blur(12px); }
+@media (prefers-reduced-motion: reduce) {
+  .mouse-glow-beam::before { animation: none; transform: rotate(-12deg); opacity: 0.85; }
+}
+@media (forced-colors: active) {
+  .mouse-glow::before { display: none; }
+  /* Forced colours drop shadows, so the top bar keeps a plain edge. */
+  body.custom-titlebar #window-color-bar { border-bottom: 1px solid CanvasText; }
 }
 
 @keyframes logoPulse {
@@ -2378,8 +2438,8 @@ body.task-branchless #ahead-behind {
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 600;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 3px;
   cursor: pointer;
@@ -3170,8 +3230,8 @@ body.task-branchless #ahead-behind {
 }
 
 #btn-broadcast-send {
-  background: var(--accent);
-  color: var(--accent-contrast, #fff);
+  background: var(--primary);
+  color: var(--primary-contrast, #fff);
   border: none;
   border-radius: 9999px;
   padding: 6px 16px;
@@ -3182,7 +3242,7 @@ body.task-branchless #ahead-behind {
 }
 
 #btn-broadcast-send:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 #btn-broadcast-send:active {

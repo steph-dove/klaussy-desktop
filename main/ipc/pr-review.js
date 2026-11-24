@@ -450,8 +450,8 @@ ipcMain.handle('pr-review-close', () => {
 // popout's first paint matches the active theme instead of flashing the dark
 // brand color before the CSS variables apply. 'system' resolves via the OS.
 const THEME_BG = {
-  dark: '#0e0e13', midnight: '#0d1117', monokai: '#272822', nord: '#2e3440',
-  solarized: '#002b36', rose: '#191724', light: '#ffffff',
+  dark: '#0b0f19', midnight: '#0d1117', monokai: '#272822', nord: '#2e3440',
+  solarized: '#002b36', rose: '#191724', light: '#f6f6fc',
 };
 function popoutBackgroundColor() {
   const preset = (loadConfig().theme || {}).preset || 'dark';

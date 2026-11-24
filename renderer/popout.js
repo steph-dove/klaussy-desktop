@@ -19,7 +19,7 @@
     var terminal = new Terminal({
       cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: 13,
-      fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: "'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       scrollback: 10000,
       theme: window.ThemeManager.getTerminalTheme(),
       minimumContrastRatio: 4.5, // never let low-contrast text vanish

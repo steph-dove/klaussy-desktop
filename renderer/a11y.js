@@ -703,7 +703,7 @@ window.A11y = (function () {
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
     }
     .a11y-field-error { color: var(--error); font-size: 12px; margin: 4px 0; }
-    :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #4a9eff)) !important; outline-offset: 2px; }
+    :where(:focus-visible) { outline: 2px solid var(--focus-ring, var(--accent, #a794ff)) !important; outline-offset: 2px; }
     :where(input, textarea, select, [contenteditable]):focus-visible { outline-offset: 0; }
     :where([role="tab"], .file-viewer-tab, .diff-tab):focus-visible { outline-offset: -2px; }
     :where(.xterm :focus-visible, .monaco-editor :focus-visible, [role="dialog"]:focus-visible) { outline: none !important; }

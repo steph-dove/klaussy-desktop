@@ -71,7 +71,7 @@
       }
       .klaussy-toast.error   { border-left-color: #ff5252; }
       .klaussy-toast.warn    { border-left-color: #ffb74d; }
-      .klaussy-toast.info    { border-left-color: #64b5f6; }
+      .klaussy-toast.info    { border-left-color: var(--accent, #a794ff); }
       .klaussy-toast.success { border-left-color: #81c784; }
       .klaussy-toast .msg { white-space: pre-wrap; }
       .klaussy-toast-action {

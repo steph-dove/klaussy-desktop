@@ -420,7 +420,7 @@
   margin-top: 6px;
   padding: 6px 10px;
   background: var(--surface-hover, rgba(128, 128, 128, 0.08));
-  border-left: 2px solid var(--accent, #4a9eff);
+  border-left: 2px solid var(--accent, #a794ff);
   border-radius: 0 4px 4px 0;
   font-size: 11px;
   color: var(--text, #e8e8ee);
@@ -587,7 +587,7 @@
   border-radius: 6px;
   padding: 12px;
   overflow-x: auto;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   margin: 10px 0;
 }
@@ -596,7 +596,7 @@
   background: rgba(255, 255, 255, 0.08);
   padding: 2px 5px;
   border-radius: 4px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -814,7 +814,7 @@
 }
 
 .actions-dropdown-item.actions-featured:hover {
-  background: var(--accent, #4a9eff);
+  background: var(--accent, #a794ff);
   color: var(--accent-contrast);
 }
 

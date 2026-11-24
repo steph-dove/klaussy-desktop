@@ -89,6 +89,16 @@ for (const [name, t] of Object.entries(presets)) {
 }
 
 // Tinted chip fills used behind --diff-add-fg / --diff-del-fg text (PR state chips, deps icons, banners).
+for (const name of Object.keys(presets)) {
+  test(`${name}: primary-contrast text stays readable on the primary fill and its hover`, () => {
+    const v = cssVars(name);
+    for (const fill of [v['--primary'], v['--primary-hover']]) {
+      const r = ratio(v['--primary-contrast'], fill);
+      assert.ok(r >= 4.5, `${v['--primary-contrast']} on ${fill} is ${r.toFixed(2)}`);
+    }
+  });
+}
+
 const ADD_TINTS = ['rgba(35, 134, 54, 0.25)', 'rgba(46, 160, 67, 0.2)'];
 const DEL_TINTS = ['rgba(218, 54, 51, 0.2)'];
 const DIFF_PANELS = ['bg', 'sidebarBg', 'surface'];
@@ -288,14 +298,14 @@ test('text on translucent tinted fills keeps 4.5:1 over every panel in every pre
 
 // Rules whose elements hold no text: dividers, icon glyphs, chart bars, drag ghosts and resize handles.
 const OPACITY_NON_TEXT_ALLOWED = {
-  '01-base.css': ['.sidebar-section-header::after'],
+  '01-base.css': ['.sidebar-section-header::after', '.mouse-glow-beam::before'],
   '02-toolbar-diff.css': ['.actions-dropdown-btn .actions-chevron', '.terminal-container.dragging', '#diff-resize-handle:hover, #diff-resize-handle.active'],
   '04-editor.css': ['.inline-edit-prompt::before'],
   '05-pr-review-surface.css': ['.task-item.dragging', '.plan-phase-icon-todo::before'],
   '06-searchable-select.css': ['.ss-trigger .ss-caret'],
 };
-// Keyframes on purely decorative layers (the dashboard's empty-state glow).
-const OPACITY_NON_TEXT_KEYFRAMES = ['pulseGlow'];
+// Keyframes on purely decorative layers (the dashboard's empty-state glow, the mouse's backlight).
+const OPACITY_NON_TEXT_KEYFRAMES = ['pulseGlow', 'mouseBeamSway'];
 
 // Opacity multiplies down whatever text the element contains, so any rule may hold text unless allowlisted above; hidden (0) and disabled are exempt.
 test('stylesheets do not dim text with opacity', () => {

@@ -56,7 +56,7 @@ function createWindow(opts) {
     height: 800,
     title: 'Maussian',
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#0b0f19',
     ...(isMac ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 19, y: 12 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, '..', '..', 'preload.js'),

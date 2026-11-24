@@ -190,8 +190,8 @@
   cursor: default;
 }
 .agent-toolbar-run {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 6px;
   padding: 6px 14px;
@@ -202,7 +202,7 @@
   white-space: nowrap;
 }
 .agent-toolbar-run:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 .terminal-container.drag-over {
@@ -860,7 +860,7 @@
 .light-syntax #diff-view .hljs-keyword, .light-syntax #file-viewer-view .hljs-keyword,
 .light-syntax #diff-view .hljs-literal, .light-syntax #file-viewer-view .hljs-literal,
 .light-syntax #diff-view .hljs-symbol, .light-syntax #file-viewer-view .hljs-symbol,
-.light-syntax #diff-view .hljs-name, .light-syntax #file-viewer-view .hljs-name { color: #cf222e; }
+.light-syntax #diff-view .hljs-name, .light-syntax #file-viewer-view .hljs-name { color: #b91c26; }
 .light-syntax #diff-view .hljs-built_in, .light-syntax #file-viewer-view .hljs-built_in,
 .light-syntax #diff-view .hljs-type, .light-syntax #file-viewer-view .hljs-type { color: #6639ba; }
 .light-syntax #diff-view .hljs-number, .light-syntax #file-viewer-view .hljs-number,
@@ -893,7 +893,7 @@
 .light-syntax #diff-view .hljs-property, .light-syntax #file-viewer-view .hljs-property { color: #0550ae; }
 .light-syntax #diff-view .hljs-call, .light-syntax #file-viewer-view .hljs-call { color: #6639ba; }
 .light-syntax #diff-view .hljs-module, .light-syntax #file-viewer-view .hljs-module { color: #953800; }
-.light-syntax #diff-view .hljs-self, .light-syntax #file-viewer-view .hljs-self { color: #cf222e; }
+.light-syntax #diff-view .hljs-self, .light-syntax #file-viewer-view .hljs-self { color: #b91c26; }
 .light-syntax #diff-view .hljs-constant, .light-syntax #file-viewer-view .hljs-constant { color: #0550ae; }
 .light-syntax #diff-view .hljs-decorator, .light-syntax #file-viewer-view .hljs-decorator { color: #6639ba; }
 .light-syntax #diff-view .hljs-subst, .light-syntax #file-viewer-view .hljs-subst { color: #24292f; }
@@ -938,7 +938,7 @@
 .light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-literal,
 .light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-name,
 .light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-symbol,
-.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-link { color: #cf222e; }
+.light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-link { color: #b91c26; }
 .light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-built_in,
 .light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-type { color: #6639ba; }
 .light-syntax :is(.file-md-preview, .markdown-body, .pr-conv-md) .hljs-number,
@@ -1100,9 +1100,9 @@
 }
 
 #diff-partial-action-bar .partial-apply {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
 }
 
 #diff-partial-action-bar .partial-apply:hover {
@@ -1227,7 +1227,7 @@
   margin: 4px 8px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid #79c0ff;
+  border-left: 3px solid var(--accent);
   border-radius: 4px;
   font-size: 12px;
 }
@@ -1289,9 +1289,9 @@
 
 .diff-comment-post {
   padding: 5px 14px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   border-radius: 4px;
   font-family: inherit;
   font-size: 11px;
@@ -1300,7 +1300,7 @@
 }
 
 .diff-comment-post:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 .diff-comment-post:disabled {
@@ -1361,8 +1361,8 @@
   padding: 4px 12px;
   font-size: 11px;
   font-weight: 600;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -1403,8 +1403,8 @@
   font-size: 15px;
   line-height: 1;
   white-space: normal;
-  color: var(--accent-contrast);
-  background: var(--accent);
+  color: var(--primary-contrast);
+  background: var(--primary);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -1460,9 +1460,9 @@
 }
 
 .diff-annotation-save {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
 }
 
 .diff-annotation-cancel {
@@ -1540,9 +1540,9 @@
 }
 
 .diff-annotations-send {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
 }
 
 /* Commit area & footer */
@@ -1606,8 +1606,8 @@
 .diff-status-error { border-color: var(--error); color: var(--error); }
 
 #btn-do-commit {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   padding: 6px 14px;
   border-radius: 6px;
@@ -1617,7 +1617,7 @@
 }
 
 #btn-do-commit:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 #btn-do-commit:disabled {
@@ -1680,16 +1680,16 @@
 }
 
 #diff-footer #btn-commit {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
-  box-shadow: 0 2px 8px rgba(74, 158, 255, 0.25);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-contrast);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--primary) 25%, transparent);
 }
 
 #diff-footer #btn-commit:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  box-shadow: 0 4px 12px rgba(74, 158, 255, 0.35);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 
 #diff-footer button:disabled {

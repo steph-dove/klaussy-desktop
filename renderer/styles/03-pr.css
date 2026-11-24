@@ -88,9 +88,9 @@
   font-size: 12px;
   font-weight: 600;
   font-family: inherit;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   border-radius: 6px;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(139, 92, 246, 0.35);
@@ -978,12 +978,12 @@
 }
 
 #btn-pr-merge.ready {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
 }
 
 #btn-pr-merge.ready:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 #btn-pr-merge[aria-disabled="true"] {
@@ -1351,8 +1351,8 @@
 }
 
 .pr-ai-fix-all-header-btn {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   font-weight: 600;
   margin-right: 4px;
 }

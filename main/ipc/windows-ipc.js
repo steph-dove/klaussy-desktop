@@ -196,7 +196,7 @@ function openPreferencesWindow(ownerWin) {
     height: 560,
     title: 'Preferences',
     icon: path.join(__dirname, '..', '..', 'icon.icns'),
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#0b0f19',
     resizable: true,
     minimizable: false,
     maximizable: false,
@@ -238,7 +238,7 @@ function kimiBashGranted() {
 ipcMain.handle('get-preferences', () => {
   const config = loadConfig();
   return {
-    fontFamily: config.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+    fontFamily: config.fontFamily || "'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
     fontSize: config.fontSize || 13,
     lineHeight: config.lineHeight || 1.2,
     cursorStyle: config.cursorStyle || 'block',

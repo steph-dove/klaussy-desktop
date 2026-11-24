@@ -485,9 +485,9 @@ button.pr-check-toggle {
 }
 .pr-check-fix-discard:hover { background: var(--surface-hover); }
 .pr-check-fix-push {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
 }
 .pr-check-fix-push:hover { filter: brightness(1.08); }
 .pr-check-fix-push:disabled, .pr-check-fix-discard:disabled { opacity: 0.6; cursor: wait; }
@@ -587,9 +587,9 @@ button.pr-check-toggle {
 .pr-ai-empty .pr-ai-run {
   font-size: 13px;
   padding: 8px 18px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
   font-weight: 600;
 }
 .pr-ai-empty .pr-ai-run:hover { filter: brightness(1.1); }
@@ -699,9 +699,9 @@ button.pr-check-toggle {
   padding: 0 14px;
   font-size: 11px;
   font-weight: 600;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   border-radius: 4px;
   cursor: pointer;
   font-family: inherit;
@@ -727,9 +727,9 @@ button.pr-check-toggle {
   font-size: 11px;
   font-weight: 600;
   border-radius: 4px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   cursor: pointer;
   font-family: inherit;
 }
@@ -875,16 +875,16 @@ button.pr-check-toggle {
   cursor: pointer;
 }
 .pr-workflow-dispatch-go {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
 }
 .pr-workflow-dispatch-go:disabled { opacity: 0.6; cursor: default; }
 
 .pr-ai-implement-all {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
   font-weight: 600;
 }
 .pr-ai-implement-all:hover { filter: brightness(1.1); }
@@ -1192,9 +1192,9 @@ button.pr-check-toggle {
 }
 .pr-ai-finding-ignore:hover, .pr-ai-finding-undo:hover { background: var(--surface-hover); }
 .pr-ai-finding-implement, .pr-ai-finding-redo {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
   font-weight: 600;
 }
 .pr-ai-finding-implement:hover, .pr-ai-finding-redo:hover { filter: brightness(1.1); }
@@ -1346,7 +1346,7 @@ button.pr-check-toggle {
   align-self: flex-end;
   background: var(--accent-dim);
   color: var(--text);
-  border: 1px solid rgba(88, 166, 255, 0.3);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .pr-ai-finding-chat-msg.assistant {
   align-self: flex-start;
@@ -1395,8 +1395,8 @@ button.pr-check-toggle {
   font-size: 11px;
   padding: 6px 14px;
   border-radius: 4px;
-  border: 1px solid var(--accent);
-  background: var(--accent);
+  border: 1px solid var(--primary);
+  background: var(--primary);
   color: var(--bg, white);
   cursor: pointer;
 }
@@ -1489,9 +1489,9 @@ button.pr-check-toggle {
 .pr-ai-finding-draft-comment {
   margin-top: 8px;
   padding: 10px 12px;
-  border: 1px solid rgba(88, 166, 255, 0.35);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
   border-radius: 4px;
-  background: rgba(88, 166, 255, 0.06);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1557,9 +1557,9 @@ button.pr-check-toggle {
   border-color: var(--text-muted);
 }
 .pr-ai-finding-draft-approve {
-  background: var(--accent);
+  background: var(--primary);
   color: var(--bg, white);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--primary);
   padding: 4px 14px;
   font-size: 11px;
   border-radius: 4px;
@@ -1761,9 +1761,9 @@ button.pr-check-toggle {
   border-color: var(--text-muted);
 }
 .pr-conv-claude-draft-approve {
-  background: var(--accent);
+  background: var(--primary);
   color: var(--bg, white);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--primary);
   padding: 4px 14px;
   font-size: 11px;
   border-radius: 4px;
@@ -1856,12 +1856,12 @@ button.pr-check-toggle {
   color: var(--text-muted) !important;
 }
 .pr-ai-finding-composer-save {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
 }
 .pr-ai-finding-composer-save:hover {
-  background: var(--accent-hover) !important;
+  background: var(--primary-hover) !important;
 }
 
 .pr-ai-finding-implement-out {
@@ -2393,9 +2393,9 @@ button.pr-check-toggle {
 .pr-conv-edit-save,
 .pr-conv-new-post,
 .pr-conv-claude-draft-approve {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
 }
 .pr-conv-reply-send:hover,
 .pr-conv-edit-save:hover,
@@ -2759,8 +2759,8 @@ button.pr-check-toggle {
 .pr-comment-composer-hint { color: var(--text-muted); font-size: 11px; }
 .pr-comment-composer-save {
   padding: 4px 12px;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 4px;
   font-size: 11px;
@@ -2841,9 +2841,9 @@ button.pr-check-toggle {
   border-radius: 3px;
 }
 .pr-pending-submit {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
 }
 
 /* Submit-review dialog */
@@ -2936,9 +2936,9 @@ button.pr-check-toggle {
 .pr-submit-cancel { background: transparent; color: var(--text); }
 .pr-submit-cancel:hover { background: var(--surface-hover); }
 .pr-submit-send {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
   font-weight: 600;
 }
 .pr-submit-send:hover { filter: brightness(1.1); }
@@ -3031,9 +3031,9 @@ button.pr-check-toggle {
 .pr-picker-start {
   flex-shrink: 0;
   padding: 6px 14px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   border-radius: 4px;
   font-size: 12px;
   font-weight: 600;
@@ -3109,7 +3109,7 @@ button.pr-check-toggle {
 }
 .pr-picker-forge.pr-forge-github {
   background: transparent;
-  color: var(--accent, #58a6ff);
+  color: var(--accent, #a794ff);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 50%, transparent);
 }
 .pr-picker-forge.pr-forge-gitlab {
@@ -3317,8 +3317,9 @@ button.pr-check-toggle {
 }
 
 .palette-item.selected {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--accent-dim);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .quick-open-item {
@@ -3399,8 +3400,8 @@ button.pr-check-toggle {
 }
 
 .about-close {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 6px;
   padding: 6px 20px;
@@ -3409,7 +3410,7 @@ button.pr-check-toggle {
 }
 
 .about-close:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 .about-loading {
@@ -3667,9 +3668,9 @@ button.pr-check-toggle {
 .skills-search:focus { border-color: var(--accent); }
 .skills-search:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
 .skills-new {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   border-radius: 4px;
   padding: 4px 12px;
   font-size: 12px;
@@ -3752,9 +3753,9 @@ button.pr-check-toggle {
 .skills-create-cancel { background: transparent; color: var(--text); }
 .skills-create-cancel:hover { background: var(--surface-hover); }
 .skills-create-go {
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border-color: var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border-color: var(--primary);
   font-weight: 600;
 }
 .skills-create-go:hover { filter: brightness(1.1); }
@@ -3837,9 +3838,9 @@ button.pr-check-toggle {
   padding: 2px 10px;
   border-radius: 4px;
   cursor: pointer;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  border: 1px solid var(--accent);
+  background: var(--primary);
+  color: var(--primary-contrast);
+  border: 1px solid var(--primary);
   font-family: inherit;
 }
 .mcp-connect:hover { filter: brightness(1.1); }
@@ -4252,8 +4253,8 @@ button.pr-check-toggle {
 }
 .deps-action-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .deps-action {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 4px;
   padding: 6px 14px;
@@ -4306,8 +4307,8 @@ button.pr-check-toggle {
   text-align: center;
 }
 .deps-install-btn {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 4px;
   padding: 8px 18px;
@@ -4463,9 +4464,9 @@ button.pr-check-toggle {
   font-weight: 500;
 }
 .skills-preview-save {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
   font-weight: 600;
 }
 .skills-preview-save:disabled {
@@ -4558,9 +4559,9 @@ button.pr-check-toggle {
   border-color: var(--accent);
 }
 .skills-preview-run {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--primary-contrast);
 }
 .skills-preview-run:hover { filter: brightness(1.08); }
 
@@ -4736,7 +4737,7 @@ button.pr-check-toggle {
   font-family: inherit;
   border: 1px solid var(--border);
 }
-.deps-recheck { background: var(--accent); color: var(--accent-contrast); border-color: var(--accent); font-weight: 600; }
+.deps-recheck { background: var(--primary); color: var(--primary-contrast); border-color: var(--primary); font-weight: 600; }
 .deps-recheck:hover { filter: brightness(1.1); }
 .deps-skip { background: transparent; color: var(--text); }
 .deps-skip:hover { background: var(--surface-hover); }
@@ -4782,8 +4783,8 @@ button.pr-check-toggle {
 }
 
 #btn-run-app {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   padding: 4px 10px;
   border-radius: 4px;
@@ -4877,8 +4878,8 @@ button.pr-check-toggle {
 
 #project-replace-btn {
   align-self: flex-end;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   padding: 4px 12px;
   border-radius: 4px;
@@ -5127,8 +5128,8 @@ mark.search-hit-replace {
 }
 
 #btn-stash-push {
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: 6px;
   padding: 6px 12px;
@@ -5138,7 +5139,7 @@ mark.search-hit-replace {
 }
 
 #btn-stash-push:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 #stash-list {
@@ -5262,9 +5263,9 @@ mark.search-hit-replace {
 }
 
 .file-viewer-run-btn {
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--primary-contrast);
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 4px;
@@ -5345,9 +5346,9 @@ mark.search-hit-replace {
 }
 
 .file-viewer-save-btn {
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  color: var(--primary-contrast);
   font-size: 11px;
   padding: 2px 10px;
   border-radius: 4px;
@@ -5356,8 +5357,8 @@ mark.search-hit-replace {
 }
 
 .file-viewer-save-btn:hover:not(:disabled) {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
 }
 
 .file-viewer-save-btn:disabled {
@@ -5959,17 +5960,17 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .tags-action-btn {
-  background: var(--accent);
+  background: var(--primary);
   border: none;
   border-radius: 6px;
-  color: var(--accent-contrast);
+  color: var(--primary-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 6px 14px;
 }
 
 .tags-action-btn:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 #tags-create-form {
@@ -6000,17 +6001,17 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .tags-btn-primary {
-  background: var(--accent);
+  background: var(--primary);
   border: none;
   border-radius: 6px;
-  color: var(--accent-contrast);
+  color: var(--primary-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 5px 14px;
 }
 
 .tags-btn-primary:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 .tags-btn-secondary {
@@ -6307,17 +6308,17 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .env-save-btn {
-  background: var(--accent);
+  background: var(--primary);
   border: none;
   border-radius: 6px;
-  color: var(--accent-contrast);
+  color: var(--primary-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 6px 16px;
 }
 
 .env-save-btn:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 .env-save-btn:disabled {
@@ -6760,17 +6761,17 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .conflict-btn-primary {
-  background: var(--accent);
+  background: var(--primary);
   border: none;
   border-radius: 6px;
-  color: var(--accent-contrast);
+  color: var(--primary-contrast);
   cursor: pointer;
   font-size: 12px;
   padding: 6px 14px;
 }
 
 .conflict-btn-primary:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 .conflict-btn-primary:disabled {
@@ -6911,10 +6912,10 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .conflict-resolve-btn {
-  background: var(--accent);
+  background: var(--primary);
   border: none;
   border-radius: 4px;
-  color: var(--accent-contrast);
+  color: var(--primary-contrast);
   cursor: pointer;
   font-size: 11px;
   padding: 2px 10px;
@@ -6922,7 +6923,7 @@ body.task-branchless .file-viewer-blame-btn {
 }
 
 .conflict-resolve-btn:hover {
-  background: var(--accent-hover);
+  background: var(--primary-hover);
 }
 
 /* ---- Markdown Preview (file viewer "pretty" mode) ---- */
@@ -7657,7 +7658,7 @@ button.pr-term-view {
   background: var(--accent) !important;
   color: var(--accent-contrast) !important;
   border-color: var(--accent) !important;
-  box-shadow: 0 2px 8px rgba(74, 158, 255, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .pr-check-actions button.pr-check-debug-btn {
   border-color: color-mix(in srgb, var(--accent) 25%, transparent);
@@ -7706,18 +7707,18 @@ button.pr-term-view {
 .pr-ai-empty .pr-ai-run {
   font-size: 13px;
   padding: 10px 24px;
-  background: var(--accent);
-  color: var(--accent-contrast);
+  background: var(--primary);
+  color: var(--primary-contrast);
   border: none;
   border-radius: var(--radius-md);
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(74, 158, 255, 0.2);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 20%, transparent);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .pr-ai-empty .pr-ai-run:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px rgba(74, 158, 255, 0.35);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
   filter: brightness(1.15);
 }
 .pr-ai-conventions-chip {
@@ -7786,10 +7787,10 @@ button.pr-term-view {
   border-color: var(--border-strong);
 }
 .pr-ai-finding-implement, .pr-ai-finding-redo {
-  box-shadow: 0 2px 6px rgba(74, 158, 255, 0.25);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 .pr-ai-finding-implement:hover, .pr-ai-finding-redo:hover {
-  box-shadow: 0 4px 12px rgba(74, 158, 255, 0.4);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 40%, transparent);
 }
 
 /* 4. Terminal View Tab Enhancements */
@@ -7843,15 +7844,15 @@ button.pr-term-view {
 /* Highlight AI Review primary trigger action */
 button.js-ai-review,
 .js-ai-review button.agent-toolbar-run {
-  background: var(--accent) !important;
-  color: var(--accent-contrast) !important;
-  border-color: var(--accent) !important;
+  background: var(--primary) !important;
+  color: var(--primary-contrast) !important;
+  border-color: var(--primary) !important;
   font-weight: 600;
 }
 button.js-ai-review:hover,
 .js-ai-review button.agent-toolbar-run:hover {
   filter: brightness(1.1);
-  box-shadow: 0 1px 6px rgba(74, 158, 255, 0.3);
+  box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* ---- Session notes panel (inter-agent notes bus) ---- */
@@ -8176,7 +8177,7 @@ button.js-ai-review:hover,
 .rename-body p { margin: 0 0 8px; }
 .rename-body ul { margin: 0 0 8px; padding-left: 18px; color: var(--text-dim); }
 .rename-body li { margin-bottom: 6px; }
-.rename-logo { width: 80px; height: auto; align-self: flex-start; flex: none; }
+.rename-logo { width: 80px; height: auto; flex: none; }
 .rename-azure {
   margin-top: 8px;
   padding: 10px 12px;

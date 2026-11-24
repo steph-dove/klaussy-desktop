@@ -4,25 +4,28 @@ window.ThemeManager = (function () {
   var presets = {
     dark: {
       name: 'Dark',
-      // Polished dark — soft, faintly-cool near-black with a clean elevation
-      // ladder (bg → sidebar → surface → hover) so panels/cards separate
-      // without hard lines. Inputs sit recessed below bg; calm blue accent.
-      bg: '#0e0e13', sidebarBg: '#16161d', border: '#272730', borderStrong: '#67677f',
-      accent: '#4a9eff', accentHover: '#6cb2ff',
-      text: '#e8e8ee', textMuted: '#9a9aa6', textDim: '#8d8d98',
-      surface: '#1c1c24', surfaceHover: '#26262f',
-      inputBg: '#0a0a0e', success: '#46c463', error: '#f05d54', warning: '#c8951b',
-      diffSelection: '#002154',
-      // termFg softer than the UI text — pure white in a full terminal is
+      // Maussian navy with an elevation ladder (bg -> sidebar -> surface ->
+      // hover) so panels separate without hard lines; inputs sit recessed.
+      // Lime fills action buttons, violet carries focus/selection/links, teal
+      // is running and success.
+      bg: '#0b0f19', sidebarBg: '#101524', border: '#252d44', borderStrong: '#66708f',
+      primary: '#c6f432', primaryHover: '#d4f85e',
+      accent: '#a794ff', accentHover: '#bcadff',
+      text: '#e9ebf3', textMuted: '#9ca3b8', textDim: '#8f97ad',
+      surface: '#161c2e', surfaceHover: '#1f2740',
+      inputBg: '#070a12', success: '#2dd4bf', error: '#f26a61', warning: '#c8951b',
+      diffSelection: '#2a2163',
+      diffHunkBg: '#1b1a3a', diffHunkFg: '#b3a4ff',
+      // termFg softer than the UI text: pure white in a full terminal is
       // fatiguing.
-      termBg: '#0d0d12', termFg: '#d2d2da', termCursor: '#4a9eff', termSelection: 'rgba(74, 158, 255, 0.26)',
+      termBg: '#090d16', termFg: '#d4d8e4', termCursor: '#c6f432', termSelection: 'rgba(109, 74, 255, 0.35)',
       // Slightly desaturated ANSI palette so agent output reads as calm and
       // cohesive instead of harsh primary colors.
       termAnsi: {
-        black: '#2a2a33', red: '#f0796f', green: '#6ece8a', yellow: '#e3c179',
-        blue: '#6cb2ff', magenta: '#c699f0', cyan: '#5fcfd0', white: '#c8c8d2',
-        brightBlack: '#52525e', brightRed: '#ff8b80', brightGreen: '#88dc9e', brightYellow: '#f0d089',
-        brightBlue: '#88c2ff', brightMagenta: '#d4b0ff', brightCyan: '#7fdede', brightWhite: '#f0f0f5',
+        black: '#262d40', red: '#f0796f', green: '#a8d84a', yellow: '#e3c179',
+        blue: '#8fa8ff', magenta: '#b9a4ff', cyan: '#4fd8c6', white: '#c8ccd8',
+        brightBlack: '#555e78', brightRed: '#ff8b80', brightGreen: '#c6f432', brightYellow: '#f0d089',
+        brightBlue: '#a9bcff', brightMagenta: '#cfc1ff', brightCyan: '#7ae6d8', brightWhite: '#f0f2f8',
       },
     },
     midnight: {
@@ -147,13 +150,21 @@ window.ThemeManager = (function () {
     },
     light: {
       name: 'Light',
-      bg: '#ffffff', sidebarBg: '#f5f5f7', border: '#d1d1d6', borderStrong: '#8a8a96',
-      accent: '#5755d4', accentHover: '#5f5dd4',
-      text: '#1c1c1e', textMuted: '#65656a', textDim: '#65656a',
-      surface: '#f2f2f7', surfaceHover: '#e5e5ea',
-      inputBg: '#ffffff', success: '#1f7534', error: '#ce0b00', warning: '#816112',
+      // Maussian light: a cool, faintly violet off-white ground (#f6f6fc) with
+      // panels stepping down from it and white inputs. Lime can't hold contrast
+      // on white, so action buttons are brand violet with white text (5.1:1);
+      // teal darkened so success text holds 4.5:1.
+      bg: '#f6f6fc', sidebarBg: '#f0f0f9', border: '#d3d4e6', borderStrong: '#7a7d96',
+      primary: '#6d4aff', primaryHover: '#5b3ae0',
+      accent: '#5b3ae0', accentHover: '#6d4aff',
+      text: '#121626', textMuted: '#4f546b', textDim: '#4f546b',
+      surface: '#eeeef8', surfaceHover: '#e6e6f3',
+      inputBg: '#ffffff', success: '#0c6b63', error: '#ce0b00', warning: '#816112',
       diffSelection: '#fff0a0',
-      termBg: '#ffffff', termFg: '#1c1c1e', termCursor: '#5856d6', termSelection: '#5856d633',
+      // The mouse's violet backlight, fainter so it still reads as light on white.
+      mouseGlowAlpha: 0.28,
+      topbarShadow: '0 1px 10px rgba(18, 22, 38, 0.1)',
+      termBg: '#fbfbfe', termFg: '#121626', termCursor: '#6d4aff', termSelection: 'rgba(109, 74, 255, 0.2)',
       // On a light background, the ANSI "white" colors are the trap: programs
       // assume a dark terminal and emit white / bright-white foreground text,
       // which vanishes on white. So white maps to a readable gray and
@@ -169,7 +180,7 @@ window.ThemeManager = (function () {
       // Add/del foregrounds double as text (sidebar counts, PR chips, errors), so they hold 4.5:1 on their tinted chips too.
       diffAddBg: 'rgba(35, 134, 54, 0.1)', diffAddFg: '#15662c',
       diffDelBg: 'rgba(218, 54, 51, 0.1)', diffDelFg: '#b01d27',
-      diffHunkBg: '#ddf4ff', diffHunkFg: '#0969da',
+      diffHunkBg: '#efebff', diffHunkFg: '#5b3ae0',
       lightSyntax: true,
     },
   };
@@ -247,6 +258,13 @@ window.ThemeManager = (function () {
       '--sidebar-bg': theme.sidebarBg,
       '--border': theme.border,
       '--border-strong': theme.borderStrong,
+      // Presets without their own primary fill buttons with the accent, as before.
+      '--primary': theme.primary || theme.accent,
+      '--primary-hover': theme.primary ? (theme.primaryHover || theme.primary) : theme.accentHover,
+      '--primary-dim': withAlpha(theme.primary || theme.accent, 0.16),
+      '--primary-contrast': readableOn(theme.primary || theme.accent),
+      '--mouse-glow-alpha': String(theme.mouseGlowAlpha || 0.6),
+      '--topbar-shadow': theme.topbarShadow || '0 2px 12px rgba(0, 0, 0, 0.5)',
       '--accent': theme.accent,
       '--accent-hover': theme.accentHover,
       '--accent-dim': withAlpha(theme.accent, theme.accentDimAlpha || 0.16),

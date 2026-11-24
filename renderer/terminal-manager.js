@@ -48,7 +48,7 @@ window.TerminalManager = (function () {
     var terminal = new Terminal({
       cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: AppState.currentFontSize,
-      fontFamily: AppState.savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: AppState.savedPrefs.fontFamily || "'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       lineHeight: AppState.savedPrefs.lineHeight || 1.45,
       cursorStyle: AppState.savedPrefs.cursorStyle || 'block',
       scrollback: 10000,
@@ -643,7 +643,7 @@ window.TerminalManager = (function () {
     var subTerminal = new Terminal({
       cursorBlink: !AppUtils.prefersReducedMotion(),
       fontSize: AppState.currentFontSize,
-      fontFamily: AppState.savedPrefs.fontFamily || "'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      fontFamily: AppState.savedPrefs.fontFamily || "'IBM Plex Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
       lineHeight: AppState.savedPrefs.lineHeight || 1.45,
       cursorStyle: AppState.savedPrefs.cursorStyle || 'block',
       scrollback: 10000,
