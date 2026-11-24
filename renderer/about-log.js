@@ -313,7 +313,7 @@ window.Dialogs = (function () {
             + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
           + '</div>'
           + '<div class="rename-body">'
-            + '<img class="rename-logo" src="../icon.png" alt="" aria-hidden="true">'
+            + '<img class="rename-logo" src="mouse.png" alt="" aria-hidden="true">'
             + '<div>'
               + '<p>Same app, new name. Your settings, sessions and PR checkouts came with you.</p>'
               + '<ul>'

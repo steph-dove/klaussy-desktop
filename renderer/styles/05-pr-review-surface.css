@@ -8176,7 +8176,7 @@ button.js-ai-review:hover,
 .rename-body p { margin: 0 0 8px; }
 .rename-body ul { margin: 0 0 8px; padding-left: 18px; color: var(--text-dim); }
 .rename-body li { margin-bottom: 6px; }
-.rename-logo { width: 56px; height: 56px; flex: none; }
+.rename-logo { width: 80px; height: auto; align-self: flex-start; flex: none; }
 .rename-azure {
   margin-top: 8px;
   padding: 10px 12px;
