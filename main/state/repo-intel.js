@@ -451,9 +451,9 @@ async function bootstrapPipx(py, pyArgs = []) {
 // klaussy-repo-conventions) onto the new ones, with whichever installer owns the
 // old one. The old package goes first: both ship the same files, so installing the
 // new one alongside and then removing the old one deletes what they share. If the
-// install fails after the uninstall, the command is simply missing, and
-// ensureReviewTools installs the new package on its next pass. Returns the list of
-// packages it moved; never throws.
+// new install fails (offline, PyPI down, package not published yet), the old
+// package goes back with the same installer, so the machine is never left without
+// the tool. Returns the list of packages it moved; never throws.
 const PEP668 = /externally-managed-environment|PEP ?668|break-system-packages/i;
 function refreshPathQuietly() {
   try { require('../bootstrap/app-events').refreshSpawnPath(); } catch {}
@@ -475,15 +475,26 @@ async function moveOffLegacyTools({ exec = execFileP, candidates = pythonCandida
     }
     return null;
   };
+  // Uninstall the old package, install the new one, and put the old one back if
+  // the install fails. The install error is rethrown so the move counts as failed.
+  const swap = async (t, run) => {
+    await run('uninstall', t.legacy);
+    try {
+      await run('install', t.pkg);
+    } catch (err) {
+      try { await run('install', t.legacy); } catch (restoreErr) {
+        console.warn('[repo-intel] restoring', t.legacy, 'failed:', (restoreErr && restoreErr.message) || restoreErr);
+      }
+      throw err;
+    }
+  };
   const moved = [];
   for (const t of TOOLS) {
     try {
       if (listHasPkg(pipxList, t.legacy)) {
-        await exec('pipx', ['uninstall', t.legacy], BIG);
-        await exec('pipx', ['install', t.pkg], BIG);
+        await swap(t, (verb, pkg) => exec('pipx', [verb, pkg], BIG));
       } else if (listHasPkg(uvList, t.legacy)) {
-        await exec('uv', ['tool', 'uninstall', t.legacy], BIG);
-        await exec('uv', ['tool', 'install', t.pkg], BIG);
+        await swap(t, (verb, pkg) => exec('uv', ['tool', verb, pkg], BIG));
       } else {
         const c = await pipUser(t.legacy);
         if (!c) continue;
@@ -495,8 +506,9 @@ async function moveOffLegacyTools({ exec = execFileP, candidates = pythonCandida
             throw err;
           }
         };
-        await withEscape('uninstall', '-y', t.legacy);
-        await withEscape('install', '--user', t.pkg);
+        await swap(t, (verb, pkg) => (verb === 'uninstall'
+          ? withEscape('uninstall', '-y', pkg)
+          : withEscape('install', '--user', pkg)));
       }
       moved.push(t.pkg);
     } catch (err) {

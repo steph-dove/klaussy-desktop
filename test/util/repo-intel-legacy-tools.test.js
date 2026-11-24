@@ -73,3 +73,38 @@ test('a failed move is reported, not thrown, and the other tool still moves', as
   });
   assert.deepEqual(await moveOffLegacyTools({ exec: m.exec, candidates: PY, refreshPath: noRefresh }), ['mauss']);
 });
+
+test('uv: a failed install puts the old package back', async () => {
+  const m = machine({
+    uv: ['klaussy-repo-conventions'],
+    fail: (line) => line === 'uv tool install maussian-repo-conventions',
+  });
+  assert.deepEqual(await moveOffLegacyTools({ exec: m.exec, candidates: PY, refreshPath: noRefresh }), []);
+  const order = m.calls.filter((c) => c.startsWith('uv tool ') && !c.includes('list'));
+  assert.deepEqual(order, [
+    'uv tool uninstall klaussy-repo-conventions',
+    'uv tool install maussian-repo-conventions',
+    'uv tool install klaussy-repo-conventions',
+  ]);
+});
+
+test('pipx: a failed install puts the old package back', async () => {
+  const m = machine({ pipx: ['klaussy-agents'], fail: (line) => line === 'pipx install mauss' });
+  assert.deepEqual(await moveOffLegacyTools({ exec: m.exec, candidates: PY, refreshPath: noRefresh }), []);
+  assert.equal(m.calls.at(-1), 'pipx install klaussy-agents');
+});
+
+test('pip --user: a failed install puts the old package back', async () => {
+  const m = machine({
+    pip: ['klaussy-agents'],
+    fail: (line) => line === 'python3 -m pip install --user mauss',
+  });
+  assert.deepEqual(await moveOffLegacyTools({ exec: m.exec, candidates: PY, refreshPath: noRefresh }), []);
+  assert.equal(m.calls.at(-1), 'python3 -m pip install --user klaussy-agents');
+});
+
+test('a failed restore is logged and does not throw', async () => {
+  const m = machine({ pipx: ['klaussy-agents'], fail: (line) => line.startsWith('pipx install') });
+  assert.deepEqual(await moveOffLegacyTools({ exec: m.exec, candidates: PY, refreshPath: noRefresh }), []);
+  assert.ok(m.calls.includes('pipx install klaussy-agents'));
+});
