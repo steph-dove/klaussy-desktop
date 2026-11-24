@@ -296,7 +296,7 @@ function startInboundSockets() {
 // exercises the outbound webhook.
 const _socketStatus = { slack: null, discord: null };
 
-const STALE_THREAD_NOTE = 'This thread is no longer connected to a running session, so nothing was sent. Reply in the session’s current thread, or in Klaussy.';
+const STALE_THREAD_NOTE = 'This thread is no longer connected to a running session, so nothing was sent. Reply in the session’s current thread, or in Maussian.';
 
 // One note per thread rather than one per message: someone can type several
 // lines before they read the first answer.

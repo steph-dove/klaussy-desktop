@@ -396,6 +396,7 @@ test('sessionNotesEnv gives a terminal everything it needs to join the bus', () 
   const env = sessionNotesEnv(repo, 7);
 
   assert.equal(env.KLAUSSY_SESSION_NOTES_DIR, ensureSessionNotesDir(repo));
+  assert.equal(env.MAUSSIAN_SESSION_NOTES_DIR, env.KLAUSSY_SESSION_NOTES_DIR);
   assert.equal(env.KLAUSSY_SESSION_ID, '7');
   assert.deepEqual(sessionNotesEnv(null, 1), {}, 'no worktree means no env, not a throw');
 });

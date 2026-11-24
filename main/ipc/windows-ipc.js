@@ -274,7 +274,7 @@ ipcMain.handle('get-preferences', () => {
     // Keep comments concise (≤2 sentences; docstrings ≤5) before commit.
     // On by default — only an explicit false opts out.
     stripComments: config.stripComments !== false,
-    // Klaussy CLAUDE.md enrichment runs the Claude CLI = API spend on the
+    // Maussian CLAUDE.md enrichment runs the Claude CLI = API spend on the
     // user's machine, so it's OFF by default — opt in explicitly.
     repoIntelEnrich: config.repoIntelEnrich === true,
     voiceInput: config.voiceInput !== false,
@@ -330,8 +330,8 @@ ipcMain.handle('test-notification', async (_event, cfg) => {
     const results = await dispatchEvent({
       type: EVENT_TYPES.COMPLETED,
       containerId: 'test',
-      workspacePath: 'Klaussy preferences',
-      agentName: 'Klaussy test',
+      workspacePath: 'Maussian preferences',
+      agentName: 'Maussian test',
       exitCode: 0,
       logsTail: 'If you can read this, the webhook works.',
       ts: Date.now(),
@@ -541,7 +541,7 @@ function remoteSetupSteps(platform = process.platform, provider = '', token = ''
   // Sign the agent in with its subscription — required, or the agent hangs and
   // its container is killed after 120s. Interactive, so it's a step we can't run.
   const login = `nemesis8 login${flag}   # sign in to the agent (interactive) — required`;
-  // Inline the token Klaussy stores so the gateway and app can't drift.
+  // Inline the token Maussian stores so the gateway and app can't drift.
   const tok = token || '<generate one in Preferences>';
   const tokenLine = win ? `$env:NEMESIS8_AUTH_TOKEN="${tok}"` : `export NEMESIS8_AUTH_TOKEN="${tok}"`;
   return [install, login, tokenLine, `nemesis8 serve${flag}`];

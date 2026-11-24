@@ -119,7 +119,7 @@
       .replace(/\bp r\b/g, 'pr')
       .replace(/\s+/g, ' ')
       .trim()
-      .replace(/^(hey |ok |okay )?klaussy /, '')
+      .replace(/^(hey |ok |okay )?(klaussy|maussian|mauss) /, '')
       .replace(/^(please |can you |could you |would you |let s |lets |i want to |i d like to |go ahead and )+/, '')
       .replace(/ please$/, '')
       .replace(/\b(a|an) /g, ''));
@@ -343,10 +343,10 @@
     return { query: query };
   }
 
-  // Nouns for Klaussy's own UI; "pull request", "server" and "test" are left out because agents get asked about those.
+  // Nouns for Maussian's own UI; "pull request", "server" and "test" are left out because agents get asked about those.
   var UI_NOUN = /\b(reviews?|revues?|cr|panel|window|picker|dialog|modal|tab|settings|preferences|prefs|history|microphone|mic|owl|agents|agent list|sidebar|palette|zoom)\b/;
 
-  // A short phrase naming part of Klaussy that nothing matched: worth asking Ollama before typing it into the agent.
+  // A short phrase naming part of Maussian that nothing matched: worth asking Ollama before typing it into the agent.
   function mentionsAppUi(text) {
     var spoken = normalize(text);
     return !!spoken && spoken.split(' ').length <= 6 && !/\b(and|then|so|because)\b/.test(spoken) && UI_NOUN.test(spoken);

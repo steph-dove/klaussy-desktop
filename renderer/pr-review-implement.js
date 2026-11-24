@@ -26,7 +26,7 @@
     } else if (ev.type === 'result') {
       if (ev.result) PR.aiReview.finalText = ev.result;
       // Capture usage so we can show the user what this run cost on their
-      // own Anthropic account. Klaussy doesn't bill — we just surface what
+      // own Anthropic account. Maussian doesn't bill — we just surface what
       // claude already reports.
       PR.aiReview.usage = PR.extractUsage(ev);
     } else if (ev.type === 'system' && ev.subtype) {
@@ -166,7 +166,7 @@
       if (PR.implRun.status === 'cancelled' || signal === 'SIGTERM' || signal === 'SIGKILL') {
         PR.finalizeImplementRun('cancelled');
       } else if (data && data.reason === 'trust-prompt') {
-        PR.finalizeImplementRun('error', 'Claude quit at its folder-trust prompt. Run it again and pick “Yes, I trust this folder”, or allow Klaussy to manage Claude permissions for this repo.');
+        PR.finalizeImplementRun('error', 'Claude quit at its folder-trust prompt. Run it again and pick “Yes, I trust this folder”, or allow Maussian to manage Claude permissions for this repo.');
       } else {
         PR.finalizeImplementRun('error', 'The agent exited without finishing the turn');
       }

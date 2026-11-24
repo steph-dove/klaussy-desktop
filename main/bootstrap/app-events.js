@@ -53,7 +53,7 @@ function checkExternalCLIs() {
   dialog.showMessageBox({
     type: 'info',
     title: 'Optional CLIs not found',
-    message: 'Klaussy will run, but some features need these on your PATH:',
+    message: 'Maussian will run, but some features need these on your PATH:',
     detail: problems.join('\n') + '\n\nOpen Setup Check in the app to install them.',
     buttons: ['OK'],
   });
@@ -159,8 +159,8 @@ function install() {
     // Force the macOS app menu name. In dev (`npx electron .`) the bundled
     // Info.plist still says "Electron" — setName at startup overrides what
     // the menu template's `label: app.name` resolves to so the menu bar
-    // shows "Klaussy" instead.
-    app.setName('Klaussy');
+    // shows "Maussian" instead.
+    app.setName('Maussian');
 
     // Set dock icon on macOS using PNG (avoids icon cache issues with .icns)
     if (process.platform === 'darwin' && app.dock) {

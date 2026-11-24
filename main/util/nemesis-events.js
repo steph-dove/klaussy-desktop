@@ -41,7 +41,7 @@ function normalize(event) {
     // Carried alongside containerId because an id means nothing to whoever
     // reads the alert.
     sessionName: event.sessionName || '',
-    // The name Klaussy shows for the session, as distinct from the repo it
+    // The name Maussian shows for the session, as distinct from the repo it
     // opened — a thread is named after both.
     sessionBranch: event.sessionBranch || '',
     workspacePath: event.workspacePath || '',

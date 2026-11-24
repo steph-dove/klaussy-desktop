@@ -43,7 +43,7 @@ test('condenseTurn: an empty or failing summarizer falls back to the tail', asyn
     const out = await condenseTurn(LONG, { summarize });
     assert.match(out, /Line 39 of what/);
     assert.doesNotMatch(out, /Line 0 of what/);
-    assert.match(out, /Full output in Klaussy/);
+    assert.match(out, /Full output in Maussian/);
   }
 });
 

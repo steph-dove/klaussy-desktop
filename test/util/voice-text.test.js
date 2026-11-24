@@ -59,6 +59,8 @@ test('non-speech markers become empty', () => {
 test('normalize lowercases, strips punctuation, joins "p r" and a wake word', () => {
   assert.equal(normalize('Open P.R. review!'), 'open pr review');
   assert.equal(normalize('Klaussy, view changes please.'), 'view changes');
+  assert.equal(normalize('Maussian, view changes please.'), 'view changes');
+  assert.equal(normalize('hey mauss view changes'), 'view changes');
 });
 
 test('the phrasings from the request map to app actions', () => {

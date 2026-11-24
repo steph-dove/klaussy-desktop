@@ -1,6 +1,6 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Application menu. Call installAppMenu() from whenReady — after app.setName
-// so the app-name submenu label picks up "Klaussy" instead of "Electron".
+// so the app-name submenu label picks up "Maussian" instead of "Electron".
 //
 // Most items are simple renderer-facing signals (send a channel so the
 // renderer toggles a dialog). The Edit menu intentionally keeps paste even
@@ -82,7 +82,7 @@ function installAppMenu() {
           },
         },
         {
-          label: 'How to use Klaussy',
+          label: 'How to use Maussian',
           click: (_item, focusedWindow) => {
             const win = appWindowFor(focusedWindow);
             if (win && !win.isDestroyed()) win.webContents.send('show-how-to-use');
@@ -133,7 +133,7 @@ function installAppMenu() {
           },
         },
         {
-          label: 'Add klaussy review to GitHub…',
+          label: 'Add Maussian review to GitHub…',
           click: () => { shell.openExternal('https://github.com/apps/klaussy-review'); },
         },
         {

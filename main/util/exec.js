@@ -257,7 +257,7 @@ function sanitizeExtraEnv(extraEnv) {
   return out;
 }
 
-// A Klaussy launched from inside a Claude Code session inherits that session's
+// A Maussian launched from inside a Claude Code session inherits that session's
 // markers, and a child that sees them turns transcript saving off — costing the
 // session both its resume id and its readable history.
 const INHERITED_SESSION_MARKERS = [

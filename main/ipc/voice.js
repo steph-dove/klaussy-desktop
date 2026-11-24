@@ -13,12 +13,12 @@ const MIC_SETTINGS_URLS = {
 
 function micHelp(platform = process.platform) {
   if (platform === 'darwin') {
-    return { message: 'Klaussy can’t use the microphone. Allow it in System Settings › Privacy & Security › Microphone.', canOpenSettings: true };
+    return { message: 'Maussian can’t use the microphone. Allow it in System Settings › Privacy & Security › Microphone.', canOpenSettings: true };
   }
   if (platform === 'win32') {
-    return { message: 'Klaussy can’t use the microphone. Turn on microphone access for desktop apps in Settings › Privacy & security › Microphone.', canOpenSettings: true };
+    return { message: 'Maussian can’t use the microphone. Turn on microphone access for desktop apps in Settings › Privacy & security › Microphone.', canOpenSettings: true };
   }
-  return { message: 'Klaussy can’t use the microphone. Check that one is connected and not muted, and that your desktop’s privacy settings (or Flatpak/Snap permissions) let Klaussy use it.', canOpenSettings: false };
+  return { message: 'Maussian can’t use the microphone. Check that one is connected and not muted, and that your desktop’s privacy settings (or Flatpak/Snap permissions) let Maussian use it.', canOpenSettings: false };
 }
 
 function micDenied() {
@@ -35,7 +35,7 @@ async function prepareVoice({ modelDir } = {}) {
       ok: false,
       code: 'model-missing',
       error: app.isPackaged
-        ? 'The voice model is missing from this install. Reinstall Klaussy to restore it.'
+        ? 'The voice model is missing from this install. Reinstall Maussian to restore it.'
         : 'Voice model not downloaded. Run `npm run voice:fetch` and try again.',
     };
   }
@@ -65,12 +65,12 @@ async function openMicSettings(platform = process.platform) {
 }
 
 // Numbered so a small local model only has to answer with a digit.
-// With an agent tab open most speech is for the agent, so the model is told to pick only requests aimed at Klaussy itself.
+// With an agent tab open most speech is for the agent, so the model is told to pick only requests aimed at Maussian itself.
 function buildIntentPrompt(text, actions, { agentTab = false } = {}) {
   const intro = agentTab
-    ? 'Someone is talking to Klaussy, a desktop app where they dictate instructions to an AI coding agent.\n'
+    ? 'Someone is talking to Maussian, a desktop app where they dictate instructions to an AI coding agent.\n'
       + 'Almost everything they say is an instruction for the coding agent (run tests, edit code, start servers, open files, make pull requests). Those must get 0.\n'
-      + 'Only when they are clearly asking Klaussy itself to open or show one of its own windows, panels or dialogs, pick that action.\n'
+      + 'Only when they are clearly asking Maussian itself to open or show one of its own windows, panels or dialogs, pick that action.\n'
     : 'You map a spoken request to one action in a desktop app for coding agents.\n';
   return intro
     + 'Request: "' + String(text).replace(/"/g, "'") + '"\n'

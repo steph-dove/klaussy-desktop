@@ -1,8 +1,8 @@
 # Keyboard shortcuts
 
-Every keyboard shortcut Klaussy handles, grouped by where it works. Press **F1** in the app for a shorter list.
+Every keyboard shortcut Maussian handles, grouped by where it works. Press **F1** in the app for a shorter list.
 
-**Windows and Linux use Ctrl+Shift for app shortcuts.** On macOS they're Cmd+key. On Windows and Linux, plain Ctrl+letter belongs to the shell running in the terminal (Ctrl+C, Ctrl+R, Ctrl+L and so on), so Klaussy's own shortcuts add Shift: Cmd+K on a Mac is Ctrl+Shift+K elsewhere. Menu items, the code editor and the "send" key in text boxes use plain Ctrl.
+**Windows and Linux use Ctrl+Shift for app shortcuts.** On macOS they're Cmd+key. On Windows and Linux, plain Ctrl+letter belongs to the shell running in the terminal (Ctrl+C, Ctrl+R, Ctrl+L and so on), so Maussian's own shortcuts add Shift: Cmd+K on a Mac is Ctrl+Shift+K elsewhere. Menu items, the code editor and the "send" key in text boxes use plain Ctrl.
 
 The tables use the Mac's names for keys: Option is Alt on a PC keyboard, and Delete in the Mac column is the forward-delete key (Fn+Delete on a laptop).
 
@@ -26,14 +26,14 @@ These work in the main window, whatever has focus, terminals included, except wh
 
 ## App menu
 
-The first three are Klaussy's own. The rest are Electron's standard menu items and use Electron's default keys for them. They work in every Klaussy window.
+The first three are Maussian's own. The rest are Electron's standard menu items and use Electron's default keys for them. They work in every Maussian window.
 
 | macOS | Windows / Linux | What it does | Where it works |
 |---|---|---|---|
 | Cmd+, | Ctrl+, | Preferences | Any window |
 | F1 | F1 | Keyboard shortcuts list (View menu) | Any window except the code editor, where F1 opens the editor's own command list. The list opens in the focused app window, or the main window if a PR review, Preferences or pop-out window has focus. |
 | Cmd+N | Ctrl+N | New window | Any window |
-| Cmd+H | None | Hide Klaussy | macOS only |
+| Cmd+H | None | Hide Maussian | macOS only |
 | Cmd+Option+H | None | Hide other apps | macOS only |
 | Cmd+Q | Ctrl+Q on Linux; none on Windows | Quit | Any window |
 | Cmd+Z | Ctrl+Z | Undo | Text fields |
@@ -87,7 +87,7 @@ A task's main terminal gets all of these. Sub-tab terminals and pop-out terminal
 
 ## Code editor
 
-The editor is Monaco, so its usual editing keys work as well. These are the ones Klaussy adds.
+The editor is Monaco, so its usual editing keys work as well. These are the ones Maussian adds.
 
 | macOS | Windows / Linux | What it does | Where it works |
 |---|---|---|---|

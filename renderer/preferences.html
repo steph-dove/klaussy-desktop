@@ -470,7 +470,7 @@
       </div>
       <div class="field-hint">Ollama serves local models a 4096-token window by default, which
         an agent's prompt and tool definitions alone exceed — so it loses its tools and forgets
-        the conversation. Klaussy raises this on the model itself. Bigger windows hold longer
+        the conversation. Maussian raises this on the model itself. Bigger windows hold longer
         sessions but reserve more memory up front, and are capped at what the model supports.</div>
 
       <div class="field field-full">
@@ -485,7 +485,7 @@
       <div class="field-hint" id="pref-kimi-autonomous-bash-hint">Kimi already edits files in a worktree on its own, but never runs
         commands without asking — so unattended jobs like CI fix-check can't run your tests. This
         adds an allow rule for its Bash tool to <code>~/.kimi-code/config.toml</code>, which applies
-        to your kimi CLI everywhere, not just Klaussy. Unticking removes it.</div>
+        to your kimi CLI everywhere, not just Maussian. Unticking removes it.</div>
 
       <div class="field field-full">
         <label for="pref-aider-path">Aider Path (for Ollama)</label>
@@ -563,7 +563,7 @@
           <div class="claude-info np-status" role="status"></div>
           <div class="field-hint np-setup-help">
             <div class="np-local-row">
-              Set up this gateway on <strong>this machine</strong> in one step (needs Docker). Klaussy opens a terminal tab that installs nemesis8, signs the agent in, and starts it with the token above — you just complete the sign-in in that tab.
+              Set up this gateway on <strong>this machine</strong> in one step (needs Docker). Maussian opens a terminal tab that installs nemesis8, signs the agent in, and starts it with the token above — you just complete the sign-in in that tab.
               <div class="field"><button type="button" class="np-setup klaus-btn klaus-btn-primary">Set up &amp; start locally</button></div>
             </div>
             <div class="np-manual-row">
@@ -578,7 +578,7 @@
 
     <div class="section">
       <div class="section-title" role="heading" aria-level="2">Slack &amp; Discord Notifications</div>
-      <div class="field-hint">Post to a chat channel when an agent finishes, fails, or stops to ask for permission — so you can leave Klaussy in the background. Paste a webhook URL for either service (or both). Leaving both empty turns the whole feature off.</div>
+      <div class="field-hint">Post to a chat channel when an agent finishes, fails, or stops to ask for permission — so you can leave Maussian in the background. Paste a webhook URL for either service (or both). Leaving both empty turns the whole feature off.</div>
 
       <div class="field field-full">
         <label for="pref-slack-webhook">Slack webhook URL</label>
@@ -606,7 +606,7 @@
         <label for="pref-notify-message">Mirror the whole session into a thread</label>
         <input type="checkbox" id="pref-notify-message" aria-describedby="pref-notify-message-hint" />
       </div>
-      <div class="field-hint" id="pref-notify-message-hint">Posts each thing the agent says into that session's thread as it happens, so you can follow along and answer by replying — rather than only hearing about it when Klaussy recognises a prompt. Turning this off falls back to the quiet alert below.</div>
+      <div class="field-hint" id="pref-notify-message-hint">Posts each thing the agent says into that session's thread as it happens, so you can follow along and answer by replying — rather than only hearing about it when Maussian recognises a prompt. Turning this off falls back to the quiet alert below.</div>
       <div class="field">
         <label for="pref-notify-summarize">Summarize long turns</label>
         <input type="checkbox" id="pref-notify-summarize" aria-describedby="pref-notify-summarize-hint" />
@@ -633,7 +633,7 @@
       <div class="claude-info" id="notify-test-status" role="status"></div>
 
       <div class="section-title" role="heading" aria-level="3" style="margin-top:18px;">Replying from chat (optional)</div>
-      <div class="field-hint">A webhook only sends one way. To get <strong>Approve</strong>/<strong>Reject</strong> buttons and to answer an agent by typing in the channel, Klaussy needs a Slack app or Discord bot — it opens an outgoing connection, so there's no public URL or tunnel involved. <a href="#" id="notify-docs-link" class="nemesis-docs">Step-by-step setup guide ↗</a></div>
+      <div class="field-hint">A webhook only sends one way. To get <strong>Approve</strong>/<strong>Reject</strong> buttons and to answer an agent by typing in the channel, Maussian needs a Slack app or Discord bot — it opens an outgoing connection, so there's no public URL or tunnel involved. <a href="#" id="notify-docs-link" class="nemesis-docs">Step-by-step setup guide ↗</a></div>
       <div class="field-hint"><strong>Read before enabling:</strong> anyone you allow below can approve a permission prompt on this machine — including an agent asking to run something destructive. Use a private channel. Approvals are single-use and expire after 30 minutes.</div>
 
       <div class="field-hint" id="slack-setup-hint"><strong>Slack</strong> — create an app, turn on Socket Mode <em>and</em> Interactivity, add the <code>chat:write</code> and <code>channels:history</code> scopes, then <code>/invite</code> the bot to the channel. <a href="#" id="slack-docs-link" class="nemesis-docs">Slack setup steps ↗</a></div>
@@ -685,7 +685,7 @@
         <label for="pref-precommit-review">Pre-commit review (silent failures, secrets, debug leftovers + lint)</label>
         <input type="checkbox" id="pref-precommit-review" aria-describedby="pref-precommit-review-hint" />
       </div>
-      <div class="field-hint" id="pref-precommit-review-hint">Before a commit lands (Klaussy's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
+      <div class="field-hint" id="pref-precommit-review-hint">Before a commit lands (Maussian's Commit button and a git pre-commit hook in session repos), your agent reviews the staged diff for silent failures, leaked secrets, debug leftovers, and blatant correctness landmines, and your repo's linter runs on the staged files. You always decide: fix or commit anyway. Unchecking removes the git hooks.</div>
 
       <div class="field">
         <label for="pref-strip-comments">Keep comments concise before commit</label>
@@ -703,7 +703,7 @@
         <label for="pref-session-activity">Share session notes between active agents</label>
         <input type="checkbox" id="pref-session-activity" aria-describedby="pref-session-activity-hint" />
       </div>
-      <div class="field-hint" id="pref-session-activity-hint">When two or more agents are working in the same session, Klaussy summarizes what each one is doing every few minutes and leaves it as a session note the others can read, so they don't duplicate or contradict each other's work. It also records a note when a session is handed to a different agent. This costs a small headless agent call per active agent per pass; uncheck to stop it entirely. Agents can still write their own notes either way. On by default.</div>
+      <div class="field-hint" id="pref-session-activity-hint">When two or more agents are working in the same session, Maussian summarizes what each one is doing every few minutes and leaves it as a session note the others can read, so they don't duplicate or contradict each other's work. It also records a note when a session is handed to a different agent. This costs a small headless agent call per active agent per pass; uncheck to stop it entirely. Agents can still write their own notes either way. On by default.</div>
 
       <div class="field">
         <label for="pref-repo-intel-enrich">Enrich CLAUDE.md with your agent</label>
@@ -718,7 +718,7 @@
         <label for="pref-voice-input">Voice dictation and commands (on-device, English)</label>
         <input type="checkbox" id="pref-voice-input" aria-describedby="pref-voice-input-hint" />
       </div>
-      <div class="field-hint" id="pref-voice-input-hint">Click the mic button in the sidebar and say a command such as "open pr review", "open the dev loop" or "new session"; anything that isn't a command is typed into the active agent, and nothing is sent until you press Enter. You can also hold Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) to dictate, or Cmd+Shift+; (Ctrl+Shift+;) for a command. Speech is transcribed on this machine; audio never leaves it. On by default; uncheck to remove the shortcuts and stop Klaussy from using the microphone.</div>
+      <div class="field-hint" id="pref-voice-input-hint">Click the mic button in the sidebar and say a command such as "open pr review", "open the dev loop" or "new session"; anything that isn't a command is typed into the active agent, and nothing is sent until you press Enter. You can also hold Cmd+Shift+Space (Ctrl+Shift+Space on Windows and Linux) to dictate, or Cmd+Shift+; (Ctrl+Shift+;) for a command. Speech is transcribed on this machine; audio never leaves it. On by default; uncheck to remove the shortcuts and stop Maussian from using the microphone.</div>
     </div>
 
     <!-- Keybindings Section -->

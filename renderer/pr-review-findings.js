@@ -574,7 +574,7 @@
     if (PR.forgeName() !== 'GitHub' || PR.appPromoDismissed()) return '';
     return '<div class="pr-ai-app-promo">'
       + '<span class="pr-ai-app-promo-text">Want this on every pull request, including your teammates\u2019?</span>'
-      + '<button class="pr-ai-app-promo-link" type="button">Add klaussy review to GitHub \u2192</button>'
+      + '<button class="pr-ai-app-promo-link" type="button">Add Maussian review to GitHub \u2192</button>'
       + '<button class="pr-ai-app-promo-dismiss" type="button" title="Don\u2019t show this again" aria-label="Don\u2019t show this again">&times;</button>'
     + '</div>';
   };
@@ -598,7 +598,7 @@
       s.verdict ? '**Verdict:** ' + s.verdict + (head ? ' \u00b7 reviewed at `' + head.slice(0, 7) + '`' : '') : '',
       risks.length === 1 ? risks[0] : risks.map(function (r, k) { return (k + 1) + '. ' + r; }).join('\n'),
       s.testCoverage ? 'Test coverage: ' + s.testCoverage : '',
-      'Reviewed by [klaussy](https://klaussy.com).',
+      'Reviewed by [Maussian](https://maussian.ai).',
     ].filter(Boolean).join('\n\n');
   };
 

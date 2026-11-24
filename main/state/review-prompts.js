@@ -771,11 +771,11 @@ const IMPLEMENT_TEST_AND_COMMIT =
   + `   edits that were already in the worktree, usually from earlier\n`
   + `   Implement runs on this PR, belong in the commit too. Use a short\n`
   + `   conventional message (\`fix: ...\`) naming the findings it addresses.\n`
-  + `   Do not push and do not offer to. You are running inside Klaussy, the\n`
-  + `   app that started this run: Klaussy pushes your commit to the PR\n`
+  + `   Do not push and do not offer to. You are running inside Maussian, the\n`
+  + `   app that started this run: Maussian pushes your commit to the PR\n`
   + `   branch itself the moment you finish (pushing from here would target\n`
   + `   the wrong remote on forks). In your summary, say the commit will be\n`
-  + `   pushed by Klaussy; don't describe it as unpushed or waiting on the user.\n\n`;
+  + `   pushed by Maussian; don't describe it as unpushed or waiting on the user.\n\n`;
 
 function implementSummary(step, extra) {
   return `${step}. **Summary.** One short bullet per change, prefixed with the file\n`

@@ -40,7 +40,7 @@ function getRendererAllowedRoots() {
   for (const inst of _getInstances().values()) {
     if (inst && inst.worktreePath) roots.add(inst.worktreePath);
   }
-  // Klaussy-owned directories (pr-checkouts clones, userData for caches).
+  // Maussian-owned directories (pr-checkouts clones, userData for caches).
   try { roots.add(app.getPath('userData')); } catch {}
   return Array.from(roots);
 }

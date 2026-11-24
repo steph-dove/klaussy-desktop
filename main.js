@@ -46,6 +46,7 @@ require('./main/ipc/gh');
 require('./main/ipc/glab');
 require('./main/ipc/bitbucket');
 require('./main/ipc/azure');
+require('./main/ipc/rename-notice');
 require('./main/ipc/git');
 require('./main/ipc/tasks');
 require('./main/ipc/repo');

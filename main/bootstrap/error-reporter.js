@@ -8,7 +8,7 @@
 //   3. Renderer-side console errors (wired by the renderer itself; not here)
 //
 // electron-log writes to:
-//   ~/Library/Logs/Klaussy/main.log (macOS)
+//   ~/Library/Logs/Maussian/main.log (macOS)
 // plus the About → View Logs panel.
 //
 // When you're ready to ship telemetry off-device (e.g. Sentry), add the
@@ -41,8 +41,8 @@ function install() {
   // If we ever add Sentry, flip uploadToServer and submitURL then.
   try {
     crashReporter.start({
-      productName: 'Klaussy',
-      companyName: 'Klaussy',
+      productName: 'Maussian',
+      companyName: 'Maussian',
       submitURL: '',
       uploadToServer: false,
     });

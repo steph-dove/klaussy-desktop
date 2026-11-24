@@ -46,7 +46,7 @@ Run in dev mode (`npm start`) for everything except §6 (build).
 - [ ] **fixSpawnPath**: launch the packaged build (NSIS) from the Start
       menu. Open a terminal and run `where claude` / `where gh`. They
       resolve. (If they don't, the install put them outside the user's
-      registry-PATH; not a Klaussy regression.)
+      registry-PATH; not a Maussian regression.)
 - [ ] Open a `.py` file when pyright is missing. Install hint dialog
       appears with the `pipx install pyright` text.
 - [ ] Open a `.cpp` file when clangd is missing. Hint suggests
@@ -67,14 +67,14 @@ Run in dev mode (`npm start`) for everything except §6 (build).
 ### §5 — Build
 
 - [ ] `npm run dist:win` produces:
-      - [ ] `dist/Klaussy-<version>-x64-nsis.exe` (installer)
-      - [ ] `dist/Klaussy-<version>-x64-portable.exe` (portable)
+      - [ ] `dist/Maussian-<version>-x64-nsis.exe` (installer)
+      - [ ] `dist/Maussian-<version>-x64-portable.exe` (portable)
 - [ ] Run the installer. Choose a non-default install dir. App lands
-      there, Start menu shortcut "Klaussy" is created.
+      there, Start menu shortcut "Maussian" is created.
 - [ ] Launch from Start menu. App opens normally.
 - [ ] Quit the installer-installed instance. Run the portable.exe.
       It launches without writing to the install dir.
-- [ ] Uninstall via "Add or remove programs". Klaussy is gone;
+- [ ] Uninstall via "Add or remove programs". Maussian is gone;
       `%APPDATA%\Klaussy\` (config.json, sessions) is preserved
       (deleteAppDataOnUninstall: false).
 

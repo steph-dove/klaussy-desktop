@@ -62,7 +62,10 @@ function ensureSessionNotesDir(worktreePath) {
 function sessionNotesEnv(worktreePath, terminalId) {
   if (!worktreePath) return {};
   try {
-    const env = { KLAUSSY_SESSION_NOTES_DIR: ensureSessionNotesDir(worktreePath) };
+    const dir = ensureSessionNotesDir(worktreePath);
+    // Both names: CLAUDE.md files from maussian-repo-conventions read MAUSSIAN_, everything
+    // older (and the skill templates) reads KLAUSSY_.
+    const env = { KLAUSSY_SESSION_NOTES_DIR: dir, MAUSSIAN_SESSION_NOTES_DIR: dir };
     if (terminalId != null) env.KLAUSSY_SESSION_ID = String(terminalId);
     return env;
   } catch (err) {

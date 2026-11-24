@@ -1,6 +1,6 @@
 # End User License Agreement
 
-**RETIRED as the operative license.** Klaussy is now distributed under the
+**RETIRED as the operative license.** Maussian is now distributed under the
 Sustainable Use License — see [`/LICENSE`](../LICENSE). This proprietary EULA is
 retained only as a starting point for future commercial / enterprise terms;
 it does NOT govern the open distribution.
@@ -10,7 +10,7 @@ it does NOT govern the open distribution.
 *Last updated: {{DATE}}*
 
 This End User License Agreement ("Agreement") is between you ("You") and
-{{COMPANY_NAME}} ("We", "Us", "Our") governing your use of the Klaussy
+{{COMPANY_NAME}} ("We", "Us", "Our") governing your use of the Maussian
 desktop application ("Software").
 
 ## 1. License grant

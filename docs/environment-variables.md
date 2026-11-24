@@ -1,32 +1,32 @@
 # Environment variables
 
-Klaussy runs fine with none of these set. They change where it looks for
+Maussian runs fine with none of these set. They change where it looks for
 things, which credentials it falls back to, and how much it logs.
 
 ## Shell, paths and system
 
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
-| `HOME` | Home directory used to find agent data (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.copilot`, `~/.kimi-code`, `~/.cursor`, `~/.cline`, `~/.local/share`), Claude settings and MCP config. Also where klaussy looks for `Downloads` (agent QA media) when Electron can't report that folder. | `os.homedir()` | `main/ipc/files.js`, `main/ipc/tasks.js`, `main/state/ai-providers.js`, `main/state/instances.js`, `main/state/token-usage.js`, `main/util/agent-transcript.js`, `main/util/claude-paths.js`, `main/util/copilot-sessions.js`, `main/util/mcp-config.js` |
+| `HOME` | Home directory used to find agent data (`~/.claude`, `~/.codex`, `~/.gemini`, `~/.copilot`, `~/.kimi-code`, `~/.cursor`, `~/.cline`, `~/.local/share`), Claude settings and MCP config. Also where Maussian looks for `Downloads` (agent QA media) when Electron can't report that folder. | `os.homedir()` | `main/ipc/files.js`, `main/ipc/tasks.js`, `main/state/ai-providers.js`, `main/state/instances.js`, `main/state/token-usage.js`, `main/util/agent-transcript.js`, `main/util/claude-paths.js`, `main/util/copilot-sessions.js`, `main/util/mcp-config.js` |
 | `USERPROFILE` | Home directory for locating `Downloads` when Electron can't report the downloads folder and `HOME` is unset. | `os.homedir()` | `main/ipc/files.js` |
 | `SHELL` | Shell for embedded terminals on macOS and Linux, used only if the path exists. Also the shell run as `$SHELL -lic` to read your login `PATH`. | Terminals: first of `/bin/zsh`, `/bin/bash`, `/bin/sh` that exists. Login `PATH` probe: `/bin/bash`. | `main/util/platform.js`, `main/util/spawn-path.js` |
-| `PATH` | Search path for the CLIs klaussy launches. Klaussy prepends known install dirs (pipx, pip `--user`, Homebrew and others), then merges in your login shell's `PATH` (macOS/Linux) or the registry `Path` (Windows), and writes the result back so child processes inherit it. | Inherited from the launching process | `main/util/spawn-path.js` |
+| `PATH` | Search path for the CLIs Maussian launches. Maussian prepends known install dirs (pipx, pip `--user`, Homebrew and others), then merges in your login shell's `PATH` (macOS/Linux) or the registry `Path` (Windows), and writes the result back so child processes inherit it. | Inherited from the launching process | `main/util/spawn-path.js` |
 | `TERMINAL` | Linux only. Terminal emulator opened for `claude mcp login`, tried before `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal`, `alacritty`, `kitty` and `xterm`. | Unset (first of that list on `PATH`) | `main/ipc/mcp.js` |
-| `APPDATA` | Windows. Where pip `--user` scripts are looked for (`%APPDATA%\Python\*\Scripts`), and opencode's config dir when `XDG_CONFIG_HOME` is unset. Also where klaussy looks for opencode's `auth.json` when `XDG_DATA_HOME` and `LOCALAPPDATA` are both unset. | Unset | `main/util/spawn-path.js`, `main/state/opencode-config.js` |
+| `APPDATA` | Windows. Where pip `--user` scripts are looked for (`%APPDATA%\Python\*\Scripts`), and opencode's config dir when `XDG_CONFIG_HOME` is unset. Also where Maussian looks for opencode's `auth.json` when `XDG_DATA_HOME` and `LOCALAPPDATA` are both unset. | Unset | `main/util/spawn-path.js`, `main/state/opencode-config.js` |
 | `LOCALAPPDATA` | Windows. opencode's data dir (sessions, `opencode.db`) when `XDG_DATA_HOME` is unset. | Unset | `main/state/ai-providers.js`, `main/state/opencode-config.js`, `main/state/token-usage.js` |
 | `XDG_CONFIG_HOME` | opencode's config dir, on every platform. | `~/.config` (or `%APPDATA%` on Windows) | `main/state/opencode-config.js` |
-| `XDG_DATA_HOME` | opencode's data dir, on every platform. Klaussy reads opencode sessions and token usage from `<dir>/opencode`. | `~/.local/share` (or `%LOCALAPPDATA%` on Windows) | `main/state/ai-providers.js`, `main/state/opencode-config.js`, `main/state/token-usage.js` |
+| `XDG_DATA_HOME` | opencode's data dir, on every platform. Maussian reads opencode sessions and token usage from `<dir>/opencode`. | `~/.local/share` (or `%LOCALAPPDATA%` on Windows) | `main/state/ai-providers.js`, `main/state/opencode-config.js`, `main/state/token-usage.js` |
 
 ## AI providers
 
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
-| `KIMI_CODE_HOME` | Kimi Code's home directory, where klaussy reads its sessions. Blank values are ignored. | `$HOME/.kimi-code` | `main/state/ai-providers.js`, `main/util/agent-transcript.js` |
-| `GEMINI_CLI_HOME` | The directory Gemini CLI keeps `.gemini` in, where klaussy reads its chats to mirror replies. | `$HOME` | `main/util/agent-transcript.js` |
+| `KIMI_CODE_HOME` | Kimi Code's home directory, where Maussian reads its sessions. Blank values are ignored. | `$HOME/.kimi-code` | `main/state/ai-providers.js`, `main/util/agent-transcript.js` |
+| `GEMINI_CLI_HOME` | The directory Gemini CLI keeps `.gemini` in, where Maussian reads its chats to mirror replies. | `$HOME` | `main/util/agent-transcript.js` |
 
 ## GitHub
 
-Klaussy doesn't authenticate with these, `gh` does. Klaussy only reads them to
+Maussian doesn't authenticate with these, `gh` does. Maussian only reads them to
 explain failures. While either is set, `gh` uses it over any signed-in
 account, so switching accounts won't fix a 404 or 403.
 
@@ -39,13 +39,13 @@ account, so switching accounts won't fix a 404 or 403.
 
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
-| `GITLAB_TOKEN` | GitLab token, used only when `glab config get token` returns nothing for the host or globally. Klaussy passes it to `glab` as `GL_TOKEN` (with `GL_HOST`) and uses it to clone GitLab repos for PR review. Also named in GitLab "not found" errors, which suggest unsetting it. | Unset | `main/util/glab-exec.js`, `main/util/glab-error.js` |
+| `GITLAB_TOKEN` | GitLab token, used only when `glab config get token` returns nothing for the host or globally. Maussian passes it to `glab` as `GL_TOKEN` (with `GL_HOST`) and uses it to clone GitLab repos for PR review. Also named in GitLab "not found" errors, which suggest unsetting it. | Unset | `main/util/glab-exec.js`, `main/util/glab-error.js` |
 | `GL_TOKEN` | Same as `GITLAB_TOKEN`; checked only when `GITLAB_TOKEN` is unset. | Unset | `main/util/glab-exec.js`, `main/util/glab-error.js` |
-| `CI_JOB_TOKEN` | Only named in GitLab "not found" errors, when neither of the above is set. Klaussy never uses it as a token. | Unset | `main/util/glab-error.js` |
+| `CI_JOB_TOKEN` | Only named in GitLab "not found" errors, when neither of the above is set. Maussian never uses it as a token. | Unset | `main/util/glab-error.js` |
 
 ## Bitbucket
 
-Klaussy looks for Bitbucket credentials in this order: accounts saved under
+Maussian looks for Bitbucket credentials in this order: accounts saved under
 **Preferences → Git Accounts**, a token in the app config (`bitbucketToken`), these
 environment variables, `~/.netrc`, then the git credential helper.
 
@@ -65,7 +65,7 @@ Within the environment it tries a token first:
 |---|---|---|---|
 | `BITBUCKET_TOKEN` | Bitbucket access token or Atlassian API token. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_BEARER_TOKEN` | Same as `BITBUCKET_TOKEN`; used when it's unset. | Unset | `main/util/bitbucket-api.js` |
-| `BITBUCKET_EMAIL` | Username sent with a token. With an `ATATT` token and no username containing `@`, this is used as the account email if it contains `@`. Otherwise klaussy tries `git config user.email`. If neither has an `@`, the username is sent as given (or `x-token-auth` when there is none) and Bitbucket rejects the login, so set this when you use an API token. | Unset | `main/util/bitbucket-api.js` |
+| `BITBUCKET_EMAIL` | Username sent with a token. With an `ATATT` token and no username containing `@`, this is used as the account email if it contains `@`. Otherwise Maussian tries `git config user.email`. If neither has an `@`, the username is sent as given (or `x-token-auth` when there is none) and Bitbucket rejects the login, so set this when you use an API token. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_USERNAME` | Username sent with a token (if `BITBUCKET_EMAIL` is unset) or with an app password. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_USER` | Same as `BITBUCKET_USERNAME`; used when it's unset. | Unset | `main/util/bitbucket-api.js` |
 | `BITBUCKET_APP_PASSWORD` | App password, used with `BITBUCKET_USERNAME` or `BITBUCKET_USER`. | Unset | `main/util/bitbucket-api.js` |
@@ -73,10 +73,10 @@ Within the environment it tries a token first:
 
 ## Azure DevOps
 
-Klaussy uses the account saved under **Preferences → Git Accounts** for the PR's
+Maussian uses the account saved under **Preferences → Git Accounts** for the PR's
 organization or collection, and falls back to this variable when there's none.
 Saved tokens are encrypted with the system keychain. On a system without one
-(Linux with no keyring, for example), Klaussy won't save a token, so set this
+(Linux with no keyring, for example), Maussian won't save a token, so set this
 variable instead.
 
 | Variable | What it does | Default | Read in |
@@ -87,7 +87,7 @@ variable instead.
 
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
-| `KLAUSSY_REVIEW_SOCK` | Socket the review and plan-approval hook clients try first, so a commit made in a klaussy terminal is reviewed in that window. After it they try each instance in `~/.klaussy/sockets`, then `~/.klaussy/precommit.json`. The Claude Code hook client (Notification and Stop events) sends to this socket and every registered one. Klaussy sets it for its own terminals (see below); you don't normally set it. | Set by klaussy | The hook client scripts generated by `main/state/precommit-hook.js` and `main/util/claude-hooks.js` |
+| `KLAUSSY_REVIEW_SOCK` | Socket the review and plan-approval hook clients try first, so a commit made in a Maussian terminal is reviewed in that window. After it they try each instance in `~/.klaussy/sockets`, then `~/.klaussy/precommit.json`. The Claude Code hook client (Notification and Stop events) sends to this socket and every registered one. Maussian sets it for its own terminals (see below); you don't normally set it. | Set by Maussian | The hook client scripts generated by `main/state/precommit-hook.js` and `main/util/claude-hooks.js` |
 
 ## Debugging and testing
 
@@ -103,23 +103,24 @@ variable instead.
 |---|---|---|---|
 | `RELEASE_GH_USER` | GitHub account `npm run release:mac` switches `gh` to before publishing. If that account isn't logged in, the script keeps the current one. | The publishing repo's owner | `scripts/release-mac.js` |
 
-## Variables klaussy sets for child processes
+## Variables Maussian sets for child processes
 
-Klaussy puts these in the environment of the terminals and commands it
+Maussian puts these in the environment of the terminals and commands it
 starts. You shouldn't need to set any of them, except maybe
 `KLAUSSY_SKIP_REVIEW`.
 
 | Variable | Value | Set in |
 |---|---|---|
 | `TERM` | `xterm-256color`, for every embedded terminal | `main/ipc/tasks.js`, `main/state/instances.js`, `main/state/pr-chat-pty.js`, `main/state/pr-implement-pty.js` |
-| `KLAUSSY_REVIEW_SOCK` | This instance's review socket, set on klaussy's own process once the review server is listening, so its terminals inherit it | `main/state/precommit-hook.js` |
+| `KLAUSSY_REVIEW_SOCK` | This instance's review socket, set on Maussian's own process once the review server is listening, so its terminals inherit it | `main/state/precommit-hook.js` |
 | `KLAUSSY_SESSION_NOTES_DIR` | The shared session-notes directory, for agent terminals | `main/state/session-context.js` |
+| `MAUSSIAN_SESSION_NOTES_DIR` | The same directory under the new name, which CLAUDE.md files from maussian-repo-conventions read first | `main/state/session-context.js` |
 | `KLAUSSY_SESSION_ID` | An ID for the terminal, set alongside `KLAUSSY_SESSION_NOTES_DIR` | `main/state/session-context.js` |
 | `KLAUSSY_SKIP_REVIEW` | `1`, for commits made from the diff panel (which runs its own review) and for autofix commits | `main/ipc/git.js`, `main/state/pr-monitor.js` |
 
-The pre-commit and pre-push hooks klaussy installs exit straight away when
+The pre-commit and pre-push hooks Maussian installs exit straight away when
 `KLAUSSY_SKIP_REVIEW` is non-empty. Set it yourself
 (`KLAUSSY_SKIP_REVIEW=1 git commit ...`) to skip the review for one commit or
-push. That also skips any hook you had before klaussy's, which it chains as
+push. That also skips any hook you had before Maussian's, which it chains as
 `<hook>.klaussy-prev`, because the check runs first. The commit-msg and
 post-commit hooks ignore it.

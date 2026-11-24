@@ -361,7 +361,7 @@ window.App = window.App || {};
     if (App.prReviewMounted) {
       commands.push({ label: 'Run AI Review', action: function () { window.Voice.reportAiReview(window.PrReview.runAiReviewNow()); } });
     }
-    commands.push({ label: 'How to use Klaussy', action: function () { Dialogs.showHowToUse(); } });
+    commands.push({ label: 'How to use Maussian', action: function () { Dialogs.showHowToUse(); } });
     commands.push({ label: 'Keyboard shortcuts', action: function () { Dialogs.showShortcuts(); } });
     commands.push({ label: 'Run Slash Command…', action: function () { Dialogs.showSlashLauncher(); } });
     commands.push({ label: 'Skills & Commands', action: function () { Dialogs.showSkills(); } });
@@ -371,9 +371,9 @@ window.App = window.App || {};
     commands.push({ label: 'Git accounts (GitHub, GitLab, Bitbucket & Azure DevOps)', action: function () { Dialogs.showGhAccounts(); } });
     commands.push({ label: 'Check dependencies…', action: function () { Dialogs.checkAndPromptDeps({ force: true }); } });
     commands.push({ label: 'View Logs', action: App.showLogViewer });
-    commands.push({ label: 'Add klaussy review to GitHub\u2026', action: function () { window.klaus.gh.openExternal('https://github.com/apps/klaussy-review'); } });
+    commands.push({ label: 'Add Maussian review to GitHub\u2026', action: function () { window.klaus.gh.openExternal('https://github.com/apps/klaussy-review'); } });
     commands.push({ label: 'Send feedback\u2026', action: function () { Dialogs.openFeedback(); } });
-    commands.push({ label: 'About Klaussy', action: App.showAboutDialog });
+    commands.push({ label: 'About Maussian', action: App.showAboutDialog });
 
     return commands;
   };

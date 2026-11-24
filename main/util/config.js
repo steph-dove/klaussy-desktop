@@ -124,7 +124,7 @@ function getNotificationConfig(config = loadConfig()) {
 }
 
 // Legacy single-gateway accessor, kept for back-compat surfaces. New code uses
-// getNemesisProfiles()/getNemesisProfile() — Klaussy supports several named
+// getNemesisProfiles()/getNemesisProfile() — Maussian supports several named
 // gateways, each its own picker entry.
 function getNemesisConfig() {
   const cfg = loadConfig();

@@ -4,10 +4,10 @@
 
 *Last updated: {{DATE}}*
 
-## 1. What Klaussy collects
+## 1. What Maussian collects
 
-Klaussy is a desktop application. It does not host a backend service of its own.
-Information you interact with from within Klaussy goes to third parties whose
+Maussian is a desktop application. It does not host a backend service of its own.
+Information you interact with from within Maussian goes to third parties whose
 policies govern what they collect:
 
 - **Your AI coding agent.** When you use the terminal, the Plan / Debug
@@ -15,16 +15,16 @@ policies govern what they collect:
   generation, your selected agent reads the prompt and repository context you provide.
   See the provider's privacy policy.
 - **Git Forges (GitHub, GitLab, Bitbucket, Azure DevOps).** When you view / comment on / merge
-  PRs/MRs or run CI checks through Klaussy, those requests go through your local
+  PRs/MRs or run CI checks through Maussian, those requests go through your local
   CLIs (`gh`, `glab`) or direct forge authentication to GitHub, GitLab, Bitbucket,
   or Microsoft (Azure DevOps Services, or your own Azure DevOps Server).
   See their respective privacy policies.
-- **Ollama (optional).** If you enable inline AI completion, Klaussy runs
+- **Ollama (optional).** If you enable inline AI completion, Maussian runs
   `qwen2.5-coder:1.5b` locally via Ollama. No data leaves your machine.
 - **Paddle.** If you purchase a license, Paddle processes your payment and
   emails you the license key. See Paddle's privacy policy.
 
-## 2. What Klaussy stores locally
+## 2. What Maussian stores locally
 
 - Your project list, terminal sessions, notes, and preferences, in
   `~/Library/Application Support/Klaussy/config.json`.
@@ -35,29 +35,29 @@ policies govern what they collect:
 - If you connect Azure DevOps, your personal access token, encrypted with
   your operating system's keychain (Keychain on macOS, DPAPI on Windows,
   libsecret on Linux) before it's written to `config.json`. If your system
-  has no keychain, Klaussy doesn't save the token.
+  has no keychain, Maussian doesn't save the token.
 
 None of this leaves your machine unless you explicitly sync your home
 directory to iCloud, Dropbox, etc.
 
-## 3. What Klaussy sends off-device
+## 3. What Maussian sends off-device
 
-- **License verification.** On activation, and weekly thereafter, Klaussy
+- **License verification.** On activation, and weekly thereafter, Maussian
   sends your license key and a device fingerprint (a non-reversible hash of
   your hostname + username + platform) to Paddle to confirm the license is
   still valid.
-- **Update check.** On launch, Klaussy checks our update feed for a newer
+- **Update check.** On launch, Maussian checks our update feed for a newer
   version. The request reveals your IP and the current app version; no
   personal data is sent.
 
 ## 4. Telemetry
 
-Klaussy does not send usage analytics or telemetry. We do not track which
+Maussian does not send usage analytics or telemetry. We do not track which
 features you use, what projects you open, or how often you launch the app.
 
 ## 5. Third-party services
 
-Klaussy orchestrates several tools you choose to use. Their policies apply:
+Maussian orchestrates several tools you choose to use. Their policies apply:
 
 - Anthropic (Claude): https://www.anthropic.com/legal/privacy
 - OpenAI: https://openai.com/policies/privacy-policy

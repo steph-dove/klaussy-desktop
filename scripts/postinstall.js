@@ -1,6 +1,6 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Cross-platform postinstall: rebrands the dev-mode Electron app on macOS
-// so `npx electron .` shows "Klaussy" in the menu bar instead of "Electron".
+// so `npx electron .` shows "Maussian" in the menu bar instead of "Electron".
 //
 // Was previously inline shell commands chained with `||true`. That worked
 // on macOS and silently no-op'd on Linux, but on Windows `cp` and `plutil`
@@ -21,7 +21,7 @@ if (process.platform === 'darwin') {
   const plist = 'node_modules/electron/dist/Electron.app/Contents/Info.plist';
   for (const key of ['CFBundleName', 'CFBundleDisplayName']) {
     try {
-      execFileSync('plutil', ['-replace', key, '-string', 'Klaussy', plist], { stdio: 'ignore' });
+      execFileSync('plutil', ['-replace', key, '-string', 'Maussian', plist], { stdio: 'ignore' });
     } catch {}
   }
 }

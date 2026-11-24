@@ -418,7 +418,7 @@ body.custom-titlebar #titlebar-content {
 }
 #titlebar-branch[hidden] { display: none; }
 
-/* Klaussy brand block at the top of the sidebar, above the token graph. Its
+/* Maussian brand block at the top of the sidebar, above the token graph. Its
    name is the window's <h1>. */
 .sidebar-brand-name { margin: 0; font: inherit; letter-spacing: inherit; }
 #sidebar-brand {
@@ -433,9 +433,8 @@ body.custom-titlebar #titlebar-content {
   cursor: default;
 }
 .sidebar-brand-logo {
-  width: 22px;
-  height: 22px;
-  border-radius: 5px;
+  width: auto;
+  height: 30px;
   flex: none;
   object-fit: contain;
   transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), filter 0.35s cubic-bezier(0.16, 1, 0.3, 1);
@@ -448,6 +447,7 @@ body.custom-titlebar #titlebar-content {
   justify-content: center;
   padding: 14px 0 10px;
 }
+#sidebar.collapsed .sidebar-brand-logo { height: 24px; }
 #sidebar.collapsed #sidebar-brand .sidebar-brand-name {
   position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
 }
@@ -978,7 +978,7 @@ body.pr-review-popout #voice-float:not([hidden]) {
 }
 
 /* Commit review gate prompt — shown under the filters when the selected repo
-   has no Klaussy pre-commit hook yet. Hidden via the [hidden] attribute. */
+   has no Maussian pre-commit hook yet. Hidden via the [hidden] attribute. */
 #commit-gate-banner {
   display: flex;
   align-items: center;
@@ -2192,11 +2192,9 @@ body.task-branchless #ahead-behind {
 }
 
 .empty-dashboard-logo {
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
+  width: auto;
+  height: 64px;
   margin-bottom: 16px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.05);
   animation: logoPulse 4s ease-in-out 3;
 }
 

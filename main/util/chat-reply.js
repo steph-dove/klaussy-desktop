@@ -199,12 +199,12 @@ function approvalTail(inst) {
 // Shared gate for every button click; returns { error } or { claim, inst }.
 function claimForClick({ token, userId, allowList }) {
   if (!isAllowed(userId, allowList)) {
-    return { error: { ok: false, reason: 'not-allowed', message: 'You are not on this Klaussy approval allow-list.' } };
+    return { error: { ok: false, reason: 'not-allowed', message: 'You are not on this Maussian approval allow-list.' } };
   }
   const claim = redeem(token);
   if (!claim.ok) {
     const message = claim.reason === 'expired'
-      ? 'That request expired — answer it in Klaussy instead.'
+      ? 'That request expired — answer it in Maussian instead.'
       : 'That request was already answered.';
     return { error: { ok: false, reason: claim.reason, message } };
   }
@@ -220,7 +220,7 @@ function claimForClick({ token, userId, allowList }) {
       error: {
         ok: false,
         reason: 'moved-on',
-        message: 'That prompt has changed — answer the current one in Klaussy.',
+        message: 'That prompt has changed — answer the current one in Maussian.',
       },
     };
   }
@@ -273,7 +273,7 @@ function applyChoice({ token, key, userId, allowList }) {
 // answering prompts that want something other than y/n.
 function applyText({ taskId, text, userId, allowList }) {
   if (!isAllowed(userId, allowList)) {
-    return { ok: false, reason: 'not-allowed', message: 'You are not on this Klaussy approval allow-list.' };
+    return { ok: false, reason: 'not-allowed', message: 'You are not on this Maussian approval allow-list.' };
   }
   const body = sanitizeForPaste(text);
   if (!body) return { ok: false, reason: 'empty', message: 'Nothing to send.' };

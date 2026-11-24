@@ -760,7 +760,7 @@
         if (res.token) { profile.token = res.token; tokenEl.value = res.token; }
         if (!(profile.remote || '').trim()) { profile.remote = 'http://localhost:9801'; remoteEl.value = profile.remote; }
         saveAll(); refresh();
-        setStatus('', 'opened a setup tab in Klaussy — complete the sign-in there, then come back and Test connection');
+        setStatus('', 'opened a setup tab in Maussian — complete the sign-in there, then come back and Test connection');
       } else { setStatus('err', escHtml((res && res.error) || 'could not start setup')); }
     });
 

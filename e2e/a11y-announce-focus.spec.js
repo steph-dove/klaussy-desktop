@@ -105,7 +105,7 @@ test.describe('announcements and focus after actions', () => {
   });
 
   test('the window has a visible level-one heading', async ({ mainWindow }) => {
-    await expect(mainWindow.getByRole('heading', { level: 1, name: 'Klaussy' })).toBeVisible();
+    await expect(mainWindow.getByRole('heading', { level: 1, name: 'Maussian' })).toBeVisible();
   });
 
   test('an empty PR review comment shows an inline error instead of doing nothing', async ({ electronApp, mainWindow }) => {

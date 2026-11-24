@@ -2073,7 +2073,7 @@ button.pr-check-toggle {
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
   box-shadow: 0 0 0 3px var(--bg);
 }
-/* Klaussy marker for AI findings: accent dot, rounded square to stand apart. */
+/* Maussian marker for AI findings: accent dot, rounded square to stand apart. */
 .pr-conv-avatar-ai {
   background: var(--accent);
   border-radius: 8px;
@@ -8162,3 +8162,26 @@ button.js-ai-review:hover,
   white-space: pre-wrap; word-break: break-word;
 }
 .pr-review-load-error-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+/* One-time "Klaussy is now Maussian" card. */
+.rename-card { width: 480px; }
+.rename-body {
+  display: flex;
+  gap: 16px;
+  padding: 16px 18px 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+.rename-body p { margin: 0 0 8px; }
+.rename-body ul { margin: 0 0 8px; padding-left: 18px; color: var(--text-dim); }
+.rename-body li { margin-bottom: 6px; }
+.rename-logo { width: 80px; height: auto; align-self: flex-start; flex: none; }
+.rename-azure {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.rename-azure-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.rename-done { font-size: 12px; color: var(--diff-add-fg, #7ce27c); }

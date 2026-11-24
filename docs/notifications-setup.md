@@ -1,6 +1,6 @@
 # Slack & Discord notifications
 
-Klaussy can post to a chat channel when an agent finishes, fails, or stops to ask
+Maussian can post to a chat channel when an agent finishes, fails, or stops to ask
 for permission — and, if you set it up for two-way, let you answer from that
 channel without going back to the app.
 
@@ -39,13 +39,13 @@ they're read-only.
 ## Level 2 — two-way (buttons and replies)
 
 A webhook is one-directional: it's a URL you post *to*, so Slack and Discord have
-no way to reach back to your machine. To receive a button click, Klaussy opens an
+no way to reach back to your machine. To receive a button click, Maussian opens an
 outbound WebSocket to the platform instead. That needs real app credentials, and
 no public URL or tunnel — which is why this works from a laptop behind NAT.
 
 > **Read this first.** A button in a channel means **anyone you allow can approve
 > a permission prompt on your machine** — including an agent asking to run a
-> destructive command. Klaussy requires an explicit allow-list of user IDs, and
+> destructive command. Maussian requires an explicit allow-list of user IDs, and
 > approvals are single-use and expire after 30 minutes. Use a private channel.
 
 ### Slack two-way
@@ -85,7 +85,7 @@ Continue with the app you made above.
    menu doesn't offer it, open your profile in a browser — the URL ends in the
    same `U0…`.
 
-Leave **Slack webhook URL** empty once the bot is set up. Klaussy prefers the
+Leave **Slack webhook URL** empty once the bot is set up. Maussian prefers the
 bot whenever there is one, since a webhook cannot post into a thread.
 
 ### Discord two-way
@@ -109,7 +109,7 @@ which one you're in.
 2. Click **Bot** in that menu. (On recent portals the bot already exists; if you
    see an **Add Bot** button, click it and confirm.)
 3. Click **Reset Token** → **Yes, do it** → **Copy**. This is your **bot
-   token** — paste it straight into Klaussy's *Discord bot token* field, since
+   token** — paste it straight into Maussian's *Discord bot token* field, since
    the portal will not show it again.
 4. Stay on the **Bot** page and scroll to **Privileged Gateway Intents**. Turn
    on **MESSAGE CONTENT INTENT** and save.
@@ -129,7 +129,7 @@ which one you're in.
    **Authorize**.
 
    `292057844736` is View Channel, Send Messages, Read Message History, Create
-   Public Threads, and Send Messages in Threads — Klaussy opens one thread per
+   Public Threads, and Send Messages in Threads — Maussian opens one thread per
    agent session and talks to you inside it.
 
    *Why not the portal's own generator?* Its Bot Permissions calculator has no
@@ -150,13 +150,13 @@ which one you're in.
 7. Right-click the channel you want alerts in → **Copy Channel ID**.
 8. Right-click your own name in the member list → **Copy User ID**.
 
-**Part C — in Klaussy, Preferences → Slack & Discord Notifications**
+**Part C — in Maussian, Preferences → Slack & Discord Notifications**
 
 9. Paste the bot token (step 3), channel ID (step 7), and your user ID into
    **Who may approve** (step 8). The status line under that section goes
    *connecting…* → *connected*.
 
-The bot shows **offline** in your server's member list until Klaussy connects —
+The bot shows **offline** in your server's member list until Maussian connects —
 that's expected, not a failed install.
 
 Two things that quietly block part A:
@@ -192,7 +192,7 @@ several agents can run at once without their alerts interleaving.
   task sticks.
 
 Replies only reach a session while its agent is still running. Once an agent
-exits, Klaussy turns that tab into a plain shell — replies to its old alerts are
+exits, Maussian turns that tab into a plain shell — replies to its old alerts are
 refused rather than typed into your shell.
 
 ## If something doesn't work
@@ -201,7 +201,7 @@ refused rather than typed into your shell.
 |---|---|
 | Test message works, buttons don't appear | Two-way isn't configured — buttons need the app/bot tokens, not just a webhook. |
 | Buttons appear, clicking says "not on the allow-list" | Your user ID isn't in **Who may approve**. It must be the ID (`U0…` / a long number), not your display name. |
-| "That request expired" | Approvals last 30 minutes; answer in Klaussy. |
+| "That request expired" | Approvals last 30 minutes; answer in Maussian. |
 | "That request was already answered" | Single-use by design — someone clicked first, or the prompt was answered in the app. |
 | Discord replies arrive empty | **MESSAGE CONTENT INTENT** is off. |
 | Slack thread replies do nothing | Missing `message.channels` / `message.groups` event subscription, or the bot isn't in the channel. |
@@ -211,7 +211,7 @@ refused rather than typed into your shell.
 | Replies in an old thread are ignored | Threads stop routing once their agent exits — the thread stays as history. |
 | Nothing arrives at all | Check the session's 🔔 is on and the event type isn't unticked. |
 | Too many "went quiet" alerts | Raise the seconds field next to that checkbox, or untick it. |
-| Discord bot shows offline in the member list | Expected until Klaussy connects. If it stays offline after saving the token, check the status line in Preferences. |
+| Discord bot shows offline in the member list | Expected until Maussian connects. If it stays offline after saving the token, check the status line in Preferences. |
 | Your server isn't in the "Add to Server" dropdown | You need **Manage Server** permission on it. |
 | Can't find "Send Messages" in the portal's permission checkboxes | It isn't offered there. Use the `permissions=292057844736` invite link above. |
 | Bot is in the server but alerts never post | It was invited without Send Messages. Re-open the `permissions=292057844736` link to re-authorize; no need to remove it first. |
@@ -219,7 +219,7 @@ refused rather than typed into your shell.
 
 ## Where the credentials live
 
-Tokens are stored in plaintext in Klaussy's `config.json`
+Tokens are stored in plaintext in Maussian's `config.json`
 (`~/Library/Application Support/Klaussy/config.json` on macOS). Anyone who can
 read that file can post as your bot and, if allow-listed, drive your agents.
 Revoke a leaked token in the Slack app dashboard or the Discord developer portal.

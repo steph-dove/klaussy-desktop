@@ -1,20 +1,20 @@
-# <img src="brand-mark.png" width="32" height="32" align="absmiddle" alt="Klaussy Logo"> Klaussy Desktop
+# <img src="brand-mark.png" width="32" height="32" align="absmiddle" alt="Maussian Logo"> Maussian Desktop
 
 > [!IMPORTANT]
-> **License: source-available, not open source.** © 2026 Dovatech LLC, licensed under the [Sustainable Use License](https://github.com/steph-dove/klaussy-desktop/blob/main/LICENSE). It's free for personal use, non-commercial use, and use inside your own company. Selling it, or distributing or offering this code or the app as part of a paid or commercial product or service, is not permitted without a commercial license and is copyright infringement. For a commercial license, email stephanie@klaussy.com.
+> **License: source-available, not open source.** © 2026 Dovatech LLC, licensed under the [Sustainable Use License](https://github.com/steph-dove/klaussy-desktop/blob/main/LICENSE). It's free for personal use, non-commercial use, and use inside your own company. Selling it, or distributing or offering this code or the app as part of a paid or commercial product or service, is not permitted without a commercial license and is copyright infringement. For a commercial license, email stephanie@maussian.ai.
 
 **The agent-first IDE that reviews its own code before you commit.**
 
 [![GitHub stars](https://img.shields.io/github/stars/steph-dove/klaussy-desktop?style=social)](https://github.com/steph-dove/klaussy-desktop/stargazers)
 [![Downloads served](https://img.shields.io/badge/downloads%20served-316-1f6feb?logo=github&logoColor=white&labelColor=2ea043)](https://github.com/steph-dove/klaussy-desktop/releases)
 
-⬇️ **[Download Klaussy Desktop](https://www.klaussy.com/#how-it-stays-yours)** for macOS, Windows and Linux. Free for individual use.
+⬇️ **[Download Maussian Desktop](https://maussian.ai)** for macOS, Windows and Linux. Free for individual use.
 
-> **The desktop is the face. The [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents) engine is the spine.** While other orchestrators give you a worktree grid, Klaussy brings the conventions, custom skills, and active git-level guardrails that actually keep agents aligned with your codebase.
+> **The desktop is the face. The [`mauss`](https://pypi.org/project/mauss/) engine is the spine.** While other orchestrators give you a worktree grid, Maussian brings the conventions, custom skills, and active git-level guardrails that actually keep agents aligned with your codebase.
 
-Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop runs multi-agent, multi-repository AI coding sessions in a unified, tabbed light-themed workspace. It spawns isolated Git worktrees per task, enabling you to run multiple agents in parallel without juggling branches, staging mess, or local workspace clutter.
+Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Maussian Desktop runs multi-agent, multi-repository AI coding sessions in a unified, tabbed light-themed workspace. It spawns isolated Git worktrees per task, enabling you to run multiple agents in parallel without juggling branches, staging mess, or local workspace clutter.
 
-> **📣 Out of stealth.** Klaussy has been in heads-down development for six months — quietly battle-tested by a private group of developers shipping real production work through it every day. After months of dogfooding, refinement, and distributing builds to testers, it's finally open to everyone.
+> **📣 Out of stealth.** Maussian has been in heads-down development for six months — quietly battle-tested by a private group of developers shipping real production work through it every day. After months of dogfooding, refinement, and distributing builds to testers, it's finally open to everyone.
 
 ---
 
@@ -31,11 +31,11 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Klaussy Desktop 
 *   **🔍 PR & MR Reviews Without Local Checkout**
     Paste a GitHub, Bitbucket or Azure DevOps pull request URL, or a GitLab merge request URL, to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
 *   **🔄 Cross-Agent Session Resuming**
-    Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Klaussy Desktop automatically compiles a structured handoff brief to catch the new agent up.
+    Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Maussian Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
     Type one prompt and send it to every open terminal at once, across all sessions and split panes. The bar sits under Active agents in the sidebar, or floats over the terminals where you can drag it.
 *   **🔔 Answer Agents from Slack & Discord**
-    Get a message when an agent finishes, fails, or stops to ask permission — then hit **Approve**/**Reject** or reply with text right there, and it goes straight to the agent's terminal. Klaussy dials out over Socket Mode / the Discord Gateway, so there's no public URL, tunnel, or open port. Approvals are limited to an allow-list you name, single-use, and expire. Set it up under **Preferences → Slack & Discord Notifications** ([step-by-step guide](./docs/notifications-setup.md)).
+    Get a message when an agent finishes, fails, or stops to ask permission — then hit **Approve**/**Reject** or reply with text right there, and it goes straight to the agent's terminal. Maussian dials out over Socket Mode / the Discord Gateway, so there's no public URL, tunnel, or open port. Approvals are limited to an allow-list you name, single-use, and expire. Set it up under **Preferences → Slack & Discord Notifications** ([step-by-step guide](./docs/notifications-setup.md)).
 *   **🔌 Multi-Agent MCP Manager**
     Connect Model Context Protocol servers (GitHub, GitLab, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Gemini, and the rest — from one catalog, with a single add fanning out to every agent you pick.
 *   **🛠️ Workflow-Oriented Tools**
@@ -71,7 +71,7 @@ See **[Keyboard Shortcuts](./docs/keyboard-shortcuts.md)** for the full list by 
 
 ![AI-powered PR review with structured findings](./docs/klaussy_pr_ai_review.png)
 
-**CI debugging built in** — when a GitHub Actions or Azure Pipelines check fails, Klaussy pulls the job's logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
+**CI debugging built in** — when a GitHub Actions or Azure Pipelines check fails, Maussian pulls the job's logs and an agent explains the root cause and proposes a concrete fix without leaving the app.
 
 ![Agent-assisted CI failure debugging](./docs/klaussy_ci_debug.png)
 
@@ -83,7 +83,7 @@ See **[Keyboard Shortcuts](./docs/keyboard-shortcuts.md)** for the full list by 
 
 ## 📋 Prerequisites
 
-Klaussy Desktop automatically detects and configures your local environment. It requires:
+Maussian Desktop automatically detects and configures your local environment. It requires:
 1.  **Node.js 24+** (the agent stores are read through `node:sqlite`)
 2.  **Git Forge Tools / Credentials** (GitHub CLI `gh`, GitLab CLI `glab`, Bitbucket credentials, or an Azure DevOps personal access token)
 3.  **An Agent CLI or IDE extension** (Claude Code is the default; also supports Codex, Gemini, Antigravity, Copilot, Cursor, Cline, opencode, Kimi Code, and local models via Ollama + Aider)
@@ -127,7 +127,7 @@ See [LINUX.md](LINUX.md) for the Linux smoke checklist.
 
 *For Bitbucket repositories, connect an App Password or token under **Preferences → Git Accounts**. For Azure DevOps, connect a personal access token there, or set `AZURE_DEVOPS_EXT_PAT`.*
 
-The environment variables klaussy reads (forge tokens, path overrides, debug switches) are listed in [docs/environment-variables.md](./docs/environment-variables.md).
+The environment variables Maussian reads (forge tokens, path overrides, debug switches) are listed in [docs/environment-variables.md](./docs/environment-variables.md).
 
 ---
 
@@ -163,8 +163,8 @@ npm run dist:linux    # Linux AppImage + DEB (requires Linux host)
 
 ## ⚖️ License & Attribution
 
-Klaussy Desktop is source-available under the **Sustainable Use License (SUL 1.0)**. You can run, modify, and self-host the software for personal, non-commercial, and internal business use. Reselling or offering Klaussy Desktop as a paid hosted service requires a commercial license.
+Maussian Desktop is source-available under the **Sustainable Use License (SUL 1.0)**. You can run, modify, and self-host the software for personal, non-commercial, and internal business use. Reselling or offering Maussian Desktop as a paid hosted service requires a commercial license.
 
-The underlying generator engine, [`klaussy-agents`](https://github.com/steph-dove/klaussy-agents), is source-available under the [Functional Source License (FSL-1.1-MIT)](https://github.com/steph-dove/klaussy-agents/blob/main/LICENSE).
+The underlying generator engine, [`mauss`](https://pypi.org/project/mauss/), is source-available under the [Functional Source License (FSL-1.1-MIT)](https://pypi.org/project/mauss/).
 
 © 2026 Dovatech LLC

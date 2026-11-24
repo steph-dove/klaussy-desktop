@@ -109,9 +109,9 @@ function headline(event, p) {
 // while a checkbox menu needs keystrokes only the terminal can send.
 function answerHint(event, bold) {
   if (event.multiSelect === 'typed') return 'Reply in chat with the option numbers, e.g. `1, 3`.';
-  if (event.multiSelect) return 'Picking several options needs the terminal — answer in Klaussy.';
+  if (event.multiSelect) return 'Picking several options needs the terminal — answer in Maussian.';
   if (event.menuPrompt) return 'Reply in chat with your option choice(s).';
-  return `Respond in Klaussy to ${bold}Approve${bold} or ${bold}Reject${bold} this step.`;
+  return `Respond in Maussian to ${bold}Approve${bold} or ${bold}Reject${bold} this step.`;
 }
 
 function formatSlack(event) {
@@ -157,7 +157,7 @@ function formatSlack(event) {
       if (event.optionsTruncated) {
         blocks.push({
           type: 'context',
-          elements: [{ type: 'mrkdwn', text: '_More options exist — answer in Klaussy to see them all._' }],
+          elements: [{ type: 'mrkdwn', text: '_More options exist — answer in Maussian to see them all._' }],
         });
       }
     } else if (event.approvalToken && !event.menuPrompt && !event.multiSelect) {

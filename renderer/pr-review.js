@@ -345,7 +345,7 @@ window.PrReview = window.PrReview || {};
     PR.hostEl.innerHTML = '<div class="pr-review-preparing">'
       + '<div class="pr-review-load-error" role="alert">'
         + '<h2>Couldn\u2019t fetch ' + repo + ' from ' + forge + '</h2>'
-        + '<p>The pull request loaded, but Klaussy couldn\u2019t download its commits to build the diff. Check your network or VPN, then try again.</p>'
+        + '<p>The pull request loaded, but Maussian couldn\u2019t download its commits to build the diff. Check your network or VPN, then try again.</p>'
         + '<code>' + PR.escHtml(state.diffError) + '</code>'
         + '<div class="pr-review-load-error-actions">'
           + '<button class="pr-review-btn pr-review-retry-diff" type="button">Retry</button>'

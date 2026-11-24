@@ -1,6 +1,6 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // The "Enable Commit Review Gate" banner under the repo filter. It appears
-// only when a single repo is selected AND that repo has no Klaussy pre-commit
+// only when a single repo is selected AND that repo has no Maussian pre-commit
 // hook installed; enabling it drives the same installer the app runs
 // automatically (state/precommit-hook.js), so worktrees, hook chaining, and
 // opt-out all behave identically to hooks installed on session create.
