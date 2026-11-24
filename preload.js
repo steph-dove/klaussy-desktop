@@ -762,6 +762,8 @@ contextBridge.exposeInMainWorld('klaus', {
       ipcRenderer.on('preferences-changed', (_event, prefs) => callback(prefs));
     },
     getAboutInfo: () => ipcRenderer.invoke('get-about-info'),
+    // The one-time rename card: null, or { reconnect: [{ collectionUrl, collectionPath, host }] }.
+    getRenameNotice: () => ipcRenderer.invoke('rename-notice-get'),
     getClaudeInfo: () => ipcRenderer.invoke('get-claude-info'),
     // Per-provider version probe for Preferences. provider = 'claude' | 'codex'
     // | 'gemini' | 'copilot'. Returns { id, displayName, path, version }.

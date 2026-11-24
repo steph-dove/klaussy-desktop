@@ -33,10 +33,16 @@ function legacyUserDataDir(appData, current, exists = fs.existsSync) {
   return legacy;
 }
 
+// True once this launch has picked up a Klaussy folder; the rename card keys off it.
+let usingLegacy = false;
+
 function keepLegacyUserData() {
   try {
     const legacy = legacyUserDataDir(app.getPath('appData'), app.getPath('userData'));
-    if (legacy) app.setPath('userData', legacy);
+    if (legacy) {
+      app.setPath('userData', legacy);
+      usingLegacy = true;
+    }
   } catch (err) {
     console.error('[single-instance] legacy userData check failed:', err.message);
   }
@@ -79,4 +85,8 @@ function installSecondInstanceFocus(getMainWindow, allWindows) {
   });
 }
 
-module.exports = { acquirePrimaryOrExit, installSecondInstanceFocus, legacyUserDataDir };
+function usingLegacyUserData() {
+  return usingLegacy;
+}
+
+module.exports = { acquirePrimaryOrExit, installSecondInstanceFocus, legacyUserDataDir, usingLegacyUserData };

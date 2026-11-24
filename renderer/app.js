@@ -1488,7 +1488,10 @@ window.App = window.App || {};
   // Probe gh + claude on startup (silent if everything's set up). Stays out
   // of the way for steady-state users; only first-runs / broken setups see
   // the dialog. Manual invocation also available via the command palette.
-  setTimeout(function () { Dialogs.checkAndPromptDeps(); }, 800);
+  // After an upgrade from Klaussy, the one-time rename card goes first.
+  setTimeout(function () {
+    Dialogs.showRenameNotice().then(function () { Dialogs.checkAndPromptDeps(); });
+  }, 800);
 
   // Empty-state CTA: "Add a worktree" opens the same modal as the sidebar's
   // `+` New Task button, whose Browse/drag/recents flow lets you pick a repo

@@ -275,6 +275,95 @@ window.Dialogs = (function () {
     });
   }
 
+  // One-time card for installs upgraded from Klaussy. Main decides whether it
+  // shows; reconnect lists the Azure DevOps orgs whose token needs entering again.
+  // Resolves when the card closes (or right away when there's nothing to show).
+  function showRenameNotice() {
+    var get = window.klaus.ui.getRenameNotice;
+    if (!get) return Promise.resolve();
+    return Promise.resolve(get()).catch(function () { return null; }).then(function (notice) {
+      if (!notice) return;
+      return new Promise(function (resolve) {
+        var reconnect = notice.reconnect || [];
+        var overlay = document.createElement('div');
+        overlay.className = 'palette-overlay';
+        var dialog = document.createElement('div');
+        dialog.className = 'deps-dialog rename-card';
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-labelledby', 'rename-title');
+
+        var azureBlock = '';
+        if (reconnect.length) {
+          var buttons = reconnect.map(function (r, i) {
+            var label = reconnect.length > 1
+              ? 'Reconnect ' + (r.collectionPath || r.host || r.collectionUrl)
+              : 'Reconnect Azure DevOps';
+            return '<button type="button" class="deps-action rename-reconnect" data-i="' + i + '">' + escHtml(label) + '</button>';
+          }).join('');
+          azureBlock =
+            '<div class="rename-azure">'
+              + '<p>Your Azure DevOps token needs entering again. Saved tokens are tied to the app\'s name, and that changed.</p>'
+              + '<div class="rename-azure-buttons">' + buttons + '</div>'
+            + '</div>';
+        }
+
+        dialog.innerHTML =
+          '<div class="deps-head">'
+            + '<h2 id="rename-title">Hey! Klaussy is now Maussian</h2>'
+            + '<button class="deps-close" type="button" title="Close" aria-label="Close">&times;</button>'
+          + '</div>'
+          + '<div class="rename-body">'
+            + '<img class="rename-logo" src="../icon.png" alt="" aria-hidden="true">'
+            + '<div>'
+              + '<p>Same app, new name. Your settings, sessions and PR checkouts came with you.</p>'
+              + '<ul>'
+                + '<li>The review tools now install as <code>mauss</code>, and Maussian swaps out <code>klaussy-agents</code> for you. The <code>klaussy</code> command still works.</li>'
+                + '<li>Docs and downloads live at <button type="button" class="az-link rename-site">maussian.ai</button>.</li>'
+              + '</ul>'
+              + azureBlock
+            + '</div>'
+          + '</div>'
+          + '<div class="deps-actions">'
+            + '<button class="deps-action rename-ok" type="button">Got it</button>'
+          + '</div>';
+
+        overlay.appendChild(dialog);
+        document.body.appendChild(overlay);
+
+        function close() {
+          if (!overlay.isConnected) return;
+          overlay.remove();
+          resolve();
+        }
+        overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+        dialog.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+        dialog.querySelector('.deps-close').addEventListener('click', close);
+        dialog.querySelector('.rename-ok').addEventListener('click', close);
+        dialog.querySelector('.rename-site').addEventListener('click', function () {
+          Promise.resolve(window.klaus.gh.openExternal('https://maussian.ai')).catch(function () {});
+        });
+        dialog.querySelectorAll('.rename-reconnect').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var r = reconnect[Number(btn.dataset.i)];
+            showAzureLogin({
+              collectionUrl: r.collectionUrl,
+              onSuccess: function () {
+                var done = document.createElement('span');
+                done.className = 'rename-done';
+                done.textContent = reconnect.length > 1
+                  ? 'Reconnected ' + (r.collectionPath || r.host || r.collectionUrl)
+                  : 'Azure DevOps reconnected';
+                btn.replaceWith(done);
+              },
+            });
+          });
+        });
+        var first = dialog.querySelector('.rename-reconnect') || dialog.querySelector('.rename-ok');
+        first.focus();
+      });
+    });
+  }
+
   // First-run / on-demand setup dialog. Probes gh + claude, shows only when
   // something is missing/unauthed. Has a Re-check button so the user can fix in
   // another terminal and verify without restarting.
@@ -2629,6 +2718,7 @@ window.Dialogs = (function () {
     showHowToUse: showHowToUse,
     showLicenses: showLicenses,
     checkAndPromptDeps: checkAndPromptDeps,
+    showRenameNotice: showRenameNotice,
     openFeedback: openFeedback,
     showSkills: showSkills,
     showMemory: showMemory,
