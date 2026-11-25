@@ -229,7 +229,8 @@ test('the palette opens straight away and says it is loading until the file list
   });
 
   try {
-    await pointAt(mainWindow, '/tmp/klaussy-e2e-qo-loading');
+    // A real folder: the app only serves a worktree it knows (ipc-guard).
+    await pointAt(mainWindow, fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-qo-loading-')));
     await mainWindow.evaluate(() => { window.QuickOpen.show(); });
 
     const overlay = mainWindow.locator('.quick-open-overlay');

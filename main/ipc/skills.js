@@ -195,15 +195,29 @@ ipcMain.handle('list-skills', async () => {
 // Skill/command files live under ~/.claude (user + plugin cache) OR under a
 // project root (project-scope .claude/skills). Allow either; reject anything
 // else so a compromised renderer can't read arbitrary files through here.
+// Inside ~/.claude only the folders skills come from, and CLAUDE.md: never
+// settings*.json (its hooks run on every claude start) or .credentials.json.
+const CLAUDE_SKILL_DIRS = new Set(['skills', 'commands', 'agents', 'plugins']);
 function safeSkillPath(filePath) {
   const claudeHome = path.join(require('os').homedir(), '.claude');
-  return pathUnder(claudeHome, filePath) || pathUnderAnyRoot(filePath);
+  const inClaude = pathUnder(claudeHome, filePath);
+  if (inClaude) {
+    let homeReal = claudeHome;
+    try { homeReal = fs.realpathSync(claudeHome); } catch {}
+    const parts = path.relative(homeReal, inClaude).split(path.sep);
+    if (parts.length === 1 && parts[0] === 'CLAUDE.md') return inClaude;
+    return parts.length > 1 && CLAUDE_SKILL_DIRS.has(parts[0]) ? inClaude : null;
+  }
+  return pathUnderAnyRoot(filePath);
 }
 
 ipcMain.handle('open-skill-file', (_event, { filePath }) => {
   if (!filePath) return { ok: false };
   const safe = safeSkillPath(filePath);
-  if (!safe) return { error: 'path outside ~/.claude or an allowed project root' };
+  if (!safe) return { error: 'path outside ~/.claude skills or an allowed project root' };
+  // The OS opens a file with its default app, so a .command, .app or script
+  // would run. Skills and commands are Markdown; nothing else opens from here.
+  if (!/\.(md|markdown)$/i.test(safe)) return { error: 'Only Markdown files open from here' };
   shell.openPath(safe);
   return { ok: true };
 });
@@ -225,6 +239,10 @@ ipcMain.handle('write-skill-file', (_event, { filePath, content }) => {
   if (typeof content !== 'string') return { error: 'Content must be a string' };
   const safe = safeSkillPath(filePath);
   if (!safe) return { error: 'path outside ~/.claude or an allowed project root' };
+  // Skills, commands and agents are Markdown. Anything else in those folders
+  // (a plugin's hook script, installed_plugins.json) can run code the next
+  // time claude starts, so the editor never writes it.
+  if (!/\.(md|markdown)$/i.test(safe)) return { error: 'Only Markdown skill files can be edited here' };
   try {
     fs.writeFileSync(safe, content, 'utf8');
     return { ok: true };

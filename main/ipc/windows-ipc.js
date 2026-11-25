@@ -556,8 +556,12 @@ function remoteSetupSteps(platform = process.platform, provider = '', token = ''
 // "Test connection" for the prefs section. Tests the values passed from the
 // form directly (not saved config) so it can't race the async config write.
 ipcMain.handle('test-nemesis-connection', async (_event, { remote, token } = {}) => {
-  const url = remote !== undefined ? remote : getNemesisConfig().remote;
-  const tok = token !== undefined ? token : getNemesisConfig().token;
+  const saved = getNemesisConfig();
+  const url = remote !== undefined ? remote : saved.remote;
+  // The saved token only ever goes to the saved gateway; testing some other
+  // address uses whatever token the form passes, or none.
+  const sameGateway = nemesis.normalizeBaseUrl(url || '') === nemesis.normalizeBaseUrl(saved.remote || '');
+  const tok = token !== undefined ? token : (sameGateway ? saved.token : '');
   if (!url) return { ok: false, error: 'Enter a gateway URL first.' };
   const base = nemesis.normalizeBaseUrl(url);
   if (!base) return { ok: false, error: 'That gateway URL doesn’t look valid.' };

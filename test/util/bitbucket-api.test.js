@@ -260,3 +260,24 @@ test('resolveEmailIfApiToken skips env and git values that are not emails', () =
     () => resolveEmailIfApiToken('someuser', 'ATATT-test'));
   assert.equal(got, 'someuser');
 });
+
+test('credentials never go to a host no saved account names', async () => {
+  const initialConfig = loadConfig();
+  const prevToken = process.env.BITBUCKET_TOKEN;
+  try {
+    saveConfig({ bitbucketAccounts: [{ username: 'u', appPassword: 'secret', hostname: 'bitbucket.org', active: true }], bitbucketToken: 'tok' });
+    await flushSaveConfig();
+    process.env.BITBUCKET_TOKEN = 'env-token';
+    clearBitbucketAuthCache();
+    assert.equal(getBitbucketAuth({ host: 'evil.example' }), null);
+    assert.equal(getBitbucketAuth({ host: 'evil.example', account: 'u' }), null);
+    clearBitbucketAuthCache();
+    assert.equal(getBitbucketAuth({ host: 'bitbucket.org' }).password, 'secret');
+  } finally {
+    // Restore the one key: replacing process.env would swap Node's env object.
+    if (prevToken === undefined) delete process.env.BITBUCKET_TOKEN; else process.env.BITBUCKET_TOKEN = prevToken;
+    saveConfig(initialConfig);
+    await flushSaveConfig();
+    clearBitbucketAuthCache();
+  }
+});

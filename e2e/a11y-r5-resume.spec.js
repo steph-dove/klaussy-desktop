@@ -1,7 +1,17 @@
 /* global window,document */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { test, expect } = require('./fixtures');
 
-const SESSION_ROOT = '/tmp/klaussy-e2e-r5/klaussy/sessions/demo';
+// Real folders under the run's temp root: the app only acts on workspaces it
+// knows (main/util/ipc-guard.js), and made-up /tmp paths aren't any.
+const R5 = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-r5-'));
+for (const d of ['klaussy/sessions/demo', 'my-repo', 'one-repo', 'one-wt', 'repo-a', 'repo-b', 'solo-wt']) {
+  fs.mkdirSync(path.join(R5, d), { recursive: true });
+}
+
+const SESSION_ROOT = R5 + '/klaussy/sessions/demo';
 
 async function showInactive(mainWindow, list) {
   await mainWindow.evaluate((wts) => {
@@ -48,11 +58,11 @@ test.describe('resume accessibility', () => {
 
   test('saved-session buttons name the repo and agents', async ({ mainWindow }) => {
     await showInactive(mainWindow, [{
-      isSavedSession: true, path: '/tmp/klaussy-e2e-r5/solo-wt', repoPath: '/tmp/klaussy-e2e-r5/my-repo', branch: 'feat-x',
+      isSavedSession: true, path: R5 + '/solo-wt', repoPath: R5 + '/my-repo', branch: 'feat-x',
       mode: 'claude', savedAt: Date.now(),
       savedAgents: [
-        { mode: 'claude', sessionId: 'a', worktreePath: '/tmp/klaussy-e2e-r5/solo-wt' },
-        { mode: 'copilot', sessionId: 'b', worktreePath: '/tmp/klaussy-e2e-r5/solo-wt' },
+        { mode: 'claude', sessionId: 'a', worktreePath: R5 + '/solo-wt' },
+        { mode: 'copilot', sessionId: 'b', worktreePath: R5 + '/solo-wt' },
       ],
     }]);
     const resume = mainWindow.locator('.saved-session-resume');
@@ -66,7 +76,7 @@ test.describe('resume accessibility', () => {
       ipcMain.handle('resume-session', () => new Promise((r) => setTimeout(() => r({ error: 'session file missing' }), 400)));
     });
     await showInactive(mainWindow, [{
-      isSavedSession: true, path: '/tmp/klaussy-e2e-r5/one-wt', repoPath: '/tmp/klaussy-e2e-r5/one-repo', branch: 'main',
+      isSavedSession: true, path: R5 + '/one-wt', repoPath: R5 + '/one-repo', branch: 'main',
       mode: 'claude', sessionId: 'x', savedAt: Date.now(),
     }]);
     const resume = mainWindow.locator('.saved-session-resume');
@@ -91,8 +101,8 @@ test.describe('resume accessibility', () => {
       ), 300)));
     });
     await showInactive(mainWindow, [
-      { path: SESSION_ROOT + '/repo-a', repoPath: '/tmp/klaussy-e2e-r5/repo-a', branch: 'demo' },
-      { path: SESSION_ROOT + '/repo-b', repoPath: '/tmp/klaussy-e2e-r5/repo-b', branch: 'demo' },
+      { path: SESSION_ROOT + '/repo-a', repoPath: R5 + '/repo-a', branch: 'demo' },
+      { path: SESSION_ROOT + '/repo-b', repoPath: R5 + '/repo-b', branch: 'demo' },
     ]);
     const resumeAll = mainWindow.locator('.session-group[data-session="demo"] .session-group-resume-btn');
     await resumeAll.focus();

@@ -27,6 +27,7 @@ const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
 const { getProvider, isAgentMode, binFor, displayNameFor, RETIRED_AGENTS } = require('../state/ai-providers');
 const { resumeModes } = require('../state/retired-agents');
+const { depthUnder, isSessionWorktreeDir: isWorktreeDirUnder } = require('../util/session-paths');
 const { buildHandoffSeed } = require('../state/session-handoff');
 const { sessionNotesEnv, withSessionContext } = require('../state/session-context');
 const { noteHandoff } = require('../state/session-activity');
@@ -699,7 +700,8 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
     return { error: 'No worktrees given' };
   }
   const sessionsRoot = path.join(os.homedir(), 'klaussy', 'sessions');
-  const inSessionsRoot = (p) => p.startsWith(sessionsRoot + path.sep);
+  const sessionDepth = (p) => depthUnder(sessionsRoot, p);
+  const isSessionWorktreeDir = (p) => isWorktreeDirUnder(sessionsRoot, p);
   const results = [];
   const sessionDirs = new Set();
 
@@ -740,9 +742,9 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
       }
     }
     if (!removed) {
-      // Fallback only INSIDE ~/klaussy/sessions — never force-delete
+      // Fallback only for a session worktree folder — never force-delete
       // arbitrary paths.
-      if (inSessionsRoot(wtPath)) {
+      if (isSessionWorktreeDir(wtPath)) {
         try {
           fs.rmSync(wtPath, { recursive: true, force: true });
           if (repo && repo !== wtPath) {
@@ -764,8 +766,8 @@ ipcMain.handle('delete-session', async (_event, { worktreePaths }) => {
       }
     }
     results.push({ path: wtPath, ok: true });
-    const parent = path.dirname(wtPath);
-    if (inSessionsRoot(parent)) sessionDirs.add(parent);
+    const parent = path.dirname(path.resolve(wtPath));
+    if (sessionDepth(parent) === 1) sessionDirs.add(parent);
   }
 
   // Remove now-empty session folders (sessions root only).

@@ -21,20 +21,28 @@ const test = base.extend({
   configSeed: [ {}, { option: true } ],
   extraEnv: [ {}, { option: true } ],
 
+  // Outside the e2e root (playwright.config.js), so settings stay out of the
+  // folders the renderer may read, as they are for a real user.
   userDataDir: async ({}, use) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-'));
+    const dir = fs.mkdtempSync(path.join(process.env.MAUSSIAN_E2E_SYSTEM_TMP || os.tmpdir(), 'klaussy-e2e-'));
     await use(dir);
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   },
 
   electronApp: async ({ userDataDir, configSeed, extraEnv }, use) => {
-    if (configSeed && Object.keys(configSeed).length) {
-      // schemaVersion stamped so startup migrations leave the seed untouched.
-      fs.writeFileSync(
-        path.join(userDataDir, 'config.json'),
-        JSON.stringify({ schemaVersion: 2, ...configSeed }, null, 2),
-      );
+    // The e2e root, where every spec's temp repos live, is seeded as a folder
+    // the person opened, so the app treats them as known workspaces.
+    const seed = { ...(configSeed || {}) };
+    const root = process.env.MAUSSIAN_E2E_ROOT;
+    if (root) {
+      const recent = seed.recentPaths || {};
+      seed.recentPaths = { ...recent, folders: [root, ...(recent.folders || [])] };
     }
+    // schemaVersion stamped so startup migrations leave the seed untouched.
+    fs.writeFileSync(
+      path.join(userDataDir, 'config.json'),
+      JSON.stringify({ schemaVersion: 3, ...seed }, null, 2),
+    );
     const app = await electron.launch({
       args: [path.join(repoRoot, 'main.js'), `--user-data-dir=${userDataDir}`],
       cwd: repoRoot,

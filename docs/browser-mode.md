@@ -132,11 +132,60 @@ sessions first.
 
 Still to do before anyone else runs it:
 
-- Review every IPC handler against "a hostile page that got paired" and confirm
-  destructive actions outside a worktree in the helper.
+- Handler review, batches 2 and 3 (see "Handler review" below).
 - When the UI moves to app.maussian.ai: allow that origin, answer Chrome's local
   network access preflight for it only, deploy the UI from CI with a strict CSP
   and SRI and no third-party script.
+
+## Handler review
+
+Every main-process IPC handler was audited against "a script injected into the
+page can call any handler with any arguments". That applies to the desktop
+app's window too; a browser tab just makes it a bigger surface. A page can
+already open a terminal and type into it, so an injected script has full use
+of the account either way. What the review closes is doing it silently.
+
+Batch 1 (done):
+
+- `main/util/ipc-guard.js` wraps every `ipcMain.handle` (the few `ipcMain.on`
+  listeners take terminal ids, not paths). A `worktreePath`, `repoPath`,
+  `worktreeHint` or `projectPath` argument, and each entry of `worktreePaths`,
+  must be a workspace the app knows (`path-gate.knownWorkspace`): a project or
+  anything under one, a recent folder, a live task's worktree, a saved session,
+  a git worktree of a known project (read from its `.git` file, with the
+  project's own record pointing back, rather than by running git there), or a
+  worktree a project still registers after its folder is gone.
+  `add-sub-terminal`'s `cwd` isn't one: it's relative to the task's worktree
+  and confined there by `dirUnder`.
+- Five channels bring in a repo the person just picked, so they skip the
+  check: `attach-worktree`, and the New Worktree dialog's `create-task`,
+  `checkout-branch`, `list-branches` and `suggest-worktree-locations` (its
+  source repo can come from Browse, drag-and-drop or recents without being
+  added as a project). A page can call these too: they run git in a repo it
+  names and can create a worktree there. That's the job of those handlers.
+- The renderer roots no longer include userData itself (`config.json` holds
+  tokens and settings that decide what runs), only `pr-checkouts`. A recent
+  folder that is `/`, home, or above home is not a root.
+- `delete-session` force-deletes only `~/klaussy/sessions/<session>/<worktree>`,
+  checked on the normalised path, never a symlink.
+- Renderer-supplied git refs (branch, hash, tag, base branch) can't start with
+  `-`; `git blame` takes its file after `--`.
+- Every agent launch drops a model name with shell characters or a session id
+  that isn't a plain id; every model is quoted (Claude's and Codex's weren't),
+  and the session folders passed as `--add-dir` are single-quoted.
+- Skill files inside `~/.claude` are limited to `skills/`, `commands/`,
+  `agents/`, `plugins/` and `CLAUDE.md`, and only Markdown is written or opened
+  with the OS.
+- The Nemesis connection test sends the saved token only to the saved gateway;
+  Bitbucket credentials go only to bitbucket.org or a host a saved account names.
+
+Batch 2 (to do): settings that lead to running code or sending data out (agent
+binary paths, MCP server commands, notification webhooks and their allow
+list, Kimi's autonomous bash, Nemesis gateways) need a confirmation the page
+can't click for itself, and stored tokens should reach the page masked.
+Batch 3 (to do): gh API path segments (PR and comment numbers, workflow
+inputs), `lsp-request` methods, `test-notification` URLs, the Windows
+`mcp-login-terminal` name, and the medium items in the audit.
 
 ## First-run flow (target)
 

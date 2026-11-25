@@ -101,8 +101,10 @@ test('remote backends declare themselves (special sandbox agents)', () => {
 });
 
 // PowerShell gets single-quoted paths; POSIX shells get JSON double quotes.
+// Session dirs are single-quoted on every platform: inside double quotes a
+// POSIX shell would still run a `$(...)` in a renderer-supplied path.
 function addDir(dir) {
-  return process.platform === 'win32' ? `--add-dir '${dir}'` : `--add-dir ${JSON.stringify(dir)}`;
+  return `--add-dir '${dir}'`;
 }
 
 // Codex's sandbox counts `.git` as outside the project and rejects the write

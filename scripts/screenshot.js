@@ -56,6 +56,10 @@ async function launch({ repo } = {}) {
     fs.rmSync(userDataDir, { recursive: true, force: true });
     if (!repo) fs.rmSync(repoDir, { recursive: true, force: true });
   };
+  // The app only shows a folder it knows (main/util/ipc-guard.js): seed the
+  // repo as one the person opened, which is what opening it would record.
+  fs.writeFileSync(path.join(userDataDir, 'config.json'),
+    JSON.stringify({ schemaVersion: 3, recentPaths: { folders: [repoDir] } }));
   let app;
   try {
     app = await electron.launch({

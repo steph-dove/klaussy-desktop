@@ -5,7 +5,13 @@
 // calls on conversion) against a hand-built tab DOM, so no pty is spawned.
 
 /* global window, document */
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { test, expect } = require('./fixtures');
+
+// A real folder: the app only looks up a model for a worktree it knows.
+const PROBE = fs.mkdtempSync(path.join(os.tmpdir(), 'tab-probe-'));
 
 // Pin the model lookup in the main process. Stubbing window.klaus from the page
 // is silently ignored — contextBridge objects are frozen — and the real handler
@@ -29,11 +35,11 @@ async function seedTask(mainWindow, { id, mode }) {
       '<button class="sub-tab" data-sub-id="0"><span class="sub-tab-label"></span></button>';
     document.body.appendChild(container);
     window.AppState.tasks.set(t.id, {
-      id: t.id, mode: t.mode, worktreePath: '/tmp/tab-probe',
+      id: t.id, mode: t.mode, worktreePath: t.probe,
       container, subTerminals: [],
     });
     window.TerminalManager.refreshAgentChip(t.id);
-  }, { id, mode });
+  }, { id, mode, probe: PROBE });
   return mainWindow.locator('#tab-probe-' + id + ' .sub-tab-label');
 }
 

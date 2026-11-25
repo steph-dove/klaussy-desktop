@@ -117,8 +117,14 @@ function getBitbucketAuth(opts = {}) {
     }
   }
 
-  const activeConfigAccount = accounts.find((a) => a.active && (!a.hostname || a.hostname === host)) || accounts[0];
-  if (activeConfigAccount) {
+  // The next three fallbacks send whichever credentials they find, so they only
+  // apply to bitbucket.org or a host one of the saved accounts names. A host
+  // that came from a pasted URL or the page must never receive them. (.netrc,
+  // below, is looked up by host, so it stays.)
+  const trustedHost = host === 'bitbucket.org' || accounts.some((a) => a && a.hostname === host);
+  const forHost = (a) => a && (a.hostname ? a.hostname === host : host === 'bitbucket.org');
+  const activeConfigAccount = accounts.find((a) => a.active && forHost(a)) || accounts.find(forHost);
+  if (trustedHost && activeConfigAccount) {
     const rawSecret = activeConfigAccount.appPassword || activeConfigAccount.password || activeConfigAccount.token || '';
     const auth = {
       username: resolveEmailIfApiToken(activeConfigAccount.username, rawSecret),
@@ -132,7 +138,7 @@ function getBitbucketAuth(opts = {}) {
   }
 
   // 2. Direct token/password from config
-  if (config.bitbucketToken) {
+  if (trustedHost && config.bitbucketToken) {
     const auth = {
       username: resolveEmailIfApiToken(config.bitbucketUsername, config.bitbucketToken),
       password: config.bitbucketToken,
@@ -145,7 +151,7 @@ function getBitbucketAuth(opts = {}) {
   }
 
   // 3. Environment variables
-  if (process.env.BITBUCKET_TOKEN || process.env.BITBUCKET_BEARER_TOKEN) {
+  if (trustedHost && (process.env.BITBUCKET_TOKEN || process.env.BITBUCKET_BEARER_TOKEN)) {
     const token = process.env.BITBUCKET_TOKEN || process.env.BITBUCKET_BEARER_TOKEN;
     const rawUser = process.env.BITBUCKET_EMAIL || process.env.BITBUCKET_USERNAME || process.env.BITBUCKET_USER || null;
     const auth = {
@@ -159,7 +165,7 @@ function getBitbucketAuth(opts = {}) {
     return auth;
   }
 
-  if ((process.env.BITBUCKET_APP_PASSWORD || process.env.BITBUCKET_PASSWORD) && (process.env.BITBUCKET_USERNAME || process.env.BITBUCKET_USER)) {
+  if (trustedHost && (process.env.BITBUCKET_APP_PASSWORD || process.env.BITBUCKET_PASSWORD) && (process.env.BITBUCKET_USERNAME || process.env.BITBUCKET_USER)) {
     const username = process.env.BITBUCKET_USERNAME || process.env.BITBUCKET_USER;
     const password = process.env.BITBUCKET_APP_PASSWORD || process.env.BITBUCKET_PASSWORD;
     const auth = {

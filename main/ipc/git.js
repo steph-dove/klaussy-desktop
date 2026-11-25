@@ -9,6 +9,7 @@ const { spawn } = require('child_process');
 const { ipcMain } = require('electron');
 const { execFileP, ghExec } = require('../util/exec');
 const { gitErrorReason } = require('../util/git-log-error');
+const { gitRef, gitRefError } = require('../util/git-arg');
 
 // ---- Phase 1: Git Status & Diff ----
 
@@ -132,6 +133,7 @@ ipcMain.handle('git-branches', async (_event, { worktreePath }) => {
 });
 
 ipcMain.handle('git-branch-files', async (_event, { worktreePath, baseBranch }) => {
+  if (!gitRef(baseBranch)) return { files: [], error: gitRefError('base branch') };
   try {
     // Use merge-base to find the branch point, then diff against working tree
     const mbRes = await execFileP('git', ['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath });
@@ -148,6 +150,7 @@ ipcMain.handle('git-branch-files', async (_event, { worktreePath, baseBranch }) 
 });
 
 ipcMain.handle('git-branch-diff', async (_event, { worktreePath, baseBranch, file }) => {
+  if (!gitRef(baseBranch)) return { diff: '', error: gitRefError('base branch') };
   try {
     const mbRes = await execFileP('git', ['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath });
     const mergeBase = mbRes.stdout.trim();
@@ -384,6 +387,7 @@ async function collectWorktreeState(task) {
 
 // D2: Branch checkout
 ipcMain.handle('git-checkout', async (_event, { worktreePath, branch }) => {
+  if (!gitRef(branch)) return { error: gitRefError('branch') };
   try {
     await execFileP('git', ['checkout', branch], { cwd: worktreePath });
     return { ok: true };
@@ -462,6 +466,8 @@ ipcMain.handle('git-log', async (_event, { worktreePath, count }) => {
 });
 
 ipcMain.handle('git-show', async (_event, { worktreePath, hash }) => {
+  // Any revision (a hash, HEAD~1, a tag), as long as it can't become an option.
+  if (!gitRef(hash)) return { diff: '', error: gitRefError('commit') };
   try {
     const { stdout } = await execFileP('git', ['show', '--format=', hash], {
       cwd: worktreePath, maxBuffer: 10 * 1024 * 1024,
@@ -475,7 +481,7 @@ ipcMain.handle('git-show', async (_event, { worktreePath, hash }) => {
 // D5: Blame
 ipcMain.handle('git-blame', async (_event, { worktreePath, file }) => {
   try {
-    const { stdout: output } = await execFileP('git', ['blame', '--porcelain', file], {
+    const { stdout: output } = await execFileP('git', ['blame', '--porcelain', '--', file], {
       cwd: worktreePath, maxBuffer: 10 * 1024 * 1024,
     });
     // Parse porcelain blame into per-line annotations
@@ -547,6 +553,8 @@ ipcMain.handle('git-tags', async (_event, { worktreePath }) => {
 });
 
 ipcMain.handle('git-tag-create', async (_event, { worktreePath, name, message, commit }) => {
+  if (!gitRef(name)) return { error: gitRefError('tag') };
+  if (commit && !gitRef(commit)) return { error: gitRefError('commit') };
   try {
     const args = ['tag'];
     if (message) {
@@ -563,6 +571,7 @@ ipcMain.handle('git-tag-create', async (_event, { worktreePath, name, message, c
 });
 
 ipcMain.handle('git-tag-delete', async (_event, { worktreePath, name }) => {
+  if (!gitRef(name)) return { error: gitRefError('tag') };
   try {
     await execFileP('git', ['tag', '-d', name], { cwd: worktreePath });
     return { ok: true };
@@ -572,6 +581,7 @@ ipcMain.handle('git-tag-delete', async (_event, { worktreePath, name }) => {
 });
 
 ipcMain.handle('git-tag-push', async (_event, { worktreePath, name }) => {
+  if (!gitRef(name)) return { error: gitRefError('tag') };
   try {
     await execFileP('git', ['push', 'origin', name], { cwd: worktreePath, timeout: 15000 });
     return { ok: true };

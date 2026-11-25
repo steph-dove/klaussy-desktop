@@ -23,6 +23,9 @@ if (!acquirePrimaryOrExit()) {
 
 function boot() {
   require('./main/util/logging');
+  // Before any handler registers: every one taking a worktree or repo path
+  // from the renderer then only accepts a workspace the app already knows.
+  require('./main/util/ipc-guard').install();
   // Before app ready — it registers the privileged schemes.
   require('./main/bootstrap/privileged-schemes');
   const pathGate = require('./main/util/path-gate');

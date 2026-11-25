@@ -104,14 +104,13 @@ function claudeUsage(u) {
 // these through each agent's add-directory flag lets the agent READ and EDIT
 // its sibling worktrees, not just its own cwd — without them the agents treat
 function quotedSessionDirs(sessionDirs) {
-  // PowerShell (the Windows default shell) doesn't treat `\` as an escape, so
-  // JSON.stringify's doubled backslashes (`C:\\Users\\…`) would reach the agent
-  // verbatim and break the --add-dir path. Single-quote it literally there.
-  // POSIX shells keep the JSON double-quoted form (their paths have no `\`).
-  const isWin = process.platform === 'win32';
+  // Single-quoted on every platform (shQuote). The dirs can come from the
+  // renderer, and inside double quotes a POSIX shell still runs `$(...)`.
+  // PowerShell (the Windows default shell) also needs them single-quoted, since
+  // it doesn't treat `\` as an escape.
   return (Array.isArray(sessionDirs) ? sessionDirs : [])
     .filter((d) => typeof d === 'string' && d)
-    .map((d) => (isWin ? `'${d.replace(/'/g, "''")}'` : JSON.stringify(d)));
+    .map((d) => shQuote(d));
 }
 
 // A Nemesis8 gateway URL points at another machine (vs localhost/empty, which
@@ -159,7 +158,7 @@ const PROVIDERS = {
     // resumeLatest is ignored: callers already looked up the latest id, and a bare --resume opens the picker.
     buildInteractiveCmd(bin, { resumeSessionId, model, sessionDirs } = {}) {
       let base = resumeSessionId ? `${bin} --resume ${resumeSessionId}` : bin;
-      if (model) base += ` --model ${model}`; // alias (opus/sonnet/haiku) or full id
+      if (model) base += ` --model ${JSON.stringify(model)}`; // alias (opus/sonnet/haiku) or full id
       // Grant access to sibling session worktrees so cross-repo edits work.
       const dirs = quotedSessionDirs(sessionDirs);
       if (dirs.length) base += ` --add-dir ${dirs.join(' ')}`;
@@ -273,7 +272,7 @@ const PROVIDERS = {
     buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, model, sessionDirs, notesDir } = {}) {
       // Top-level flags precede the `resume` subcommand. The notes dir is
       // granted because Codex's sandbox counts `.git` as outside the project.
-      const m = model ? ` -m ${model}` : '';
+      const m = model ? ` -m ${JSON.stringify(model)}` : '';
       const writable = notesDir ? [...(sessionDirs || []), notesDir] : sessionDirs;
       const dirs = quotedSessionDirs(writable).map((d) => ` --add-dir ${d}`).join('');
       const top = `${bin}${m}${dirs}`;
@@ -811,7 +810,8 @@ const PROVIDERS = {
       let base = bin;
       let cfg = {};
       try { cfg = loadConfig() || {}; } catch {}
-      const effectiveModel = model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel;
+      // Read from settings after the launch wrapper ran, so checked here too.
+      const effectiveModel = safeModel(model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel);
       if (effectiveModel) {
         try { require('./opencode-config').ensureOpenCodeOllamaConfig(effectiveModel, cwd); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
         base += ` --model ${JSON.stringify(effectiveModel)}`;
@@ -827,7 +827,8 @@ const PROVIDERS = {
       const args = ['run'];
       let cfg = {};
       try { cfg = loadConfig() || {}; } catch {}
-      const effectiveModel = model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel;
+      // Read from settings after the launch wrapper ran, so checked here too.
+      const effectiveModel = safeModel(model || (cfg.agentModel && cfg.agentModel.opencode) || cfg.opencodeModel);
       if (effectiveModel) {
         try { require('./opencode-config').ensureOpenCodeOllamaConfig(effectiveModel); } catch (e) { console.warn('[opencode-config] provider config failed:', e.message); }
         args.push('--model', effectiveModel);
@@ -970,7 +971,7 @@ const PROVIDERS = {
 
     buildInteractiveCmd(bin, { resumeSessionId, model } = {}) {
       const m = model || 'qwen2.5-coder:7b';
-      return `${bin} --model ollama/${m}`;
+      return `${bin} --model ${JSON.stringify(`ollama/${m}`)}`;
     },
     buildHeadlessRun(bin, { prompt, mode, model } = {}) {
       const m = model || 'qwen2.5-coder:7b';
@@ -1028,6 +1029,39 @@ const PROVIDERS = {
 };
 
 const PROVIDER_IDS = Object.keys(PROVIDERS);
+
+// Every interactive command is a shell string typed into the agent's pty, and
+// the model and session id in it come from settings and saved sessions, which
+// the page can write. Models are double-quoted, so refuse what expands or
+// escapes inside double quotes in a POSIX shell or PowerShell; a session id is
+// a plain id. Anything else is dropped (the agent's default is used) rather
+// than run.
+const UNSAFE_IN_QUOTES = /[$`"\\!%\x00-\x1f\x7f]/; // % expands in cmd.exe
+function safeModel(model) {
+  if (model == null || model === '') return model;
+  if (typeof model !== 'string' || model.length > 200 || UNSAFE_IN_QUOTES.test(model)) {
+    console.warn('[ai-providers] ignoring a model name with shell characters in it');
+    return '';
+  }
+  return model;
+}
+function safeSessionId(id) {
+  if (id == null || id === '') return id;
+  if (typeof id !== 'string' || !/^[\w.:-]{1,200}$/.test(id)) {
+    console.warn('[ai-providers] ignoring a session id that is not a plain id');
+    return null;
+  }
+  return id;
+}
+for (const p of Object.values(PROVIDERS)) {
+  const build = p.buildInteractiveCmd;
+  if (typeof build !== 'function') continue;
+  p.buildInteractiveCmd = function buildInteractiveCmdSafely(bin, opts = {}) {
+    const clean = { ...opts, model: safeModel(opts.model), resumeSessionId: safeSessionId(opts.resumeSessionId) };
+    if (opts.profile && opts.profile.model) clean.profile = { ...opts.profile, model: safeModel(opts.profile.model) };
+    return build.call(this, bin, clean);
+  };
+}
 
 const { RETIRED_AGENTS } = require('./retired-agents');
 
@@ -1260,6 +1294,8 @@ function displayNameFor(mode) {
 
 module.exports = {
   PROVIDER_IDS,
+  safeModel,
+  safeSessionId,
   RETIRED_AGENTS,
   getProvider,
   isAgentMode,
