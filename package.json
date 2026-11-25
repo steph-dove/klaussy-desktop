@@ -23,6 +23,7 @@
     "test": "node --require ./test/setup.js --test test/util/*.test.js",
     "test:web": "node --test test/web/*.test.js",
     "test:e2e": "playwright test",
+    "test:e2e:affected": "node scripts/e2e-affected.js",
     "secrets": "gitleaks git --no-banner --redact --config .gitleaks.toml .",
     "screenshot": "node scripts/screenshot.js",
     "rebuild": "electron-rebuild",

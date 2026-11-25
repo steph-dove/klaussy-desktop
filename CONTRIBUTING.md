@@ -24,7 +24,27 @@ npm run lint     # eslint over main/, renderer/, preload.js, main.js
 npm test         # unit tests (node --require ./test/setup.js --test test/util/*.test.js)
 npm run secrets  # gitleaks over the full history (brew install gitleaks)
 npm run test:e2e # Playwright e2e (optional; launches the app)
+npm run test:e2e:affected  # only the e2e specs your branch can affect
 ```
+
+The full e2e suite takes about 40 minutes. `test:e2e:affected` looks at what
+changed since your branch left `origin/main` (uncommitted and untracked work
+included) and runs only the specs that change can reach: from a changed IPC
+handler to the `window.klaus` API that calls it, the renderer code using that
+API, and the specs touching that UI. It prints why it picked each spec.
+
+```bash
+npm run test:e2e:affected -- --list              # show the choice, run nothing
+npm run test:e2e:affected -- --base my-branch    # compare with another ref
+npm run test:e2e:affected -- --all               # run the whole suite anyway
+npm run test:e2e:affected -- -- --reporter=line  # after a second --, args go to Playwright
+```
+
+It runs everything for a change to `main.js`, startup code, CSS, the e2e
+fixtures or config, a deleted app file, a file it has no rule for, or a
+`preload.js` change it can't map to channels. Docs, unit tests, `web/` (browser
+mode, covered by `npm run test:web`) and packaging run nothing. A changed file no
+spec reaches is listed: unit tests are the check for those.
 
 To screenshot the app as it is (for a plan or a PR), `npm run screenshot` boots it
 the way the e2e tests do, skips the first-run Setup check, opens a repo in the
