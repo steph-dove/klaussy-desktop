@@ -15,6 +15,7 @@
 
 const { app, dialog, BrowserWindow } = require('electron');
 const log = require('electron-log');
+const { installRenameOnQuit } = require('../util/bundle-rename');
 
 let _installed = false;
 
@@ -32,6 +33,10 @@ function install() {
     log.warn('[updater] electron-updater not installed; skipping');
     return;
   }
+
+  // The Klaussy.app -> Maussian.app rename on quit, gated on the update check (see
+  // bundle-rename.js). Registered before the check can start, so no event is missed.
+  installRenameOnQuit({ app, autoUpdater, log });
 
   autoUpdater.logger = log;
   autoUpdater.autoDownload = true;

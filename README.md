@@ -49,7 +49,7 @@ Prebuilt, signed, and notarized binaries are available for macOS, Windows, and L
 
 ➡️ **[Download the Latest Release](https://github.com/steph-dove/klaussy-desktop/releases/latest)** &nbsp;|&nbsp; **[★ Star this Repo](https://github.com/steph-dove/klaussy-desktop)** &nbsp;|&nbsp; 💬 **[Join the Discord](https://discord.gg/ZxNhsuMyYu)**
 
-*   **macOS:** signed + notarized using Apple Developer ID. Drag `Klaussy.app` to `/Applications`.
+*   **macOS:** signed + notarized using Apple Developer ID. Open the Maussian DMG (`Maussian-<version>-<arch>.dmg`) and drag the app to `/Applications`. The file starts out as `Klaussy.app` (that keeps updates from older versions reopening on their own) and becomes `Maussian.app` after the app quits once. It's called Maussian everywhere else.
 *   **Windows:** signed with an EV Code Signing certificate. Run the installer.
 *   **Linux:** AppImage, `.deb`, and `.tar.gz` packages are provided.
 

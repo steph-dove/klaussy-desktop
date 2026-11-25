@@ -102,6 +102,7 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "icon": "icon.icns",
+      "executableName": "Klaussy",
       "target": [
         {
           "target": "dmg",

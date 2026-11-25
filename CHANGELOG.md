@@ -2,6 +2,13 @@
 
 All notable changes to Maussian Desktop (formerly Klaussy Desktop) are documented here.
 
+## Unreleased
+
+### 🍎 Mac Updates Reopen Again
+
+- **Reopens After Updating**: updating from Klaussy closed the app and left a question mark in the Dock. Updates now install in place and reopen, like before the rename.
+- **Renamed On Quit**: the app file keeps the name `Klaussy.app` while it updates, then becomes `Maussian.app` the next time you quit with nothing to install. A Mac that already took 0.32.0 misses one more reopen on its next update, then renames itself and updates normally from then on.
+
 ## 0.32.0
 
 ### 🐭 Klaussy Is Now Maussian
