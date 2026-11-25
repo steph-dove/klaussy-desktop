@@ -15,6 +15,8 @@ const { allProviders, getProvider, binFor, installCommandFor, docsUrlFor, authMe
 const nemesis = require('../util/nemesis-client');
 const { resolveAgentBin } = require('../util/agent-bin');
 const { replacementFor } = require('../state/retired-agents');
+const sensitive = require('../util/sensitive-prefs');
+const { confirm } = require('../util/confirm-sensitive');
 
 function defaultAgentFor(config) {
   const id = config.defaultProvider || config.defaultMode || 'claude';
@@ -289,9 +291,11 @@ ipcMain.handle('get-preferences', () => {
     broadcastPlacement: config.broadcastPlacement === 'floating' ? 'floating' : 'sidebar',
     // Nemesis8 named gateway profiles (migrates the legacy single-gateway keys
     // into one profile when none exist yet).
-    nemesisProfiles: getNemesisProfiles(),
+    // Saved tokens reach the page masked (sensitive-prefs.js); saving the mask
+    // back keeps the token, and reveal-secret shows one after an OK.
+    nemesisProfiles: sensitive.maskProfiles(getNemesisProfiles()),
     // Slack/Discord webhook gateway (URLs, per-event mutes, new-session default).
-    notificationGateway: getNotificationConfig(config),
+    notificationGateway: sensitive.maskGateway(getNotificationConfig(config)),
   };
 });
 
@@ -360,8 +364,73 @@ ipcMain.handle('test-notification', async (_event, cfg) => {
   }
 });
 
-ipcMain.handle('set-preferences', (_event, prefs) => {
+const GATEWAY_KEYS = [
+  'enabled', 'slackWebhookUrl', 'discordWebhookUrl', 'nemesisUrl', 'slackAppToken', 'slackBotToken',
+  'slackChannel', 'discordBotToken', 'discordChannel', 'allowList', 'notifyNewSessions',
+  'summarizeMessages', 'staleAfterSeconds',
+];
+const GATEWAY_EVENTS = ['completed', 'failed', 'approvalRequired', 'stale', 'message'];
+function pickGatewayFields(ng) {
+  const out = {};
+  if (!ng || typeof ng !== 'object') return out;
+  for (const k of GATEWAY_KEYS) if (ng[k] !== undefined) out[k] = ng[k];
+  if (ng.events && typeof ng.events === 'object') {
+    out.events = {};
+    for (const e of GATEWAY_EVENTS) if (ng.events[e] !== undefined) out.events[e] = !!ng.events[e];
+  }
+  return out;
+}
+
+// Changes that make the app run something or send data somewhere new wait for
+// an OK the page can't give (confirm-sensitive.js); everything else saves now.
+const SOCKET_KEYS = ['slackAppToken', 'slackBotToken', 'slackChannel', 'discordBotToken', 'discordChannel'];
+
+// What the Preferences window should show for changes it was refused: the saved values.
+function savedValuesFor(changes, config) {
+  const out = {};
+  for (const c of changes) {
+    if (sensitive.AGENT_PATH_KEYS.includes(c.key)) out[c.key] = config[c.key] || '';
+    else if (c.key === 'kimiAutonomousBash') out.kimiAutonomousBash = kimiBashGranted();
+    else if (c.key.startsWith('ng.')) {
+      const k = c.key.slice(3);
+      const ng = sensitive.maskGateway(getNotificationConfig(config));
+      out.notificationGateway = { ...(out.notificationGateway || {}), [k]: ng[k] };
+    } else if (c.key.startsWith('nemesis.')) {
+      const id = c.key.slice('nemesis.'.length, -'.remote'.length);
+      const p = getNemesisProfiles().find((x) => x.id === id);
+      out.nemesisRemotes = { ...(out.nemesisRemotes || {}), [id]: (p && p.remote) || '' };
+    }
+  }
+  return out;
+}
+
+const sensitiveGate = new sensitive.SensitiveGate({
+  confirm,
+  onDecision(allowed, changes) {
+    const config = loadConfig();
+    let error = null;
+    if (allowed) {
+      sensitive.applyChanges(config, changes);
+      saveConfig(config);
+      if (changes.some((c) => c.key === 'kimiAutonomousBash')) {
+        const r = require('../state/kimi-permissions').setGranted(true);
+        if (r.error) error = `Could not update kimi's config.toml: ${r.error}`;
+      }
+      if (changes.some((c) => c.key.startsWith('ng.') && SOCKET_KEYS.includes(c.key.slice(3)))) scheduleGatewayRestart();
+    }
+    const decision = { allowed, labels: changes.map((c) => c.label), error };
+    const payload = { sensitiveDecision: decision, ...(allowed ? {} : { sensitiveRevert: savedValuesFor(changes, config) }) };
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('preferences-changed', payload);
+    }
+  },
+});
+
+ipcMain.handle('set-preferences', (_event, rawPrefs) => {
   const config = loadConfig();
+  const held = sensitive.sensitiveChanges(rawPrefs || {}, config, { kimiGranted: kimiBashGranted() });
+  const prefs = sensitive.withoutChanges(rawPrefs || {}, config, held);
+  const waiting = sensitiveGate.offer(held, sensitive.mentionedKeys(rawPrefs || {}));
   if (prefs.fontFamily !== undefined) config.fontFamily = prefs.fontFamily;
   if (prefs.fontSize !== undefined) config.fontSize = prefs.fontSize;
   if (prefs.lineHeight !== undefined) config.lineHeight = prefs.lineHeight;
@@ -456,15 +525,16 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   // Merged, not replaced, so a partial update (or a key the UI doesn't expose,
   // like nemesisUrl) survives a save from the prefs window.
   if (prefs.notificationGateway !== undefined && prefs.notificationGateway !== null) {
-    const ng = prefs.notificationGateway;
+    // Only the fields the app reads: anything else a page put in would be saved
+    // unasked. The ones that need an OK were already put back by withoutChanges.
+    const ng = pickGatewayFields(prefs.notificationGateway);
     const prev = config.notificationGateway || {};
     config.notificationGateway = Object.assign({}, prev, ng, {
       events: Object.assign({}, prev.events, ng.events),
     });
     // Sockets capture credentials at connect time. This save fires per
     // keystroke, so debounce or typing a token means a reconnect per character.
-    const socketKeys = ['slackAppToken', 'slackBotToken', 'slackChannel', 'discordBotToken', 'discordChannel'];
-    if (socketKeys.some((k) => (prev[k] || '') !== (config.notificationGateway[k] || ''))) {
+    if (SOCKET_KEYS.some((k) => (prev[k] || '') !== (config.notificationGateway[k] || ''))) {
       scheduleGatewayRestart();
     }
   }
@@ -486,11 +556,16 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   }
   saveConfig(config);
 
-  // Broadcast to all windows so they can apply changes live; pop-outs aren't in allWindows.
+  // Broadcast to all windows so they can apply changes live; pop-outs aren't in
+  // allWindows. Tokens go out masked, like get-preferences.
+  const shown = { ...prefs };
+  if (shown.notificationGateway) shown.notificationGateway = sensitive.maskGateway(shown.notificationGateway);
+  if (Array.isArray(shown.nemesisProfiles)) shown.nemesisProfiles = sensitive.maskProfiles(shown.nemesisProfiles);
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('preferences-changed', prefs);
+    if (!win.isDestroyed()) win.webContents.send('preferences-changed', shown);
   }
-  return kimiError ? { ok: false, error: kimiError } : { ok: true };
+  const extra = { pending: waiting.pending, refused: waiting.refused };
+  return kimiError ? { ok: false, error: kimiError, ...extra } : { ok: true, ...extra };
 });
 
 ipcMain.handle('get-claude-info', async () => {
@@ -558,16 +633,23 @@ function remoteSetupSteps(platform = process.platform, provider = '', token = ''
   // Sign the agent in with its subscription — required, or the agent hangs and
   // its container is killed after 120s. Interactive, so it's a step we can't run.
   const login = `nemesis8 login${flag}   # sign in to the agent (interactive) — required`;
-  // Inline the token Maussian stores so the gateway and app can't drift.
-  const tok = token || '<generate one in Preferences>';
+  // The token itself isn't inlined: these steps reach the page, which only ever
+  // sees tokens masked. Preferences → Nemesis8 → Show reveals it after an OK.
+  const tok = token ? '<your token: Preferences \u2192 Nemesis8 \u2192 Show>' : '<generate one in Preferences>';
   const tokenLine = win ? `$env:NEMESIS8_AUTH_TOKEN="${tok}"` : `export NEMESIS8_AUTH_TOKEN="${tok}"`;
   return [install, login, tokenLine, `nemesis8 serve${flag}`];
 }
 
 // "Test connection" for the prefs section. Tests the values passed from the
 // form directly (not saved config) so it can't race the async config write.
-ipcMain.handle('test-nemesis-connection', async (_event, { remote, token } = {}) => {
-  const saved = getNemesisConfig();
+ipcMain.handle('test-nemesis-connection', async (_event, { remote, token, profileId } = {}) => {
+  const byId = typeof profileId === 'string' ? getNemesisProfiles().find((p) => p.id === profileId) : null;
+  const saved = byId || getNemesisConfig();
+  // A masked token from the form means "the saved one", which the rule below
+  // only sends to the saved gateway; any other mask is no token.
+  if (typeof token === 'string' && sensitive.isMasked(token)) {
+    token = token === sensitive.maskToken(saved.token) ? undefined : '';
+  }
   const url = remote !== undefined ? remote : saved.remote;
   // The saved token only ever goes to the saved gateway; testing some other
   // address uses whatever token the form passes, or none.
@@ -586,4 +668,24 @@ ipcMain.handle('test-nemesis-connection', async (_event, { remote, token } = {})
   };
 });
 
-module.exports = { openPreferencesWindow, remoteSetupSteps };
+// Shows one saved token to the page, after an OK it can't give itself.
+// { kind: 'nemesis', id } or { kind: 'gateway', field }.
+ipcMain.handle('reveal-secret', async (_event, { kind, id, field } = {}) => {
+  let value = '';
+  let label = '';
+  if (kind === 'nemesis') {
+    const p = getNemesisProfiles().find((x) => x.id === id);
+    value = (p && p.token) || '';
+    label = `the token for Nemesis gateway "${(p && p.name) || id}"`;
+  } else if (kind === 'gateway' && sensitive.GATEWAY_TOKENS.has(field)) {
+    value = getNotificationConfig(loadConfig())[field] || '';
+    label = `the saved ${field.replace(/Token$/, '').replace(/([a-z])([A-Z])/g, '$1 $2')} token`;
+  } else {
+    return { error: 'Unknown secret' };
+  }
+  if (!value) return { error: 'Nothing saved' };
+  const ok = await confirm({ title: `Show ${label}?`, lines: ['It will appear in the Preferences window.'] });
+  return ok ? { value } : { error: 'Not allowed' };
+});
+
+module.exports = { openPreferencesWindow, remoteSetupSteps, sensitiveGate };

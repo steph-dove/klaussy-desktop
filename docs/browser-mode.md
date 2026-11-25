@@ -132,7 +132,6 @@ sessions first.
 
 Still to do before anyone else runs it:
 
-- Handler review, batch 2 (see "Handler review" below).
 - When the UI moves to app.maussian.ai: allow that origin, answer Chrome's local
   network access preflight for it only, deploy the UI from CI with a strict CSP
   and SRI and no third-party script.
@@ -179,10 +178,34 @@ Batch 1 (done):
 - The Nemesis connection test sends the saved token only to the saved gateway;
   Bitbucket credentials go only to bitbucket.org or a host a saved account names.
 
-Batch 2 (to do): settings that lead to running code or sending data out (agent
-binary paths, MCP server commands, notification webhooks and their allow
-list, Kimi's autonomous bash, Nemesis gateways) need a confirmation the page
-can't click for itself, and stored tokens should reach the page masked.
+Batch 2 (done):
+
+- Settings that make the app run something or send data somewhere new wait for
+  an OK the page can't give (`main/util/confirm-sensitive.js`): an agent's
+  binary path, Kimi's autonomous bash turned on, a webhook URL, bot token or
+  channel, new names on the chat allow list, approve/reject buttons turned on,
+  a Nemesis gateway address, and adding an MCP server. Clearing any of them
+  never asks.
+- Where it asks: the desktop app shows a native dialog. In browser mode the
+  `dialog` module is answered by the page, so the helper asks in the terminal
+  running `npm run web` instead (`Allow? [y/N]`). Only `y` or `yes` allows;
+  no answer within 2 minutes, or no terminal, is no. If the helper later runs
+  without a terminal, it swaps in a native dialog through `setAsker` and
+  nothing else changes.
+- Preferences saves on every keystroke pause, so these changes are held until
+  they stop changing (1.5 s) and asked about together, once
+  (`main/util/sensitive-prefs.js`). The rest of the save goes through at once.
+  A "no" is remembered for that exact value and the window puts the saved
+  value back, so the next autosave doesn't ask again.
+- Saved tokens (Slack and Discord bot/app tokens, Nemesis gateway tokens)
+  reach the page masked: eight dots and the last four characters. Saving the
+  mask back keeps the token. The Nemesis setup commands no longer inline it,
+  and its connection test and local setup take the profile id and use the
+  saved token themselves. Preferences' Show button (`reveal-secret`) shows a
+  Nemesis token after an OK.
+- "Set up locally" (`nemesis-setup-local`) downloads and runs nemesis8's
+  install script, so it asks too, and it only works for a saved profile.
+
 Batch 3 (done):
 
 - Every PR number, comment number, run id and check-run id that goes into a

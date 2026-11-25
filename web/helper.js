@@ -223,6 +223,11 @@ function pairAllowed() {
 
 // ---- boot the desktop main process -----------------------------------------
 
+// Settings that run something or send data out ask for an OK. Here `dialog` is
+// answered by the page, so they ask in this terminal instead.
+const confirmSensitive = require(path.join(ROOT, 'main/util/confirm-sensitive'));
+confirmSensitive.setAsker(confirmSensitive.terminalAsker());
+
 require(path.join(ROOT, 'main.js'));
 const windowsState = require(path.join(ROOT, 'main/state/windows'));
 const { BrowserWindow, ipcMain } = electron;

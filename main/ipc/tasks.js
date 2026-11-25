@@ -1317,12 +1317,43 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
 
 // One-click gateway setup in a Maussian terminal tab — a real TTY, which the
 // interactive `nemesis8 login` needs: spawn a shell, focus it, type the script.
-ipcMain.handle('nemesis-setup-local', (_event, opts = {}) => {
+ipcMain.handle('nemesis-setup-local', async (_event, opts = {}) => {
   const { nemesisSetupScript, nemesisRunCmd, setupInputsOk } = require('../util/nemesis-setup');
-  const token = String(opts.token || '').trim() || crypto.randomBytes(24).toString('hex');
+  // Preferences only holds a masked token, so a profile's saved token is looked
+  // up here; a freshly generated one is saved into that profile, and only its
+  // mask goes back to the page.
+  const sensitive = require('../util/sensitive-prefs');
+  const { loadConfig: load, saveConfig: save, getNemesisProfiles } = require('../util/config');
+  const profileId = typeof opts.profileId === 'string' ? opts.profileId : '';
+  const savedProfile = profileId ? getNemesisProfiles().find((p) => p.id === profileId) : null;
+  if (!savedProfile) return { error: 'Save this gateway in Preferences first, then set it up.' };
+  let token = sensitive.unmaskToken(String(opts.token || '').trim(), savedProfile.token);
+  // A mask that isn't this profile's saved token stands for nothing we have.
+  if (sensitive.isMasked(token)) return { error: 'That token isn\u2019t this gateway\u2019s saved one. Generate or paste a new one.' };
+  const generated = !token;
+  if (generated) token = crypto.randomBytes(24).toString('hex');
   const provider = String(opts.provider || '').trim();
   if (!setupInputsOk(provider, token)) {
     return { error: 'The provider must be a plain name, and the token letters, digits, - or _ (8 or more).' };
+  }
+  // It downloads and runs nemesis8's install script, so it waits for an OK the
+  // page can't give.
+  const ok = await require('../util/confirm-sensitive').confirm({
+    title: 'Set up a Nemesis8 gateway on this computer?',
+    lines: [
+      'Installs nemesis8 if it\u2019s missing (curl https://nemesis8.nuts.services/install.sh | sh),',
+      'signs in to the sandbox agent and starts the gateway on port 9801.',
+      ...(generated ? ['Saves a new gateway token for this profile.'] : []),
+    ],
+  });
+  if (!ok) return { error: 'Not started: it wasn\u2019t allowed.' };
+  // Saved before the terminal starts, so the gateway and the profile can't disagree.
+  if (generated) {
+    const cfg = load();
+    const p = (Array.isArray(cfg.nemesisProfiles) ? cfg.nemesisProfiles : []).find((x) => x && x.id === profileId);
+    if (!p) return { error: 'Save this gateway in Preferences first, then set it up.' };
+    p.token = token;
+    save(cfg);
   }
 
   const { ext, content } = nemesisSetupScript(process.platform, provider, token);
@@ -1360,7 +1391,7 @@ ipcMain.handle('nemesis-setup-local', (_event, opts = {}) => {
   if (win && !win.isDestroyed()) {
     try { win.webContents.send('open-external-task', task); win.focus(); } catch { /* window gone */ }
   }
-  return { ok: true, token, taskId: task.id };
+  return { ok: true, token: sensitive.maskToken(token), taskId: task.id };
 });
 
 ipcMain.handle('kill-sub-terminal', (_event, { taskId, subId }) => {

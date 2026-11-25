@@ -10,22 +10,27 @@
 // Claude CLI. (No assertion on prompt fidelity — the fake ignores its args.)
 
 const os = require('os');
+const path = require('path');
+const fs = require('fs');
 const { test, expect } = require('./fixtures');
-const { buildRepo, makeBinDir, writeFakeAgent, git, rm } = require('./helpers');
+const { buildRepo, writeFakeAgent, git, rm } = require('./helpers');
 
 // Static at collection time (extraEnv is read when the spec is loaded). The
 // fake agent echoes this after its FAKE-AGENT-READY banner; we match on it so a
 // stray banner from some other path can't pass the assertion.
 const TAG = `FAKE-AI-${process.pid}`;
-test.use({ extraEnv: { FAKE_AGENT_OUTPUT: TAG } });
+// Seeded before launch: an agent path set from the page now waits for an OK the
+// page can't give (main/util/sensitive-prefs.js), which is the point.
+const BIN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-e2e-fakebin-explain-'));
+const FAKE_AGENT = writeFakeAgent(BIN_DIR, 'claude');
+test.use({ extraEnv: { FAKE_AGENT_OUTPUT: TAG }, configSeed: { claudePath: FAKE_AGENT, defaultProvider: 'claude' } });
+test.afterAll(() => rm(BIN_DIR));
 
 test('✨ commit message: fake agent output streams into #commit-message', async ({ mainWindow }) => {
   await mainWindow.waitForLoadState('networkidle');
   await expect(mainWindow.locator('#btn-new-task')).toBeVisible();
 
   const repo = buildRepo({ 'a.txt': 'one\n' }, 'commitmsg');
-  const binDir = makeBinDir();
-  const fakeAgent = writeFakeAgent(binDir, 'claude');
 
   try {
     // Stage a real change so `git diff --cached` (read by the handler) is non-empty.
@@ -33,9 +38,6 @@ test('✨ commit message: fake agent output streams into #commit-message', async
     git(repo, 'config', 'user.name', 'e2e');
     require('fs').writeFileSync(repo + '/a.txt', 'one\ntwo\n');
     git(repo, 'add', 'a.txt');
-
-    // binFor / defaultAgentProvider both read config at spawn time.
-    await mainWindow.evaluate((p) => window.klaus.ui.setPreferences({ claudePath: p, defaultProvider: 'claude' }), fakeAgent);
 
     // Open the diff panel on the repo and reveal the commit area, then drive the
     // real sparkle button.
@@ -54,7 +56,6 @@ test('✨ commit message: fake agent output streams into #commit-message', async
     expect(value, `commit message:\n${value}`).toContain('FAKE-AGENT-READY claude');
   } finally {
     rm(repo);
-    rm(binDir);
   }
 });
 
@@ -63,14 +64,10 @@ test('explain-diff: selecting diff text + Explain streams the agent output inlin
   await expect(mainWindow.locator('#btn-new-task')).toBeVisible();
 
   const repo = buildRepo({ 'app.js': 'const x = 1;\nconst y = 2;\nconst z = 3;\n' }, 'explain');
-  const binDir = makeBinDir();
-  const fakeAgent = writeFakeAgent(binDir, 'claude');
 
   try {
     // Unstaged modification → a real working-tree diff to render and select.
     require('fs').writeFileSync(repo + '/app.js', 'const x = 1;\nconst y = 22;\nconst z = 3;\n');
-
-    await mainWindow.evaluate((p) => window.klaus.ui.setPreferences({ claudePath: p, defaultProvider: 'claude' }), fakeAgent);
 
     // Reveal the panel and populate the file list WITHOUT DiffPanel.show() — that
     // path installs an fs watcher whose refresh can re-render #diff-view during
@@ -116,6 +113,5 @@ test('explain-diff: selecting diff text + Explain streams the agent output inlin
     await expect(body).toContainText('FAKE-AGENT-READY claude');
   } finally {
     rm(repo);
-    rm(binDir);
   }
 });

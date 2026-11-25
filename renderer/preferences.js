@@ -327,6 +327,8 @@
 
     var res = await window.klaus.ui.setPreferences(updated);
     if (res && res.error) showStatus(res.error, true, /kimi/i.test(res.error) ? kimiBash : null);
+    else if (res && res.refused && res.refused.length) showStatus('Not saved, you said no: ' + res.refused.join(', '), true);
+    else if (res && res.pending && res.pending.length) showStatus('Waiting for your OK: ' + res.pending.join(', ') + ' (Maussian will ask in a moment)');
     else showStatus('Saved');
   }
 
@@ -382,6 +384,37 @@
   broadcastPlacement.addEventListener('change', saveAll);
   // The mic button and the broadcast bar's dock button change these from the main window; without the sync the next autosave would undo them.
   window.klaus.ui.onPreferencesChanged(function (changed) {
+    if (changed.sensitiveDecision) {
+      var d = changed.sensitiveDecision;
+      if (d.error) showStatus(d.error, true);
+      else if (d.allowed) showStatus('Saved: ' + d.labels.join(', '));
+      else showStatus('Not saved, you said no: ' + d.labels.join(', '), true);
+    }
+    // A refused change: put the saved value back, or the next autosave asks again.
+    var r = changed.sensitiveRevert;
+    if (r) {
+      Object.keys(agentPaths).forEach(function (id) {
+        var key = agentPaths[id].prefKey;
+        if (r[key] !== undefined) agentPaths[id].input.value = r[key];
+      });
+      if (r.kimiAutonomousBash !== undefined) kimiBash.checked = !!r.kimiAutonomousBash;
+      var ngIds = {
+        slackWebhookUrl: 'pref-slack-webhook', discordWebhookUrl: 'pref-discord-webhook',
+        slackAppToken: 'pref-slack-app-token', slackBotToken: 'pref-slack-bot-token', slackChannel: 'pref-slack-channel',
+        discordBotToken: 'pref-discord-bot-token', discordChannel: 'pref-discord-channel',
+      };
+      var ngr = r.notificationGateway || {};
+      Object.keys(ngr).forEach(function (k) {
+        if (ngIds[k]) document.getElementById(ngIds[k]).value = ngr[k] || '';
+        if (k === 'allowList') document.getElementById('pref-notify-allowlist').value = (ngr[k] || []).join(', ');
+      });
+      if (r.nemesisRemotes) {
+        nemesisProfiles.forEach(function (p) {
+          if (r.nemesisRemotes[p.id] !== undefined) p.remote = r.nemesisRemotes[p.id];
+        });
+        renderNemesisProfiles();
+      }
+    }
     if (changed.voiceInput !== undefined) voiceInput.checked = !!changed.voiceInput;
     if (changed.broadcastPlacement !== undefined) broadcastPlacement.value = changed.broadcastPlacement === 'floating' ? 'floating' : 'sidebar';
   });
@@ -661,6 +694,8 @@
     var win = window.klaus.ui.platform === 'win32';
     var flag = profile.provider ? ' --provider ' + profile.provider : '';
     var token = (profile.token || '').trim();
+    // A saved token reaches this window masked; Show swaps in the real one.
+    if (token.indexOf('\u2022\u2022\u2022\u2022') === 0) token = '<your token: click Show>';
     var install = win
       ? 'powershell -c "irm https://nemesis8.nuts.services/install.ps1 | iex"'
       : 'curl -fsSL https://nemesis8.nuts.services/install.sh | sh';
@@ -715,6 +750,11 @@
     providerEl.addEventListener('change', function () { profile.provider = providerEl.value; saveAll(); refresh(); });
     modelEl.addEventListener('input', function () { profile.model = modelEl.value; saveAll(); });
 
+    q('.np-show').addEventListener('click', async function () {
+      var res = await window.klaus.ui.revealSecret({ kind: 'nemesis', id: profile.id });
+      if (res && res.value) { profile.token = res.value; tokenEl.value = res.value; tokenEl.type = 'text'; refresh(); }
+      else setStatus('err', escHtml((res && res.error) || 'not shown'));
+    });
     q('.np-gen').addEventListener('click', function () {
       profile.token = randomHex(24); tokenEl.value = profile.token; saveAll(); setStatus('', ''); refresh();
     });
@@ -737,7 +777,7 @@
     });
     q('.np-test').addEventListener('click', async function (e) {
       var btn = e.currentTarget;
-      var conn = { remote: (profile.remote || '').trim(), token: profile.token || '' };
+      var conn = { remote: (profile.remote || '').trim(), token: profile.token || '', profileId: profile.id };
       window.klaus.ui.setPreferences({ nemesisProfiles: collectNemesisProfiles() });
       btn.disabled = true; setStatus('', 'connecting…');
       var res;
@@ -750,8 +790,10 @@
     q('.np-setup').addEventListener('click', async function (e) {
       var btn = e.currentTarget; var prev = btn.textContent;
       btn.disabled = true; btn.textContent = 'Opening terminal…';
+      // The main side reads this profile's saved token, so it has to be saved first.
+      await window.klaus.ui.setPreferences({ nemesisProfiles: collectNemesisProfiles() });
       var res;
-      try { res = await window.klaus.ui.nemesisSetupLocal({ token: (profile.token || '').trim(), provider: profile.provider || '' }); }
+      try { res = await window.klaus.ui.nemesisSetupLocal({ token: (profile.token || '').trim(), provider: profile.provider || '', profileId: profile.id }); }
       catch (_e) { res = { error: 'could not start setup' }; }
       btn.disabled = false; btn.textContent = prev;
       if (res && res.ok) {

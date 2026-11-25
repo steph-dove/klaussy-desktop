@@ -770,6 +770,7 @@ contextBridge.exposeInMainWorld('klaus', {
     // Test the saved Nemesis8 gateway connection (health check). Returns
     // { ok, version, error, insecure, url } for the prefs "Test connection" button.
     testNemesisConnection: (conn) => ipcRenderer.invoke('test-nemesis-connection', conn || {}),
+    revealSecret: (which) => ipcRenderer.invoke('reveal-secret', which || {}),
     // One-click: install + login + start a LOCAL gateway in the system terminal.
     // Returns { ok, token } (token may be freshly generated) or { error }.
     nemesisSetupLocal: (opts) => ipcRenderer.invoke('nemesis-setup-local', opts || {}),

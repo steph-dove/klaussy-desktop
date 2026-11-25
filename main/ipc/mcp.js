@@ -60,9 +60,20 @@ ipcMain.handle('mcp-targets', () => {
   return { targets };
 });
 
-ipcMain.handle('mcp-add', (_event, { agentId, scope, server }) => {
+// An MCP server is a command an agent runs (or a URL it sends data to), so adding
+// one waits for an OK the page can't give (confirm-sensitive.js).
+ipcMain.handle('mcp-add', async (_event, { agentId, scope, server }) => {
   const repoPath = scope === 'project' ? currentRepoPath() : null;
   if (scope === 'project' && !repoPath) return { error: 'No active repository for project scope' };
+  if (!server || typeof server !== 'object') return { error: 'No server provided' };
+  const runs = server.url
+    ? `Connects to: ${server.url}`
+    : `Runs: ${[server.command, ...(Array.isArray(server.args) ? server.args : [])].join(' ')}`;
+  const ok = await require('../util/confirm-sensitive').confirm({
+    title: `Add the MCP server "${server.name}" for ${agentId}?`,
+    lines: [runs, `Scope: ${scope === 'project' ? `this project (${repoPath})` : 'every project'}`],
+  });
+  if (!ok) return { error: 'Not added: it wasn\u2019t allowed.' };
   return mcp.addServer({ agentId, scope, repoPath, server });
 });
 
