@@ -186,7 +186,7 @@ window.ActionModal = (function () {
 
   // Agent-neutral debug fallback — used when the repo has no <repo>-debug skill.
   // Replaces the old `/debug ` seed, which was a Claude Code built-in slash
-  // command and meant nothing to Codex/Gemini/etc. Prose any agent can follow;
+  // command and meant nothing to Codex/Antigravity/etc. Prose any agent can follow;
   // mirrors the klaussy debug skill's phases (reproduce → root-cause read-only →
   // failing test → minimal fix → verify). The user's details are appended.
   var DEBUG_PROMPT = [

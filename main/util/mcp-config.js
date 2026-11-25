@@ -366,8 +366,8 @@ function tomlRemove(file, name) {
 // ---- Public API ----
 
 // List every configured MCP server across all agents + scopes. Deduped by
-// absolute file path, so antigravity (which shares Gemini's settings.json)
-// doesn't double-list. `activeRepo` is folded in if not already a project.
+// absolute file path, so two agents that share a config file don't
+// double-list it. `activeRepo` is folded in if not already a project.
 function listServers({ projects = [], activeRepo = null, homedir = defaultHome() } = {}) {
   const locations = [{ scope: 'user', repoPath: null, projectName: null }];
   const seenRepos = new Set();

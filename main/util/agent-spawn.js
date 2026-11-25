@@ -6,7 +6,7 @@
 // shell, no quoting concerns. That path is preserved exactly.
 //
 // Windows is the problem the rest of this file exists for. The agent CLIs are
-// installed as npm `.cmd` shims (`claude.cmd`, `gemini.cmd`, …). Node can't
+// installed as npm `.cmd` shims (`claude.cmd`, `codex.cmd`, …). Node can't
 // spawn a `.cmd` directly — `CreateProcess` only appends `.exe` (never consults
 // PATHEXT), and Node 24 refuses `.cmd`/`.bat` without a shell — so `spawn('claude')`
 // throws ENOENT. Routing through the shell fixes the launch, but a `.cmd` runs

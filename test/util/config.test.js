@@ -155,6 +155,82 @@ test('runConfigMigrations v1->v2 defaults defaultProvider to claude when default
   } finally { restore(); }
 });
 
+test('runConfigMigrations v2->v3 moves Gemini CLI settings and sessions to Antigravity', async () => {
+  const { dir, restore } = mkTestDir();
+  try {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'gemini',
+      defaultMode: 'gemini',
+      geminiPath: '/usr/local/bin/gemini',
+      agentModel: { gemini: 'gemini-2.5-pro', codex: 'gpt-5' },
+      savedSessions: [
+        { worktreePath: '/w/a', mode: 'gemini', sessionId: 'x', subTerminals: [{ mode: 'gemini', sessionId: 'y' }, { mode: 'claude', sessionId: 'z' }] },
+        { worktreePath: '/w/b', mode: 'claude', sessionId: 'c1' },
+        null,
+      ],
+    }));
+    config.runConfigMigrations();
+    await waitForFlush();
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.schemaVersion, config.CURRENT_SCHEMA_VERSION);
+    assert.equal(after.defaultProvider, 'antigravity');
+    assert.equal(after.defaultMode, 'antigravity');
+    assert.equal('geminiPath' in after, false);
+    assert.deepEqual(after.agentModel, { codex: 'gpt-5' });
+    const [a, b] = after.savedSessions;
+    // originalMode keeps 'gemini' so resume hands off instead of `agy --continue`.
+    assert.deepEqual([a.mode, a.originalMode, a.sessionId], ['antigravity', 'gemini', null]);
+    assert.deepEqual(a.subTerminals, [{ mode: 'antigravity', sessionId: null }, { mode: 'claude', sessionId: 'z' }]);
+    assert.deepEqual([b.mode, b.sessionId, b.originalMode], ['claude', 'c1', undefined]);
+  } finally { restore(); }
+});
+
+test('runConfigMigrations v2->v3 edge cases: kept originalMode, odd shapes, emptied agentModel', async () => {
+  const { dir, restore } = mkTestDir();
+  try {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({
+      schemaVersion: 2,
+      defaultProvider: 'gemini',
+      agentModel: { gemini: 'gemini-2.5-pro' },
+      savedSessions: [
+        // started under Claude, later switched to Gemini: keep who started it
+        { mode: 'gemini', originalMode: 'claude', sessionId: 'x', subTerminals: [{ label: 'no mode' }, null] },
+      ],
+    }));
+    config.runConfigMigrations();
+    await waitForFlush();
+    let after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.deepEqual(after.agentModel, {});
+    const [s] = after.savedSessions;
+    assert.deepEqual([s.mode, s.originalMode, s.sessionId], ['antigravity', 'claude', null]);
+    assert.deepEqual(s.subTerminals, [{ label: 'no mode' }, null]);
+
+    // savedSessions that isn't an array doesn't stop the rest from migrating.
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 2, defaultProvider: 'gemini', savedSessions: { nope: true } }));
+    config.runConfigMigrations();
+    await waitForFlush();
+    after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.schemaVersion, config.CURRENT_SCHEMA_VERSION);
+    assert.equal(after.defaultProvider, 'antigravity');
+  } finally { restore(); }
+});
+
+test('runConfigMigrations v2->v3 leaves a config without Gemini CLI as it was', async () => {
+  const { dir, restore } = mkTestDir();
+  try {
+    const file = path.join(dir, 'config.json');
+    fs.writeFileSync(file, JSON.stringify({ schemaVersion: 2, defaultProvider: 'codex', savedSessions: [{ mode: 'claude', sessionId: 's' }] }));
+    config.runConfigMigrations();
+    await waitForFlush();
+    const after = JSON.parse(fs.readFileSync(file, 'utf8'));
+    assert.equal(after.defaultProvider, 'codex');
+    assert.deepEqual(after.savedSessions, [{ mode: 'claude', sessionId: 's' }]);
+  } finally { restore(); }
+});
+
 test('saveConfig is atomic: no .tmp file left behind on success', async () => {
   const { dir, restore } = mkTestDir();
   try {

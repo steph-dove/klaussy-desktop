@@ -35,7 +35,7 @@ let isQuitting = false;
 
 // Startup nudge: gh is needed for PR/GitHub features, and at least ONE agent
 // CLI is needed to run tasks. We don't require any specific agent — Claude,
-// Codex, Gemini, or Copilot all satisfy it — so a Codex-only user isn't told
+// Codex, Antigravity, or Copilot all satisfy it — so a Codex-only user isn't told
 // they're "missing Claude".
 function checkExternalCLIs() {
   const config = loadConfig();

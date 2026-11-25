@@ -25,7 +25,8 @@ const { dirUnder, pathUnder } = require('../util/path-gate');
 const { stopCIPolling } = require('../state/ci-poll');
 const { getMainWindow, hardenWindow } = require('../state/windows');
 const { collectWorktreeState } = require('./git');
-const { getProvider, isAgentMode, binFor, displayNameFor } = require('../state/ai-providers');
+const { getProvider, isAgentMode, binFor, displayNameFor, RETIRED_AGENTS } = require('../state/ai-providers');
+const { resumeModes } = require('../state/retired-agents');
 const { buildHandoffSeed } = require('../state/session-handoff');
 const { sessionNotesEnv, withSessionContext } = require('../state/session-context');
 const { noteHandoff } = require('../state/session-activity');
@@ -311,13 +312,15 @@ ipcMain.handle('resume-session', async (_event, {
   // Recreate it from its branch so the session stays resumable.
   const ensured = ensureWorktreeOnDisk(actualWorktreePath, repoPath, branch);
   if (ensured.error) return { error: ensured.error };
-  const resumeMode = mode || 'claude';
-  const startedBy = originalMode || resumeMode;
+  const { resumeMode, startedBy } = resumeModes(mode, originalMode);
 
   // Cross-agent resume: the user picked a different agent than the one that
   // started this session. Native resume can't carry state across agents, so
   // distill the prior session into a handoff brief and seed the new agent with
-  if (isAgentMode(resumeMode) && isAgentMode(startedBy) && resumeMode !== startedBy) {
+  // A session started under a retired agent (Gemini CLI) hands off too, which
+  // starts its replacement fresh instead of `--continue`-ing some other chat.
+  const startedByAgent = isAgentMode(startedBy) || !!RETIRED_AGENTS[startedBy];
+  if (isAgentMode(resumeMode) && startedByAgent && resumeMode !== startedBy) {
     let seed = '';
     try {
       seed = await buildHandoffSeed({ worktreePath: actualWorktreePath, originalMode: startedBy, sessionId });
@@ -405,7 +408,7 @@ ipcMain.handle('dismiss-saved-session', (_event, { worktreePath, sessionId }) =>
 });
 
 // Seed an agent's native memory file with multi-repo session context so every
-// agent we support (Claude / Codex / Gemini / Copilot / future Cursor) starts
+// agent we support (Claude / Codex / Antigravity / Copilot / Cursor ...) starts
 // aware of its sibling repos. Each repo in a session shares one branch name and
 const SESSION_CTX_START = '<!-- klaussy:session-context (auto-generated; safe to delete) -->';
 const SESSION_CTX_END = '<!-- /klaussy:session-context -->';
@@ -1276,7 +1279,7 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
   inst.subTerminals.push(sub);
 
   // codex pre-fills its positional prompt but waits for an Enter to submit
-  // (Claude/Gemini auto-run theirs). Nudge it once the TUI is up, with a second
+  // (Claude/Antigravity auto-run theirs). Nudge it once the TUI is up, with a second
   // attempt for a slow boot. Harmless for agents that already submitted.
   if (needsEnter) {
     const sendEnter = () => { if (sub.alive) { try { ptyProc.write('\r'); } catch {} } };

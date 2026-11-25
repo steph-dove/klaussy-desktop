@@ -114,7 +114,7 @@
         // must keep `originalText` in sync with it — otherwise the first parse
         // freezes the body (originalText) and every later (longer) parse looks
         // like a user edit, leaving a truncated finding. Agents that stream in
-        // many small deltas (Gemini) hit this; only a real ✎ edit, which
+        // many small deltas hit this; only a real ✎ edit, which
         // changes `text` WITHOUT touching `originalText`, should diverge them.
         var userEdited = prev.originalText != null && prev.text !== prev.originalText;
         if (!userEdited) {

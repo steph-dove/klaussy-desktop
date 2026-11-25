@@ -948,7 +948,7 @@
     ['review pr 103', 'open that pull request'],
     ['run review', 'AI review in PR review, or review this session'],
     ['new session', 'start a session'],
-    ['select agent gemini', 'press a button or tab by its name'],
+    ['select agent antigravity', 'press a button or tab by its name'],
     ['open the dev loop', 'show or start the dev loop'],
     ['open agent list', 'running and finished agents'],
     ['switch to auth fix', 'focus a session by name'],

@@ -241,7 +241,6 @@ const AGENT_SKILLS_DIRS = {
   claude: ['.claude', 'skills'],
   codex: ['.agents', 'skills'],
   cline: ['.agents', 'skills'],
-  gemini: ['.gemini', 'skills'],
   cursor: ['.cursor', 'skills'],
   copilot: ['.github', 'skills'],
   antigravity: ['.gemini', 'antigravity-cli', 'plugins', 'klaussy', 'skills'],

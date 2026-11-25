@@ -84,7 +84,7 @@ function startOrAttachChat({ worktreePath, provider = 'claude', seedPrompt, onDa
   const config = loadConfig();
   const prov = getProvider(provider) || getProvider('claude');
   const bin = binFor(prov.id, config);
-  // Gated agents (Gemini) prompt once per worktree for trust + file access.
+  // Gated agents (Antigravity) prompt once per worktree for trust + file access.
   const consent = ensureWorktreeConsentSync(prov.id, worktreePath);
   if (!consent.allowed) return { cancelled: true };
   // Token-rotation guard (Codex): warn before a second concurrent session.

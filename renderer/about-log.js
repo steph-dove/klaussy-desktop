@@ -182,7 +182,7 @@ window.Dialogs = (function () {
       },
       {
         title: 'Resuming & cross-agent handoff',
-        body: 'Reopen past work from the New Worktree modal’s Existing Session tab — pick a saved session and hit Resume to reattach its worktree(s) and agent. By default it resumes under the agent that started the session; choose a different one (Claude, Codex, Gemini, Copilot, Cursor, Cline…) and Maussian summarizes the previous transcript into a handoff brief and seeds the new agent with it, so context carries across CLIs. A toast shows while the summary is being compiled — the resume isn’t instant.',
+        body: 'Reopen past work from the New Worktree modal’s Existing Session tab — pick a saved session and hit Resume to reattach its worktree(s) and agent. By default it resumes under the agent that started the session; choose a different one (Claude, Codex, Antigravity, Copilot, Cursor, Cline…) and Maussian summarizes the previous transcript into a handoff brief and seeds the new agent with it, so context carries across CLIs. A toast shows while the summary is being compiled — the resume isn’t instant.',
       },
       {
         title: 'MCP servers',
@@ -379,7 +379,7 @@ window.Dialogs = (function () {
       ? deps.agents
       : [{ id: 'claude', name: 'Claude Code CLI (claude)', installed: deps.claude.installed, version: deps.claude.version, path: deps.claude.path, isDefault: true }];
     // The setup gate is "at least one agent installed" — any of Claude / Codex /
-    // Gemini / Copilot counts. We auto-prompt only when gh is bad or NO agent is
+    // Antigravity / Copilot counts. We auto-prompt only when gh is bad or NO agent is
     // installed, so a Codex-only user is never nagged about a missing Claude.
     var anyAgentInstalled = agentList.some(function (a) { return a.installed; });
     var noAgent = !anyAgentInstalled;
@@ -2058,7 +2058,7 @@ window.Dialogs = (function () {
       if (!groups.length) {
         return '<div class="skills-empty">'
           + '<p>No MCP servers configured yet.</p>'
-          + '<p class="skills-empty-hint">Click \u201cAdd server\u201d to connect GitHub, Slack, Linear, Jira, Datadog and more \u2014 across Claude, Codex, Cursor, Gemini and the other agents Maussian drives.</p>'
+          + '<p class="skills-empty-hint">Click \u201cAdd server\u201d to connect GitHub, Slack, Linear, Jira, Datadog and more \u2014 across Claude, Codex, Cursor, Antigravity and the other agents Maussian drives.</p>'
         + '</div>';
       }
       return '<div class="skills-section-head">Configured <span class="skills-section-count">' + groups.length + '</span></div>'

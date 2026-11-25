@@ -1,7 +1,7 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // AI CLI provider registry — the single source of truth for the per-tool
 // differences between the coding agents Maussian can drive (Claude Code, OpenAI
-// Codex, Gemini CLI, Antigravity CLI, GitHub Copilot CLI, Cursor CLI, Cline
+// Codex, Antigravity CLI, GitHub Copilot CLI, Cursor CLI, Cline
 
 const path = require('path');
 const os = require('os');
@@ -416,103 +416,6 @@ const PROVIDERS = {
       }
       return null;
     },
-  },
-
-  gemini: {
-    id: 'gemini',
-    displayName: 'Gemini CLI',
-    memoryFile: 'GEMINI.md', // Gemini CLI reads GEMINI.md
-    shortLabel: 'gm',
-    defaultBin: 'gemini',
-    configPathKey: 'geminiPath',
-    versionArgs: ['--version'],
-    // Sessions live under ~/.gemini/tmp/<project_hash>/chats/; the hash
-    // algorithm is undocumented, so Phase 1 uses `-r` (resume latest) rather
-    // than locating exact files.
-    perWorktreeSessions: false,
-    supportsExactResume: false,
-
-    // VERIFIED flags (gemini-cli 0.44.1 --help): `--resume <latest|index>` needs
-    // a value; the implement flow passes the prompt via `-i` (execute + stay
-    // interactive), so the positional bare-prompt form isn't used.
-    interactivePromptFlag: '-i',
-    // Gemini's "trusted folders" gate refuses to run in a directory it hasn't
-    // been told to trust. We surface this as a per-(worktree, agent) consent
-    // prompt (see util/agent-consent.js); only when the user allows do we pass
-    worktreeConsent: {
-      prompt: 'Gemini needs to trust this folder and read/write its files to work here.',
-      allowLabel: 'Allow read & write',
-    },
-    buildInteractiveCmd(bin, { resumeSessionId, resumeLatest, trust, model, sessionDirs } = {}) {
-      var base = bin;
-      if (trust) base += ' --skip-trust --approval-mode auto_edit';
-      if (model) base += ` -m ${model}`; // pin a specific Gemini model/version
-      // Add sibling session worktrees to the workspace so cross-repo edits work.
-      for (const d of quotedSessionDirs(sessionDirs)) base += ` --include-directories ${d}`;
-      if (resumeSessionId) return `${base} --resume ${resumeSessionId}`;
-      if (resumeLatest) return `${base} --resume latest`;
-      return base;
-    },
-    buildHeadlessRun(_bin, { prompt, mode, allowEdits, trust, model, promptOnStdin } = {}) {
-      // VERIFIED (gemini-cli 0.44.1): `-p` = non-interactive; `-o stream-json`
-      // = NDJSON we translate into Claude-shaped events; `--approval-mode
-      // auto_edit` auto-approves edit tools. `--skip-trust` clears the trusted-
-      const args = [];
-      if (trust) args.push('--skip-trust');
-      if (model) args.push('-m', model);
-      // Windows: prompt on stdin so it survives the `.cmd` shim (util/agent-spawn).
-      // `-p` requires a value and would greedily consume the next flag, so drop
-      // it and let gemini read the piped stdin as the prompt. VERIFY on gemini-cli.
-      if (!promptOnStdin) args.push('-p', prompt);
-      if (mode === 'stream') args.push('--output-format', 'stream-json');
-      if (allowEdits) args.push('--approval-mode', 'auto_edit');
-      return { args, stdinInput: promptOnStdin ? prompt : undefined, outputMode: mode === 'stream' ? 'json-translate' : 'passthrough' };
-    },
-    sessionDir() {
-      return path.join(home(), '.gemini', 'tmp');
-    },
-
-    // VERIFIED against gemini-cli 0.44.1 `-o stream-json` (2026-06-02):
-    // {type:'init', session_id, model} {type:'message', role:'user', content} ←
-    // the echoed prompt; IGNORE {type:'message', role:'assistant', content,
-    parseStreamLine(obj) {
-      const events = [];
-      if (!obj || !obj.type) return events;
-      if (obj.type === 'message' && obj.role === 'assistant' && typeof obj.content === 'string') {
-        events.push({ kind: 'text', text: obj.content, delta: !!obj.delta });
-      } else if (obj.type === 'tool_use' && obj.tool_name) {
-        // VERIFIED shape: {type:'tool_use', tool_name, tool_id, parameters:{...}}.
-        const p = obj.parameters || {};
-        const hint = p.file_path || p.path || p.dir_path || p.pattern || p.command || p.title || '';
-        events.push({ kind: 'tool', name: obj.tool_name, hint: typeof hint === 'string' ? hint : '' });
-      } else if (obj.type === 'result') {
-        const s = obj.stats || {};
-        events.push({
-          kind: 'usage',
-          usage: {
-            inputTokens: s.input_tokens || s.input || 0,
-            cacheCreationInputTokens: 0,
-            cacheReadInputTokens: s.cached || 0,
-            outputTokens: s.output_tokens || 0,
-            totalTokens: s.total_tokens || 0,
-          },
-        });
-        events.push({ kind: 'end_turn' });
-      }
-      // init + user messages are intentionally ignored.
-      return events;
-    },
-    usageFromSessionLine() {
-      // VERIFY: Gemini session/chat file format is undocumented. Left null
-      // until a real file is inspected; token-usage aggregation for Gemini is
-      // deferred to Phase 4.
-      return null;
-    },
-    // VERIFY: Gemini session/chat format undocumented. Stubs so the implement
-    // PTY degrades gracefully (no tail attached) instead of crashing.
-    sessionLineToEvents() { return []; },
-    snapshotSessions() { return new Set(); },
-    findNewSession() { return null; },
   },
 
   // Antigravity CLI (`agy`) — Google's successor to Gemini CLI (Gemini CLI was
@@ -1126,12 +1029,13 @@ const PROVIDERS = {
 
 const PROVIDER_IDS = Object.keys(PROVIDERS);
 
+const { RETIRED_AGENTS } = require('./retired-agents');
+
 // npm package per provider, used by the Setup Check dialog to show/run a
 // one-line install command. Kept here so install guidance has one source.
 const NPM_PACKAGES = {
   claude: '@anthropic-ai/claude-code',
   codex: '@openai/codex',
-  gemini: '@google/gemini-cli',
   copilot: '@github/copilot',
   cline: 'cline',
   opencode: 'opencode-ai',
@@ -1167,7 +1071,6 @@ const INSTALL_COMMANDS = {
 const DOCS_URLS = {
   claude: 'https://docs.claude.com/en/docs/claude-code/overview',
   codex: 'https://github.com/openai/codex',
-  gemini: 'https://github.com/google-gemini/gemini-cli',
   antigravity: 'https://antigravity.google',
   copilot: 'https://github.com/github/copilot-cli',
   cursor: 'https://cursor.com/docs/cli',
@@ -1183,7 +1086,6 @@ function docsUrlFor(id) { return DOCS_URLS[id] || null; }
 const SHORT_NAMES = {
   claude: 'Claude',
   codex: 'Codex',
-  gemini: 'Gemini',
   antigravity: 'Antigravity',
   copilot: 'Copilot',
   cursor: 'Cursor',
@@ -1197,7 +1099,7 @@ const SHORT_NAMES = {
 // Model/version selection. `id:''` = the agent's own default (no flag passed).
 // Lists are grounded against each CLI, not guessed: claude — `--model` takes
 // the aliases 'opus'/'sonnet'/'haiku' (claude --help), which always resolve to
-const MODEL_FLAGS = { claude: '--model', codex: '-m', gemini: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', kimi: '--model', ollama: '--model' };
+const MODEL_FLAGS = { claude: '--model', codex: '-m', antigravity: '--model', copilot: '--model', cursor: '--model', cline: '--model', opencode: '--model', kimi: '--model', ollama: '--model' };
 const MODELS = {
   claude: [
     { id: '', label: 'Default' },
@@ -1209,13 +1111,6 @@ const MODELS = {
     { id: '', label: 'Default' },
     { id: 'gpt-5.5', label: 'GPT-5.5' },
     { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-  ],
-  gemini: [
-    { id: '', label: 'Default (auto)' },
-    { id: 'gemini-2.5-flash', label: '2.5 Flash' },
-    { id: 'gemini-2.5-pro', label: '2.5 Pro' },
-    { id: 'gemini-3-flash-preview', label: '3 Flash (preview)' },
-    { id: 'gemini-3-pro-preview', label: '3 Pro (preview)' },
   ],
   // VERIFY: agy's `--model` takes display names with spaces (e.g. "Gemini 3.5
   // Flash (Low)"); the full list comes from `agy models`, which requires an
@@ -1275,7 +1170,6 @@ function installCommandFor(id, platform = process.platform) {
 const AUTH_CHECKS = {
   claude:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'claude' },
   codex:   { statusArgs: ['login', 'status'], notAuthedPattern: /not logged in/i, loginCommand: 'codex login' },
-  gemini:  { statusArgs: null, notAuthedPattern: null, loginCommand: 'gemini' },
   // agy signs in interactively on first run; `/logout` clears creds. No verified
   // quiet status probe yet, so auth state is reported as unknown (not false).
   antigravity: { statusArgs: null, notAuthedPattern: null, loginCommand: 'agy' },
@@ -1351,7 +1245,7 @@ function allProviders() {
 function shortLabelFor(mode) {
   if (mode === 'shell') return 'sh';
   if (isNemesisMode(mode)) return PROVIDERS.nemesis8.shortLabel;
-  const p = PROVIDERS[mode];
+  const p = PROVIDERS[mode] || RETIRED_AGENTS[mode];
   return p ? p.shortLabel : 'cc';
 }
 
@@ -1360,12 +1254,13 @@ function displayNameFor(mode) {
   // Per-profile names live in the renderer's provider list; main-side labels
   // (exit notices) use the generic name.
   if (isNemesisMode(mode)) return PROVIDERS.nemesis8.displayName;
-  const p = PROVIDERS[mode];
+  const p = PROVIDERS[mode] || RETIRED_AGENTS[mode];
   return p ? p.displayName : mode;
 }
 
 module.exports = {
   PROVIDER_IDS,
+  RETIRED_AGENTS,
   getProvider,
   isAgentMode,
   binFor,

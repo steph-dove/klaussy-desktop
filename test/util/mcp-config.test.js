@@ -21,8 +21,7 @@ test('configFile resolves each agent + scope correctly', () => {
   const home = '/h';
   assert.equal(mcp.configFile('claude', 'user', null, home), path.join(home, '.claude.json'));
   assert.equal(mcp.configFile('claude', 'project', '/repo', home), path.join('/repo', '.mcp.json'));
-  assert.equal(mcp.configFile('gemini', 'user', null, home), path.join(home, '.gemini', 'settings.json'));
-  // Antigravity has its own file under ~/.gemini (not Gemini's settings.json).
+  // Antigravity has its own file under ~/.gemini (not Gemini CLI's settings.json).
   assert.equal(mcp.configFile('antigravity', 'user', null, home), path.join(home, '.gemini', 'config', 'mcp_config.json'));
   assert.equal(mcp.configFile('cline', 'user', null, home), path.join(home, '.cline', 'data', 'settings', 'cline_mcp_settings.json'));
   assert.equal(mcp.configFile('codex', 'user', null, home), path.join(home, '.codex', 'config.toml'));
@@ -73,11 +72,11 @@ test('stdio server stores env values on disk but list returns keys only', () => 
 
 test('add preserves unrelated keys and existing servers', () => {
   const home = tmpHome();
-  const file = path.join(home, '.gemini', 'settings.json');
+  const file = path.join(home, '.cursor', 'mcp.json');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ theme: 'dark', mcpServers: { existing: { command: 'old' } } }, null, 2));
 
-  mcp.addServer({ agentId: 'gemini', scope: 'user', homedir: home, server: { name: 'fresh', type: 'stdio', command: 'npx' } });
+  mcp.addServer({ agentId: 'cursor', scope: 'user', homedir: home, server: { name: 'fresh', type: 'stdio', command: 'npx' } });
 
   const obj = readJson(file);
   assert.equal(obj.theme, 'dark', 'unrelated key preserved');
@@ -117,14 +116,16 @@ test('malformed JSON config errors without clobbering the file', () => {
   assert.equal(fs.readFileSync(file, 'utf8'), '{ this is not json', 'file left untouched');
 });
 
-test('Gemini and Antigravity write separate files', () => {
+test('Antigravity writes its own file and leaves Gemini CLI\'s settings.json alone', () => {
   const home = tmpHome();
-  mcp.addServer({ agentId: 'gemini', scope: 'user', homedir: home, server: { name: 'g', type: 'stdio', command: 'x' } });
+  const legacy = path.join(home, '.gemini', 'settings.json');
+  fs.mkdirSync(path.dirname(legacy), { recursive: true });
+  fs.writeFileSync(legacy, JSON.stringify({ mcpServers: { old: { command: 'x' } } }));
   mcp.addServer({ agentId: 'antigravity', scope: 'user', homedir: home, server: { name: 'a', type: 'stdio', command: 'y' } });
-  assert.ok(fs.existsSync(path.join(home, '.gemini', 'settings.json')), 'gemini file');
   assert.ok(fs.existsSync(path.join(home, '.gemini', 'config', 'mcp_config.json')), 'antigravity file');
+  assert.deepEqual(readJson(legacy), { mcpServers: { old: { command: 'x' } } });
   const byAgent = mcp.listServers({ homedir: home }).servers.map((s) => s.agentId).sort();
-  assert.deepEqual(byAgent, ['antigravity', 'gemini']);
+  assert.deepEqual(byAgent, ['antigravity']);
 });
 
 test('listServers dedups duplicate locations by file path', () => {

@@ -57,7 +57,6 @@
   var agentPaths = {
     claude: { input: claudePath, infoEl: document.getElementById('agent-info-claude'), prefKey: 'claudePath' },
     codex: { input: document.getElementById('pref-codex-path'), infoEl: document.getElementById('agent-info-codex'), prefKey: 'codexPath' },
-    gemini: { input: document.getElementById('pref-gemini-path'), infoEl: document.getElementById('agent-info-gemini'), prefKey: 'geminiPath' },
     antigravity: { input: document.getElementById('pref-antigravity-path'), infoEl: document.getElementById('agent-info-antigravity'), prefKey: 'antigravityPath' },
     copilot: { input: document.getElementById('pref-copilot-path'), infoEl: document.getElementById('agent-info-copilot'), prefKey: 'copilotPath' },
     cursor: { input: document.getElementById('pref-cursor-path'), infoEl: document.getElementById('agent-info-cursor'), prefKey: 'cursorPath' },
@@ -297,7 +296,6 @@
       screenReaderMode: screenReader.checked,
       claudePath: agentPaths.claude.input.value.trim(),
       codexPath: agentPaths.codex.input.value.trim(),
-      geminiPath: agentPaths.gemini.input.value.trim(),
       antigravityPath: agentPaths.antigravity.input.value.trim(),
       copilotPath: agentPaths.copilot.input.value.trim(),
       cursorPath: agentPaths.cursor.input.value.trim(),

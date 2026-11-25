@@ -18,9 +18,27 @@ const VALID_OUTPUT_MODES = new Set(['passthrough', 'json-text', 'json-translate'
 test('registry exposes the expected providers', () => {
   // Order-independent membership check — guards against a provider being
   // dropped from the registry object or PROVIDER_IDS drifting out of sync.
-  for (const id of ['claude', 'codex', 'gemini', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode', 'kimi']) {
+  for (const id of ['claude', 'codex', 'antigravity', 'copilot', 'cursor', 'cline', 'opencode', 'kimi']) {
     assert.ok(ALL.includes(id), `missing provider: ${id}`);
   }
+});
+
+test('Gemini CLI is retired: not an agent, replaced by Antigravity, still named', () => {
+  const { getProvider, isAgentMode, displayNameFor, RETIRED_AGENTS } = require('../../main/state/ai-providers');
+  assert.ok(!ALL.includes('gemini'));
+  assert.equal(getProvider('gemini'), null);
+  assert.equal(isAgentMode('gemini'), false);
+  assert.equal(RETIRED_AGENTS.gemini.replacedBy, 'antigravity');
+  assert.ok(ALL.includes(RETIRED_AGENTS.gemini.replacedBy));
+  assert.equal(displayNameFor('gemini'), 'Gemini CLI');
+});
+
+test('lookups for the retired Gemini CLI fail safely', () => {
+  const a = require('../../main/state/ai-providers');
+  assert.equal(a.binFor('gemini', { geminiPath: '/usr/local/bin/gemini' }), null);
+  assert.equal(a.installCommandFor('gemini'), null);
+  assert.deepEqual(a.modelsFor('gemini'), [{ id: '', label: 'Default' }]);
+  assert.equal(a.shortLabelFor('gemini'), 'gm'); // not Claude's 'cc'
 });
 
 test('every provider satisfies the universal registry contract', () => {

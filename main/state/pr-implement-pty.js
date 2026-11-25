@@ -227,7 +227,7 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
   const config = loadConfig();
   const prov = getProvider(provider) || getProvider('claude');
   const bin = binFor(prov.id, config);
-  // Gated agents (Gemini) prompt once per worktree for trust + file access.
+  // Gated agents (Antigravity) prompt once per worktree for trust + file access.
   const consent = ensureWorktreeConsentSync(prov.id, worktreePath);
   if (!consent.allowed) return { cancelled: true };
   // Token-rotation guard: warn before a second concurrent Codex session.
@@ -263,7 +263,7 @@ function startImplementPty({ requestId, worktreePath, prompt, provider = 'claude
   const model = (config.agentModel || {})[prov.id] || '';
   const agentCmd = prov.buildInteractiveCmd(bin, { trust: consent.trust, model });
   // Most agents take the prompt as a positional arg; some need a flag to run it
-  // interactively (Gemini `-i`). kimi accepts neither, so it launches bare and
+  // interactively (Antigravity `-i`). kimi accepts neither, so it launches bare and
   // gets the prompt pasted into its TUI once that's up.
   const pasteAtBoot = prov.promptDelivery === 'paste';
   const promptFlag = prov.interactivePromptFlag ? `${prov.interactivePromptFlag} ` : '';

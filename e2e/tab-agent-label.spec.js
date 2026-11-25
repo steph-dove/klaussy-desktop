@@ -10,7 +10,7 @@ const { test, expect } = require('./fixtures');
 // Pin the model lookup in the main process. Stubbing window.klaus from the page
 // is silently ignored — contextBridge objects are frozen — and the real handler
 // falls back to the machine's configured CLI default, which isn't stable here.
-const MODELS = { claude: 'opus', codex: 'gpt-5', gemini: 'gemini-2.5-pro' };
+const MODELS = { claude: 'opus', codex: 'gpt-5' };
 
 async function stubModelIpc(electronApp, models) {
   await electronApp.evaluate(({ ipcMain }, byMode) => {
@@ -89,8 +89,8 @@ test('Resume relabels from the live mode, not the agent that exited', async ({ m
   // Resume sets mode back to an agent but leaves resumeAgent set, so a stale
   // resumeAgent must not outrank a live mode.
   await mainWindow.evaluate(() => {
-    window.AppState.tasks.get(9005).mode = 'gemini';
+    window.AppState.tasks.get(9005).mode = 'codex';
     window.TerminalManager.refreshAgentChip(9005);
   });
-  await expect(label).toHaveText('Gemini 2.5 Pro');
+  await expect(label).toHaveText('GPT-5');
 });

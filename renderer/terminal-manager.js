@@ -867,7 +867,7 @@ window.TerminalManager = (function () {
     var taskEntry = tasks.get(taskId);
     if (!taskEntry) return { error: 'No active task' };
 
-    // Use the parent task's agent so a Codex/Gemini/Copilot task's actions open
+    // Use the parent task's agent so a Codex/Antigravity/Copilot task's actions open
     // that same agent; shell-only tasks fall back to the default. (NOTE: the
     // prompt bodies are still Claude-flavored slash commands — see plan-modal.)
     var defaultAgent = (AppState.savedPrefs && (AppState.savedPrefs.defaultProvider || AppState.savedPrefs.defaultMode)) || 'claude';

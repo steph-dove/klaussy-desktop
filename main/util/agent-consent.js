@@ -1,6 +1,6 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Per-(worktree, agent) consent for agents that gate on a workspace-trust /
-// file-access decision (Gemini's "trusted folders" today). The first time the
+// file-access decision (Antigravity's folder trust today). The first time the
 // user runs such an agent in a worktree we show a blocking prompt; the choice
 // is remembered per (worktree, agent) so we don't ask again.
 //

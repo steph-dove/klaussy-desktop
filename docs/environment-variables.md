@@ -22,7 +22,6 @@ things, which credentials it falls back to, and how much it logs.
 | Variable | What it changes | Default | Read in |
 |---|---|---|---|
 | `KIMI_CODE_HOME` | Kimi Code's home directory, where Maussian reads its sessions. Blank values are ignored. | `$HOME/.kimi-code` | `main/state/ai-providers.js`, `main/util/agent-transcript.js` |
-| `GEMINI_CLI_HOME` | The directory Gemini CLI keeps `.gemini` in, where Maussian reads its chats to mirror replies. | `$HOME` | `main/util/agent-transcript.js` |
 
 ## GitHub
 

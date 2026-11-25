@@ -7,7 +7,7 @@
 //
 // We track how many sessions each provider has live, and when a provider
 // flagged `concurrentAuthUnsafe` already has one running we ask the user before
-// starting another. Claude and Gemini don't rotate tokens this way, so they
+// starting another. Other agents don't rotate tokens this way, so they
 // aren't flagged and never prompt.
 //
 // Usage:
@@ -48,7 +48,7 @@ function beginSession(providerId) {
       detail:
         `${label} signs in with single-use tokens, so running two ${label} sessions at once can `
         + `invalidate each other's login — you'd then have to run \`${cmd} login\` again before it works.\n\n`
-        + `Claude and Gemini don't have this limit. Start this ${label} session anyway?`,
+        + `Other agents don't have this limit. Start this ${label} session anyway?`,
     });
     if (choice !== 1) return { ok: false, release: noop };
   }

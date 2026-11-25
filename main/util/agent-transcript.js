@@ -246,83 +246,6 @@ function findKimiWire(worktreePath, sinceMs, taken) {
   return pickSession(candidates, sinceMs);
 }
 
-// ---- Gemini CLI: ~/.gemini/tmp/<project id>/chats/session-*.jsonl ----
-
-function geminiHome() {
-  return path.join(process.env.GEMINI_CLI_HOME || home(), '.gemini');
-}
-
-function geminiText(content) {
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.filter((p) => p && typeof p.text === 'string' && !p.thought).map((p) => p.text).join('');
-}
-
-// A message is appended again under the same id when its tokens or tool calls
-// arrive, so a repeat of something already read is not new speech.
-// file -> { offset, said: id -> text }, so a turn parses only what was appended.
-const geminiIndex = new Map();
-
-function readGemini({ transcriptFile, cursor, fromEnd, sinceMs }) {
-  let size;
-  try { size = fs.statSync(transcriptFile).size; } catch { return null; }
-  if (fromEnd) return { text: '', cursor: size };
-  const from = typeof cursor === 'number' && cursor <= size ? cursor : 0;
-  let index = geminiIndex.get(transcriptFile);
-  // Starting before what's indexed, or a shorter file, means re-indexing from the top.
-  if (!index || from < index.offset || size < index.offset) index = { offset: 0, said: new Map() };
-  const read = readAppendedLines(transcriptFile, index.offset);
-  if (!read) return null;
-
-  const parts = [];
-  let offset = index.offset;
-  for (const line of read.lines) {
-    const start = offset;
-    offset += Buffer.byteLength(line, 'utf8') + 1;
-    let rec;
-    try { rec = JSON.parse(line); } catch { continue; }
-    if (!rec || rec.type !== 'gemini' || !rec.id) continue;
-    const text = geminiText(rec.content).trim();
-    if (!text || index.said.get(rec.id) === text) continue;
-    index.said.set(rec.id, text);
-    if (start < from) continue;
-    if (sinceMs && rec.timestamp && Date.parse(rec.timestamp) < sinceMs) continue;
-    parts.push(text);
-  }
-  index.offset = read.cursor;
-  geminiIndex.set(transcriptFile, index);
-  return { text: capFromEnd(parts.join('\n\n')), cursor: read.cursor };
-}
-
-function geminiProjectId(worktreePath) {
-  let registry;
-  try { registry = JSON.parse(fs.readFileSync(path.join(geminiHome(), 'projects.json'), 'utf8')); } catch { return ''; }
-  const projects = (registry && registry.projects) || {};
-  for (const [root, id] of Object.entries(projects)) {
-    if (samePath(root, worktreePath)) return id;
-  }
-  return '';
-}
-
-function findGeminiChat(worktreePath, sinceMs, taken) {
-  const id = geminiProjectId(worktreePath);
-  if (!id) return '';
-  const dir = path.join(geminiHome(), 'tmp', id, 'chats');
-  let names = [];
-  try { names = fs.readdirSync(dir); } catch { return ''; }
-  const candidates = [];
-  for (const name of names) {
-    if (!name.startsWith('session-') || !name.endsWith('.jsonl')) continue;
-    const file = path.join(dir, name);
-    if (taken && taken.has(file)) continue;
-    let st;
-    try { st = fs.statSync(file); } catch { continue; }
-    if (sinceMs && st.mtimeMs < sinceMs) continue;
-    candidates.push({ file, bornMs: st.birthtimeMs || st.ctimeMs, mtimeMs: st.mtimeMs });
-  }
-  return pickSession(candidates, sinceMs);
-}
-
 // ---- Cursor: ~/.cursor/projects/<slug>/agent-transcripts/<id>/<id>.jsonl ----
 //
 // Rewritten whole on every checkpoint, so the cursor is a line count.
@@ -776,7 +699,7 @@ function readOpencode({ transcriptFile, cursor, fromEnd }) {
 
 const READERS = {
   claude: readClaude, codex: readCodex, antigravity: readAntigravity, opencode: readOpencode,
-  copilot: readCopilot, kimi: readKimi, gemini: readGemini, cline: readCline, ollama: readAider, cursor: readCursor,
+  copilot: readCopilot, kimi: readKimi, cline: readCline, ollama: readAider, cursor: readCursor,
 };
 
 function hasReader(providerId) {
@@ -803,7 +726,6 @@ module.exports = {
   findCodexRollout,
   findCopilotEvents,
   findKimiWire,
-  findGeminiChat,
   findClineSession,
   findCursorTranscript,
   cursorProjectSlug,

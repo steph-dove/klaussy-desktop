@@ -115,7 +115,7 @@ ${material}`;
 
 // Condense `material` via a headless agent run. Prefers Claude (no folder-trust
 // gate, reliable -p text), then the incoming agent if it has no trust gate
-// (gated agents like Gemini/Antigravity would block on consent in -p). Resolves
+// (gated agents like Antigravity would block on consent in -p). Resolves
 // to '' on any failure/timeout so the caller falls back to the raw material.
 function summarize(material, incomingMode) {
   return runHeadless(summaryPrompt(material), incomingMode);

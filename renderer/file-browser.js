@@ -512,7 +512,7 @@ window.FileBrowser = (function () {
   ].join('\n');
 
   // "Figure out how to run this app and run it" flow. Hands off to the task's
-  // OWN agent (Claude / Codex / Gemini / …) in a sub-terminal via
+  // OWN agent (Claude / Codex / Antigravity / …) in a sub-terminal via
   // openClaudeSubTerminal, which resolves the agent from the parent task's mode
   // exactly like the Plan/Debug/Review actions — not a hardcoded `claude`.
   //
@@ -521,8 +521,8 @@ window.FileBrowser = (function () {
   // skills dir (klaussy-agents >= 0.14), and these skills are model-invoked by
   // description across all agents, so naming the skill in plain prose triggers
   // it everywhere Claude's slash syntax would only work in Claude. We resolve
-  // the skill in the TASK agent's own dir (a Gemini task looks in .gemini/skills,
-  // not .claude/skills); if this agent has no run skill (aider, or a repo
+  // the skill in the TASK agent's own dir (an Antigravity task looks in its own
+  // plugin skills, not .claude/skills); if this agent has no run skill (aider, or a repo
   // generated before it existed), we seed the self-contained RUN_APP_FALLBACK_-
   // PROMPT instead — also plain prose that any agent can follow directly.
   async function runApp() {

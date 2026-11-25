@@ -752,7 +752,7 @@ function klaussyInitArgs(base, branch, version, enrich) {
   args.push('--local');
   return args;
 }
-// Generated root conventions docs — Claude reads CLAUDE.md, Gemini GEMINI.md,
+// Generated root conventions docs — Claude reads CLAUDE.md, Antigravity GEMINI.md,
 // everything else AGENTS.md; shared with syncIntelIntoWorktree so the excluded
 // and synced sets can't drift apart.
 const BOOTSTRAP_DOCS = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'GEMINI.md'];
@@ -1472,7 +1472,7 @@ function slimFromBlock(block) {
 // `agentMode`: pass the agent the prompt targets. For 'claude' with a
 // CLAUDE.md present at the queried path (i.e. a synced worktree), the slim
 // graph-only block is returned — token saving, see slimFromBlock. Other
-// agents (codex/gemini/copilot don't read CLAUDE.md) and unsynced paths get
+// agents (codex/antigravity/copilot don't read CLAUDE.md) and unsynced paths get
 // the full block.
 //
 // `touchedPaths`: optional list of files touched in the current PR or task.

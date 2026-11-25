@@ -53,7 +53,7 @@
   // A misheard word must never end an agent session, so these stay keyboard-only.
   var NOT_BY_VOICE = /^(Kill Task|Restart )/;
   var THRESHOLD = 0.6;
-  // One word buried in a long label ("gemini" in "Open Folder or File in Gemini CLI") isn't a match.
+  // One word buried in a long label ("cursor" in "Open Folder or File in Cursor CLI") isn't a match.
   var MIN_DICE = 0.5;
   var MIN_LEAD = 0.05;
 
@@ -263,7 +263,7 @@
     return { state: 'done' };
   }
 
-  // "new session and then select gemini" -> ['new session', 'select gemini']; one part when there is no "then".
+  // "new session and then select codex" -> ['new session', 'select codex']; one part when there is no "then".
   function splitChain(text) {
     return String(text || '').split(/\s*,?\s*\b(?:and then|then)\b\s*,?\s*/i)
       .map(function (p) { return p.replace(/^[.,\s]+|[,\s]+$/g, ''); })

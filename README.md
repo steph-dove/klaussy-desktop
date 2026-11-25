@@ -21,7 +21,7 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Maussian Desktop
 ## 🚀 Key Highlights
 
 *   **⚡ Parallel Agents, Isolated Worktrees**
-    One task = one git worktree + one independent agent. Run Claude Code, Codex, Gemini, Antigravity, Copilot, Cursor, Cline, opencode, and Kimi Code side by side — or drive a tab with a local model through Ollama (via Aider), or drop to a plain shell. The visual sidebar tracks staged/unstaged counts, status, and branch alignment per task.
+    One task = one git worktree + one independent agent. Run Claude Code, Codex, Antigravity, Copilot, Cursor, Cline, opencode, and Kimi Code side by side — or drive a tab with a local model through Ollama (via Aider), or drop to a plain shell. The visual sidebar tracks staged/unstaged counts, status, and branch alignment per task.
 *   **🧪 Sandboxed Agents (Nemesis8)**
     Optionally run an agent inside an isolated [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) Docker sandbox instead of directly on your machine. Add a gateway under **Preferences → Nemesis8 Sandboxes** (one click sets one up locally), then pick **Nemesis8 Sandbox** as the agent for any tab. Keeps the agent's blast radius off your host, and works against a local or remote gateway.
 *   **📂 Multi-Repo Git Sessions**
@@ -31,13 +31,13 @@ Designed by an ex-GitHub, ex-Twitch, and ex-Microsoft engineer, Maussian Desktop
 *   **🔍 PR & MR Reviews Without Local Checkout**
     Paste a GitHub, Bitbucket or Azure DevOps pull request URL, or a GitLab merge request URL, to view files, commit history, checks, and AI review tabs. Instantly materializes any review into a local worktree for editing with one click.
 *   **🔄 Cross-Agent Session Resuming**
-    Start a session with Claude Code, pause it, and resume it under Gemini, Antigravity, Cursor, Cline, opencode, or Kimi Code. Maussian Desktop automatically compiles a structured handoff brief to catch the new agent up.
+    Start a session with Claude Code, pause it, and resume it under Codex, Antigravity, Cursor, Cline, opencode, or Kimi Code. Maussian Desktop automatically compiles a structured handoff brief to catch the new agent up.
 *   **📡 Broadcast to All Agents**
     Type one prompt and send it to every open terminal at once, across all sessions and split panes. The bar sits under Active agents in the sidebar, or floats over the terminals where you can drag it.
 *   **🔔 Answer Agents from Slack & Discord**
     Get a message when an agent finishes, fails, or stops to ask permission — then hit **Approve**/**Reject** or reply with text right there, and it goes straight to the agent's terminal. Maussian dials out over Socket Mode / the Discord Gateway, so there's no public URL, tunnel, or open port. Approvals are limited to an allow-list you name, single-use, and expire. Set it up under **Preferences → Slack & Discord Notifications** ([step-by-step guide](./docs/notifications-setup.md)).
 *   **🔌 Multi-Agent MCP Manager**
-    Connect Model Context Protocol servers (GitHub, GitLab, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Gemini, and the rest — from one catalog, with a single add fanning out to every agent you pick.
+    Connect Model Context Protocol servers (GitHub, GitLab, Slack, Linear, Notion, Datadog, and more) across Claude, Codex, Cursor, Antigravity, and the rest — from one catalog, with a single add fanning out to every agent you pick.
 *   **🛠️ Workflow-Oriented Tools**
     Fuzzy command palette (`Cmd+K`), pop-out task windows, and built-in flows for planning, debugging, and humanizing prose.
 
@@ -86,7 +86,7 @@ See **[Keyboard Shortcuts](./docs/keyboard-shortcuts.md)** for the full list by 
 Maussian Desktop automatically detects and configures your local environment. It requires:
 1.  **Node.js 24+** (the agent stores are read through `node:sqlite`)
 2.  **Git Forge Tools / Credentials** (GitHub CLI `gh`, GitLab CLI `glab`, Bitbucket credentials, or an Azure DevOps personal access token)
-3.  **An Agent CLI or IDE extension** (Claude Code is the default; also supports Codex, Gemini, Antigravity, Copilot, Cursor, Cline, opencode, Kimi Code, and local models via Ollama + Aider)
+3.  **An Agent CLI or IDE extension** (Claude Code is the default; also supports Codex, Antigravity, Copilot, Cursor, Cline, opencode, Kimi Code, and local models via Ollama + Aider)
 
 Optional: **Docker + a [Nemesis8](https://github.com/DeepBlueDynamics/nemesis8) gateway** if you want to run agents sandboxed rather than directly on your machine, and **Ollama** for local inline autocomplete.
 

@@ -419,49 +419,6 @@ test('kimi: the session is found through the index by workdir', () => {
   }
 });
 
-// Record shapes follow gemini-cli 0.47's ChatRecordingService.
-const geminiSay = (id, content, timestamp) => ({ id, type: 'gemini', content, timestamp });
-
-test('gemini: replies are read, prompts and empty tool turns are not', () => {
-  const file = tmpFile('session-x.jsonl', [
-    { sessionId: 's', projectHash: 'h', startTime: '2026-06-01T00:00:00.000Z' },
-    { id: 'u1', type: 'user', content: [{ text: 'what is a worktree?' }] },
-    geminiSay('g0', ''),
-    geminiSay('g1', 'A second checkout of the same repo.'),
-    { $set: { lastUpdated: '2026-06-01T00:00:01.000Z' } },
-  ]);
-  const r = t.readNewMessages('gemini', { transcriptFile: file, cursor: 0 });
-  assert.equal(r.text, 'A second checkout of the same repo.');
-});
-
-test('gemini: a message re-appended with its token counts is not posted twice', () => {
-  const file = tmpFile('session-x.jsonl', [geminiSay('g1', 'Done.')]);
-  const r = t.readNewMessages('gemini', { transcriptFile: file, cursor: 0 });
-  assert.equal(r.text, 'Done.');
-  appendLine(file, { ...geminiSay('g1', 'Done.'), tokens: { total: 12 } });
-  appendLine(file, geminiSay('g2', 'Next answer.'));
-  assert.equal(t.readNewMessages('gemini', { transcriptFile: file, cursor: r.cursor }).text, 'Next answer.');
-});
-
-test('gemini: the chat is found through the project registry', () => {
-  const gHome = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-gemini-home-'));
-  const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'klaussy-wt-'));
-  const chats = path.join(gHome, '.gemini', 'tmp', 'my-proj', 'chats');
-  fs.mkdirSync(chats, { recursive: true });
-  fs.writeFileSync(path.join(gHome, '.gemini', 'projects.json'), JSON.stringify({ projects: { [worktree]: 'my-proj' } }));
-  const chat = path.join(chats, 'session-2026-06-01T00-00-abcd1234.jsonl');
-  fs.writeFileSync(chat, '');
-  const prev = process.env.GEMINI_CLI_HOME;
-  process.env.GEMINI_CLI_HOME = gHome;
-  try {
-    assert.equal(t.findGeminiChat(worktree, 0), chat);
-    assert.equal(t.findGeminiChat(worktree, 0, new Set([chat])), '');
-    assert.equal(t.findGeminiChat('/not/a/project', 0), '');
-  } finally {
-    if (prev === undefined) delete process.env.GEMINI_CLI_HOME; else process.env.GEMINI_CLI_HOME = prev;
-  }
-});
-
 // Shapes follow the cline CLI's sessions/<id>/<id>.messages.json.
 test('cline: reply text is read, thinking and tool calls are not, and the cursor moves on', () => {
   const doc = (messages) => ({ version: 1, sessionId: 's', messages });
@@ -647,4 +604,9 @@ test('ollama (aider): a history file that is a symlink out of the worktree is ne
 
 test('sessions written in the same millisecond go to the later one', () => {
   assert.equal(t.pickSession([{ file: 'first', bornMs: 1, mtimeMs: 5 }, { file: 'second', bornMs: 1, mtimeMs: 5 }], 0), 'second');
+});
+
+test('Gemini CLI has no transcript reader anymore', () => {
+  assert.equal(t.hasReader('gemini'), false);
+  assert.equal(t.hasReader('antigravity'), true);
 });

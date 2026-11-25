@@ -40,7 +40,7 @@ window.AppUtils = (function () {
   }
 
   // ---- AI provider labels (single source: preload's static provider list) ----
-  // mode is a provider id ('claude' | 'codex' | 'gemini' | 'copilot') or
+  // mode is a provider id ('claude' | 'codex' | 'antigravity' | 'copilot' | ...) or
   // 'shell'. Falls back gracefully if the preload bridge isn't ready.
   function _providers() {
     return (window.klaus && window.klaus.ui && window.klaus.ui.providers) || [];

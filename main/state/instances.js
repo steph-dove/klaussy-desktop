@@ -392,7 +392,6 @@ function resetMirrorBinding(inst) {
 const SESSION_FINDERS = {
   copilot: (inst, since) => agentTranscript.findCopilotEvents(inst.worktreePath, since, transcriptsTaken(inst)),
   kimi: (inst, since) => agentTranscript.findKimiWire(inst.worktreePath, since, transcriptsTaken(inst)),
-  gemini: (inst, since) => agentTranscript.findGeminiChat(inst.worktreePath, since, transcriptsTaken(inst)),
   cline: (inst, since) => agentTranscript.findClineSession(inst.worktreePath, since, transcriptsTaken(inst)),
   ollama: (inst, since) => agentTranscript.findAiderHistory(inst.worktreePath, since, transcriptsTaken(inst)),
   cursor: (inst, since) => agentTranscript.findCursorTranscript(inst.worktreePath, since, transcriptsTaken(inst)),
@@ -400,7 +399,7 @@ const SESSION_FINDERS = {
 
 // Readers that drop records older than the tab's start can read a resumed
 // session from the top; skipping to its end would skip the first reply too.
-const AGED_READERS = new Set(['claude', 'copilot', 'kimi', 'gemini', 'cline']);
+const AGED_READERS = new Set(['claude', 'copilot', 'kimi', 'cline']);
 
 // Cursor replaces its transcript on every rewrite, so its conversation
 // directory is what says how old the session is.
@@ -885,7 +884,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   extraEnv = sanitizeExtraEnv(extraEnv);
   const spawnEnv = agentSpawnEnv(worktreePath, id);
 
-  // An agent mode (claude/codex/gemini/copilot) launches that CLI; 'shell'
+  // An agent mode (claude/codex/antigravity/copilot/...) launches that CLI; 'shell'
   // mode launches a plain login shell. The provider registry owns the exact
   // command string (binary, resume flag) so this stays tool-agnostic.
   const config = loadConfig();
@@ -904,7 +903,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
     // Nemesis8 runs `nemesis8 interactive` in this pty, resolved from the picked
     // gateway profile (nemesis8:<id>) — its inner agent and, if remote, URL/token.
     const nemProfile = nemesis.shouldUseNemesis(mode) ? getNemesisProfile(mode) : null;
-    // Gated agents (Gemini) prompt once per worktree for trust + file access.
+    // Gated agents (Antigravity) prompt once per worktree for trust + file access.
     // If the user cancels, don't spawn at all.
     const consent = ensureWorktreeConsentSync(provider.id, worktreePath);
     if (!consent.allowed) return { cancelled: true };
@@ -952,7 +951,7 @@ function spawnInWorktree(name, worktreePath, branch, mode, resumeSessionId, extr
   }
 
   // codex pre-fills its positional handoff prompt but waits for an Enter to
-  // submit (Claude/Gemini/Antigravity auto-run theirs). Nudge once the TUI is
+  // submit (Claude/Antigravity auto-run theirs). Nudge once the TUI is
   // up, with a retry for a slow boot; harmless for agents that already ran it.
   if (needsEnter) {
     const sendEnter = () => { try { if (instances.get(id)) ptyProc.write('\r'); } catch { /* gone */ } };

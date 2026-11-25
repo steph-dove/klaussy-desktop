@@ -14,6 +14,12 @@ const { startAutoFetch } = require('../state/ci-poll');
 const { allProviders, getProvider, binFor, installCommandFor, docsUrlFor, authMetaFor } = require('../state/ai-providers');
 const nemesis = require('../util/nemesis-client');
 const { resolveAgentBin } = require('../util/agent-bin');
+const { replacementFor } = require('../state/retired-agents');
+
+function defaultAgentFor(config) {
+  const id = config.defaultProvider || config.defaultMode || 'claude';
+  return replacementFor(id) || id;
+}
 
 // Synchronous provider-list handed to the sandboxed preload (which can't
 // require local files). Registered on require, before any window/preload runs.
@@ -249,7 +255,6 @@ ipcMain.handle('get-preferences', () => {
     ollamaModel: config.ollamaModel || 'qwen2.5-coder:1.5b-base',
     claudePath: config.claudePath || '',
     codexPath: config.codexPath || '',
-    geminiPath: config.geminiPath || '',
     antigravityPath: config.antigravityPath || '',
     copilotPath: config.copilotPath || '',
     cursorPath: config.cursorPath || '',
@@ -261,8 +266,10 @@ ipcMain.handle('get-preferences', () => {
     kimiAutonomousBash: kimiBashGranted(),
     aiderPath: config.aiderPath || '',
     // defaultProvider supersedes defaultMode; fall back for un-migrated configs.
-    defaultProvider: config.defaultProvider || config.defaultMode || 'claude',
-    defaultMode: config.defaultProvider || config.defaultMode || 'claude',
+    // A retired agent (Gemini CLI) shows as its replacement, so the Run picker
+    // and Preferences always have a real option selected.
+    defaultProvider: defaultAgentFor(config),
+    defaultMode: defaultAgentFor(config),
     // Per-agent pinned model/version: { <agentId>: '<modelId>' }.
     agentModel: config.agentModel || {},
     theme: config.theme || { preset: 'dark' },
@@ -357,7 +364,6 @@ ipcMain.handle('set-preferences', (_event, prefs) => {
   if (prefs.ollamaModel !== undefined) config.ollamaModel = prefs.ollamaModel;
   if (prefs.claudePath !== undefined) config.claudePath = prefs.claudePath;
   if (prefs.codexPath !== undefined) config.codexPath = prefs.codexPath;
-  if (prefs.geminiPath !== undefined) config.geminiPath = prefs.geminiPath;
   if (prefs.antigravityPath !== undefined) config.antigravityPath = prefs.antigravityPath;
   if (prefs.copilotPath !== undefined) config.copilotPath = prefs.copilotPath;
   if (prefs.cursorPath !== undefined) config.cursorPath = prefs.cursorPath;

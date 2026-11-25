@@ -22,7 +22,6 @@ if (!Array.isArray(AGENT_PROVIDERS) || AGENT_PROVIDERS.length === 0) {
   AGENT_PROVIDERS = [
     { id: 'claude', displayName: 'Claude Code', shortLabel: 'cc', defaultBin: 'claude' },
     { id: 'codex', displayName: 'OpenAI Codex', shortLabel: 'cx', defaultBin: 'codex' },
-    { id: 'gemini', displayName: 'Gemini CLI', shortLabel: 'gm', defaultBin: 'gemini' },
     { id: 'antigravity', displayName: 'Antigravity CLI', shortLabel: 'ag', defaultBin: 'agy' },
     { id: 'copilot', displayName: 'GitHub Copilot', shortLabel: 'cp', defaultBin: 'copilot' },
     { id: 'cursor', displayName: 'Cursor CLI', shortLabel: 'cu', defaultBin: 'cursor-agent' },
@@ -766,7 +765,7 @@ contextBridge.exposeInMainWorld('klaus', {
     getRenameNotice: () => ipcRenderer.invoke('rename-notice-get'),
     getClaudeInfo: () => ipcRenderer.invoke('get-claude-info'),
     // Per-provider version probe for Preferences. provider = 'claude' | 'codex'
-    // | 'gemini' | 'copilot'. Returns { id, displayName, path, version }.
+    // | 'antigravity' | 'copilot' | .... Returns { id, displayName, path, version }.
     getAgentInfo: (provider) => ipcRenderer.invoke('get-agent-info', { provider }),
     // Test the saved Nemesis8 gateway connection (health check). Returns
     // { ok, version, error, insecure, url } for the prefs "Test connection" button.

@@ -122,7 +122,7 @@ function spawnClaudeStream({
   const chunkChannel = `${channelPrefix}-${streamJson ? 'data' : 'chunk'}-${requestId}`;
   const doneChannel = `${channelPrefix}-done-${requestId}`;
 
-  // Gated agents (Gemini) need worktree trust to run at all. Prompt for it
+  // Gated agents (Antigravity) need worktree trust to run at all. Prompt for it
   // (once per worktree) on user-initiated surfaces; otherwise use stored
   // consent. If the user declines, bail before spawning and tell the renderer.
   let trust;
@@ -140,7 +140,7 @@ function spawnClaudeStream({
 
   // Token-rotation guard: warn before a second concurrent Codex run (e.g. a
   // Codex review while a Codex terminal is live). Only prompts when another
-  // Codex session is already active; no-op for Claude/Gemini/Copilot.
+  // Codex session is already active; no-op for Claude/Copilot.
   const authSlot = beginSession(prov.id);
   if (!authSlot.ok) {
     if (isBackground) broadcastToAllWindows(doneChannel, { cancelled: true });
@@ -148,7 +148,7 @@ function spawnClaudeStream({
     return null;
   }
 
-  // Pinned model/version for this agent (Gemini today), '' = the agent default.
+  // Pinned model/version for this agent (e.g. Codex, Antigravity), '' = the agent default.
   const model = (config.agentModel || {})[prov.id] || '';
   // When the CLI is a Windows `.cmd` shim it can't carry the multi-line prompt
   // as a command-line arg (see util/agent-spawn), so providers return it on
@@ -200,18 +200,13 @@ function spawnClaudeStream({
     sendChunk(text);
   };
 
-  // Providers whose stdout is JSONL (Codex always; Gemini/Copilot in stream
+  // Providers whose stdout is JSONL (Codex always; Copilot in stream
   // mode) are parsed line-by-line. 'json-text' surfaces only the agent's text
   // (clean answer, like a raw `-p` provider); 'json-translate' re-serializes
   // each event into Claude stream-json so the PR-review renderer parses one
   // format. A line buffer handles JSON lines split across stdout chunks.
   const jsonMode = run.outputMode === 'json-text' || run.outputMode === 'json-translate';
   let lineBuf = '';
-  // The PR-review renderer treats each assistant text block as the full answer
-  // so far (it assigns, not appends). Some agents stream partial text deltas
-  // (Gemini's delta:true messages), so we accumulate them and emit the full
-  // running text each time. Non-delta text (a complete message) replaces it.
-  let textAcc = '';
   const consumeJsonLine = (line) => {
     if (!line.trim()) return;
     let obj;
@@ -219,8 +214,9 @@ function spawnClaudeStream({
     for (const ev of prov.parseStreamLine(obj)) {
       if (run.outputMode === 'json-translate') {
         if (ev.kind === 'text') {
-          textAcc = ev.delta ? (textAcc + (ev.text || '')) : (ev.text || '');
-          emitText(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: textAcc }] } }) + '\n');
+          // Each text event is a complete message; the PR-review renderer treats
+          // an assistant text block as the full answer so far.
+          emitText(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: ev.text || '' }] } }) + '\n');
         } else {
           const cj = normalizedToClaudeStreamJson(ev);
           if (cj) emitText(JSON.stringify(cj) + '\n');

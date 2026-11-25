@@ -1,13 +1,14 @@
 // Copyright 2026 Dovatech LLC. SPDX-License-Identifier: LicenseRef-Sustainable-Use-1.0
 // Persistent config living at userData/config.json: repo path, project list, UI
-// prefs, notify toggles, per-agent CLI paths (claudePath / codexPath /
-// geminiPath / antigravityPath / copilotPath / cursorPath / clinePath /
+// prefs, notify toggles, per-agent CLI paths (claudePath, codexPath,
+// antigravityPath and the rest), saved sessions and the schema version.
 
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { RETIRED_AGENTS, replacementFor } = require('../state/retired-agents');
 
-const CURRENT_SCHEMA_VERSION = 2;
+const CURRENT_SCHEMA_VERSION = 3;
 
 // Persist repo path in a simple JSON file in userData
 function getConfigPath() {
@@ -233,12 +234,47 @@ const migrations = [
   },
 
   // v1 → v2: multi-agent support. `defaultMode` ('claude' | 'shell') becomes
-  // `defaultProvider`, which now also accepts 'codex' | 'gemini' |
-  // 'antigravity' | 'copilot' | 'cursor' | 'cline'. We keep `defaultMode` in
+  // `defaultProvider`, which now also accepts 'codex' | 'antigravity' |
+  // 'copilot' | 'cursor' | 'cline' (and, until v3, 'gemini'). We keep `defaultMode` in
   function v1_to_v2(config) {
     if (config.defaultProvider === undefined) {
       config.defaultProvider = config.defaultMode || 'claude';
     }
+  },
+
+  // v2 → v3: Gemini CLI is gone, replaced by Antigravity (state/retired-agents). Settings and saved sessions that name a retired agent
+  // move to its replacement. A saved session keeps the old id as originalMode,
+  // so resuming it takes the hand-off path and starts the new agent fresh:
+  // the same-agent path would run `agy --continue`, which picks up the last
+  // conversation agy had anywhere, possibly another project's. A model pinned
+  // for the old agent is dropped; its model ids mean nothing to the new one.
+  function v2_to_v3(config) {
+    const replacement = replacementFor;
+    for (const key of ['defaultProvider', 'defaultMode']) {
+      if (replacement(config[key])) config[key] = replacement(config[key]);
+    }
+    for (const s of Array.isArray(config.savedSessions) ? config.savedSessions : []) {
+      if (!s) continue;
+      if (replacement(s.mode)) {
+        if (!s.originalMode) s.originalMode = s.mode;
+        s.mode = replacement(s.mode);
+        s.sessionId = null;
+      }
+      for (const t of Array.isArray(s.subTerminals) ? s.subTerminals : []) {
+        if (t && replacement(t.mode)) {
+          t.mode = replacement(t.mode);
+          t.sessionId = null;
+        }
+      }
+    }
+    // saveConfig merges (nested objects too), so a key is removed by setting it
+    // undefined, which JSON.stringify drops; `delete` would leave the saved one.
+    if (config.agentModel) {
+      for (const id of Object.keys(RETIRED_AGENTS)) {
+        if (id in config.agentModel) config.agentModel[id] = undefined;
+      }
+    }
+    if ('geminiPath' in config) config.geminiPath = undefined;
   },
 ];
 
