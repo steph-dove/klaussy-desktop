@@ -805,6 +805,13 @@
 
     var presets = [
       { name: 'None', value: null },
+      // Maussian's own colors, from maussian.ai and the app.
+      { name: 'Maussian lime', value: '#c6f432' },
+      { name: 'Maussian purple', value: '#a794ff' },
+      { name: 'Maussian violet', value: '#6d4aff' },
+      { name: 'Maussian teal', value: '#2dd4bf' },
+      { name: 'Maussian', value: 'linear-gradient(90deg, #6d4aff, #a794ff)' },
+      { name: 'Maussian glow', value: 'linear-gradient(90deg, #a794ff, #c6f432)' },
       // Solids
       { name: 'Red', value: '#e5484d' },
       { name: 'Orange', value: '#f5821f' },
