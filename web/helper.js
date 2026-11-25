@@ -31,6 +31,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
 const guards = require('./guards');
+const policy = require('./window-policy');
 
 const SHIM = require.resolve('./electron-shim');
 // electron-log picks its plain-Node build outside Electron, which has no
@@ -50,8 +51,11 @@ const ROOT = path.join(__dirname, '..');
 const BASE_PORT = Number(process.env.MAUSSIAN_PORT) || 43117;
 const PORT_TRIES = 10;
 const HELLO_TIMEOUT_MS = 2000;
-const SECONDARY_GRACE_MS = 15000;
 const BIND_RESERVE_MS = 10000;
+// A window someone asked for: closed if no tab shows up for it. Longer once a
+// popup blocker stopped the tab, since the person then has to click a button.
+const OPEN_WAIT_MS = 60000;
+const BLOCKED_WAIT_MS = 10 * 60 * 1000;
 // Before the hello, a socket may only say hello: a few hundred bytes. Anything
 // bigger is dropped unparsed, and only a handful may wait at once.
 const PRE_AUTH_MAX_BYTES = 4096;
@@ -137,6 +141,7 @@ const tokenOk = (candidate) => guards.tokenMatches(candidate, TOKEN_BUF);
 require(path.join(ROOT, 'main.js'));
 const windowsState = require(path.join(ROOT, 'main/state/windows'));
 const { BrowserWindow, ipcMain } = electron;
+electron.__web.setOpenHook((win) => openTabFor(win));
 
 // Folder browser for the in-page open dialog (web/bridge.js). Limited to the
 // home folder: repos live there, and nothing else needs listing.
@@ -188,18 +193,62 @@ function isFree(win, { ownReservation = false } = {}) {
 
 // A reload asks for the window it had; a new tab takes the main window if no
 // tab holds it, else gets a secondary window like a desktop "New Window".
-function pickWindow(wantId) {
+// `strict` is a tab opened for one particular window (a pop-out): it gets that
+// window or nothing, never the main app in its place.
+function pickWindow(wantId, strict) {
   const wanted = wantId ? BrowserWindow.fromId(Number(wantId)) : null;
   if (isFree(wanted, { ownReservation: true })) return wanted;
+  if (strict) return null;
   const main = windowsState.getMainWindow();
   if (isFree(main)) return main;
   return windowsState.createWindow({ secondary: true });
 }
 
 function queryOf(win) {
-  const url = win.webContents.getURL();
-  const i = url.indexOf('?');
-  return i === -1 ? '' : url.slice(i);
+  return win._query || '';
+}
+
+function pageOf(win) {
+  return policy.pageFor(win._page);
+}
+
+// main/ opened a window (a pop-out, Preferences, New Window): ask the tab the
+// person is using to open a tab for it, bound to that window. Popup blockers
+// allow it because it follows their click within moments; if one blocks it
+// anyway, bridge.js offers a button and says so ('open-blocked').
+// A window /__bind just made for a new tab is reserved for that tab by the
+// time this runs (loadFile defers the hook), so it never gets a second tab.
+function openTabFor(win) {
+  const page = pageOf(win);
+  if (page == null) {
+    console.warn(`[web] can't show a window that loads ${win._page}; it has no tab`);
+    return;
+  }
+  const isMain = win === windowsState.getMainWindow();
+  const reserved = reservedUntil.get(win.id) > Date.now();
+  if (!policy.needsTab({ hasTab: !!win.webContents._socket, isMain, reserved, page })) return;
+  const candidates = BrowserWindow.getAllWindows()
+    .filter((w) => w !== win && w.webContents._socket)
+    .map((w) => ({ id: w.id, lastActive: w._lastActive, win: w }));
+  const focused = BrowserWindow.getFocusedWindow();
+  const opener = policy.pickOpener(candidates, focused && focused.id);
+  if (!opener) {
+    console.log(`[web] a ${page} window opened with no tab to show it`);
+    return;
+  }
+  opener.win.webContents.send('__web:open-window', {
+    winId: win.id,
+    path: `/renderer/${page}${queryOf(win)}`,
+    title: win.getTitle(),
+  });
+  scheduleClose(win, OPEN_WAIT_MS); // nobody opened it: close it like an unused window
+}
+
+// The tab the person is using: dialogs and new tabs go to it. Set from real
+// input in the page (bridge.js 'focus'), never from background calls.
+function markActive(win) {
+  win._lastActive = Date.now();
+  electron.__web.setFocused(win);
 }
 
 function makeEvent(win) {
@@ -212,6 +261,8 @@ class TabSocket {
     this.pending = new Map();
     this.seq = 0;
     this.replayed = new Set(); // terminal channels already repainted for this tab
+    this.unloading = false;    // the page said it's going away (pagehide)
+    this.loadedSent = false;   // did-finish-load is emitted once per page
   }
   sendMessage(obj) {
     if (this.ws.readyState === this.ws.OPEN) this.ws.send(encode(obj));
@@ -234,8 +285,11 @@ function bindSocket(win, tab) {
   closeTimers.delete(win.id);
   reservedUntil.delete(win.id);
   win.webContents._socket = tab;
-  electron.__web.setFocused(win);
-  win.webContents.emit('did-finish-load');
+  markActive(win); // a tab that just opened was opened by the person
+  // Pop-outs and Preferences are titled by main/; the main page titles itself.
+  if (pageOf(win) !== 'index.html') tab.sendMessage({ t: 'evt', ch: '__web:title', args: [win.getTitle()] });
+  // 'did-finish-load' waits for the page's own 'loaded' message: main/ sends
+  // on it (popout-init), and the page's listeners don't exist before then.
 }
 
 // A secondary window with no tab for a while is closed, like closing a desktop
@@ -252,7 +306,7 @@ function scheduleClose(win, delayMs) {
 function unbindSocket(win, tab) {
   if (win.webContents._socket !== tab) return;
   win.webContents._socket = null;
-  scheduleClose(win, SECONDARY_GRACE_MS);
+  scheduleClose(win, policy.graceFor(pageOf(win), tab.unloading));
 }
 
 // A fresh page builds empty terminals; repaint each from the window's recorded
@@ -260,10 +314,21 @@ function unbindSocket(win, tab) {
 // reaches main/, so anything main/ flushes on subscribe lands after it, in
 // order. Later subscribes from the same page (rewireTerminal) reuse the
 // terminal that already shows it, so they get nothing.
+// A window showing this terminal for the first time (a pop-out, a new window)
+// has nothing recorded yet; it starts from the window that recorded it most
+// recently, and only that one's buffer is joined.
 function replayTerminal(win, tab, channel) {
   if (typeof channel !== 'string' || tab.replayed.has(channel)) return;
   tab.replayed.add(channel);
-  const text = win.webContents.replayText(channel);
+  let source = win;
+  if (!win.webContents.replayAt(channel)) {
+    let newest = 0;
+    for (const other of BrowserWindow.getAllWindows()) {
+      const at = other === win ? 0 : other.webContents.replayAt(channel);
+      if (at > newest) { newest = at; source = other; }
+    }
+  }
+  const text = source.webContents.replayText(channel);
   if (text) tab.sendMessage({ t: 'evt', ch: channel, args: [text] });
 }
 
@@ -349,8 +414,10 @@ function readBody(req, limit = 1 << 20) {
   });
 }
 
-function renderIndex() {
-  const html = fs.readFileSync(path.join(ROOT, 'renderer', 'index.html'), 'utf8');
+// A renderer page with the bridge and the wrapped preload ahead of its own
+// scripts, which expect window.klaus to exist when they run.
+function renderPage(page) {
+  const html = fs.readFileSync(path.join(ROOT, 'renderer', page), 'utf8');
   return html.replace('<title>', '<script src="/web/bridge.js"></script><script src="/web/preload.js"></script>\n  <title>');
 }
 
@@ -367,11 +434,17 @@ async function handlePost(req, res, url) {
   if (!body || typeof body !== 'object') return send(res, 400, 'Bad request');
 
   if (url.pathname === '/__bind') {
-    const win = pickWindow(body.winId);
+    // A tab opened for a particular window that's gone (closed, or it waited
+    // too long behind a popup blocker) gets 410 and says so, rather than
+    // showing the main app or a page that can't be served in its place.
+    const win = pickWindow(body.winId, body.forWin === true);
+    if (!win || pageOf(win) == null) return send(res, 410, 'Gone');
     reservedUntil.set(win.id, Date.now() + BIND_RESERVE_MS);
     // If its tab never connects, don't keep it forever.
-    if (!win.webContents._socket) scheduleClose(win, BIND_RESERVE_MS + SECONDARY_GRACE_MS);
-    return send(res, 200, encode({ winId: win.id, query: queryOf(win), platform: process.platform, home: HOME }), 'application/json');
+    if (!win.webContents._socket) scheduleClose(win, BIND_RESERVE_MS + policy.GRACE_MS.closingWindow);
+    return send(res, 200, encode({
+      winId: win.id, page: pageOf(win), query: queryOf(win), platform: process.platform, home: HOME,
+    }), 'application/json');
   }
 
   if (url.pathname === '/__sync') {
@@ -397,11 +470,12 @@ function handleGet(req, res, url) {
     return res.end();
   }
   if (rel === 'favicon.ico') rel = 'icon.png';
-  if (rel === 'renderer/index.html') {
+  const page = rel.startsWith('renderer/') && rel.slice('renderer/'.length);
+  if (page && policy.PAGES.has(page)) {
     // frame-ancestors only works as a header; the page's <meta> CSP can't set it.
     res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
     res.setHeader('X-Frame-Options', 'DENY');
-    return send(res, 200, renderIndex(), TYPES['.html']);
+    return send(res, 200, renderPage(page), TYPES['.html']);
   }
   if (rel === 'web/preload.js') return send(res, 200, renderPreload(), TYPES['.js']);
 
@@ -489,7 +563,19 @@ wss.on('connection', (ws) => {
         if (p) { tab.pending.delete(msg.id); (msg.ok ? p.resolve(msg.value) : p.reject(new Error(msg.error))); }
         break;
       }
-      case 'focus': electron.__web.setFocused(win); break;
+      case 'focus': markActive(win); break;
+      case 'unloading': tab.unloading = true; break;
+      // Once per page, however often a page (or a raw socket) says it.
+      case 'loaded':
+        if (!tab.loadedSent) { tab.loadedSent = true; win.webContents.emit('did-finish-load'); }
+        break;
+      // A popup blocker stopped a tab for this window; the person now has to
+      // click the page's button, so give them longer before it closes.
+      case 'open-blocked': {
+        const target = BrowserWindow.fromId(Number(msg.winId));
+        if (target && target !== win && !target.webContents._socket) scheduleClose(target, BLOCKED_WAIT_MS);
+        break;
+      }
       default: break;
     }
   });

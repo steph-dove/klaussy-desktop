@@ -23,31 +23,49 @@
   // Earlier builds kept it in localStorage; don't leave it behind.
   try { var local = store('localStorage'); if (local) local.removeItem(TOKEN_KEY); } catch (_e) { /* storage blocked */ }
 
+  // The helper's link carries the token. A tab this page opens for a pop-out,
+  // Preferences or New Window carries only the window it's for (#win=): it
+  // gets the token from the sessionStorage a browser copies into a tab opened
+  // with window.open, so the token never sits in that tab's URL or history.
   var m = location.hash.match(/(?:^#|&)token=([A-Za-z0-9_-]{43})/);
-  if (m) {
-    if (session) session.setItem(TOKEN_KEY, m[1]);
-    history.replaceState(null, '', location.pathname + location.search);
-  }
+  var forWin = location.hash.match(/(?:^#|&)win=(\d+)/);
+  if (m && session) session.setItem(TOKEN_KEY, m[1]);
+  if (m || forWin) history.replaceState(null, '', location.pathname + location.search);
   var token = (session && session.getItem(TOKEN_KEY)) || (m && m[1]) || '';
+  // Nothing here needs the tab that opened this one.
+  try { if (window.opener) window.opener = null; } catch (_e) { /* cross-origin opener */ }
 
-  function showConnect(reason) {
+  // A full-page card in place of the app: the connect card, or a closed window.
+  function showCard(title, text, code) {
     var paint = function () {
       document.body.innerHTML = '';
       document.body.style.cssText = 'margin:0;font:15px/1.5 system-ui,sans-serif;background:#f6f5f2;color:#1d1d1b;display:flex;align-items:center;justify-content:center;min-height:100vh';
       var card = document.createElement('div');
       card.style.cssText = 'max-width:460px;padding:32px;background:#fff;border:1px solid #dddcd7;border-radius:12px';
       var h = document.createElement('h1');
-      h.textContent = 'Connect your computer';
+      h.textContent = title;
       h.style.cssText = 'font-size:20px;margin:0 0 8px';
       var p = document.createElement('p');
-      p.textContent = reason || 'Maussian runs on your machine. Start it in a terminal, and it opens this page signed in:';
-      var code = document.createElement('pre');
-      code.textContent = 'npm run web';
-      code.style.cssText = 'background:#f0efec;padding:10px 12px;border-radius:8px;font-size:14px';
-      card.appendChild(h); card.appendChild(p); card.appendChild(code);
+      p.textContent = text;
+      card.appendChild(h); card.appendChild(p);
+      if (code) {
+        var pre = document.createElement('pre');
+        pre.textContent = code;
+        pre.style.cssText = 'background:#f0efec;padding:10px 12px;border-radius:8px;font-size:14px';
+        card.appendChild(pre);
+      }
       document.body.appendChild(card);
     };
     if (document.body) paint(); else document.addEventListener('DOMContentLoaded', paint);
+  }
+
+  function showConnect(reason) {
+    showCard('Connect your computer',
+      reason || 'Maussian runs on your machine. Start it in a terminal, and it opens this page signed in:', 'npm run web');
+  }
+
+  function showClosed() {
+    showCard('This window was closed', 'Maussian closed this window. You can close this tab.');
   }
 
   // ---- encoding (Uint8Array <-> base64, mirrored in web/helper.js) ----------
@@ -81,8 +99,11 @@
     x.setRequestHeader('Content-Type', 'application/json');
     x.setRequestHeader('X-Maussian-Token', token);
     x.send(encode(body));
-    if (x.status === 401) { var e = new Error('Unauthorized'); e.status = 401; throw e; }
-    if (x.status !== 200) throw new Error('Helper answered ' + x.status);
+    if (x.status !== 200) {
+      var e = new Error(x.status === 401 ? 'Unauthorized' : 'Helper answered ' + x.status);
+      e.status = x.status;
+      throw e;
+    }
     return decode(x.responseText);
   }
 
@@ -90,18 +111,25 @@
   var bound;
   try {
     if (!token) throw Object.assign(new Error('No token'), { status: 401 });
-    bound = syncPost('/__bind', { winId: session && session.getItem(WIN_KEY) });
+    bound = forWin
+      ? syncPost('/__bind', { winId: forWin[1], forWin: true })
+      : syncPost('/__bind', { winId: session && session.getItem(WIN_KEY) });
   } catch (err) {
     if (err.status === 401 && session) session.removeItem(TOKEN_KEY);
-    showConnect(err.status === 401 ? null : 'Maussian isn’t running on this computer. Start it in a terminal:');
+    // 410: the window this tab was opened for is gone (closed, or it waited too
+    // long behind a popup blocker).
+    if (err.status === 410) showClosed();
+    else showConnect(err.status === 401 ? null : 'Maussian isn’t running on this computer. Start it in a terminal:');
     window.__maussianRequire = function () { throw new Error('Maussian is not connected'); };
     return;
   }
   if (session) session.setItem(WIN_KEY, String(bound.winId));
-  // A secondary window's renderer reads ?secondary=1 at load, so fix the URL
-  // before any renderer script runs.
-  if ((bound.query || '') !== location.search) {
-    location.replace(location.pathname + (bound.query || ''));
+  // Show the page this window loads (a reloaded pop-out stays a pop-out), and a
+  // secondary window's renderer reads ?secondary=1 at load: fix the URL before
+  // any renderer script runs.
+  var wantPath = '/renderer/' + (bound.page || 'index.html');
+  if (location.pathname !== wantPath || (bound.query || '') !== location.search) {
+    location.replace(wantPath + (bound.query || ''));
     window.__maussianRequire = function () { throw new Error('Reloading'); };
     return;
   }
@@ -119,6 +147,25 @@
   // Messages wait here while connecting or reconnecting. A helper that stays
   // away shouldn't grow this without limit.
   var QUEUE_MAX = 1000;
+
+  // This script runs in <head>, before the page's own scripts register their
+  // listeners, and the socket can be faster than they are. Events wait until
+  // the document is parsed; in Electron a page never sees a message before then.
+  var held = document.readyState === 'loading' ? [] : null;
+  if (held) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var list = held; held = null;
+      list.forEach(function (e) { handleEvent(e[0], e[1]); });
+    });
+  }
+
+  // Electron's 'did-finish-load', which main/ waits on before sending a
+  // pop-out its task: once per page, when it has loaded and is connected.
+  var loadedSent = false;
+  function sendLoaded() {
+    if (!loadedSent && ready && document.readyState === 'complete') loadedSent = trySend({ t: 'loaded' });
+  }
+  window.addEventListener('load', sendLoaded);
 
   function emit(ch, args) {
     var set = listeners[ch];
@@ -173,10 +220,12 @@
       if (msg.t === 'welcome') {
         ready = true;
         everConnected = true;
+        if (document.hasFocus()) markActive();
         retries = 0;
         setBanner(null);
         var q = queue; queue = [];
         q.forEach(function (x) { post(x); });
+        sendLoaded();
         return;
       }
       if (msg.t === 'res') {
@@ -187,7 +236,12 @@
         else p.reject(new Error("Error invoking remote method '" + p.ch + "': Error: " + msg.error));
         return;
       }
-      if (msg.t === 'evt') return handleEvent(msg.ch, msg.args);
+      if (msg.t === 'evt') {
+        if (msg.ch === '__web:close') return closeTab(); // not worth holding
+        if (held) held.push([msg.ch, msg.args]);
+        else handleEvent(msg.ch, msg.args);
+        return;
+      }
       if (msg.t === 'req') return handleRequest(msg);
     };
     ws.onclose = function (e) {
@@ -217,7 +271,33 @@
     if (ch === '__web:focus') { window.focus(); return; }
     if (ch === '__web:notification') return notify(args[0] || {});
     if (ch === '__web:error-box') { messageDialog('error', args[0] || {}); return; }
+    if (ch === '__web:open-window') return openWindow(args[0] || {});
+    if (ch === '__web:close') return closeTab();
     emit(ch, args);
+  }
+
+  // main/ opened a window. Open a tab for it, signed in with this tab's token
+  // and bound to that window. It follows the click that asked for it, so popup
+  // blockers allow it; if one doesn't, offer a button, which always works.
+  function openWindow(w) {
+    if (typeof w.path !== 'string' || w.path.indexOf('/renderer/') !== 0 || !Number.isInteger(w.winId)) return;
+    var url = w.path + '#win=' + w.winId;
+    if (window.open(url, '_blank')) return;
+    trySend({ t: 'open-blocked', winId: w.winId });
+    var box = el('div', 'position:fixed;right:16px;bottom:16px;z-index:2147483647;display:flex;gap:12px;align-items:center;background:#1d1d1b;color:#fff;padding:10px 14px;border-radius:8px;font:13px system-ui,sans-serif');
+    box.setAttribute('role', 'alert');
+    box.appendChild(el('span', '', 'Your browser blocked ' + (w.title ? '“' + w.title + '”' : 'a new tab') + '.'));
+    var open = el('button', 'font:13px system-ui,sans-serif;padding:4px 12px;border-radius:6px;border:0;background:#fff;color:#1d1d1b;cursor:pointer', 'Open it');
+    open.type = 'button';
+    open.onclick = function () { window.open(url, '_blank'); box.remove(); };
+    var dismiss = el('button', 'font:13px system-ui,sans-serif;padding:4px 8px;border:0;background:none;color:#fff;cursor:pointer', '×');
+    dismiss.type = 'button';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.onclick = function () { box.remove(); };
+    box.appendChild(open);
+    box.appendChild(dismiss);
+    document.body.appendChild(box);
+    open.focus();
   }
 
   function notify(n) {
@@ -283,7 +363,26 @@
     throw new Error("Cannot find module '" + name + "' in browser mode");
   };
 
-  window.addEventListener('focus', function () { if (ready) trySend({ t: 'focus' }); });
+  // The helper sends dialogs and new tabs to the tab in use. Real input says
+  // which one that is; a background tab's calls don't.
+  var lastActiveSent = 0;
+  function markActive() {
+    var now = Date.now();
+    if (!ready || now - lastActiveSent < 1000) return;
+    if (trySend({ t: 'focus' })) lastActiveSent = now;
+  }
+  window.addEventListener('focus', markActive);
+  document.addEventListener('pointerdown', markActive, true);
+  document.addEventListener('keydown', markActive, true);
+  // Leaving on purpose (close, reload, navigate): the helper can close this
+  // window soon. A dropped socket without this keeps the window much longer.
+  window.addEventListener('pagehide', function () { trySend({ t: 'unloading' }); });
+
+  // window.close() only works for tabs a script opened; otherwise say so.
+  function closeTab() {
+    window.close();
+    setTimeout(showClosed, 300);
+  }
 
   // ---- dialogs ------------------------------------------------------------
   // The helper waits on a dialog for as long as the person takes; a tab that

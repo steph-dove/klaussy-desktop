@@ -136,3 +136,67 @@ test('at most 64 terminals are kept per window, least recently written dropped f
   assert.strictEqual(channels[channels.length - 1], 'terminal-data-6');
   win.destroy();
 });
+
+// ---- windows that main/ opens --------------------------------------------------
+
+const shim = require('../../web/electron-shim');
+
+// The hook is global; restore it even when an assertion fails.
+async function withOpenHook(fn) {
+  const opened = [];
+  shim.__web.setOpenHook((w) => opened.push([w._page, w._query]));
+  try {
+    await fn();
+    await new Promise((r) => setImmediate(r));
+  } finally {
+    shim.__web.setOpenHook(null);
+  }
+  return opened;
+}
+
+test('a window that loads a page is reported once, with its page and query', async () => {
+  let win;
+  const opened = await withOpenHook(() => {
+    win = new BrowserWindow();
+    win.loadFile('/app/renderer/index.html', { query: { secondary: '1' } });
+  });
+  assert.deepStrictEqual(opened, [['index.html', '?secondary=1']]);
+  win.destroy();
+});
+
+test('a window closed before it is shown is never reported', async () => {
+  const opened = await withOpenHook(() => {
+    const win = new BrowserWindow();
+    win.loadFile('/app/renderer/preferences.html');
+    win.destroy();
+  });
+  assert.deepStrictEqual(opened, []);
+});
+
+function closeMessages(sent) {
+  return sent.filter((m) => m.t === 'evt' && m.ch === '__web:close').length;
+}
+
+test('main/ closing a pop-out closes its tab, once', () => {
+  const { win, sent } = windowWithTab();
+  win.loadFile('/app/renderer/popout.html');
+  win.close();
+  win.close(); // already destroyed: nothing more is sent
+  assert.equal(closeMessages(sent), 1);
+});
+
+test('closing a full app window never closes its tab', () => {
+  const { win, sent } = windowWithTab();
+  win.loadFile('/app/renderer/index.html', { query: { secondary: '1' } });
+  win.close();
+  assert.equal(closeMessages(sent), 0);
+});
+
+test('replayAt says when a window last recorded a terminal, without joining it', () => {
+  const { win } = windowWithTab();
+  assert.equal(win.webContents.replayAt('terminal-data-9'), 0);
+  const before = Date.now();
+  win.webContents.send('terminal-data-9', 'x');
+  assert.ok(win.webContents.replayAt('terminal-data-9') >= before);
+  win.destroy();
+});

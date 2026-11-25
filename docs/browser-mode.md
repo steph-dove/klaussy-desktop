@@ -171,8 +171,14 @@ config (no autostart, pinned version, allowed agents and hosts).
      terminal on its first subscribe; a page that survived a dropped connection
      gets each terminal reset and repainted on reconnect. A full-screen agent
      UI cut mid-stream relies on the redraw that follows the reattach resize.
-   - Pop-out windows, `preferences.html` and `pr-review.html` open new
-     Electron windows; map them to `window.open` tabs.
+   - Pop-outs as tabs (done): when main/ opens a window (task pop-out, PR
+     review pop-out, Preferences, New Window), the helper asks the tab in use
+     to open a tab for it, signed in and bound to that window by id. It follows
+     the click, so popup blockers allow it; if one doesn't, the tab offers a
+     button. main/ closing the window ("Pop in") closes the tab, and a closed
+     pop-out tab reads as closed in the app after 4 s. A pop-out starts from
+     the terminal history another window recorded. The PR review pop-out is
+     untested end to end (it needs a live PR review).
    - `klaussy-voice:` and `klaussy-qa:` schemes have no browser equivalent yet;
      serve them as helper routes.
    - Browser-reserved shortcuts (Cmd+W/T/N) need remapping outside an installed

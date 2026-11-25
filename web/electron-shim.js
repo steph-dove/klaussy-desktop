@@ -142,10 +142,11 @@ class WebContents extends EventEmitter {
     if (buf) {
       this._replay.delete(channel); // re-inserted below: Map order is recency
     } else {
-      buf = { chunks: [], size: 0, trimmed: false };
+      buf = { chunks: [], size: 0, trimmed: false, at: 0 };
       if (this._replay.size >= REPLAY_MAX_CHANNELS) this._replay.delete(this._replay.keys().next().value);
     }
     this._replay.set(channel, buf);
+    buf.at = Date.now();
     buf.chunks.push(text);
     buf.size += text.length;
     if (buf.size > REPLAY_CAP) {
@@ -158,6 +159,11 @@ class WebContents extends EventEmitter {
   }
   // Terminals this window has recorded output for, oldest first.
   replayChannels() { return [...this._replay.keys()]; }
+  // When this window last recorded output for a terminal (0: never); cheap, no join.
+  replayAt(channel) {
+    const buf = this._replay.get(channel);
+    return buf ? buf.at : 0;
+  }
   // The recorded output for one terminal, to send ahead of live output.
   replayText(channel) {
     const buf = this._replay.get(channel);
@@ -192,9 +198,14 @@ class BrowserWindow extends EventEmitter {
     windows.set(this.id, this);
     if (focusedId == null) focusedId = this.id;
   }
+  // A window has no screen of its own here: the helper opens a browser tab for
+  // it (pop-outs, Preferences, New Window) once main/ has set it up.
   loadFile(file, opts) {
     const query = opts && opts.query ? '?' + new URLSearchParams(opts.query).toString() : '';
     this.webContents._url = 'file://' + file + query;
+    this._page = path.basename(file);
+    this._query = query;
+    setImmediate(() => { if (!this._destroyed && openHook) openHook(this); });
     return Promise.resolve();
   }
   loadURL(url) { this.webContents._url = url; return Promise.resolve(); }
@@ -221,6 +232,9 @@ class BrowserWindow extends EventEmitter {
   close() { this.destroy(); }
   destroy() {
     if (this._destroyed) return;
+    // main/ closing a pop-out ("Pop in") or Preferences closes its tab. A full
+    // app window's tab stays: closing the person's main tab is never right.
+    if (this._page && this._page !== 'index.html') this.webContents.send('__web:close');
     this.emit('close', { preventDefault() {} });
     this._destroyed = true;
     this.webContents._destroyed = true;
@@ -244,6 +258,9 @@ const webContents = {
 };
 
 function setFocused(win) { if (win) focusedId = win.id; }
+
+// Set by web/helper.js: called once a window has loaded its page.
+let openHook = null;
 
 // ---- dialogs (answered by a tab) -------------------------------------------
 
@@ -426,6 +443,7 @@ module.exports = {
     handlers,
     setFocused,
     setUserData,
+    setOpenHook: (fn) => { openHook = fn; },
     markReady: () => { app._ready = true; app.emit('ready'); markReady(); },
   },
 };
