@@ -122,6 +122,18 @@ function findBrowser(dir, id) {
   return (typeof id === 'string' && listBrowsers(dir).find((b) => b.id === id)) || null;
 }
 
+// A browser's label comes from the browser itself and is printed in a terminal
+// by --status, so control characters (newlines that would forge rows, escape
+// sequences that would rewrite the screen) never get through. Applied when a
+// label is stored and again when it's shown, for labels stored before this.
+function cleanLabel(label) {
+  return String(label == null ? '' : label)
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
 // Pairs a browser: { browserId } or { error: 'bad-key' | 'full' | 'bad-code' }.
 // The key and the room are checked before the code is spent, so a bad request
 // never burns the one-time code its link carried.
@@ -133,9 +145,46 @@ function pairBrowser(dir, code, jwk, label, now = Date.now()) {
     if (browsers.length >= MAX_BROWSERS) return { error: 'full' };
     if (!spendCode(dir, code, now)) return { error: 'bad-code' };
     const id = crypto.randomBytes(16).toString('hex');
-    browsers.push({ id, jwk: key, label: String(label || '').slice(0, 120), pairedAt: new Date(now).toISOString() });
+    browsers.push({ id, jwk: key, label: cleanLabel(label), pairedAt: new Date(now).toISOString() });
     writeJson(path.join(dir, BROWSERS_FILE), browsers);
     return { browserId: id };
+  });
+}
+
+// Records a sign-in, so --status can say when a browser was last used. At most
+// once per SIGN_IN_RECORD_MS per browser: it takes the file lock, and the
+// helper calls it on every sign-in.
+const SIGN_IN_RECORD_MS = 10 * 60 * 1000;
+function touchBrowser(dir, id, now = Date.now()) {
+  const seen = findBrowser(dir, id);
+  if (!seen) return false;
+  if (seen.lastSignIn && now - Date.parse(seen.lastSignIn) < SIGN_IN_RECORD_MS) return true;
+  return withLock(dir, () => {
+    const browsers = listBrowsers(dir);
+    const b = browsers.find((x) => x.id === id);
+    if (!b) return false;
+    b.lastSignIn = new Date(now).toISOString();
+    writeJson(path.join(dir, BROWSERS_FILE), browsers);
+    return true;
+  });
+}
+
+// Forgets one browser, named by its full id or a unique prefix of at least 4
+// characters (what --status prints). An exact id wins even when it's also a
+// prefix of another. { removed } or { error: 'missing' | 'too-short' |
+// 'not-found' | 'ambiguous' }.
+function removeBrowser(dir, idOrPrefix) {
+  if (typeof idOrPrefix !== 'string' || !idOrPrefix.trim()) return { error: 'missing' };
+  const want = idOrPrefix.trim().toLowerCase();
+  if (want.length < 4) return { error: 'too-short' };
+  return withLock(dir, () => {
+    const browsers = listBrowsers(dir);
+    const exact = browsers.filter((b) => b.id === want);
+    const hits = exact.length ? exact : browsers.filter((b) => b.id.startsWith(want));
+    if (!hits.length) return { error: 'not-found' };
+    if (hits.length > 1) return { error: 'ambiguous' };
+    writeJson(path.join(dir, BROWSERS_FILE), browsers.filter((b) => b !== hits[0]));
+    return { removed: hits[0] };
   });
 }
 
@@ -161,6 +210,7 @@ function verifyChallenge(jwk, challenge, signatureB64url) {
 }
 
 module.exports = {
-  CODES_FILE, BROWSERS_FILE, LOCK_FILE, PAIR_CODE_TTL_MS, MAX_PENDING_CODES, MAX_BROWSERS,
-  mintPairCode, consumePairCode, publicJwk, listBrowsers, findBrowser, pairBrowser, removeAllBrowsers, verifyChallenge,
+  CODES_FILE, BROWSERS_FILE, LOCK_FILE, PAIR_CODE_TTL_MS, MAX_PENDING_CODES, MAX_BROWSERS, SIGN_IN_RECORD_MS, cleanLabel,
+  mintPairCode, consumePairCode, publicJwk, listBrowsers, findBrowser, pairBrowser, touchBrowser, removeBrowser,
+  removeAllBrowsers, verifyChallenge,
 };

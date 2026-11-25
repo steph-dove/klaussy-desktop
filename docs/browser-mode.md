@@ -17,6 +17,8 @@ closes and reattaches when a tab opens again.
 ```sh
 npm run web                 # starts the helper and opens the browser, signed in
 npm run web -- --no-open    # print the link instead
+npm run web -- --status     # running or not, and the paired browsers
+npm run web -- --unpair <id> # forget one browser (an id or prefix from --status)
 npm run web -- --unpair-all # forget every paired browser, open tabs included
 npm run test:web            # integration test: a real helper, every way in refused
 ```
@@ -122,15 +124,14 @@ asynchronously and reloads.
 
 What a script injected into the page could still do is use the key while the
 page is open; it can't copy it out. Nothing long-lived that grants access sits
-anywhere a script could read. `--unpair-all` revokes every browser, and a
+anywhere a script could read. `--status` lists paired browsers with when each
+last signed in; `--unpair <id>` revokes one and `--unpair-all` every one, and a
 running helper closes their tabs within 2 seconds. The helper prints its link
 only with `--no-open`. Stop the helper with Ctrl-C or SIGTERM; it saves
 sessions first.
 
 Still to do before anyone else runs it:
 
-- A `maussian status` command listing paired browsers, and unpairing one at a
-  time.
 - Review every IPC handler against "a hostile page that got paired" and confirm
   destructive actions outside a worktree in the helper.
 - When the UI moves to app.maussian.ai: allow that origin, answer Chrome's local

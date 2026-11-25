@@ -224,6 +224,60 @@ test('the socket refuses every way in without a session', async () => {
   assert.equal((await socket({ send: 'x'.repeat(5000) })).closed, 1009); // too big before hello
 });
 
+// A tab signed in by a freshly paired browser; resolves with the open socket.
+async function signedInTab(label = 'Test browser') {
+  const b = newBrowser();
+  const code = linkCode((await run([])).out).code;
+  const { browserId } = json(await post('/__pair', { code, publicKey: b.publicKey, label }));
+  const ticket = await signIn(b, browserId);
+  const { winId } = json(await post('/__bind', {}, { 'X-Maussian-Ticket': ticket }));
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/__ws`, { origin });
+  await new Promise((resolve, reject) => {
+    ws.on('open', () => ws.send(JSON.stringify({ t: 'hello', ticket, winId })));
+    ws.on('message', resolve);
+    ws.on('close', (c) => reject(new Error(`closed ${c}`)));
+  });
+  const closed = Promise.race([
+    new Promise((resolve) => ws.on('close', resolve)),
+    new Promise((resolve) => setTimeout(() => resolve('still open'), 8000)),
+  ]);
+  return { browserId, ticket, ws, closed };
+}
+
+test('--status shows the helper and paired browsers; --unpair signs out just one', async () => {
+  const keep = await signedInTab();
+  // A label trying to forge a row: --status must print it on one line.
+  const drop = await signedInTab('Test browser\n  ffffffff  Forged row\u001b[2J');
+
+  const status = (await run(['--status'])).out;
+  assert.match(status, new RegExp(`Running on http://127\\.0\\.0\\.1:${port}`));
+  const row = status.split('\n').find((l) => l.includes(drop.browserId.slice(0, 8)));
+  assert.ok(row && row.includes('Test browser') && row.includes('last signed in'), status);
+  assert.ok(!status.split('\n').some((l) => /^\s+ffffffff\b/.test(l)), 'no forged row');
+  assert.ok(!status.includes('\u001b'), 'no escape sequences');
+
+  const r = await run(['--unpair', drop.browserId.slice(0, 8)]);
+  assert.match(r.out, /Forgot Test browser/);
+  assert.equal(await drop.closed, 4401);
+  assert.equal((await post('/__bind', {}, { 'X-Maussian-Ticket': drop.ticket })).status, 401);
+  // The other browser's tab and ticket are untouched, a full sweep later too.
+  await new Promise((r) => setTimeout(r, 2500));
+  assert.equal(keep.ws.readyState, WebSocket.OPEN);
+  assert.equal((await post('/__bind', {}, { 'X-Maussian-Ticket': keep.ticket })).status, 200);
+  keep.ws.close();
+
+  for (const [args, said] of [
+    [['--unpair', 'zz'], /at least the first 4 characters/],
+    [['--unpair', 'ffffffff'], /No paired browser has that id/],
+    [['--unpair'], /Say which browser/],
+    [['--unpair', '--no-open'], /Say which browser/],
+  ]) {
+    const r2 = await run(args);
+    assert.equal(r2.code, 1, args.join(' '));
+    assert.match(r2.out, said);
+  }
+});
+
 // Unpairs every browser, so it runs after every test that pairs one.
 test('a signed-in tab gets in, and --unpair-all throws it out', async () => {
   const b = newBrowser();

@@ -3,6 +3,8 @@
 // serves the renderer to a browser tab on 127.0.0.1.
 //
 //   npm run web                    (ELECTRON_RUN_AS_NODE=1 electron web/helper.js)
+//   npm run web -- --status        is it running, and which browsers are paired
+//   npm run web -- --unpair <id>   forget one browser (an id or a prefix from --status)
 //   npm run web -- --unpair-all    forget every paired browser, open tabs included
 //
 // It runs under Electron's Node so node-pty keeps the ABI it was rebuilt for.
@@ -64,7 +66,8 @@ const BLOCKED_WAIT_MS = 10 * 60 * 1000;
 const PRE_AUTH_MAX_BYTES = 4096;
 const PRE_AUTH_MAX_SOCKETS = 8;
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
 
 function openInBrowser(link) {
   const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open';
@@ -104,8 +107,75 @@ electron.__web.setUserData(USER_DATA);
 const instanceLock = require(path.join(ROOT, 'main/util/instance-lock'));
 const pairing = require(path.join(ROOT, 'main/util/web-pairing'));
 
-// The panic button. Works whether or not a helper is running: a running one
-// sees the file change and closes every tab it signed in.
+// ---- commands that only read or change the pairing files ---------------------
+// They work whether or not a helper is running; a running one sees the file
+// change and closes the tabs of any browser that's no longer paired.
+
+function when(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'unknown';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Whether a helper answers on `port`, asked from a child process so this stays
+// synchronous (the rest of startup follows these commands).
+function helperAnswers(port) {
+  const probe = `require('http').get({ host: '127.0.0.1', port: ${Number(port)}, path: '/', headers: { Host: '127.0.0.1:${Number(port)}' }, timeout: 1500 },`
+    + ` (r) => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1)).on('timeout', () => process.exit(1));`;
+  const r = require('child_process').spawnSync(process.execPath, ['-e', probe], {
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 3000, stdio: 'ignore',
+  });
+  return r.status === 0;
+}
+
+if (args.has('--status')) {
+  const holder = instanceLock.currentHolder(USER_DATA);
+  const lines = ['', 'Maussian browser mode'];
+  if (holder && holder.kind === 'web' && !Number.isInteger(holder.port)) {
+    lines.push(`  Starting (pid ${holder.pid}), not listening yet`);
+  } else if (holder && holder.kind === 'web') {
+    lines.push(helperAnswers(holder.port)
+      ? `  Running on http://127.0.0.1:${holder.port} (pid ${holder.pid})`
+      : `  Its process is alive (pid ${holder.pid}) but nothing answers on port ${holder.port}`);
+  } else if (holder && holder.kind === 'desktop') {
+    lines.push(`  Not running: the desktop app has these settings open (pid ${holder.pid})`);
+  } else {
+    lines.push('  Not running. Start it with `npm run web`.');
+  }
+  lines.push(`  Settings: ${USER_DATA}`);
+  const browsers = pairing.listBrowsers(USER_DATA);
+  lines.push('', browsers.length ? `Paired browsers (${browsers.length}):` : 'No paired browsers. `npm run web` pairs the one it opens.');
+  for (const b of browsers) {
+    const used = b.lastSignIn ? `last signed in ${when(b.lastSignIn)}` : 'never signed in';
+    lines.push(`  ${b.id.slice(0, 8)}  ${pairing.cleanLabel(b.label) || 'Unnamed browser'}  paired ${when(b.pairedAt)}, ${used}`);
+  }
+  if (browsers.length) {
+    lines.push('', '  Forget one:  npm run web -- --unpair <id>', '  Forget all:  npm run web -- --unpair-all');
+  }
+  console.log(lines.join('\n') + '\n');
+  process.exit(0);
+}
+
+if (args.has('--unpair')) {
+  const value = argv[argv.indexOf('--unpair') + 1];
+  // A following flag (`--unpair --no-open`) is not an id.
+  const r = pairing.removeBrowser(USER_DATA, value && !value.startsWith('-') ? value : undefined);
+  const why = {
+    missing: 'Say which browser: `npm run web -- --unpair <id>`, with an id from `npm run web -- --status`.',
+    'too-short': 'Give at least the first 4 characters of its id (see `npm run web -- --status`).',
+    'not-found': 'No paired browser has that id (see `npm run web -- --status`).',
+    ambiguous: 'More than one paired browser starts with that; give more of the id.',
+  };
+  if (r.error) {
+    console.error(`\n${why[r.error]}\n`);
+    process.exit(1);
+  }
+  console.log(`\nForgot ${pairing.cleanLabel(r.removed.label) || 'that browser'} (${r.removed.id.slice(0, 8)}). Its open tabs are signed out.\n`);
+  process.exit(0);
+}
+
+// The panic button.
 if (args.has('--unpair-all')) {
   const n = pairing.removeAllBrowsers(USER_DATA);
   console.log(`\nForgot ${n} paired browser${n === 1 ? '' : 's'}. Running \`npm run web\` pairs this one again.\n`);
@@ -478,7 +548,12 @@ async function handlePost(req, res, url) {
       () => pairing.verifyChallenge(browser.jwk, body.challenge, body.signature));
     if (r.error === 'limited') return send(res, 429, 'Too many attempts');
     if (r.error) return send(res, 401, 'Unauthorized');
-    return send(res, 200, encode({ ticket: r.ticket }), 'application/json');
+    send(res, 200, encode({ ticket: r.ticket }), 'application/json');
+    // After answering: it can wait on the pairing lock, and it's only bookkeeping.
+    setImmediate(() => {
+      try { pairing.touchBrowser(USER_DATA, browser.id); } catch (err) { console.warn('[web] sign-in not recorded:', err.message); }
+    });
+    return;
   }
 
   // Everything else needs a session.

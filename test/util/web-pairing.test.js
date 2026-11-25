@@ -92,6 +92,70 @@ test('a lock left by a crashed process is taken over, and none is left behind', 
   assert.equal(fs.existsSync(lock), false);
 });
 
+test('a sign-in is recorded on the browser', () => {
+  const dir = tmpDir();
+  const { browserId } = pairing.pairBrowser(dir, pairing.mintPairCode(dir), browserKey().jwk);
+  assert.equal(pairing.findBrowser(dir, browserId).lastSignIn, undefined);
+  assert.equal(pairing.touchBrowser(dir, browserId, Date.UTC(2026, 10, 24, 12)), true);
+  assert.equal(pairing.findBrowser(dir, browserId).lastSignIn, '2026-11-24T12:00:00.000Z');
+  assert.equal(pairing.touchBrowser(dir, 'gone'), false);
+});
+
+test('one browser can be forgotten by its id or a unique prefix', () => {
+  const dir = tmpDir();
+  const a = pairing.pairBrowser(dir, pairing.mintPairCode(dir), browserKey().jwk, 'A').browserId;
+  const b = pairing.pairBrowser(dir, pairing.mintPairCode(dir), browserKey().jwk, 'B').browserId;
+  assert.deepEqual(pairing.removeBrowser(dir, 'ab'), { error: 'too-short' });
+  assert.deepEqual(pairing.removeBrowser(dir, 'zzzzzzzz'), { error: 'not-found' });
+  assert.equal(pairing.removeBrowser(dir, a.slice(0, 8).toUpperCase()).removed.label, 'A');
+  assert.equal(pairing.findBrowser(dir, a), null);
+  assert.ok(pairing.findBrowser(dir, b));
+});
+
+test('labels lose control characters, so they can\u2019t forge rows or rewrite the terminal', () => {
+  assert.equal(pairing.cleanLabel('Chrome\nb00000000  Fake row'), 'Chrome b00000000 Fake row');
+  assert.equal(pairing.cleanLabel('A\u001b[2J\u001b[HB'), 'A [2J [HB');
+  assert.equal(pairing.cleanLabel('x'.repeat(500)).length, 120);
+  assert.equal(pairing.cleanLabel(undefined), '');
+  const dir = tmpDir();
+  const { browserId } = pairing.pairBrowser(dir, pairing.mintPairCode(dir), browserKey().jwk, 'Line one\r\nLine two');
+  assert.equal(pairing.findBrowser(dir, browserId).label, 'Line one Line two');
+});
+
+test('a sign-in is recorded at most every few minutes, and not for a forgotten browser', () => {
+  const dir = tmpDir();
+  const { browserId } = pairing.pairBrowser(dir, pairing.mintPairCode(dir), browserKey().jwk);
+  const t0 = Date.UTC(2026, 10, 25, 9);
+  pairing.touchBrowser(dir, browserId, t0);
+  pairing.touchBrowser(dir, browserId, t0 + 60 * 1000);
+  assert.equal(pairing.findBrowser(dir, browserId).lastSignIn, new Date(t0).toISOString());
+  pairing.touchBrowser(dir, browserId, t0 + pairing.SIGN_IN_RECORD_MS + 1);
+  assert.equal(pairing.findBrowser(dir, browserId).lastSignIn, new Date(t0 + pairing.SIGN_IN_RECORD_MS + 1).toISOString());
+  pairing.removeBrowser(dir, browserId);
+  assert.equal(pairing.touchBrowser(dir, browserId), false);
+});
+
+test('a full id wins over prefixes, and odd input is refused clearly', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, pairing.BROWSERS_FILE), JSON.stringify([
+    { id: 'abcd', jwk: {}, label: 'short' }, { id: 'abcd5678', jwk: {}, label: 'long' },
+  ]));
+  assert.equal(pairing.removeBrowser(dir, 'abcd').removed.label, 'short');
+  assert.deepEqual(pairing.listBrowsers(dir).map((b) => b.id), ['abcd5678']);
+  assert.ok(!fs.readFileSync(path.join(dir, pairing.BROWSERS_FILE), 'utf8').includes('"short"'));
+  for (const bad of [undefined, null, 42, '', '   ']) assert.deepEqual(pairing.removeBrowser(dir, bad), { error: 'missing' });
+  assert.deepEqual(pairing.removeBrowser(dir, ' ab '), { error: 'too-short' });
+});
+
+test('an ambiguous prefix forgets nothing', () => {
+  const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, pairing.BROWSERS_FILE), JSON.stringify([
+    { id: 'abcd1111', jwk: {}, label: 'one' }, { id: 'abcd2222', jwk: {}, label: 'two' },
+  ]));
+  assert.deepEqual(pairing.removeBrowser(dir, 'abcd'), { error: 'ambiguous' });
+  assert.equal(pairing.listBrowsers(dir).length, 2);
+});
+
 test('unpairing forgets every browser and every pending code', () => {
   const dir = tmpDir();
   pairing.pairBrowser(dir, pairing.mintPairCode(dir), browserKey().jwk);
