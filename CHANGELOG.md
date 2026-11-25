@@ -2,12 +2,26 @@
 
 All notable changes to Maussian Desktop (formerly Klaussy Desktop) are documented here.
 
-## Unreleased
+## 0.33.0
 
 ### 🍎 Mac Updates Reopen Again
 
 - **Reopens After Updating**: updating from Klaussy closed the app and left a question mark in the Dock. Updates now install in place and reopen, like before the rename.
 - **Renamed On Quit**: the app file keeps the name `Klaussy.app` while it updates, then becomes `Maussian.app` the next time you quit with nothing to install. A Mac that already took 0.32.0 misses one more reopen on its next update, then renames itself and updates normally from then on.
+
+### 🔒 Safer Settings
+
+- **Asks Before Risky Settings**: a setting that makes the app run a command, or send your data somewhere new, now waits for you to OK it in a dialog. In browser mode it asks in the terminal running `npm run web`. Saved tokens show masked.
+- **Tighter App Internals**: the app checks what every part of the window asks it to do, so a script slipped into the page can't read files outside your projects, rewrite your shell setup or change what runs, without anything showing on screen.
+
+### 🌐 Browser Mode
+
+- **Pair a Browser Once**: a browser pairs with a one-time code and its own key instead of a shared token, and signs in from then on without one.
+- **See and Remove Paired Browsers**: `npm run web -- --status` lists them, and `--unpair <id>` forgets one and closes its tabs.
+
+### 🎨 Window Colors
+
+- **Maussian Colors**: Preferences → Window color has Maussian's lime, purple, violet and teal, plus two gradients.
 
 ## 0.32.0
 
