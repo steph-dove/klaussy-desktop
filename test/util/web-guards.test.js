@@ -25,15 +25,6 @@ test('Origin must be the helper’s own page', () => {
   assert.strictEqual(guards.originOk(undefined, 43117), false);
 });
 
-test('the token must match exactly', () => {
-  const token = Buffer.from('a'.repeat(43));
-  assert.strictEqual(guards.tokenMatches('a'.repeat(43), token), true);
-  assert.strictEqual(guards.tokenMatches('a'.repeat(42) + 'b', token), false);
-  assert.strictEqual(guards.tokenMatches('a'.repeat(42), token), false);
-  assert.strictEqual(guards.tokenMatches(undefined, token), false);
-  assert.strictEqual(guards.tokenMatches({ length: 43 }, token), false);
-});
-
 test('only the preload’s sync channel is reachable synchronously', () => {
   assert.ok(guards.SYNC_CHANNELS.has('get-providers-sync'));
   assert.ok(!guards.SYNC_CHANNELS.has('subscribe-terminal'));

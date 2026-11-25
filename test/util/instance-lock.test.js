@@ -65,19 +65,17 @@ test('release leaves another process’s lock alone; discard removes it', () => 
   assert.strictEqual(lock.readLock(dir), null);
 });
 
-test('browserUrl signs in with the helper’s token and port', () => {
+test('browserUrl carries a fresh one-time pairing code', () => {
   const dir = tmpDir();
-  fs.writeFileSync(path.join(dir, lock.TOKEN_FILE), 'tok\n');
-  assert.strictEqual(
-    lock.browserUrl(dir, { kind: 'web', pid: OTHER_PID, port: 43117 }),
-    'http://127.0.0.1:43117/renderer/index.html#token=tok',
-  );
+  const pairing = require('../../main/util/web-pairing');
+  const url = lock.browserUrl(dir, { kind: 'web', pid: OTHER_PID, port: 43117 });
+  const m = url.match(/^http:\/\/127\.0\.0\.1:43117\/renderer\/index\.html#pair=([A-Za-z0-9_-]{43})$/);
+  assert.ok(m, url);
+  assert.strictEqual(pairing.consumePairCode(dir, m[1]), true);
 });
 
-test('browserUrl is null before the helper listens, without a token, or for the desktop app', () => {
+test('browserUrl is null before the helper listens, or for the desktop app', () => {
   const dir = tmpDir();
-  assert.strictEqual(lock.browserUrl(dir, { kind: 'web', pid: OTHER_PID, port: 43117 }), null);
-  fs.writeFileSync(path.join(dir, lock.TOKEN_FILE), 'tok');
   assert.strictEqual(lock.browserUrl(dir, { kind: 'web', pid: OTHER_PID }), null);
   assert.strictEqual(lock.browserUrl(dir, { kind: 'desktop', pid: OTHER_PID, port: 1 }), null);
 });

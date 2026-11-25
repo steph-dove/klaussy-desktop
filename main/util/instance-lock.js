@@ -13,7 +13,6 @@ const fs = require('fs');
 const path = require('path');
 
 const LOCK_FILE = 'maussian-instance.json';
-const TOKEN_FILE = 'web-token';
 const KINDS = new Set(['desktop', 'web']);
 
 function isProcessAlive(pid) {
@@ -90,14 +89,14 @@ function discard(dir) {
   fs.rmSync(lockPath(dir), { force: true });
 }
 
-// The signed-in link to a running browser helper, or null if it isn't
-// listening yet or has no token.
+// A link to a running browser helper, or null if it isn't listening yet. It
+// carries a fresh one-time pairing code (util/web-pairing.js), which a browser
+// already paired ignores, and one that isn't uses to pair.
 function browserUrl(dir, holder) {
   if (!holder || holder.kind !== 'web' || !Number.isInteger(holder.port)) return null;
-  let token;
-  try { token = fs.readFileSync(path.join(dir, TOKEN_FILE), 'utf8').trim(); } catch { return null; }
-  if (!token) return null;
-  return `http://127.0.0.1:${holder.port}/renderer/index.html#token=${token}`;
+  let code;
+  try { code = require('./web-pairing').mintPairCode(dir); } catch { return null; }
+  return `http://127.0.0.1:${holder.port}/renderer/index.html#pair=${code}`;
 }
 
 // Ask a holder to stop (it saves sessions on SIGTERM) and wait for it to exit.
@@ -112,5 +111,5 @@ async function stopHolder(holder, { timeoutMs = 10000, isAlive = isProcessAlive,
 }
 
 module.exports = {
-  LOCK_FILE, TOKEN_FILE, acquire, update, release, discard, currentHolder, readLock, browserUrl, stopHolder, isProcessAlive,
+  LOCK_FILE, acquire, update, release, discard, currentHolder, readLock, browserUrl, stopHolder, isProcessAlive,
 };

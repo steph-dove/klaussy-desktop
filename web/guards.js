@@ -2,7 +2,6 @@
 // The checks web/helper.js runs on every request, kept free of server state so
 // test/util/web-guards.test.js can cover them directly.
 
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -14,12 +13,6 @@ function hostOk(host, port) {
 // Origin: only the helper's own page may open the socket or POST.
 function originOk(origin, port) {
   return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
-}
-
-function tokenMatches(candidate, tokenBuf) {
-  if (typeof candidate !== 'string') return false;
-  const b = Buffer.from(candidate);
-  return b.length === tokenBuf.length && crypto.timingSafeEqual(b, tokenBuf);
 }
 
 // The one ipcMain.on channel the renderer reaches synchronously (preload.js).
@@ -53,4 +46,4 @@ function resolveStatic(root, rel, roots, realpath = fs.realpathSync.native) {
   return allowed ? real : null;
 }
 
-module.exports = { hostOk, originOk, tokenMatches, SYNC_CHANNELS, decodePath, resolveStatic };
+module.exports = { hostOk, originOk, SYNC_CHANNELS, decodePath, resolveStatic };

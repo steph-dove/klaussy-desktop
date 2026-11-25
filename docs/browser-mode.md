@@ -15,9 +15,10 @@ picker stands in for the native one, and a shell keeps running after its tab
 closes and reattaches when a tab opens again.
 
 ```sh
-npm run web              # starts the helper and opens the browser, signed in
-npm run web -- --no-open # print the link instead
-npm run web -- --new-token  # rotate the token, signing out every tab
+npm run web                 # starts the helper and opens the browser, signed in
+npm run web -- --no-open    # print the link instead
+npm run web -- --unpair-all # forget every paired browser, open tabs included
+npm run test:web            # integration test: a real helper, every way in refused
 ```
 
 ## How it works
@@ -84,15 +85,19 @@ desktop user can open the same running sessions in a browser at the same time.
 ## Security
 
 A localhost process that can open shells is remote code execution for any page
-that can reach it. Current checks (in `web/guards.js`, unit-tested in
-`test/util/web-guards.test.js`, and exercised against the running helper):
+that can reach it. Current checks (in `web/guards.js` and
+`main/util/web-pairing.js`, unit-tested, and run against a real helper by
+`npm run test:web`):
 
 | Check | Result when it fails |
 | --- | --- |
 | Listens on 127.0.0.1 only | not reachable from the network |
 | `Host` must be `127.0.0.1:<port>` or `localhost:<port>` (DNS rebinding) | HTTP 403, WebSocket refused at upgrade |
 | `Origin` must be the helper's own origin | WebSocket refused at upgrade, POST 401 |
-| Token in the first message, compared in constant time, within 2 s | close 4401 |
+| A session ticket on `/__bind`, `/__sync` and the socket's first message, within 2 s | HTTP 401, close 4401 |
+| Pairing code: one-time, 5 minutes, stored hashed | 401 |
+| Sign-in: a fresh challenge (single use, 1 minute) signed by the paired key | 401 |
+| An unpaired browser's open tabs | closed 4401 within 2 s |
 | No request is handled before the hello; pre-hello messages capped at 4 KB, at most 8 sockets waiting | close 4401 / 1009 / 1013 |
 | Malformed paths (bad %-escape, NUL, backslash) | 400, never a crash |
 | Static files only from an allowlist of folders, checked after resolving symlinks | 404 |
@@ -100,25 +105,37 @@ that can reach it. Current checks (in `web/guards.js`, unit-tested in
 | The in-page folder browser lists folders inside the home folder only | error in the dialog |
 | `frame-ancestors 'none'` and `X-Frame-Options: DENY` on the page | can't be framed |
 
-The token reaches the browser only in the URL fragment the helper opens, which
-never goes to a server log, and the helper prints it only with `--no-open`. It
-is 32 random bytes kept in `<userData>/web-token` (mode 600). The page keeps it
-in sessionStorage, so it ends with the tab; running `npm run web` again opens a
-signed-in tab. Stop the helper with Ctrl-C or SIGTERM; it saves sessions first.
+**Pairing.** A browser pairs once. The helper's link carries a one-time
+pairing code (32 random bytes, 5 minutes, single use, kept only as a SHA-256
+hash in `<userData>/web-pair-codes.json`). The page makes an ECDSA P-256 key
+with WebCrypto as non-extractable, keeps it in IndexedDB, and registers the
+public half (`<userData>/web-browsers.json`). Anyone who can run `npm run web`
+as this user can mint a code; nobody else can.
+
+**Signing in.** The page asks for a challenge, signs it with that key, and gets
+a session ticket. The ticket lives in the helper's memory (hashed) and the
+tab's sessionStorage, so it ends with the tab or the helper, and a tab opened
+with `window.open` gets a copy. After a helper restart the page signs in again
+with its key, no new link needed. The app's scripts need `window.klaus` before
+they run, so binding is synchronous; with no valid ticket, the page signs in
+asynchronously and reloads.
+
+What a script injected into the page could still do is use the key while the
+page is open; it can't copy it out. Nothing long-lived that grants access sits
+anywhere a script could read. `--unpair-all` revokes every browser, and a
+running helper closes their tabs within 2 seconds. The helper prints its link
+only with `--no-open`. Stop the helper with Ctrl-C or SIGTERM; it saves
+sessions first.
 
 Still to do before anyone else runs it:
 
-- Replace the token with a per-browser key pair: WebCrypto non-extractable key,
-  public key registered at pairing, a signed nonce per connection. Then the
-  planned `maussian status` / `maussian unpair --all` commands.
-- A one-time pairing token (5 minutes, single use) instead of a long-lived one.
+- A `maussian status` command listing paired browsers, and unpairing one at a
+  time.
 - Review every IPC handler against "a hostile page that got paired" and confirm
   destructive actions outside a worktree in the helper.
 - When the UI moves to app.maussian.ai: allow that origin, answer Chrome's local
   network access preflight for it only, deploy the UI from CI with a strict CSP
   and SRI and no third-party script.
-- An integration test that starts the helper and runs the socket refusal cases
-  (the checks themselves are unit-tested; the wiring is checked by hand today).
 
 ## First-run flow (target)
 
@@ -184,7 +201,8 @@ config (no autostart, pinned version, allowed agents and hosts).
    - Browser-reserved shortcuts (Cmd+W/T/N) need remapping outside an installed
      web app.
    - Run the Playwright e2e suite against the web build.
-3. **Pairing and security hardening** from the list above, with tests.
+3. **Pairing and security hardening** (pairing, sign-in and the integration
+   test done; the rest of the list above still open).
 4. **Install and returning users:** self-contained helper builds, curl/brew/npx,
    autostart, `maussian` CLI, version handshake, trust page, Safari fallback.
 5. **Launch:** hosted UI at app.maussian.ai, `maussian://` handoff to desktop,

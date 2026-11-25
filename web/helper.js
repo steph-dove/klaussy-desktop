@@ -2,7 +2,8 @@
 // Browser-mode helper: runs the desktop app's main process without Electron and
 // serves the renderer to a browser tab on 127.0.0.1.
 //
-//   npm run web            (ELECTRON_RUN_AS_NODE=1 electron web/helper.js)
+//   npm run web                    (ELECTRON_RUN_AS_NODE=1 electron web/helper.js)
+//   npm run web -- --unpair-all    forget every paired browser, open tabs included
 //
 // It runs under Electron's Node so node-pty keeps the ABI it was rebuilt for.
 // require('electron') resolves to web/electron-shim.js, so main.js and every
@@ -14,9 +15,11 @@
 //   * listens on 127.0.0.1 only;
 //   * every HTTP request must carry a Host of 127.0.0.1:<port> or
 //     localhost:<port> (DNS rebinding);
-//   * the WebSocket and the two POST endpoints require an allowed Origin and
-//     the helper's token, compared in constant time;
-//   * the token reaches the browser only in the URL fragment the helper opens;
+//   * every POST and the WebSocket require an allowed Origin;
+//   * a browser pairs once with a one-time code from the helper's link and a
+//     non-extractable WebCrypto key, then signs in by signing a challenge
+//     (main/util/web-pairing.js). The session ticket it gets lives only in this
+//     process's memory; /__bind, /__sync and the socket all require one;
 //   * a malformed request gets a 400, never an exception: any website can send
 //     requests here, and a crash would take every running agent with it.
 // Static files come from an allowlist of folders and are not secret.
@@ -68,8 +71,8 @@ function openInBrowser(link) {
   execFile(opener, [link], () => {});
 }
 
-// The link carries the token, so it's only printed when asked for (--no-open),
-// to keep it out of terminal logs otherwise.
+// The link carries a one-time pairing code (5 minutes, single use), so it's only
+// printed when asked for (--no-open), to keep it out of terminal logs otherwise.
 function announce(link, already) {
   const lead = already ? 'Maussian is already running on this computer.' : 'Maussian is running on this computer.';
   if (args.has('--no-open')) {
@@ -87,6 +90,8 @@ function announce(link, already) {
 // it matches `npm start` (the -dev folder); --installed shares the installed
 // app's folder instead.
 function resolveUserData() {
+  // Tests (test/web) point the helper at a throwaway folder.
+  if (process.env.MAUSSIAN_WEB_USERDATA) return process.env.MAUSSIAN_WEB_USERDATA;
   const { legacyUserDataDir } = require(path.join(ROOT, 'main/bootstrap/single-instance'));
   const appData = electron.app.getPath('appData');
   const current = path.join(appData, 'Maussian');
@@ -97,6 +102,15 @@ function resolveUserData() {
 const USER_DATA = resolveUserData();
 electron.__web.setUserData(USER_DATA);
 const instanceLock = require(path.join(ROOT, 'main/util/instance-lock'));
+const pairing = require(path.join(ROOT, 'main/util/web-pairing'));
+
+// The panic button. Works whether or not a helper is running: a running one
+// sees the file change and closes every tab it signed in.
+if (args.has('--unpair-all')) {
+  const n = pairing.removeAllBrowsers(USER_DATA);
+  console.log(`\nForgot ${n} paired browser${n === 1 ? '' : 's'}. Running \`npm run web\` pairs this one again.\n`);
+  process.exit(0);
+}
 
 {
   const taken = instanceLock.acquire(USER_DATA, { kind: 'web' });
@@ -115,26 +129,27 @@ const instanceLock = require(path.join(ROOT, 'main/util/instance-lock'));
   process.on('exit', () => instanceLock.release(USER_DATA));
 }
 
-// ---- token -------------------------------------------------------------------
+// ---- pairing and sessions ------------------------------------------------------
 
-// Kept across restarts, so `npm run web` can reopen a signed-in tab whether or
-// not the helper was already running. `--new-token` rotates it.
-function loadToken() {
-  const file = path.join(USER_DATA, instanceLock.TOKEN_FILE);
-  if (!args.has('--new-token')) {
-    try {
-      const t = fs.readFileSync(file, 'utf8').trim();
-      if (/^[A-Za-z0-9_-]{43}$/.test(t)) return t;
-    } catch {}
-  }
-  const t = crypto.randomBytes(32).toString('base64url');
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, t, { mode: 0o600 });
-  return t;
+// Earlier builds kept a long-lived token here; browsers pair now.
+fs.rmSync(path.join(USER_DATA, 'web-token'), { force: true });
+
+const { SessionStore } = require('./sessions');
+// Re-read on every check rather than cached by mtime: the file is tiny, and an
+// unpair followed by a re-pair inside one mtime tick must not slip through.
+const isPaired = (browserId) => !!pairing.findBrowser(USER_DATA, browserId);
+const sessions = new SessionStore({ isPaired });
+
+// Pairing attempts, all browsers together: a burst of bad codes gets 429.
+const PAIR_ATTEMPTS_PER_MINUTE = 20;
+let pairAttempts = [];
+function pairAllowed() {
+  const now = Date.now();
+  pairAttempts = pairAttempts.filter((t) => now - t < 60000);
+  if (pairAttempts.length >= PAIR_ATTEMPTS_PER_MINUTE) return false;
+  pairAttempts.push(now);
+  return true;
 }
-const TOKEN = loadToken();
-const TOKEN_BUF = Buffer.from(TOKEN);
-const tokenOk = (candidate) => guards.tokenMatches(candidate, TOKEN_BUF);
 
 // ---- boot the desktop main process -----------------------------------------
 
@@ -405,8 +420,9 @@ function readBody(req, limit = 1 << 20) {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
+      if (size > limit) return; // already refused; just drain the rest
       size += c.length;
-      if (size > limit) { reject(new Error('Body too large')); req.destroy(); return; }
+      if (size > limit) { reject(Object.assign(new Error('Body too large'), { tooLarge: true })); return; }
       chunks.push(c);
     });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
@@ -428,10 +444,45 @@ function renderPreload() {
 }
 
 async function handlePost(req, res, url) {
-  if (!originOk(req.headers.origin) || !tokenOk(req.headers['x-maussian-token'])) return send(res, 401, 'Unauthorized');
+  if (!originOk(req.headers.origin)) return send(res, 401, 'Unauthorized');
   let body;
-  try { body = decode(await readBody(req) || '{}'); } catch { return send(res, 400, 'Bad request'); }
+  try {
+    body = decode(await readBody(req, 64 * 1024) || '{}');
+  } catch (err) {
+    return send(res, err && err.tooLarge ? 413 : 400, err && err.tooLarge ? 'Too large' : 'Bad request');
+  }
   if (!body || typeof body !== 'object') return send(res, 400, 'Bad request');
+
+  // Pairing: a one-time code from the helper's link registers the public half
+  // of the page's WebCrypto key.
+  if (url.pathname === '/__pair') {
+    if (!pairAllowed()) return send(res, 429, 'Too many attempts');
+    const r = pairing.pairBrowser(USER_DATA, body.code, body.publicKey, body.label);
+    if (r.error === 'bad-key') return send(res, 400, 'Bad key');      // the code is still good
+    if (r.error === 'full') return send(res, 409, 'Too many paired browsers'); // and here
+    if (r.error) return send(res, 401, 'Unauthorized');
+    return send(res, 200, encode({ browserId: r.browserId }), 'application/json');
+  }
+
+  // Signing in: a fresh challenge, signed with that key, buys a session ticket.
+  if (url.pathname === '/__challenge') {
+    if (!pairing.findBrowser(USER_DATA, body.browserId)) return send(res, 401, 'Unauthorized');
+    const r = sessions.challengeFor(body.browserId);
+    if (r.error) return send(res, 429, 'Too many attempts');
+    return send(res, 200, encode({ challenge: r.challenge }), 'application/json');
+  }
+  if (url.pathname === '/__session') {
+    const browser = pairing.findBrowser(USER_DATA, body.browserId);
+    if (!browser) return send(res, 401, 'Unauthorized');
+    const r = sessions.signIn(browser.id, body.challenge,
+      () => pairing.verifyChallenge(browser.jwk, body.challenge, body.signature));
+    if (r.error === 'limited') return send(res, 429, 'Too many attempts');
+    if (r.error) return send(res, 401, 'Unauthorized');
+    return send(res, 200, encode({ ticket: r.ticket }), 'application/json');
+  }
+
+  // Everything else needs a session.
+  if (!sessions.browserFor(req.headers['x-maussian-ticket'])) return send(res, 401, 'Unauthorized');
 
   if (url.pathname === '/__bind') {
     // A tab opened for a particular window that's gone (closed, or it waited
@@ -530,6 +581,7 @@ wss.on('connection', (ws) => {
   preAuthSockets++;
   let authed = false;
   const tab = new TabSocket(ws);
+  ws.tab = tab;
   let win = null;
   const helloTimer = setTimeout(() => ws.close(4401, 'No hello'), HELLO_TIMEOUT_MS);
 
@@ -540,7 +592,9 @@ wss.on('connection', (ws) => {
     if (!msg || typeof msg !== 'object') return ws.close(4400, 'Bad message');
 
     if (!win) {
-      if (msg.t !== 'hello' || !tokenOk(msg.token)) return ws.close(4401, 'Unauthorized');
+      const browserId = msg.t === 'hello' ? sessions.browserFor(msg.ticket) : null;
+      if (!browserId) return ws.close(4401, 'Unauthorized');
+      tab.browserId = browserId;
       const wanted = BrowserWindow.fromId(Number(msg.winId));
       if (!wanted || wanted.isDestroyed() || (wanted.webContents._socket && wanted.webContents._socket !== tab)) {
         return ws.close(4409, 'Window unavailable');
@@ -594,7 +648,7 @@ function onListening() {
   // The desktop app and a second `npm run web` find us through the lock.
   instanceLock.update(USER_DATA, { port });
   electron.__web.markReady();
-  announce(`http://127.0.0.1:${port}/renderer/index.html#token=${TOKEN}`, false);
+  announce(`http://127.0.0.1:${port}/renderer/index.html#pair=${pairing.mintPairCode(USER_DATA)}`, false);
 }
 
 // Another program may own the default port; the lock file records the one we
@@ -616,6 +670,17 @@ function listen(attempt) {
   server.once('listening', onListeningOnce);
   server.listen(candidate, '127.0.0.1');
 }
+
+// --unpair-all from another terminal: tabs signed in by a browser that's no
+// longer paired are closed, not just refused next time. Expired challenges and
+// idle sessions are dropped on the same beat.
+setInterval(() => {
+  const ids = new Set(pairing.listBrowsers(USER_DATA).map((b) => b.id));
+  for (const ws of wss.clients) {
+    if (ws.tab && ws.tab.browserId && !ids.has(ws.tab.browserId)) ws.close(4401, 'Unpaired');
+  }
+  sessions.prune();
+}, 2000).unref();
 
 // app-events' before-quit handler cancels the first quit, awaits the session
 // save, then quits again; only that second quit exits (see electron-shim's

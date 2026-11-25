@@ -21,6 +21,7 @@
     "start": "electron .",
     "lint": "eslint \"main/**/*.js\" main.js preload.js \"renderer/**/*.js\" \"scripts/**/*.js\" \"web/**/*.js\"",
     "test": "node --require ./test/setup.js --test test/util/*.test.js",
+    "test:web": "node --test test/web/*.test.js",
     "test:e2e": "playwright test",
     "secrets": "gitleaks git --no-banner --redact --config .gitleaks.toml .",
     "screenshot": "node scripts/screenshot.js",

@@ -10,28 +10,34 @@
 (function () {
   'use strict';
 
-  var TOKEN_KEY = 'maussian.token';
+  var TICKET_KEY = 'maussian.ticket';
   var WIN_KEY = 'maussian.win';
+  var ATTEMPTS_KEY = 'maussian.signin';
+  var KEY_UNSAVED_KEY = 'maussian.key-unsaved';
 
-  // ---- token (arrives once in the URL fragment the helper opens) -----------
-  // Kept in sessionStorage, so it lives only as long as this tab: nothing
-  // persistent for an injected script to collect. A new tab without it shows
-  // the connect card, and `npm run web` opens a signed-in one. The plan
-  // replaces the token with a per-browser key pair (docs/browser-mode.md).
+  // ---- signing in -------------------------------------------------------------
+  // This browser holds a non-extractable ECDSA key in IndexedDB, registered
+  // with the helper once through a one-time pairing code (#pair= in the
+  // helper's link). To sign in it signs a fresh challenge and gets a session
+  // ticket, kept in sessionStorage: it ends with the tab and with the helper
+  // process, and a tab opened with window.open gets a copy. The app's scripts
+  // need window.klaus before they run, so binding below is synchronous; with no
+  // valid ticket yet, signing in happens asynchronously and the page reloads.
   function store(kind) { try { return window[kind]; } catch (_e) { return null; } }
   var session = store('sessionStorage');
-  // Earlier builds kept it in localStorage; don't leave it behind.
-  try { var local = store('localStorage'); if (local) local.removeItem(TOKEN_KEY); } catch (_e) { /* storage blocked */ }
+  // Earlier builds kept a long-lived token; don't leave it behind.
+  try {
+    var local = store('localStorage');
+    if (local) local.removeItem('maussian.token');
+    if (session) session.removeItem('maussian.token');
+  } catch (_e) { /* storage blocked */ }
 
-  // The helper's link carries the token. A tab this page opens for a pop-out,
-  // Preferences or New Window carries only the window it's for (#win=): it
-  // gets the token from the sessionStorage a browser copies into a tab opened
-  // with window.open, so the token never sits in that tab's URL or history.
-  var m = location.hash.match(/(?:^#|&)token=([A-Za-z0-9_-]{43})/);
+  // A tab this page opens for a pop-out, Preferences or New Window carries only
+  // the window it's for (#win=); it already has the ticket.
+  var pairCode = location.hash.match(/(?:^#|&)pair=([A-Za-z0-9_-]{43})/);
   var forWin = location.hash.match(/(?:^#|&)win=(\d+)/);
-  if (m && session) session.setItem(TOKEN_KEY, m[1]);
-  if (m || forWin) history.replaceState(null, '', location.pathname + location.search);
-  var token = (session && session.getItem(TOKEN_KEY)) || (m && m[1]) || '';
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  var ticket = (session && session.getItem(TICKET_KEY)) || '';
   // Nothing here needs the tab that opened this one.
   try { if (window.opener) window.opener = null; } catch (_e) { /* cross-origin opener */ }
 
@@ -97,7 +103,7 @@
     var x = new XMLHttpRequest();
     x.open('POST', url, false);
     x.setRequestHeader('Content-Type', 'application/json');
-    x.setRequestHeader('X-Maussian-Token', token);
+    x.setRequestHeader('X-Maussian-Ticket', ticket);
     x.send(encode(body));
     if (x.status !== 200) {
       var e = new Error(x.status === 401 ? 'Unauthorized' : 'Helper answered ' + x.status);
@@ -107,22 +113,129 @@
     return decode(x.responseText);
   }
 
+  function postJson(url, body) {
+    return fetch(url, {
+      method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+      if (!r.ok) throw Object.assign(new Error('Helper answered ' + r.status), { status: r.status });
+      return r.json();
+    });
+  }
+
+  function b64url(buf) {
+    return toB64(new Uint8Array(buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
+  // The key record { browserId, privateKey } lives in IndexedDB, which stores a
+  // non-extractable CryptoKey as is: usable here, never readable as bytes.
+  function idb(mode, fn) {
+    return new Promise(function (resolve, reject) {
+      var open = indexedDB.open('maussian', 1);
+      open.onupgradeneeded = function () { open.result.createObjectStore('keys'); };
+      open.onerror = function () { reject(open.error); };
+      open.onsuccess = function () {
+        var db = open.result;
+        var tx = db.transaction('keys', mode);
+        var req = fn(tx.objectStore('keys'));
+        tx.oncomplete = function () { db.close(); resolve(req && req.result); };
+        tx.onerror = function () { db.close(); reject(tx.error); };
+      };
+    });
+  }
+  // Rejects when IndexedDB itself fails, so a paired browser with a passing
+  // storage error isn't mistaken for an unpaired one and paired again.
+  function loadKey() {
+    return idb('readonly', function (s) { return s.get('browser'); }).catch(function (err) {
+      throw Object.assign(new Error('this browser’s storage isn’t available (' + (err && err.message || err) + ')'), { status: 0 });
+    });
+  }
+  function saveKey(rec) { return idb('readwrite', function (s) { return s.put(rec, 'browser'); }); }
+
+  function browserLabel() {
+    var ua = navigator.userAgent;
+    var name = /Edg\//.test(ua) ? 'Edge' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox'
+      : /Safari\//.test(ua) ? 'Safari' : 'Browser';
+    var os = /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : '';
+    return name + (os ? ' on ' + os : '');
+  }
+
+  function signInWith(rec) {
+    return postJson('/__challenge', { browserId: rec.browserId }).then(function (c) {
+      return crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, rec.privateKey, new TextEncoder().encode(c.challenge))
+        .then(function (sig) {
+          return postJson('/__session', { browserId: rec.browserId, challenge: c.challenge, signature: b64url(sig) });
+        });
+    }).then(function (r) { return r.ticket; });
+  }
+
+  function pair(code) {
+    return crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign', 'verify']).then(function (kp) {
+      return crypto.subtle.exportKey('jwk', kp.publicKey).then(function (jwk) {
+        return postJson('/__pair', { code: code, publicKey: { kty: jwk.kty, crv: jwk.crv, x: jwk.x, y: jwk.y }, label: browserLabel() });
+      }).then(function (r) {
+        var rec = { browserId: r.browserId, privateKey: kp.privateKey };
+        // Without IndexedDB this still signs in now, but the key is gone with
+        // the page: say so once the app is up, since next time needs a new link.
+        return saveKey(rec).catch(function () {
+          if (session) session.setItem(KEY_UNSAVED_KEY, '1');
+        }).then(function () { return rec; });
+      });
+    });
+  }
+
+  // A paired browser signs in with its key. The pairing code is for one that
+  // isn't paired yet, or was unpaired (--unpair-all).
+  function signIn(code) {
+    return loadKey().then(function (rec) {
+      if (rec && rec.browserId && rec.privateKey) {
+        return signInWith(rec).catch(function (err) {
+          if (err.status === 401 && code) return pair(code).then(signInWith);
+          throw err;
+        });
+      }
+      if (!code) throw Object.assign(new Error('Not paired'), { status: 401 });
+      return pair(code).then(signInWith);
+    });
+  }
+
+  // Sign in, then reload so the app's scripts run against a live connection.
+  // A few tries a minute at most, so a helper that keeps refusing can't loop.
+  function signInAndReload() {
+    var now = Date.now();
+    var tries = [];
+    try { tries = JSON.parse((session && session.getItem(ATTEMPTS_KEY)) || '[]').filter(function (t) { return now - t < 60000; }); } catch (_e) { tries = []; }
+    if (!session || tries.length >= 3) {
+      return showConnect('Couldn’t sign in to Maussian from this tab. Start it again in a terminal:');
+    }
+    session.setItem(ATTEMPTS_KEY, JSON.stringify(tries.concat(now)));
+    showCard('Signing in', 'Connecting to Maussian on this computer\u2026');
+    signIn(pairCode && pairCode[1]).then(function (t) {
+      session.setItem(TICKET_KEY, t);
+      location.replace(location.pathname + location.search + (forWin ? '#win=' + forWin[1] : ''));
+    }, function (err) {
+      if (err && err.status === 401) return showConnect(null);
+      showConnect('Couldn’t sign in to Maussian (' + (err && err.message || err) + '). Start it again in a terminal:');
+    });
+  }
+
   // ---- bind this tab to a window in the helper -------------------------------
   var bound;
   try {
-    if (!token) throw Object.assign(new Error('No token'), { status: 401 });
+    if (!ticket) throw Object.assign(new Error('Not signed in'), { status: 401 });
     bound = forWin
       ? syncPost('/__bind', { winId: forWin[1], forWin: true })
       : syncPost('/__bind', { winId: session && session.getItem(WIN_KEY) });
   } catch (err) {
-    if (err.status === 401 && session) session.removeItem(TOKEN_KEY);
+    window.__maussianRequire = function () { throw new Error('Maussian is not connected'); };
     // 410: the window this tab was opened for is gone (closed, or it waited too
     // long behind a popup blocker).
-    if (err.status === 410) showClosed();
-    else showConnect(err.status === 401 ? null : 'Maussian isn’t running on this computer. Start it in a terminal:');
-    window.__maussianRequire = function () { throw new Error('Maussian is not connected'); };
-    return;
+    if (err.status === 410) return showClosed();
+    if (err.status !== 401) return showConnect('Maussian isn’t running on this computer. Start it in a terminal:');
+    if (session) session.removeItem(TICKET_KEY);
+    return signInAndReload();
   }
+  // The sign-in cap isn't reset here: a helper that accepts the ticket but keeps
+  // closing the socket (4401) would otherwise reload forever. It ages out instead.
   if (session) session.setItem(WIN_KEY, String(bound.winId));
   // Show the page this window loads (a reloaded pop-out stays a pop-out), and a
   // secondary window's renderer reads ?secondary=1 at load: fix the URL before
@@ -213,7 +326,7 @@
     ws.onopen = function () {
       // resume: this page kept its terminals through a dropped connection, so
       // the helper resets and repaints them with what they missed.
-      trySend({ t: 'hello', token: token, winId: bound.winId, resume: everConnected });
+      trySend({ t: 'hello', ticket: ticket, winId: bound.winId, resume: everConnected });
     };
     ws.onmessage = function (e) {
       var msg = decode(e.data);
@@ -223,6 +336,11 @@
         if (document.hasFocus()) markActive();
         retries = 0;
         setBanner(null);
+        if (session && session.getItem(KEY_UNSAVED_KEY)) {
+          session.removeItem(KEY_UNSAVED_KEY);
+          setBanner('This browser couldn’t save its Maussian key, so next time it will need a new link from `npm run web`.');
+          setTimeout(function () { setBanner(null); }, 10000);
+        }
         var q = queue; queue = [];
         q.forEach(function (x) { post(x); });
         sendLoaded();
@@ -251,8 +369,10 @@
         delete pending[id];
       });
       if (e.code === 4401) {
-        if (session) session.removeItem(TOKEN_KEY);
-        return showConnect('This tab is no longer signed in to Maussian. Start it again in a terminal to reconnect:');
+        // The ticket died with a restarted helper, or this browser was unpaired.
+        // Reloading signs in again with the key, or shows the connect card.
+        if (session) session.removeItem(TICKET_KEY);
+        return location.reload();
       }
       if (e.code === 4409 && session) {
         // Our window was taken or closed while we were away: bind afresh.
@@ -276,7 +396,7 @@
     emit(ch, args);
   }
 
-  // main/ opened a window. Open a tab for it, signed in with this tab's token
+  // main/ opened a window. Open a tab for it, signed in with this tab's ticket
   // and bound to that window. It follows the click that asked for it, so popup
   // blockers allow it; if one doesn't, offer a button, which always works.
   function openWindow(w) {
