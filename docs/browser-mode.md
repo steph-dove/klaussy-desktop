@@ -132,7 +132,7 @@ sessions first.
 
 Still to do before anyone else runs it:
 
-- Handler review, batches 2 and 3 (see "Handler review" below).
+- Handler review, batch 2 (see "Handler review" below).
 - When the UI moves to app.maussian.ai: allow that origin, answer Chrome's local
   network access preflight for it only, deploy the UI from CI with a strict CSP
   and SRI and no third-party script.
@@ -183,9 +183,26 @@ Batch 2 (to do): settings that lead to running code or sending data out (agent
 binary paths, MCP server commands, notification webhooks and their allow
 list, Kimi's autonomous bash, Nemesis gateways) need a confirmation the page
 can't click for itself, and stored tokens should reach the page masked.
-Batch 3 (to do): gh API path segments (PR and comment numbers, workflow
-inputs), `lsp-request` methods, `test-notification` URLs, the Windows
-`mcp-login-terminal` name, and the medium items in the audit.
+Batch 3 (done):
+
+- Every PR number, comment number, run id and check-run id that goes into a
+  gh argument or API path must be a plain integer, and a review thread a
+  GraphQL node id. `pr-review` takes only `approve`, `request-changes` or
+  `comment`. A workflow dispatch takes a numeric id or a `.yml` name, a ref
+  that passes `gitRef`, and flat inputs (strings, numbers, booleans; GitHub
+  turns each into a string).
+- `lsp-request` and `lsp-notify` pass exactly the methods `lsp-client.js`
+  sends (a test reads that file to keep the lists in step).
+  `workspace/executeCommand` and the like never reach a language server.
+- Notifications post only to `https://hooks.slack.com/services/...` or a
+  Discord `/api/webhooks/...` URL. That's checked where they're sent, so a
+  URL saved in settings can't point them at localhost either.
+- `mcp-login-terminal` takes a server name of letters, digits, `_`, `.` and
+  `-`, not starting with `-` (Windows runs it through a `cmd /k` line where
+  quoting doesn't hold).
+- `nemesis-setup-local` and the remote setup steps put the provider and token
+  into shell commands, so both must be plain (`[\w.-]` and `[A-Za-z0-9_-]{8,}`).
+- `create-skill-file` with a project scope needs a workspace the app knows.
 
 ## First-run flow (target)
 

@@ -549,7 +549,16 @@ ipcMain.handle('pr-fix-in-terminal', (_event, { worktreePath, text }) => {
 
 // ---- PR Threaded Reply ----
 
+
+// PR and comment numbers go into gh arguments and API paths, so only plain
+// positive integers; a thread is a GraphQL node id.
+const isId = (v) => /^[1-9]\d{0,15}$/.test(String(v));
+const isNodeId = (v) => typeof v === 'string' && /^[A-Za-z0-9_=-]{1,200}$/.test(v);
+const BAD_PR = { error: 'Invalid pull request number' };
+const REVIEW_EVENTS = new Set(['approve', 'request-changes', 'comment']);
+
 ipcMain.handle('pr-reply-to-comment', async (_event, { worktreePath, prNumber, commentId, body }) => {
+  if (!isId(prNumber) || !isId(commentId)) return { error: 'Invalid pull request or comment number' };
   try {
     const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
     const repo = JSON.parse(repoResult).nameWithOwner;
@@ -575,6 +584,7 @@ ipcMain.handle('pr-for-branch', (_event, { worktreePath }) => {
 });
 
 ipcMain.handle('pr-add-review-comment', async (_event, { worktreePath, prNumber, body, path: filePath, line, side, startLine, startSide, commitId }) => {
+  if (!isId(prNumber)) return BAD_PR;
   try {
     const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
     const repo = JSON.parse(repoResult).nameWithOwner;
@@ -599,6 +609,7 @@ ipcMain.handle('pr-add-review-comment', async (_event, { worktreePath, prNumber,
 });
 
 ipcMain.handle('pr-merge', async (_event, { worktreePath, prNumber, strategy }) => {
+  if (!isId(prNumber)) return BAD_PR;
   const flag = { merge: '--merge', squash: '--squash', rebase: '--rebase' }[strategy];
   if (!flag) return { error: 'Unknown merge strategy: ' + strategy };
   try {
@@ -612,6 +623,7 @@ ipcMain.handle('pr-merge', async (_event, { worktreePath, prNumber, strategy }) 
 });
 
 ipcMain.handle('pr-checks', async (_event, { worktreePath, prNumber }) => {
+  if (!isId(prNumber)) return BAD_PR;
   // Use `gh api` rather than `gh pr checks` so the renderer gets the full
   // check-run shape (id, runId, jobId, started_at, completed_at, output.summary,
   // app.slug). `gh pr checks` is pre-normalized and drops everything we need
@@ -689,6 +701,7 @@ ipcMain.handle('pr-checks', async (_event, { worktreePath, prNumber }) => {
 });
 
 ipcMain.handle('pr-review-threads', async (_event, { worktreePath, prNumber }) => {
+  if (!isId(prNumber)) return BAD_PR;
   try {
     const repoResult = ghExec(['repo', 'view', '--json', 'nameWithOwner'], { cwd: worktreePath, stdio: 'pipe' }).toString();
     const [owner, repo] = JSON.parse(repoResult).nameWithOwner.split('/');
@@ -734,6 +747,7 @@ ipcMain.handle('pr-review-threads', async (_event, { worktreePath, prNumber }) =
 });
 
 function resolveOrUnresolveThread(worktreePath, threadId, resolve) {
+  if (!isNodeId(threadId)) return { error: 'Invalid thread id' };
   const mutation = resolve
     ? 'mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }'
     : 'mutation($id: ID!) { unresolveReviewThread(input: {threadId: $id}) { thread { id isResolved } } }';
@@ -758,6 +772,7 @@ ipcMain.handle('pr-unresolve-thread', (_event, { worktreePath, threadId }) => {
 });
 
 ipcMain.handle('pr-add-comment', async (_event, { worktreePath, prNumber, body }) => {
+  if (!isId(prNumber)) return BAD_PR;
   try {
     ghExec(['pr', 'comment', String(prNumber), '--body', humanizeComment(body)], {
       cwd: worktreePath, stdio: 'pipe', timeout: 15000
@@ -769,6 +784,9 @@ ipcMain.handle('pr-add-comment', async (_event, { worktreePath, prNumber, body }
 });
 
 ipcMain.handle('pr-review', async (_event, { worktreePath, prNumber, event, body }) => {
+  if (!isId(prNumber)) return BAD_PR;
+  // Becomes `--<event>`, so only gh's three review events.
+  if (!REVIEW_EVENTS.has(event)) return { error: 'Unknown review event' };
   try {
     const args = ['pr', 'review', String(prNumber), '--' + event];
     if (body) args.push('--body', humanizeComment(body));

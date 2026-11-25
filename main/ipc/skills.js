@@ -8,7 +8,7 @@ const fs = require('fs');
 const { ipcMain, shell } = require('electron');
 const { loadConfig } = require('../util/config');
 const { currentRepoPath } = require('../state/pr-review');
-const { pathUnder, pathUnderAnyRoot } = require('../util/path-gate');
+const { pathUnder, pathUnderAnyRoot, knownWorkspace } = require('../util/path-gate');
 
 // Enumerate installed plugins from ~/.claude/plugins/installed_plugins.json.
 // Plugins no longer live at ~/.claude/plugins/<name>/ — Claude Code now keeps
@@ -495,8 +495,8 @@ ipcMain.handle('create-skill-file', (_event, { type, scope, name }) => {
   if (scope === 'user') {
     root = path.join(require('os').homedir(), '.claude');
   } else {
-    // scope is the absolute project path.
-    if (!scope || !fs.existsSync(scope)) return { error: 'Invalid project scope: ' + scope };
+    // scope is the absolute project path, which must be one the app knows.
+    if (!scope || !fs.existsSync(scope) || !knownWorkspace(scope)) return { error: 'Invalid project scope: ' + scope };
     root = path.join(scope, '.claude');
   }
 

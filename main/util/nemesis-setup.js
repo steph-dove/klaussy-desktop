@@ -53,7 +53,17 @@ Write-Host "Done. Gateway is running - go back to Preferences and Test connectio
 }
 
 // { ext, content } for the host OS.
+// Both are written into the script verbatim: the provider unquoted on a command
+// line, the token inside double quotes, where `$(...)` would still run. They
+// can come from the renderer, so only the shapes they really have get in.
+const SAFE_PROVIDER = /^[\w.-]{0,64}$/;
+const SAFE_TOKEN = /^[A-Za-z0-9_-]{8,256}$/;
+function setupInputsOk(provider, token) {
+  return SAFE_PROVIDER.test(String(provider || '')) && SAFE_TOKEN.test(String(token || ''));
+}
+
 function nemesisSetupScript(platform, provider, token) {
+  if (!setupInputsOk(provider, token)) throw new Error('Invalid Nemesis8 provider or token');
   return platform === 'win32'
     ? { ext: 'ps1', content: ps1Script(provider, token) }
     : { ext: 'sh', content: shScript(provider, token) };
@@ -66,4 +76,4 @@ function nemesisRunCmd(platform, scriptPath) {
     : `sh "${scriptPath}"`;
 }
 
-module.exports = { nemesisSetupScript, nemesisRunCmd };
+module.exports = { nemesisSetupScript, nemesisRunCmd, setupInputsOk };

@@ -119,6 +119,10 @@ function findLinuxTerminal() {
 // the OS terminal where the user completes the flow; return the cmd for show/copy.
 ipcMain.handle('mcp-login-terminal', async (_event, { name }) => {
   if (!name) return { error: 'No server name' };
+  // On Windows the name goes into a `cmd /c start cmd /k` line, where quoting
+  // doesn't hold; MCP server names are plain identifiers anyway.
+  // Letters, digits, `_`, `.` and `-`, and never a leading `-` (it would be a flag).
+  if (!/^[A-Za-z0-9_][\w.-]{0,99}$/.test(String(name))) return { error: 'Invalid server name' };
   const config = loadConfig();
   const bin = binFor('claude', config);
   const displayCmd = `${bin} mcp login ${name}`;

@@ -67,6 +67,15 @@ function eventTypeEnabled(event, cfg) {
 // whole dispatch — one dead Slack URL shouldn't suppress the Discord post, and
 // a network error must never bubble into the PTY lifecycle path.
 async function safePost(target, url, payload) {
+  // The URL comes from settings, which the page can write, so it's checked
+  // here, where every notification goes out, not only on the test button.
+  // Called through module.exports so tests can point it at a local server.
+  const allowed = target === 'slack' ? module.exports.isSlackWebhookUrl(url)
+    : target === 'discord' ? module.exports.isDiscordWebhookUrl(url) : false;
+  if (!allowed) {
+    try { console.error(`[notification-gateway] ${target} webhook URL refused: not a ${target} webhook`); } catch {}
+    return { target, ok: false, error: `not a ${target} webhook URL` };
+  }
   try {
     const { status } = await postWebhook(url, payload);
     const ok = status >= 200 && status < 300;
@@ -528,7 +537,26 @@ function reconnectSockets() {
   }
 }
 
+// Where a Slack or Discord incoming webhook can live. Anything else would turn
+// a webhook URL from the renderer into a POST to any host, localhost included.
+function isSlackWebhookUrl(url) {
+  try {
+    const u = new URL(String(url));
+    return u.protocol === 'https:' && u.hostname === 'hooks.slack.com' && !u.port && u.pathname.startsWith('/services/');
+  } catch { return false; }
+}
+function isDiscordWebhookUrl(url) {
+  try {
+    const u = new URL(String(url));
+    return u.protocol === 'https:' && !u.port
+      && ['discord.com', 'discordapp.com', 'ptb.discord.com', 'canary.discord.com'].includes(u.hostname)
+      && u.pathname.startsWith('/api/webhooks/');
+  } catch { return false; }
+}
+
 module.exports = {
+  isSlackWebhookUrl,
+  isDiscordWebhookUrl,
   postWebhook,
   dispatchEvent,
   eventTypeEnabled,

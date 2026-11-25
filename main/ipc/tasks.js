@@ -1318,9 +1318,12 @@ ipcMain.handle('add-sub-terminal', (_event, { taskId, label, mode, initialPrompt
 // One-click gateway setup in a Maussian terminal tab — a real TTY, which the
 // interactive `nemesis8 login` needs: spawn a shell, focus it, type the script.
 ipcMain.handle('nemesis-setup-local', (_event, opts = {}) => {
-  const { nemesisSetupScript, nemesisRunCmd } = require('../util/nemesis-setup');
+  const { nemesisSetupScript, nemesisRunCmd, setupInputsOk } = require('../util/nemesis-setup');
   const token = String(opts.token || '').trim() || crypto.randomBytes(24).toString('hex');
   const provider = String(opts.provider || '').trim();
+  if (!setupInputsOk(provider, token)) {
+    return { error: 'The provider must be a plain name, and the token letters, digits, - or _ (8 or more).' };
+  }
 
   const { ext, content } = nemesisSetupScript(process.platform, provider, token);
   const scriptPath = path.join(os.tmpdir(), `klaussy-nemesis-setup-${Date.now()}.${ext}`);

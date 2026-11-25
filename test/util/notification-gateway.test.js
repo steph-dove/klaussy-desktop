@@ -8,6 +8,11 @@ const gateway = require('../../main/util/notification-gateway');
 const nemesis = require('../../main/util/nemesis-events');
 const { EVENT_TYPES } = nemesis;
 const { saveConfig, flushSaveConfig } = require('../../main/util/config');
+
+// These tests post to a local capture server, which the real webhook URL
+// checks refuse (they're covered in ipc-hardening-medium.test.js).
+gateway.isSlackWebhookUrl = () => true;
+gateway.isDiscordWebhookUrl = () => true;
 const threads = require('../../main/util/session-threads');
 
 // A capturing webhook server. Records every POST (path + parsed JSON body) and

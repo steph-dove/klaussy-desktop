@@ -5,6 +5,7 @@
 // ipcMain.handle side effects.
 
 const { ipcMain } = require('electron');
+const { gitRef } = require('../util/git-arg');
 const { execFile, execFileSync, spawn } = require('child_process');
 const { ghExec, ghExecP, appendStderr, execFileP } = require('../util/exec');
 const { ghJson, ghText } = require('../util/gh-json');
@@ -93,7 +94,11 @@ ipcMain.handle('pr-required-checks', async (_event, { worktreePath, prNumber }) 
 });
 
 // Rerun all failed jobs in a workflow run. Maps to `gh run rerun --failed`.
+// Run and check-run ids go into gh arguments and API paths: plain integers only.
+const isRunId = (v) => /^[1-9]\d{0,19}$/.test(String(v));
+
 ipcMain.handle('pr-review-run-rerun-failed', async (_event, { runId }) => {
+  if (runId && !isRunId(runId)) return { error: 'Invalid run id' };
   if (!prReview.active) return { error: 'No active PR review' };
   if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo } = prReview.active;
@@ -146,8 +151,17 @@ ipcMain.handle('pr-review-workflow-dispatch', async (_event, { workflowId, ref, 
   if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo, meta } = prReview.active;
   if (!workflowId) return { error: 'Missing workflowId' };
+  // Both go into the API path: a workflow is its numeric id or its file name.
+  if (!/^(\d+|[\w.-]+\.ya?ml)$/.test(String(workflowId))) return { error: 'Invalid workflow id' };
   const useRef = (ref && ref.trim()) || (meta && meta.headRefName) || '';
   if (!useRef) return { error: 'Missing ref' };
+  if (!gitRef(useRef)) return { error: 'Invalid ref' };
+  // Inputs: plain names, and flat values (strings, numbers, booleans; GitHub
+  // turns every one into a string). No objects or arrays.
+  if (inputs != null && (typeof inputs !== 'object' || Array.isArray(inputs)
+    || Object.entries(inputs).some(([k, v]) => !/^[\w-]{1,100}$/.test(k) || (v !== null && typeof v === 'object')))) {
+    return { error: 'Invalid workflow inputs' };
+  }
   const cwd = currentRepoPath() || require('os').homedir();
 
   // gh api -X POST with `--input -` reads a JSON body from stdin. We build
@@ -178,6 +192,7 @@ const watchedRunLogs = new Map(); // requestId -> { stop }
 
 ipcMain.handle('pr-review-run-log-watch-start', async (event, { requestId, runId }) => {
   if (!requestId || !runId) return { error: 'Missing requestId or runId' };
+  if (!isRunId(runId)) return { error: 'Invalid run id' };
   if (watchedRunLogs.has(requestId)) return { error: 'Already watching this requestId' };
   if (!prReview.active) return { error: 'No active PR review' };
   if (!activeOnGitHub()) return { error: NOT_GITHUB };
@@ -298,6 +313,7 @@ ipcMain.handle('pr-review-run-log-watch-stop', (_event, { requestId }) => {
 
 // Cancel an in-progress workflow run. Maps to `gh run cancel`.
 ipcMain.handle('pr-review-run-cancel', async (_event, { runId }) => {
+  if (!isRunId(runId)) return { error: 'Invalid run id' };
   if (!prReview.active) return { error: 'No active PR review' };
   if (!activeOnGitHub()) return { error: NOT_GITHUB };
   const { baseOwner, baseRepo } = prReview.active;
@@ -322,6 +338,7 @@ ipcMain.handle('pr-review-check-annotations', async (_event, { checkRunId }) => 
   if (!baseOwner || !baseRepo || !checkRunId) {
     return { annotations: [], error: 'Missing repo or check id' };
   }
+  if (!isRunId(checkRunId)) return { annotations: [], error: 'Invalid check id' };
   const cwd = currentRepoPath() || require('os').homedir();
   // Drop --paginate: the annotations endpoint returns a single JSON array
   // (no Link header on the typical first-page-and-only-page response), and

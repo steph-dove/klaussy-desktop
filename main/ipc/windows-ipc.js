@@ -323,7 +323,7 @@ ipcMain.handle('get-notification-status', () => {
 // Fires a sample event at the on-screen webhook URLs, so a URL can be checked
 // before it's saved.
 ipcMain.handle('test-notification', async (_event, cfg) => {
-  const { dispatchEvent } = require('../util/notification-gateway');
+  const { dispatchEvent, isSlackWebhookUrl, isDiscordWebhookUrl } = require('../util/notification-gateway');
   const { EVENT_TYPES } = require('../util/nemesis-events');
   const merged = {
     slackWebhookUrl: (cfg && cfg.slackWebhookUrl) || '',
@@ -332,6 +332,12 @@ ipcMain.handle('test-notification', async (_event, cfg) => {
   };
   if (!merged.slackWebhookUrl && !merged.discordWebhookUrl) {
     return { ok: false, error: 'no webhook URL configured' };
+  }
+  if (merged.slackWebhookUrl && !isSlackWebhookUrl(merged.slackWebhookUrl)) {
+    return { ok: false, error: 'That isn’t a Slack webhook URL (https://hooks.slack.com/services/…).' };
+  }
+  if (merged.discordWebhookUrl && !isDiscordWebhookUrl(merged.discordWebhookUrl)) {
+    return { ok: false, error: 'That isn’t a Discord webhook URL (https://discord.com/api/webhooks/…, or discordapp.com, ptb. or canary.).' };
   }
   try {
     const results = await dispatchEvent({
@@ -539,6 +545,11 @@ async function remoteAgentInfo(providerId, provider) {
 // Copy-paste gateway bring-up commands for the setup modal, matched to the host
 // OS. `provider` sets the sandbox agent via `serve --provider`; token is inlined.
 function remoteSetupSteps(platform = process.platform, provider = '', token = '') {
+  // These get pasted into a shell, so the same rule as the local setup script:
+  // a provider or token that isn't plain is left out, never inlined.
+  const { setupInputsOk } = require('../util/nemesis-setup');
+  if (!setupInputsOk(provider, 'placeholder')) provider = '';
+  if (token && !setupInputsOk('', token)) token = '';
   const win = platform === 'win32';
   const flag = provider ? ` --provider ${provider}` : '';
   const install = win
@@ -575,4 +586,4 @@ ipcMain.handle('test-nemesis-connection', async (_event, { remote, token } = {})
   };
 });
 
-module.exports = { openPreferencesWindow };
+module.exports = { openPreferencesWindow, remoteSetupSteps };
